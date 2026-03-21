@@ -61,7 +61,7 @@ public sealed class PointerState
     /// <summary>
     /// Handle a pointer up event. Returns the up event and optionally a click/double-click event.
     /// </summary>
-    public (PointerUpEvent upEvent, ElementEvent? clickEvent) HandlePointerUp(
+    public (PointerUpEvent upEvent, ClickEvent? clickEvent, DoubleClickEvent? doubleClickEvent) HandlePointerUp(
         Element target, Point position, int button, KeyModifiers modifiers)
     {
         var upEvent = new PointerUpEvent
@@ -71,7 +71,8 @@ public sealed class PointerState
             Modifiers = modifiers
         };
 
-        ElementEvent? clickEvent = null;
+        ClickEvent? clickEvent = null;
+        DoubleClickEvent? doubleClickEvent = null;
 
         // Synthesize click if released on the same element that was pressed
         if (button == _pressedButton && ReferenceEquals(target, _pressedElement))
@@ -92,9 +93,17 @@ public sealed class PointerState
             _lastClickTime = now;
             _lastClickPosition = position;
 
+            clickEvent = new ClickEvent
+            {
+                Position = position,
+                Button = button,
+                Modifiers = modifiers,
+                ClickCount = _clickCount
+            };
+
             if (_clickCount == 2)
             {
-                clickEvent = new DoubleClickEvent
+                doubleClickEvent = new DoubleClickEvent
                 {
                     Position = position,
                     Button = button,
@@ -102,20 +111,10 @@ public sealed class PointerState
                 };
                 _clickCount = 0;
             }
-            else
-            {
-                clickEvent = new ClickEvent
-                {
-                    Position = position,
-                    Button = button,
-                    Modifiers = modifiers,
-                    ClickCount = _clickCount
-                };
-            }
         }
 
         _pressedElement = null;
-        return (upEvent, clickEvent);
+        return (upEvent, clickEvent, doubleClickEvent);
     }
 
     private static float Distance(Point a, Point b)

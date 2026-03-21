@@ -94,10 +94,12 @@ public sealed class Application : IDisposable
                 }
                 else
                 {
-                    var (upEvt, clickEvt) = _pointerState.HandlePointerUp(target, pos, button.Button, button.Modifiers);
+                    var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, pos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(upEvt, target);
                     if (clickEvt is not null)
                         EventDispatcher.Dispatch(clickEvt, target);
+                    if (dblClickEvt is not null)
+                        EventDispatcher.Dispatch(dblClickEvt, target);
                 }
                 break;
             }
