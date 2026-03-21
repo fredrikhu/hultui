@@ -71,9 +71,10 @@ public sealed class TextPipeline
         {
             run.OffsetX = x;
             x += run.Width;
-            maxAscent = Math.Max(maxAscent, Math.Abs(run.Font.Ascent));
-            maxDescent = Math.Max(maxDescent, run.Font.Descent);
-            maxLeading = Math.Max(maxLeading, run.Font.Leading);
+            // Font metrics are at reference size 1 — scale by actual fontSize
+            maxAscent = Math.Max(maxAscent, Math.Abs(run.Font.Ascent) * run.FontSize);
+            maxDescent = Math.Max(maxDescent, run.Font.Descent * run.FontSize);
+            maxLeading = Math.Max(maxLeading, run.Font.Leading * run.FontSize);
         }
 
         var line = new TextLine(runs, totalWidth, maxAscent, maxDescent, maxLeading);
@@ -189,18 +190,19 @@ public sealed class TextPipeline
             shaped.OffsetX = width;
             width += shaped.Width;
             runs.Add(shaped);
-            maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent));
-            maxDescent = Math.Max(maxDescent, fr.Font.Descent);
-            maxLeading = Math.Max(maxLeading, fr.Font.Leading);
+            // Font metrics are at reference size 1 — scale by actual fontSize
+            maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * style.FontSize);
+            maxDescent = Math.Max(maxDescent, fr.Font.Descent * style.FontSize);
+            maxLeading = Math.Max(maxLeading, fr.Font.Leading * style.FontSize);
         }
 
-        // If no runs (empty line), use primary font metrics
+        // If no runs (empty line), use primary font metrics scaled by fontSize
         if (runs.Count == 0)
         {
             var primaryFont = _fonts.Resolve(style.FontFamily, style.FontWeight, FontSlant.Normal);
-            maxAscent = Math.Abs(primaryFont.Ascent);
-            maxDescent = primaryFont.Descent;
-            maxLeading = primaryFont.Leading;
+            maxAscent = Math.Abs(primaryFont.Ascent) * style.FontSize;
+            maxDescent = primaryFont.Descent * style.FontSize;
+            maxLeading = primaryFont.Leading * style.FontSize;
         }
 
         return new TextLine(runs, width, maxAscent, maxDescent, maxLeading);

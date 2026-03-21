@@ -187,8 +187,9 @@ internal sealed class StubResolvedFont : IResolvedFont
 {
     private readonly float _charWidth;
     public string FamilyName => "TestFont";
-    public float Ascent => -12f; // negative like Skia
-    public float Descent => 4f;
+    // Metrics at reference size 1 (pipeline scales by fontSize)
+    public float Ascent => -0.75f;
+    public float Descent => 0.25f;
     public float Leading => 0f;
     public float LineHeight => Math.Abs(Ascent) + Descent + Leading;
     public object NativeHandle => this;

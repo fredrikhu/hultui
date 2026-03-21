@@ -1,6 +1,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Platform.SDL3;
 
 namespace HultUI;
@@ -32,6 +33,9 @@ public sealed class Application : IDisposable
         {
             _window.PollEvents();
             if (!_window.IsOpen) break;
+
+            // Style resolution (inherited properties flow top-down)
+            StyleResolver.Resolve(_root);
 
             // Layout
             _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
