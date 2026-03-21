@@ -11,4 +11,8 @@
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="ICU4N" Version="60.1.0-alpha.439" />
+  </ItemGroup>
+
 </Project>

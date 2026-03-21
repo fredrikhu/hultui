@@ -2,6 +2,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Text;
 using SkiaSharp;
 
 namespace HultUI.Rendering.Skia;
@@ -10,8 +11,10 @@ public sealed class SkiaRenderContext : IRenderContext
 {
     private SKCanvas? _canvas;
     private readonly Stack<int> _saveStack = new();
+    private TextPipeline? _pipeline;
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
+    internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     private SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
     public void BeginFrame(float width, float height, float scaleFactor)
@@ -67,16 +70,22 @@ public sealed class SkiaRenderContext : IRenderContext
 
     public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines)
     {
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text) || _pipeline is null) return;
 
-        using var typeface = SKTypeface.FromFamilyName(style.FontFamily, ToSkFontWeight(style.FontWeight), SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
-        using var font = new SKFont(typeface, style.FontSize);
+        var layout = _pipeline.Layout(text, style, bounds.Width, maxLines);
         using var paint = new SKPaint { Color = ToSkColor(style.TextColor), IsAntialias = true };
 
-        // Simple single-line text rendering for now
-        var metrics = font.Metrics;
-        float y = bounds.Y - metrics.Ascent;
-        Canvas.DrawText(text, bounds.X, y, font, paint);
+        foreach (var line in layout.Lines)
+        {
+            float lineY = bounds.Y + line.OffsetY + line.Ascent;
+
+            foreach (var run in line.Runs)
+            {
+                var typeface = (SKTypeface)run.Font.NativeHandle;
+                using var font = new SKFont(typeface, run.FontSize);
+                Canvas.DrawText(run.Text, bounds.X + run.OffsetX, lineY, font, paint);
+            }
+        }
     }
 
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)

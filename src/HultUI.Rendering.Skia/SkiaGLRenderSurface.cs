@@ -1,4 +1,5 @@
 using HultUI.Core.Rendering;
+using HultUI.Text;
 using SkiaSharp;
 
 namespace HultUI.Rendering.Skia;
@@ -8,7 +9,8 @@ public sealed class SkiaGLRenderSurface : IRenderSurface
     private readonly GRGlInterface _glInterface;
     private readonly GRContext _grContext;
     private readonly SkiaRenderContext _renderContext = new();
-    private readonly SkiaMeasureContext _measureContext = new();
+    private readonly SkiaMeasureContext _measureContext;
+    private readonly TextPipeline _pipeline;
 
     private GRBackendRenderTarget? _renderTarget;
     private SKSurface? _surface;
@@ -25,6 +27,12 @@ public sealed class SkiaGLRenderSurface : IRenderSurface
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GL interface");
         _grContext = GRContext.CreateGl(_glInterface)
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GR context");
+
+        var fontCollection = new SkiaFontCollection();
+        var textShaper = new SkiaTextShaper();
+        _pipeline = new TextPipeline(fontCollection, textShaper);
+        _measureContext = new SkiaMeasureContext(_pipeline);
+        _renderContext.SetPipeline(_pipeline);
     }
 
     public void Resize(int widthPx, int heightPx, float scaleFactor)
