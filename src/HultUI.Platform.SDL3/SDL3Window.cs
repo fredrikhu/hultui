@@ -22,6 +22,8 @@ public sealed unsafe class SDL3Window : IDisposable
     public IRenderSurface Surface => _surface ?? throw new InvalidOperationException("Window not initialized");
     public bool IsOpen { get; private set; }
 
+    public EventTranslator EventTranslator { get; } = new();
+
     public event Action? Resized;
     public event Action? CloseRequested;
 
@@ -83,6 +85,10 @@ public sealed unsafe class SDL3Window : IDisposable
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     UpdateSize();
                     Resized?.Invoke();
+                    break;
+
+                default:
+                    EventTranslator.ProcessEvent(&evt);
                     break;
             }
         }

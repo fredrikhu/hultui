@@ -209,13 +209,21 @@ public sealed class LayoutEngine
                     finalY = contentAbsY + mainOffset;
                 }
 
+                float newAbsX = finalX + child.Layout.Margin.Left;
+                float newAbsY = finalY + child.Layout.Margin.Top;
+                float deltaX = newAbsX - child.Layout.AbsoluteX;
+                float deltaY = newAbsY - child.Layout.AbsoluteY;
+
                 child.Layout = child.Layout with
                 {
                     X = isRow ? mainOffset : crossOffset + itemCrossOffset,
                     Y = isRow ? crossOffset + itemCrossOffset : mainOffset,
-                    AbsoluteX = finalX + child.Layout.Margin.Left,
-                    AbsoluteY = finalY + child.Layout.Margin.Top
+                    AbsoluteX = newAbsX,
+                    AbsoluteY = newAbsY
                 };
+
+                if (deltaX != 0 || deltaY != 0)
+                    OffsetDescendants(child, deltaX, deltaY);
 
                 mainOffset += childMainSize + justifyGap;
             }
@@ -426,7 +434,25 @@ public sealed class LayoutEngine
         else if (pos.Bottom.Resolve(containerContentBox.Height) is float bottom)
             y = containerContentBox.Bottom - child.Layout.Height - bottom;
 
+        float deltaX = x - child.Layout.AbsoluteX;
+        float deltaY = y - child.Layout.AbsoluteY;
         child.Layout = child.Layout with { AbsoluteX = x, AbsoluteY = y };
+
+        if (deltaX != 0 || deltaY != 0)
+            OffsetDescendants(child, deltaX, deltaY);
+    }
+
+    private static void OffsetDescendants(Element element, float dx, float dy)
+    {
+        foreach (var child in element.Children)
+        {
+            child.Layout = child.Layout with
+            {
+                AbsoluteX = child.Layout.AbsoluteX + dx,
+                AbsoluteY = child.Layout.AbsoluteY + dy
+            };
+            OffsetDescendants(child, dx, dy);
+        }
     }
 
     // ── Static helpers ──
