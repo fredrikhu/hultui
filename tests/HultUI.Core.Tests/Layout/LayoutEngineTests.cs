@@ -315,4 +315,519 @@ public class LayoutEngineTests
         Assert.Equal(20, absChild.Layout.AbsoluteX, 1f);
         Assert.Equal(10, absChild.Layout.AbsoluteY, 1f);
     }
+
+    [Fact]
+    public void AbsolutePosition_BottomRight()
+    {
+        var root = Box.New().Width(400).Height(300);
+        var absChild = Box.New().Width(50).Height(50);
+        absChild.Position.Type = PositionType.Absolute;
+        absChild.Position.Bottom = 10;
+        absChild.Position.Right = 20;
+        root.AddChild(absChild);
+
+        Layout(root);
+
+        // Right edge: 400 - 50 - 20 = 330
+        Assert.Equal(330, absChild.Layout.AbsoluteX, 1f);
+        // Bottom edge: 300 - 50 - 10 = 240
+        Assert.Equal(240, absChild.Layout.AbsoluteY, 1f);
+    }
+
+    // ──── Phase 2: Flex Wrap ────
+
+    [Fact]
+    public void Row_Wrap_ItemsWrapToNextLine()
+    {
+        var root = Flex.Row().Width(300).Height(200)
+            .FlexWrap(FlexWrap.Wrap)
+            .Children(
+                Box.New().Width(150).Height(50),
+                Box.New().Width(150).Height(50),
+                Box.New().Width(150).Height(50)  // wraps to second line
+            );
+        Layout(root);
+
+        var child0 = root.Children[0];
+        var child1 = root.Children[1];
+        var child2 = root.Children[2];
+
+        // First line: two 150px items fit in 300px
+        Assert.Equal(0, child0.Layout.AbsoluteX, 1f);
+        Assert.Equal(0, child0.Layout.AbsoluteY, 1f);
+        Assert.Equal(150, child1.Layout.AbsoluteX, 1f);
+        Assert.Equal(0, child1.Layout.AbsoluteY, 1f);
+
+        // Second line: third item wraps
+        Assert.Equal(0, child2.Layout.AbsoluteX, 1f);
+        Assert.Equal(50, child2.Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void Row_Wrap_ThreeLines()
+    {
+        var root = Flex.Row().Width(200).Height(300)
+            .FlexWrap(FlexWrap.Wrap)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(60),
+                Box.New().Width(100).Height(60),
+                Box.New().Width(100).Height(30)
+            );
+        Layout(root);
+
+        // Line 1: items 0,1 (100+100=200, fits)
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(0, root.Children[1].Layout.AbsoluteY, 1f);
+
+        // Line 2: items 2,3 (100+100=200, fits), y = 40 (max height of line 1)
+        Assert.Equal(40, root.Children[2].Layout.AbsoluteY, 1f);
+        Assert.Equal(40, root.Children[3].Layout.AbsoluteY, 1f);
+
+        // Line 3: item 4, y = 40 + 60 = 100
+        Assert.Equal(100, root.Children[4].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void Row_Wrap_WithMainGap()
+    {
+        // Use ColumnGap (main axis gap for row) without cross gap
+        var root = Box.New().Width(300).Height(200);
+        root.Flex.Direction = FlexDirection.Row;
+        root.Flex.Wrap = FlexWrap.Wrap;
+        root.Flex.ColumnGap = 10;
+        root.ReplaceChildren(
+            Box.New().Width(140).Height(50),
+            Box.New().Width(140).Height(50),
+            Box.New().Width(140).Height(50)  // 140+10+140=290 fits, but 3rd doesn't
+        );
+        Layout(root);
+
+        // First line: two items fit (140+10+140=290 < 300)
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteX, 1f);
+        Assert.Equal(150, root.Children[1].Layout.AbsoluteX, 1f);
+
+        // Third item wraps to second line (no cross gap set)
+        Assert.Equal(0, root.Children[2].Layout.AbsoluteX, 1f);
+        Assert.Equal(50, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void Row_Wrap_CrossGap()
+    {
+        // RowGap applies between lines in a row wrap
+        var root = Box.New().Width(200).Height(300);
+        root.Flex.Direction = FlexDirection.Row;
+        root.Flex.Wrap = FlexWrap.Wrap;
+        root.Flex.RowGap = 10;
+        root.ReplaceChildren(
+            Box.New().Width(100).Height(40),
+            Box.New().Width(100).Height(40),
+            Box.New().Width(100).Height(40),
+            Box.New().Width(100).Height(40)
+        );
+        Layout(root);
+
+        // Line 1: items 0,1 at y=0
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteY, 1f);
+        // Line 2: items 2,3 at y = 40 + 10 (cross gap) = 50
+        Assert.Equal(50, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void Row_WrapReverse()
+    {
+        var root = Flex.Row().Width(200).Height(200)
+            .FlexWrap(FlexWrap.WrapReverse)
+            .Children(
+                Box.New().Width(100).Height(50),
+                Box.New().Width(100).Height(50),
+                Box.New().Width(100).Height(50)  // wraps
+            );
+        Layout(root);
+
+        // With wrap-reverse, the second line appears ABOVE the first
+        // Line ordering is reversed: line with item 2 comes first visually
+        var child0 = root.Children[0];
+        var child2 = root.Children[2];
+
+        // The wrapped line (child2) should be above the first line (child0,child1)
+        Assert.True(child2.Layout.AbsoluteY < child0.Layout.AbsoluteY,
+            $"Wrapped item Y ({child2.Layout.AbsoluteY}) should be above first line Y ({child0.Layout.AbsoluteY})");
+    }
+
+    [Fact]
+    public void Column_Wrap()
+    {
+        var root = Flex.Column().Width(300).Height(100)
+            .FlexWrap(FlexWrap.Wrap)
+            .Children(
+                Box.New().Width(80).Height(50),
+                Box.New().Width(80).Height(50),
+                Box.New().Width(80).Height(50)  // wraps to second column
+            );
+        Layout(root);
+
+        // First column: items 0,1 (50+50=100, fits height)
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteX, 1f);
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(0, root.Children[1].Layout.AbsoluteX, 1f);
+        Assert.Equal(50, root.Children[1].Layout.AbsoluteY, 1f);
+
+        // Second column: item 2 wraps
+        Assert.Equal(80, root.Children[2].Layout.AbsoluteX, 1f);
+        Assert.Equal(0, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void Row_Wrap_PerLineGrow()
+    {
+        // Grow distributes within each line independently
+        // 120*2=240 fits, 120*3=360 wraps
+        var root = Flex.Row().Width(300).Height(200)
+            .FlexWrap(FlexWrap.Wrap)
+            .Children(
+                Box.New().Width(120).Height(50).FlexGrow(1),
+                Box.New().Width(120).Height(50).FlexGrow(1),
+                Box.New().Width(120).Height(50).FlexGrow(1)  // wraps
+            );
+        Layout(root);
+
+        // Line 1: items 0,1 (240px) grow to fill 300px → 150 each
+        Assert.Equal(150, root.Children[0].Layout.Width, 1f);
+        Assert.Equal(150, root.Children[1].Layout.Width, 1f);
+
+        // Line 2: item 2 (120px) grows to fill entire 300px
+        Assert.Equal(300, root.Children[2].Layout.Width, 1f);
+    }
+
+    // ──── Phase 2: AlignContent ────
+
+    [Fact]
+    public void AlignContent_Center()
+    {
+        var root = Flex.Row().Width(200).Height(300)
+            .FlexWrap(FlexWrap.Wrap)
+            .AlignContent(AlignContent.Center)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40)
+            );
+        Layout(root);
+
+        // Two lines, each 40px tall = 80px total
+        // Centered in 300px: offset = (300 - 80) / 2 = 110
+        Assert.Equal(110, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(150, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void AlignContent_FlexEnd()
+    {
+        var root = Flex.Row().Width(200).Height(300)
+            .FlexWrap(FlexWrap.Wrap)
+            .AlignContent(AlignContent.FlexEnd)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40)
+            );
+        Layout(root);
+
+        // Two lines, 80px total. FlexEnd pushes to bottom: offset = 300 - 80 = 220
+        Assert.Equal(220, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(260, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void AlignContent_SpaceBetween()
+    {
+        var root = Flex.Row().Width(200).Height(300)
+            .FlexWrap(FlexWrap.Wrap)
+            .AlignContent(AlignContent.SpaceBetween)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40)
+            );
+        Layout(root);
+
+        // Two lines of 40px. SpaceBetween: line1 at 0, line2 at 300-40=260
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(260, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    [Fact]
+    public void AlignContent_Stretch()
+    {
+        var root = Flex.Row().Width(200).Height(300)
+            .FlexWrap(FlexWrap.Wrap)
+            .AlignContent(AlignContent.Stretch)
+            .AlignItems(AlignItems.FlexStart)
+            .Children(
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40),
+                Box.New().Width(100).Height(40)
+            );
+        Layout(root);
+
+        // Two lines, each 40px natural. Stretch distributes remaining 220px:
+        // Each line gets 40 + 110 = 150px
+        // Line 1 at y=0, line 2 at y=150
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(150, root.Children[2].Layout.AbsoluteY, 1f);
+    }
+
+    // ──── Phase 2: Reverse Directions ────
+
+    [Fact]
+    public void RowReverse()
+    {
+        var root = Flex.Row().Width(300).Height(50)
+            .FlexDirection(FlexDirection.RowReverse)
+            .Children(
+                Box.New().Width(100).Height(50),
+                Box.New().Width(100).Height(50)
+            );
+        Layout(root);
+
+        // In row-reverse, items are placed right-to-left
+        // child0 (first in source) should be on the RIGHT
+        var child0 = root.Children[0];
+        var child1 = root.Children[1];
+
+        Assert.True(child0.Layout.AbsoluteX > child1.Layout.AbsoluteX,
+            $"In row-reverse, first child ({child0.Layout.AbsoluteX}) should be to the right of second ({child1.Layout.AbsoluteX})");
+    }
+
+    [Fact]
+    public void ColumnReverse()
+    {
+        var root = Flex.Column().Width(100).Height(300)
+            .FlexDirection(FlexDirection.ColumnReverse)
+            .Children(
+                Box.New().Width(100).Height(50),
+                Box.New().Width(100).Height(50)
+            );
+        Layout(root);
+
+        var child0 = root.Children[0];
+        var child1 = root.Children[1];
+
+        Assert.True(child0.Layout.AbsoluteY > child1.Layout.AbsoluteY,
+            $"In column-reverse, first child ({child0.Layout.AbsoluteY}) should be below second ({child1.Layout.AbsoluteY})");
+    }
+
+    // ──── Phase 2: FlexShrink ────
+
+    [Fact]
+    public void FlexShrink_ShrinkOverflow()
+    {
+        // Two children totaling 400px in a 300px container
+        var root = Flex.Row().Width(300).Height(50).Children(
+            Box.New().Height(50).FlexBasis(200).FlexShrink(1),
+            Box.New().Height(50).FlexBasis(200).FlexShrink(1)
+        );
+        Layout(root);
+
+        // Total = 400, available = 300, overflow = 100
+        // Both have equal shrink * basis, so each shrinks by 50
+        Assert.Equal(150, root.Children[0].Layout.Width, 1f);
+        Assert.Equal(150, root.Children[1].Layout.Width, 1f);
+    }
+
+    [Fact]
+    public void FlexShrink_ProportionalToSize()
+    {
+        // Different basis sizes with equal shrink factor
+        var root = Flex.Row().Width(300).Height(50).Children(
+            Box.New().Height(50).FlexBasis(300).FlexShrink(1),
+            Box.New().Height(50).FlexBasis(100).FlexShrink(1)
+        );
+        Layout(root);
+
+        // Total = 400, overflow = 100
+        // Shrink proportional to basis * shrink: 300*1=300, 100*1=100
+        // child0 shrinks: 100 * (300/400) = 75 → 225
+        // child1 shrinks: 100 * (100/400) = 25 → 75
+        Assert.Equal(225, root.Children[0].Layout.Width, 1f);
+        Assert.Equal(75, root.Children[1].Layout.Width, 1f);
+    }
+
+    [Fact]
+    public void FlexShrink_ZeroDoesNotShrink()
+    {
+        var root = Flex.Row().Width(200).Height(50).Children(
+            Box.New().Height(50).FlexBasis(150).FlexShrink(0),
+            Box.New().Height(50).FlexBasis(150).FlexShrink(1)
+        );
+        Layout(root);
+
+        // Only child1 shrinks. Overflow = 100. child1 takes all the reduction.
+        Assert.Equal(150, root.Children[0].Layout.Width, 1f);
+        Assert.Equal(50, root.Children[1].Layout.Width, 1f);
+    }
+
+    // ──── Phase 2: FlexBasis ────
+
+    [Fact]
+    public void FlexBasis_OverridesWidth()
+    {
+        var root = Flex.Row().Width(400).Height(50).Children(
+            Box.New().Width(100).Height(50).FlexBasis(200)
+        );
+        Layout(root);
+
+        // FlexBasis takes precedence over Width for sizing in flex layout
+        Assert.Equal(200, root.Children[0].Layout.Width, 1f);
+    }
+
+    [Fact]
+    public void FlexBasis_Percentage()
+    {
+        var root = Flex.Row().Width(400).Height(50).Children(
+            Box.New().Height(50).FlexBasis(Dimension.Percent(25))
+        );
+        Layout(root);
+
+        Assert.Equal(100, root.Children[0].Layout.Width, 1f);
+    }
+
+    // ──── Phase 2: Min/Max with Flex ────
+
+    [Fact]
+    public void MaxWidth_ClampsFlexGrow()
+    {
+        var root = Flex.Row().Width(400).Height(50).Children(
+            Box.New().Height(50).FlexGrow(1).MaxWidth(100),
+            Box.New().Height(50).FlexGrow(1)
+        );
+        Layout(root);
+
+        // Both want 200px from grow, but child0 is clamped to 100
+        Assert.Equal(100, root.Children[0].Layout.Width, 1f);
+    }
+
+    [Fact]
+    public void MinWidth_PreventsFlexShrink()
+    {
+        var root = Flex.Row().Width(200).Height(50).Children(
+            Box.New().Height(50).FlexBasis(150).FlexShrink(1).MinWidth(120),
+            Box.New().Height(50).FlexBasis(150).FlexShrink(1)
+        );
+        Layout(root);
+
+        // MinWidth ensures child0 doesn't go below 120
+        Assert.True(root.Children[0].Layout.Width >= 120,
+            $"Width {root.Children[0].Layout.Width} should be >= 120 (MinWidth)");
+    }
+
+    // ──── Phase 2: Percentage Height ────
+
+    [Fact]
+    public void PercentageHeight()
+    {
+        var root = Flex.Column().Width(100).Height(400).Children(
+            Box.New().Width(100).Height(Dimension.Percent(25))
+        );
+        Layout(root);
+
+        Assert.Equal(100, root.Children[0].Layout.Height, 1f);
+    }
+
+    // ──── Phase 2: AlignSelf ────
+
+    [Fact]
+    public void AlignSelf_OverridesAlignItems()
+    {
+        var root = Flex.Row().Width(400).Height(100)
+            .AlignItems(AlignItems.FlexStart)
+            .Children(
+                Box.New().Width(100).Height(40), // stays at top
+                Box.New().Width(100).Height(40).AlignSelf(AlignSelf.Center), // centered
+                Box.New().Width(100).Height(40).AlignSelf(AlignSelf.FlexEnd)  // at bottom
+            );
+        Layout(root);
+
+        Assert.Equal(0, root.Children[0].Layout.AbsoluteY, 1f);
+        Assert.Equal(30, root.Children[1].Layout.AbsoluteY, 1f);  // (100-40)/2
+        Assert.Equal(60, root.Children[2].Layout.AbsoluteY, 1f);  // 100-40
+    }
+
+    // ──── Phase 2: JustifyContent additional ────
+
+    [Fact]
+    public void JustifyContent_FlexEnd()
+    {
+        var root = Flex.Row().Width(400).Height(50)
+            .JustifyContent(JustifyContent.FlexEnd)
+            .Children(
+                Box.New().Width(100).Height(50),
+                Box.New().Width(100).Height(50)
+            );
+        Layout(root);
+
+        // Items pushed to end: 400 - 200 = 200 offset
+        Assert.Equal(200, root.Children[0].Layout.AbsoluteX, 1f);
+        Assert.Equal(300, root.Children[1].Layout.AbsoluteX, 1f);
+    }
+
+    [Fact]
+    public void JustifyContent_SpaceEvenly()
+    {
+        var root = Flex.Row().Width(400).Height(50)
+            .JustifyContent(JustifyContent.SpaceEvenly)
+            .Children(
+                Box.New().Width(50).Height(50),
+                Box.New().Width(50).Height(50),
+                Box.New().Width(50).Height(50)
+            );
+        Layout(root);
+
+        // SpaceEvenly: free = 400 - 150 = 250, gaps = 250/4 = 62.5
+        Assert.Equal(62.5f, root.Children[0].Layout.AbsoluteX, 1f);
+        Assert.Equal(175, root.Children[1].Layout.AbsoluteX, 1f);
+        Assert.Equal(287.5f, root.Children[2].Layout.AbsoluteX, 1f);
+    }
+
+    [Fact]
+    public void JustifyContent_SpaceAround()
+    {
+        var root = Flex.Row().Width(400).Height(50)
+            .JustifyContent(JustifyContent.SpaceAround)
+            .Children(
+                Box.New().Width(50).Height(50),
+                Box.New().Width(50).Height(50)
+            );
+        Layout(root);
+
+        // SpaceAround: free = 300, each item gets 300/2 = 150 space around
+        // Half-space before first: 75, full space between: 150
+        Assert.Equal(75, root.Children[0].Layout.AbsoluteX, 1f);
+        Assert.Equal(275, root.Children[1].Layout.AbsoluteX, 1f);
+    }
+
+    // ──── Phase 2: NoWrap overflow ────
+
+    [Fact]
+    public void Row_NoWrap_ShrinksByDefault()
+    {
+        // Without wrap, items shrink rather than wrap
+        var root = Flex.Row().Width(200).Height(50).Children(
+            Box.New().Width(150).Height(50),
+            Box.New().Width(150).Height(50)
+        );
+        Layout(root);
+
+        // Default flex-shrink is 1, so both shrink proportionally
+        // Total = 300, available = 200, overflow = 100
+        Assert.Equal(100, root.Children[0].Layout.Width, 1f);
+        Assert.Equal(100, root.Children[1].Layout.Width, 1f);
+    }
 }

@@ -32,6 +32,7 @@ public static class ElementExtensions
     public static T JustifyContent<T>(this T el, JustifyContent jc) where T : Element { el.Flex.JustifyContent = jc; return el; }
     public static T AlignItems<T>(this T el, AlignItems ai) where T : Element { el.Flex.AlignItems = ai; return el; }
     public static T AlignSelf<T>(this T el, AlignSelf a) where T : Element { el.Flex.AlignSelf = a; return el; }
+    public static T AlignContent<T>(this T el, AlignContent ac) where T : Element { el.Flex.AlignContent = ac; return el; }
 
     // ──── Box visual properties ────
     public static T Background<T>(this T el, Color c) where T : BoxElement { el.BackgroundColor = c; return el; }
