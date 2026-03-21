@@ -7,17 +7,17 @@ using HultUI.Core.Styling;
 // Build a UI tree with nested colored boxes and text
 var root = Flex.Column(gap: 16).Padding(24).Children(
 
-    // Header row
-    Flex.Row(gap: 12).Height(60).AlignItems(AlignItems.Center).Children(
-        Box.New().FlexGrow(1).Height(60).Padding(new Thickness(0, 16, 0, 16))
+    // Header row (FlexShrink=0 so it keeps its height when window is small)
+    Flex.Row(gap: 12).Height(60).FlexShrink(0).AlignItems(AlignItems.Center).Children(
+        Box.New().FlexGrow(1).Padding(new Thickness(6, 16, 6, 16))
             .Background(Color.FromHex("#4F46E5")).CornerRadius(8f)
             .TextColor(Color.FromHex("#FFFFFF")).FontSize(24f).FontWeight(FontWeight.Bold)
             .Children(Text.New("HultUI")),
-        Box.New().Width(120).Height(60).Padding(12)
+        Box.New().Width(120).Padding(12)
             .Background(Color.FromHex("#7C3AED")).CornerRadius(8f)
             .TextColor(Color.FromHex("#FFFFFF"))
             .Children(Text.New("Docs")),
-        Box.New().Width(80).Height(60).Padding(12)
+        Box.New().Width(80).Padding(12)
             .Background(Color.FromHex("#EC4899")).CornerRadius(8f)
             .TextColor(Color.FromHex("#FFFFFF"))
             .Children(Text.New("About"))
@@ -53,8 +53,8 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
             )
     ),
 
-    // Footer
-    Box.New().Height(40).Padding(10).Background(Color.FromHex("#1E293B")).CornerRadius(8f)
+    // Footer (FlexShrink=0 so it keeps its height when window is small)
+    Box.New().Height(40).FlexShrink(0).Padding(10).Background(Color.FromHex("#1E293B")).CornerRadius(8f)
         .TextColor(Color.FromHex("#64748B")).FontSize(12f)
         .Children(Text.New("Built with HultUI — a cross-platform C# UI framework"))
 );
