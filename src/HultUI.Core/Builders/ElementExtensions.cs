@@ -1,0 +1,54 @@
+using HultUI.Core.Elements;
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
+
+namespace HultUI.Core.Builders;
+
+public static class ElementExtensions
+{
+    // ──── Size ────
+    public static T Width<T>(this T el, Dimension w) where T : Element { el.Box.Width = w; return el; }
+    public static T Height<T>(this T el, Dimension h) where T : Element { el.Box.Height = h; return el; }
+    public static T MinWidth<T>(this T el, Dimension w) where T : Element { el.Box.MinWidth = w; return el; }
+    public static T MinHeight<T>(this T el, Dimension h) where T : Element { el.Box.MinHeight = h; return el; }
+    public static T MaxWidth<T>(this T el, Dimension w) where T : Element { el.Box.MaxWidth = w; return el; }
+    public static T MaxHeight<T>(this T el, Dimension h) where T : Element { el.Box.MaxHeight = h; return el; }
+    public static T Size<T>(this T el, Dimension w, Dimension h) where T : Element { el.Box.Width = w; el.Box.Height = h; return el; }
+
+    // ──── Spacing ────
+    public static T Padding<T>(this T el, Thickness p) where T : Element { el.Box.Padding = p; return el; }
+    public static T Padding<T>(this T el, float uniform) where T : Element { el.Box.Padding = new Thickness(uniform); return el; }
+    public static T Margin<T>(this T el, Thickness m) where T : Element { el.Box.Margin = m; return el; }
+    public static T Margin<T>(this T el, float uniform) where T : Element { el.Box.Margin = new Thickness(uniform); return el; }
+
+    // ──── Flex properties ────
+    public static T FlexDirection<T>(this T el, FlexDirection dir) where T : Element { el.Flex.Direction = dir; return el; }
+    public static T FlexWrap<T>(this T el, FlexWrap wrap) where T : Element { el.Flex.Wrap = wrap; return el; }
+    public static T FlexGrow<T>(this T el, float grow) where T : Element { el.Flex.FlexGrow = grow; return el; }
+    public static T FlexShrink<T>(this T el, float shrink) where T : Element { el.Flex.FlexShrink = shrink; return el; }
+    public static T FlexBasis<T>(this T el, Dimension basis) where T : Element { el.Flex.FlexBasis = basis; return el; }
+    public static T Gap<T>(this T el, float gap) where T : Element { el.Flex.Gap = gap; return el; }
+    public static T JustifyContent<T>(this T el, JustifyContent jc) where T : Element { el.Flex.JustifyContent = jc; return el; }
+    public static T AlignItems<T>(this T el, AlignItems ai) where T : Element { el.Flex.AlignItems = ai; return el; }
+    public static T AlignSelf<T>(this T el, AlignSelf a) where T : Element { el.Flex.AlignSelf = a; return el; }
+
+    // ──── Box visual properties ────
+    public static T Background<T>(this T el, Color c) where T : BoxElement { el.BackgroundColor = c; return el; }
+    public static T BorderColor<T>(this T el, Color c) where T : BoxElement { el.BorderColor = c; return el; }
+    public static T CornerRadius<T>(this T el, CornerRadius r) where T : BoxElement { el.CornerRadius = r; return el; }
+    public static T CornerRadius<T>(this T el, float uniform) where T : BoxElement { el.CornerRadius = new CornerRadius(uniform); return el; }
+
+    // ──── Inherited style ────
+    public static T FontFamily<T>(this T el, string family) where T : Element { el.Inherited.FontFamily = family; return el; }
+    public static T FontSize<T>(this T el, float size) where T : Element { el.Inherited.FontSize = size; return el; }
+    public static T FontWeight<T>(this T el, FontWeight weight) where T : Element { el.Inherited.FontWeight = weight; return el; }
+    public static T TextColor<T>(this T el, Color color) where T : Element { el.Inherited.TextColor = color; return el; }
+
+    // ──── Children ────
+    public static T Children<T>(this T el, params Element[] children) where T : Element
+    {
+        el.ReplaceChildren(children);
+        return el;
+    }
+}

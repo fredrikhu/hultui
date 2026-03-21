@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/HultUI.Samples.HelloWorld/HultUI.Samples.HelloWorld.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
+    <Project Path="src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj" />
+    <Project Path="src/HultUI.Rendering.Skia/HultUI.Rendering.Skia.csproj" />
+    <Project Path="src/HultUI.SourceGenerators/HultUI.SourceGenerators.csproj" />
+    <Project Path="src/HultUI.Text/HultUI.Text.csproj" />
+    <Project Path="src/HultUI/HultUI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,18 @@
+using HultUI.Core.Primitives;
+
+namespace HultUI.Core.Layout;
+
+public sealed class BoxStyle
+{
+    public Dimension Width { get; set; } = Dimension.Auto;
+    public Dimension Height { get; set; } = Dimension.Auto;
+    public Dimension MinWidth { get; set; } = Dimension.None;
+    public Dimension MinHeight { get; set; } = Dimension.None;
+    public Dimension MaxWidth { get; set; } = Dimension.None;
+    public Dimension MaxHeight { get; set; } = Dimension.None;
+    public Thickness Padding { get; set; }
+    public Thickness BorderWidth { get; set; }
+    public Thickness Margin { get; set; }
+    public Overflow OverflowX { get; set; } = Overflow.Visible;
+    public Overflow OverflowY { get; set; } = Overflow.Visible;
+}

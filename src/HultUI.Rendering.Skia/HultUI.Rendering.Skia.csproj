@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Rendering.Skia</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
+    <ProjectReference Include="..\HultUI.Text\HultUI.Text.csproj" />
+  </ItemGroup>
+
+</Project>
