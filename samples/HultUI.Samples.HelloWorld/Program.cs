@@ -1,18 +1,17 @@
 using HultUI;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 
 // State
-var clickCount = 0;
 var isDark = false;
-TextElement? counterText = null;
 
 // Elements we'll recolor on theme toggle
-BoxElement? counterDisplay = null;
 BoxElement? footerBar = null;
 BoxElement? sidebarFill = null;
 var sidebarItems = new List<(BoxElement item, string lightHex, string darkHex)>();
@@ -50,24 +49,8 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
         // Content area
         Flex.Column(gap: 16).FlexGrow(1).Children(
 
-            // Interactive demo section
-            Flex.Row(gap: 12).FlexShrink(0).AlignItems(AlignItems.Center).Children(
-                MakeButton("#4F46E5", "Click me!", _ =>
-                {
-                    clickCount++;
-                    if (counterText is not null)
-                        counterText.Content = $"Clicked {clickCount} time{(clickCount == 1 ? "" : "s")}";
-                }),
-                MakeButton("#DC2626", "Reset", _ =>
-                {
-                    clickCount = 0;
-                    if (counterText is not null)
-                        counterText.Content = "Clicked 0 times";
-                }),
-                counterDisplay = Box.New().Padding(12).Background(Color.FromHex("#F1F5F9")).CornerRadius(8f)
-                    .TextColor(Color.FromHex("#334155")).FontSize(16f)
-                    .Children(counterText = Text.New("Clicked 0 times"))
-            ),
+            // Reactive counter component
+            new CounterComponent().Mount(),
 
             // Color card grid
             Flex.Row(gap: 12).FlexWrap(FlexWrap.Wrap).FlexGrow(1)
@@ -112,11 +95,6 @@ toggleBtn.OnClick(_ =>
     toggleBtn.BackgroundColor = isDark ? darkToggle : lightToggle;
     toggleLabel.Content = isDark ? "Light Mode" : "Dark Mode";
 
-    if (counterDisplay is not null)
-    {
-        counterDisplay.BackgroundColor = theme.SurfaceVariant;
-        counterDisplay.Inherited.TextColor = isDark ? Color.FromHex("#E2E8F0") : Color.FromHex("#334155");
-    }
     if (footerBar is not null)
     {
         footerBar.BackgroundColor = theme.Surface;
@@ -127,6 +105,9 @@ toggleBtn.OnClick(_ =>
 });
 
 app.Run();
+return;
+
+// ──── Static helper functions (top-level local functions) ────
 
 static BoxElement MakeCard(string hex, string label)
 {
@@ -148,30 +129,6 @@ static BoxElement MakeCard(string hex, string label)
     card.OnClick(_ => Console.WriteLine($"Card clicked: {label}"));
 
     return card;
-}
-
-static BoxElement MakeButton(string hex, string label, Action<ClickEvent> onClick)
-{
-    var baseColor = Color.FromHex(hex);
-    var hoverColor = new Color(
-        (byte)(baseColor.R * 0.85f), (byte)(baseColor.G * 0.85f),
-        (byte)(baseColor.B * 0.85f), baseColor.A);
-    var pressColor = new Color(
-        (byte)(baseColor.R * 0.7f), (byte)(baseColor.G * 0.7f),
-        (byte)(baseColor.B * 0.7f), baseColor.A);
-
-    var btn = Box.New().Padding(new Thickness(10, 20, 10, 20))
-        .Background(baseColor).CornerRadius(8f)
-        .TextColor(Color.FromHex("#FFFFFF")).FontSize(14f).FontWeight(FontWeight.Bold)
-        .Children(Text.New(label));
-
-    btn.OnPointerEnter(_ => btn.BackgroundColor = hoverColor);
-    btn.OnPointerLeave(_ => btn.BackgroundColor = baseColor);
-    btn.OnPointerDown(_ => btn.BackgroundColor = pressColor);
-    btn.OnPointerUp(_ => btn.BackgroundColor = hoverColor);
-    btn.OnClick(onClick);
-
-    return btn;
 }
 
 static BoxElement MakeHeaderButton(string hex, string label)
@@ -209,4 +166,51 @@ BoxElement MakeSidebarItem(string lightHex, string darkHex, string label)
     item.OnClick(_ => Console.WriteLine($"Sidebar clicked: {label}"));
 
     return item;
+}
+
+// ──── Reactive Counter Component ────
+// Demonstrates the Component model: Build() is wrapped in an Effect,
+// so when _count changes, the UI automatically rebuilds via tree diffing.
+
+class CounterComponent : Component
+{
+    private readonly Signal<int> _count = new(0);
+
+    public override Element Build()
+    {
+        var count = _count.Value;
+        var label = count == 0 ? "Clicked 0 times" : $"Clicked {count} time{(count == 1 ? "" : "s")}";
+
+        return Flex.Row(gap: 12).FlexShrink(0).AlignItems(AlignItems.Center).Children(
+            MakeButton("#4F46E5", "Click me!", _ => _count.Value++),
+            MakeButton("#DC2626", "Reset", _ => _count.Value = 0),
+            Box.New().Padding(12).Background(Color.FromHex("#F1F5F9")).CornerRadius(8f)
+                .TextColor(Color.FromHex("#334155")).FontSize(16f)
+                .Children(Text.New(label))
+        );
+    }
+
+    private static BoxElement MakeButton(string hex, string label, Action<ClickEvent> onClick)
+    {
+        var baseColor = Color.FromHex(hex);
+        var hoverColor = new Color(
+            (byte)(baseColor.R * 0.85f), (byte)(baseColor.G * 0.85f),
+            (byte)(baseColor.B * 0.85f), baseColor.A);
+        var pressColor = new Color(
+            (byte)(baseColor.R * 0.7f), (byte)(baseColor.G * 0.7f),
+            (byte)(baseColor.B * 0.7f), baseColor.A);
+
+        var btn = Box.New().Padding(new Thickness(10, 20, 10, 20))
+            .Background(baseColor).CornerRadius(8f)
+            .TextColor(Color.FromHex("#FFFFFF")).FontSize(14f).FontWeight(FontWeight.Bold)
+            .Children(Text.New(label));
+
+        btn.OnPointerEnter(_ => btn.BackgroundColor = hoverColor);
+        btn.OnPointerLeave(_ => btn.BackgroundColor = baseColor);
+        btn.OnPointerDown(_ => btn.BackgroundColor = pressColor);
+        btn.OnPointerUp(_ => btn.BackgroundColor = hoverColor);
+        btn.OnClick(onClick);
+
+        return btn;
+    }
 }

@@ -25,6 +25,17 @@ public class TextElement : Element
 
     public static TextElement New(string content) => new() { _content = content };
 
+    internal override void PatchFrom(Element source)
+    {
+        base.PatchFrom(source);
+        if (source is TextElement text)
+        {
+            Content = text.Content;
+            Overflow = text.Overflow;
+            MaxLines = text.MaxLines;
+        }
+    }
+
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         ctx.MeasureText(Content, ResolvedInherited, availableWidth, MaxLines);
 

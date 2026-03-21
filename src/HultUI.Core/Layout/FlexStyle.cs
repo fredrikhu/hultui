@@ -19,4 +19,20 @@ public sealed class FlexStyle
 
     public float ResolvedRowGap => RowGap > 0 ? RowGap : Gap;
     public float ResolvedColumnGap => ColumnGap > 0 ? ColumnGap : Gap;
+
+    internal void CopyFrom(FlexStyle source)
+    {
+        Direction = source.Direction;
+        Wrap = source.Wrap;
+        AlignItems = source.AlignItems;
+        AlignContent = source.AlignContent;
+        AlignSelf = source.AlignSelf;
+        JustifyContent = source.JustifyContent;
+        FlexGrow = source.FlexGrow;
+        FlexShrink = source.FlexShrink;
+        FlexBasis = source.FlexBasis;
+        Gap = source.Gap;
+        RowGap = source.RowGap;
+        ColumnGap = source.ColumnGap;
+    }
 }

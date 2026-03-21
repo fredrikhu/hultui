@@ -10,6 +10,16 @@ public sealed class InheritedStyle
     public Color? TextColor { get; set; }
     public TextDirection? TextDirection { get; set; }
     public CursorType? Cursor { get; set; }
+
+    internal void CopyFrom(InheritedStyle source)
+    {
+        FontFamily = source.FontFamily;
+        FontSize = source.FontSize;
+        FontWeight = source.FontWeight;
+        TextColor = source.TextColor;
+        TextDirection = source.TextDirection;
+        Cursor = source.Cursor;
+    }
 }
 
 public readonly record struct ResolvedInheritedStyle(

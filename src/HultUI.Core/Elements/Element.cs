@@ -155,6 +155,26 @@ public abstract class Element
         MarkLayoutDirty();
     }
 
+    // ──── Patching (used by TreeDiffer) ────
+    internal virtual void PatchFrom(Element source)
+    {
+        Key = source.Key;
+        Name = source.Name;
+        Flex.CopyFrom(source.Flex);
+        Box.CopyFrom(source.Box);
+        Position.CopyFrom(source.Position);
+        Inherited.CopyFrom(source.Inherited);
+        Role = source.Role;
+        AccessibleName = source.AccessibleName;
+        AccessibleDescription = source.AccessibleDescription;
+        // Note: event handlers are NOT copied. Handlers from the first Build()
+        // capture references to the existing (live) elements. Copying handlers
+        // from a new Build() would bring closures pointing to detached elements.
+        // For dynamic handler behavior, read signals inside handlers instead.
+        MarkLayoutDirty();
+        MarkPaintDirty();
+    }
+
     // ──── Rendering ────
     public virtual void Render(IRenderContext ctx) { }
 

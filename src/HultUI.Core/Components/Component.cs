@@ -1,0 +1,36 @@
+using HultUI.Core.Elements;
+
+namespace HultUI.Core.Components;
+
+/// <summary>
+/// Base class for stateful UI components. Subclasses override Build() to return
+/// an element tree. When reactive dependencies read during Build() change,
+/// the tree is automatically rebuilt and diffed against the previous version.
+/// </summary>
+public abstract class Component
+{
+    internal ComponentHost? Host { get; set; }
+
+    /// <summary>
+    /// Produce the element tree for this component.
+    /// Called inside a reactive Effect — any Signal/Computed reads are tracked.
+    /// </summary>
+    public abstract Element Build();
+
+    /// <summary>Called after the component host is added to the element tree.</summary>
+    protected internal virtual void OnMount() { }
+
+    /// <summary>Called after the component host is removed from the element tree.</summary>
+    protected internal virtual void OnUnmount() { }
+
+    /// <summary>Called before each Build() invocation.</summary>
+    protected internal virtual void OnBeforeBuild() { }
+
+    /// <summary>Called after each Build() invocation and tree reconciliation.</summary>
+    protected internal virtual void OnAfterBuild() { }
+
+    /// <summary>
+    /// Create a ComponentHost element that can be placed in the element tree.
+    /// </summary>
+    public ComponentHost Mount() => new(this);
+}

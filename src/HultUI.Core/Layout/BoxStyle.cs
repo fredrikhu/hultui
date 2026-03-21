@@ -15,4 +15,19 @@ public sealed class BoxStyle
     public Thickness Margin { get; set; }
     public Overflow OverflowX { get; set; } = Overflow.Visible;
     public Overflow OverflowY { get; set; } = Overflow.Visible;
+
+    internal void CopyFrom(BoxStyle source)
+    {
+        Width = source.Width;
+        Height = source.Height;
+        MinWidth = source.MinWidth;
+        MinHeight = source.MinHeight;
+        MaxWidth = source.MaxWidth;
+        MaxHeight = source.MaxHeight;
+        Padding = source.Padding;
+        BorderWidth = source.BorderWidth;
+        Margin = source.Margin;
+        OverflowX = source.OverflowX;
+        OverflowY = source.OverflowY;
+    }
 }

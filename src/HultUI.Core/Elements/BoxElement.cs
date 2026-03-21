@@ -11,6 +11,17 @@ public class BoxElement : Element
 
     public static BoxElement New() => new();
 
+    internal override void PatchFrom(Element source)
+    {
+        base.PatchFrom(source);
+        if (source is BoxElement box)
+        {
+            BackgroundColor = box.BackgroundColor;
+            BorderColor = box.BorderColor;
+            CornerRadius = box.CornerRadius;
+        }
+    }
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;

@@ -10,4 +10,14 @@ public sealed class PositionStyle
     public Dimension Bottom { get; set; } = Dimension.None;
     public Dimension Left { get; set; } = Dimension.None;
     public int ZIndex { get; set; }
+
+    internal void CopyFrom(PositionStyle source)
+    {
+        Type = source.Type;
+        Top = source.Top;
+        Right = source.Right;
+        Bottom = source.Bottom;
+        Left = source.Left;
+        ZIndex = source.ZIndex;
+    }
 }
