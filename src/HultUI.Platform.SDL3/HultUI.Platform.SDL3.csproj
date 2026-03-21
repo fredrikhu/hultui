@@ -5,11 +5,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Platform.SDL3</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ppy.SDL3-CS" Version="2026.320.0" />
   </ItemGroup>
 
 </Project>

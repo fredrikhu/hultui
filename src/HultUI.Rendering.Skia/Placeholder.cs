@@ -1,1 +1,0 @@
-namespace HultUI.Rendering.Skia;
