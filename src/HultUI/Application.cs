@@ -15,7 +15,14 @@ public sealed class Application : IDisposable
     private readonly FocusManager _focusManager = new();
     private readonly PointerState _pointerState = new();
     private Element? _root;
+    private Theme _theme = Theme.Light;
     private bool _disposed;
+
+    public Theme Theme
+    {
+        get => _theme;
+        set => _theme = value ?? throw new ArgumentNullException(nameof(value));
+    }
 
     public Application(string title = "HultUI Application", int width = 800, int height = 600)
     {
@@ -39,15 +46,15 @@ public sealed class Application : IDisposable
             _window.PollEvents();
             if (!_window.IsOpen) break;
 
-            // Style resolution (inherited properties flow top-down)
-            StyleResolver.Resolve(_root);
+            // Style resolution (inherited properties flow top-down from theme)
+            StyleResolver.Resolve(_root, _theme.ToResolvedStyle());
 
             // Layout
             _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
 
             // Render
             var ctx = _window.Surface.RenderContext;
-            ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor);
+            ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
             ElementRenderer.RenderTree(_root, ctx);
             ctx.EndFrame();
 

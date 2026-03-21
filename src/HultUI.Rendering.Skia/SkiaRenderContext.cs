@@ -17,11 +17,11 @@ public sealed class SkiaRenderContext : IRenderContext
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     private SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
-    public void BeginFrame(float width, float height, float scaleFactor)
+    public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null)
     {
         Canvas.ResetMatrix();
         Canvas.Scale(scaleFactor);
-        Canvas.Clear(SKColors.Transparent);
+        Canvas.Clear(clearColor is { } c ? ToSkColor(c) : SKColors.Transparent);
     }
 
     public void EndFrame()

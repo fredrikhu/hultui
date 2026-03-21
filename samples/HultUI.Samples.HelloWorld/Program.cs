@@ -6,9 +6,23 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 
-// Build a UI tree with nested colored boxes, text, and interactive elements
+// State
 var clickCount = 0;
+var isDark = false;
 TextElement? counterText = null;
+
+// Elements we'll recolor on theme toggle
+BoxElement? counterDisplay = null;
+BoxElement? footerBar = null;
+BoxElement? sidebarFill = null;
+var sidebarItems = new List<(BoxElement item, string lightHex, string darkHex)>();
+
+// Theme toggle button (wired after app creation)
+var toggleBtn = Box.New().Width(120).Padding(12)
+    .Background(Color.FromHex("#F59E0B")).CornerRadius(8f)
+    .TextColor(Color.FromHex("#FFFFFF")).FontWeight(FontWeight.Bold)
+    .Children(Text.New("Dark Mode"));
+var toggleLabel = (TextElement)toggleBtn.Children[0];
 
 var root = Flex.Column(gap: 16).Padding(24).Children(
 
@@ -19,7 +33,7 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
             .TextColor(Color.FromHex("#FFFFFF")).FontSize(24f).FontWeight(FontWeight.Bold)
             .Children(Text.New("HultUI")),
         MakeHeaderButton("#7C3AED", "Docs"),
-        MakeHeaderButton("#EC4899", "About")
+        toggleBtn
     ),
 
     // Main content area
@@ -27,10 +41,10 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
 
         // Sidebar
         Flex.Column(gap: 8).Width(200).Children(
-            MakeSidebarItem("#1E293B", "Dashboard"),
-            MakeSidebarItem("#334155", "Components"),
-            MakeSidebarItem("#475569", "Settings"),
-            Box.New().FlexGrow(1).Background(Color.FromHex("#0F172A")).CornerRadius(6f)
+            MakeSidebarItem("#1E293B", "#1E293B", "Dashboard"),
+            MakeSidebarItem("#334155", "#334155", "Components"),
+            MakeSidebarItem("#475569", "#475569", "Settings"),
+            sidebarFill = Box.New().FlexGrow(1).Background(Color.FromHex("#0F172A")).CornerRadius(6f)
         ),
 
         // Content area
@@ -38,7 +52,7 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
 
             // Interactive demo section
             Flex.Row(gap: 12).FlexShrink(0).AlignItems(AlignItems.Center).Children(
-                MakeButton("#4F46E5", "Click me!", evt =>
+                MakeButton("#4F46E5", "Click me!", _ =>
                 {
                     clickCount++;
                     if (counterText is not null)
@@ -50,7 +64,7 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
                     if (counterText is not null)
                         counterText.Content = "Clicked 0 times";
                 }),
-                Box.New().Padding(12).Background(Color.FromHex("#F1F5F9")).CornerRadius(8f)
+                counterDisplay = Box.New().Padding(12).Background(Color.FromHex("#F1F5F9")).CornerRadius(8f)
                     .TextColor(Color.FromHex("#334155")).FontSize(16f)
                     .Children(counterText = Text.New("Clicked 0 times"))
             ),
@@ -70,13 +84,48 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
     ),
 
     // Footer
-    Box.New().Height(40).FlexShrink(0).Padding(10).Background(Color.FromHex("#1E293B")).CornerRadius(8f)
+    footerBar = Box.New().Height(40).FlexShrink(0).Padding(10).Background(Color.FromHex("#1E293B")).CornerRadius(8f)
         .TextColor(Color.FromHex("#64748B")).FontSize(12f)
         .Children(Text.New("Built with HultUI — a cross-platform C# UI framework"))
 );
 
 using var app = new Application("HultUI - Hello World", 900, 650);
 app.SetRoot(root);
+
+// Wire theme toggle now that app exists
+var lightToggle = Color.FromHex("#F59E0B");
+var darkToggle = Color.FromHex("#6366F1");
+
+toggleBtn.OnPointerEnter(_ =>
+{
+    var c = isDark ? darkToggle : lightToggle;
+    toggleBtn.BackgroundColor = new Color(
+        (byte)(c.R * 0.85f), (byte)(c.G * 0.85f), (byte)(c.B * 0.85f), c.A);
+});
+toggleBtn.OnPointerLeave(_ => toggleBtn.BackgroundColor = isDark ? darkToggle : lightToggle);
+toggleBtn.OnClick(_ =>
+{
+    isDark = !isDark;
+    var theme = isDark ? Theme.Dark : Theme.Light;
+    app.Theme = theme;
+
+    toggleBtn.BackgroundColor = isDark ? darkToggle : lightToggle;
+    toggleLabel.Content = isDark ? "Light Mode" : "Dark Mode";
+
+    if (counterDisplay is not null)
+    {
+        counterDisplay.BackgroundColor = theme.SurfaceVariant;
+        counterDisplay.Inherited.TextColor = isDark ? Color.FromHex("#E2E8F0") : Color.FromHex("#334155");
+    }
+    if (footerBar is not null)
+    {
+        footerBar.BackgroundColor = theme.Surface;
+        footerBar.Inherited.TextColor = theme.Secondary;
+    }
+    foreach (var (item, lightHex, darkHex) in sidebarItems)
+        item.BackgroundColor = Color.FromHex(isDark ? darkHex : lightHex);
+});
+
 app.Run();
 
 static BoxElement MakeCard(string hex, string label)
@@ -90,14 +139,13 @@ static BoxElement MakeCard(string hex, string label)
         .TextColor(Color.FromHex("#FFFFFF")).FontSize(18f).FontWeight(FontWeight.Bold)
         .Children(Text.New(label));
 
-    // Darken on hover by switching to a darker shade
     var darkColor = new Color(
         (byte)(baseColor.R * 0.8f), (byte)(baseColor.G * 0.8f),
         (byte)(baseColor.B * 0.8f), baseColor.A);
 
     card.OnPointerEnter(_ => card.BackgroundColor = darkColor);
     card.OnPointerLeave(_ => card.BackgroundColor = baseColor);
-    card.OnClick(evt => Console.WriteLine($"Card clicked: {label}"));
+    card.OnClick(_ => Console.WriteLine($"Card clicked: {label}"));
 
     return card;
 }
@@ -145,17 +193,19 @@ static BoxElement MakeHeaderButton(string hex, string label)
     return btn;
 }
 
-static BoxElement MakeSidebarItem(string hex, string label)
+BoxElement MakeSidebarItem(string lightHex, string darkHex, string label)
 {
-    var baseColor = Color.FromHex(hex);
+    var baseColor = Color.FromHex(lightHex);
     var hoverColor = Color.FromHex("#3B82F6");
 
     var item = Box.New().Height(40).Padding(10).Background(baseColor).CornerRadius(6f)
         .TextColor(Color.FromHex("#94A3B8")).FontSize(14f)
         .Children(Text.New(label));
 
-    item.OnPointerEnter(_ => { item.BackgroundColor = hoverColor; });
-    item.OnPointerLeave(_ => { item.BackgroundColor = baseColor; });
+    sidebarItems.Add((item, lightHex, darkHex));
+
+    item.OnPointerEnter(_ => item.BackgroundColor = hoverColor);
+    item.OnPointerLeave(_ => item.BackgroundColor = Color.FromHex(isDark ? darkHex : lightHex));
     item.OnClick(_ => Console.WriteLine($"Sidebar clicked: {label}"));
 
     return item;

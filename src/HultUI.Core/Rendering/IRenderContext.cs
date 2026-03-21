@@ -18,7 +18,7 @@ public interface IRenderContext
     void PushOpacity(float opacity);
     void Pop();
 
-    void BeginFrame(float width, float height, float scaleFactor);
+    void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null);
     void EndFrame();
 }
 
