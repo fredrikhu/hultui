@@ -23,7 +23,9 @@ public sealed class PointerState
 
     /// <summary>
     /// Update the hovered element based on pointer position.
-    /// Dispatches PointerEnter/PointerLeave events as needed.
+    /// Dispatches PointerEnter/PointerLeave events following mouseenter/mouseleave
+    /// semantics: moving between an element and its descendants does NOT fire
+    /// leave on the ancestor.
     /// </summary>
     public void UpdateHover(Element? newHovered, Point position, KeyModifiers modifiers)
     {
@@ -35,11 +37,37 @@ public sealed class PointerState
         var oldHovered = _hoveredElement;
         _hoveredElement = newHovered;
 
-        if (oldHovered is not null)
-            EventDispatcher.DispatchDirect(new PointerLeaveEvent { Position = position, Modifiers = modifiers }, oldHovered);
+        // Find the common ancestor to avoid firing leave/enter on shared ancestors
+        var commonAncestor = FindCommonAncestor(oldHovered, newHovered);
 
-        if (newHovered is not null)
-            EventDispatcher.DispatchDirect(new PointerEnterEvent { Position = position, Modifiers = modifiers }, newHovered);
+        // Fire PointerLeave on elements that lost the pointer (old → common ancestor, exclusive)
+        var leaveEvt = new PointerLeaveEvent { Position = position, Modifiers = modifiers };
+        for (var el = oldHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
+            EventDispatcher.DispatchDirect(leaveEvt, el);
+
+        // Fire PointerEnter on elements that gained the pointer (new → common ancestor, exclusive)
+        var enterEvt = new PointerEnterEvent { Position = position, Modifiers = modifiers };
+        for (var el = newHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
+            EventDispatcher.DispatchDirect(enterEvt, el);
+    }
+
+    private static Element? FindCommonAncestor(Element? a, Element? b)
+    {
+        if (a is null || b is null) return null;
+
+        // Collect ancestors of a into a set
+        var ancestors = new HashSet<Element>(ReferenceEqualityComparer.Instance);
+        for (var el = a; el is not null; el = el.Parent)
+            ancestors.Add(el);
+
+        // Walk up from b to find the first shared ancestor
+        for (var el = b; el is not null; el = el.Parent)
+        {
+            if (ancestors.Contains(el))
+                return el;
+        }
+
+        return null;
     }
 
     /// <summary>
