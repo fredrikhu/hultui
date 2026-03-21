@@ -12,6 +12,9 @@
     <ProjectReference Include="..\HultUI.Text\HultUI.Text.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
     <ProjectReference Include="..\HultUI.Platform.SDL3\HultUI.Platform.SDL3.csproj" />
+    <ProjectReference Include="..\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

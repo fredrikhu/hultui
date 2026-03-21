@@ -169,21 +169,21 @@ BoxElement MakeSidebarItem(string lightHex, string darkHex, string label)
 }
 
 // ──── Reactive Counter Component ────
-// Demonstrates the Component model: Build() is wrapped in an Effect,
-// so when _count changes, the UI automatically rebuilds via tree diffing.
+// Demonstrates the Component model with [Reactive] source generator.
+// The [Reactive] attribute generates a Signal<int> backing field automatically.
 
-class CounterComponent : Component
+partial class CounterComponent : Component
 {
-    private readonly Signal<int> _count = new(0);
+    [Reactive] public partial int Count { get; set; }
 
     public override Element Build()
     {
-        var count = _count.Value;
+        var count = Count; // reads the generated Signal<int> — tracked by the Effect
         var label = count == 0 ? "Clicked 0 times" : $"Clicked {count} time{(count == 1 ? "" : "s")}";
 
         return Flex.Row(gap: 12).FlexShrink(0).AlignItems(AlignItems.Center).Children(
-            MakeButton("#4F46E5", "Click me!", _ => _count.Value++),
-            MakeButton("#DC2626", "Reset", _ => _count.Value = 0),
+            MakeButton("#4F46E5", "Click me!", _ => Count++),
+            MakeButton("#DC2626", "Reset", _ => Count = 0),
             Box.New().Padding(12).Background(Color.FromHex("#F1F5F9")).CornerRadius(8f)
                 .TextColor(Color.FromHex("#334155")).FontSize(16f)
                 .Children(Text.New(label))

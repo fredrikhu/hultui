@@ -1,0 +1,257 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
+
+namespace HultUI.SourceGenerators;
+
+[Generator(LanguageNames.CSharp)]
+public sealed class ReactiveGenerator : IIncrementalGenerator
+{
+    private const string ReactiveAttributeFullName = "HultUI.Core.Reactivity.ReactiveAttribute";
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        // Find all properties with [Reactive]
+        var properties = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ReactiveAttributeFullName,
+                predicate: static (node, _) => node is PropertyDeclarationSyntax,
+                transform: static (ctx, ct) => ExtractModel(ctx, ct))
+            .Where(static m => m is not null)
+            .Select(static (m, _) => m!);
+
+        // Group by containing class
+        var grouped = properties.Collect();
+
+        // Generate source
+        context.RegisterSourceOutput(grouped, static (spc, models) => Execute(spc, models));
+    }
+
+    private static ReactivePropertyModel? ExtractModel(
+        GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
+    {
+        if (ctx.TargetNode is not PropertyDeclarationSyntax propSyntax)
+            return null;
+
+        var propSymbol = ctx.TargetSymbol as IPropertySymbol;
+        if (propSymbol is null)
+            return null;
+
+        var containingType = propSymbol.ContainingType;
+        if (containingType is null)
+            return null;
+
+        // Extract default value from the property initializer
+        string? defaultValue = null;
+        if (propSyntax.Initializer is not null)
+        {
+            defaultValue = propSyntax.Initializer.Value.ToFullString().Trim();
+        }
+
+        // Get the fully qualified type name for the property type
+        var typeStr = propSymbol.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        // Check if the containing class is partial
+        bool isClassPartial = false;
+        foreach (var decl in containingType.DeclaringSyntaxReferences)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (decl.GetSyntax(ct) is TypeDeclarationSyntax tds &&
+                tds.Modifiers.Any(SyntaxKind.PartialKeyword))
+            {
+                isClassPartial = true;
+                break;
+            }
+        }
+
+        // Check if the property itself is partial
+        bool isPropertyPartial = propSyntax.Modifiers.Any(SyntaxKind.PartialKeyword);
+
+        // Gather namespace
+        var ns = containingType.ContainingNamespace.IsGlobalNamespace
+            ? null
+            : containingType.ContainingNamespace.ToDisplayString();
+
+        return new ReactivePropertyModel(
+            @namespace: ns,
+            className: containingType.Name,
+            classAccessibility: AccessibilityToString(containingType.DeclaredAccessibility),
+            isClassPartial: isClassPartial,
+            isPropertyPartial: isPropertyPartial,
+            propertyName: propSymbol.Name,
+            propertyType: typeStr,
+            defaultValue: defaultValue,
+            isNullable: propSymbol.Type.NullableAnnotation == NullableAnnotation.Annotated);
+    }
+
+    private static void Execute(SourceProductionContext spc, ImmutableArray<ReactivePropertyModel> models)
+    {
+        if (models.IsDefaultOrEmpty)
+            return;
+
+        // Report diagnostics for non-partial classes
+        foreach (var model in models)
+        {
+            if (!model.IsClassPartial)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    Diagnostics.ClassMustBePartial,
+                    Location.None,
+                    model.ClassName,
+                    model.PropertyName));
+            }
+        }
+
+        // Group by (namespace, className)
+        var byClass = models
+            .Where(static m => m.IsClassPartial)
+            .GroupBy(static m => (m.Namespace, m.ClassName), EqualityComparer<(string?, string)>.Default);
+
+        foreach (var group in byClass)
+        {
+            var first = group.First();
+            var source = GenerateClass(first.Namespace, first.ClassName, first.ClassAccessibility, group.ToArray());
+            var hintName = first.Namespace is not null
+                ? $"{first.Namespace}.{first.ClassName}.Reactive.g.cs"
+                : $"{first.ClassName}.Reactive.g.cs";
+            spc.AddSource(hintName, SourceText.From(source, Encoding.UTF8));
+        }
+    }
+
+    private static string GenerateClass(
+        string? ns, string className, string accessibility,
+        ReactivePropertyModel[] properties)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        sb.AppendLine("using HultUI.Core.Reactivity;");
+        sb.AppendLine();
+
+        if (ns is not null)
+        {
+            sb.AppendLine($"namespace {ns};");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine($"{accessibility} partial class {className}");
+        sb.AppendLine("{");
+
+        for (int i = 0; i < properties.Length; i++)
+        {
+            var prop = properties[i];
+            var fieldName = $"__{ToCamelCase(prop.PropertyName)}_signal";
+            var defaultExpr = prop.DefaultValue ?? (prop.IsNullable ? "default" : "default!");
+
+            sb.AppendLine($"    private readonly Signal<{prop.PropertyType}> {fieldName} = new({defaultExpr});");
+            sb.AppendLine();
+            var partialKw = prop.IsPropertyPartial ? "partial " : "";
+            sb.AppendLine($"    public {partialKw}{prop.PropertyType} {prop.PropertyName}");
+            sb.AppendLine("    {");
+            sb.AppendLine($"        get => {fieldName}.Value;");
+            sb.AppendLine($"        set => {fieldName}.Value = value;");
+            sb.AppendLine("    }");
+
+            if (i < properties.Length - 1)
+                sb.AppendLine();
+        }
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
+    private static string ToCamelCase(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return name;
+        return char.ToLowerInvariant(name[0]) + name.Substring(1);
+    }
+
+    private static string AccessibilityToString(Accessibility accessibility) => accessibility switch
+    {
+        Accessibility.Public => "public",
+        Accessibility.Internal => "internal",
+        Accessibility.Protected => "protected",
+        Accessibility.ProtectedOrInternal => "protected internal",
+        Accessibility.ProtectedAndInternal => "private protected",
+        Accessibility.Private => "private",
+        _ => "internal"
+    };
+}
+
+internal sealed class ReactivePropertyModel : IEquatable<ReactivePropertyModel>
+{
+    public string? Namespace { get; }
+    public string ClassName { get; }
+    public string ClassAccessibility { get; }
+    public bool IsClassPartial { get; }
+    public bool IsPropertyPartial { get; }
+    public string PropertyName { get; }
+    public string PropertyType { get; }
+    public string? DefaultValue { get; }
+    public bool IsNullable { get; }
+
+    public ReactivePropertyModel(
+        string? @namespace, string className, string classAccessibility,
+        bool isClassPartial, bool isPropertyPartial, string propertyName,
+        string propertyType, string? defaultValue, bool isNullable)
+    {
+        Namespace = @namespace;
+        ClassName = className;
+        ClassAccessibility = classAccessibility;
+        IsClassPartial = isClassPartial;
+        IsPropertyPartial = isPropertyPartial;
+        PropertyName = propertyName;
+        PropertyType = propertyType;
+        DefaultValue = defaultValue;
+        IsNullable = isNullable;
+    }
+
+    public bool Equals(ReactivePropertyModel? other)
+    {
+        if (other is null) return false;
+        return Namespace == other.Namespace &&
+               ClassName == other.ClassName &&
+               ClassAccessibility == other.ClassAccessibility &&
+               IsClassPartial == other.IsClassPartial &&
+               IsPropertyPartial == other.IsPropertyPartial &&
+               PropertyName == other.PropertyName &&
+               PropertyType == other.PropertyType &&
+               DefaultValue == other.DefaultValue &&
+               IsNullable == other.IsNullable;
+    }
+
+    public override bool Equals(object? obj) => Equals(obj as ReactivePropertyModel);
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int hash = 17;
+            hash = hash * 31 + (Namespace?.GetHashCode() ?? 0);
+            hash = hash * 31 + ClassName.GetHashCode();
+            hash = hash * 31 + PropertyName.GetHashCode();
+            hash = hash * 31 + PropertyType.GetHashCode();
+            return hash;
+        }
+    }
+}
+
+internal static class Diagnostics
+{
+    public static readonly DiagnosticDescriptor ClassMustBePartial = new(
+        id: "HULTUI001",
+        title: "Class with [Reactive] property must be partial",
+        messageFormat: "Class '{0}' contains [Reactive] property '{1}' but is not declared as partial",
+        category: "HultUI.SourceGenerators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+}
