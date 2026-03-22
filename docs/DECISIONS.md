@@ -153,3 +153,6 @@ HultUI (meta-package)
 - **Hot reload** — Detect tree changes and re-render without restart
 - **Accessibility** — Design for it from start (Role, AccessibleName on elements), platform bridges later
 - **Compiled markup** — Optional DSL that compiles to C# Build() methods
+- **Units for measurements** - points, percentage, etc. What makes sense; cm/inches do not.
+- **Theme improvements** - Color.Themed(light, dark) or something like that. We need to make some design decisions here.
+- **Keyboard navigation** - E.g. tab to focus next element (and possibility to decide what is next), arrows to change between radiobox selection.
