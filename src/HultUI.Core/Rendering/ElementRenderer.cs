@@ -15,6 +15,25 @@ public static class ElementRenderer
         // Render self
         element.Render(ctx);
 
+        // ScrollViewElement: clip + translate children, then draw scrollbars on top
+        if (element is ScrollViewElement scrollView)
+        {
+            scrollView.UpdateContentSize();
+
+            var clipRect = element.Layout.AbsoluteContentBox;
+            ctx.PushClip(clipRect);
+            ctx.PushTranslate(-scrollView.ScrollOffsetX, -scrollView.ScrollOffsetY);
+
+            foreach (var child in element.Children)
+                RenderElement(child, ctx);
+
+            ctx.Pop(); // translate
+            ctx.Pop(); // clip
+
+            scrollView.RenderScrollbars(ctx);
+            return;
+        }
+
         // Clip to content box if overflow is hidden
         bool needsClip = element.Box.OverflowX == Overflow.Hidden || element.Box.OverflowY == Overflow.Hidden;
         if (needsClip)
@@ -23,7 +42,7 @@ public static class ElementRenderer
             ctx.PushClip(clipRect);
         }
 
-        // Render children in order (absolute children on top handled by z-index later)
+        // Render children in order
         foreach (var child in element.Children)
             RenderElement(child, ctx);
 

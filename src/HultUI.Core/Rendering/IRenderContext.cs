@@ -18,6 +18,8 @@ public interface IRenderContext
     void PushOpacity(float opacity);
     void Pop();
 
+    ICanvasDrawingContext CreateCanvasContext(Rect bounds);
+
     void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null);
     void EndFrame();
 }

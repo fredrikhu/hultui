@@ -2,6 +2,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
 namespace HultUI.Core.Builders;
@@ -47,12 +48,20 @@ public static class ElementExtensions
     public static T FontWeight<T>(this T el, FontWeight weight) where T : Element { el.Inherited.FontWeight = weight; return el; }
     public static T TextColor<T>(this T el, Color color) where T : Element { el.Inherited.TextColor = color; return el; }
 
+    // ──── Image properties ────
+    public static T ImageFit<T>(this T el, ImageFit fit) where T : ImageElement { el.Fit = fit; return el; }
+    public static T ImageSource<T>(this T el, IImageSource source) where T : ImageElement { el.Source = source; return el; }
+
+    // ──── ScrollView properties ────
+    public static T ScrollSpeed<T>(this T el, float speed) where T : ScrollViewElement { el.ScrollSpeed = speed; return el; }
+
     // ──── Events ────
     public static T OnClick<T>(this T el, Action<ClickEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerDown<T>(this T el, Action<PointerDownEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerUp<T>(this T el, Action<PointerUpEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerEnter<T>(this T el, Action<PointerEnterEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnPointerLeave<T>(this T el, Action<PointerLeaveEvent> handler) where T : Element { el.On(handler); return el; }
+    public static T OnScroll<T>(this T el, Action<ScrollEvent> handler) where T : Element { el.On(handler); return el; }
 
     // ──── Children ────
     public static T Children<T>(this T el, params Element[] children) where T : Element

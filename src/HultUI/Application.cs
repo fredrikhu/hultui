@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -43,6 +44,7 @@ public sealed class Application : IDisposable
 
         while (_window.IsOpen)
         {
+            var sw = Stopwatch.StartNew();
             _window.PollEvents();
             if (!_window.IsOpen) break;
 
@@ -57,6 +59,8 @@ public sealed class Application : IDisposable
             ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
             ElementRenderer.RenderTree(_root, ctx);
             ctx.EndFrame();
+            sw.Stop();
+            Console.WriteLine($"{sw.Elapsed.TotalMicroseconds/1000.0,5:N1} ms");
 
             // Present
             _window.Surface.Present();

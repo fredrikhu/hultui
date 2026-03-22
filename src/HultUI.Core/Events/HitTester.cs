@@ -24,9 +24,20 @@ public static class HitTester
         if (!element.HitTest(point))
             return null;
 
-        // Determine clip rect for children if overflow is hidden
+        // Determine clip rect and point transform for children
         Rect? childClip = clipRect;
-        if (element.Box.OverflowX == Layout.Overflow.Hidden || element.Box.OverflowY == Layout.Overflow.Hidden)
+        Point childPoint = point;
+
+        if (element is ScrollViewElement scrollView)
+        {
+            // ScrollView clips to content box and offsets hit test point
+            var contentBox = element.Layout.AbsoluteContentBox;
+            childClip = clipRect.HasValue ? Intersect(clipRect.Value, contentBox) : contentBox;
+            childPoint = new Point(
+                point.X + scrollView.ScrollOffsetX,
+                point.Y + scrollView.ScrollOffsetY);
+        }
+        else if (element.Box.OverflowX == Layout.Overflow.Hidden || element.Box.OverflowY == Layout.Overflow.Hidden)
         {
             var contentBox = element.Layout.AbsoluteContentBox;
             childClip = clipRect.HasValue ? Intersect(clipRect.Value, contentBox) : contentBox;
@@ -35,7 +46,7 @@ public static class HitTester
         // Traverse children in reverse order (last child = front-most)
         for (int i = element.Children.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestRecursive(element.Children[i], point, childClip);
+            var hit = HitTestRecursive(element.Children[i], childPoint, childClip);
             if (hit is not null)
                 return hit;
         }

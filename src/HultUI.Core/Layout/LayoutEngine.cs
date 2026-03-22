@@ -68,9 +68,16 @@ public sealed class LayoutEngine
         }
         else
         {
+            // Pass whether cross dimension is definite so single-line
+            // containers with auto cross use natural content sizes
+            bool hasDefiniteCross = (element.Flex.Direction is FlexDirection.Row or FlexDirection.RowReverse)
+                ? resolvedHeight != null
+                : resolvedWidth != null;
+
             contentSize = LayoutFlexChildren(element, flowChildren, contentAvailW, contentAvailH,
-                absoluteX + outerSpacing.Left + margin.Left,
-                absoluteY + outerSpacing.Top + margin.Top);
+                contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
+                contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
+                hasDefiniteCross: hasDefiniteCross);
         }
 
         // Final element size
@@ -97,7 +104,8 @@ public sealed class LayoutEngine
     }
 
     private Size LayoutFlexChildren(Element container, List<Element> children,
-        float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY)
+        float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY,
+        bool hasDefiniteCross = true)
     {
         var flex = container.Flex;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
@@ -110,18 +118,26 @@ public sealed class LayoutEngine
         float mainGap = isRow ? flex.ResolvedColumnGap : flex.ResolvedRowGap;
         float crossGap = isRow ? flex.ResolvedRowGap : flex.ResolvedColumnGap;
 
+        // Scroll containers: unlimited main axis for flex distribution,
+        // but keep original values as child constraints to avoid NaN overflow
+        bool scrollOnMain = isRow
+            ? container.Box.OverflowX == Overflow.Scroll
+            : container.Box.OverflowY == Overflow.Scroll;
+        float mainDistribute = scrollOnMain ? float.MaxValue / 2 : mainAvailable;
+
         // ── Phase 1: Measure all children to get hypothetical sizes ──
+        // Use original mainAvailable (not unlimited) so children get proper constraints
         var items = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
 
         // ── Phase 2: Collect items into lines ──
-        var lines = CollectLines(items, mainAvailable, mainGap, isWrap);
+        var lines = CollectLines(items, mainDistribute, mainGap, isWrap);
 
         // ── Phase 3: Resolve flex grow/shrink per line ──
         foreach (var line in lines)
-            ResolveFlexGrowShrink(line, mainAvailable, mainGap);
+            ResolveFlexGrowShrink(line, mainDistribute, mainGap);
 
         // ── Phase 4: Compute per-line cross sizes ──
-        ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap);
+        ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
         // ── Phase 5: Distribute lines along cross axis (AlignContent) ──
         float totalCrossSize = 0;
@@ -152,8 +168,8 @@ public sealed class LayoutEngine
                 if (i > 0) lineTotalMain += mainGap;
             }
 
-            float mainOffset = ComputeJustifyOffset(flex.JustifyContent, mainAvailable, lineTotalMain, line.Items.Count);
-            float justifyGap = ComputeJustifyGap(flex.JustifyContent, mainAvailable, lineTotalMain, line.Items.Count, mainGap);
+            float mainOffset = ComputeJustifyOffset(flex.JustifyContent, mainDistribute, lineTotalMain, line.Items.Count);
+            float justifyGap = ComputeJustifyGap(flex.JustifyContent, mainDistribute, lineTotalMain, line.Items.Count, mainGap);
 
             for (int i = 0; i < line.Items.Count; i++)
             {
@@ -380,7 +396,7 @@ public sealed class LayoutEngine
     }
 
     private static void ComputeLineCrossSizes(List<FlexLine> lines, float crossAvailable,
-        AlignContent alignContent, bool isWrap)
+        AlignContent alignContent, bool isWrap, bool hasDefiniteCross)
     {
         // Each line's cross size is the max cross size of its items
         for (int i = 0; i < lines.Count; i++)
@@ -392,9 +408,12 @@ public sealed class LayoutEngine
         }
 
         // If single line (nowrap), the line takes the full cross available
+        // when the container has a definite cross size. Per CSS spec, if the
+        // cross size is indefinite, use the max of items' natural cross sizes.
         if (!isWrap && lines.Count == 1)
         {
-            lines[0] = lines[0] with { CrossSize = crossAvailable };
+            if (hasDefiniteCross)
+                lines[0] = lines[0] with { CrossSize = crossAvailable };
             return;
         }
 

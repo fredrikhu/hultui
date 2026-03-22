@@ -90,7 +90,72 @@ public sealed class SkiaRenderContext : IRenderContext
 
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
     {
-        // Image rendering will be implemented in Phase 10
+        if (source is not SkiaImageSource skiaSource || skiaSource.Bitmap is not { } bitmap)
+            return;
+
+        var srcW = (float)bitmap.Width;
+        var srcH = (float)bitmap.Height;
+        var destW = destRect.Width;
+        var destH = destRect.Height;
+
+        var (drawRect, srcRect) = ComputeImageFit(fit, srcW, srcH, destW, destH, destRect);
+
+        using var paint = new SKPaint { IsAntialias = true };
+        Canvas.DrawBitmap(bitmap, srcRect, ToSkRect(drawRect), paint);
+    }
+
+    private static (Rect drawRect, SKRect srcRect) ComputeImageFit(
+        ImageFit fit, float srcW, float srcH, float destW, float destH, Rect destRect)
+    {
+        var fullSrc = new SKRect(0, 0, srcW, srcH);
+
+        switch (fit)
+        {
+            case ImageFit.Fill:
+                return (destRect, fullSrc);
+
+            case ImageFit.None:
+            {
+                // Draw at natural size, centered
+                float x = destRect.X + (destW - srcW) / 2;
+                float y = destRect.Y + (destH - srcH) / 2;
+                return (new Rect(x, y, srcW, srcH), fullSrc);
+            }
+
+            case ImageFit.Contain:
+            {
+                float scale = Math.Min(destW / srcW, destH / srcH);
+                float w = srcW * scale;
+                float h = srcH * scale;
+                float x = destRect.X + (destW - w) / 2;
+                float y = destRect.Y + (destH - h) / 2;
+                return (new Rect(x, y, w, h), fullSrc);
+            }
+
+            case ImageFit.Cover:
+            {
+                float scale = Math.Max(destW / srcW, destH / srcH);
+                float visibleW = destW / scale;
+                float visibleH = destH / scale;
+                float srcX = (srcW - visibleW) / 2;
+                float srcY = (srcH - visibleH) / 2;
+                return (destRect, new SKRect(srcX, srcY, srcX + visibleW, srcY + visibleH));
+            }
+
+            case ImageFit.ScaleDown:
+            {
+                // Like Contain but only shrink, never enlarge
+                float scale = Math.Min(1f, Math.Min(destW / srcW, destH / srcH));
+                float w = srcW * scale;
+                float h = srcH * scale;
+                float x = destRect.X + (destW - w) / 2;
+                float y = destRect.Y + (destH - h) / 2;
+                return (new Rect(x, y, w, h), fullSrc);
+            }
+
+            default:
+                return (destRect, fullSrc);
+        }
     }
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
@@ -135,6 +200,11 @@ public sealed class SkiaRenderContext : IRenderContext
     {
         if (_saveStack.Count > 0)
             Canvas.RestoreToCount(_saveStack.Pop());
+    }
+
+    public ICanvasDrawingContext CreateCanvasContext(Rect bounds)
+    {
+        return new SkiaCanvasDrawingContext(Canvas, bounds);
     }
 
     // ── Conversion helpers ──

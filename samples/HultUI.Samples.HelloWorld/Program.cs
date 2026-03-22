@@ -6,6 +6,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
 // State
@@ -52,17 +53,19 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
             // Reactive counter component
             new CounterComponent().Mount(),
 
-            // Color card grid
-            Flex.Row(gap: 12).FlexWrap(FlexWrap.Wrap).FlexGrow(1)
-                .AlignContent(AlignContent.FlexStart)
-                .Children(
-                    MakeCard("#06B6D4", "Cyan"),
-                    MakeCard("#14B8A6", "Teal"),
-                    MakeCard("#22C55E", "Green"),
-                    MakeCard("#EAB308", "Yellow"),
-                    MakeCard("#F97316", "Orange"),
-                    MakeCard("#EF4444", "Red")
-                )
+            // Scrollable list + canvas demo side by side
+            Flex.Row(gap: 16).FlexGrow(1).Children(
+
+                // Scrollable list
+                ScrollView.New().FlexGrow(1).CornerRadius(8f).Background(Color.FromHex("#F8FAFC")).Children(
+                    MakeScrollableList()
+                ),
+
+                // Canvas drawing demo
+                Canvas.New(DrawCanvasDemo)
+                    .Width(200).FlexShrink(0)
+                    .Background(Color.FromHex("#0F172A")).CornerRadius(8f)
+            )
         )
     ),
 
@@ -109,26 +112,60 @@ return;
 
 // ──── Static helper functions (top-level local functions) ────
 
-static BoxElement MakeCard(string hex, string label)
+static Element[] MakeScrollableList()
 {
-    var baseColor = Color.FromHex(hex);
-    var card = Flex.Column(gap: 0)
-        .Width(160).Height(120)
-        .Background(baseColor).CornerRadius(12f)
-        .Padding(16)
-        .JustifyContent(JustifyContent.FlexEnd)
-        .TextColor(Color.FromHex("#FFFFFF")).FontSize(18f).FontWeight(FontWeight.Bold)
-        .Children(Text.New(label));
+    string[] colors = ["#4F46E5", "#7C3AED", "#06B6D4", "#14B8A6", "#22C55E", "#EAB308", "#F97316", "#EF4444",
+                        "#EC4899", "#8B5CF6", "#3B82F6", "#10B981", "#F59E0B", "#DC2626", "#6366F1", "#0EA5E9"];
+    var items = new Element[colors.Length];
+    for (int i = 0; i < colors.Length; i++)
+    {
+        var hex = colors[i];
+        var baseColor = Color.FromHex(hex);
+        var hoverColor = new Color(
+            (byte)(baseColor.R * 0.85f), (byte)(baseColor.G * 0.85f),
+            (byte)(baseColor.B * 0.85f), baseColor.A);
 
-    var darkColor = new Color(
-        (byte)(baseColor.R * 0.8f), (byte)(baseColor.G * 0.8f),
-        (byte)(baseColor.B * 0.8f), baseColor.A);
+        var item = Flex.Row(gap: 12).Padding(12).AlignItems(AlignItems.Center)
+            .Background(i % 2 == 0 ? Color.Transparent : Color.FromHex("#F1F5F9"))
+            .Children(
+                Box.New().Width(32).Height(32).Background(baseColor).CornerRadius(6f),
+                Text.New($"Item {i + 1} — Color {hex}")
+            );
 
-    card.OnPointerEnter(_ => card.BackgroundColor = darkColor);
-    card.OnPointerLeave(_ => card.BackgroundColor = baseColor);
-    card.OnClick(_ => Console.WriteLine($"Card clicked: {label}"));
+        item.OnPointerEnter(_ => item.BackgroundColor = hoverColor);
+        item.OnPointerLeave(_ => item.BackgroundColor = i % 2 == 0 ? Color.Transparent : Color.FromHex("#F1F5F9"));
+        item.OnClick(_ => Console.WriteLine($"List item clicked: {i + 1}"));
 
-    return card;
+        items[i] = item;
+    }
+    return items;
+}
+
+static void DrawCanvasDemo(ICanvasDrawingContext ctx)
+{
+    var w = ctx.Bounds.Width;
+    var h = ctx.Bounds.Height;
+
+    // Background grid
+    var gridColor = new Color(255, 255, 255, 20);
+    for (float y = 0; y < h; y += 20)
+        ctx.DrawLine(new Point(0, y), new Point(w, y), gridColor, 1);
+    for (float x = 0; x < w; x += 20)
+        ctx.DrawLine(new Point(x, 0), new Point(x, h), gridColor, 1);
+
+    // Decorative circles
+    ctx.DrawCircle(new Point(w / 2, h * 0.3f), 40, new Color(79, 70, 229, 180));
+    ctx.DrawCircleStroke(new Point(w / 2, h * 0.3f), 55, new Color(99, 102, 241, 100), 2);
+    ctx.DrawCircle(new Point(w * 0.3f, h * 0.6f), 25, new Color(6, 182, 212, 150));
+    ctx.DrawCircle(new Point(w * 0.7f, h * 0.55f), 30, new Color(34, 197, 94, 150));
+
+    // Title
+    ctx.DrawText("Canvas", new Point(w / 2 - 30, h * 0.75f), new Color(255, 255, 255), 18);
+
+    // Rounded rect border
+    ctx.DrawRoundedRectStroke(
+        new Rect(10, 10, w - 20, h - 20),
+        new CornerRadius(8), new Color(255, 255, 255, 40), 1);
 }
 
 static BoxElement MakeHeaderButton(string hex, string label)
