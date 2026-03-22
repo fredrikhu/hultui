@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
@@ -54,6 +55,11 @@ public static class ElementExtensions
 
     // ──── ScrollView properties ────
     public static T ScrollSpeed<T>(this T el, float speed) where T : ScrollViewElement { el.ScrollSpeed = speed; return el; }
+
+    // ──── Accessibility ────
+    public static T AccessibleRole<T>(this T el, AccessibilityRole role) where T : Element { el.Role = role; return el; }
+    public static T AccessibleName<T>(this T el, string name) where T : Element { el.AccessibleName = name; return el; }
+    public static T AccessibleDescription<T>(this T el, string desc) where T : Element { el.AccessibleDescription = desc; return el; }
 
     // ──── Events ────
     public static T OnClick<T>(this T el, Action<ClickEvent> handler) where T : Element { el.On(handler); return el; }

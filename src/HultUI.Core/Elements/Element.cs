@@ -56,6 +56,9 @@ public abstract class Element
         list.Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt)));
     }
 
+    internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
+        _handlers is not null && _handlers.ContainsKey(typeof(TEvent));
+
     internal void InvokeHandlers(ElementEvent evt, EventPhase phase)
     {
         if (_handlers is null) return;
