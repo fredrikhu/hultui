@@ -56,6 +56,9 @@ var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.App
             // Reactive counter component
             new CounterComponent().Mount(),
 
+            // Input controls row
+            MakeInputControlsDemo(),
+
             // Scrollable list + canvas demo side by side
             Flex.Row(gap: 16).FlexGrow(1).Children(
 
@@ -211,6 +214,67 @@ BoxElement MakeSidebarItem(string lightHex, string darkHex, string label)
     item.OnClick(_ => Console.WriteLine($"Sidebar clicked: {label}"));
 
     return item;
+}
+
+static Element MakeInputControlsDemo()
+{
+    var statusLabel = Text.New("Type in the text field, toggle checkboxes, or select a radio option.");
+
+    return Flex.Column(gap: 12).FlexShrink(0).Padding(16)
+        .Background(Color.FromHex("#F8FAFC")).CornerRadius(8f).Children(
+
+        // Text input
+        Flex.Row(gap: 12).AlignItems(AlignItems.Center).Children(
+            Text.New("Name:").FontSize(14f),
+            TextInput.New()
+                .PlaceholderText("Enter your name...")
+                .OnTextChanged(text => statusLabel.Content = $"Hello, {text}!")
+                .Width(250).Height(32)
+                .Background(Color.FromHex("#FFFFFF")).CornerRadius(4f)
+                .BorderColor(Color.FromHex("#CBD5E1"))
+        ),
+
+        // Checkboxes + Radio buttons side by side
+        Flex.Row(gap: 32).AlignItems(AlignItems.FlexStart).Children(
+
+            // Checkboxes
+            Flex.Column(gap: 8).Children(
+                Text.New("Options:").FontSize(14f).FontWeight(FontWeight.SemiBold),
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    Checkbox.New().OnCheckedChanged(v => Console.WriteLine($"Notifications: {v}")),
+                    Text.New("Enable notifications").FontSize(13f)
+                ),
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    Checkbox.New(true).OnCheckedChanged(v => Console.WriteLine($"Dark sidebar: {v}")),
+                    Text.New("Dark sidebar").FontSize(13f)
+                ),
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    Checkbox.New().OnCheckedChanged(v => Console.WriteLine($"Compact mode: {v}")),
+                    Text.New("Compact mode").FontSize(13f)
+                )
+            ),
+
+            // Radio buttons
+            Flex.Column(gap: 8).Children(
+                Text.New("Theme:").FontSize(14f).FontWeight(FontWeight.SemiBold),
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    RadioButton.New("theme", true),
+                    Text.New("System").FontSize(13f)
+                ),
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    RadioButton.New("theme"),
+                    Text.New("Light").FontSize(13f)
+                ),
+                Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+                    RadioButton.New("theme"),
+                    Text.New("Dark").FontSize(13f)
+                )
+            )
+        ),
+
+        // Status line
+        statusLabel.FontSize(12f).TextColor(Color.FromHex("#64748B"))
+    );
 }
 
 // ──── Reactive Counter Component ────

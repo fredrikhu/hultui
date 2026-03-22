@@ -22,6 +22,7 @@ public sealed class Application : IDisposable
     private Theme _theme = Theme.Light;
     private bool _disposed;
     private Element? _lastHoveredElement;
+    private ScrollViewElement? _scrollbarDragTarget;
 
     public IClipboard Clipboard { get; }
     public PerformanceCounters Performance => _perf;
@@ -102,6 +103,14 @@ public sealed class Application : IDisposable
             case InputEvent.MouseMoveInput move:
             {
                 var pos = new Point(move.X, move.Y);
+
+                // If dragging a scrollbar, route directly to the drag target
+                if (_scrollbarDragTarget is not null)
+                {
+                    _scrollbarDragTarget.UpdateScrollbarDrag(pos);
+                    break;
+                }
+
                 var target = HitTester.HitTest(_root, pos);
                 _pointerState.UpdateHover(target, pos, move.Modifiers);
                 _lastHoveredElement = target;
@@ -126,12 +135,30 @@ public sealed class Application : IDisposable
             case InputEvent.MouseButtonInput button:
             {
                 var pos = new Point(button.X, button.Y);
+
+                // End scrollbar drag on button up
+                if (!button.IsDown && _scrollbarDragTarget is not null)
+                {
+                    _scrollbarDragTarget.EndScrollbarDrag();
+                    _scrollbarDragTarget = null;
+                    break;
+                }
+
                 var target = HitTester.HitTest(_root, pos);
                 if (target is null) break;
 
                 if (button.IsDown)
                 {
+                    // Check if click is on a scrollbar — walk up from target to find a ScrollViewElement
+                    if (button.Button == 0 && TryStartScrollbarDrag(target, pos))
+                        break;
+
                     _focusManager.SetFocus(target);
+
+                    // Provide clipboard to text inputs when focused
+                    if (target is TextInputElement textInput)
+                        textInput.Clipboard = Clipboard;
+
                     var downEvt = _pointerState.HandlePointerDown(target, pos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(downEvt, target);
                 }
@@ -195,6 +222,26 @@ public sealed class Application : IDisposable
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Walks from the hit target up through ancestors looking for a ScrollViewElement
+    /// whose scrollbar was clicked. Returns true if a drag was started or track was clicked.
+    /// </summary>
+    private bool TryStartScrollbarDrag(Element target, Point pos)
+    {
+        Element? current = target;
+        while (current is not null)
+        {
+            if (current is ScrollViewElement sv && sv.TryStartScrollbarDrag(pos))
+            {
+                if (sv.IsDraggingScrollbar)
+                    _scrollbarDragTarget = sv;
+                return true;
+            }
+            current = current.Parent;
+        }
+        return false;
     }
 
     public void Dispose()

@@ -72,6 +72,7 @@ public class CanvasElementTests
         public void DrawText(string text, Rect bounds, Core.Styling.ResolvedInheritedStyle style, Core.Layout.TextOverflow overflow, int? maxLines) { }
         public void DrawImage(IImageSource source, Rect destRect, Core.Layout.ImageFit fit) { }
         public void DrawLine(Point from, Point to, Color color, float strokeWidth) { }
+        public Size MeasureText(string text, Core.Styling.ResolvedInheritedStyle style) => new(text.Length * style.FontSize * 0.6f, style.FontSize);
         public void PushClip(Rect clipRect) { }
         public void PushRoundedClip(Rect clipRect, CornerRadius radius) { }
         public void PushTranslate(float x, float y) { }

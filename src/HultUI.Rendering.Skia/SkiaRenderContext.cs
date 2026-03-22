@@ -158,6 +158,21 @@ public sealed class SkiaRenderContext : IRenderContext
         }
     }
 
+    public Size MeasureText(string text, ResolvedInheritedStyle style)
+    {
+        if (string.IsNullOrEmpty(text) || _pipeline is null)
+            return Size.Zero;
+
+        // Use SKFont.MeasureText directly — this matches SKCanvas.DrawText's advance widths
+        // exactly, avoiding the HarfBuzz vs SkiaSharp measurement discrepancy.
+        var font = _pipeline.Fonts.Resolve(style.FontFamily, style.FontWeight, FontSlant.Normal);
+        var typeface = (SKTypeface)font.NativeHandle;
+        using var skFont = new SKFont(typeface, style.FontSize);
+        float width = skFont.MeasureText(text);
+        float height = skFont.Spacing; // line height (ascent + descent + leading)
+        return new Size(width, height);
+    }
+
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
     {
         if (color.A == 0) return;

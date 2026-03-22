@@ -1,0 +1,131 @@
+using HultUI.Core.Events;
+using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
+
+namespace HultUI.Core.Elements;
+
+public class RadioButtonElement : Element
+{
+    private bool _isChecked;
+
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set
+        {
+            if (_isChecked == value) return;
+            _isChecked = value;
+            MarkPaintDirty();
+        }
+    }
+
+    public string GroupName { get; set; } = "";
+    public float RadioSize { get; set; } = 18f;
+    public float BorderWidth { get; set; } = 2f;
+    public Color CircleColor { get; set; } = new(200, 200, 200, 255);
+    public Color CheckedColor { get; set; } = new(66, 135, 245, 255);
+    public Color DotColor { get; set; } = new(255, 255, 255, 255);
+
+    public Action<bool>? OnChanged { get; set; }
+
+    public RadioButtonElement()
+    {
+        Inherited.Cursor = CursorType.Pointer;
+        On<ClickEvent>(OnClick);
+    }
+
+    public static RadioButtonElement New(string groupName = "", bool isChecked = false) =>
+        new() { GroupName = groupName, _isChecked = isChecked };
+
+    private void OnClick(ClickEvent evt)
+    {
+        if (IsChecked) return; // Already selected, no-op
+
+        // Deselect all radio buttons in the same group within the subtree
+        if (!string.IsNullOrEmpty(GroupName))
+        {
+            var root = FindGroupRoot();
+            DeselectGroupMembers(root);
+        }
+
+        IsChecked = true;
+        OnChanged?.Invoke(true);
+    }
+
+    /// <summary>
+    /// Walks up the tree to find the root ancestor for group searching.
+    /// Stops at the first element that isn't a simple layout wrapper, or at the tree root.
+    /// </summary>
+    private Element FindGroupRoot()
+    {
+        Element current = this;
+        while (current.Parent is not null)
+            current = current.Parent;
+        return current;
+    }
+
+    private void DeselectGroupMembers(Element subtree)
+    {
+        if (subtree is RadioButtonElement radio &&
+            radio != this &&
+            radio.GroupName == GroupName &&
+            radio.IsChecked)
+        {
+            radio.IsChecked = false;
+            radio.OnChanged?.Invoke(false);
+        }
+
+        foreach (var child in subtree.Children)
+            DeselectGroupMembers(child);
+    }
+
+    internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
+    {
+        return new Size(RadioSize, RadioSize);
+    }
+
+    public override void Render(IRenderContext ctx)
+    {
+        var box = Layout.AbsoluteContentBox;
+        float cx = box.X + box.Width / 2;
+        float cy = box.Y + box.Height / 2;
+        float radius = RadioSize / 2;
+
+        // Use a canvas context for circle drawing
+        var canvasCtx = ctx.CreateCanvasContext(box);
+
+        float localCx = box.Width / 2;
+        float localCy = box.Height / 2;
+
+        if (IsChecked)
+        {
+            // Filled outer circle
+            canvasCtx.DrawCircle(new Point(localCx, localCy), radius, CheckedColor);
+            // Inner dot
+            canvasCtx.DrawCircle(new Point(localCx, localCy), radius * 0.4f, DotColor);
+        }
+        else
+        {
+            // Empty circle with border
+            canvasCtx.DrawCircleStroke(new Point(localCx, localCy), radius - BorderWidth / 2, CircleColor, BorderWidth);
+        }
+    }
+
+    internal override void PatchFrom(Element source)
+    {
+        base.PatchFrom(source);
+        if (source is RadioButtonElement radio)
+        {
+            GroupName = radio.GroupName;
+            RadioSize = radio.RadioSize;
+            BorderWidth = radio.BorderWidth;
+            CircleColor = radio.CircleColor;
+            CheckedColor = radio.CheckedColor;
+            DotColor = radio.DotColor;
+            OnChanged = radio.OnChanged;
+            // Preserve IsChecked state
+        }
+    }
+}

@@ -57,6 +57,16 @@ public static class ElementExtensions
     // ──── ScrollView properties ────
     public static T ScrollSpeed<T>(this T el, float speed) where T : ScrollViewElement { el.ScrollSpeed = speed; return el; }
 
+    // ──── TextInput properties ────
+    public static T PlaceholderText<T>(this T el, string text) where T : TextInputElement { el.Placeholder = text; return el; }
+    public static T OnTextChanged<T>(this T el, Action<string> handler) where T : TextInputElement { el.TextChanged = handler; return el; }
+
+    // ──── Checkbox properties ────
+    public static T OnCheckedChanged<T>(this T el, Action<bool> handler) where T : CheckboxElement { el.OnChanged = handler; return el; }
+
+    // ──── RadioButton properties ────
+    public static T OnRadioChanged<T>(this T el, Action<bool> handler) where T : RadioButtonElement { el.OnChanged = handler; return el; }
+
     // ──── Accessibility ────
     public static T AccessibleRole<T>(this T el, AccessibilityRole role) where T : Element { el.Role = role; return el; }
     public static T AccessibleName<T>(this T el, string name) where T : Element { el.AccessibleName = name; return el; }

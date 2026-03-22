@@ -5,7 +5,7 @@ using HultUI.Core.Rendering;
 
 namespace HultUI.Core.Elements;
 
-public class ScrollViewElement : BoxElement
+public partial class ScrollViewElement : BoxElement
 {
     private float _scrollOffsetX;
     private float _scrollOffsetY;

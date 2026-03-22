@@ -1,0 +1,392 @@
+using HultUI.Core.Accessibility;
+using HultUI.Core.Events;
+using HultUI.Core.Layout;
+using HultUI.Core.Platform;
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
+
+namespace HultUI.Core.Elements;
+
+public class TextInputElement : BoxElement
+{
+    private string _text = "";
+    private int _cursorPos;
+    private int _selectionStart;
+    private bool _focused;
+    private float _scrollOffset; // horizontal scroll for text wider than the box
+    private IRenderContext? _renderCtx; // cached for hit-testing with real font metrics
+
+    public string Text
+    {
+        get => _text;
+        set
+        {
+            _text = value ?? "";
+            _cursorPos = Math.Min(_cursorPos, _text.Length);
+            _selectionStart = _cursorPos;
+            MarkPaintDirty();
+        }
+    }
+
+    public int CursorPosition
+    {
+        get => _cursorPos;
+        set
+        {
+            _cursorPos = Math.Clamp(value, 0, _text.Length);
+            _selectionStart = _cursorPos;
+        }
+    }
+
+    public int SelectionStart => Math.Min(_selectionStart, _cursorPos);
+    public int SelectionEnd => Math.Max(_selectionStart, _cursorPos);
+    public bool HasSelection => _selectionStart != _cursorPos;
+    public string SelectedText => HasSelection ? _text[SelectionStart..SelectionEnd] : "";
+
+    public string Placeholder { get; set; } = "";
+    public Color PlaceholderColor { get; set; } = new(150, 150, 150, 255);
+    public Color SelectionColor { get; set; } = new(66, 135, 245, 80);
+    public Color CursorColor { get; set; } = new(0, 0, 0, 255);
+    public Color FocusBorderColor { get; set; } = new(66, 135, 245, 255);
+    public float CursorWidth { get; set; } = 1.5f;
+
+    public Action<string>? TextChanged { get; set; }
+
+    /// <summary>
+    /// Clipboard reference — set by Application when the element is focused.
+    /// </summary>
+    public IClipboard? Clipboard { get; set; }
+
+    public TextInputElement()
+    {
+        Box.Padding = new Thickness(8);
+        Inherited.FontSize = 14f;
+        Inherited.Cursor = CursorType.Text;
+
+        On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
+        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        On<TextInputEvent>(OnTextInput);
+        On<KeyDownEvent>(OnKeyDown);
+        On<PointerDownEvent>(OnPointerDown);
+    }
+
+    public static TextInputElement New(string text = "") => new() { _text = text, _cursorPos = text.Length, _selectionStart = text.Length };
+
+    private void OnTextInput(TextInputEvent evt)
+    {
+        if (!_focused) return;
+        DeleteSelection();
+        _text = _text.Insert(_cursorPos, evt.Text);
+        _cursorPos += evt.Text.Length;
+        _selectionStart = _cursorPos;
+        NotifyChanged();
+        MarkPaintDirty();
+    }
+
+    private void OnKeyDown(KeyDownEvent evt)
+    {
+        if (!_focused) return;
+
+        bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
+        bool ctrl = evt.Modifiers.HasFlag(KeyModifiers.Ctrl);
+
+        switch (evt.Key)
+        {
+            case KeyCode.Left:
+                if (ctrl)
+                    MoveCursorWordLeft(shift);
+                else
+                    MoveCursor(-1, shift);
+                break;
+
+            case KeyCode.Right:
+                if (ctrl)
+                    MoveCursorWordRight(shift);
+                else
+                    MoveCursor(1, shift);
+                break;
+
+            case KeyCode.Home:
+                MoveCursorTo(0, shift);
+                break;
+
+            case KeyCode.End:
+                MoveCursorTo(_text.Length, shift);
+                break;
+
+            case KeyCode.Backspace:
+                if (HasSelection)
+                    DeleteSelection();
+                else if (_cursorPos > 0)
+                {
+                    if (ctrl)
+                    {
+                        int target = FindWordBoundaryLeft(_cursorPos);
+                        _text = _text.Remove(target, _cursorPos - target);
+                        _cursorPos = target;
+                    }
+                    else
+                    {
+                        _text = _text.Remove(_cursorPos - 1, 1);
+                        _cursorPos--;
+                    }
+                    _selectionStart = _cursorPos;
+                }
+                NotifyChanged();
+                break;
+
+            case KeyCode.Delete:
+                if (HasSelection)
+                    DeleteSelection();
+                else if (_cursorPos < _text.Length)
+                {
+                    if (ctrl)
+                    {
+                        int target = FindWordBoundaryRight(_cursorPos);
+                        _text = _text.Remove(_cursorPos, target - _cursorPos);
+                    }
+                    else
+                    {
+                        _text = _text.Remove(_cursorPos, 1);
+                    }
+                }
+                NotifyChanged();
+                break;
+
+            case KeyCode.A when ctrl:
+                _selectionStart = 0;
+                _cursorPos = _text.Length;
+                break;
+
+            case KeyCode.C when ctrl:
+                if (HasSelection && Clipboard is not null)
+                    Clipboard.SetText(SelectedText);
+                break;
+
+            case KeyCode.X when ctrl:
+                if (HasSelection && Clipboard is not null)
+                {
+                    Clipboard.SetText(SelectedText);
+                    DeleteSelection();
+                    NotifyChanged();
+                }
+                break;
+
+            case KeyCode.V when ctrl:
+                if (Clipboard is not null)
+                {
+                    var clipText = Clipboard.GetText();
+                    if (clipText is not null)
+                    {
+                        DeleteSelection();
+                        _text = _text.Insert(_cursorPos, clipText);
+                        _cursorPos += clipText.Length;
+                        _selectionStart = _cursorPos;
+                        NotifyChanged();
+                    }
+                }
+                break;
+
+            default:
+                return; // Don't mark paint dirty for unhandled keys
+        }
+
+        MarkPaintDirty();
+    }
+
+    private void OnPointerDown(PointerDownEvent evt)
+    {
+        // Place cursor at click position
+        var contentBox = Layout.AbsoluteContentBox;
+        float clickX = evt.Position.X - contentBox.X + _scrollOffset;
+        int pos = HitTestTextPosition(clickX);
+
+        bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
+        _cursorPos = pos;
+        if (!shift)
+            _selectionStart = pos;
+
+        MarkPaintDirty();
+    }
+
+    private void MoveCursor(int delta, bool extendSelection)
+    {
+        if (!extendSelection && HasSelection)
+        {
+            // Collapse selection in the direction of movement
+            _cursorPos = delta < 0 ? SelectionStart : SelectionEnd;
+            _selectionStart = _cursorPos;
+            return;
+        }
+
+        _cursorPos = Math.Clamp(_cursorPos + delta, 0, _text.Length);
+        if (!extendSelection)
+            _selectionStart = _cursorPos;
+    }
+
+    private void MoveCursorTo(int pos, bool extendSelection)
+    {
+        _cursorPos = Math.Clamp(pos, 0, _text.Length);
+        if (!extendSelection)
+            _selectionStart = _cursorPos;
+    }
+
+    private void MoveCursorWordLeft(bool extendSelection)
+    {
+        MoveCursorTo(FindWordBoundaryLeft(_cursorPos), extendSelection);
+    }
+
+    private void MoveCursorWordRight(bool extendSelection)
+    {
+        MoveCursorTo(FindWordBoundaryRight(_cursorPos), extendSelection);
+    }
+
+    private int FindWordBoundaryLeft(int from)
+    {
+        if (from <= 0) return 0;
+        int i = from - 1;
+        while (i > 0 && char.IsWhiteSpace(_text[i])) i--;
+        while (i > 0 && !char.IsWhiteSpace(_text[i - 1])) i--;
+        return i;
+    }
+
+    private int FindWordBoundaryRight(int from)
+    {
+        if (from >= _text.Length) return _text.Length;
+        int i = from;
+        while (i < _text.Length && !char.IsWhiteSpace(_text[i])) i++;
+        while (i < _text.Length && char.IsWhiteSpace(_text[i])) i++;
+        return i;
+    }
+
+    private void DeleteSelection()
+    {
+        if (!HasSelection) return;
+        int start = SelectionStart;
+        int end = SelectionEnd;
+        _text = _text.Remove(start, end - start);
+        _cursorPos = start;
+        _selectionStart = start;
+    }
+
+    private void NotifyChanged()
+    {
+        TextChanged?.Invoke(_text);
+    }
+
+    /// <summary>
+    /// Given an X position in text space, returns the character index closest to it.
+    /// </summary>
+    private int HitTestTextPosition(float x)
+    {
+        if (string.IsNullOrEmpty(_text)) return 0;
+
+        // Binary search for the position
+        var style = ResolvedInherited;
+        int lo = 0, hi = _text.Length;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) / 2;
+            float midWidth = MeasureSubstring(0, mid, style);
+            if (midWidth < x)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo;
+    }
+
+    private float MeasureSubstring(int start, int length, ResolvedInheritedStyle style)
+    {
+        if (length == 0) return 0;
+        var sub = _text.Substring(start, length);
+        if (_renderCtx is not null)
+            return _renderCtx.MeasureText(sub, style).Width;
+        return sub.Length * style.FontSize * 0.6f; // fallback for tests
+    }
+
+    public override void Render(IRenderContext ctx)
+    {
+        _renderCtx = ctx; // cache for hit-testing
+
+        // Draw background/border
+        var borderColor = _focused ? FocusBorderColor : BorderColor;
+        var origBorder = BorderColor;
+        if (_focused) BorderColor = FocusBorderColor;
+        base.Render(ctx);
+        if (_focused) BorderColor = origBorder;
+
+        var contentBox = Layout.AbsoluteContentBox;
+        var style = ResolvedInherited;
+
+        // Measure text widths using real font metrics
+        float cursorX = _cursorPos > 0 && !string.IsNullOrEmpty(_text)
+            ? ctx.MeasureText(_text[.._cursorPos], style).Width
+            : 0;
+        float totalTextWidth = !string.IsNullOrEmpty(_text)
+            ? ctx.MeasureText(_text, style).Width
+            : 0;
+
+        // Auto-scroll to keep cursor visible
+        float scrollPadding = style.FontSize; // one em of padding when scrolling
+        if (cursorX - _scrollOffset > contentBox.Width - CursorWidth)
+            _scrollOffset = cursorX - contentBox.Width + CursorWidth + scrollPadding;
+        if (cursorX - _scrollOffset < 0)
+            _scrollOffset = cursorX;
+        _scrollOffset = Math.Max(0, _scrollOffset);
+
+        ctx.PushClip(contentBox);
+
+        // Draw selection highlight
+        if (HasSelection)
+        {
+            float selStartX = SelectionStart > 0
+                ? ctx.MeasureText(_text[..SelectionStart], style).Width
+                : 0;
+            float selEndX = SelectionEnd > 0
+                ? ctx.MeasureText(_text[..SelectionEnd], style).Width
+                : 0;
+            ctx.DrawRect(new Rect(
+                contentBox.X + selStartX - _scrollOffset, contentBox.Y,
+                selEndX - selStartX, contentBox.Height), SelectionColor);
+        }
+
+        // Draw text or placeholder
+        if (string.IsNullOrEmpty(_text) && !string.IsNullOrEmpty(Placeholder) && !_focused)
+        {
+            var placeholderStyle = style with { TextColor = PlaceholderColor };
+            ctx.DrawText(Placeholder, contentBox, placeholderStyle, TextOverflow.Clip, 1);
+        }
+        else if (!string.IsNullOrEmpty(_text))
+        {
+            var textRect = new Rect(contentBox.X - _scrollOffset, contentBox.Y, totalTextWidth + scrollPadding, contentBox.Height);
+            ctx.DrawText(_text, textRect, style, TextOverflow.Clip, 1);
+        }
+
+        // Draw cursor
+        if (_focused)
+        {
+            float cx = contentBox.X + cursorX - _scrollOffset;
+            ctx.DrawRect(new Rect(cx, contentBox.Y + 2, CursorWidth, contentBox.Height - 4), CursorColor);
+        }
+
+        ctx.Pop(); // clip
+    }
+
+    internal override void PatchFrom(Element source)
+    {
+        base.PatchFrom(source);
+        if (source is TextInputElement input)
+        {
+            Placeholder = input.Placeholder;
+            PlaceholderColor = input.PlaceholderColor;
+            SelectionColor = input.SelectionColor;
+            CursorColor = input.CursorColor;
+            FocusBorderColor = input.FocusBorderColor;
+            CursorWidth = input.CursorWidth;
+            TextChanged = input.TextChanged;
+            // Preserve text, cursor position, and selection during patching
+        }
+    }
+}

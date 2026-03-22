@@ -68,6 +68,9 @@ public sealed unsafe class SDL3Window : IDisposable
         // Create SkiaSharp surface with SDL3 GL proc resolver
         _surface = new SkiaGLRenderSurface(GetGLProcAddress);
 
+        // Enable text input events (SDL3 requires explicit activation)
+        SDL_StartTextInput(_window);
+
         UpdateSize();
         IsOpen = true;
     }
