@@ -202,7 +202,11 @@ public sealed unsafe class SDL3Window : IDisposable
         PixelHeight = ph;
         LogicalWidth = lw;
         LogicalHeight = lh;
-        ScaleFactor = lw > 0 ? (float)pw / lw : 1f;
+        // Use SDL's display scale rather than computing from pixel/logical ratio.
+        // The computed ratio can fluctuate slightly during resize (floating-point
+        // division of changing integers), causing sub-pixel jitter and text
+        // rendering artifacts. The display scale is constant for a given monitor.
+        ScaleFactor = SDL_GetWindowDisplayScale(_window);
 
         _surface?.Resize(pw, ph, ScaleFactor);
     }
