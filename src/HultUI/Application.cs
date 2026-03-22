@@ -32,7 +32,11 @@ public sealed class Application : IDisposable
     public Theme Theme
     {
         get => _theme;
-        set => _theme = value ?? throw new ArgumentNullException(nameof(value));
+        set
+        {
+            _theme = value ?? throw new ArgumentNullException(nameof(value));
+            _root?.MarkStyleDirty();
+        }
     }
 
     public Application(string title = "HultUI Application", int width = 800, int height = 600)
@@ -40,6 +44,7 @@ public sealed class Application : IDisposable
         _window = new SDL3Window(title, width, height);
         _layoutEngine = new LayoutEngine(_window.Surface.MeasureContext);
         _window.EventTranslator.OnInputEvent += HandleInputEvent;
+        _window.Resized += OnWindowResized;
         Clipboard = new SDL3Clipboard(_window);
         _devTools = new DevToolsOverlay(_perf);
     }
@@ -47,6 +52,12 @@ public sealed class Application : IDisposable
     public void SetRoot(Element root)
     {
         _root = root;
+    }
+
+    private void OnWindowResized()
+    {
+        _root?.MarkLayoutDirty();
+        _root?.MarkPaintDirty();
     }
 
     public void Run()
@@ -61,17 +72,30 @@ public sealed class Application : IDisposable
             _window.PollEvents();
             if (!_window.IsOpen) break;
 
-            // Style resolution
+            // Skip the entire pipeline when nothing has changed
+            if (_root.DirtyFlags == DirtyFlags.None)
+            {
+                _perf.EndFrame();
+                Thread.Sleep(16);
+                continue;
+            }
+
+            // Style resolution (only if any element has style changes)
             _perf.BeginStyle();
-            StyleResolver.Resolve(_root, _theme.ToResolvedStyle());
+            if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
+            {
+                StyleResolver.Resolve(_root, _theme.ToResolvedStyle());
+                ClearFlags(_root, DirtyFlags.Style);
+            }
             _perf.EndStyle();
 
-            // Layout
+            // Layout (only if any element has layout changes)
             _perf.BeginLayout();
-            _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
+            if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
+                _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
             _perf.EndLayout();
 
-            // Render
+            // Render (if anything is dirty, we need to repaint the whole surface)
             _perf.BeginRender();
             var ctx = _window.Surface.RenderContext;
             ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
@@ -83,6 +107,9 @@ public sealed class Application : IDisposable
 
             ctx.EndFrame();
             _perf.EndRender();
+
+            // Clear remaining dirty flags after full render
+            ClearAllFlags(_root);
 
             _perf.EndFrame();
 
@@ -242,6 +269,10 @@ public sealed class Application : IDisposable
                 break;
             }
         }
+
+        // Any input event may have triggered visual changes via handlers,
+        // so ensure the render pipeline runs this frame.
+        _root.MarkPaintDirty();
     }
 
     /// <summary>
@@ -262,6 +293,20 @@ public sealed class Application : IDisposable
             current = current.Parent;
         }
         return false;
+    }
+
+    private static void ClearFlags(Element element, DirtyFlags flags)
+    {
+        element.DirtyFlags &= ~flags;
+        foreach (var child in element.Children)
+            ClearFlags(child, flags);
+    }
+
+    private static void ClearAllFlags(Element element)
+    {
+        element.DirtyFlags = DirtyFlags.None;
+        foreach (var child in element.Children)
+            ClearAllFlags(child);
     }
 
     public void Dispose()

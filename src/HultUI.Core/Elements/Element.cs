@@ -77,6 +77,13 @@ public abstract class Element
     // ──── Dirty tracking ────
     internal DirtyFlags DirtyFlags { get; set; } = DirtyFlags.All;
 
+    // ──── Layout cache (used by LayoutEngine for subtree skipping) ────
+    internal float CacheConstraintW;
+    internal float CacheConstraintH;
+    internal float? CacheForcedW;
+    internal float? CacheForcedH;
+    internal Size CacheResultSize;
+
     internal void MarkLayoutDirty()
     {
         var current = (Element?)this;
@@ -91,14 +98,36 @@ public abstract class Element
 
     internal void MarkPaintDirty()
     {
-        DirtyFlags |= DirtyFlags.Paint;
+        var current = (Element?)this;
+        while (current is not null)
+        {
+            if (current.DirtyFlags.HasFlag(DirtyFlags.Paint))
+                break;
+            current.DirtyFlags |= DirtyFlags.Paint;
+            current = current.Parent;
+        }
     }
 
     internal void MarkStyleDirty()
     {
+        // Propagate down (inherited style may change for descendants)
+        MarkStyleDirtyDown();
+        // Propagate up so root knows style work is needed
+        var current = Parent;
+        while (current is not null)
+        {
+            if (current.DirtyFlags.HasFlag(DirtyFlags.Style))
+                break;
+            current.DirtyFlags |= DirtyFlags.Style;
+            current = current.Parent;
+        }
+    }
+
+    private void MarkStyleDirtyDown()
+    {
         DirtyFlags |= DirtyFlags.Style;
         foreach (var child in _children)
-            child.MarkStyleDirty();
+            child.MarkStyleDirtyDown();
     }
 
     // ──── Lifecycle ────

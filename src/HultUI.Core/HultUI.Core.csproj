@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Core.Tests" />
+    <InternalsVisibleTo Include="HultUI" />
   </ItemGroup>
 
 </Project>

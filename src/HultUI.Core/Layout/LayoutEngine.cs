@@ -28,6 +28,16 @@ public sealed class LayoutEngine
     private Size ComputeLayout(Element element, LayoutConstraint constraint, float absoluteX, float absoluteY,
         float? forcedWidth = null, float? forcedHeight = null)
     {
+        // Skip clean subtrees when constraints haven't changed
+        if (!element.DirtyFlags.HasFlag(DirtyFlags.Layout)
+            && element.CacheConstraintW == constraint.AvailableWidth
+            && element.CacheConstraintH == constraint.AvailableHeight
+            && element.CacheForcedW == forcedWidth
+            && element.CacheForcedH == forcedHeight)
+        {
+            return element.CacheResultSize;
+        }
+
         var box = element.Box;
         var padding = box.Padding;
         var border = box.BorderWidth;
@@ -100,7 +110,16 @@ public sealed class LayoutEngine
                 LayoutAbsoluteChild(absChild, contentBox);
         }
 
-        return new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+        var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+
+        // Update layout cache for subtree skipping on future passes
+        element.CacheConstraintW = constraint.AvailableWidth;
+        element.CacheConstraintH = constraint.AvailableHeight;
+        element.CacheForcedW = forcedWidth;
+        element.CacheForcedH = forcedHeight;
+        element.CacheResultSize = resultSize;
+
+        return resultSize;
     }
 
     private Size LayoutFlexChildren(Element container, List<Element> children,

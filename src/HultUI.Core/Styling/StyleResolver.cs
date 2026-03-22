@@ -37,6 +37,9 @@ public static class StyleResolver
         element.ResolvedInherited = resolved;
 
         foreach (var child in element.Children)
-            ResolveRecursive(child, resolved);
+        {
+            if (child.DirtyFlags.HasFlag(DirtyFlags.Style))
+                ResolveRecursive(child, resolved);
+        }
     }
 }

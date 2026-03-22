@@ -7,11 +7,16 @@ using SkiaSharp;
 
 namespace HultUI.Rendering.Skia;
 
-public sealed class SkiaRenderContext : IRenderContext
+public sealed class SkiaRenderContext : IRenderContext, IDisposable
 {
     private SKCanvas? _canvas;
     private readonly Stack<int> _saveStack = new();
     private TextPipeline? _pipeline;
+
+    // Pooled Skia objects to avoid per-draw-call allocations
+    private readonly SKPaint _pooledPaint = new();
+    private readonly SKFont _pooledFont = new();
+    private bool _disposed;
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
@@ -32,8 +37,9 @@ public sealed class SkiaRenderContext : IRenderContext
     public void DrawRect(Rect rect, Color fill)
     {
         if (fill.A == 0) return;
-        using var paint = new SKPaint { Color = ToSkColor(fill) };
-        Canvas.DrawRect(ToSkRect(rect), paint);
+        _pooledPaint.Reset();
+        _pooledPaint.Color = ToSkColor(fill);
+        Canvas.DrawRect(ToSkRect(rect), _pooledPaint);
     }
 
     public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill, Color stroke, Thickness strokeWidth)
@@ -42,29 +48,29 @@ public sealed class SkiaRenderContext : IRenderContext
 
         if (fill.A > 0)
         {
-            using var fillPaint = new SKPaint { Color = ToSkColor(fill), IsAntialias = true };
+            _pooledPaint.Reset();
+            _pooledPaint.Color = ToSkColor(fill);
+            _pooledPaint.IsAntialias = true;
             if (radius.IsZero)
-                Canvas.DrawRect(skRect, fillPaint);
+                Canvas.DrawRect(skRect, _pooledPaint);
             else
-                Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), fillPaint);
+                Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
         }
 
         if (stroke.A > 0 && (strokeWidth.Top > 0 || strokeWidth.Right > 0 || strokeWidth.Bottom > 0 || strokeWidth.Left > 0))
         {
             // Use average stroke width for now (uniform border)
             float avgStroke = (strokeWidth.Top + strokeWidth.Right + strokeWidth.Bottom + strokeWidth.Left) / 4f;
-            using var strokePaint = new SKPaint
-            {
-                Color = ToSkColor(stroke),
-                IsStroke = true,
-                StrokeWidth = avgStroke,
-                IsAntialias = true
-            };
+            _pooledPaint.Reset();
+            _pooledPaint.Color = ToSkColor(stroke);
+            _pooledPaint.IsStroke = true;
+            _pooledPaint.StrokeWidth = avgStroke;
+            _pooledPaint.IsAntialias = true;
 
             if (radius.IsZero)
-                Canvas.DrawRect(skRect, strokePaint);
+                Canvas.DrawRect(skRect, _pooledPaint);
             else
-                Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), strokePaint);
+                Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
         }
     }
 
@@ -73,7 +79,9 @@ public sealed class SkiaRenderContext : IRenderContext
         if (string.IsNullOrEmpty(text) || _pipeline is null) return;
 
         var layout = _pipeline.Layout(text, style, bounds.Width, maxLines);
-        using var paint = new SKPaint { Color = ToSkColor(style.TextColor), IsAntialias = true };
+        _pooledPaint.Reset();
+        _pooledPaint.Color = ToSkColor(style.TextColor);
+        _pooledPaint.IsAntialias = true;
 
         foreach (var line in layout.Lines)
         {
@@ -82,8 +90,9 @@ public sealed class SkiaRenderContext : IRenderContext
             foreach (var run in line.Runs)
             {
                 var typeface = (SKTypeface)run.Font.NativeHandle;
-                using var font = new SKFont(typeface, run.FontSize);
-                Canvas.DrawText(run.Text, bounds.X + run.OffsetX, lineY, font, paint);
+                _pooledFont.Typeface = typeface;
+                _pooledFont.Size = run.FontSize;
+                Canvas.DrawText(run.Text, bounds.X + run.OffsetX, lineY, _pooledFont, _pooledPaint);
             }
         }
     }
@@ -100,8 +109,9 @@ public sealed class SkiaRenderContext : IRenderContext
 
         var (drawRect, srcRect) = ComputeImageFit(fit, srcW, srcH, destW, destH, destRect);
 
-        using var paint = new SKPaint { IsAntialias = true };
-        Canvas.DrawBitmap(bitmap, srcRect, ToSkRect(drawRect), paint);
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        Canvas.DrawBitmap(bitmap, srcRect, ToSkRect(drawRect), _pooledPaint);
     }
 
     private static (Rect drawRect, SKRect srcRect) ComputeImageFit(
@@ -167,23 +177,22 @@ public sealed class SkiaRenderContext : IRenderContext
         // exactly, avoiding the HarfBuzz vs SkiaSharp measurement discrepancy.
         var font = _pipeline.Fonts.Resolve(style.FontFamily, style.FontWeight, FontSlant.Normal);
         var typeface = (SKTypeface)font.NativeHandle;
-        using var skFont = new SKFont(typeface, style.FontSize);
-        float width = skFont.MeasureText(text);
-        float height = skFont.Spacing; // line height (ascent + descent + leading)
+        _pooledFont.Typeface = typeface;
+        _pooledFont.Size = style.FontSize;
+        float width = _pooledFont.MeasureText(text);
+        float height = _pooledFont.Spacing; // line height (ascent + descent + leading)
         return new Size(width, height);
     }
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
     {
         if (color.A == 0) return;
-        using var paint = new SKPaint
-        {
-            Color = ToSkColor(color),
-            IsStroke = true,
-            StrokeWidth = strokeWidth,
-            IsAntialias = true
-        };
-        Canvas.DrawLine(from.X, from.Y, to.X, to.Y, paint);
+        _pooledPaint.Reset();
+        _pooledPaint.Color = ToSkColor(color);
+        _pooledPaint.IsStroke = true;
+        _pooledPaint.StrokeWidth = strokeWidth;
+        _pooledPaint.IsAntialias = true;
+        Canvas.DrawLine(from.X, from.Y, to.X, to.Y, _pooledPaint);
     }
 
     public void PushClip(Rect clipRect)
@@ -207,8 +216,9 @@ public sealed class SkiaRenderContext : IRenderContext
 
     public void PushOpacity(float opacity)
     {
-        using var paint = new SKPaint { Color = new SKColor(255, 255, 255, (byte)(opacity * 255)) };
-        _saveStack.Push(Canvas.SaveLayer(paint));
+        _pooledPaint.Reset();
+        _pooledPaint.Color = new SKColor(255, 255, 255, (byte)(opacity * 255));
+        _saveStack.Push(Canvas.SaveLayer(_pooledPaint));
     }
 
     public void Pop()
@@ -253,4 +263,12 @@ public sealed class SkiaRenderContext : IRenderContext
         FontWeight.Black => SKFontStyleWeight.Black,
         _ => SKFontStyleWeight.Normal
     };
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _pooledPaint.Dispose();
+        _pooledFont.Dispose();
+    }
 }

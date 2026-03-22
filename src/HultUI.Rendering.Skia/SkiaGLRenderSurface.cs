@@ -64,6 +64,7 @@ public sealed class SkiaGLRenderSurface : IRenderSurface
 
     public void Dispose()
     {
+        _renderContext.Dispose();
         _surface?.Dispose();
         _renderTarget?.Dispose();
         _grContext.Dispose();
