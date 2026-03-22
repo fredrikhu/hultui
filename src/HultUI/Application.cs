@@ -56,8 +56,11 @@ public sealed class Application : IDisposable
 
     private void OnWindowResized()
     {
-        _root?.MarkLayoutDirty();
-        _root?.MarkPaintDirty();
+        if (_root is null) return;
+        _root.MarkLayoutDirty();
+        _root.MarkPaintDirty();
+        // Render immediately so the user sees live resize preview
+        RenderFrame();
     }
 
     public void Run()
@@ -80,46 +83,53 @@ public sealed class Application : IDisposable
                 continue;
             }
 
-            // Style resolution (only if any element has style changes)
-            _perf.BeginStyle();
-            if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
-            {
-                StyleResolver.Resolve(_root, _theme.ToResolvedStyle());
-                ClearFlags(_root, DirtyFlags.Style);
-            }
-            _perf.EndStyle();
-
-            // Layout (only if any element has layout changes)
-            _perf.BeginLayout();
-            if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
-                _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
-            _perf.EndLayout();
-
-            // Render (if anything is dirty, we need to repaint the whole surface)
-            _perf.BeginRender();
-            var ctx = _window.Surface.RenderContext;
-            ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
-            ElementRenderer.RenderTree(_root, ctx);
-
-            // DevTools overlay (renders on top of everything)
-            _perf.ElementCount = PerformanceCounters.CountElements(_root);
-            _devTools.Render(ctx, _root, _window.LogicalWidth, _window.LogicalHeight);
-
-            ctx.EndFrame();
-            _perf.EndRender();
-
-            // Clear remaining dirty flags after full render
-            ClearAllFlags(_root);
+            RenderFrame();
 
             _perf.EndFrame();
-
-            // Present
-            _window.Surface.Present();
-            _window.SwapBuffers();
 
             // Don't spin at 100% CPU — cap at ~60fps
             Thread.Sleep(16);
         }
+    }
+
+    private void RenderFrame()
+    {
+        if (_root is null) return;
+
+        // Style resolution (only if any element has style changes)
+        _perf.BeginStyle();
+        if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
+        {
+            StyleResolver.Resolve(_root, _theme.ToResolvedStyle());
+            ClearFlags(_root, DirtyFlags.Style);
+        }
+        _perf.EndStyle();
+
+        // Layout (only if any element has layout changes)
+        _perf.BeginLayout();
+        if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
+        _perf.EndLayout();
+
+        // Render
+        _perf.BeginRender();
+        var ctx = _window.Surface.RenderContext;
+        ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
+        ElementRenderer.RenderTree(_root, ctx);
+
+        // DevTools overlay (renders on top of everything)
+        _perf.ElementCount = PerformanceCounters.CountElements(_root);
+        _devTools.Render(ctx, _root, _window.LogicalWidth, _window.LogicalHeight);
+
+        ctx.EndFrame();
+        _perf.EndRender();
+
+        // Clear remaining dirty flags after full render
+        ClearAllFlags(_root);
+
+        // Present
+        _window.Surface.Present();
+        _window.SwapBuffers();
     }
 
     private void HandleInputEvent(InputEvent evt)

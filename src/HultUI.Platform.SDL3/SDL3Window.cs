@@ -15,6 +15,7 @@ public sealed unsafe class SDL3Window : IDisposable
     private bool _disposed;
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
+    private GCHandle _gcHandle;
 
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
@@ -64,6 +65,9 @@ public sealed unsafe class SDL3Window : IDisposable
             throw new InvalidOperationException($"SDL_GL_CreateContext failed: {GetError()}");
 
         SDL_GL_MakeCurrent(_window, _glContext);
+        // Disable driver-level vsync — on Wayland the compositor handles
+        // vsync, and swap interval 1 can block during interactive resize.
+        SDL_GL_SetSwapInterval(0);
 
         // Create SkiaSharp surface with SDL3 GL proc resolver
         _surface = new SkiaGLRenderSurface(GetGLProcAddress);
@@ -71,8 +75,42 @@ public sealed unsafe class SDL3Window : IDisposable
         // Enable text input events (SDL3 requires explicit activation)
         SDL_StartTextInput(_window);
 
+        // Register event watcher for live resize rendering.
+        // SDL_AddEventWatch fires even during the modal resize loop
+        // where SDL_PollEvent is blocked.
+        _gcHandle = GCHandle.Alloc(this);
+        SDL_AddEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
+
         UpdateSize();
         IsOpen = true;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static SDLBool EventWatchCallback(IntPtr userdata, SDL_Event* evt)
+    {
+        var window = (SDL3Window)GCHandle.FromIntPtr(userdata).Target!;
+
+        switch (evt->type)
+        {
+            // Resize events fire after the resize completes
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                window.UpdateSize();
+                window.Resized?.Invoke();
+                break;
+
+            // Exposed with data1==1 fires during live resize —
+            // this is SDL3's signal to render immediately.
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
+                if (evt->window.data1 == 1)
+                {
+                    window.UpdateSize();
+                    window.Resized?.Invoke();
+                }
+                break;
+        }
+
+        return true;
     }
 
     public void PollEvents()
@@ -89,6 +127,11 @@ public sealed unsafe class SDL3Window : IDisposable
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    UpdateSize();
+                    Resized?.Invoke();
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
                     UpdateSize();
                     Resized?.Invoke();
                     break;
@@ -190,6 +233,10 @@ public sealed unsafe class SDL3Window : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        SDL_RemoveEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
+        if (_gcHandle.IsAllocated)
+            _gcHandle.Free();
 
         _surface?.Dispose();
         _surface = null;
