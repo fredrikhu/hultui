@@ -14,6 +14,7 @@ public class TextInputElement : BoxElement
     private int _cursorPos;
     private int _selectionStart;
     private bool _focused;
+    private bool _isDragging;
     private float _scrollOffset; // horizontal scroll for text wider than the box
     private IRenderContext? _renderCtx; // cached for hit-testing with real font metrics
 
@@ -60,7 +61,7 @@ public class TextInputElement : BoxElement
 
     public TextInputElement()
     {
-        Box.Padding = new Thickness(8);
+        Box.Padding = new Thickness(4, 8, 4, 8);
         Inherited.FontSize = 14f;
         Inherited.Cursor = CursorType.Text;
 
@@ -69,7 +70,13 @@ public class TextInputElement : BoxElement
         On<TextInputEvent>(OnTextInput);
         On<KeyDownEvent>(OnKeyDown);
         On<PointerDownEvent>(OnPointerDown);
+        On<PointerMoveEvent>(OnPointerMove);
+        On<PointerUpEvent>(OnPointerUp);
+        On<ClickEvent>(OnClick);
     }
+
+    /// <summary>True while the user is dragging to select text. Used by Application for pointer capture.</summary>
+    public bool IsDragging => _isDragging;
 
     public static TextInputElement New(string text = "") => new() { _text = text, _cursorPos = text.Length, _selectionStart = text.Length };
 
@@ -197,17 +204,84 @@ public class TextInputElement : BoxElement
 
     private void OnPointerDown(PointerDownEvent evt)
     {
-        // Place cursor at click position
-        var contentBox = Layout.AbsoluteContentBox;
-        float clickX = evt.Position.X - contentBox.X + _scrollOffset;
-        int pos = HitTestTextPosition(clickX);
+        if (evt.Button != 0) return;
+
+        int pos = PositionFromPoint(evt.Position);
 
         bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
         _cursorPos = pos;
         if (!shift)
             _selectionStart = pos;
 
+        _isDragging = true;
         MarkPaintDirty();
+    }
+
+    private void OnPointerMove(PointerMoveEvent evt)
+    {
+        if (!_isDragging) return;
+
+        _cursorPos = PositionFromPoint(evt.Position);
+        MarkPaintDirty();
+    }
+
+    private void OnPointerUp(PointerUpEvent evt)
+    {
+        _isDragging = false;
+    }
+
+    private void OnClick(ClickEvent evt)
+    {
+        if (evt.ClickCount == 2)
+        {
+            // Double-click: select word under cursor
+            int pos = PositionFromPoint(evt.Position);
+            _selectionStart = FindWordBoundaryLeft(pos);
+            // FindWordBoundaryLeft skips back past the word, but if pos is mid-word
+            // we want the start of the current word
+            int wordStart = _selectionStart;
+            // Walk left from pos to find start of current word
+            int ws = pos;
+            while (ws > 0 && !char.IsWhiteSpace(_text[ws - 1])) ws--;
+            _selectionStart = ws;
+            // Walk right from pos to find end of current word
+            int we = pos;
+            while (we < _text.Length && !char.IsWhiteSpace(_text[we])) we++;
+            _cursorPos = we;
+            MarkPaintDirty();
+        }
+        else if (evt.ClickCount >= 3)
+        {
+            // Triple-click: select all
+            _selectionStart = 0;
+            _cursorPos = _text.Length;
+            MarkPaintDirty();
+        }
+    }
+
+    /// <summary>
+    /// Called by Application to update drag selection when pointer is outside this element's bounds.
+    /// </summary>
+    public void UpdateDragPosition(Point position)
+    {
+        if (!_isDragging) return;
+        _cursorPos = PositionFromPoint(position);
+        MarkPaintDirty();
+    }
+
+    /// <summary>
+    /// Called by Application when pointer is released during a drag capture.
+    /// </summary>
+    public void EndDrag()
+    {
+        _isDragging = false;
+    }
+
+    private int PositionFromPoint(Point screenPos)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        float clickX = screenPos.X - contentBox.X + _scrollOffset;
+        return HitTestTextPosition(clickX);
     }
 
     private void MoveCursor(int delta, bool extendSelection)
@@ -368,7 +442,7 @@ public class TextInputElement : BoxElement
         if (_focused)
         {
             float cx = contentBox.X + cursorX - _scrollOffset;
-            ctx.DrawRect(new Rect(cx, contentBox.Y + 2, CursorWidth, contentBox.Height - 4), CursorColor);
+            ctx.DrawRect(new Rect(cx, contentBox.Y, CursorWidth, contentBox.Height), CursorColor);
         }
 
         ctx.Pop(); // clip

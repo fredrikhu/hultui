@@ -2,6 +2,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 using Xunit;
 
 namespace HultUI.Core.Tests.Elements;
@@ -19,6 +20,8 @@ public class TextInputElementTests
         container.Box.Width = 400;
         container.Box.Height = 400;
         container.AddChild(input);
+        // Resolve styles so ResolvedInherited has valid FontSize (needed for hit-testing)
+        StyleResolver.Resolve(container, Theme.Light.ToResolvedStyle());
         _layout.PerformLayout(container, 400, 400);
         // Simulate focus
         EventDispatcher.DispatchDirect(new FocusEvent(), input);
@@ -166,5 +169,36 @@ public class TextInputElementTests
 
         EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Backspace }, input);
         Assert.Equal("Ho", input.Text);
+    }
+
+    [Fact]
+    public void DoubleClick_SelectsWord()
+    {
+        var input = CreateInput("Hello World");
+        // Double-click somewhere in "Hello" — approximate position doesn't matter,
+        // the click handler uses PositionFromPoint which falls back to char approximation
+        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 5), ClickCount = 2 }, input);
+        Assert.True(input.HasSelection);
+        Assert.Equal("Hello", input.SelectedText);
+    }
+
+    [Fact]
+    public void TripleClick_SelectsAll()
+    {
+        var input = CreateInput("Hello World");
+        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 5), ClickCount = 3 }, input);
+        Assert.True(input.HasSelection);
+        Assert.Equal("Hello World", input.SelectedText);
+    }
+
+    [Fact]
+    public void PointerDown_StartsDrag()
+    {
+        var input = CreateInput("Hello");
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(8, 5), Button = 0 }, input);
+        Assert.True(input.IsDragging);
+
+        EventDispatcher.Dispatch(new PointerUpEvent { Position = new Point(8, 5), Button = 0 }, input);
+        Assert.False(input.IsDragging);
     }
 }

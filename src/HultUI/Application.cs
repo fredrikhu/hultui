@@ -23,6 +23,7 @@ public sealed class Application : IDisposable
     private bool _disposed;
     private Element? _lastHoveredElement;
     private ScrollViewElement? _scrollbarDragTarget;
+    private TextInputElement? _textInputDragTarget;
 
     public IClipboard Clipboard { get; }
     public PerformanceCounters Performance => _perf;
@@ -111,6 +112,13 @@ public sealed class Application : IDisposable
                     break;
                 }
 
+                // If dragging in a text input, route move to the capture target
+                if (_textInputDragTarget is not null)
+                {
+                    _textInputDragTarget.UpdateDragPosition(pos);
+                    break;
+                }
+
                 var target = HitTester.HitTest(_root, pos);
                 _pointerState.UpdateHover(target, pos, move.Modifiers);
                 _lastHoveredElement = target;
@@ -144,6 +152,14 @@ public sealed class Application : IDisposable
                     break;
                 }
 
+                // End text input drag on button up
+                if (!button.IsDown && _textInputDragTarget is not null)
+                {
+                    _textInputDragTarget.EndDrag();
+                    _textInputDragTarget = null;
+                    // Don't break — still dispatch PointerUp/Click to the target
+                }
+
                 var target = HitTester.HitTest(_root, pos);
                 if (target is null) break;
 
@@ -161,6 +177,10 @@ public sealed class Application : IDisposable
 
                     var downEvt = _pointerState.HandlePointerDown(target, pos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(downEvt, target);
+
+                    // Start pointer capture for text input drag selection
+                    if (button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
+                        _textInputDragTarget = dragInput;
                 }
                 else
                 {
