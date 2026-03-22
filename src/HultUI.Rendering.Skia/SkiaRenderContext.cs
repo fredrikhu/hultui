@@ -15,7 +15,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     // Pooled Skia objects to avoid per-draw-call allocations
     private readonly SKPaint _pooledPaint = new();
-    private readonly SKFont _pooledFont = new();
+    private readonly SKFont _pooledFont = new() { Subpixel = true };
     private bool _disposed;
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
