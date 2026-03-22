@@ -204,4 +204,44 @@ public class ScrollViewElementTests
         // The child occupies 0-500 in content space, so it should be hit
         Assert.NotNull(hit);
     }
+
+    [Fact]
+    public void HitTest_HitsItemsScrolledIntoView()
+    {
+        // Regression test: items below the initial viewport must be hittable
+        // after scrolling them into view.
+        var sv = ScrollViewElement.New();
+        sv.Box.Width = 200;
+        sv.Box.Height = 100;
+
+        // 5 items, each 50px tall → total 250px, viewport 100px
+        var items = new BoxElement[5];
+        for (int i = 0; i < 5; i++)
+        {
+            items[i] = BoxElement.New();
+            items[i].Box.Width = 200;
+            items[i].Box.Height = 50;
+            sv.AddChild(items[i]);
+        }
+
+        _layout.PerformLayout(sv, 200, 100);
+        sv.UpdateContentSize();
+
+        // Without scrolling, item[0] and item[1] are visible (Y 0-50 and 50-100)
+        // item[3] is at Y=150-200, not visible
+        var hitNoScroll = HitTester.HitTest(sv, new Point(100, 75));
+        Assert.Same(items[1], hitNoScroll);
+
+        // Scroll down by 100 → items[2] at Y=100-150 and items[3] at Y=150-200 are now visible
+        // on screen at Y=0-50 and Y=50-100 respectively
+        sv.ScrollOffsetY = 100;
+
+        // Click at Y=25 (screen) → should hit items[2] (content Y=125)
+        var hitScrolled = HitTester.HitTest(sv, new Point(100, 25));
+        Assert.Same(items[2], hitScrolled);
+
+        // Click at Y=75 (screen) → should hit items[3] (content Y=175)
+        var hitScrolled2 = HitTester.HitTest(sv, new Point(100, 75));
+        Assert.Same(items[3], hitScrolled2);
+    }
 }

@@ -125,6 +125,7 @@ static Element[] MakeScrollableList()
     var items = new Element[colors.Length];
     for (int i = 0; i < colors.Length; i++)
     {
+        var idx = i;
         var hex = colors[i];
         var baseColor = Color.FromHex(hex);
         var hoverColor = new Color(
@@ -140,8 +141,8 @@ static Element[] MakeScrollableList()
             );
 
         item.OnPointerEnter(_ => item.BackgroundColor = hoverColor);
-        item.OnPointerLeave(_ => item.BackgroundColor = i % 2 == 0 ? Color.Transparent : Color.FromHex("#F1F5F9"));
-        item.OnClick(_ => Console.WriteLine($"List item clicked: {i + 1}"));
+        item.OnPointerLeave(_ => item.BackgroundColor = idx % 2 == 0 ? Color.Transparent : Color.FromHex("#F1F5F9"));
+        item.OnClick(_ => Console.WriteLine($"List item clicked: {idx + 1}"));
 
         items[i] = item;
     }

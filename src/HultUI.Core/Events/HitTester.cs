@@ -30,9 +30,17 @@ public static class HitTester
 
         if (element is ScrollViewElement scrollView)
         {
-            // ScrollView clips to content box and offsets hit test point
+            // ScrollView clips to content box and offsets hit test point.
+            // Both point and clip rect must be transformed into content-space
+            // so that child AbsoluteX/Y (which don't account for scroll) can be
+            // compared correctly against the scroll-adjusted point.
             var contentBox = element.Layout.AbsoluteContentBox;
-            childClip = clipRect.HasValue ? Intersect(clipRect.Value, contentBox) : contentBox;
+            var screenClip = clipRect.HasValue ? Intersect(clipRect.Value, contentBox) : contentBox;
+            childClip = new Rect(
+                screenClip.X + scrollView.ScrollOffsetX,
+                screenClip.Y + scrollView.ScrollOffsetY,
+                screenClip.Width,
+                screenClip.Height);
             childPoint = new Point(
                 point.X + scrollView.ScrollOffsetX,
                 point.Y + scrollView.ScrollOffsetY);
