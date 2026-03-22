@@ -1,7 +1,8 @@
-using System.Diagnostics;
+using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -15,9 +16,16 @@ public sealed class Application : IDisposable
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
     private readonly PointerState _pointerState = new();
+    private readonly PerformanceCounters _perf = new();
+    private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Theme _theme = Theme.Light;
     private bool _disposed;
+    private Element? _lastHoveredElement;
+
+    public IClipboard Clipboard { get; }
+    public PerformanceCounters Performance => _perf;
+    public DevToolsOverlay DevTools => _devTools;
 
     public Theme Theme
     {
@@ -30,6 +38,8 @@ public sealed class Application : IDisposable
         _window = new SDL3Window(title, width, height);
         _layoutEngine = new LayoutEngine(_window.Surface.MeasureContext);
         _window.EventTranslator.OnInputEvent += HandleInputEvent;
+        Clipboard = new SDL3Clipboard(_window);
+        _devTools = new DevToolsOverlay(_perf);
     }
 
     public void SetRoot(Element root)
@@ -44,23 +54,35 @@ public sealed class Application : IDisposable
 
         while (_window.IsOpen)
         {
-            var sw = Stopwatch.StartNew();
+            _perf.BeginFrame();
+
             _window.PollEvents();
             if (!_window.IsOpen) break;
 
-            // Style resolution (inherited properties flow top-down from theme)
+            // Style resolution
+            _perf.BeginStyle();
             StyleResolver.Resolve(_root, _theme.ToResolvedStyle());
+            _perf.EndStyle();
 
             // Layout
+            _perf.BeginLayout();
             _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
+            _perf.EndLayout();
 
             // Render
+            _perf.BeginRender();
             var ctx = _window.Surface.RenderContext;
             ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
             ElementRenderer.RenderTree(_root, ctx);
+
+            // DevTools overlay (renders on top of everything)
+            _perf.ElementCount = PerformanceCounters.CountElements(_root);
+            _devTools.Render(ctx, _root, _window.LogicalWidth, _window.LogicalHeight);
+
             ctx.EndFrame();
-            sw.Stop();
-            Console.WriteLine($"{sw.Elapsed.TotalMicroseconds/1000.0,5:N1} ms");
+            _perf.EndRender();
+
+            _perf.EndFrame();
 
             // Present
             _window.Surface.Present();
@@ -82,6 +104,16 @@ public sealed class Application : IDisposable
                 var pos = new Point(move.X, move.Y);
                 var target = HitTester.HitTest(_root, pos);
                 _pointerState.UpdateHover(target, pos, move.Modifiers);
+                _lastHoveredElement = target;
+
+                // Update cursor based on hovered element's resolved style
+                var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
+                _window.SetCursor(cursor);
+
+                // Update DevTools inspector
+                if (_devTools.IsEnabled)
+                    _devTools.HoveredElement = target;
+
                 if (target is not null)
                 {
                     EventDispatcher.Dispatch(
@@ -130,6 +162,16 @@ public sealed class Application : IDisposable
 
             case InputEvent.KeyInput key:
             {
+                // F12 toggles DevTools
+                if (key.IsDown && key.KeyCode == KeyCode.F12)
+                {
+                    _devTools.IsEnabled = !_devTools.IsEnabled;
+                    _devTools.ShowBoundingBoxes = _devTools.IsEnabled;
+                    if (!_devTools.IsEnabled)
+                        _devTools.HoveredElement = null;
+                    break;
+                }
+
                 var target = _focusManager.FocusedElement ?? _root;
                 if (key.IsDown)
                 {

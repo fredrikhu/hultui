@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 using HultUI.Rendering.Skia;
 using SDL;
 using static SDL.SDL3;
@@ -12,6 +13,8 @@ public sealed unsafe class SDL3Window : IDisposable
     private SDL_GLContextState* _glContext;
     private SkiaGLRenderSurface? _surface;
     private bool _disposed;
+    private readonly Dictionary<CursorType, nint> _cursorCache = [];
+    private CursorType _currentCursor = CursorType.Default;
 
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
@@ -99,6 +102,50 @@ public sealed unsafe class SDL3Window : IDisposable
         SDL_GL_SwapWindow(_window);
     }
 
+    public void SetCursor(CursorType cursor)
+    {
+        if (cursor == _currentCursor) return;
+        _currentCursor = cursor;
+
+        if (!_cursorCache.TryGetValue(cursor, out var sdlCursor))
+        {
+            sdlCursor = (nint)SDL_CreateSystemCursor(MapCursorType(cursor));
+            _cursorCache[cursor] = sdlCursor;
+        }
+
+        SDL_SetCursor((SDL_Cursor*)sdlCursor);
+    }
+
+    public string? GetClipboardText()
+    {
+        return SDL_GetClipboardText();
+    }
+
+    public void SetClipboardText(string text)
+    {
+        var bytes = MarshalUtf8(text);
+        fixed (byte* ptr = bytes)
+        {
+            SDL_SetClipboardText(ptr);
+        }
+    }
+
+    private static SDL_SystemCursor MapCursorType(CursorType cursor) => cursor switch
+    {
+        CursorType.Pointer => SDL_SystemCursor.SDL_SYSTEM_CURSOR_POINTER,
+        CursorType.Text => SDL_SystemCursor.SDL_SYSTEM_CURSOR_TEXT,
+        CursorType.Crosshair => SDL_SystemCursor.SDL_SYSTEM_CURSOR_CROSSHAIR,
+        CursorType.Move => SDL_SystemCursor.SDL_SYSTEM_CURSOR_MOVE,
+        CursorType.ResizeNS => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NS_RESIZE,
+        CursorType.ResizeEW => SDL_SystemCursor.SDL_SYSTEM_CURSOR_EW_RESIZE,
+        CursorType.ResizeNESW => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NESW_RESIZE,
+        CursorType.ResizeNWSE => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NWSE_RESIZE,
+        CursorType.NotAllowed => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NOT_ALLOWED,
+        CursorType.Wait => SDL_SystemCursor.SDL_SYSTEM_CURSOR_WAIT,
+        CursorType.None => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT,
+        _ => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT
+    };
+
     private void UpdateSize()
     {
         int pw, ph, lw, lh;
@@ -143,6 +190,10 @@ public sealed unsafe class SDL3Window : IDisposable
 
         _surface?.Dispose();
         _surface = null;
+
+        foreach (var cursor in _cursorCache.Values)
+            SDL_DestroyCursor((SDL_Cursor*)cursor);
+        _cursorCache.Clear();
 
         if (_glContext != null)
         {

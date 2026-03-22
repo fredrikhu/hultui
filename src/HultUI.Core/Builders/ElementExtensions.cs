@@ -48,6 +48,7 @@ public static class ElementExtensions
     public static T FontSize<T>(this T el, float size) where T : Element { el.Inherited.FontSize = size; return el; }
     public static T FontWeight<T>(this T el, FontWeight weight) where T : Element { el.Inherited.FontWeight = weight; return el; }
     public static T TextColor<T>(this T el, Color color) where T : Element { el.Inherited.TextColor = color; return el; }
+    public static T Cursor<T>(this T el, CursorType cursor) where T : Element { el.Inherited.Cursor = cursor; return el; }
 
     // ──── Image properties ────
     public static T ImageFit<T>(this T el, ImageFit fit) where T : ImageElement { el.Fit = fit; return el; }

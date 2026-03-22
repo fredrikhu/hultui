@@ -1,4 +1,5 @@
 using HultUI;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
@@ -21,10 +22,12 @@ var sidebarItems = new List<(BoxElement item, string lightHex, string darkHex)>(
 var toggleBtn = Box.New().Width(120).Padding(12)
     .Background(Color.FromHex("#F59E0B")).CornerRadius(8f)
     .TextColor(Color.FromHex("#FFFFFF")).FontWeight(FontWeight.Bold)
+    .Cursor(CursorType.Pointer)
+    .AccessibleName("Toggle theme")
     .Children(Text.New("Dark Mode"));
 var toggleLabel = (TextElement)toggleBtn.Children[0];
 
-var root = Flex.Column(gap: 16).Padding(24).Children(
+var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.Application).AccessibleName("HultUI Demo").Children(
 
     // Header row
     Flex.Row(gap: 12).Height(60).FlexShrink(0).AlignItems(AlignItems.Center).Children(
@@ -40,7 +43,7 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
     Flex.Row(gap: 16).FlexGrow(1).Children(
 
         // Sidebar
-        Flex.Column(gap: 8).Width(200).Children(
+        Flex.Column(gap: 8).Width(200).AccessibleRole(AccessibilityRole.Group).AccessibleName("Navigation").Children(
             MakeSidebarItem("#1E293B", "#1E293B", "Dashboard"),
             MakeSidebarItem("#334155", "#334155", "Components"),
             MakeSidebarItem("#475569", "#475569", "Settings"),
@@ -72,7 +75,7 @@ var root = Flex.Column(gap: 16).Padding(24).Children(
     // Footer
     footerBar = Box.New().Height(40).FlexShrink(0).Padding(10).Background(Color.FromHex("#1E293B")).CornerRadius(8f)
         .TextColor(Color.FromHex("#64748B")).FontSize(12f)
-        .Children(Text.New("Built with HultUI — a cross-platform C# UI framework"))
+        .Children(Text.New("Built with HultUI — Press F12 for DevTools"))
 );
 
 using var app = new Application("HultUI - Hello World", 900, 650);
@@ -127,6 +130,7 @@ static Element[] MakeScrollableList()
 
         var item = Flex.Row(gap: 12).Padding(12).AlignItems(AlignItems.Center)
             .Background(i % 2 == 0 ? Color.Transparent : Color.FromHex("#F1F5F9"))
+            .Cursor(CursorType.Pointer)
             .Children(
                 Box.New().Width(32).Height(32).Background(baseColor).CornerRadius(6f),
                 Text.New($"Item {i + 1} — Color {hex}")
@@ -178,6 +182,8 @@ static BoxElement MakeHeaderButton(string hex, string label)
     var btn = Box.New().Width(120).Padding(12)
         .Background(baseColor).CornerRadius(8f)
         .TextColor(Color.FromHex("#FFFFFF"))
+        .Cursor(CursorType.Pointer)
+        .AccessibleName(label)
         .Children(Text.New(label));
 
     btn.OnPointerEnter(_ => btn.BackgroundColor = hoverColor);
@@ -194,6 +200,8 @@ BoxElement MakeSidebarItem(string lightHex, string darkHex, string label)
 
     var item = Box.New().Height(40).Padding(10).Background(baseColor).CornerRadius(6f)
         .TextColor(Color.FromHex("#94A3B8")).FontSize(14f)
+        .Cursor(CursorType.Pointer)
+        .AccessibleName(label)
         .Children(Text.New(label));
 
     sidebarItems.Add((item, lightHex, darkHex));
@@ -240,6 +248,8 @@ partial class CounterComponent : Component
         var btn = Box.New().Padding(new Thickness(10, 20, 10, 20))
             .Background(baseColor).CornerRadius(8f)
             .TextColor(Color.FromHex("#FFFFFF")).FontSize(14f).FontWeight(FontWeight.Bold)
+            .Cursor(CursorType.Pointer)
+            .AccessibleName(label)
             .Children(Text.New(label));
 
         btn.OnPointerEnter(_ => btn.BackgroundColor = hoverColor);
