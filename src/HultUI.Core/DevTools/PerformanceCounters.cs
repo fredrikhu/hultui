@@ -8,6 +8,7 @@ public sealed class PerformanceCounters
     private readonly Stopwatch _layoutTimer = new();
     private readonly Stopwatch _renderTimer = new();
     private readonly Stopwatch _styleTimer = new();
+    private readonly Stopwatch _presentTimer = new();
 
     private readonly float[] _frameTimes = new float[60];
     private int _frameIndex;
@@ -16,6 +17,7 @@ public sealed class PerformanceCounters
     public float LayoutTimeMs { get; private set; }
     public float RenderTimeMs { get; private set; }
     public float StyleTimeMs { get; private set; }
+    public float PresentTimeMs { get; private set; }
     public float AverageFrameTimeMs { get; private set; }
     public float Fps => AverageFrameTimeMs > 0 ? 1000f / AverageFrameTimeMs : 0;
     public int ElementCount { get; set; }
@@ -42,6 +44,9 @@ public sealed class PerformanceCounters
 
     public void BeginRender() => _renderTimer.Restart();
     public void EndRender() { _renderTimer.Stop(); RenderTimeMs = (float)_renderTimer.Elapsed.TotalMilliseconds; }
+
+    public void BeginPresent() => _presentTimer.Restart();
+    public void EndPresent() { _presentTimer.Stop(); PresentTimeMs = (float)_presentTimer.Elapsed.TotalMilliseconds; }
 
     public static int CountElements(Core.Elements.Element root)
     {

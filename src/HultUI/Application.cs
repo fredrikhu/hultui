@@ -70,21 +70,18 @@ public sealed class Application : IDisposable
 
         while (_window.IsOpen)
         {
-            _perf.BeginFrame();
-
             _window.PollEvents();
             if (!_window.IsOpen) break;
 
             // Skip the entire pipeline when nothing has changed
             if (_root.DirtyFlags == DirtyFlags.None)
             {
-                _perf.EndFrame();
                 Thread.Sleep(16);
                 continue;
             }
 
+            _perf.BeginFrame();
             RenderFrame();
-
             _perf.EndFrame();
         }
     }
@@ -108,25 +105,27 @@ public sealed class Application : IDisposable
             _layoutEngine.PerformLayout(_root, _window.LogicalWidth, _window.LogicalHeight);
         _perf.EndLayout();
 
-        // Render
-        _perf.BeginRender();
+        // Render (user content only — DevTools excluded from timing)
         var ctx = _window.Surface.RenderContext;
         ctx.BeginFrame(_window.LogicalWidth, _window.LogicalHeight, _window.ScaleFactor, _theme.Background);
+        _perf.BeginRender();
         ElementRenderer.RenderTree(_root, ctx);
+        _perf.EndRender();
 
-        // DevTools overlay (renders on top of everything)
+        // DevTools overlay (second pass, not timed)
         _perf.ElementCount = PerformanceCounters.CountElements(_root);
         _devTools.Render(ctx, _root, _window.LogicalWidth, _window.LogicalHeight);
 
         ctx.EndFrame();
-        _perf.EndRender();
 
         // Clear remaining dirty flags after full render
         ClearAllFlags(_root);
 
-        // Present
+        // Present + swap
+        _perf.BeginPresent();
         _window.Surface.Present();
         _window.SwapBuffers();
+        _perf.EndPresent();
     }
 
     private void HandleInputEvent(InputEvent evt)
