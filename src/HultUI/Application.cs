@@ -86,9 +86,6 @@ public sealed class Application : IDisposable
             RenderFrame();
 
             _perf.EndFrame();
-
-            // Don't spin at 100% CPU — cap at ~60fps
-            Thread.Sleep(16);
         }
     }
 

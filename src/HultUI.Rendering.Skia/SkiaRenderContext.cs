@@ -18,6 +18,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private readonly SKFont _pooledFont = new() { Subpixel = true };
     private bool _disposed;
 
+    // Text blob cache: avoids re-shaping text (string → glyphs) every frame
+    private readonly Dictionary<TextBlobKey, SKTextBlob?> _textBlobCache = new();
+    private const int TextBlobCacheMaxSize = 2048;
+    private readonly record struct TextBlobKey(string Text, nint Typeface, float FontSize);
+
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     private SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
@@ -90,9 +95,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             foreach (var run in line.Runs)
             {
                 var typeface = (SKTypeface)run.Font.NativeHandle;
-                _pooledFont.Typeface = typeface;
-                _pooledFont.Size = run.FontSize;
-                Canvas.DrawText(run.Text, bounds.X + run.OffsetX, lineY, _pooledFont, _pooledPaint);
+                var blob = GetOrCreateTextBlob(run.Text, typeface, run.FontSize);
+                if (blob is not null)
+                    Canvas.DrawText(blob, bounds.X + run.OffsetX, lineY, _pooledPaint);
             }
         }
     }
@@ -232,6 +237,32 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return new SkiaCanvasDrawingContext(Canvas, bounds);
     }
 
+    // ── Text blob cache ──
+
+    private SKTextBlob? GetOrCreateTextBlob(string text, SKTypeface typeface, float fontSize)
+    {
+        var key = new TextBlobKey(text, typeface.Handle, fontSize);
+        if (_textBlobCache.TryGetValue(key, out var cached))
+            return cached;
+
+        _pooledFont.Typeface = typeface;
+        _pooledFont.Size = fontSize;
+        var blob = SKTextBlob.Create(text, _pooledFont);
+
+        if (_textBlobCache.Count >= TextBlobCacheMaxSize)
+            ClearTextBlobCache();
+
+        _textBlobCache[key] = blob;
+        return blob;
+    }
+
+    private void ClearTextBlobCache()
+    {
+        foreach (var blob in _textBlobCache.Values)
+            blob?.Dispose();
+        _textBlobCache.Clear();
+    }
+
     // ── Conversion helpers ──
 
     private static SKColor ToSkColor(Color c) => new(c.R, c.G, c.B, c.A);
@@ -268,6 +299,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ClearTextBlobCache();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
     }
