@@ -16,6 +16,10 @@ public sealed unsafe class SDL3Window : IDisposable
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
     private GCHandle _gcHandle;
+    private bool _inResizeRender;
+    private bool _resizePending;
+    private long _lastResizeRenderTick;
+    private const long ResizeThrottleMs = 50;
 
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
@@ -92,20 +96,26 @@ public sealed unsafe class SDL3Window : IDisposable
 
         switch (evt->type)
         {
-            // Resize events fire after the resize completes
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                window.UpdateSize();
-                window.Resized?.Invoke();
-                break;
-
-            // Exposed with data1==1 fires during live resize —
-            // this is SDL3's signal to render immediately.
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
-                if (evt->window.data1 == 1)
+                if (window._inResizeRender)
+                    break;
+
+                window.UpdateSize();
+
+                long now = Environment.TickCount64;
+                if (now - window._lastResizeRenderTick >= ResizeThrottleMs)
                 {
-                    window.UpdateSize();
+                    window._lastResizeRenderTick = now;
+                    window._resizePending = false;
+                    window._inResizeRender = true;
                     window.Resized?.Invoke();
+                    window._inResizeRender = false;
+                }
+                else
+                {
+                    window._resizePending = true;
                 }
                 break;
         }
@@ -127,13 +137,14 @@ public sealed unsafe class SDL3Window : IDisposable
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                    UpdateSize();
-                    Resized?.Invoke();
-                    break;
-
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
-                    UpdateSize();
-                    Resized?.Invoke();
+                    // After the modal resize loop ends, ensure we render
+                    // the final size (the watcher may have throttled it).
+                    if (_resizePending)
+                    {
+                        _resizePending = false;
+                        Resized?.Invoke();
+                    }
                     break;
 
                 default:
@@ -192,23 +203,28 @@ public sealed unsafe class SDL3Window : IDisposable
         _ => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT
     };
 
-    private void UpdateSize()
+    /// <summary>
+    /// Updates cached size fields from SDL. Returns true if the size actually changed.
+    /// </summary>
+    private bool UpdateSize()
     {
         int pw, ph, lw, lh;
         SDL_GetWindowSizeInPixels(_window, &pw, &ph);
         SDL_GetWindowSize(_window, &lw, &lh);
+        float scale = SDL_GetWindowDisplayScale(_window);
+
+        if (pw == PixelWidth && ph == PixelHeight && lw == LogicalWidth && lh == LogicalHeight
+            && scale == ScaleFactor)
+            return false;
 
         PixelWidth = pw;
         PixelHeight = ph;
         LogicalWidth = lw;
         LogicalHeight = lh;
-        // Use SDL's display scale rather than computing from pixel/logical ratio.
-        // The computed ratio can fluctuate slightly during resize (floating-point
-        // division of changing integers), causing sub-pixel jitter and text
-        // rendering artifacts. The display scale is constant for a given monitor.
-        ScaleFactor = SDL_GetWindowDisplayScale(_window);
+        ScaleFactor = scale;
 
         _surface?.Resize(pw, ph, ScaleFactor);
+        return true;
     }
 
     private static IntPtr GetGLProcAddress(string name)
