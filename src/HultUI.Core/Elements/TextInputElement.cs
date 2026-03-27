@@ -438,11 +438,13 @@ public class TextInputElement : BoxElement
             ctx.DrawText(_text, textRect, style, TextOverflow.Clip, 1);
         }
 
-        // Draw cursor
+        // Draw cursor (sized to text line height, centered vertically)
         if (_focused)
         {
             float cx = contentBox.X + cursorX - _scrollOffset;
-            ctx.DrawRect(new Rect(cx, contentBox.Y, CursorWidth, contentBox.Height), CursorColor);
+            float textHeight = ctx.MeasureText("X", style).Height;
+            float cy = contentBox.Y + (contentBox.Height - textHeight) / 2;
+            ctx.DrawRect(new Rect(cx, cy, CursorWidth, textHeight), CursorColor);
         }
 
         ctx.Pop(); // clip

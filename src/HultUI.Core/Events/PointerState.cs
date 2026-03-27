@@ -137,7 +137,6 @@ public sealed class PointerState
                     Button = button,
                     Modifiers = modifiers
                 };
-                _clickCount = 0;
             }
         }
 
