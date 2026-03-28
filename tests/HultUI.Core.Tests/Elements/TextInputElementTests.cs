@@ -131,19 +131,42 @@ public class TextInputElementTests
     }
 
     [Fact]
-    public void PatchFrom_PreservesTextAndCursor()
+    public void PatchFrom_CopiesTextFromSource()
     {
         var input = CreateInput("Hello World");
         input.CursorPosition = 5;
 
-        var incoming = TextInputElement.New();
+        var incoming = TextInputElement.New("Updated");
         incoming.Placeholder = "Type here...";
 
         input.PatchFrom(incoming);
 
+        Assert.Equal("Updated", input.Text);
+        Assert.Equal("Type here...", input.Placeholder);
+    }
+
+    [Fact]
+    public void PatchFrom_ClearsTextWhenSourceIsEmpty()
+    {
+        var input = CreateInput("Hello World");
+
+        var incoming = TextInputElement.New();
+        input.PatchFrom(incoming);
+
+        Assert.Equal("", input.Text);
+    }
+
+    [Fact]
+    public void PatchFrom_PreservesTextWhenSourceHasSameText()
+    {
+        var input = CreateInput("Hello World");
+        input.CursorPosition = 5;
+
+        var incoming = TextInputElement.New("Hello World");
+        input.PatchFrom(incoming);
+
         Assert.Equal("Hello World", input.Text);
         Assert.Equal(5, input.CursorPosition);
-        Assert.Equal("Type here...", input.Placeholder);
     }
 
     [Fact]

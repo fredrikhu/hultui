@@ -55,7 +55,7 @@ partial class TodoApp : Component
 
             // Input row
             Flex.Row(gap: 8).Padding(16).FlexShrink(0).AlignItems(AlignItems.Center).Children(
-                TextInput.New()
+                TextInput.New(_inputText)
                     .PlaceholderText("What needs to be done?")
                     .OnTextChanged(text => _inputText = text)
                     .FlexGrow(1).Height(36)

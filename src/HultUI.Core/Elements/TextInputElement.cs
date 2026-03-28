@@ -478,7 +478,7 @@ public class TextInputElement : BoxElement
             FocusBorderColor = input.FocusBorderColor;
             CursorWidth = input.CursorWidth;
             TextChanged = input.TextChanged;
-            // Preserve text, cursor position, and selection during patching
+            Text = input.Text;
         }
     }
 }
