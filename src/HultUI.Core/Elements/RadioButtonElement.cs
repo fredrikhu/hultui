@@ -30,6 +30,15 @@ public class RadioButtonElement : Element
 
     public Action<bool>? OnChanged { get; set; }
 
+    protected internal override void ApplyTheme(Theme theme)
+    {
+        var rt = theme.RadioButton;
+        RadioSize = rt.Size;
+        CircleColor = rt.BorderColor ?? theme.Border;
+        CheckedColor = rt.SelectedColor ?? theme.Primary;
+        DotColor = rt.DotColor ?? Color.White;
+    }
+
     public RadioButtonElement()
     {
         Inherited.Cursor = CursorType.Pointer;

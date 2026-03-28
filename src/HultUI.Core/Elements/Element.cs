@@ -31,6 +31,12 @@ public abstract class Element
     public InheritedStyle Inherited { get; } = new();
     public ResolvedInheritedStyle ResolvedInherited { get; internal set; }
 
+    /// <summary>
+    /// Called during style resolution to apply theme-dependent visual properties.
+    /// Override in themed elements (Button, TextInput, etc.) to read from the theme.
+    /// </summary>
+    protected internal virtual void ApplyTheme(Theme theme) { }
+
     // ──── Accessibility ────
     public AccessibilityRole Role { get; set; } = AccessibilityRole.None;
     public string? AccessibleName { get; set; }

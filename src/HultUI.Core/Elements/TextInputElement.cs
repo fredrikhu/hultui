@@ -59,6 +59,21 @@ public class TextInputElement : BoxElement
     /// </summary>
     public IClipboard? Clipboard { get; set; }
 
+    protected internal override void ApplyTheme(Theme theme)
+    {
+        var ti = theme.TextInput;
+        CornerRadius = ti.CornerRadius;
+        Box.Padding = ti.Padding;
+        Box.BorderWidth = ti.BorderWidth;
+        Inherited.FontSize = ti.FontSize;
+        BackgroundColor = ti.Background ?? theme.Background;
+        BorderColor = ti.BorderColor ?? theme.Border;
+        FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
+        PlaceholderColor = ti.PlaceholderColor ?? theme.Secondary;
+        SelectionColor = ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
+        CursorColor = ti.CursorColor ?? theme.TextColor;
+    }
+
     public TextInputElement()
     {
         Box.Padding = new Thickness(4, 8, 4, 8);

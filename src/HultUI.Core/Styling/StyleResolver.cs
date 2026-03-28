@@ -15,15 +15,20 @@ public static class StyleResolver
 
     public static void Resolve(Element root)
     {
-        ResolveRecursive(root, DefaultStyle);
+        ResolveRecursive(root, DefaultStyle, null);
     }
 
     public static void Resolve(Element root, ResolvedInheritedStyle rootDefaults)
     {
-        ResolveRecursive(root, rootDefaults);
+        ResolveRecursive(root, rootDefaults, null);
     }
 
-    private static void ResolveRecursive(Element element, ResolvedInheritedStyle parent)
+    public static void Resolve(Element root, Theme theme)
+    {
+        ResolveRecursive(root, theme.ToResolvedStyle(), theme);
+    }
+
+    private static void ResolveRecursive(Element element, ResolvedInheritedStyle parent, Theme? theme)
     {
         var own = element.Inherited;
         var resolved = new ResolvedInheritedStyle(
@@ -36,10 +41,13 @@ public static class StyleResolver
 
         element.ResolvedInherited = resolved;
 
+        if (theme is not null)
+            element.ApplyTheme(theme);
+
         foreach (var child in element.Children)
         {
             if (child.DirtyFlags.HasFlag(DirtyFlags.Style))
-                ResolveRecursive(child, resolved);
+                ResolveRecursive(child, resolved, theme);
         }
     }
 }

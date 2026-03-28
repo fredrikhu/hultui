@@ -9,6 +9,9 @@ namespace HultUI.Platform.SDL3;
 
 public sealed unsafe class SDL3Window : IDisposable
 {
+    private static bool _sdlInitialized;
+    private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
+
     private SDL_Window* _window;
     private SDL_GLContextState* _glContext;
     private SkiaGLRenderSurface? _surface;
@@ -17,10 +20,11 @@ public sealed unsafe class SDL3Window : IDisposable
     private CursorType _currentCursor = CursorType.Default;
     private GCHandle _gcHandle;
     private bool _inResizeRender;
-    private bool _resizePending;
+    internal bool ResizePending;
     private long _lastResizeRenderTick;
     private const long ResizeThrottleMs = 50;
 
+    public SDL_WindowID WindowId { get; private set; }
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
     public int LogicalWidth { get; private set; }
@@ -33,12 +37,10 @@ public sealed unsafe class SDL3Window : IDisposable
     public EventTranslator EventTranslator { get; } = new();
 
     public event Action? Resized;
-    public event Action? CloseRequested;
 
     public SDL3Window(string title, int width, int height)
     {
-        if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
-            throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
+        EnsureSDLInitialized();
 
         // Set OpenGL attributes for SkiaSharp compatibility
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -79,6 +81,10 @@ public sealed unsafe class SDL3Window : IDisposable
         // Enable text input events (SDL3 requires explicit activation)
         SDL_StartTextInput(_window);
 
+        // Register in the static window registry
+        WindowId = SDL_GetWindowID(_window);
+        _registry[WindowId] = this;
+
         // Register event watcher for live resize rendering.
         // SDL_AddEventWatch fires even during the modal resize loop
         // where SDL_PollEvent is blocked.
@@ -99,6 +105,10 @@ public sealed unsafe class SDL3Window : IDisposable
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
+                // Only handle events for this specific window
+                if (!evt->window.windowID.Equals(window.WindowId))
+                    break;
+
                 if (window._inResizeRender)
                     break;
 
@@ -108,14 +118,14 @@ public sealed unsafe class SDL3Window : IDisposable
                 if (now - window._lastResizeRenderTick >= ResizeThrottleMs)
                 {
                     window._lastResizeRenderTick = now;
-                    window._resizePending = false;
+                    window.ResizePending = false;
                     window._inResizeRender = true;
                     window.Resized?.Invoke();
                     window._inResizeRender = false;
                 }
                 else
                 {
-                    window._resizePending = true;
+                    window.ResizePending = true;
                 }
                 break;
         }
@@ -123,16 +133,26 @@ public sealed unsafe class SDL3Window : IDisposable
         return true;
     }
 
-    public void PollEvents()
+    /// <summary>
+    /// Polls all SDL events and routes them to the correct window.
+    /// Input events are dispatched via each window's EventTranslator.
+    /// Returns false if a quit event was received.
+    /// </summary>
+    public static bool PollAllEvents(Action<SDL3Window>? onWindowClose = null)
     {
+        bool quit = false;
         SDL_Event evt;
         while (SDL_PollEvent(&evt))
         {
             switch (evt.type)
             {
                 case (uint)SDL_EventType.SDL_EVENT_QUIT:
-                    IsOpen = false;
-                    CloseRequested?.Invoke();
+                    quit = true;
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    if (_registry.TryGetValue(evt.window.windowID, out var closeWin))
+                        onWindowClose?.Invoke(closeWin);
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
@@ -140,18 +160,31 @@ public sealed unsafe class SDL3Window : IDisposable
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
                     // After the modal resize loop ends, ensure we render
                     // the final size (the watcher may have throttled it).
-                    if (_resizePending)
+                    if (_registry.TryGetValue(evt.window.windowID, out var resizeWin) && resizeWin.ResizePending)
                     {
-                        _resizePending = false;
-                        Resized?.Invoke();
+                        resizeWin.ResizePending = false;
+                        resizeWin.Resized?.Invoke();
                     }
                     break;
 
                 default:
-                    EventTranslator.ProcessEvent(&evt);
+                    var windowId = ExtractWindowId(&evt);
+                    if (_registry.TryGetValue(windowId, out var inputWin))
+                        inputWin.EventTranslator.ProcessEvent(&evt);
                     break;
             }
         }
+        return !quit;
+    }
+
+    public void MakeCurrent()
+    {
+        SDL_GL_MakeCurrent(_window, _glContext);
+    }
+
+    public void Close()
+    {
+        IsOpen = false;
     }
 
     public void SwapBuffers()
@@ -206,7 +239,7 @@ public sealed unsafe class SDL3Window : IDisposable
     /// <summary>
     /// Updates cached size fields from SDL. Returns true if the size actually changed.
     /// </summary>
-    private bool UpdateSize()
+    internal bool UpdateSize()
     {
         int pw, ph, lw, lh;
         SDL_GetWindowSizeInPixels(_window, &pw, &ph);
@@ -225,6 +258,37 @@ public sealed unsafe class SDL3Window : IDisposable
 
         _surface?.Resize(pw, ph, ScaleFactor);
         return true;
+    }
+
+    private static SDL_WindowID ExtractWindowId(SDL_Event* evt)
+    {
+        return evt->type switch
+        {
+            (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN or
+            (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP => evt->button.windowID,
+            (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION => evt->motion.windowID,
+            (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL => evt->wheel.windowID,
+            (uint)SDL_EventType.SDL_EVENT_KEY_DOWN or
+            (uint)SDL_EventType.SDL_EVENT_KEY_UP => evt->key.windowID,
+            (uint)SDL_EventType.SDL_EVENT_TEXT_INPUT => evt->text.windowID,
+            _ => default
+        };
+    }
+
+    private static void EnsureSDLInitialized()
+    {
+        if (_sdlInitialized) return;
+        _sdlInitialized = true;
+
+        if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
+            throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
+    }
+
+    public static void ShutdownSDL()
+    {
+        if (!_sdlInitialized) return;
+        _sdlInitialized = false;
+        SDL_Quit();
     }
 
     private static IntPtr GetGLProcAddress(string name)
@@ -254,6 +318,8 @@ public sealed unsafe class SDL3Window : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _registry.Remove(WindowId);
+
         SDL_RemoveEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
         if (_gcHandle.IsAllocated)
             _gcHandle.Free();
@@ -276,7 +342,5 @@ public sealed unsafe class SDL3Window : IDisposable
             SDL_DestroyWindow(_window);
             _window = null;
         }
-
-        SDL_Quit();
     }
 }

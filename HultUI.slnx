@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/samples/">
     <Project Path="samples/HultUI.Samples.HelloWorld/HultUI.Samples.HelloWorld.csproj" />
+    <Project Path="samples/HultUI.Samples.Minimal/HultUI.Samples.Minimal.csproj" />
+    <Project Path="samples/HultUI.Samples.TodoList/HultUI.Samples.TodoList.csproj" />
+    <Project Path="samples/HultUI.Samples.MultiWindow/HultUI.Samples.MultiWindow.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />

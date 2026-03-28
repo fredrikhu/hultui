@@ -16,6 +16,12 @@ public sealed class Theme
     public TextDirection TextDirection { get; init; } = TextDirection.Ltr;
     public CursorType Cursor { get; init; } = CursorType.Default;
 
+    // Component styles
+    public ButtonTheme Button { get; init; } = new();
+    public TextInputTheme TextInput { get; init; } = new();
+    public CheckboxTheme Checkbox { get; init; } = new();
+    public RadioButtonTheme RadioButton { get; init; } = new();
+
     // Semantic colors
     public Color Background { get; init; } = Color.White;
     public Color Surface { get; init; } = new(248, 250, 252);       // slate-50

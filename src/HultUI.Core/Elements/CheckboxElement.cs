@@ -28,6 +28,16 @@ public class CheckboxElement : Element
     public Color CheckmarkColor { get; set; } = new(255, 255, 255, 255);
     public float CornerRadius { get; set; } = 3f;
 
+    protected internal override void ApplyTheme(Theme theme)
+    {
+        var ct = theme.Checkbox;
+        CheckboxSize = ct.Size;
+        CornerRadius = ct.CornerRadius.TopLeft; // uniform
+        BoxColor = ct.BorderColor ?? theme.Border;
+        CheckedColor = ct.CheckedBackground ?? theme.Primary;
+        CheckmarkColor = ct.CheckMarkColor ?? Color.White;
+    }
+
     public Action<bool>? OnChanged { get; set; }
 
     public CheckboxElement()
