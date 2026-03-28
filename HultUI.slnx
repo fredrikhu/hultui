@@ -4,6 +4,7 @@
     <Project Path="samples/HultUI.Samples.Minimal/HultUI.Samples.Minimal.csproj" />
     <Project Path="samples/HultUI.Samples.TodoList/HultUI.Samples.TodoList.csproj" />
     <Project Path="samples/HultUI.Samples.MultiWindow/HultUI.Samples.MultiWindow.csproj" />
+    <Project Path="samples/HultUI.Samples.Theming/HultUI.Samples.Theming.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
