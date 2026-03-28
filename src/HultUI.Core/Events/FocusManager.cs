@@ -22,4 +22,24 @@ public sealed class FocusManager
     }
 
     public void ClearFocus() => SetFocus(null);
+
+    /// <summary>
+    /// Move focus to the next focusable element in document order (Tab).
+    /// </summary>
+    public void MoveFocusNext(Element root)
+    {
+        var next = FocusTraversal.FindNext(root, FocusedElement);
+        if (next is not null)
+            SetFocus(next);
+    }
+
+    /// <summary>
+    /// Move focus to the previous focusable element in document order (Shift+Tab).
+    /// </summary>
+    public void MoveFocusPrevious(Element root)
+    {
+        var prev = FocusTraversal.FindPrevious(root, FocusedElement);
+        if (prev is not null)
+            SetFocus(prev);
+    }
 }

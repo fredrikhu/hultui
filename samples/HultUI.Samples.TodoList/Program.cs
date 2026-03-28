@@ -61,7 +61,7 @@ partial class TodoApp : Component
                     .FlexGrow(1).Height(36)
                     .Background(Color.White).CornerRadius(6f)
                     .BorderColor(Color.FromHex("#CBD5E1")),
-                MakeButton("Add", Color.FromHex("#4F46E5"), AddItem)
+                MakeButton("Add", AddItem)
             ),
 
             // Item list (scrollable)
@@ -73,7 +73,7 @@ partial class TodoApp : Component
             Flex.Row(gap: 8).Padding(12).FlexShrink(0)
                 .Background(Color.FromHex("#F8FAFC"))
                 .JustifyContent(JustifyContent.FlexEnd).Children(
-                MakeButton("Clear completed", Color.FromHex("#DC2626"), ClearCompleted)
+                MakeButton("Clear completed", ClearCompleted)
             )
         );
     }
@@ -94,7 +94,7 @@ partial class TodoApp : Component
             elements[i] = row.Children(
                     Checkbox.New(item.Done).OnCheckedChanged(done => ToggleItem(index, done)),
                     Text.New(item.Text).FlexGrow(1).TextColor(strikeColor),
-                    MakeIconButton("x", Color.FromHex("#EF4444"), () => RemoveItem(index))
+                    MakeIconButton("x", () => RemoveItem(index))
                 );
         }
         return elements;
@@ -127,33 +127,16 @@ partial class TodoApp : Component
         Version++;
     }
 
-    private static BoxElement MakeButton(string label, Color color, Action onClick)
+    private static ButtonElement MakeButton(string label, Action onClick)
     {
-        var hoverColor = new Color(
-            (byte)(color.R * 0.85f), (byte)(color.G * 0.85f),
-            (byte)(color.B * 0.85f), color.A);
-
-        var btn = Box.New().Padding(new Thickness(8, 16, 8, 16))
-            .Background(color).CornerRadius(6f)
-            .TextColor(Color.White).FontSize(13f).FontWeight(FontWeight.SemiBold)
-            .Cursor(CursorType.Pointer)
-            .Children(Text.New(label));
-
-        btn.OnPointerEnter(_ => btn.BackgroundColor = hoverColor);
-        btn.OnPointerLeave(_ => btn.BackgroundColor = color);
+        var btn = Button.New(label);
         btn.OnClick(_ => onClick());
         return btn;
     }
 
-    private static BoxElement MakeIconButton(string label, Color color, Action onClick)
+    private static ButtonElement MakeIconButton(string label, Action onClick)
     {
-        var btn = Box.New().Padding(new Thickness(4, 8, 4, 8))
-            .CornerRadius(4f).Cursor(CursorType.Pointer)
-            .TextColor(color).FontSize(12f).FontWeight(FontWeight.Bold)
-            .Children(Text.New(label));
-
-        btn.OnPointerEnter(_ => btn.BackgroundColor = new Color(color.R, color.G, color.B, 30));
-        btn.OnPointerLeave(_ => btn.BackgroundColor = Color.Transparent);
+        var btn = Button.New(label, ButtonVariant.Danger);
         btn.OnClick(_ => onClick());
         return btn;
     }

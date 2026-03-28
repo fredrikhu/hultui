@@ -17,10 +17,12 @@ public class ButtonElement : BoxElement
     private ButtonVariant _variant = ButtonVariant.Primary;
     private bool _hovered;
     private bool _pressed;
+    private bool _focused;
     private Color _baseColor;
     private Color _hoverColor;
     private Color _pressedColor;
     private Color _textColor;
+    private Color _focusRingColor;
 
     public ButtonVariant Variant
     {
@@ -47,6 +49,7 @@ public class ButtonElement : BoxElement
 
     public ButtonElement()
     {
+        IsFocusable = true;
         Flex.FlexShrink = 0;
         Inherited.Cursor = CursorType.Pointer;
 
@@ -71,6 +74,25 @@ public class ButtonElement : BoxElement
             _pressed = false;
             UpdateVisualState();
         });
+        On<FocusEvent>(_ =>
+        {
+            _focused = true;
+            MarkPaintDirty();
+        });
+        On<BlurEvent>(_ =>
+        {
+            _focused = false;
+            MarkPaintDirty();
+        });
+        On<KeyDownEvent>(evt =>
+        {
+            if (!_focused) return;
+            if (evt.Key is KeyCode.Enter or KeyCode.Space)
+            {
+                // Synthesize a click event for keyboard activation
+                EventDispatcher.DispatchDirect(new ClickEvent { Position = Point.Zero }, this);
+            }
+        });
     }
 
     public static ButtonElement New(string label, ButtonVariant variant = ButtonVariant.Primary)
@@ -87,6 +109,7 @@ public class ButtonElement : BoxElement
         Box.Padding = bt.Padding;
         Inherited.FontSize = bt.FontSize;
         Inherited.FontWeight = bt.FontWeight;
+        _focusRingColor = theme.FocusRing;
 
         // Resolve variant colors from theme semantic colors
         (_baseColor, _textColor) = _variant switch
@@ -102,6 +125,22 @@ public class ButtonElement : BoxElement
 
         Inherited.TextColor = _textColor;
         UpdateVisualState();
+    }
+
+    public override void Render(IRenderContext ctx)
+    {
+        base.Render(ctx);
+
+        if (_focused)
+        {
+            var box = Layout.AbsoluteBorderBox;
+            float offset = 2f;
+            var ringRect = new Rect(box.X - offset, box.Y - offset, box.Width + offset * 2, box.Height + offset * 2);
+            var ringRadius = new CornerRadius(
+                CornerRadius.TopLeft + offset, CornerRadius.TopRight + offset,
+                CornerRadius.BottomRight + offset, CornerRadius.BottomLeft + offset);
+            ctx.DrawRoundedRect(ringRect, ringRadius, Color.Transparent, _focusRingColor, new Thickness(2f));
+        }
     }
 
     private void UpdateVisualState()

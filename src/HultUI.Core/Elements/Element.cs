@@ -37,6 +37,9 @@ public abstract class Element
     /// </summary>
     protected internal virtual void ApplyTheme(Theme theme) { }
 
+    // ──── Focus ────
+    public bool IsFocusable { get; set; }
+
     // ──── Accessibility ────
     public AccessibilityRole Role { get; set; } = AccessibilityRole.None;
     public string? AccessibleName { get; set; }
@@ -202,6 +205,7 @@ public abstract class Element
         Box.CopyFrom(source.Box);
         Position.CopyFrom(source.Position);
         Inherited.CopyFrom(source.Inherited);
+        IsFocusable = source.IsFocusable;
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;

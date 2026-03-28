@@ -76,6 +76,7 @@ public class TextInputElement : BoxElement
 
     public TextInputElement()
     {
+        IsFocusable = true;
         Box.Padding = new Thickness(4, 8, 4, 8);
         Inherited.FontSize = 14f;
         Inherited.Cursor = CursorType.Text;

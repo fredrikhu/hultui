@@ -33,6 +33,7 @@ public sealed class Theme
     public Color Border { get; init; } = new(226, 232, 240);         // slate-200
     public Color Danger { get; init; } = new(220, 38, 38);           // red-600
     public Color DangerText { get; init; } = Color.White;
+    public Color FocusRing { get; init; } = new(59, 130, 246, 180);  // blue-500 with alpha
 
     /// <summary>
     /// Converts the theme's text properties to a ResolvedInheritedStyle
@@ -61,5 +62,6 @@ public sealed class Theme
         Border = new Color(51, 65, 85),                  // slate-700
         Danger = new Color(239, 68, 68),                 // red-500
         DangerText = Color.White,
+        FocusRing = new Color(99, 102, 241, 180),       // indigo-500 with alpha
     };
 }

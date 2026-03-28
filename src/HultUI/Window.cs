@@ -234,6 +234,20 @@ public sealed class Window : IDisposable
                     break;
                 }
 
+                // Tab / Shift+Tab focus traversal
+                if (key.IsDown && key.KeyCode == KeyCode.Tab)
+                {
+                    if (key.Modifiers.HasFlag(KeyModifiers.Shift))
+                        _focusManager.MoveFocusPrevious(_root);
+                    else
+                        _focusManager.MoveFocusNext(_root);
+
+                    // Provide clipboard to text inputs when focused via Tab
+                    if (_focusManager.FocusedElement is TextInputElement tabFocusedInput)
+                        tabFocusedInput.Clipboard = Clipboard;
+                    break;
+                }
+
                 var target = _focusManager.FocusedElement ?? _root;
                 if (key.IsDown)
                 {

@@ -9,6 +9,8 @@ namespace HultUI.Core.Elements;
 public class CheckboxElement : Element
 {
     private bool _isChecked;
+    private bool _focused;
+    private Color _focusRingColor;
 
     public bool IsChecked
     {
@@ -36,14 +38,27 @@ public class CheckboxElement : Element
         BoxColor = ct.BorderColor ?? theme.Border;
         CheckedColor = ct.CheckedBackground ?? theme.Primary;
         CheckmarkColor = ct.CheckMarkColor ?? Color.White;
+        _focusRingColor = theme.FocusRing;
     }
 
     public Action<bool>? OnChanged { get; set; }
 
     public CheckboxElement()
     {
+        IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         On<ClickEvent>(OnClick);
+        On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
+        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        On<KeyDownEvent>(evt =>
+        {
+            if (!_focused) return;
+            if (evt.Key == KeyCode.Space)
+            {
+                IsChecked = !IsChecked;
+                OnChanged?.Invoke(IsChecked);
+            }
+        });
     }
 
     public static CheckboxElement New(bool isChecked = false) => new() { _isChecked = isChecked };
@@ -84,6 +99,15 @@ public class CheckboxElement : Element
         {
             // Empty box with border
             ctx.DrawRoundedRect(checkRect, radius, Color.Transparent, BoxColor, new Thickness(BorderWidth));
+        }
+
+        // Focus ring
+        if (_focused)
+        {
+            float offset = 3f;
+            var ringRect = new Rect(x - offset, y - offset, CheckboxSize + offset * 2, CheckboxSize + offset * 2);
+            var ringRadius = new CornerRadius(CornerRadius + offset);
+            ctx.DrawRoundedRect(ringRect, ringRadius, Color.Transparent, _focusRingColor, new Thickness(2f));
         }
     }
 

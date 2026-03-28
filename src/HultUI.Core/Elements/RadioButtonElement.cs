@@ -9,6 +9,8 @@ namespace HultUI.Core.Elements;
 public class RadioButtonElement : Element
 {
     private bool _isChecked;
+    private bool _focused;
+    private Color _focusRingColor;
 
     public bool IsChecked
     {
@@ -37,12 +39,33 @@ public class RadioButtonElement : Element
         CircleColor = rt.BorderColor ?? theme.Border;
         CheckedColor = rt.SelectedColor ?? theme.Primary;
         DotColor = rt.DotColor ?? Color.White;
+        _focusRingColor = theme.FocusRing;
     }
 
     public RadioButtonElement()
     {
+        IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
         On<ClickEvent>(OnClick);
+        On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
+        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        On<KeyDownEvent>(evt =>
+        {
+            if (!_focused) return;
+            if (evt.Key == KeyCode.Space)
+            {
+                if (!IsChecked)
+                {
+                    if (!string.IsNullOrEmpty(GroupName))
+                    {
+                        var root = FindGroupRoot();
+                        DeselectGroupMembers(root);
+                    }
+                    IsChecked = true;
+                    OnChanged?.Invoke(true);
+                }
+            }
+        });
     }
 
     public static RadioButtonElement New(string groupName = "", bool isChecked = false) =>
@@ -65,7 +88,6 @@ public class RadioButtonElement : Element
 
     /// <summary>
     /// Walks up the tree to find the root ancestor for group searching.
-    /// Stops at the first element that isn't a simple layout wrapper, or at the tree root.
     /// </summary>
     private Element FindGroupRoot()
     {
@@ -98,8 +120,6 @@ public class RadioButtonElement : Element
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;
-        float cx = box.X + box.Width / 2;
-        float cy = box.Y + box.Height / 2;
         float radius = RadioSize / 2;
 
         // Use a canvas context for circle drawing
@@ -119,6 +139,13 @@ public class RadioButtonElement : Element
         {
             // Empty circle with border
             canvasCtx.DrawCircleStroke(new Point(localCx, localCy), radius - BorderWidth / 2, CircleColor, BorderWidth);
+        }
+
+        // Focus ring
+        if (_focused)
+        {
+            float offset = 3f;
+            canvasCtx.DrawCircleStroke(new Point(localCx, localCy), radius + offset, _focusRingColor, 2f);
         }
     }
 
