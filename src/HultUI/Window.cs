@@ -184,10 +184,11 @@ public sealed class Window : IDisposable
                     if (button.Button == 0 && TryStartScrollbarDrag(target, pos))
                         break;
 
-                    _focusManager.SetFocus(target);
+                    var focusTarget = FindFocusableAncestor(target);
+                    _focusManager.SetFocus(focusTarget);
 
                     // Provide clipboard to text inputs when focused
-                    if (target is TextInputElement textInput)
+                    if (focusTarget is TextInputElement textInput)
                         textInput.Clipboard = Clipboard;
 
                     var downEvt = _pointerState.HandlePointerDown(target, pos, button.Button, button.Modifiers);
@@ -275,6 +276,22 @@ public sealed class Window : IDisposable
         // Any input event may have triggered visual changes via handlers,
         // so ensure the render pipeline runs this frame.
         _root.MarkPaintDirty();
+    }
+
+    /// <summary>
+    /// Walks from the hit target up through ancestors to find the nearest focusable element.
+    /// Returns null if no focusable ancestor exists (clicking on non-interactive area clears focus).
+    /// </summary>
+    private static Element? FindFocusableAncestor(Element? target)
+    {
+        var current = target;
+        while (current is not null)
+        {
+            if (current.IsFocusable)
+                return current;
+            current = current.Parent;
+        }
+        return null;
     }
 
     /// <summary>
