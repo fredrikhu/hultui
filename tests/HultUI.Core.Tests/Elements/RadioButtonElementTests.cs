@@ -127,7 +127,7 @@ public class RadioButtonElementTests
     }
 
     [Fact]
-    public void PatchFrom_PreservesCheckedState()
+    public void PatchFrom_CopiesCheckedState()
     {
         var rb = RadioButtonElement.New("g", true);
         var incoming = RadioButtonElement.New("g");
@@ -135,7 +135,7 @@ public class RadioButtonElementTests
 
         rb.PatchFrom(incoming);
 
-        Assert.True(rb.IsChecked); // preserved
+        Assert.False(rb.IsChecked); // copied from source
         Assert.Equal(24, rb.RadioSize); // patched
     }
 

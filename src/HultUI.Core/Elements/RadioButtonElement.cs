@@ -161,7 +161,7 @@ public class RadioButtonElement : Element
             CheckedColor = radio.CheckedColor;
             DotColor = radio.DotColor;
             OnChanged = radio.OnChanged;
-            // Preserve IsChecked state
+            IsChecked = radio.IsChecked;
         }
     }
 }

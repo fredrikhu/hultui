@@ -60,7 +60,7 @@ public class CheckboxElementTests
     }
 
     [Fact]
-    public void PatchFrom_PreservesCheckedState()
+    public void PatchFrom_CopiesCheckedState()
     {
         var cb = CheckboxElement.New(true);
         var incoming = CheckboxElement.New(false);
@@ -68,7 +68,7 @@ public class CheckboxElementTests
 
         cb.PatchFrom(incoming);
 
-        Assert.True(cb.IsChecked); // preserved
+        Assert.False(cb.IsChecked); // copied from source
         Assert.Equal(24, cb.CheckboxSize); // patched
     }
 

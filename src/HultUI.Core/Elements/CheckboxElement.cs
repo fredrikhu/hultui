@@ -123,7 +123,7 @@ public class CheckboxElement : Element
             CheckmarkColor = cb.CheckmarkColor;
             CornerRadius = cb.CornerRadius;
             OnChanged = cb.OnChanged;
-            // Preserve IsChecked state
+            IsChecked = cb.IsChecked;
         }
     }
 }
