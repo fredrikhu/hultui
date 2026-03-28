@@ -1,3 +1,4 @@
+using HultUI.Core.Components;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Platform;
@@ -8,10 +9,17 @@ namespace HultUI;
 
 public sealed class Application : IDisposable
 {
+    private static Application? _current;
+
     private readonly List<Window> _windows = [];
     private Theme _theme = Theme.Light;
     private bool _disposed;
     private bool _quitRequested;
+
+    /// <summary>
+    /// The most recently created Application instance. Used by hot reload to find the running app.
+    /// </summary>
+    internal static Application? Current => _current;
 
     /// <summary>
     /// The first window created by this application.
@@ -44,6 +52,7 @@ public sealed class Application : IDisposable
     /// </summary>
     public Application(string title = "HultUI Application", int width = 800, int height = 600)
     {
+        _current = this;
         CreateWindow(title, width, height);
     }
 
@@ -120,10 +129,36 @@ public sealed class Application : IDisposable
         }
     }
 
+    /// <summary>
+    /// Forces all component hosts to rebuild, then marks all windows for re-render.
+    /// Called by hot reload when code changes are applied.
+    /// </summary>
+    internal void ForceRebuildAll()
+    {
+        foreach (var window in _windows)
+        {
+            if (window.Root is not null)
+                ForceRebuildTree(window.Root);
+            window.MarkStyleDirty();
+        }
+    }
+
+    private static void ForceRebuildTree(Element element)
+    {
+        if (element is ComponentHost host)
+            host.ForceRebuild();
+
+        foreach (var child in element.Children)
+            ForceRebuildTree(child);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+
+        if (_current == this)
+            _current = null;
 
         foreach (var window in _windows)
             window.Dispose();

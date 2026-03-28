@@ -39,6 +39,16 @@ public sealed class ComponentHost : Element
         }
     }
 
+    /// <summary>
+    /// Forces a full rebuild of this component, bypassing dependency checks.
+    /// Used by hot reload to pick up code changes.
+    /// </summary>
+    internal void ForceRebuild()
+    {
+        if (_buildEffect is null) return;
+        Rebuild();
+    }
+
     protected override void OnMounted()
     {
         _component.OnMount();

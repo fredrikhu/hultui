@@ -49,6 +49,8 @@ public sealed class Window : IDisposable
         _root = root;
     }
 
+    internal Element? Root => _root;
+
     internal void MarkStyleDirty()
     {
         _root?.MarkStyleDirty();
