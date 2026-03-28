@@ -244,7 +244,7 @@ partial class ThemingDemo : Component
 
     private static Element Section(string title, Element content)
     {
-        return Flex.Column(gap: 8).Padding(new Thickness(0, 16, 0, 16)).Children(
+        return Flex.Column(gap: 8).Padding(new Thickness(0, 16, 0, 16)).FlexShrink(0).Children(
             Text.New(title).FontSize(13f).FontWeight(FontWeight.SemiBold),
             content
         );
