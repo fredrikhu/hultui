@@ -211,6 +211,7 @@ public abstract class Element
         // For dynamic handler behavior, read signals inside handlers instead.
         MarkLayoutDirty();
         MarkPaintDirty();
+        MarkStyleDirty();
     }
 
     // ──── Rendering ────
