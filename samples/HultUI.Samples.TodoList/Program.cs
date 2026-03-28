@@ -18,24 +18,20 @@ record TodoItem(string Text, bool Done);
 
 // ──── Main app component ────
 
-partial class TodoApp : Component
+class TodoApp : Component
 {
-    [Reactive] public partial int Version { get; set; }
-
-    private readonly List<TodoItem> _items =
-    [
+    private readonly ReactiveList<TodoItem> _items = new([
         new("Learn HultUI basics", true),
         new("Build a todo app", false),
         new("Add more features", false),
-    ];
+    ]);
 
     private string _inputText = "";
 
     public override Element Build()
     {
-        // Read Version to track changes (forces rebuild when items mutate)
-        _ = Version;
-
+        // Iterating and reading Count on ReactiveList tracks dependencies —
+        // Build() automatically re-runs when items are added, removed, or replaced.
         var doneCount = _items.Count(i => i.Done);
         var totalCount = _items.Count;
 
@@ -107,25 +103,21 @@ partial class TodoApp : Component
         if (string.IsNullOrEmpty(text)) return;
         _items.Add(new TodoItem(text, false));
         _inputText = "";
-        Version++;
     }
 
     private void ToggleItem(int index, bool done)
     {
         _items[index] = _items[index] with { Done = done };
-        Version++;
     }
 
     private void RemoveItem(int index)
     {
         _items.RemoveAt(index);
-        Version++;
     }
 
     private void ClearCompleted()
     {
         _items.RemoveAll(i => i.Done);
-        Version++;
     }
 
     private static ButtonElement MakeButton(string label, Action onClick)
