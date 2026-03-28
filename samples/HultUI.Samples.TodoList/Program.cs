@@ -58,6 +58,7 @@ partial class TodoApp : Component
                 TextInput.New(_inputText)
                     .PlaceholderText("What needs to be done?")
                     .OnTextChanged(text => _inputText = text)
+                    .OnKeyDown(evt => { if (evt.Key == KeyCode.Enter) AddItem(); })
                     .FlexGrow(1).Height(36)
                     .Background(Color.White).CornerRadius(6f)
                     .BorderColor(Color.FromHex("#CBD5E1")),
