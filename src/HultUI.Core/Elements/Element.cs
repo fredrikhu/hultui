@@ -37,6 +37,20 @@ public abstract class Element
     /// </summary>
     protected internal virtual void ApplyTheme(Theme theme) { }
 
+    // ──── Visual ────
+    private float _opacity = 1f;
+    public float Opacity
+    {
+        get => _opacity;
+        set
+        {
+            var clamped = Math.Clamp(value, 0f, 1f);
+            if (_opacity == clamped) return;
+            _opacity = clamped;
+            MarkPaintDirty();
+        }
+    }
+
     // ──── Focus ────
     public bool IsFocusable { get; set; }
 
@@ -206,6 +220,7 @@ public abstract class Element
         Position.CopyFrom(source.Position);
         Inherited.CopyFrom(source.Inherited);
         IsFocusable = source.IsFocusable;
+        _opacity = source._opacity;
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;

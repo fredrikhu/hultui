@@ -12,6 +12,10 @@ public static class ElementRenderer
 
     private static void RenderElement(Element element, IRenderContext ctx)
     {
+        bool hasOpacity = element.Opacity < 1f;
+        if (hasOpacity)
+            ctx.PushOpacity(element.Opacity);
+
         // Render self
         element.Render(ctx);
 
@@ -31,6 +35,9 @@ public static class ElementRenderer
             ctx.Pop(); // clip
 
             scrollView.RenderScrollbars(ctx);
+
+            if (hasOpacity)
+                ctx.Pop();
             return;
         }
 
@@ -47,6 +54,9 @@ public static class ElementRenderer
             RenderElement(child, ctx);
 
         if (needsClip)
+            ctx.Pop();
+
+        if (hasOpacity)
             ctx.Pop();
     }
 }

@@ -81,6 +81,9 @@ public static class ElementExtensions
     public static T OnScroll<T>(this T el, Action<ScrollEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnKeyDown<T>(this T el, Action<KeyDownEvent> handler) where T : Element { el.On(handler); return el; }
 
+    // ──── Visual ────
+    public static T Opacity<T>(this T el, float opacity) where T : Element { el.Opacity = opacity; return el; }
+
     // ──── Children ────
     public static T Children<T>(this T el, params Element[] children) where T : Element
     {

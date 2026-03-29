@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using HultUI.Core.Animation;
 using HultUI.Core.Components;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
@@ -80,8 +82,14 @@ public sealed class Application : IDisposable
         if (_windows.Count == 0)
             throw new InvalidOperationException("No windows created.");
 
+        var frameStopwatch = Stopwatch.StartNew();
+
         while (!_quitRequested && _windows.Any(w => w.IsOpen))
         {
+            // Delta time
+            float deltaSeconds = (float)frameStopwatch.Elapsed.TotalSeconds;
+            frameStopwatch.Restart();
+
             // Poll and route all SDL events
             bool alive = SDL3Window.PollAllEvents(onWindowClose: w => OnWindowCloseRequested(w));
 
@@ -90,6 +98,9 @@ public sealed class Application : IDisposable
                 _quitRequested = true;
                 break;
             }
+
+            // Tick animations (marks elements dirty as needed)
+            AnimationManager.Tick(deltaSeconds);
 
             // Render any dirty windows
             bool anyRendered = false;
@@ -103,7 +114,7 @@ public sealed class Application : IDisposable
                 anyRendered = true;
             }
 
-            if (!anyRendered)
+            if (!anyRendered && !AnimationManager.HasActiveAnimations)
                 Thread.Sleep(16);
 
             // Clean up closed windows
