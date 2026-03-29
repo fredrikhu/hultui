@@ -238,20 +238,64 @@ When a component rebuilds, `TreeDiffer` reconciles the new element tree against 
 
 ### When to use keys
 
-Use `.Key` when rendering a dynamic list where items can be added, removed, or reordered:
+Use `Key` when rendering a dynamic list where items can be added, removed, or reordered:
 
 ```csharp
 public override Element Build()
 {
     return Flex.Column().Children(
         _items.Value.Select(item =>
-            Text.New(item.Name).Key(item.Id)
+            Text.New(item.Name) { Key = item.Id }
         )
     );
 }
 ```
 
 Without keys, inserting an item at the beginning of the list would cause every element to be patched with the next item's data instead of shifting elements down.
+
+### Keys and event handlers
+
+**This is critical:** when patching, event handlers are **not** copied from the new tree. Handlers from the original `Build()` are preserved because they capture references to the live element instances. This means that if the differ patches element #0 to display a different item, the event handler still captures the *original* item's data.
+
+```csharp
+// BUG: without keys, handlers capture stale values after rebuild
+for (int i = 0; i < items.Count; i++)
+{
+    var item = items[i];
+    var box = Box.New().Children(Text.New(item));
+    box.On<ClickEvent>(_ => Console.WriteLine(item)); // captures 'item'
+    children[i] = box;
+}
+```
+
+If `items` changes from `["Apple", "Banana"]` to `["Banana"]`, the differ patches element #0 from "Apple" → "Banana" visually, but the click handler still prints "Apple". The fix is to set a key based on item identity:
+
+```csharp
+var box = Box.New().Children(Text.New(item));
+box.Key = item; // differ now matches by identity, not position
+box.On<ClickEvent>(_ => Console.WriteLine(item));
+```
+
+This applies to any per-item behavior captured in closures: event handlers, drag & drop handlers, animation callbacks, etc.
+
+### Keys and animations
+
+Animations started during `Build()` run on the element instance returned by that call. If the differ patches an existing element instead of inserting a new one, the animation targets a discarded element and has no visible effect. To force the differ to create a fresh element (and thus run the animation), include a changing value in the key:
+
+```csharp
+[Reactive] public partial int TriggerCount { get; set; }
+
+public override Element Build()
+{
+    var gen = TriggerCount;
+    var box = Box.New().Width(0).Height(60);
+    box.Key = $"expandBox-{gen}"; // new key on each trigger → new element → animation runs
+    Animate.Width(box, Dimension.Px(0), Dimension.Px(300)).Duration(0.5f).Start();
+    return box;
+}
+```
+
+Without the key suffix, pressing a button that increments `TriggerCount` would rebuild the tree but the differ would patch the existing box — the new animation targets a discarded element and the box stays at its current width.
 
 ---
 
