@@ -125,6 +125,7 @@ partial class DragDropDemo : Component
             .Children(
                 Text.New(item).FontSize(13f).FontWeight(FontWeight.SemiBold)
             );
+        box.Key = $"drag-{item}";
         box.Inherited.Cursor = CursorType.Move;
 
         box.On<DragStartEvent>(e =>

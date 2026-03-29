@@ -1,3 +1,4 @@
+using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Events;
@@ -9,7 +10,14 @@ public abstract class DragDropEvent : ElementEvent
 }
 
 /// <summary>Fired on the source element when an internal drag begins.</summary>
-public sealed class DragStartEvent : DragDropEvent;
+public sealed class DragStartEvent : DragDropEvent
+{
+    /// <summary>
+    /// Optional custom visual element to render at the cursor during drag.
+    /// If null, the source element is re-rendered as the drag ghost.
+    /// </summary>
+    public Element? DragVisual { get; set; }
+}
 
 /// <summary>Fired (direct, non-bubbling) when a drag enters an element's bounds.</summary>
 public sealed class DragEnterEvent : DragDropEvent;

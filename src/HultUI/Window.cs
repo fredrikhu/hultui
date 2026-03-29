@@ -31,6 +31,8 @@ public sealed class Window : IDisposable
     private bool _isDragging;
     private DragData? _dragData;
     private Element? _dragHoveredElement;
+    private Element? _dragVisual;
+    private bool _dragVisualLayoutDone;
     private Point _lastDragPos;
     private bool _dragAccepted;
     private bool _isExternalDrag;
@@ -107,6 +109,10 @@ public sealed class Window : IDisposable
         _perf.BeginRender();
         ElementRenderer.RenderTree(_root, ctx);
         _perf.EndRender();
+
+        // Drag ghost overlay
+        if (_isDragging && !_isExternalDrag)
+            RenderDragGhost(ctx);
 
         // DevTools overlay (second pass, not timed)
         _perf.ElementCount = PerformanceCounters.CountElements(_root);
@@ -408,6 +414,41 @@ public sealed class Window : IDisposable
         return false;
     }
 
+    // ──── Drag ghost rendering ────
+
+    private void RenderDragGhost(IRenderContext ctx)
+    {
+        if (_dragVisual is not null)
+        {
+            // Custom visual: resolve styles + layout once, then render at cursor
+            if (!_dragVisualLayoutDone)
+            {
+                StyleResolver.Resolve(_dragVisual, Application.Theme);
+                _layoutEngine.PerformLayout(_dragVisual, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+                _dragVisualLayoutDone = true;
+            }
+
+            float offsetX = _lastDragPos.X - _dragVisual.Layout.Width / 2;
+            float offsetY = _lastDragPos.Y - _dragVisual.Layout.Height / 2;
+            ctx.PushTranslate(offsetX, offsetY);
+            ctx.PushOpacity(0.8f);
+            ElementRenderer.RenderTree(_dragVisual, ctx);
+            ctx.Pop();
+            ctx.Pop();
+        }
+        else if (_dragSource is not null)
+        {
+            // Default: re-render the source element at cursor position
+            float offsetX = _lastDragPos.X - _dragSource.Layout.AbsoluteX - _dragSource.Layout.Width / 2;
+            float offsetY = _lastDragPos.Y - _dragSource.Layout.AbsoluteY - _dragSource.Layout.Height / 2;
+            ctx.PushTranslate(offsetX, offsetY);
+            ctx.PushOpacity(0.7f);
+            ElementRenderer.RenderTree(_dragSource, ctx);
+            ctx.Pop();
+            ctx.Pop();
+        }
+    }
+
     // ──── Drag & Drop helpers ────
 
     private static Element? FindDraggableAncestor(Element? target)
@@ -434,6 +475,10 @@ public sealed class Window : IDisposable
 
         var startEvt = new DragStartEvent { Position = pos, DragData = _dragData };
         EventDispatcher.DispatchDirect(startEvt, _dragSource);
+
+        // Capture drag visual (custom or source element as default)
+        _dragVisual = startEvt.DragVisual;
+        _dragVisualLayoutDone = false;
 
         PlatformWindow.SetCursor(CursorType.Move);
         UpdateDragHover(pos);
@@ -527,6 +572,8 @@ public sealed class Window : IDisposable
         _isExternalDrag = false;
         _dragData = null;
         _dragHoveredElement = null;
+        _dragVisual = null;
+        _dragVisualLayoutDone = false;
         _dragAccepted = false;
     }
 
