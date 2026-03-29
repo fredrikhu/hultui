@@ -450,13 +450,13 @@ public sealed class Window : IDisposable
         if (target != _dragHoveredElement)
         {
             if (_dragHoveredElement is not null)
-                EventDispatcher.DispatchDirect(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
+                EventDispatcher.Dispatch(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
 
             _dragHoveredElement = target;
             _dragAccepted = false;
 
             if (target is not null)
-                EventDispatcher.DispatchDirect(new DragEnterEvent { Position = pos, DragData = _dragData }, target);
+                EventDispatcher.Dispatch(new DragEnterEvent { Position = pos, DragData = _dragData }, target);
         }
 
         // Fire DragOver (bubbles) so ancestors can accept
@@ -494,7 +494,7 @@ public sealed class Window : IDisposable
 
         // Fire DragLeave on previously hovered element
         if (_dragHoveredElement is not null)
-            EventDispatcher.DispatchDirect(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
+            EventDispatcher.Dispatch(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
 
         // Fire DragEnd on the source
         if (_dragSource is not null)
@@ -513,7 +513,7 @@ public sealed class Window : IDisposable
             EventDispatcher.Dispatch(new DropEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
 
         if (_dragHoveredElement is not null && _dragData is not null)
-            EventDispatcher.DispatchDirect(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
+            EventDispatcher.Dispatch(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
 
         PlatformWindow.SetCursor(CursorType.Default);
         ResetDragState();
