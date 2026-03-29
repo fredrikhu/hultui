@@ -3,6 +3,9 @@ using HultUI.Core.Layout;
 
 namespace HultUI.Core.Rendering;
 
+// Children are rendered in ZIndex order (ascending): low ZIndex = back, high ZIndex = front.
+// When no child has a non-zero ZIndex, the original insertion order is used (zero allocation).
+
 public static class ElementRenderer
 {
     public static void RenderTree(Element root, IRenderContext ctx)
@@ -28,8 +31,9 @@ public static class ElementRenderer
             ctx.PushClip(clipRect);
             ctx.PushTranslate(-scrollView.ScrollOffsetX, -scrollView.ScrollOffsetY);
 
-            foreach (var child in element.Children)
-                RenderElement(child, ctx);
+            var scrollChildren = ZOrderHelper.GetChildrenInZOrder(element);
+            for (int i = 0; i < scrollChildren.Count; i++)
+                RenderElement(scrollChildren[i], ctx);
 
             ctx.Pop(); // translate
             ctx.Pop(); // clip
@@ -49,9 +53,10 @@ public static class ElementRenderer
             ctx.PushClip(clipRect);
         }
 
-        // Render children in order
-        foreach (var child in element.Children)
-            RenderElement(child, ctx);
+        // Render children in z-order
+        var children = ZOrderHelper.GetChildrenInZOrder(element);
+        for (int i = 0; i < children.Count; i++)
+            RenderElement(children[i], ctx);
 
         if (needsClip)
             ctx.Pop();

@@ -83,6 +83,7 @@ public static class ElementExtensions
 
     // ──── Visual ────
     public static T Opacity<T>(this T el, float opacity) where T : Element { el.Opacity = opacity; return el; }
+    public static T ZIndex<T>(this T el, int zIndex) where T : Element { el.Position.ZIndex = zIndex; return el; }
 
     // ──── Children ────
     public static T Children<T>(this T el, params Element[] children) where T : Element

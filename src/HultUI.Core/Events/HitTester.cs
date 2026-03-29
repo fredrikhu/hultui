@@ -1,6 +1,8 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 
+// Hit testing traverses children in reverse z-order (highest ZIndex first = front-to-back).
+
 namespace HultUI.Core.Events;
 
 public static class HitTester
@@ -51,10 +53,11 @@ public static class HitTester
             childClip = clipRect.HasValue ? Intersect(clipRect.Value, contentBox) : contentBox;
         }
 
-        // Traverse children in reverse order (last child = front-most)
-        for (int i = element.Children.Count - 1; i >= 0; i--)
+        // Traverse children in reverse z-order (highest ZIndex / last child = front-most)
+        var children = ZOrderHelper.GetChildrenInZOrder(element);
+        for (int i = children.Count - 1; i >= 0; i--)
         {
-            var hit = HitTestRecursive(element.Children[i], childPoint, childClip);
+            var hit = HitTestRecursive(children[i], childPoint, childClip);
             if (hit is not null)
                 return hit;
         }
