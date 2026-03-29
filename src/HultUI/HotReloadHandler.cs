@@ -1,3 +1,4 @@
+#if !NATIVE_AOT
 [assembly: System.Reflection.Metadata.MetadataUpdateHandler(typeof(HultUI.HotReloadHandler))]
 
 namespace HultUI;
@@ -18,3 +19,4 @@ internal static class HotReloadHandler
         Application.Current?.ForceRebuildAll();
     }
 }
+#endif
