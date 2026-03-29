@@ -23,6 +23,8 @@ public class CheckboxElement : Element
         }
     }
 
+    public string? Label { get; set; }
+    public float LabelGap { get; set; } = 8f;
     public float CheckboxSize { get; set; } = 18f;
     public float BorderWidth { get; set; } = 2f;
     public Color BoxColor { get; set; } = new(200, 200, 200, 255);
@@ -62,6 +64,7 @@ public class CheckboxElement : Element
     }
 
     public static CheckboxElement New(bool isChecked = false) => new() { _isChecked = isChecked };
+    public static CheckboxElement New(bool isChecked, string label) => new() { _isChecked = isChecked, Label = label };
 
     private void OnClick(ClickEvent evt)
     {
@@ -71,14 +74,21 @@ public class CheckboxElement : Element
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
-        return new Size(CheckboxSize, CheckboxSize);
+        if (Label is null)
+            return new Size(CheckboxSize, CheckboxSize);
+
+        float textMaxWidth = availableWidth - CheckboxSize - LabelGap;
+        if (textMaxWidth < 0) textMaxWidth = 0;
+        var textSize = ctx.MeasureText(Label, ResolvedInherited, textMaxWidth, null);
+        return new Size(
+            CheckboxSize + LabelGap + textSize.Width,
+            Math.Max(CheckboxSize, textSize.Height));
     }
 
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteContentBox;
-        // Center the checkbox in the content box
-        float x = box.X + (box.Width - CheckboxSize) / 2;
+        float x = Label is null ? box.X + (box.Width - CheckboxSize) / 2 : box.X;
         float y = box.Y + (box.Height - CheckboxSize) / 2;
         var checkRect = new Rect(x, y, CheckboxSize, CheckboxSize);
         var radius = new CornerRadius(CornerRadius);
@@ -109,6 +119,15 @@ public class CheckboxElement : Element
             var ringRadius = new CornerRadius(CornerRadius + offset);
             ctx.DrawRoundedRect(ringRect, ringRadius, Color.Transparent, _focusRingColor, new Thickness(2f));
         }
+
+        // Label
+        if (Label is not null)
+        {
+            float textX = box.X + CheckboxSize + LabelGap;
+            float textWidth = box.Width - CheckboxSize - LabelGap;
+            var textBounds = new Rect(textX, box.Y, textWidth, box.Height);
+            ctx.DrawText(Label, textBounds, ResolvedInherited, TextOverflow.Ellipsis, null);
+        }
     }
 
     internal override void PatchFrom(Element source)
@@ -122,6 +141,8 @@ public class CheckboxElement : Element
             CheckedColor = cb.CheckedColor;
             CheckmarkColor = cb.CheckmarkColor;
             CornerRadius = cb.CornerRadius;
+            Label = cb.Label;
+            LabelGap = cb.LabelGap;
             OnChanged = cb.OnChanged;
             IsChecked = cb.IsChecked;
         }

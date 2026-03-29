@@ -23,6 +23,8 @@ public class RadioButtonElement : Element
         }
     }
 
+    public string? Label { get; set; }
+    public float LabelGap { get; set; } = 8f;
     public string GroupName { get; set; } = "";
     public float RadioSize { get; set; } = 18f;
     public float BorderWidth { get; set; } = 2f;
@@ -71,6 +73,9 @@ public class RadioButtonElement : Element
     public static RadioButtonElement New(string groupName = "", bool isChecked = false) =>
         new() { GroupName = groupName, _isChecked = isChecked };
 
+    public static RadioButtonElement New(string groupName, bool isChecked, string label) =>
+        new() { GroupName = groupName, _isChecked = isChecked, Label = label };
+
     private void OnClick(ClickEvent evt)
     {
         if (IsChecked) return; // Already selected, no-op
@@ -114,7 +119,15 @@ public class RadioButtonElement : Element
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {
-        return new Size(RadioSize, RadioSize);
+        if (Label is null)
+            return new Size(RadioSize, RadioSize);
+
+        float textMaxWidth = availableWidth - RadioSize - LabelGap;
+        if (textMaxWidth < 0) textMaxWidth = 0;
+        var textSize = ctx.MeasureText(Label, ResolvedInherited, textMaxWidth, null);
+        return new Size(
+            RadioSize + LabelGap + textSize.Width,
+            Math.Max(RadioSize, textSize.Height));
     }
 
     public override void Render(IRenderContext ctx)
@@ -125,7 +138,7 @@ public class RadioButtonElement : Element
         // Use a canvas context for circle drawing
         var canvasCtx = ctx.CreateCanvasContext(box);
 
-        float localCx = box.Width / 2;
+        float localCx = Label is null ? box.Width / 2 : radius;
         float localCy = box.Height / 2;
 
         if (IsChecked)
@@ -147,6 +160,15 @@ public class RadioButtonElement : Element
             float offset = 3f;
             canvasCtx.DrawCircleStroke(new Point(localCx, localCy), radius + offset, _focusRingColor, 2f);
         }
+
+        // Label
+        if (Label is not null)
+        {
+            float textX = box.X + RadioSize + LabelGap;
+            float textWidth = box.Width - RadioSize - LabelGap;
+            var textBounds = new Rect(textX, box.Y, textWidth, box.Height);
+            ctx.DrawText(Label, textBounds, ResolvedInherited, TextOverflow.Ellipsis, null);
+        }
     }
 
     internal override void PatchFrom(Element source)
@@ -154,6 +176,8 @@ public class RadioButtonElement : Element
         base.PatchFrom(source);
         if (source is RadioButtonElement radio)
         {
+            Label = radio.Label;
+            LabelGap = radio.LabelGap;
             GroupName = radio.GroupName;
             RadioSize = radio.RadioSize;
             BorderWidth = radio.BorderWidth;

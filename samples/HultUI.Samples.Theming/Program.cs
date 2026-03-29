@@ -186,19 +186,19 @@ partial class ThemingDemo : Component
 
                     // Checkbox section
                     Section("Checkbox",
-                        Flex.Row(gap: 12).AlignItems(AlignItems.Center).Children(
-                            Checkbox.New(isChecked)
-                                .OnCheckedChanged(v => CheckboxValue = v),
-                            Text.New(isChecked ? "Checked" : "Unchecked").FontSize(14f)
-                        )
+                        Checkbox.New(isChecked, isChecked ? "Checked" : "Unchecked")
+                            .OnCheckedChanged(v => CheckboxValue = v)
                     ),
 
                     // Radio buttons section
                     Section("Radio Buttons",
                         Flex.Column(gap: 10).Children(
-                            BuildRadioOption("theme-radio", "Option A", radioValue),
-                            BuildRadioOption("theme-radio", "Option B", radioValue),
-                            BuildRadioOption("theme-radio", "Option C", radioValue)
+                            RadioButton.New("theme-radio", radioValue == "Option A", "Option A")
+                                .OnRadioChanged(_ => RadioValue = "Option A"),
+                            RadioButton.New("theme-radio", radioValue == "Option B", "Option B")
+                                .OnRadioChanged(_ => RadioValue = "Option B"),
+                            RadioButton.New("theme-radio", radioValue == "Option C", "Option C")
+                                .OnRadioChanged(_ => RadioValue = "Option C")
                         )
                     ),
 
@@ -231,15 +231,6 @@ partial class ThemingDemo : Component
             buttons[i] = btn;
         }
         return buttons;
-    }
-
-    private Element BuildRadioOption(string group, string label, string currentValue)
-    {
-        return Flex.Row(gap: 10).AlignItems(AlignItems.Center).Children(
-            RadioButton.New(group, currentValue == label)
-                .OnRadioChanged(_ => RadioValue = label),
-            Text.New(label).FontSize(14f)
-        );
     }
 
     private static Element Section(string title, Element content)
