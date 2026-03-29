@@ -51,6 +51,9 @@ public abstract class Element
         }
     }
 
+    // ──── Drag & Drop ────
+    public bool Draggable { get; set; }
+
     // ──── Focus ────
     public bool IsFocusable { get; set; }
 
@@ -220,6 +223,7 @@ public abstract class Element
         Position.CopyFrom(source.Position);
         Inherited.CopyFrom(source.Inherited);
         IsFocusable = source.IsFocusable;
+        Draggable = source.Draggable;
         _opacity = source._opacity;
         Role = source.Role;
         AccessibleName = source.AccessibleName;

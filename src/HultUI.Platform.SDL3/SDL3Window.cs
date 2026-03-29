@@ -271,6 +271,11 @@ public sealed unsafe class SDL3Window : IDisposable
             (uint)SDL_EventType.SDL_EVENT_KEY_DOWN or
             (uint)SDL_EventType.SDL_EVENT_KEY_UP => evt->key.windowID,
             (uint)SDL_EventType.SDL_EVENT_TEXT_INPUT => evt->text.windowID,
+            (uint)SDL_EventType.SDL_EVENT_DROP_BEGIN or
+            (uint)SDL_EventType.SDL_EVENT_DROP_FILE or
+            (uint)SDL_EventType.SDL_EVENT_DROP_TEXT or
+            (uint)SDL_EventType.SDL_EVENT_DROP_COMPLETE or
+            (uint)SDL_EventType.SDL_EVENT_DROP_POSITION => evt->drop.windowID,
             _ => default
         };
     }

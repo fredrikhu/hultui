@@ -30,5 +30,11 @@ public enum EventType : byte
     KeyUp,
     TextInput,
     Focus,
-    Blur
+    Blur,
+    DragStart,
+    DragEnter,
+    DragLeave,
+    DragOver,
+    Drop,
+    DragEnd
 }

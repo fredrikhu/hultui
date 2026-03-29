@@ -69,6 +69,34 @@ public sealed unsafe class EventTranslator
                 if (text is not null)
                     OnInputEvent?.Invoke(new InputEvent.TextInputInput(text));
                 break;
+
+            case (uint)SDL_EventType.SDL_EVENT_DROP_BEGIN:
+                OnInputEvent?.Invoke(new InputEvent.DropBeginInput());
+                break;
+
+            case (uint)SDL_EventType.SDL_EVENT_DROP_POSITION:
+                OnInputEvent?.Invoke(new InputEvent.DropPositionInput(evt->drop.x, evt->drop.y));
+                break;
+
+            case (uint)SDL_EventType.SDL_EVENT_DROP_FILE:
+            {
+                var path = Marshal.PtrToStringUTF8((IntPtr)evt->drop.data);
+                if (path is not null)
+                    OnInputEvent?.Invoke(new InputEvent.DropFileInput(path));
+                break;
+            }
+
+            case (uint)SDL_EventType.SDL_EVENT_DROP_TEXT:
+            {
+                var dropText = Marshal.PtrToStringUTF8((IntPtr)evt->drop.data);
+                if (dropText is not null)
+                    OnInputEvent?.Invoke(new InputEvent.DropTextInput(dropText));
+                break;
+            }
+
+            case (uint)SDL_EventType.SDL_EVENT_DROP_COMPLETE:
+                OnInputEvent?.Invoke(new InputEvent.DropCompleteInput());
+                break;
         }
     }
 
@@ -196,4 +224,9 @@ public abstract record InputEvent
     public record MouseWheelInput(float MouseX, float MouseY, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
     public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat) : InputEvent;
     public record TextInputInput(string Text) : InputEvent;
+    public record DropBeginInput() : InputEvent;
+    public record DropPositionInput(float X, float Y) : InputEvent;
+    public record DropFileInput(string Path) : InputEvent;
+    public record DropTextInput(string Text) : InputEvent;
+    public record DropCompleteInput() : InputEvent;
 }

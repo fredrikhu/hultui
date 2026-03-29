@@ -85,6 +85,15 @@ public static class ElementExtensions
     public static T Opacity<T>(this T el, float opacity) where T : Element { el.Opacity = opacity; return el; }
     public static T ZIndex<T>(this T el, int zIndex) where T : Element { el.Position.ZIndex = zIndex; return el; }
 
+    // ──── Drag & Drop ────
+    public static T Draggable<T>(this T el, bool draggable = true) where T : Element { el.Draggable = draggable; return el; }
+    public static T OnDragStart<T>(this T el, Action<DragStartEvent> handler) where T : Element { el.On(handler); return el; }
+    public static T OnDragEnter<T>(this T el, Action<DragEnterEvent> handler) where T : Element { el.On(handler); return el; }
+    public static T OnDragLeave<T>(this T el, Action<DragLeaveEvent> handler) where T : Element { el.On(handler); return el; }
+    public static T OnDragOver<T>(this T el, Action<DragOverEvent> handler) where T : Element { el.On(handler); return el; }
+    public static T OnDrop<T>(this T el, Action<DropEvent> handler) where T : Element { el.On(handler); return el; }
+    public static T OnDragEnd<T>(this T el, Action<DragEndEvent> handler) where T : Element { el.On(handler); return el; }
+
     // ──── Children ────
     public static T Children<T>(this T el, params Element[] children) where T : Element
     {

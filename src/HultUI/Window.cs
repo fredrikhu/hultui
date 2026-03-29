@@ -23,6 +23,18 @@ public sealed class Window : IDisposable
     private TextInputElement? _textInputDragTarget;
     private bool _disposed;
 
+    // ──── Drag & Drop state ────
+    private const float DragThreshold = 5f;
+    private Element? _potentialDragSource;
+    private Element? _dragSource;
+    private Point _dragStartPos;
+    private bool _isDragging;
+    private DragData? _dragData;
+    private Element? _dragHoveredElement;
+    private Point _lastDragPos;
+    private bool _dragAccepted;
+    private bool _isExternalDrag;
+
     internal SDL3Window PlatformWindow { get; }
     internal Application Application { get; }
 
@@ -136,6 +148,25 @@ public sealed class Window : IDisposable
                     break;
                 }
 
+                // If actively dragging (internal), update drag hover
+                if (_isDragging && !_isExternalDrag)
+                {
+                    UpdateDragHover(pos);
+                    break;
+                }
+
+                // Check if a potential drag should activate
+                if (_potentialDragSource is not null)
+                {
+                    float dx = pos.X - _dragStartPos.X;
+                    float dy = pos.Y - _dragStartPos.Y;
+                    if (dx * dx + dy * dy >= DragThreshold * DragThreshold)
+                    {
+                        StartInternalDrag(pos);
+                        break;
+                    }
+                }
+
                 var target = HitTester.HitTest(_root, pos);
                 _pointerState.UpdateHover(target, pos, move.Modifiers);
                 _lastHoveredElement = target;
@@ -160,6 +191,17 @@ public sealed class Window : IDisposable
             case InputEvent.MouseButtonInput button:
             {
                 var pos = new Point(button.X, button.Y);
+
+                // End internal drag on button up
+                if (!button.IsDown && _isDragging && !_isExternalDrag)
+                {
+                    EndInternalDrag(pos);
+                    break;
+                }
+
+                // Cancel potential drag on button up (didn't reach threshold)
+                if (!button.IsDown && _potentialDragSource is not null)
+                    _potentialDragSource = null;
 
                 // End scrollbar drag on button up
                 if (!button.IsDown && _scrollbarDragTarget is not null)
@@ -199,6 +241,17 @@ public sealed class Window : IDisposable
                     // Start pointer capture for text input drag selection
                     if (button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
                         _textInputDragTarget = dragInput;
+
+                    // Record potential drag source if the element (or ancestor) is draggable
+                    if (button.Button == 0 && _textInputDragTarget is null)
+                    {
+                        var draggable = FindDraggableAncestor(target);
+                        if (draggable is not null)
+                        {
+                            _potentialDragSource = draggable;
+                            _dragStartPos = pos;
+                        }
+                    }
                 }
                 else
                 {
@@ -273,6 +326,45 @@ public sealed class Window : IDisposable
                 EventDispatcher.Dispatch(new TextInputEvent { Text = textInput.Text }, target);
                 break;
             }
+
+            // ──── OS-level drag & drop ────
+            case InputEvent.DropBeginInput:
+            {
+                _isExternalDrag = true;
+                _isDragging = true;
+                _dragData = new DragData();
+                _dragHoveredElement = null;
+                _dragAccepted = false;
+                break;
+            }
+
+            case InputEvent.DropPositionInput dropPos:
+            {
+                if (!_isExternalDrag) break;
+                var pos = new Point(dropPos.X, dropPos.Y);
+                UpdateDragHover(pos);
+                break;
+            }
+
+            case InputEvent.DropFileInput dropFile:
+            {
+                if (_dragData is not null)
+                    _dragData.Files.Add(dropFile.Path);
+                break;
+            }
+
+            case InputEvent.DropTextInput dropText:
+            {
+                if (_dragData is not null)
+                    _dragData.Text = dropText.Text;
+                break;
+            }
+
+            case InputEvent.DropCompleteInput:
+            {
+                EndExternalDrag();
+                break;
+            }
         }
 
         // Any input event may have triggered visual changes via handlers,
@@ -314,6 +406,128 @@ public sealed class Window : IDisposable
             current = current.Parent;
         }
         return false;
+    }
+
+    // ──── Drag & Drop helpers ────
+
+    private static Element? FindDraggableAncestor(Element? target)
+    {
+        var current = target;
+        while (current is not null)
+        {
+            if (current.Draggable)
+                return current;
+            current = current.Parent;
+        }
+        return null;
+    }
+
+    private void StartInternalDrag(Point pos)
+    {
+        _dragSource = _potentialDragSource!;
+        _potentialDragSource = null;
+        _isDragging = true;
+        _isExternalDrag = false;
+        _dragData = new DragData();
+        _dragHoveredElement = null;
+        _dragAccepted = false;
+
+        var startEvt = new DragStartEvent { Position = pos, DragData = _dragData };
+        EventDispatcher.DispatchDirect(startEvt, _dragSource);
+
+        PlatformWindow.SetCursor(CursorType.Move);
+        UpdateDragHover(pos);
+    }
+
+    private void UpdateDragHover(Point pos)
+    {
+        if (_root is null || _dragData is null) return;
+        _lastDragPos = pos;
+
+        var target = HitTester.HitTest(_root, pos);
+
+        // Fire DragLeave / DragEnter when the hovered element changes
+        if (target != _dragHoveredElement)
+        {
+            if (_dragHoveredElement is not null)
+                EventDispatcher.DispatchDirect(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
+
+            _dragHoveredElement = target;
+            _dragAccepted = false;
+
+            if (target is not null)
+                EventDispatcher.DispatchDirect(new DragEnterEvent { Position = pos, DragData = _dragData }, target);
+        }
+
+        // Fire DragOver (bubbles) so ancestors can accept
+        if (target is not null)
+        {
+            var overEvt = new DragOverEvent { Position = pos, DragData = _dragData };
+            EventDispatcher.Dispatch(overEvt, target);
+            _dragAccepted = overEvt.Accepted;
+        }
+        else
+        {
+            _dragAccepted = false;
+        }
+
+        PlatformWindow.SetCursor(_dragAccepted ? CursorType.Move : CursorType.NotAllowed);
+    }
+
+    private void EndInternalDrag(Point pos)
+    {
+        if (_root is null || _dragData is null) { ResetDragState(); return; }
+
+        var target = HitTester.HitTest(_root, pos);
+
+        // Fire final DragOver to confirm acceptance
+        bool accepted = false;
+        if (target is not null)
+        {
+            var overEvt = new DragOverEvent { Position = pos, DragData = _dragData };
+            EventDispatcher.Dispatch(overEvt, target);
+            accepted = overEvt.Accepted;
+
+            if (accepted)
+                EventDispatcher.Dispatch(new DropEvent { Position = pos, DragData = _dragData }, target);
+        }
+
+        // Fire DragLeave on previously hovered element
+        if (_dragHoveredElement is not null)
+            EventDispatcher.DispatchDirect(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
+
+        // Fire DragEnd on the source
+        if (_dragSource is not null)
+            EventDispatcher.DispatchDirect(new DragEndEvent { Position = pos, DragData = _dragData, WasAccepted = accepted }, _dragSource);
+
+        // Restore cursor
+        var cursorTarget = HitTester.HitTest(_root, pos);
+        PlatformWindow.SetCursor(cursorTarget?.ResolvedInherited.Cursor ?? CursorType.Default);
+
+        ResetDragState();
+    }
+
+    private void EndExternalDrag()
+    {
+        if (_dragData is not null && _dragHoveredElement is not null && _dragAccepted)
+            EventDispatcher.Dispatch(new DropEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
+
+        if (_dragHoveredElement is not null && _dragData is not null)
+            EventDispatcher.DispatchDirect(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
+
+        PlatformWindow.SetCursor(CursorType.Default);
+        ResetDragState();
+    }
+
+    private void ResetDragState()
+    {
+        _potentialDragSource = null;
+        _dragSource = null;
+        _isDragging = false;
+        _isExternalDrag = false;
+        _dragData = null;
+        _dragHoveredElement = null;
+        _dragAccepted = false;
     }
 
     private static void ClearFlags(Element element, DirtyFlags flags)

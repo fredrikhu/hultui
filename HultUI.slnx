@@ -7,6 +7,7 @@
     <Project Path="samples/HultUI.Samples.Theming/HultUI.Samples.Theming.csproj" />
     <Project Path="samples/HultUI.Samples.Animation/HultUI.Samples.Animation.csproj" />
     <Project Path="samples/HultUI.Samples.ZIndex/HultUI.Samples.ZIndex.csproj" />
+    <Project Path="samples/HultUI.Samples.DragDrop/HultUI.Samples.DragDrop.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
