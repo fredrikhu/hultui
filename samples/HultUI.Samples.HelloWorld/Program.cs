@@ -52,7 +52,7 @@ var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.App
             MakeSidebarItem("#334155", "#334155", "Components"),
             MakeSidebarItem("#475569", "#475569", "Settings"),
             // TODO: This must be able to be done nicer
-            Box.New().Children(Image.New(imageSource).Padding(10).Size(160f, 160f * imageSource.IntrinsicSize.Height / imageSource.IntrinsicSize.Width)),
+            Box.New().Children(Image.New(imageSource).Size(Dimension.Percent(100), 164f * imageSource.IntrinsicSize.Height / imageSource.IntrinsicSize.Width)).Padding(10),
             sidebarFill = Box.New().FlexGrow(1).Background(Color.FromHex("#0F172A")).CornerRadius(6f)
         ),
 
