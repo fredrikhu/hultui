@@ -11,7 +11,11 @@ A cross-platform UI framework for C#/.NET. Build desktop applications with a flu
 - **Source generators** -- `[Reactive]` attribute generates Signal-backed properties
 - **Rich text rendering** -- HarfBuzz shaping, font fallback, emoji support, BiDi
 - **Built-in controls** -- text input, checkbox, radio button, scroll view, canvas
-- **Theme support** -- light/dark themes, runtime switching
+- **Animations** -- tween-based system with easing, delays, and chaining
+- **Drag and drop** -- internal element drag and OS file/text drops
+- **Custom window chrome** -- borderless windows with custom title bars and edge resize
+- **Multi-window** -- multiple windows with shared reactive state
+- **Theme support** -- light/dark themes, runtime switching, custom themes
 - **GPU-accelerated** -- SkiaSharp rendering on OpenGL via SDL3
 - **DevTools overlay** -- F12 to inspect elements, view layout bounds, and monitor performance
 - **Zero-dependency core** -- layout, reactivity, and events have no external NuGet dependencies
@@ -154,13 +158,23 @@ Press **F12** at runtime to toggle the DevTools overlay:
 - [Layout Guide](docs/LAYOUT.md) -- flexbox layout in depth
 - [Elements Reference](docs/ELEMENTS.md) -- all built-in elements and their properties
 - [Reactivity Guide](docs/REACTIVITY.md) -- signals, computed values, effects, and components
+- [Animations](docs/ANIMATIONS.md) -- tweens, easing, chaining, and cancellation
+- [Drag and Drop](docs/DRAG-AND-DROP.md) -- internal element drag and OS file/text drops
+- [Custom Window Chrome](docs/CUSTOM-CHROME.md) -- borderless windows with custom title bars
+- [Multi-Window](docs/MULTI-WINDOW.md) -- multiple windows with shared state
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
 
 ## Samples
 
 - [`HultUI.Samples.Minimal`](samples/HultUI.Samples.Minimal/) -- bare minimum app
-- [`HultUI.Samples.TodoList`](samples/HultUI.Samples.TodoList/) -- reactive todo list
 - [`HultUI.Samples.HelloWorld`](samples/HultUI.Samples.HelloWorld/) -- kitchen sink demo
+- [`HultUI.Samples.TodoList`](samples/HultUI.Samples.TodoList/) -- reactive todo list
+- [`HultUI.Samples.Theming`](samples/HultUI.Samples.Theming/) -- custom themes and runtime switching
+- [`HultUI.Samples.Animation`](samples/HultUI.Samples.Animation/) -- animation demos
+- [`HultUI.Samples.DragDrop`](samples/HultUI.Samples.DragDrop/) -- internal drag and OS file drops
+- [`HultUI.Samples.ZIndex`](samples/HultUI.Samples.ZIndex/) -- z-index layering
+- [`HultUI.Samples.MultiWindow`](samples/HultUI.Samples.MultiWindow/) -- multi-window with shared state
+- [`HultUI.Samples.CustomChrome`](samples/HultUI.Samples.CustomChrome/) -- borderless window with custom title bar
 
 ## Requirements
 
