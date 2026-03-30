@@ -9,6 +9,7 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 
 // State
 var isDark = false;
@@ -26,6 +27,9 @@ var toggleBtn = Box.New().Width(120).Padding(12)
     .AccessibleName("Toggle theme")
     .Children(Text.New("Dark Mode"));
 var toggleLabel = (TextElement)toggleBtn.Children[0];
+
+
+var imageSource = SkiaImageSource.FromFile("image.jpg");
 
 var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.Application).AccessibleName("HultUI Demo").Children(
 
@@ -47,6 +51,8 @@ var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.App
             MakeSidebarItem("#1E293B", "#1E293B", "Dashboard"),
             MakeSidebarItem("#334155", "#334155", "Components"),
             MakeSidebarItem("#475569", "#475569", "Settings"),
+            // TODO: This must be able to be done nicer
+            Box.New().Children(Image.New(imageSource).Padding(10).Size(160f, 160f * imageSource.IntrinsicSize.Height / imageSource.IntrinsicSize.Width)),
             sidebarFill = Box.New().FlexGrow(1).Background(Color.FromHex("#0F172A")).CornerRadius(6f)
         ),
 
