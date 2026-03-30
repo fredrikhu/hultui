@@ -511,7 +511,7 @@ public sealed class Window : IOverlayHost, IDisposable
             if (!_dragVisualLayoutDone)
             {
                 StyleResolver.Resolve(_dragVisual, Application.Theme);
-                _layoutEngine.PerformLayout(_dragVisual, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+                _layoutEngine.PerformLayout(_dragVisual, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, forceRootFill: false);
                 _dragVisualLayoutDone = true;
             }
 
@@ -709,7 +709,7 @@ public sealed class Window : IOverlayHost, IDisposable
         StyleResolver.Resolve(content, theme);
         entry.StyleResolved = true;
 
-        _layoutEngine.PerformLayout(content, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+        _layoutEngine.PerformLayout(content, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, forceRootFill: false);
         entry.LayoutDone = true;
 
         // Clamp to viewport so the overlay stays on screen
@@ -768,7 +768,7 @@ public sealed class Window : IOverlayHost, IDisposable
             if (!overlay.LayoutDone || content.DirtyFlags.HasFlag(DirtyFlags.Layout))
             {
                 _layoutEngine.PerformLayout(content,
-                    PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+                    PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, forceRootFill: false);
                 overlay.LayoutDone = true;
             }
 

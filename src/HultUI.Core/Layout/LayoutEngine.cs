@@ -13,12 +13,13 @@ public sealed class LayoutEngine
         _measureContext = measureContext;
     }
 
-    public void PerformLayout(Element root, float availableWidth, float availableHeight)
+    public void PerformLayout(Element root, float availableWidth, float availableHeight, bool forceRootFill = true)
     {
         var constraint = new LayoutConstraint(availableWidth, availableHeight);
-        // Only force size for auto-dimensioned roots; explicit sizes should be respected
-        float? fw = root.Box.Width.IsAuto ? availableWidth : null;
-        float? fh = root.Box.Height.IsAuto ? availableHeight : null;
+        // Only force size for auto-dimensioned roots when filling (e.g. window root).
+        // Overlays should size to content instead.
+        float? fw = forceRootFill && root.Box.Width.IsAuto ? availableWidth : null;
+        float? fh = forceRootFill && root.Box.Height.IsAuto ? availableHeight : null;
         ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
         ClearLayoutDirty(root);
     }
