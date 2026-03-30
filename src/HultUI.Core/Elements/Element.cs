@@ -54,6 +54,9 @@ public abstract class Element
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 
+    // ──── Window Chrome ────
+    public bool IsWindowDragRegion { get; set; }
+
     // ──── Focus ────
     public bool IsFocusable { get; set; }
 
@@ -84,6 +87,8 @@ public abstract class Element
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
         _handlers is not null && _handlers.ContainsKey(typeof(TEvent));
+
+    internal bool HasAnyEventHandlers => _handlers is not null && _handlers.Count > 0;
 
     internal void InvokeHandlers(ElementEvent evt, EventPhase phase)
     {
@@ -224,6 +229,7 @@ public abstract class Element
         Inherited.CopyFrom(source.Inherited);
         IsFocusable = source.IsFocusable;
         Draggable = source.Draggable;
+        IsWindowDragRegion = source.IsWindowDragRegion;
         _opacity = source._opacity;
         Role = source.Role;
         AccessibleName = source.AccessibleName;

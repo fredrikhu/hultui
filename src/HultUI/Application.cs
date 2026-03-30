@@ -52,10 +52,11 @@ public sealed class Application : IDisposable
     /// <summary>
     /// Creates an application with a primary window.
     /// </summary>
-    public Application(string title = "HultUI Application", int width = 800, int height = 600)
+    public Application(string title = "HultUI Application", int width = 800, int height = 600,
+        WindowStyle style = WindowStyle.Default)
     {
         _current = this;
-        CreateWindow(title, width, height);
+        CreateWindow(title, width, height, style);
     }
 
     /// <summary>
@@ -66,9 +67,10 @@ public sealed class Application : IDisposable
     /// <summary>
     /// Creates a new window managed by this application. Shares the application's theme.
     /// </summary>
-    public Window CreateWindow(string title, int width = 800, int height = 600)
+    public Window CreateWindow(string title, int width = 800, int height = 600,
+        WindowStyle style = WindowStyle.Default)
     {
-        var sdlWindow = new SDL3Window(title, width, height);
+        var sdlWindow = new SDL3Window(title, width, height, style);
         var window = new Window(this, sdlWindow);
         _windows.Add(window);
         return window;

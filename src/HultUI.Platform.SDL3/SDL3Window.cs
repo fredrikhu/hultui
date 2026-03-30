@@ -38,8 +38,18 @@ public sealed unsafe class SDL3Window : IDisposable
 
     public event Action? Resized;
 
-    public SDL3Window(string title, int width, int height)
+    public WindowStyle Style { get; }
+
+    /// <summary>
+    /// Delegate called by the SDL hit test callback. Receives logical (x, y) and
+    /// returns an SDL_HitTestResult value as int.
+    /// Set by Window.cs for borderless windows.
+    /// </summary>
+    public Func<int, int, int>? HitTestHandler { get; set; }
+
+    public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
     {
+        Style = style;
         EnsureSDLInitialized();
 
         // Set OpenGL attributes for SkiaSharp compatibility
@@ -56,6 +66,9 @@ public sealed unsafe class SDL3Window : IDisposable
         var flags = SDL_WindowFlags.SDL_WINDOW_OPENGL
             | SDL_WindowFlags.SDL_WINDOW_RESIZABLE
             | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY;
+
+        if (style == WindowStyle.Borderless)
+            flags |= SDL_WindowFlags.SDL_WINDOW_BORDERLESS;
 
         var titleBytes = MarshalUtf8(title);
         fixed (byte* titlePtr = titleBytes)
@@ -90,6 +103,11 @@ public sealed unsafe class SDL3Window : IDisposable
         // where SDL_PollEvent is blocked.
         _gcHandle = GCHandle.Alloc(this);
         SDL_AddEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
+
+        // For borderless windows, register the hit test callback so SDL knows
+        // which regions are draggable (title bar) and resizable (edges).
+        if (style == WindowStyle.Borderless)
+            SDL_SetWindowHitTest(_window, &HitTestNativeCallback, GCHandle.ToIntPtr(_gcHandle));
 
         UpdateSize();
         IsOpen = true;
@@ -185,6 +203,24 @@ public sealed unsafe class SDL3Window : IDisposable
     public void Close()
     {
         IsOpen = false;
+    }
+
+    // ──── Window management (for custom chrome) ────
+
+    public void Minimize() => SDL_MinimizeWindow(_window);
+    public void Maximize() => SDL_MaximizeWindow(_window);
+    public void Restore() => SDL_RestoreWindow(_window);
+
+    public bool IsMaximized =>
+        ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static SDL_HitTestResult HitTestNativeCallback(SDL_Window* window, SDL_Point* area, IntPtr data)
+    {
+        var self = (SDL3Window)GCHandle.FromIntPtr(data).Target!;
+        if (self.HitTestHandler is { } handler)
+            return (SDL_HitTestResult)handler(area->x, area->y);
+        return SDL_HitTestResult.SDL_HITTEST_NORMAL;
     }
 
     public void SwapBuffers()

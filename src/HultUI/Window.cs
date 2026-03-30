@@ -44,6 +44,17 @@ public sealed class Window : IDisposable
     public PerformanceCounters Performance => _perf;
     public DevToolsOverlay DevTools => _devTools;
     public bool IsOpen => PlatformWindow.IsOpen && !_disposed;
+    public WindowStyle Style => PlatformWindow.Style;
+
+    // ──── Window management (custom chrome) ────
+    public bool IsMaximized => PlatformWindow.IsMaximized;
+    public void Minimize() => PlatformWindow.Minimize();
+    public void Maximize() => PlatformWindow.Maximize();
+    public void Restore() => PlatformWindow.Restore();
+    public void ToggleMaximize() { if (IsMaximized) Restore(); else Maximize(); }
+
+    /// <summary>Width in pixels of the invisible resize border for borderless windows.</summary>
+    public int ResizeBorderWidth { get; set; } = 6;
 
     public event Action? Closed;
 
@@ -56,6 +67,9 @@ public sealed class Window : IDisposable
         _devTools = new DevToolsOverlay(_perf);
         PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
         PlatformWindow.Resized += OnWindowResized;
+
+        if (platformWindow.Style == WindowStyle.Borderless)
+            platformWindow.HitTestHandler = HandleWindowHitTest;
     }
 
     public void SetRoot(Element root)
@@ -591,10 +605,68 @@ public sealed class Window : IDisposable
             ClearAllFlags(child);
     }
 
-    internal void NotifyClosed()
+    public void Close()
     {
         PlatformWindow.Close();
         Closed?.Invoke();
+    }
+
+    internal void NotifyClosed() => Close();
+
+    // ──── Window chrome hit test ────
+
+    private int HandleWindowHitTest(int x, int y)
+    {
+        int w = PlatformWindow.LogicalWidth;
+        int h = PlatformWindow.LogicalHeight;
+        int border = ResizeBorderWidth;
+
+        // Don't show resize handles when maximized
+        if (!IsMaximized)
+        {
+            bool left = x < border;
+            bool right = x >= w - border;
+            bool top = y < border;
+            bool bottom = y >= h - border;
+
+            if (top && left) return 2;     // SDL_HITTEST_RESIZE_TOPLEFT
+            if (top && right) return 4;    // SDL_HITTEST_RESIZE_TOPRIGHT
+            if (bottom && left) return 8;  // SDL_HITTEST_RESIZE_BOTTOMLEFT
+            if (bottom && right) return 6; // SDL_HITTEST_RESIZE_BOTTOMRIGHT
+            if (top) return 3;             // SDL_HITTEST_RESIZE_TOP
+            if (bottom) return 7;          // SDL_HITTEST_RESIZE_BOTTOM
+            if (left) return 9;            // SDL_HITTEST_RESIZE_LEFT
+            if (right) return 5;           // SDL_HITTEST_RESIZE_RIGHT
+        }
+
+        // Check element tree for drag regions.
+        // If the hit element itself has event handlers (e.g. a button inside the title bar),
+        // return NORMAL so the click reaches our event system instead of starting a window drag.
+        if (_root is not null)
+        {
+            var hit = HitTester.HitTest(_root, new Point(x, y));
+            if (hit is not null && !hit.HasAnyEventHandlers && HasWindowDragAncestor(hit))
+                return 1; // SDL_HITTEST_DRAGGABLE
+        }
+
+        return 0; // SDL_HITTEST_NORMAL
+    }
+
+    private static bool HasWindowDragAncestor(Element element)
+    {
+        // Walk from the hit element up toward the root. If we find an element with
+        // event handlers before finding a drag region, the click belongs to that
+        // interactive element (e.g. a button inside the title bar), not the drag region.
+        Element? current = element;
+        while (current is not null)
+        {
+            if (current.IsWindowDragRegion)
+                return true;
+            if (current.HasAnyEventHandlers)
+                return false;
+            current = current.Parent;
+        }
+        return false;
     }
 
     public void Dispose()

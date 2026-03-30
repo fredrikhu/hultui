@@ -87,6 +87,7 @@ public static class ElementExtensions
 
     // ──── Drag & Drop ────
     public static T Draggable<T>(this T el, bool draggable = true) where T : Element { el.Draggable = draggable; return el; }
+    public static T WindowDrag<T>(this T el, bool isDragRegion = true) where T : Element { el.IsWindowDragRegion = isDragRegion; return el; }
     public static T OnDragStart<T>(this T el, Action<DragStartEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragEnter<T>(this T el, Action<DragEnterEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragLeave<T>(this T el, Action<DragLeaveEvent> handler) where T : Element { el.On(handler); return el; }
