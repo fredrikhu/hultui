@@ -244,15 +244,18 @@ static Element MakeInputControlsDemo()
                 Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
                     Checkbox.New().OnCheckedChanged(v => Console.WriteLine($"Notifications: {v}")),
                     Text.New("Enable notifications").FontSize(13f)
-                ),
+                )
+                .Tooltip("Enable notifications"),
                 Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
                     Checkbox.New(true).OnCheckedChanged(v => Console.WriteLine($"Dark sidebar: {v}")),
                     Text.New("Dark sidebar").FontSize(13f)
-                ),
+                )
+                .Tooltip("Dark sidebar"),
                 Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
                     Checkbox.New().OnCheckedChanged(v => Console.WriteLine($"Compact mode: {v}")),
                     Text.New("Compact mode").FontSize(13f)
                 )
+                .Tooltip("Compact mode")
             ),
 
             // Radio buttons

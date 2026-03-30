@@ -89,6 +89,27 @@ public class TextInputElement : BoxElement
         On<PointerMoveEvent>(OnPointerMove);
         On<PointerUpEvent>(OnPointerUp);
         On<ClickEvent>(OnClick);
+
+        ContextMenuItems = BuildContextMenuItems;
+    }
+
+    private IReadOnlyList<ContextMenuItem> BuildContextMenuItems()
+    {
+        bool hasSelection = HasSelection;
+        bool hasClipboard = Clipboard?.GetText() is not null;
+
+        return
+        [
+            new ContextMenuItem { Label = "Cut", ShortcutHint = "Ctrl+X", IsDisabled = !hasSelection,
+                Action = () => { if (HasSelection && Clipboard is not null) { Clipboard.SetText(SelectedText); DeleteSelection(); NotifyChanged(); MarkPaintDirty(); } } },
+            new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
+                Action = () => { if (HasSelection && Clipboard is not null) Clipboard.SetText(SelectedText); } },
+            new ContextMenuItem { Label = "Paste", ShortcutHint = "Ctrl+V", IsDisabled = !hasClipboard,
+                Action = () => { if (Clipboard?.GetText() is { } t) { DeleteSelection(); _text = _text.Insert(_cursorPos, t); _cursorPos += t.Length; _selectionStart = _cursorPos; NotifyChanged(); MarkPaintDirty(); } } },
+            ContextMenuItem.Separator(),
+            new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _text.Length == 0,
+                Action = () => { _selectionStart = 0; _cursorPos = _text.Length; MarkPaintDirty(); } },
+        ];
     }
 
     /// <summary>True while the user is dragging to select text. Used by Application for pointer capture.</summary>

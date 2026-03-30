@@ -57,6 +57,15 @@ public abstract class Element
     // ──── Window Chrome ────
     public bool IsWindowDragRegion { get; set; }
 
+    // ──── Overlay ────
+    public IOverlayHost? OverlayHost { get; internal set; }
+
+    // ──── Tooltip ────
+    public string? TooltipText { get; set; }
+
+    // ──── Context Menu ────
+    public Func<IReadOnlyList<ContextMenuItem>>? ContextMenuItems { get; set; }
+
     // ──── Focus ────
     public bool IsFocusable { get; set; }
 
@@ -230,6 +239,8 @@ public abstract class Element
         IsFocusable = source.IsFocusable;
         Draggable = source.Draggable;
         IsWindowDragRegion = source.IsWindowDragRegion;
+        TooltipText = source.TooltipText;
+        ContextMenuItems = source.ContextMenuItems;
         _opacity = source._opacity;
         Role = source.Role;
         AccessibleName = source.AccessibleName;

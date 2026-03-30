@@ -21,6 +21,8 @@ public sealed class Theme
     public TextInputTheme TextInput { get; init; } = new();
     public CheckboxTheme Checkbox { get; init; } = new();
     public RadioButtonTheme RadioButton { get; init; } = new();
+    public TooltipTheme Tooltip { get; init; } = new();
+    public ContextMenuTheme ContextMenu { get; init; } = new();
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;
@@ -63,5 +65,31 @@ public sealed class Theme
         Danger = new Color(239, 68, 68),                 // red-500
         DangerText = Color.White,
         FocusRing = new Color(99, 102, 241, 180),       // indigo-500 with alpha
+        Tooltip = new TooltipTheme
+        {
+            Background = new Color(51, 65, 85),          // slate-700
+            TextColor = new Color(226, 232, 240),        // slate-200
+        },
+        ContextMenu = new ContextMenuTheme
+        {
+            Background = new Color(30, 41, 59),          // slate-800
+            BorderColor = new Color(51, 65, 85),         // slate-700
+            TextColor = new Color(226, 232, 240),        // slate-200
+            DisabledTextColor = new Color(100, 116, 139),// slate-500
+            HoverBackground = new Color(51, 65, 85),     // slate-700
+            SeparatorColor = new Color(51, 65, 85),      // slate-700
+            ShortcutTextColor = new Color(148, 163, 184),// slate-400
+        },
     };
+}
+
+public sealed class TooltipTheme
+{
+    public Color Background { get; init; } = new(15, 23, 42);       // slate-900
+    public Color TextColor { get; init; } = new(248, 250, 252);     // slate-50
+    public float CornerRadius { get; init; } = 4f;
+    public Thickness Padding { get; init; } = new(6, 10);
+    public float FontSize { get; init; } = 13f;
+    public float ShowDelay { get; init; } = 0.5f;
+    public float Gap { get; init; } = 4f;
 }

@@ -46,6 +46,9 @@ public static class StyleResolver
 
         foreach (var child in element.Children)
         {
+            // Propagate overlay host down the tree
+            child.OverlayHost = element.OverlayHost;
+
             if (child.DirtyFlags.HasFlag(DirtyFlags.Style))
                 ResolveRecursive(child, resolved, theme);
         }

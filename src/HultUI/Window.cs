@@ -1,3 +1,5 @@
+using HultUI.Core.Animation;
+using HultUI.Core.Builders;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -10,7 +12,7 @@ using HultUI.Platform.SDL3;
 
 namespace HultUI;
 
-public sealed class Window : IDisposable
+public sealed class Window : IOverlayHost, IDisposable
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
@@ -22,6 +24,19 @@ public sealed class Window : IDisposable
     private ScrollViewElement? _scrollbarDragTarget;
     private TextInputElement? _textInputDragTarget;
     private bool _disposed;
+
+    // ──── Overlay state ────
+    private readonly List<OverlayEntry> _overlays = [];
+    private int _nextOverlayId = 1;
+
+    // ──── Tooltip state ────
+    private Element? _tooltipOwner;
+    private TweenHandle? _tooltipDelayTween;
+    private OverlayHandle _tooltipOverlay;
+
+    // ──── Context menu state ────
+    private OverlayHandle _contextMenuOverlay;
+    private ContextMenuElement? _contextMenuElement;
 
     // ──── Drag & Drop state ────
     private const float DragThreshold = 5f;
@@ -56,6 +71,8 @@ public sealed class Window : IDisposable
     /// <summary>Width in pixels of the invisible resize border for borderless windows.</summary>
     public int ResizeBorderWidth { get; set; } = 6;
 
+    public Theme? ActiveTheme => Application.Theme;
+
     public event Action? Closed;
 
     internal Window(Application application, SDL3Window platformWindow)
@@ -75,6 +92,7 @@ public sealed class Window : IDisposable
     public void SetRoot(Element root)
     {
         _root = root;
+        root.OverlayHost = this;
     }
 
     internal Element? Root => _root;
@@ -84,7 +102,8 @@ public sealed class Window : IDisposable
         _root?.MarkStyleDirty();
     }
 
-    internal bool NeedsRender => _root is not null && _root.DirtyFlags != DirtyFlags.None;
+    internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
+        || _overlays.Count > 0;
 
     private void OnWindowResized()
     {
@@ -128,6 +147,9 @@ public sealed class Window : IDisposable
         if (_isDragging && !_isExternalDrag)
             RenderDragGhost(ctx);
 
+        // Overlay layer (tooltips, context menus, popups)
+        RenderOverlays(ctx);
+
         // DevTools overlay (second pass, not timed)
         _perf.ElementCount = PerformanceCounters.CountElements(_root);
         _devTools.Render(ctx, _root, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
@@ -136,6 +158,8 @@ public sealed class Window : IDisposable
 
         // Clear remaining dirty flags after full render
         ClearAllFlags(_root);
+        foreach (var overlay in _overlays)
+            ClearAllFlags(overlay.Content);
 
         // Present + swap
         _perf.BeginPresent();
@@ -187,13 +211,17 @@ public sealed class Window : IDisposable
                     }
                 }
 
-                var target = HitTester.HitTest(_root, pos);
+                // Check overlays first (topmost layer), then main tree
+                var target = HitTestOverlays(pos) ?? HitTester.HitTest(_root, pos);
                 _pointerState.UpdateHover(target, pos, move.Modifiers);
                 _lastHoveredElement = target;
 
                 // Update cursor based on hovered element's resolved style
                 var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
                 PlatformWindow.SetCursor(cursor);
+
+                // Tooltip tracking
+                UpdateTooltipHover(target);
 
                 // Update DevTools inspector
                 if (_devTools.IsEnabled)
@@ -211,6 +239,10 @@ public sealed class Window : IDisposable
             case InputEvent.MouseButtonInput button:
             {
                 var pos = new Point(button.X, button.Y);
+
+                // Hide tooltip on any mouse button press
+                if (button.IsDown)
+                    HideTooltip();
 
                 // End internal drag on button up
                 if (!button.IsDown && _isDragging && !_isExternalDrag)
@@ -239,31 +271,44 @@ public sealed class Window : IDisposable
                     // Don't break — still dispatch PointerUp/Click to the target
                 }
 
-                var target = HitTester.HitTest(_root, pos);
+                // Check overlays first, then main tree
+                var overlayTarget = HitTestOverlays(pos);
+                var target = overlayTarget ?? HitTester.HitTest(_root, pos);
                 if (target is null) break;
+
+                bool isOverlayHit = overlayTarget is not null;
 
                 if (button.IsDown)
                 {
+                    // Dismiss overlays when clicking outside them
+                    if (!isOverlayHit && _overlays.Count > 0)
+                        DismissOverlaysOnOutsideClick();
+
                     // Check if click is on a scrollbar — walk up from target to find a ScrollViewElement
-                    if (button.Button == 0 && TryStartScrollbarDrag(target, pos))
+                    if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
                         break;
 
-                    var focusTarget = FindFocusableAncestor(target);
-                    _focusManager.SetFocus(focusTarget);
+                    // Don't change focus when clicking overlay elements
+                    // (e.g. context menu on TextInput should keep selection visible)
+                    if (!isOverlayHit)
+                    {
+                        var focusTarget = FindFocusableAncestor(target);
+                        _focusManager.SetFocus(focusTarget);
 
-                    // Provide clipboard to text inputs when focused
-                    if (focusTarget is TextInputElement textInput)
-                        textInput.Clipboard = Clipboard;
+                        // Provide clipboard to text inputs when focused
+                        if (focusTarget is TextInputElement textInput)
+                            textInput.Clipboard = Clipboard;
+                    }
 
                     var downEvt = _pointerState.HandlePointerDown(target, pos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(downEvt, target);
 
                     // Start pointer capture for text input drag selection
-                    if (button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
+                    if (!isOverlayHit && button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
                         _textInputDragTarget = dragInput;
 
                     // Record potential drag source if the element (or ancestor) is draggable
-                    if (button.Button == 0 && _textInputDragTarget is null)
+                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -272,6 +317,10 @@ public sealed class Window : IDisposable
                             _dragStartPos = pos;
                         }
                     }
+
+                    // Right-click: show context menu
+                    if (!isOverlayHit && button.Button == 2)
+                        TryShowContextMenu(target, pos);
                 }
                 else
                 {
@@ -309,6 +358,30 @@ public sealed class Window : IDisposable
                         _devTools.HoveredElement = null;
                     break;
                 }
+
+                // Context menu keyboard navigation
+                if (key.IsDown && _contextMenuElement is not null)
+                {
+                    switch (key.KeyCode)
+                    {
+                        case KeyCode.Up:
+                            _contextMenuElement.MoveSelection(-1);
+                            break;
+                        case KeyCode.Down:
+                            _contextMenuElement.MoveSelection(1);
+                            break;
+                        case KeyCode.Enter:
+                            _contextMenuElement.ActivateSelected();
+                            break;
+                        case KeyCode.Escape:
+                            CloseContextMenu();
+                            break;
+                        default:
+                            goto normalKeyHandling;
+                    }
+                    break;
+                }
+                normalKeyHandling:
 
                 // Tab / Shift+Tab focus traversal
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
@@ -612,6 +685,252 @@ public sealed class Window : IDisposable
     }
 
     internal void NotifyClosed() => Close();
+
+    // ──── Overlay system (IOverlayHost) ────
+
+    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true)
+    {
+        var id = _nextOverlayId++;
+        var entry = new OverlayEntry
+        {
+            Id = id,
+            Content = content,
+            X = x,
+            Y = y,
+            DismissOnOutsideClick = dismissOnOutsideClick,
+            IsHitTestable = hitTestable,
+        };
+
+        // Set overlay host so elements inside the overlay can show/close overlays
+        content.OverlayHost = this;
+
+        // Resolve style and layout immediately so we can clamp to viewport
+        var theme = Application.Theme;
+        StyleResolver.Resolve(content, theme);
+        entry.StyleResolved = true;
+
+        _layoutEngine.PerformLayout(content, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+        entry.LayoutDone = true;
+
+        // Clamp to viewport so the overlay stays on screen
+        float vw = PlatformWindow.LogicalWidth;
+        float vh = PlatformWindow.LogicalHeight;
+        if (entry.X + content.Layout.Width > vw)
+            entry.X = Math.Max(0, vw - content.Layout.Width);
+        if (entry.Y + content.Layout.Height > vh)
+            entry.Y = Math.Max(0, vh - content.Layout.Height);
+
+        _overlays.Add(entry);
+        _root?.MarkPaintDirty();
+        return new OverlayHandle { Id = id };
+    }
+
+    public void CloseOverlay(OverlayHandle handle)
+    {
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            if (_overlays[i].Id == handle.Id)
+            {
+                _overlays.RemoveAt(i);
+                _root?.MarkPaintDirty();
+                return;
+            }
+        }
+    }
+
+    public void UpdateOverlayPosition(OverlayHandle handle, float x, float y)
+    {
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            if (_overlays[i].Id == handle.Id)
+            {
+                _overlays[i].X = x;
+                _overlays[i].Y = y;
+                _root?.MarkPaintDirty();
+                return;
+            }
+        }
+    }
+
+    private void RenderOverlays(IRenderContext ctx)
+    {
+        var theme = Application.Theme;
+        foreach (var overlay in _overlays)
+        {
+            var content = overlay.Content;
+
+            if (!overlay.StyleResolved || content.DirtyFlags.HasFlag(DirtyFlags.Style))
+            {
+                StyleResolver.Resolve(content, theme);
+                overlay.StyleResolved = true;
+            }
+
+            if (!overlay.LayoutDone || content.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            {
+                _layoutEngine.PerformLayout(content,
+                    PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+                overlay.LayoutDone = true;
+            }
+
+            ctx.PushTranslate(overlay.X, overlay.Y);
+            ElementRenderer.RenderTree(content, ctx);
+            ctx.Pop();
+        }
+    }
+
+    private Element? HitTestOverlays(Point pos)
+    {
+        // Test back-to-front: last overlay = topmost, checked first
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            var overlay = _overlays[i];
+            if (!overlay.IsHitTestable) continue;
+            var localPoint = new Point(pos.X - overlay.X, pos.Y - overlay.Y);
+            var hit = HitTester.HitTest(overlay.Content, localPoint);
+            if (hit is not null)
+                return hit;
+        }
+        return null;
+    }
+
+    private void DismissOverlaysOnOutsideClick()
+    {
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            if (_overlays[i].DismissOnOutsideClick)
+            {
+                // Clear context menu state if this overlay is the context menu
+                if (_overlays[i].Id == _contextMenuOverlay.Id)
+                {
+                    _contextMenuOverlay = default;
+                    _contextMenuElement = null;
+                }
+                _overlays.RemoveAt(i);
+                _root?.MarkPaintDirty();
+            }
+        }
+    }
+
+    // ──── Tooltip ────
+
+    private void UpdateTooltipHover(Element? hitTarget)
+    {
+        var (owner, text) = FindTooltipOwner(hitTarget);
+
+        // Same owner — nothing to do
+        if (owner == _tooltipOwner) return;
+
+        // Owner changed — hide current tooltip/cancel pending timer
+        HideTooltip();
+
+        if (owner is null || text is null) return;
+
+        // Start show delay
+        _tooltipOwner = owner;
+        var theme = Application.Theme;
+        float delay = theme.Tooltip.ShowDelay;
+        _tooltipDelayTween = Animate.Value(0f, 1f, _ => { })
+            .Duration(delay)
+            .OnComplete(() => ShowTooltipOverlay(owner, text))
+            .Start();
+    }
+
+    private void ShowTooltipOverlay(Element owner, string text)
+    {
+        _tooltipDelayTween = null;
+
+        // Owner may have been removed from tree during the delay
+        if (owner.OverlayHost is null) return;
+
+        var theme = Application.Theme;
+        var tt = theme.Tooltip;
+
+        var tooltip = BoxElement.New()
+            .Background(tt.Background)
+            .CornerRadius(tt.CornerRadius)
+            .Padding(tt.Padding)
+            .Children(
+                TextElement.New(text)
+                    .FontSize(tt.FontSize)
+                    .TextColor(tt.TextColor)
+            );
+
+        // Position below the owner element, centered horizontally
+        float x = owner.Layout.AbsoluteContentBox.X;
+        float y = owner.Layout.AbsoluteContentBox.Y + owner.Layout.Height + tt.Gap;
+
+        _tooltipOverlay = ShowOverlay(tooltip, x, y, dismissOnOutsideClick: false, hitTestable: false);
+    }
+
+    private void HideTooltip()
+    {
+        if (_tooltipDelayTween is { } tween)
+        {
+            tween.Cancel();
+            _tooltipDelayTween = null;
+        }
+
+        if (_tooltipOverlay.IsValid)
+        {
+            CloseOverlay(_tooltipOverlay);
+            _tooltipOverlay = default;
+        }
+
+        _tooltipOwner = null;
+    }
+
+    private static (Element? owner, string? text) FindTooltipOwner(Element? element)
+    {
+        var current = element;
+        while (current is not null)
+        {
+            if (current.TooltipText is not null)
+                return (current, current.TooltipText);
+            current = current.Parent;
+        }
+        return (null, null);
+    }
+
+    // ──── Context Menu ────
+
+    private void TryShowContextMenu(Element target, Point pos)
+    {
+        var (owner, itemsProvider) = FindContextMenuOwner(target);
+        if (owner is null || itemsProvider is null) return;
+
+        var items = itemsProvider();
+        if (items.Count == 0) return;
+
+        // Close any existing context menu first
+        CloseContextMenu();
+
+        var theme = Application.Theme;
+        var menuElement = new ContextMenuElement(items, theme.ContextMenu, CloseContextMenu);
+        _contextMenuElement = menuElement;
+        _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
+    }
+
+    private void CloseContextMenu()
+    {
+        if (_contextMenuOverlay.IsValid)
+        {
+            CloseOverlay(_contextMenuOverlay);
+            _contextMenuOverlay = default;
+        }
+        _contextMenuElement = null;
+    }
+
+    private static (Element? owner, Func<IReadOnlyList<ContextMenuItem>>? itemsProvider) FindContextMenuOwner(Element? element)
+    {
+        var current = element;
+        while (current is not null)
+        {
+            if (current.ContextMenuItems is not null)
+                return (current, current.ContextMenuItems);
+            current = current.Parent;
+        }
+        return (null, null);
+    }
 
     // ──── Window chrome hit test ────
 

@@ -95,6 +95,13 @@ public static class ElementExtensions
     public static T OnDrop<T>(this T el, Action<DropEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragEnd<T>(this T el, Action<DragEndEvent> handler) where T : Element { el.On(handler); return el; }
 
+    // ──── Tooltip ────
+    public static T Tooltip<T>(this T el, string text) where T : Element { el.TooltipText = text; return el; }
+
+    // ──── Context Menu ────
+    public static T ContextMenu<T>(this T el, Func<IReadOnlyList<ContextMenuItem>> itemsProvider) where T : Element { el.ContextMenuItems = itemsProvider; return el; }
+    public static T ContextMenu<T>(this T el, IReadOnlyList<ContextMenuItem> items) where T : Element { el.ContextMenuItems = () => items; return el; }
+
     // ──── Children ────
     public static T Children<T>(this T el, params Element[] children) where T : Element
     {
