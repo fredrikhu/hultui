@@ -25,6 +25,7 @@ public readonly record struct Dimension
     /// </summary>
     public float? Resolve(float referenceSize) => Unit switch
     {
+        // TODO: The other units need to be able to be resolved?
         DimensionUnit.Pixels => Value,
         DimensionUnit.Percent => Value / 100f * referenceSize,
         _ => null

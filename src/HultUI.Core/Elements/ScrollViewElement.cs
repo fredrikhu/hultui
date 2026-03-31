@@ -7,10 +7,10 @@ namespace HultUI.Core.Elements;
 
 public partial class ScrollViewElement : BoxElement
 {
-    private float _scrollOffsetX;
-    private float _scrollOffsetY;
-    private float _contentWidth;
-    private float _contentHeight;
+    protected float _scrollOffsetX;
+    protected float _scrollOffsetY;
+    protected float _contentWidth;
+    protected float _contentHeight;
 
     public float ScrollOffsetX
     {
@@ -56,7 +56,7 @@ public partial class ScrollViewElement : BoxElement
         MarkPaintDirty();
     }
 
-    internal void UpdateContentSize()
+    internal virtual void UpdateContentSize()
     {
         float maxRight = 0;
         float maxBottom = 0;
@@ -79,14 +79,14 @@ public partial class ScrollViewElement : BoxElement
         _scrollOffsetY = ClampY(_scrollOffsetY);
     }
 
-    private float ClampX(float value)
+    protected float ClampX(float value)
     {
         var viewportWidth = Layout.AbsoluteContentBox.Width;
         float maxScroll = Math.Max(0, _contentWidth - viewportWidth);
         return Math.Clamp(value, 0, maxScroll);
     }
 
-    private float ClampY(float value)
+    protected float ClampY(float value)
     {
         var viewportHeight = Layout.AbsoluteContentBox.Height;
         float maxScroll = Math.Max(0, _contentHeight - viewportHeight);

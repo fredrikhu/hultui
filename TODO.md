@@ -1,18 +1,11 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
-- **Context Menu** — right-click menu using overlay system. ContextMenuTheme (background, border, text/disabled/hover/separator/shortcut colors, corner radius, padding, font sizes, min width). ContextMenuElement with hover highlight, separators, shortcut hints. `Func<IReadOnlyList<ContextMenuItem>>` on Element for dynamic items. `.ContextMenu()` fluent API. Built-in TextInput context menu (Cut/Copy/Paste/Select All with dynamic disabled state). Keyboard navigation (Up/Down/Enter/Escape). Light/Dark theme presets. Dismiss on outside click.
+- **VirtualList** — `VirtualListElement<T>` extending ScrollViewElement. Fixed item height for O(1) offset calculation. Spacer-based positioning: invisible spacer pushes visible items to correct virtual positions. Element recycling pool. 1-item overscan for smooth scrolling. Fluent API: `.ItemHeight(float)`, `.Items(IReadOnlyList<T>)`, `.RenderWith(Func<T, Element>)`. Inherits scroll input, scrollbar, hit testing from ScrollViewElement. 14 unit tests.
 
 ## Up Next (in order)
 
-### 1. VirtualList
-- Virtualized scrolling for large lists — only materialize visible items
-- Fixed item height for efficient offset calculation
-- Reuse/recycle element instances as user scrolls
-- Integrate with existing ScrollViewElement for scroll input
-- Builder API: `.ItemHeight(float)`, `.Items(IReadOnlyList<T>)`, `.ItemTemplate(Func<T, Element>)`
-
-### 2. Multi-line Text Input
+### Multi-line Text Input
 - Multi-line editing with word wrapping and vertical scrolling
 - Cross-line text selection (shift+click, shift+arrow, click-drag across lines)
 - Decide: extend existing `TextInputElement` or create separate `TextAreaElement` — pick whichever is best technically (user doesn't have a preference)

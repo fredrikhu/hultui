@@ -95,6 +95,11 @@ public static class ElementExtensions
     public static T OnDrop<T>(this T el, Action<DropEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragEnd<T>(this T el, Action<DragEndEvent> handler) where T : Element { el.On(handler); return el; }
 
+    // ──── VirtualList properties ────
+    public static VirtualListElement<T> ItemHeight<T>(this VirtualListElement<T> el, float height) { el.ItemHeight = height; return el; }
+    public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
+    public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
+
     // ──── Tooltip ────
     public static T Tooltip<T>(this T el, string text) where T : Element { el.TooltipText = text; return el; }
 
