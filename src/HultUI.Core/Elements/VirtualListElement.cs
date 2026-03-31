@@ -124,39 +124,50 @@ public sealed class VirtualListElement<T> : ScrollViewElement
         var contentBox = Layout.AbsoluteContentBox;
         var viewportWidth = contentBox.Width;
 
+        // Style-resolve and layout only newly created children (those still dirty).
+        // Reused elements already have valid internal layout from a prior frame.
         foreach (var child in Children)
         {
-            // Style resolution — applies theme and resolves inherited styles
-            if (_activeTheme is not null)
-                StyleResolver.Resolve(child, _activeTheme);
-            else
-                StyleResolver.Resolve(child);
-
-            // Layout each child within the viewport width
-            float childHeight = child == _spacer ? _spacer.Box.Height.Resolve(0) ?? 0 : _itemHeight;
-            _childLayoutEngine.PerformLayout(child, viewportWidth, childHeight);
-        }
-
-        // Reposition children to their correct absolute positions.
-        // PerformLayout starts at absoluteX/Y = 0, so offset everything
-        // to the content box origin. The spacer sits at Y=0 (relative to content),
-        // visible items follow at their virtual Y positions.
-        float yOffset = 0;
-        foreach (var child in Children)
-        {
-            float dx = contentBox.X;
-            float dy = contentBox.Y + yOffset;
-
-            child.Layout = child.Layout with
+            if (child.DirtyFlags.HasFlag(DirtyFlags.Style))
             {
-                AbsoluteX = child.Layout.AbsoluteX + dx,
-                AbsoluteY = child.Layout.AbsoluteY + dy
-            };
+                if (_activeTheme is not null)
+                    StyleResolver.Resolve(child, _activeTheme);
+                else
+                    StyleResolver.Resolve(child);
+            }
 
-            OffsetDescendants(child, dx, dy);
-
-            yOffset += child.Layout.Height + child.Layout.Margin.Vertical;
+            if (child.DirtyFlags.HasFlag(DirtyFlags.Layout))
+                _childLayoutEngine.PerformLayout(child, viewportWidth, _itemHeight);
         }
+
+        // Position every child at its exact virtual Y coordinate.
+        // Using analytical positions (index * itemHeight) avoids two pitfalls:
+        //  - accumulating from Layout.Height would use stale cached spacer height
+        //  - additive offsetting would double-shift reused elements
+        for (int i = 0; i < Children.Count; i++)
+        {
+            var child = Children[i];
+            float targetY = child == _spacer
+                ? contentBox.Y
+                : contentBox.Y + (_visibleStart + (i - 1)) * _itemHeight;
+
+            SetAbsolutePosition(child, contentBox.X, targetY);
+        }
+    }
+
+    private static void SetAbsolutePosition(Element element, float targetAbsX, float targetAbsY)
+    {
+        float dx = targetAbsX - element.Layout.AbsoluteX;
+        float dy = targetAbsY - element.Layout.AbsoluteY;
+
+        if (dx == 0 && dy == 0) return;
+
+        element.Layout = element.Layout with
+        {
+            AbsoluteX = element.Layout.AbsoluteX + dx,
+            AbsoluteY = element.Layout.AbsoluteY + dy
+        };
+        OffsetDescendants(element, dx, dy);
     }
 
     private static void OffsetDescendants(Element element, float dx, float dy)
