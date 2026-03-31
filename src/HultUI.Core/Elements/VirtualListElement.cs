@@ -1,5 +1,7 @@
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
+using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
@@ -27,6 +29,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement
     // Currently materialized elements (index → element)
     private readonly Dictionary<int, Element> _activeElements = [];
 
+    // Captured during normal pipeline phases for inline child processing
+    private Theme? _activeTheme;
+    private LayoutEngine? _childLayoutEngine;
+
     public VirtualListElement()
     {
         // Column direction so children stack vertically
@@ -34,6 +40,18 @@ public sealed class VirtualListElement<T> : ScrollViewElement
     }
 
     public static new VirtualListElement<T> New() => new();
+
+    protected internal override void ApplyTheme(Theme theme)
+    {
+        base.ApplyTheme(theme);
+        _activeTheme = theme;
+    }
+
+    internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
+    {
+        _childLayoutEngine ??= new LayoutEngine(ctx);
+        return base.MeasureContent(availableWidth, availableHeight, ctx);
+    }
 
     public IReadOnlyList<T> Items
     {
@@ -87,7 +105,71 @@ public sealed class VirtualListElement<T> : ScrollViewElement
         _scrollOffsetY = ClampY(_scrollOffsetY);
 
         // Compute which items are visible and sync children
+        int prevStart = _visibleStart;
+        int prevEnd = _visibleEnd;
         SyncVisibleItems();
+
+        // Children are created during the render pass, after the normal
+        // style/layout phases have completed. Run inline style resolution
+        // and layout so the children are renderable immediately.
+        if (_visibleStart != prevStart || _visibleEnd != prevEnd)
+            LayoutVisibleChildren();
+    }
+
+    private void LayoutVisibleChildren()
+    {
+        if (_childLayoutEngine is null || Children.Count == 0)
+            return;
+
+        var contentBox = Layout.AbsoluteContentBox;
+        var viewportWidth = contentBox.Width;
+
+        foreach (var child in Children)
+        {
+            // Style resolution — applies theme and resolves inherited styles
+            if (_activeTheme is not null)
+                StyleResolver.Resolve(child, _activeTheme);
+            else
+                StyleResolver.Resolve(child);
+
+            // Layout each child within the viewport width
+            float childHeight = child == _spacer ? _spacer.Box.Height.Resolve(0) ?? 0 : _itemHeight;
+            _childLayoutEngine.PerformLayout(child, viewportWidth, childHeight);
+        }
+
+        // Reposition children to their correct absolute positions.
+        // PerformLayout starts at absoluteX/Y = 0, so offset everything
+        // to the content box origin. The spacer sits at Y=0 (relative to content),
+        // visible items follow at their virtual Y positions.
+        float yOffset = 0;
+        foreach (var child in Children)
+        {
+            float dx = contentBox.X;
+            float dy = contentBox.Y + yOffset;
+
+            child.Layout = child.Layout with
+            {
+                AbsoluteX = child.Layout.AbsoluteX + dx,
+                AbsoluteY = child.Layout.AbsoluteY + dy
+            };
+
+            OffsetDescendants(child, dx, dy);
+
+            yOffset += child.Layout.Height + child.Layout.Margin.Vertical;
+        }
+    }
+
+    private static void OffsetDescendants(Element element, float dx, float dy)
+    {
+        foreach (var child in element.Children)
+        {
+            child.Layout = child.Layout with
+            {
+                AbsoluteX = child.Layout.AbsoluteX + dx,
+                AbsoluteY = child.Layout.AbsoluteY + dy
+            };
+            OffsetDescendants(child, dx, dy);
+        }
     }
 
     private void SyncVisibleItems()
