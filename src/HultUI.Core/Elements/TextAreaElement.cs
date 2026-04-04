@@ -253,17 +253,17 @@ public class TextAreaElement : BoxElement
     internal (int line, int col) CursorToLineCol(int pos, float wrapWidth, ResolvedInheritedStyle style)
     {
         var starts = GetLineStarts(wrapWidth, style);
-        // Find the line containing pos — last line where lineStart <= pos
-        int line = starts.Count - 1;
-        for (int i = starts.Count - 1; i >= 0; i--)
+        // Binary search for the last line where lineStart <= pos
+        int lo = 0, hi = starts.Count - 1;
+        while (lo < hi)
         {
-            if (starts[i] <= pos)
-            {
-                line = i;
-                break;
-            }
+            int mid = (lo + hi + 1) / 2;
+            if (starts[mid] <= pos)
+                lo = mid;
+            else
+                hi = mid - 1;
         }
-        return (line, pos - starts[line]);
+        return (lo, pos - starts[lo]);
     }
 
     /// <summary>
@@ -730,8 +730,11 @@ public class TextAreaElement : BoxElement
 
     public override void Render(IRenderContext ctx)
     {
-        _renderCtx = ctx;
-        _lineHeight = 0; // re-measure with real context
+        if (_renderCtx != ctx)
+        {
+            _renderCtx = ctx;
+            _lineHeight = 0; // re-measure only when context changes
+        }
 
         var origBorder = BorderColor;
         if (_focused) BorderColor = FocusBorderColor;
@@ -746,14 +749,15 @@ public class TextAreaElement : BoxElement
         int lineCount = starts.Count;
         float totalHeight = lineCount * lh;
 
-        // Auto-scroll to keep cursor visible — only when cursor moved,
-        // so mouse-wheel scroll can freely move the viewport away from the cursor.
-        var (cursorLine, cursorCol) = CursorToLineCol(_cursorPos, wrapWidth, style);
-        float cursorY = cursorLine * lh;
         float maxScroll = Math.Max(0, totalHeight - contentBox.Height);
+        int cursorLine = -1;
+
+        // Auto-scroll to keep cursor visible — only when cursor moved
         if (_needsScrollToCursor)
         {
             _needsScrollToCursor = false;
+            (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
+            float cursorY = cursorLine * lh;
             if (cursorY - _scrollOffsetY < 0)
                 _scrollOffsetY = cursorY;
             if (cursorY + lh - _scrollOffsetY > contentBox.Height)
@@ -792,8 +796,7 @@ public class TextAreaElement : BoxElement
                 {
                     string lineText = _text[lineStart..displayEnd];
                     float lineY = contentBox.Y + i * lh - _scrollOffsetY;
-                    float lineWidth = MeasureSubstring(lineStart, displayEnd - lineStart, style);
-                    var lineRect = new Rect(contentBox.X, lineY, lineWidth, lh);
+                    var lineRect = new Rect(contentBox.X, lineY, wrapWidth, lh);
                     ctx.DrawText(lineText, lineRect, style, TextOverflow.Clip, 1);
                 }
             }
@@ -802,6 +805,8 @@ public class TextAreaElement : BoxElement
         // Draw cursor
         if (_focused)
         {
+            if (cursorLine < 0)
+                (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
             int cursorLineStart = starts[cursorLine];
             float cx = contentBox.X + MeasureSubstring(cursorLineStart, _cursorPos - cursorLineStart, style);
             float cy = contentBox.Y + cursorLine * lh - _scrollOffsetY;
