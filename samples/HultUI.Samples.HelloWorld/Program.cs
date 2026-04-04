@@ -227,7 +227,7 @@ static Element MakeInputControlsDemo()
 {
     var statusLabel = Text.New("Type in the text field, toggle checkboxes, or select a radio option.");
 
-    return Flex.Row(gap: 16).FlexShrink(0).Children(
+    return Flex.Row(gap: 16).FlexShrink(0).MaxHeight(220).Children(
 
         // Left column: name, checkboxes, radios, status
         Flex.Column(gap: 12).FlexShrink(0).Padding(16)
@@ -295,7 +295,6 @@ static Element MakeInputControlsDemo()
             Text.New("Notes:").FontSize(14f).FontWeight(FontWeight.SemiBold),
             TextArea.New()
                 .PlaceholderText("Write some notes...")
-                .OnTextChanged(text => Console.WriteLine($"Notes: {text.Length} chars"))
                 .FlexGrow(1).MinHeight(120)
                 .Background(Color.FromHex("#FFFFFF")).CornerRadius(4f)
                 .BorderColor(Color.FromHex("#CBD5E1"))
