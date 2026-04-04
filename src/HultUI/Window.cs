@@ -23,6 +23,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private Element? _lastHoveredElement;
     private ScrollViewElement? _scrollbarDragTarget;
     private TextInputElement? _textInputDragTarget;
+    private TextAreaElement? _textAreaDragTarget;
     private bool _disposed;
 
     // ──── Overlay state ────
@@ -192,6 +193,12 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
+                if (_textAreaDragTarget is not null)
+                {
+                    _textAreaDragTarget.UpdateDragPosition(pos);
+                    break;
+                }
+
                 // If actively dragging (internal), update drag hover
                 if (_isDragging && !_isExternalDrag)
                 {
@@ -271,6 +278,12 @@ public sealed class Window : IOverlayHost, IDisposable
                     // Don't break — still dispatch PointerUp/Click to the target
                 }
 
+                if (!button.IsDown && _textAreaDragTarget is not null)
+                {
+                    _textAreaDragTarget.EndDrag();
+                    _textAreaDragTarget = null;
+                }
+
                 // Check overlays first, then main tree
                 var overlayTarget = HitTestOverlays(pos);
                 var target = overlayTarget ?? HitTester.HitTest(_root, pos);
@@ -298,6 +311,8 @@ public sealed class Window : IOverlayHost, IDisposable
                         // Provide clipboard to text inputs when focused
                         if (focusTarget is TextInputElement textInput)
                             textInput.Clipboard = Clipboard;
+                        else if (focusTarget is TextAreaElement textArea)
+                            textArea.Clipboard = Clipboard;
                     }
 
                     var downEvt = _pointerState.HandlePointerDown(target, pos, button.Button, button.Modifiers);
@@ -306,9 +321,11 @@ public sealed class Window : IOverlayHost, IDisposable
                     // Start pointer capture for text input drag selection
                     if (!isOverlayHit && button.Button == 0 && target is TextInputElement dragInput && dragInput.IsDragging)
                         _textInputDragTarget = dragInput;
+                    else if (!isOverlayHit && button.Button == 0 && target is TextAreaElement dragArea && dragArea.IsDragging)
+                        _textAreaDragTarget = dragArea;
 
                     // Record potential drag source if the element (or ancestor) is draggable
-                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null)
+                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -394,6 +411,8 @@ public sealed class Window : IOverlayHost, IDisposable
                     // Provide clipboard to text inputs when focused via Tab
                     if (_focusManager.FocusedElement is TextInputElement tabFocusedInput)
                         tabFocusedInput.Clipboard = Clipboard;
+                    else if (_focusManager.FocusedElement is TextAreaElement tabFocusedArea)
+                        tabFocusedArea.Clipboard = Clipboard;
                     break;
                 }
 

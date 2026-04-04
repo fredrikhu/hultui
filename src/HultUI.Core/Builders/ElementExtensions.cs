@@ -61,6 +61,10 @@ public static class ElementExtensions
     public static T PlaceholderText<T>(this T el, string text) where T : TextInputElement { el.Placeholder = text; return el; }
     public static T OnTextChanged<T>(this T el, Action<string> handler) where T : TextInputElement { el.TextChanged = handler; return el; }
 
+    // ──── TextArea properties ────
+    public static TextAreaElement PlaceholderText(this TextAreaElement el, string text) { el.Placeholder = text; return el; }
+    public static TextAreaElement OnTextChanged(this TextAreaElement el, Action<string> handler) { el.TextChanged = handler; return el; }
+
     // ──── Checkbox properties ────
     public static T OnCheckedChanged<T>(this T el, Action<bool> handler) where T : CheckboxElement { el.OnChanged = handler; return el; }
 

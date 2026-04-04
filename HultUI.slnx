@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/samples/">
+    <Project Path="samples/HultUi.Samples.FedoraSetup/HultUi.Samples.FedoraSetup.csproj" />
     <Project Path="samples/HultUI.Samples.HelloWorld/HultUI.Samples.HelloWorld.csproj" />
     <Project Path="samples/HultUI.Samples.Minimal/HultUI.Samples.Minimal.csproj" />
     <Project Path="samples/HultUI.Samples.TodoList/HultUI.Samples.TodoList.csproj" />

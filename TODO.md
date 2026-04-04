@@ -1,15 +1,9 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
-- **VirtualList** — `VirtualListElement<T>` extending ScrollViewElement. Fixed item height for O(1) offset calculation. Spacer-based positioning: invisible spacer pushes visible items to correct virtual positions. Element recycling pool. 1-item overscan for smooth scrolling. Fluent API: `.ItemHeight(float)`, `.Items(IReadOnlyList<T>)`, `.RenderWith(Func<T, Element>)`. Inherits scroll input, scrollbar, hit testing from ScrollViewElement. 14 unit tests.
+- **TextArea** — Separate `TextAreaElement` (not extending TextInputElement). Word wrapping with word-boundary breaks. 2D cursor navigation (Up/Down/Home/End per line, Ctrl+Home/End for document). Cross-line selection via shift+arrows, shift+click, click-drag. Vertical scroll with cursor auto-follow and scrollbar. Enter inserts newlines. Triple-click selects line. Context menu with cut/copy/paste/select-all. Reuses TextInputTheme for styling. Wired into Window for drag-capture and clipboard. 41 unit tests.
 
 ## Up Next (in order)
-
-### Multi-line Text Input
-- Multi-line editing with word wrapping and vertical scrolling
-- Cross-line text selection (shift+click, shift+arrow, click-drag across lines)
-- Decide: extend existing `TextInputElement` or create separate `TextAreaElement` — pick whichever is best technically (user doesn't have a preference)
-- Integrate with existing clipboard, undo/redo, and context menu
 
 ## Deferred
 - IME composition / candidate list support (basic text input works, full CJK composition later)

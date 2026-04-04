@@ -83,6 +83,7 @@ public static class AccessibilityTreeBuilder
     internal static AccessibilityRole InferRole(Element element) => element switch
     {
         TextInputElement => AccessibilityRole.TextInput,
+        TextAreaElement => AccessibilityRole.TextInput,
         CheckboxElement => AccessibilityRole.Checkbox,
         RadioButtonElement => AccessibilityRole.RadioButton,
         TextElement => AccessibilityRole.Label,
