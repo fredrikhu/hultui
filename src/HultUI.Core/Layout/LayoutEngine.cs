@@ -1,3 +1,4 @@
+using System.Buffers;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -146,10 +147,11 @@ public sealed class LayoutEngine
 
         // ── Phase 1: Measure all children to get hypothetical sizes ──
         // Use original mainAvailable (not unlimited) so children get proper constraints
-        var items = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
-
+        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
+        try
+        {
         // ── Phase 2: Collect items into lines ──
-        var lines = CollectLines(items, mainDistribute, mainGap, isWrap);
+        var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
         // ── Phase 3: Resolve flex grow/shrink per line ──
         foreach (var line in lines)
@@ -218,8 +220,22 @@ public sealed class LayoutEngine
                     forcedH = item.MainSize;
                 }
 
-                float childAbsX = isRow ? contentAbsX + mainOffset : contentAbsX + crossOffset;
-                float childAbsY = isRow ? contentAbsY + crossOffset : contentAbsY + mainOffset;
+                // Pre-compute cross offset from hypothetical cross size so
+                // ComputeLayout receives correct absolute positions on cache
+                // misses, avoiding OffsetDescendants for the common case
+                float prelimCrossOffset = ComputeAlignOffset(alignSelf, line.CrossSize, item.CrossSize);
+
+                float childAbsX, childAbsY;
+                if (isRow)
+                {
+                    childAbsX = contentAbsX + mainOffset;
+                    childAbsY = contentAbsY + crossOffset + prelimCrossOffset;
+                }
+                else
+                {
+                    childAbsX = contentAbsX + crossOffset + prelimCrossOffset;
+                    childAbsY = contentAbsY + mainOffset;
+                }
 
                 ComputeLayout(child, childConstraint, childAbsX, childAbsY, forcedWidth: forcedW, forcedHeight: forcedH);
 
@@ -272,14 +288,20 @@ public sealed class LayoutEngine
         return isRow
             ? new Size(actualTotalMain, actualTotalCross)
             : new Size(actualTotalCross, actualTotalMain);
+        }
+        finally
+        {
+            ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+        }
     }
 
     // ── Flex helpers ──
 
-    private List<FlexItem> MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
+    private (FlexItem[] Array, int Count) MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
         float mainAvailable, float crossAvailable)
     {
-        var items = new List<FlexItem>(children.Count);
+        var array = ArrayPool<FlexItem>.Shared.Rent(Math.Max(1, children.Count));
+        int count = 0;
 
         for (int i = 0; i < children.Count; i++)
         {
@@ -318,57 +340,61 @@ public sealed class LayoutEngine
                 hypotheticalCross = isRow ? measured.Height : measured.Width;
             }
 
-            items.Add(new FlexItem(child, hypotheticalMain, hypotheticalCross));
+            array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross);
         }
 
-        return items;
+        return (array, count);
     }
 
-    private static List<FlexLine> CollectLines(List<FlexItem> items, float mainAvailable, float gap, bool isWrap)
+    private static List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
+        float mainAvailable, float gap, bool isWrap)
     {
         var lines = new List<FlexLine>();
 
-        if (!isWrap || items.Count == 0)
+        if (!isWrap || itemCount == 0)
         {
-            // Single line: reuse the items list directly (caller no longer needs it)
-            lines.Add(new FlexLine(items));
+            // Single line: slice directly into the rented array
+            lines.Add(new FlexLine(new ArraySegment<FlexItem>(itemsArray, 0, itemCount)));
             return lines;
         }
 
-        // Multi-line: break into lines when items overflow
-        var currentLineItems = new List<FlexItem>();
+        // Multi-line: break into lines when items overflow.
+        // Each line is a contiguous segment of the same array — no per-line allocation.
+        int lineStart = 0;
+        int lineItemCount = 0;
         float currentLineMain = 0;
 
-        for (int i = 0; i < items.Count; i++)
+        for (int i = 0; i < itemCount; i++)
         {
-            var item = items[i];
-            float itemMainWithGap = item.MainSize + (currentLineItems.Count > 0 ? gap : 0);
+            var item = itemsArray[i];
+            float itemMainWithGap = item.MainSize + (lineItemCount > 0 ? gap : 0);
 
-            if (currentLineItems.Count > 0 && currentLineMain + itemMainWithGap > mainAvailable)
+            if (lineItemCount > 0 && currentLineMain + itemMainWithGap > mainAvailable)
             {
-                // Start new line
-                lines.Add(new FlexLine(currentLineItems));
-                currentLineItems = new List<FlexItem>();
+                lines.Add(new FlexLine(new ArraySegment<FlexItem>(itemsArray, lineStart, lineItemCount)));
+                lineStart = i;
+                lineItemCount = 0;
                 currentLineMain = 0;
-                itemMainWithGap = item.MainSize; // no gap for first item
+                itemMainWithGap = item.MainSize;
             }
 
-            currentLineItems.Add(item);
+            lineItemCount++;
             currentLineMain += itemMainWithGap;
         }
 
-        if (currentLineItems.Count > 0)
-            lines.Add(new FlexLine(currentLineItems));
+        if (lineItemCount > 0)
+            lines.Add(new FlexLine(new ArraySegment<FlexItem>(itemsArray, lineStart, lineItemCount)));
 
         return lines;
     }
 
     private static void ResolveFlexGrowShrink(FlexLine line, float mainAvailable, float gap)
     {
+        var items = line.Items;
         float totalMainSize = 0;
-        for (int i = 0; i < line.Items.Count; i++)
+        for (int i = 0; i < items.Count; i++)
         {
-            totalMainSize += line.Items[i].MainSize;
+            totalMainSize += items[i].MainSize;
             if (i > 0) totalMainSize += gap;
         }
 
@@ -377,19 +403,19 @@ public sealed class LayoutEngine
         if (remainingSpace > 0)
         {
             float totalGrow = 0;
-            foreach (var item in line.Items)
+            foreach (var item in items)
                 totalGrow += item.Element.Flex.FlexGrow;
 
             if (totalGrow > 0)
             {
-                for (int i = 0; i < line.Items.Count; i++)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    var item = line.Items[i];
+                    var item = items[i];
                     float grow = item.Element.Flex.FlexGrow;
                     if (grow > 0)
                     {
                         float extra = remainingSpace * (grow / totalGrow);
-                        line.Items[i] = item with { MainSize = item.MainSize + extra };
+                        items[i] = item with { MainSize = item.MainSize + extra };
                     }
                 }
             }
@@ -397,19 +423,19 @@ public sealed class LayoutEngine
         else if (remainingSpace < 0)
         {
             float totalShrink = 0;
-            foreach (var item in line.Items)
+            foreach (var item in items)
                 totalShrink += item.Element.Flex.FlexShrink * item.MainSize;
 
             if (totalShrink > 0)
             {
-                for (int i = 0; i < line.Items.Count; i++)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    var item = line.Items[i];
+                    var item = items[i];
                     float shrinkFactor = item.Element.Flex.FlexShrink * item.MainSize;
                     if (shrinkFactor > 0)
                     {
                         float reduction = -remainingSpace * (shrinkFactor / totalShrink);
-                        line.Items[i] = item with { MainSize = Math.Max(0, item.MainSize - reduction) };
+                        items[i] = item with { MainSize = Math.Max(0, item.MainSize - reduction) };
                     }
                 }
             }
@@ -591,4 +617,4 @@ public sealed class LayoutEngine
 
 internal record struct FlexItem(Element Element, float MainSize, float CrossSize);
 
-internal record struct FlexLine(List<FlexItem> Items, float CrossSize = 0);
+internal record struct FlexLine(ArraySegment<FlexItem> Items, float CrossSize = 0);
