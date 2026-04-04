@@ -55,25 +55,21 @@ public sealed class LayoutEngine
         contentAvailW = Math.Max(0, contentAvailW);
         contentAvailH = Math.Max(0, contentAvailH);
 
-        // Separate flow children from absolutely positioned
-        List<Element>? absChildren = null;
-        var flowChildren = new List<Element>();
-        foreach (var child in element.Children)
+        // Count flow vs absolute children without allocating partition lists
+        var children = element.Children;
+        int flowCount = 0;
+        bool hasAbsolute = false;
+        for (int i = 0; i < children.Count; i++)
         {
-            if (child.Position.Type == PositionType.Absolute)
-            {
-                absChildren ??= [];
-                absChildren.Add(child);
-            }
+            if (children[i].Position.Type == PositionType.Absolute)
+                hasAbsolute = true;
             else
-            {
-                flowChildren.Add(child);
-            }
+                flowCount++;
         }
 
         // If leaf node, measure intrinsic content
         Size contentSize;
-        if (flowChildren.Count == 0)
+        if (flowCount == 0)
         {
             contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
         }
@@ -85,7 +81,7 @@ public sealed class LayoutEngine
                 ? resolvedHeight != null
                 : resolvedWidth != null;
 
-            contentSize = LayoutFlexChildren(element, flowChildren, contentAvailW, contentAvailH,
+            contentSize = LayoutFlexChildren(element, children, contentAvailW, contentAvailH,
                 contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
                 contentAbsY: absoluteY + outerSpacing.Top + margin.Top,
                 hasDefiniteCross: hasDefiniteCross);
@@ -103,12 +99,15 @@ public sealed class LayoutEngine
             AbsoluteY = absoluteY + margin.Top
         };
 
-        // Layout absolute children
-        if (absChildren is not null)
+        // Layout absolute children by scanning directly — no list needed
+        if (hasAbsolute)
         {
             var contentBox = element.Layout.AbsoluteContentBox;
-            foreach (var absChild in absChildren)
-                LayoutAbsoluteChild(absChild, contentBox);
+            for (int i = 0; i < children.Count; i++)
+            {
+                if (children[i].Position.Type == PositionType.Absolute)
+                    LayoutAbsoluteChild(children[i], contentBox);
+            }
         }
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
@@ -123,7 +122,7 @@ public sealed class LayoutEngine
         return resultSize;
     }
 
-    private Size LayoutFlexChildren(Element container, List<Element> children,
+    private Size LayoutFlexChildren(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY,
         bool hasDefiniteCross = true)
     {
@@ -277,7 +276,7 @@ public sealed class LayoutEngine
 
     // ── Flex helpers ──
 
-    private List<FlexItem> MeasureFlexItems(List<Element> children, bool isRow,
+    private List<FlexItem> MeasureFlexItems(IReadOnlyList<Element> children, bool isRow,
         float mainAvailable, float crossAvailable)
     {
         var items = new List<FlexItem>(children.Count);
@@ -285,6 +284,8 @@ public sealed class LayoutEngine
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
+            if (child.Position.Type == PositionType.Absolute)
+                continue;
             var childBox = child.Box;
 
             float? basisOrSize = child.Flex.FlexBasis.IsAuto
@@ -329,8 +330,8 @@ public sealed class LayoutEngine
 
         if (!isWrap || items.Count == 0)
         {
-            // Single line: all items on one line
-            lines.Add(new FlexLine(new List<FlexItem>(items)));
+            // Single line: reuse the items list directly (caller no longer needs it)
+            lines.Add(new FlexLine(items));
             return lines;
         }
 
