@@ -27,6 +27,10 @@ public class TextAreaElement : BoxElement
     // Preferred column (in pixels) for up/down navigation
     private float _preferredX = -1;
 
+    // Set when the cursor moves; cleared after Render scrolls to it.
+    // This prevents scroll-wheel offset from being overridden every frame.
+    private bool _needsScrollToCursor;
+
     public string Text
     {
         get => _text;
@@ -235,6 +239,14 @@ public class TextAreaElement : BoxElement
     private int LineCount(float wrapWidth, ResolvedInheritedStyle style) =>
         GetLineStarts(wrapWidth, style).Count;
 
+    /// <summary>Number of visible lines in the viewport, used for PageUp/PageDown.</summary>
+    private int GetPageLineCount()
+    {
+        float viewportHeight = Layout.AbsoluteContentBox.Height;
+        float lh = GetLineHeight(ResolvedInherited);
+        return Math.Max(1, (int)(viewportHeight / lh) - 1);
+    }
+
     /// <summary>
     /// Returns (lineIndex, columnOffset) for a given cursor position.
     /// </summary>
@@ -322,6 +334,7 @@ public class TextAreaElement : BoxElement
         _cursorPos += t.Length;
         _selectionStart = _cursorPos;
         _preferredX = -1;
+        _needsScrollToCursor = true;
         InvalidateLines();
     }
 
@@ -352,6 +365,14 @@ public class TextAreaElement : BoxElement
 
             case KeyCode.Down:
                 MoveCursorVertical(1, shift);
+                break;
+
+            case KeyCode.PageUp:
+                MoveCursorVertical(-GetPageLineCount(), shift);
+                break;
+
+            case KeyCode.PageDown:
+                MoveCursorVertical(GetPageLineCount(), shift);
                 break;
 
             case KeyCode.Home:
@@ -393,6 +414,7 @@ public class TextAreaElement : BoxElement
                         _cursorPos--;
                     }
                     _selectionStart = _cursorPos;
+                    _needsScrollToCursor = true;
                     InvalidateLines();
                 }
                 _preferredX = -1;
@@ -463,6 +485,7 @@ public class TextAreaElement : BoxElement
         _cursorPos = pos;
         if (!shift) _selectionStart = pos;
         _preferredX = -1;
+        _needsScrollToCursor = true;
         _isDragging = true;
         MarkPaintDirty();
     }
@@ -472,6 +495,7 @@ public class TextAreaElement : BoxElement
         if (!_isDragging) return;
         _cursorPos = PositionFromPoint(evt.Position);
         _preferredX = -1;
+        _needsScrollToCursor = true;
         MarkPaintDirty();
     }
 
@@ -488,6 +512,7 @@ public class TextAreaElement : BoxElement
             int we = pos;
             while (we < _text.Length && !IsWordBreak(_text[we])) we++;
             _cursorPos = we;
+            _needsScrollToCursor = true;
             MarkPaintDirty();
         }
         else if (evt.ClickCount >= 3)
@@ -500,6 +525,7 @@ public class TextAreaElement : BoxElement
             _selectionStart = starts[line];
             int lineEnd = line + 1 < starts.Count ? starts[line + 1] : _text.Length;
             _cursorPos = lineEnd;
+            _needsScrollToCursor = true;
             MarkPaintDirty();
         }
     }
@@ -522,6 +548,7 @@ public class TextAreaElement : BoxElement
         if (!_isDragging) return;
         _cursorPos = PositionFromPoint(position);
         _preferredX = -1;
+        _needsScrollToCursor = true;
         MarkPaintDirty();
     }
 
@@ -535,12 +562,14 @@ public class TextAreaElement : BoxElement
         {
             _cursorPos = delta < 0 ? SelectionStart : SelectionEnd;
             _selectionStart = _cursorPos;
+            _needsScrollToCursor = true;
             return;
         }
 
         _cursorPos = Math.Clamp(_cursorPos + delta, 0, _text.Length);
         if (!extendSelection)
             _selectionStart = _cursorPos;
+        _needsScrollToCursor = true;
     }
 
     private void MoveCursorTo(int pos, bool extendSelection)
@@ -548,6 +577,7 @@ public class TextAreaElement : BoxElement
         _cursorPos = Math.Clamp(pos, 0, _text.Length);
         if (!extendSelection)
             _selectionStart = _cursorPos;
+        _needsScrollToCursor = true;
     }
 
     private void MoveCursorVertical(int lineDelta, bool extendSelection)
@@ -640,6 +670,7 @@ public class TextAreaElement : BoxElement
         _cursorPos = start;
         _selectionStart = start;
         _preferredX = -1;
+        _needsScrollToCursor = true;
         InvalidateLines();
     }
 
@@ -715,14 +746,19 @@ public class TextAreaElement : BoxElement
         int lineCount = starts.Count;
         float totalHeight = lineCount * lh;
 
-        // Auto-scroll to keep cursor visible
+        // Auto-scroll to keep cursor visible — only when cursor moved,
+        // so mouse-wheel scroll can freely move the viewport away from the cursor.
         var (cursorLine, cursorCol) = CursorToLineCol(_cursorPos, wrapWidth, style);
         float cursorY = cursorLine * lh;
-        if (cursorY - _scrollOffsetY < 0)
-            _scrollOffsetY = cursorY;
-        if (cursorY + lh - _scrollOffsetY > contentBox.Height)
-            _scrollOffsetY = cursorY + lh - contentBox.Height;
         float maxScroll = Math.Max(0, totalHeight - contentBox.Height);
+        if (_needsScrollToCursor)
+        {
+            _needsScrollToCursor = false;
+            if (cursorY - _scrollOffsetY < 0)
+                _scrollOffsetY = cursorY;
+            if (cursorY + lh - _scrollOffsetY > contentBox.Height)
+                _scrollOffsetY = cursorY + lh - contentBox.Height;
+        }
         _scrollOffsetY = Math.Clamp(_scrollOffsetY, 0, maxScroll);
 
         ctx.PushClip(contentBox);
