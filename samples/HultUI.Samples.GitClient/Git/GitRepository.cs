@@ -1,0 +1,376 @@
+using System.Globalization;
+
+namespace GitClient.Git;
+
+/// <summary>
+/// High-level interface to a git repository via the git CLI.
+/// </summary>
+public class GitRepository
+{
+    private const string FieldSep = "\x1f"; // ASCII Unit Separator
+    private const string RecordSep = "\x1e"; // ASCII Record Separator
+
+    public string Path { get; }
+
+    public GitRepository(string path)
+    {
+        Path = path;
+    }
+
+    // ── Branches ──
+
+    public List<GitBranch> GetBranches()
+    {
+        var result = GitProcess.Run(Path,
+            "for-each-ref",
+            "--format", $"%(refname:short){FieldSep}%(refname){FieldSep}%(HEAD){FieldSep}%(upstream:short){FieldSep}%(upstream:track,nobracket)",
+            "refs/heads/", "refs/remotes/");
+
+        if (!result.Success) return [];
+
+        var branches = new List<GitBranch>();
+        foreach (var line in result.Lines)
+        {
+            var parts = line.Split(FieldSep);
+            if (parts.Length < 5) continue;
+
+            var name = parts[0];
+            var fullName = parts[1];
+            var isCurrent = parts[2] == "*";
+            var isRemote = fullName.StartsWith("refs/remotes/");
+            var trackingBranch = string.IsNullOrEmpty(parts[3]) ? null : parts[3];
+
+            var (ahead, behind) = ParseAheadBehind(parts[4]);
+
+            branches.Add(new GitBranch(name, fullName, isCurrent, isRemote, trackingBranch, ahead, behind));
+        }
+
+        return branches;
+    }
+
+    public string GetCurrentBranch()
+    {
+        var result = GitProcess.Run(Path, "rev-parse", "--abbrev-ref", "HEAD");
+        return result.Success ? result.Stdout.Trim() : "HEAD";
+    }
+
+    // ── Log ──
+
+    public List<GitCommit> GetLog(int maxCount = 500)
+    {
+        var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
+
+        var result = GitProcess.Run(Path,
+            "log",
+            $"--max-count={maxCount}",
+            $"--format={format}{RecordSep}",
+            "--all");
+
+        if (!result.Success) return [];
+
+        var commits = new List<GitCommit>();
+        var records = result.Stdout.Split(RecordSep, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var record in records)
+        {
+            var line = record.Trim();
+            if (string.IsNullOrEmpty(line)) continue;
+
+            var parts = line.Split(FieldSep);
+            if (parts.Length < 8) continue;
+
+            var parentHashes = string.IsNullOrWhiteSpace(parts[6])
+                ? []
+                : parts[6].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var refs = string.IsNullOrWhiteSpace(parts[7])
+                ? []
+                : parts[7].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+            if (!DateTimeOffset.TryParse(parts[4], CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                date = DateTimeOffset.MinValue;
+
+            commits.Add(new GitCommit(
+                Hash: parts[0],
+                ShortHash: parts[1],
+                AuthorName: parts[2],
+                AuthorEmail: parts[3],
+                AuthorDate: date,
+                Subject: parts[5],
+                ParentHashes: parentHashes,
+                Refs: refs
+            ));
+        }
+
+        return commits;
+    }
+
+    // ── Status (working tree) ──
+
+    public List<GitFileChange> GetStatus()
+    {
+        var result = GitProcess.Run(Path, "status", "--porcelain=v1", "-uall");
+        if (!result.Success) return [];
+
+        var changes = new List<GitFileChange>();
+        foreach (var line in result.Lines)
+        {
+            if (line.Length < 4) continue;
+
+            var xy = line[..2];
+            var path = line[3..];
+
+            string? oldPath = null;
+            if (path.Contains(" -> "))
+            {
+                var parts = path.Split(" -> ", 2);
+                oldPath = parts[0];
+                path = parts[1];
+            }
+
+            var kind = ParseStatusCode(xy);
+            changes.Add(new GitFileChange(path, oldPath, kind, 0, 0));
+        }
+
+        return changes;
+    }
+
+    // ── Diff ──
+
+    public List<GitFileChange> GetCommitFiles(string commitHash)
+    {
+        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-r", "--numstat", "-M", commitHash);
+        if (!result.Success) return [];
+
+        var changes = new List<GitFileChange>();
+        foreach (var line in result.Lines)
+        {
+            var parts = line.Split('\t');
+            if (parts.Length < 3) continue;
+
+            int.TryParse(parts[0], out var additions);
+            int.TryParse(parts[1], out var deletions);
+
+            var path = parts[2];
+            string? oldPath = null;
+            var kind = FileChangeKind.Modified;
+
+            if (path.Contains(" => "))
+            {
+                // Handle renames like "old => new" or "{old => new}/path"
+                kind = FileChangeKind.Renamed;
+                var renameParts = path.Split(" => ", 2);
+                oldPath = renameParts[0];
+                path = renameParts[1];
+            }
+            else if (additions > 0 && deletions == 0)
+            {
+                kind = FileChangeKind.Added;
+            }
+            else if (additions == 0 && deletions > 0)
+            {
+                kind = FileChangeKind.Deleted;
+            }
+
+            changes.Add(new GitFileChange(path, oldPath, kind, additions, deletions));
+        }
+
+        return changes;
+    }
+
+    public List<GitFileDiff> GetCommitDiff(string commitHash)
+    {
+        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", commitHash);
+        return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+    }
+
+    public List<GitFileDiff> GetWorkingDiff(bool staged)
+    {
+        var args = staged
+            ? new[] { "diff", "--cached" }
+            : new[] { "diff" };
+
+        var result = GitProcess.Run(Path, args);
+        return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+    }
+
+    // ── Staging ──
+
+    public bool Stage(string filePath)
+    {
+        return GitProcess.Run(Path, "add", "--", filePath).Success;
+    }
+
+    public bool Unstage(string filePath)
+    {
+        return GitProcess.Run(Path, "restore", "--staged", "--", filePath).Success;
+    }
+
+    public bool StageAll()
+    {
+        return GitProcess.Run(Path, "add", "-A").Success;
+    }
+
+    public bool UnstageAll()
+    {
+        return GitProcess.Run(Path, "reset", "HEAD").Success;
+    }
+
+    // ── Commit ──
+
+    public GitResult Commit(string message)
+    {
+        return GitProcess.Run(Path, "commit", "-m", message);
+    }
+
+    // ── Remote operations ──
+
+    public GitResult Fetch()
+    {
+        return GitProcess.Run(Path, "fetch", "--all", "--prune");
+    }
+
+    public GitResult Pull()
+    {
+        return GitProcess.Run(Path, "pull");
+    }
+
+    public GitResult Push()
+    {
+        return GitProcess.Run(Path, "push");
+    }
+
+    // ── Checkout ──
+
+    public GitResult Checkout(string branchName)
+    {
+        return GitProcess.Run(Path, "checkout", branchName);
+    }
+
+    // ── Tags ──
+
+    public List<string> GetTags()
+    {
+        var result = GitProcess.Run(Path, "tag", "--sort=-creatordate");
+        return result.Success ? [.. result.Lines] : [];
+    }
+
+    // ── Stashes ──
+
+    public List<string> GetStashes()
+    {
+        var result = GitProcess.Run(Path, "stash", "list", "--format=%gd: %gs");
+        return result.Success ? [.. result.Lines] : [];
+    }
+
+    // ── Parsing helpers ──
+
+    private static List<GitFileDiff> ParseUnifiedDiff(string diffText)
+    {
+        var diffs = new List<GitFileDiff>();
+        GitFileDiff? currentFile = null;
+        GitDiffHunk? currentHunk = null;
+        int oldLine = 0, newLine = 0;
+
+        foreach (var rawLine in diffText.Split('\n'))
+        {
+            if (rawLine.StartsWith("diff --git "))
+            {
+                var parts = rawLine.Split(" b/", 2);
+                var path = parts.Length > 1 ? parts[1] : rawLine;
+                currentFile = new GitFileDiff(path, null, []);
+                diffs.Add(currentFile);
+                currentHunk = null;
+            }
+            else if (rawLine.StartsWith("@@ ") && currentFile != null)
+            {
+                // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+                var header = rawLine;
+                currentHunk = new GitDiffHunk(header, []);
+                currentFile.Hunks.Add(currentHunk);
+
+                ParseHunkHeader(rawLine, out oldLine, out newLine);
+
+                currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.HunkHeader, rawLine, null, null));
+            }
+            else if (currentHunk != null)
+            {
+                if (rawLine.StartsWith('+'))
+                {
+                    currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.Addition, rawLine[1..], null, newLine));
+                    newLine++;
+                }
+                else if (rawLine.StartsWith('-'))
+                {
+                    currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.Deletion, rawLine[1..], oldLine, null));
+                    oldLine++;
+                }
+                else if (rawLine.StartsWith(' ') || rawLine.Length == 0)
+                {
+                    var content = rawLine.Length > 0 ? rawLine[1..] : "";
+                    currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.Context, content, oldLine, newLine));
+                    oldLine++;
+                    newLine++;
+                }
+            }
+        }
+
+        return diffs;
+    }
+
+    private static void ParseHunkHeader(string header, out int oldStart, out int newStart)
+    {
+        oldStart = 1;
+        newStart = 1;
+
+        // @@ -10,6 +10,8 @@ optional section heading
+        var atEnd = header.IndexOf("@@", 2);
+        if (atEnd < 0) return;
+
+        var range = header[3..atEnd].Trim();
+        var parts = range.Split(' ');
+        if (parts.Length >= 1 && parts[0].StartsWith('-'))
+        {
+            var oldParts = parts[0][1..].Split(',');
+            int.TryParse(oldParts[0], out oldStart);
+        }
+        if (parts.Length >= 2 && parts[1].StartsWith('+'))
+        {
+            var newParts = parts[1][1..].Split(',');
+            int.TryParse(newParts[0], out newStart);
+        }
+    }
+
+    private static FileChangeKind ParseStatusCode(string xy)
+    {
+        var index = xy[0];
+        var worktree = xy[1];
+
+        // Use the most specific status
+        var c = index != ' ' ? index : worktree;
+        return c switch
+        {
+            'A' => FileChangeKind.Added,
+            'M' => FileChangeKind.Modified,
+            'D' => FileChangeKind.Deleted,
+            'R' => FileChangeKind.Renamed,
+            'C' => FileChangeKind.Copied,
+            '?' => FileChangeKind.Untracked,
+            _ => FileChangeKind.Modified,
+        };
+    }
+
+    private static (int ahead, int behind) ParseAheadBehind(string track)
+    {
+        int ahead = 0, behind = 0;
+        if (string.IsNullOrEmpty(track)) return (ahead, behind);
+
+        foreach (var part in track.Split(',', StringSplitOptions.TrimEntries))
+        {
+            if (part.StartsWith("ahead "))
+                int.TryParse(part[6..], out ahead);
+            else if (part.StartsWith("behind "))
+                int.TryParse(part[7..], out behind);
+        }
+        return (ahead, behind);
+    }
+}
