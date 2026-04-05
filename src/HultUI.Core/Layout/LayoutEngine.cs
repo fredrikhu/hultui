@@ -313,9 +313,10 @@ public sealed class LayoutEngine
                 continue;
             var childBox = child.Box;
 
-            float? basisOrSize = child.Flex.FlexBasis.IsAuto
-                ? (isRow ? childBox.Width.Resolve(mainAvailable) : childBox.Height.Resolve(mainAvailable))
-                : child.Flex.FlexBasis.Resolve(mainAvailable);
+            float basisOrSize = child.Flex.FlexBasis.IsAuto
+                ? (isRow ? childBox.Width.ResolveOr(mainAvailable, -1f) : childBox.Height.ResolveOr(mainAvailable, -1f))
+                : child.Flex.FlexBasis.ResolveOr(mainAvailable, -1f);
+            bool hasBasisOrSize = float.IsPositiveInfinity(basisOrSize);
 
             float hypotheticalMain;
             float hypotheticalCross;
@@ -326,15 +327,15 @@ public sealed class LayoutEngine
             {
                 var constraintW = isRow ? mainAvailable : crossAvailable;
                 var constraintH = isRow ? crossAvailable : mainAvailable;
-                float? fw = basisOrSize.HasValue ? (isRow ? basisOrSize : null) : null;
-                float? fh = basisOrSize.HasValue ? (isRow ? null : basisOrSize) : null;
+                float? fw = hasBasisOrSize ? (isRow ? basisOrSize : null) : null;
+                float? fh = hasBasisOrSize ? (isRow ? null : basisOrSize) : null;
                 var measured = MeasureLeafSize(child, constraintW, constraintH, fw, fh);
-                hypotheticalMain = basisOrSize ?? (isRow ? measured.Width : measured.Height);
+                hypotheticalMain = hasBasisOrSize ? basisOrSize : (isRow ? measured.Width : measured.Height);
                 hypotheticalCross = isRow ? measured.Height : measured.Width;
             }
-            else if (basisOrSize.HasValue)
+            else if (hasBasisOrSize)
             {
-                hypotheticalMain = basisOrSize.Value;
+                hypotheticalMain = basisOrSize;
                 // Use container's available space as constraint so percentage
                 // dimensions resolve against the container, not the basis
                 var childConstraint = isRow
