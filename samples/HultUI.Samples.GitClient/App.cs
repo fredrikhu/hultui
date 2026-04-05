@@ -37,6 +37,8 @@ public partial class App : Component
     [Reactive] public partial bool ShowWorkingCopy { get; set; }
     [Reactive] public partial int RefreshTrigger { get; set; }
 
+    private Element? _workingCopyLayout;
+
     public App(Window window, GitRepository repo)
     {
         _window = window;
@@ -116,11 +118,15 @@ public partial class App : Component
 
     private Element BuildWorkingCopyPanel()
     {
-        var splitPane = new SplitPane(horizontal: true, initialRatio: 0.35f);
-        return splitPane.Build(
-            _stagingArea.Mount(),
-            _workingDiffViewer.Mount()
-        );
+        if (_workingCopyLayout == null)
+        {
+            var splitPane = new SplitPane(horizontal: true, initialRatio: 0.35f);
+            _workingCopyLayout = splitPane.Build(
+                _stagingArea.Mount(),
+                _workingDiffViewer.Mount()
+            );
+        }
+        return _workingCopyLayout;
     }
 
     // ── Event handlers ──

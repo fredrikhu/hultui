@@ -20,6 +20,7 @@ public partial class CommitDetail : Component
     private readonly FileTree _fileTree;
     private readonly DiffViewer _diffViewer;
     private readonly SplitPane _splitPane;
+    private Element? _splitPaneLayout;
 
     [Reactive] public partial GitCommit? Commit { get; set; }
 
@@ -89,12 +90,14 @@ public partial class CommitDetail : Component
                 )
             );
 
+        _splitPaneLayout ??= _splitPane.Build(
+            _fileTree.Mount(),
+            _diffViewer.Mount()
+        );
+
         return Flex.Column(gap: 0).FlexGrow(1).Children(
             header,
-            _splitPane.Build(
-                _fileTree.Mount(),
-                _diffViewer.Mount()
-            )
+            _splitPaneLayout
         );
     }
 
