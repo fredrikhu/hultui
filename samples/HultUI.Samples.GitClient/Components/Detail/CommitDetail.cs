@@ -51,9 +51,18 @@ public partial class CommitDetail : Component
         var files = _repo.GetCommitFiles(commit.Hash);
         _fileTree.Files = files;
 
-        // Load full diff
+        // Load diff and show only the first file by default
         var diffs = _repo.GetCommitDiff(commit.Hash);
-        _diffViewer.Diffs = diffs;
+        if (diffs.Count > 0)
+        {
+            _diffViewer.Diffs = [diffs[0]];
+            if (files.Count > 0)
+                _fileTree.SelectedFile = files[0];
+        }
+        else
+        {
+            _diffViewer.Diffs = [];
+        }
 
         // Commit info header
         var header = Flex.Column(gap: 4)
