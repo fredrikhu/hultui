@@ -53,24 +53,27 @@ public sealed class LayoutEngine
         // Content area available for children
         var contentAvailW = (resolvedWidth ?? constraint.AvailableWidth) - outerSpacing.Horizontal;
         var contentAvailH = (resolvedHeight ?? constraint.AvailableHeight) - outerSpacing.Vertical;
-        contentAvailW = Math.Max(0, contentAvailW);
-        contentAvailH = Math.Max(0, contentAvailH);
+        contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
+        contentAvailH = float.IsNegative(contentAvailH) ? 0 : contentAvailH;
 
         // Count flow vs absolute children without allocating partition lists
         var children = element.Children;
-        int flowCount = 0;
+        bool hasFlow = false;
         bool hasAbsolute = false;
         for (int i = 0; i < children.Count; i++)
         {
             if (children[i].Position.Type == PositionType.Absolute)
                 hasAbsolute = true;
             else
-                flowCount++;
+                hasFlow = true;
+
+            if (hasFlow && hasAbsolute)
+                break;
         }
 
         // If leaf node, measure intrinsic content
         Size contentSize;
-        if (flowCount == 0)
+        if (!hasFlow)
         {
             contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
         }

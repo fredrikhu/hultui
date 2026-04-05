@@ -2,12 +2,14 @@ namespace HultUI.Core.Primitives;
 
 public readonly record struct Dimension
 {
+    private readonly float _valueAsPercentage;
     public float Value { get; }
     public DimensionUnit Unit { get; }
 
     private Dimension(float value, DimensionUnit unit)
     {
         Value = value;
+        _valueAsPercentage = value / 100f;
         Unit = unit;
     }
 
@@ -27,7 +29,7 @@ public readonly record struct Dimension
     {
         // TODO: The other units need to be able to be resolved?
         DimensionUnit.Pixels => Value,
-        DimensionUnit.Percent => Value / 100f * referenceSize,
+        DimensionUnit.Percent => _valueAsPercentage * referenceSize,
         _ => null
     };
 
