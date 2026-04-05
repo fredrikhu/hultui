@@ -317,7 +317,19 @@ public sealed class LayoutEngine
             float hypotheticalMain;
             float hypotheticalCross;
 
-            if (basisOrSize.HasValue)
+            // Leaf elements: use lightweight measurement that skips LayoutResult
+            // and cache updates, since Phase 6 will do the authoritative layout
+            if (child.Children.Count == 0)
+            {
+                var constraintW = isRow ? mainAvailable : crossAvailable;
+                var constraintH = isRow ? crossAvailable : mainAvailable;
+                float? fw = basisOrSize.HasValue ? (isRow ? basisOrSize : null) : null;
+                float? fh = basisOrSize.HasValue ? (isRow ? null : basisOrSize) : null;
+                var measured = MeasureLeafSize(child, constraintW, constraintH, fw, fh);
+                hypotheticalMain = basisOrSize ?? (isRow ? measured.Width : measured.Height);
+                hypotheticalCross = isRow ? measured.Height : measured.Width;
+            }
+            else if (basisOrSize.HasValue)
             {
                 hypotheticalMain = basisOrSize.Value;
                 // Use container's available space as constraint so percentage
@@ -344,6 +356,34 @@ public sealed class LayoutEngine
         }
 
         return (array, count);
+    }
+
+    /// <summary>
+    /// Computes the outer (margin-box) size of a leaf element without setting
+    /// element.Layout or updating the layout cache. Used by Phase 1 measurement
+    /// so that Phase 6 can be the single authoritative ComputeLayout call.
+    /// </summary>
+    private Size MeasureLeafSize(Element element, float constraintW, float constraintH,
+        float? forcedWidth = null, float? forcedHeight = null)
+    {
+        var box = element.Box;
+        var outerSpacing = box.Padding + box.BorderWidth;
+        var margin = box.Margin;
+
+        var resolvedW = forcedWidth ?? box.Width.Resolve(constraintW);
+        var resolvedH = forcedHeight ?? box.Height.Resolve(constraintH);
+
+        var contentAvailW = Math.Max(0, (resolvedW ?? constraintW) - outerSpacing.Horizontal);
+        var contentAvailH = Math.Max(0, (resolvedH ?? constraintH) - outerSpacing.Vertical);
+
+        var contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
+
+        var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
+        var finalH = resolvedH ?? (contentSize.Height + outerSpacing.Vertical);
+        finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraintW);
+        finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraintH);
+
+        return new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
     }
 
     private static List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,
