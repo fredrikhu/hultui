@@ -568,10 +568,8 @@ public sealed class LayoutEngine
 
     private static float ApplyMinMax(float value, Dimension min, Dimension max, float reference)
     {
-        if (min.Resolve(reference) is float minVal)
-            value = Math.Max(value, minVal);
-        if (max.Resolve(reference) is float maxVal)
-            value = Math.Min(value, maxVal);
+        value = float.MaxNative(value, min.ResolveOr(reference, -1f));
+        value = float.MinNative(value, max.ResolveOr(reference, float.MaxValue));
         return value;
     }
 

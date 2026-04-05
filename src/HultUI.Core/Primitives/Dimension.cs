@@ -32,6 +32,14 @@ public readonly record struct Dimension
         DimensionUnit.Percent => _valueAsPercentage * referenceSize,
         _ => null
     };
+    
+   public float ResolveOr(float referenceSize, float defaultValue) => Unit switch
+    {
+        // TODO: The other units need to be able to be resolved?
+        DimensionUnit.Pixels => Value,
+        DimensionUnit.Percent => _valueAsPercentage * referenceSize,
+        _ => defaultValue
+    };
 
     public static implicit operator Dimension(float px) => Px(px);
 }
