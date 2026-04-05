@@ -1,6 +1,6 @@
 # Plan 07: Source Generator Nullable Fix
 
-**Priority:** Medium | **Effort:** Small | **Status:** Pending
+**Priority:** Medium | **Effort:** Small | **Status:** Done
 
 ## Problem
 

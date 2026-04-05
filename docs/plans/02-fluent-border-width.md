@@ -1,6 +1,6 @@
 # Plan 02: Fluent BorderWidth Extension
 
-**Priority:** High | **Effort:** Tiny | **Status:** Pending
+**Priority:** High | **Effort:** Tiny | **Status:** Done
 
 ## Problem
 

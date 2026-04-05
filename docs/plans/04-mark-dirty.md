@@ -1,6 +1,6 @@
 # Plan 04: MarkDirty() on Component
 
-**Priority:** High | **Effort:** Small | **Status:** Pending
+**Priority:** High | **Effort:** Small | **Status:** Done
 
 ## Problem
 

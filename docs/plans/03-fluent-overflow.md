@@ -1,6 +1,6 @@
 # Plan 03: Fluent Overflow Extensions (Box Clipping)
 
-**Priority:** High | **Effort:** Tiny | **Status:** Pending
+**Priority:** High | **Effort:** Tiny | **Status:** Done
 
 ## Problem
 

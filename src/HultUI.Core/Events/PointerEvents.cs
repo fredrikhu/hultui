@@ -7,6 +7,16 @@ public abstract class PointerEvent : ElementEvent
     /// <summary>Position in logical (CSS-like) coordinates relative to the window.</summary>
     public Point Position { get; init; }
 
+    /// <summary>Position relative to the current target element's content box.</summary>
+    public Point LocalPosition
+    {
+        get
+        {
+            var box = CurrentTarget.Layout.AbsoluteContentBox;
+            return new(Position.X - box.X, Position.Y - box.Y);
+        }
+    }
+
     /// <summary>Which mouse button was involved (0=left, 1=middle, 2=right).</summary>
     public int Button { get; init; }
 
@@ -36,6 +46,17 @@ public sealed class DoubleClickEvent : PointerEvent;
 public sealed class ScrollEvent : ElementEvent
 {
     public Point Position { get; init; }
+
+    /// <summary>Position relative to the current target element's content box.</summary>
+    public Point LocalPosition
+    {
+        get
+        {
+            var box = CurrentTarget.Layout.AbsoluteContentBox;
+            return new(Position.X - box.X, Position.Y - box.Y);
+        }
+    }
+
     public float DeltaX { get; init; }
     public float DeltaY { get; init; }
     public KeyModifiers Modifiers { get; init; }

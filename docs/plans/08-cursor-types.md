@@ -1,6 +1,6 @@
 # Plan 08: ColResize / RowResize Cursor Types
 
-**Priority:** Low | **Effort:** Tiny | **Status:** Pending
+**Priority:** Low | **Effort:** Tiny | **Status:** Done
 
 ## Problem
 

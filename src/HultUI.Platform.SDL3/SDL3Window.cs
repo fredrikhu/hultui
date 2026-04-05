@@ -269,6 +269,8 @@ public sealed unsafe class SDL3Window : IDisposable
         CursorType.NotAllowed => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NOT_ALLOWED,
         CursorType.Wait => SDL_SystemCursor.SDL_SYSTEM_CURSOR_WAIT,
         CursorType.None => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT,
+        CursorType.ColResize => SDL_SystemCursor.SDL_SYSTEM_CURSOR_EW_RESIZE,
+        CursorType.RowResize => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NS_RESIZE,
         _ => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT
     };
 

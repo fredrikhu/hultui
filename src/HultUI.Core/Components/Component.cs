@@ -30,7 +30,12 @@ public abstract class Component
     protected internal virtual void OnAfterBuild() { }
 
     /// <summary>
+    /// Marks this component as needing a rebuild. Use when non-reactive state changes.
+    /// </summary>
+    protected void MarkDirty() => Host?.ForceRebuild();
+
+    /// <summary>
     /// Create a ComponentHost element that can be placed in the element tree.
     /// </summary>
-    public ComponentHost Mount() => new(this);
+    public ComponentHost Mount() => Host ?? new ComponentHost(this);
 }

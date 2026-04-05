@@ -40,8 +40,15 @@ public static class ElementExtensions
     // ──── Box visual properties ────
     public static T Background<T>(this T el, Color c) where T : BoxElement { el.BackgroundColor = c; return el; }
     public static T BorderColor<T>(this T el, Color c) where T : BoxElement { el.BorderColor = c; return el; }
+    public static T BorderWidth<T>(this T el, Thickness w) where T : BoxElement { el.Box.BorderWidth = w; return el; }
+    public static T BorderWidth<T>(this T el, float uniform) where T : BoxElement { el.Box.BorderWidth = new Thickness(uniform); return el; }
     public static T CornerRadius<T>(this T el, CornerRadius r) where T : BoxElement { el.CornerRadius = r; return el; }
     public static T CornerRadius<T>(this T el, float uniform) where T : BoxElement { el.CornerRadius = new CornerRadius(uniform); return el; }
+
+    // ──── Overflow ────
+    public static T Overflow<T>(this T el, Overflow overflow) where T : Element { el.Box.OverflowX = overflow; el.Box.OverflowY = overflow; return el; }
+    public static T OverflowX<T>(this T el, Overflow overflow) where T : Element { el.Box.OverflowX = overflow; return el; }
+    public static T OverflowY<T>(this T el, Overflow overflow) where T : Element { el.Box.OverflowY = overflow; return el; }
 
     // ──── Inherited style ────
     public static T FontFamily<T>(this T el, string family) where T : Element { el.Inherited.FontFamily = family; return el; }
@@ -49,6 +56,10 @@ public static class ElementExtensions
     public static T FontWeight<T>(this T el, FontWeight weight) where T : Element { el.Inherited.FontWeight = weight; return el; }
     public static T TextColor<T>(this T el, Color color) where T : Element { el.Inherited.TextColor = color; return el; }
     public static T Cursor<T>(this T el, CursorType cursor) where T : Element { el.Inherited.Cursor = cursor; return el; }
+
+    // ──── Text properties ────
+    public static T TextOverflow<T>(this T el, TextOverflow overflow) where T : TextElement { el.Overflow = overflow; return el; }
+    public static T MaxLines<T>(this T el, int lines) where T : TextElement { el.MaxLines = lines; return el; }
 
     // ──── Image properties ────
     public static T ImageFit<T>(this T el, ImageFit fit) where T : ImageElement { el.Fit = fit; return el; }

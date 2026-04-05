@@ -1,6 +1,6 @@
 # Plan 06: LocalPosition on Pointer Events
 
-**Priority:** Medium | **Effort:** Medium | **Status:** Pending
+**Priority:** Medium | **Effort:** Medium | **Status:** Done
 
 ## Problem
 

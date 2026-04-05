@@ -59,6 +59,7 @@ public sealed class ComponentHost : Element
         _buildEffect?.Dispose();
         _buildEffect = null;
         _component.OnUnmount();
+        _component.Host = null;
     }
 
     internal override void PatchFrom(Element source)

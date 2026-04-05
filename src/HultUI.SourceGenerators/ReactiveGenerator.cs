@@ -54,8 +54,10 @@ public sealed class ReactiveGenerator : IIncrementalGenerator
             defaultValue = propSyntax.Initializer.Value.ToFullString().Trim();
         }
 
-        // Get the fully qualified type name for the property type
-        var typeStr = propSymbol.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        // Get the fully qualified type name for the property type (including ? for nullable reference types)
+        var format = SymbolDisplayFormat.FullyQualifiedFormat
+            .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+        var typeStr = propSymbol.Type.ToDisplayString(format);
 
         // Check if the containing class is partial
         bool isClassPartial = false;

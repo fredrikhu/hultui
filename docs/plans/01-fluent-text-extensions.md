@@ -1,6 +1,6 @@
 # Plan 01: Fluent TextElement Extensions (Overflow, MaxLines)
 
-**Priority:** High | **Effort:** Tiny | **Status:** Pending
+**Priority:** High | **Effort:** Tiny | **Status:** Done
 
 ## Problem
 

@@ -1,6 +1,6 @@
 # Plan 05: Mount() Idempotency
 
-**Priority:** Medium | **Effort:** Small | **Status:** Pending
+**Priority:** Medium | **Effort:** Small | **Status:** Done
 
 ## Problem
 

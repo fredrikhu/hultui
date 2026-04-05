@@ -69,5 +69,7 @@ public enum CursorType : byte
     ResizeNWSE,
     NotAllowed,
     Wait,
-    None
+    None,
+    ColResize,
+    RowResize
 }
