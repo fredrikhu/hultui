@@ -173,30 +173,25 @@ public partial class StagingArea : Component
 
     private Element CommitButton(int stagedCount)
     {
-        var enabled = stagedCount > 0;
-        var bg = enabled ? GitClientColors.ButtonPrimary : GitClientColors.ButtonSecondary;
-        var textColor = enabled ? Color.White : GitClientColors.TextMuted;
-
         var btn = Box.New()
             .Padding(new Thickness(8, 0, 8, 0))
             .CornerRadius(4f)
-            .Background(bg)
+            .Background(GitClientColors.ButtonPrimary)
             .JustifyContent(JustifyContent.Center)
             .AlignItems(AlignItems.Center)
             .Height(Dimension.Px(32))
+            .Cursor(CursorType.Pointer)
             .Children(
                 Text.New($"Commit ({stagedCount} file{(stagedCount == 1 ? "" : "s")})")
                     .FontSize(13f).FontWeight(FontWeight.SemiBold)
-                    .TextColor(textColor)
+                    .TextColor(Color.White)
             );
 
-        if (enabled)
-        {
-            btn.Inherited.Cursor = CursorType.Pointer;
-            btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimaryHover);
-            btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimary);
-            btn.On<ClickEvent>(_ => DoCommit());
-        }
+        // Always attach handlers — PatchFrom doesn't copy event handlers,
+        // so conditionally attaching them only works on the first Build().
+        btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimaryHover);
+        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimary);
+        btn.On<ClickEvent>(_ => DoCommit());
 
         return btn;
     }
