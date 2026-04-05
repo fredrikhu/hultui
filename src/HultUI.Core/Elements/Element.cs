@@ -129,7 +129,7 @@ public abstract class Element
         var current = (Element?)this;
         while (current is not null)
         {
-            if (current.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            if ((current.DirtyFlags & DirtyFlags.Layout) != 0)
                 break;
             current.DirtyFlags |= DirtyFlags.Layout;
             current = current.Parent;
@@ -141,7 +141,7 @@ public abstract class Element
         var current = (Element?)this;
         while (current is not null)
         {
-            if (current.DirtyFlags.HasFlag(DirtyFlags.Paint))
+            if ((current.DirtyFlags & DirtyFlags.Paint) != 0)
                 break;
             current.DirtyFlags |= DirtyFlags.Paint;
             current = current.Parent;
@@ -156,7 +156,7 @@ public abstract class Element
         var current = Parent;
         while (current is not null)
         {
-            if (current.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if ((current.DirtyFlags & DirtyFlags.Style) != 0)
                 break;
             current.DirtyFlags |= DirtyFlags.Style;
             current = current.Parent;

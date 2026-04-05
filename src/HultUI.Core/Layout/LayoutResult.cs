@@ -13,10 +13,10 @@ public readonly record struct LayoutResult(
 {
     public Rect BorderBox => new(X, Y, Width, Height);
     public Rect PaddingBox => BorderBox.Deflate(Border);
-    public Rect ContentBox => PaddingBox.Deflate(Padding);
+    public Rect ContentBox => BorderBox.Deflate(Border, Padding);
 
     public float AbsoluteX { get; init; }
     public float AbsoluteY { get; init; }
     public Rect AbsoluteBorderBox => new(AbsoluteX, AbsoluteY, Width, Height);
-    public Rect AbsoluteContentBox => AbsoluteBorderBox.Deflate(Border).Deflate(Padding);
+    public Rect AbsoluteContentBox => AbsoluteBorderBox.Deflate(Border, Padding);
 }

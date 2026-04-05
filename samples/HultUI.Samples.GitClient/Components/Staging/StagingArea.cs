@@ -99,6 +99,7 @@ public partial class StagingArea : Component
         {
             var file = files[i];
             var row = Flex.Row(gap: 6)
+                .FlexShrink(0)
                 .Padding(new Thickness(4, 8, 4, 24))
                 .AlignItems(AlignItems.Center)
                 .Cursor(CursorType.Pointer);

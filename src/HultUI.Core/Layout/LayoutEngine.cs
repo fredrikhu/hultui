@@ -31,7 +31,7 @@ public sealed class LayoutEngine
         float? forcedWidth = null, float? forcedHeight = null)
     {
         // Skip clean subtrees when constraints haven't changed
-        if (!element.DirtyFlags.HasFlag(DirtyFlags.Layout)
+        if ((element.DirtyFlags & DirtyFlags.Layout) == 0
             && element.CacheConstraintW == constraint.AvailableWidth
             && element.CacheConstraintH == constraint.AvailableHeight
             && element.CacheForcedW == forcedWidth
@@ -283,7 +283,7 @@ public sealed class LayoutEngine
                 }
 
                 float lineMainSize = mainOffset - justifyGap;
-                actualTotalMain = Math.Max(actualTotalMain, lineMainSize);
+                actualTotalMain = float.MaxNative(actualTotalMain, lineMainSize);
                 crossOffset += line.CrossSize + alignContentGap;
                 actualTotalCross = crossOffset - alignContentGap;
             }
@@ -316,7 +316,7 @@ public sealed class LayoutEngine
             float basisOrSize = child.Flex.FlexBasis.IsAuto
                 ? (isRow ? childBox.Width.ResolveOr(mainAvailable, -1f) : childBox.Height.ResolveOr(mainAvailable, -1f))
                 : child.Flex.FlexBasis.ResolveOr(mainAvailable, -1f);
-            bool hasBasisOrSize = float.IsPositiveInfinity(basisOrSize);
+            bool hasBasisOrSize = basisOrSize >= 0f;
 
             float hypotheticalMain;
             float hypotheticalCross;
@@ -377,8 +377,10 @@ public sealed class LayoutEngine
         var resolvedW = forcedWidth ?? box.Width.Resolve(constraintW);
         var resolvedH = forcedHeight ?? box.Height.Resolve(constraintH);
 
-        var contentAvailW = Math.Max(0, (resolvedW ?? constraintW) - outerSpacing.Horizontal);
-        var contentAvailH = Math.Max(0, (resolvedH ?? constraintH) - outerSpacing.Vertical);
+        var contentAvailW = (resolvedW ?? constraintW) - outerSpacing.Horizontal;
+        var contentAvailH = (resolvedH ?? constraintH) - outerSpacing.Vertical;
+        contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
+        contentAvailH = float.IsNegative(contentAvailH) ? 0 : contentAvailH;
 
         var contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
 
@@ -479,7 +481,8 @@ public sealed class LayoutEngine
                     if (shrinkFactor > 0)
                     {
                         float reduction = -remainingSpace * (shrinkFactor / totalShrink);
-                        items[i] = item with { MainSize = Math.Max(0, item.MainSize - reduction) };
+                        float shrunk = item.MainSize - reduction;
+                        items[i] = item with { MainSize = float.IsNegative(shrunk) ? 0 : shrunk };
                     }
                 }
             }
@@ -494,7 +497,7 @@ public sealed class LayoutEngine
         {
             float maxCross = 0;
             foreach (var item in lines[i].Items)
-                maxCross = Math.Max(maxCross, item.CrossSize);
+                maxCross = float.MaxNative(maxCross, item.CrossSize);
             lines[i] = lines[i] with { CrossSize = maxCross };
         }
 
@@ -577,7 +580,8 @@ public sealed class LayoutEngine
     private static float ComputeJustifyOffset(JustifyContent justify, float available, float used, int itemCount)
     {
         if (itemCount == 0) return 0;
-        float free = Math.Max(0, available - used);
+        float free = available - used;
+        if (float.IsNegative(free)) free = 0;
 
         return justify switch
         {
@@ -600,7 +604,8 @@ public sealed class LayoutEngine
     private static float ComputeJustifyGap(JustifyContent justify, float available, float used, int itemCount, float gap)
     {
         if (itemCount <= 1) return 0;
-        float free = Math.Max(0, available - used);
+        float free = available - used;
+        if (float.IsNegative(free)) free = 0;
 
         return justify switch
         {
@@ -613,7 +618,8 @@ public sealed class LayoutEngine
 
     private static float ComputeAlignOffset(AlignItems align, float crossAvailable, float childCrossSize)
     {
-        float free = Math.Max(0, crossAvailable - childCrossSize);
+        float free = crossAvailable - childCrossSize;
+        if (float.IsNegative(free)) free = 0;
         return align switch
         {
             AlignItems.FlexEnd => free,
@@ -625,7 +631,8 @@ public sealed class LayoutEngine
     private static float ComputeAlignContentOffset(AlignContent align, float crossAvailable, float totalCross, int lineCount)
     {
         if (lineCount == 0) return 0;
-        float free = Math.Max(0, crossAvailable - totalCross);
+        float free = crossAvailable - totalCross;
+        if (float.IsNegative(free)) free = 0;
 
         return align switch
         {
@@ -639,7 +646,8 @@ public sealed class LayoutEngine
     private static float ComputeAlignContentGap(AlignContent align, float crossAvailable, float totalCross, int lineCount, float gap)
     {
         if (lineCount <= 1) return 0;
-        float free = Math.Max(0, crossAvailable - totalCross);
+        float free = crossAvailable - totalCross;
+        if (float.IsNegative(free)) free = 0;
 
         return align switch
         {

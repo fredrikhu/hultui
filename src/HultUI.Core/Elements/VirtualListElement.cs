@@ -128,7 +128,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement
         // Reused elements already have valid internal layout from a prior frame.
         foreach (var child in Children)
         {
-            if (child.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if ((child.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 if (_activeTheme is not null)
                     StyleResolver.Resolve(child, _activeTheme);
@@ -136,7 +136,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement
                     StyleResolver.Resolve(child);
             }
 
-            if (child.DirtyFlags.HasFlag(DirtyFlags.Layout))
+            if ((child.DirtyFlags & DirtyFlags.Layout) != 0)
                 _childLayoutEngine.PerformLayout(child, viewportWidth, _itemHeight);
         }
 

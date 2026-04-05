@@ -49,7 +49,7 @@ public static class StyleResolver
             // Propagate overlay host down the tree
             child.OverlayHost = element.OverlayHost;
 
-            if (child.DirtyFlags.HasFlag(DirtyFlags.Style))
+            if ((child.DirtyFlags & DirtyFlags.Style) != 0)
                 ResolveRecursive(child, resolved, theme);
         }
     }
