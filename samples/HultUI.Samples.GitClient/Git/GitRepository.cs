@@ -246,6 +246,18 @@ public class GitRepository
         return GitProcess.Run(Path, "checkout", branchName);
     }
 
+    public GitResult CheckoutDetached(string commitHash)
+    {
+        return GitProcess.Run(Path, "checkout", "--detach", commitHash);
+    }
+
+    // ── Cherry-pick ──
+
+    public GitResult CherryPick(string commitHash)
+    {
+        return GitProcess.Run(Path, "cherry-pick", commitHash);
+    }
+
     // ── Tags ──
 
     public List<string> GetTags()

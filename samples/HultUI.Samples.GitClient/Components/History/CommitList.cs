@@ -16,9 +16,14 @@ public partial class CommitList : Component
     private List<GitCommit> _commits = [];
 
     [Reactive] public partial GitCommit? SelectedCommit { get; set; }
+    [Reactive] public partial bool WorkingCopySelected { get; set; }
     [Reactive] public partial int RefreshTrigger { get; set; }
 
     public Action<GitCommit?>? OnCommitSelected { get; set; }
+    public Action? OnWorkingCopySelected { get; set; }
+    public Action<string>? CopyToClipboard { get; set; }
+    public Action<string>? OnCheckoutCommit { get; set; }
+    public Action<string>? OnCherryPick { get; set; }
 
     public CommitList(GitRepository repo)
     {
@@ -29,22 +34,29 @@ public partial class CommitList : Component
     {
         _ = RefreshTrigger;
         var selected = SelectedCommit;
+        var wcSelected = WorkingCopySelected;
         _commits = _repo.GetLog();
+        var status = _repo.GetStatus();
 
-        if (_commits.Count == 0)
-        {
-            return Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-                .Children(
-                    Text.New("No commits yet").FontSize(14f).TextColor(GitClientColors.TextMuted)
-                );
-        }
+        return Flex.Column(gap: 0).FlexGrow(1).Background(GitClientColors.Background).Children(
+            // Working copy row (always visible at top)
+            BuildWorkingCopyRow(status.Count, wcSelected),
 
-        return VirtualListElement<GitCommit>.New()
-            .ItemHeight(36)
-            .Items(_commits)
-            .RenderWith(commit => CommitRow.Build(commit, commit == selected, SelectCommit))
-            .FlexGrow(1)
-            .Background(GitClientColors.Background);
+            // Separator
+            Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
+
+            // Commit list
+            _commits.Count == 0
+                ? Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                    .Children(
+                        Text.New("No commits yet").FontSize(14f).TextColor(GitClientColors.TextMuted)
+                    )
+                : VirtualListElement<GitCommit>.New()
+                    .ItemHeight(36)
+                    .Items(_commits)
+                    .RenderWith(commit => CommitRow.Build(commit, !wcSelected && commit == selected, SelectCommit, CopyToClipboard, OnCheckoutCommit, OnCherryPick))
+                    .FlexGrow(1)
+        );
     }
 
     public void Refresh()
@@ -52,8 +64,61 @@ public partial class CommitList : Component
         RefreshTrigger++;
     }
 
+    private Element BuildWorkingCopyRow(int changedCount, bool isSelected)
+    {
+        var row = Flex.Row(gap: 8)
+            .Height(Dimension.Px(36))
+            .Padding(new Thickness(0, 12, 0, 12))
+            .AlignItems(AlignItems.Center)
+            .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
+            .Cursor(CursorType.Pointer)
+            .FlexShrink(0);
+
+        // Pencil icon
+        row.AddChild(
+            Box.New().Width(20).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Children(Text.New("\u270E").FontSize(12f).TextColor(GitClientColors.StatusModified))
+        );
+
+        // Label
+        row.AddChild(
+            Text.New("Working Copy").FontSize(13f).FontWeight(FontWeight.SemiBold)
+                .TextColor(GitClientColors.TextPrimary).FlexGrow(1)
+        );
+
+        // Changed file count badge
+        if (changedCount > 0)
+        {
+            row.AddChild(
+                Box.New()
+                    .Padding(new Thickness(2, 8, 2, 8))
+                    .CornerRadius(10f)
+                    .Background(new Color(GitClientColors.StatusModified.R, GitClientColors.StatusModified.G, GitClientColors.StatusModified.B, 30))
+                    .Children(
+                        Text.New(changedCount.ToString()).FontSize(11f).FontWeight(FontWeight.Bold)
+                            .TextColor(GitClientColors.StatusModified)
+                    )
+            );
+        }
+
+        // Hover
+        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnClick(_ => SelectWorkingCopy());
+
+        return row;
+    }
+
+    private void SelectWorkingCopy()
+    {
+        SelectedCommit = null;
+        WorkingCopySelected = true;
+        OnWorkingCopySelected?.Invoke();
+    }
+
     private void SelectCommit(GitCommit commit)
     {
+        WorkingCopySelected = false;
         SelectedCommit = commit;
         OnCommitSelected?.Invoke(commit);
     }

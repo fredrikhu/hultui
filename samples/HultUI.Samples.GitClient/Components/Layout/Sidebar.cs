@@ -19,6 +19,7 @@ public partial class Sidebar : Component
     [Reactive] public partial int RefreshTrigger { get; set; }
 
     public Action<string>? OnBranchSelected { get; set; }
+    public Action<string>? CopyToClipboard { get; set; }
 
     public Sidebar(GitRepository repo)
     {
@@ -85,7 +86,7 @@ public partial class Sidebar : Component
                 [
                     new ContextMenuItem { Label = $"Checkout '{b.Name}'", Action = () => CheckoutBranch(b.Name) },
                     ContextMenuItem.Separator(),
-                    new ContextMenuItem { Label = "Copy name", Action = () => { /* TODO: clipboard */ } },
+                    new ContextMenuItem { Label = "Copy name", Action = () => CopyToClipboard?.Invoke(b.Name) },
                 ],
                 Tag = b,
             }).ToList(),

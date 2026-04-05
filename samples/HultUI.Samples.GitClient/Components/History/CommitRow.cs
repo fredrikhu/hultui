@@ -11,7 +11,13 @@ namespace GitClient.Components.History;
 
 public static class CommitRow
 {
-    public static Element Build(GitCommit commit, bool isSelected, Action<GitCommit> onSelect)
+    public static Element Build(
+        GitCommit commit,
+        bool isSelected,
+        Action<GitCommit> onSelect,
+        Action<string>? copyToClipboard = null,
+        Action<string>? onCheckout = null,
+        Action<string>? onCherryPick = null)
     {
         var row = Flex.Row(gap: 8)
             .Padding(new Thickness(6, 12, 6, 12))
@@ -83,11 +89,11 @@ public static class CommitRow
         // Context menu
         row.ContextMenu(() =>
         [
-            new ContextMenuItem { Label = $"Checkout '{commit.ShortHash}'", Action = () => { } },
-            new ContextMenuItem { Label = "Cherry-pick", Action = () => { } },
+            new ContextMenuItem { Label = $"Checkout '{commit.ShortHash}'", Action = () => onCheckout?.Invoke(commit.Hash) },
+            new ContextMenuItem { Label = "Cherry-pick", Action = () => onCherryPick?.Invoke(commit.Hash) },
             ContextMenuItem.Separator(),
-            new ContextMenuItem { Label = "Copy SHA", Action = () => { } },
-            new ContextMenuItem { Label = "Copy commit message", Action = () => { } },
+            new ContextMenuItem { Label = "Copy SHA", Action = () => copyToClipboard?.Invoke(commit.Hash) },
+            new ContextMenuItem { Label = "Copy commit message", Action = () => copyToClipboard?.Invoke(commit.Subject) },
         ]);
 
         return row;

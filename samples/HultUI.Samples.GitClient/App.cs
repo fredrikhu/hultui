@@ -51,7 +51,12 @@ public partial class App : Component
 
         // Wire up events
         _commitList.OnCommitSelected = OnCommitSelected;
+        _commitList.OnWorkingCopySelected = OnWorkingCopySelected;
+        _commitList.CopyToClipboard = CopyToClipboard;
+        _commitList.OnCheckoutCommit = DoCheckoutCommit;
+        _commitList.OnCherryPick = DoCherryPick;
         _sidebar.OnBranchSelected = OnBranchSelected;
+        _sidebar.CopyToClipboard = CopyToClipboard;
         _stagingArea.OnCommitted = OnCommitted;
     }
 
@@ -129,6 +134,12 @@ public partial class App : Component
         }
     }
 
+    private void OnWorkingCopySelected()
+    {
+        ShowWorkingCopy = true;
+        _stagingArea.Refresh();
+    }
+
     private void OnBranchSelected(string branchName)
     {
         _repo.Checkout(branchName);
@@ -137,6 +148,18 @@ public partial class App : Component
 
     private void OnCommitted()
     {
+        RefreshAll();
+    }
+
+    private void DoCheckoutCommit(string hash)
+    {
+        _repo.CheckoutDetached(hash);
+        RefreshAll();
+    }
+
+    private void DoCherryPick(string hash)
+    {
+        _repo.CherryPick(hash);
         RefreshAll();
     }
 
@@ -156,6 +179,11 @@ public partial class App : Component
     {
         _repo.Push();
         RefreshAll();
+    }
+
+    private void CopyToClipboard(string text)
+    {
+        _window.Clipboard.SetText(text);
     }
 
     private void RefreshAll()
