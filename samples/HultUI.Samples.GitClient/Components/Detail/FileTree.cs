@@ -47,6 +47,7 @@ public partial class FileTree : Component
             var row = Flex.Row(gap: 6)
                 .Padding(new Thickness(4, 8, 4, 8))
                 .AlignItems(AlignItems.Center)
+                .FlexShrink(0)
                 .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
                 .Cursor(CursorType.Pointer);
             row.Key = $"file-{file.Path}";

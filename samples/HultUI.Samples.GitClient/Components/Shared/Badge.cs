@@ -25,6 +25,7 @@ public static class Badge
 
         return Box.New()
             .Width(20).Height(18)
+            .FlexShrink(0)
             .CornerRadius(3f)
             .Background(new Color(color.R, color.G, color.B, 30))
             .JustifyContent(JustifyContent.Center)
