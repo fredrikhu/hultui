@@ -51,6 +51,11 @@ public sealed class ComponentHost : Element
 
     protected override void OnMounted()
     {
+        if (_buildEffect == null)
+        {
+            _component.Host = this;
+            _buildEffect = new Effect(Rebuild);
+        }
         _component.OnMount();
     }
 
