@@ -23,6 +23,11 @@ public partial class StagingArea : Component
     private readonly DiffViewer _diffViewer;
     private string _commitMessage = "";
 
+    // Currently-highlighted file row. Path + section together because the same
+    // path can appear under both Unstaged and Staged when partially staged.
+    private string? _selectedPath;
+    private bool _selectedIsStaged;
+
     [Reactive] public partial int RefreshTrigger { get; set; }
 
     public Action? OnCommitted { get; set; }
@@ -49,6 +54,18 @@ public partial class StagingArea : Component
 
         var unstaged = statusFiles.Where(f => !stagedPaths.Contains(f.Path)).ToList();
         var staged = statusFiles.Where(f => stagedPaths.Contains(f.Path)).ToList();
+
+        // Drop the highlight if the previously-selected file is no longer in
+        // the section it was clicked from (e.g. it was just staged or discarded).
+        if (_selectedPath != null)
+        {
+            var sectionFiles = _selectedIsStaged ? staged : unstaged;
+            if (!sectionFiles.Any(f => f.Path == _selectedPath))
+            {
+                _selectedPath = null;
+                _diffViewer.Diffs = [];
+            }
+        }
 
         return Flex.Column(gap: 0).FlexGrow(1).Children(
             // Unstaged changes
@@ -98,20 +115,45 @@ public partial class StagingArea : Component
         for (int i = 0; i < files.Count; i++)
         {
             var file = files[i];
+            var isSelected = file.Path == _selectedPath && isStaged == _selectedIsStaged;
+
             var row = Flex.Row(gap: 6)
                 .FlexShrink(0)
                 .Padding(new Thickness(4, 8, 4, 24))
                 .AlignItems(AlignItems.Center)
+                .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
                 .Cursor(CursorType.Pointer);
             row.Key = $"staging-{(isStaged ? "s" : "u")}-{file.Path}";
 
             row.AddChild(Badge.FileStatus(file.Kind));
             row.AddChild(
                 Text.New(Path.GetFileName(file.Path)).FontSize(12f)
-                    .TextColor(GitClientColors.TextSecondary)
+                    .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
                     .FlexGrow(1)
                     .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
             );
+
+            // Discard button (unstaged only — destructive, no confirmation in this sample)
+            if (!isStaged)
+            {
+                var discardBtn = Box.New()
+                    .Width(20).Height(18)
+                    .CornerRadius(3f)
+                    .Background(GitClientColors.ButtonSecondary)
+                    .JustifyContent(JustifyContent.Center)
+                    .AlignItems(AlignItems.Center)
+                    .Cursor(CursorType.Pointer)
+                    .Tooltip("Discard changes")
+                    .Children(Text.New("\u2715").FontSize(11f).TextColor(GitClientColors.StatusDeleted));
+
+                discardBtn.On<ClickEvent>(e =>
+                {
+                    e.StopPropagation = true;
+                    _repo.DiscardChanges(file);
+                    Refresh();
+                });
+                row.AddChild(discardBtn);
+            }
 
             // Stage/unstage button
             var actionLabel = isStaged ? "\u2212" : "+";
@@ -124,8 +166,9 @@ public partial class StagingArea : Component
                 .Cursor(CursorType.Pointer)
                 .Children(Text.New(actionLabel).FontSize(12f).TextColor(GitClientColors.TextPrimary));
 
-            actionBtn.On<ClickEvent>(_ =>
+            actionBtn.On<ClickEvent>(e =>
             {
+                e.StopPropagation = true;
                 if (isStaged) _repo.Unstage(file.Path);
                 else _repo.Stage(file.Path);
                 Refresh();
@@ -133,13 +176,16 @@ public partial class StagingArea : Component
             row.AddChild(actionBtn);
 
             // Click row to view diff
-            row.OnPointerEnter(_ => row.BackgroundColor = GitClientColors.SurfaceHover);
-            row.OnPointerLeave(_ => row.BackgroundColor = Color.Transparent);
+            row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+            row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
             row.OnClick(_ =>
             {
+                _selectedPath = file.Path;
+                _selectedIsStaged = isStaged;
                 var diffs = _repo.GetWorkingDiff(isStaged);
                 var fileDiff = diffs.Where(d => d.Path == file.Path || d.Path.EndsWith(file.Path)).ToList();
                 _diffViewer.Diffs = fileDiff.Count > 0 ? fileDiff : diffs;
+                Refresh();
             });
 
             rows[i] = row;

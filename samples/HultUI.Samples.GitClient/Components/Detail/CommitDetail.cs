@@ -22,6 +22,12 @@ public partial class CommitDetail : Component
     private readonly SplitPane _splitPane;
     private Element? _splitPaneLayout;
 
+    // Memoized per-commit data — only refreshed when Commit.Hash changes.
+    // Keeps file selection stable across rebuilds and avoids redundant `git diff` calls.
+    private string? _loadedCommitHash;
+    private List<GitFileChange> _loadedFiles = [];
+    private List<GitFileDiff> _loadedDiffs = [];
+
     [Reactive] public partial GitCommit? Commit { get; set; }
 
     public CommitDetail(GitRepository repo)
@@ -48,21 +54,25 @@ public partial class CommitDetail : Component
                 );
         }
 
-        // Load commit data
-        var files = _repo.GetCommitFiles(commit.Hash);
-        _fileTree.Files = files;
+        if (commit.Hash != _loadedCommitHash)
+        {
+            _loadedFiles = _repo.GetCommitFiles(commit.Hash);
+            _loadedDiffs = _repo.GetCommitDiff(commit.Hash);
+            _loadedCommitHash = commit.Hash;
 
-        // Load diff and show only the first file by default
-        var diffs = _repo.GetCommitDiff(commit.Hash);
-        if (diffs.Count > 0)
-        {
-            _diffViewer.Diffs = [diffs[0]];
-            if (files.Count > 0)
-                _fileTree.SelectedFile = files[0];
-        }
-        else
-        {
-            _diffViewer.Diffs = [];
+            _fileTree.Files = _loadedFiles;
+
+            if (_loadedFiles.Count > 0)
+            {
+                var firstFile = _loadedFiles[0];
+                _fileTree.SelectedFile = firstFile;
+                _diffViewer.Diffs = DiffsForFile(firstFile);
+            }
+            else
+            {
+                _fileTree.SelectedFile = null;
+                _diffViewer.Diffs = [];
+            }
         }
 
         // Commit info header
@@ -85,7 +95,7 @@ public partial class CommitDetail : Component
                     Text.New(commit.AuthorDate.ToString("yyyy-MM-dd HH:mm")).FontSize(12f)
                         .TextColor(GitClientColors.TextMuted),
                     Text.New("\u2022").FontSize(8f).TextColor(GitClientColors.TextMuted),
-                    Text.New($"{files.Count} file{(files.Count == 1 ? "" : "s")} changed").FontSize(12f)
+                    Text.New($"{_loadedFiles.Count} file{(_loadedFiles.Count == 1 ? "" : "s")} changed").FontSize(12f)
                         .TextColor(GitClientColors.TextMuted)
                 )
             );
@@ -103,16 +113,14 @@ public partial class CommitDetail : Component
 
     private void OnFileSelected(GitFileChange file)
     {
-        var commit = Commit;
-        if (commit == null) return;
+        _diffViewer.Diffs = DiffsForFile(file);
+    }
 
-        // Filter diffs to show only the selected file
-        var allDiffs = _repo.GetCommitDiff(commit.Hash);
-        var fileDiff = allDiffs.Where(d =>
-            d.Path == file.Path ||
-            d.Path.EndsWith(file.Path)
-        ).ToList();
-
-        _diffViewer.Diffs = fileDiff.Count > 0 ? fileDiff : allDiffs;
+    private List<GitFileDiff> DiffsForFile(GitFileChange file)
+    {
+        var fileDiff = _loadedDiffs
+            .Where(d => d.Path == file.Path || d.Path.EndsWith(file.Path))
+            .ToList();
+        return fileDiff.Count > 0 ? fileDiff : _loadedDiffs;
     }
 }

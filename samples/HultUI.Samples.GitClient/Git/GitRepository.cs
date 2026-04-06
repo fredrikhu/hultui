@@ -215,6 +215,20 @@ public class GitRepository
         return GitProcess.Run(Path, "reset", "HEAD").Success;
     }
 
+    /// <summary>
+    /// Discard worktree changes for a file. For untracked files this removes
+    /// the file via `git clean`; for tracked files it restores the worktree
+    /// copy from HEAD via `git restore`.
+    /// </summary>
+    public bool DiscardChanges(GitFileChange file)
+    {
+        if (file.Kind == FileChangeKind.Untracked)
+        {
+            return GitProcess.Run(Path, "clean", "-f", "--", file.Path).Success;
+        }
+        return GitProcess.Run(Path, "restore", "--worktree", "--", file.Path).Success;
+    }
+
     // ── Commit ──
 
     public GitResult Commit(string message)

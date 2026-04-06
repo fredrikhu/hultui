@@ -10,13 +10,11 @@ Issues and friction points discovered while building the Git client sample.
 
 **Suggestion**: Rename the `HultUI.Text` assembly/namespace to something that doesn't collide with the builder class name. For example `HultUI.TextEngine`, `HultUI.Typography`, or `HultUI.Core.Text`. This is a real pain point for anyone building an app inside the `HultUI.*` namespace tree — which is the natural thing to do for samples.
 
-## 2. No `MarkDirty()` on Component
+## 2. No `MarkDirty()` on Component — RESOLVED
 
-**Problem**: When a component needs to rebuild due to non-reactive state changes (e.g., toggling a plain bool `IsExpanded` on a tree node), there's no way to tell the component to rebuild. `Component` doesn't expose a public `MarkDirty()` method.
+**Status**: `Component.MarkDirty()` now exists (`src/HultUI.Core/Components/Component.cs:35`) and forwards to `Host?.ForceRebuild()`.
 
-**Workaround**: Added a `[Reactive] int Version` or `[Reactive] int RefreshTrigger` counter property, read it in `Build()`, and increment it to force a rebuild. This works but feels like a hack — every component that needs imperative refresh has a meaningless counter.
-
-**Suggestion**: Expose a `protected void Rebuild()` or `protected void MarkDirty()` method on `Component`. The reactive system should still be the primary driver, but sometimes you need an escape hatch for imperative invalidation.
+**Follow-up**: Existing samples (`CommitList`, `StagingArea`, `App`) still use the `[Reactive] int RefreshTrigger` workaround. Worth a sweep to convert them to `MarkDirty()` and delete the counters.
 
 ## 3. No fluent methods for TextElement.Overflow and TextElement.MaxLines
 
@@ -79,8 +77,6 @@ There's no fluent extension for this, unlike most other Box properties.
 
 **Suggestion**: Add `Overflow<T>(this T el, Overflow overflow)` that sets both X and Y, and optionally `OverflowX`/`OverflowY` for individual control.
 
-## 9. Component.Mount() creates a new host every call
+## 9. Component.Mount() creates a new host every call — RESOLVED
 
-**Problem**: In `App.Build()`, calling `_sidebar.Mount()` on each rebuild creates a new `ComponentHost`. The tree differ has to reconcile this each time. It wasn't clear whether I should call `.Mount()` once in the constructor and cache the `ComponentHost`, or call it each time in `Build()`.
-
-**Suggestion**: Document the intended pattern. If Mount() should only be called once, make it throw on double-mount. If it's fine to call in Build(), make it return the same host. Currently it's ambiguous.
+**Status**: `Mount()` now returns `Host ?? new ComponentHost(this)` (`src/HultUI.Core/Components/Component.cs:40`) — once a component is hosted, repeated `Mount()` calls return the same host. Calling `Mount()` from inside `Build()` on every rebuild is now the documented-by-behavior pattern.
