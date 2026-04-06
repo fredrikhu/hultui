@@ -233,20 +233,24 @@ public sealed class LayoutEngine
                     // dimensions resolve against the container, not the flex-resolved size
                     var childConstraint = new LayoutConstraint(contentAvailW, contentAvailH);
 
-                    // Main axis: always force to flex-resolved size
-                    // Cross axis: only force stretch for auto-sized dimensions
+                    // Main axis: always force to flex-resolved size.
+                    // Cross axis: only force stretch for auto-sized dimensions.
+                    // item.MainSize and line.CrossSize are outer (margin-box) sizes,
+                    // but ComputeLayout's forcedWidth/forcedHeight are border-box —
+                    // subtract the child's margins to convert.
+                    var childMargin = child.Box.Margin;
                     float? forcedW, forcedH;
                     if (isRow)
                     {
-                        forcedW = item.MainSize;
+                        forcedW = item.MainSize - childMargin.Horizontal;
                         forcedH = (alignSelf == AlignItems.Stretch && child.Box.Height.IsAuto)
-                            ? (float?)line.CrossSize : null;
+                            ? (float?)(line.CrossSize - childMargin.Vertical) : null;
                     }
                     else
                     {
                         forcedW = (alignSelf == AlignItems.Stretch && child.Box.Width.IsAuto)
-                            ? (float?)line.CrossSize : null;
-                        forcedH = item.MainSize;
+                            ? (float?)(line.CrossSize - childMargin.Horizontal) : null;
+                        forcedH = item.MainSize - childMargin.Vertical;
                     }
 
                     // Pre-compute cross offset from hypothetical cross size so
@@ -347,40 +351,42 @@ public sealed class LayoutEngine
             float hypotheticalMain;
             float hypotheticalCross;
 
-            // Leaf elements: use lightweight measurement that skips LayoutResult
-            // and cache updates, since Phase 6 will do the authoritative layout
+            // Both MainSize and CrossSize on FlexItem are the outer (margin-box)
+            // size. MeasureLeafSize and ComputeLayout already return outer sizes,
+            // so the code below just reads measured.Width/Height directly. The
+            // explicit-basis case used to assign basisOrSize (border-box), which
+            // caused flex distribution to under-count sibling margins and Phase 6
+            // to double-count them when forcing the dimension.
+            Size measured;
             if (child.Children.Count == 0)
             {
                 var constraintW = isRow ? mainAvailable : crossAvailable;
                 var constraintH = isRow ? crossAvailable : mainAvailable;
                 float? fw = hasBasisOrSize ? (isRow ? basisOrSize : null) : null;
                 float? fh = hasBasisOrSize ? (isRow ? null : basisOrSize) : null;
-                var measured = MeasureLeafSize(child, constraintW, constraintH, fw, fh);
-                hypotheticalMain = hasBasisOrSize ? basisOrSize : (isRow ? measured.Width : measured.Height);
-                hypotheticalCross = isRow ? measured.Height : measured.Width;
+                measured = MeasureLeafSize(child, constraintW, constraintH, fw, fh);
             }
             else if (hasBasisOrSize)
             {
-                hypotheticalMain = basisOrSize;
                 // Use container's available space as constraint so percentage
                 // dimensions resolve against the container, not the basis
                 var childConstraint = isRow
                     ? new LayoutConstraint(mainAvailable, crossAvailable)
                     : new LayoutConstraint(crossAvailable, mainAvailable);
-                float? fw = isRow ? (float?)hypotheticalMain : null;
-                float? fh = isRow ? null : (float?)hypotheticalMain;
-                var measured = ComputeLayout(child, childConstraint, 0, 0, forcedWidth: fw, forcedHeight: fh);
-                hypotheticalCross = isRow ? measured.Height : measured.Width;
+                float? fw = isRow ? (float?)basisOrSize : null;
+                float? fh = isRow ? null : (float?)basisOrSize;
+                measured = ComputeLayout(child, childConstraint, 0, 0, forcedWidth: fw, forcedHeight: fh);
             }
             else
             {
                 var childConstraint = isRow
                     ? new LayoutConstraint(mainAvailable, crossAvailable)
                     : new LayoutConstraint(crossAvailable, mainAvailable);
-                var measured = ComputeLayout(child, childConstraint, 0, 0);
-                hypotheticalMain = isRow ? measured.Width : measured.Height;
-                hypotheticalCross = isRow ? measured.Height : measured.Width;
+                measured = ComputeLayout(child, childConstraint, 0, 0);
             }
+
+            hypotheticalMain = isRow ? measured.Width : measured.Height;
+            hypotheticalCross = isRow ? measured.Height : measured.Width;
 
             array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross);
         }

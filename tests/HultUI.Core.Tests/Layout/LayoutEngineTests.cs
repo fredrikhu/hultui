@@ -145,6 +145,38 @@ public class LayoutEngineTests
     }
 
     [Fact]
+    public void FlexGrow_AccountsForSiblingMargins()
+    {
+        // Sibling has explicit width 50 + margin 10 → occupies 70 outer.
+        // Grow child should take the remaining 230 (not 250).
+        var root = Flex.Row().Width(300).Height(50).Children(
+            Box.New().Width(50).Height(50).Margin(new Thickness(0, 10, 0, 10)),
+            Box.New().Height(50).FlexGrow(1)
+        );
+        Layout(root);
+
+        var growChild = root.Children[1];
+        Assert.Equal(230, growChild.Layout.Width, 0.5f);
+    }
+
+    [Fact]
+    public void Row_AutoSizedChildWithMargin_AdvancesByOuterSize()
+    {
+        // Auto-sized leaf with explicit width but no FlexBasis would still hit the
+        // explicit-basis path. Use a child container so the auto-sizing path runs.
+        var first = Flex.Row().Margin(new Thickness(0, 8, 0, 8))
+            .Children(Box.New().Width(40).Height(20));
+        var second = Box.New().Width(30).Height(20);
+
+        var root = Flex.Row().Width(200).Height(50).Children(first, second);
+        Layout(root);
+
+        // First child outer width = 40 + 16 = 56. Second child should sit at x=56.
+        Assert.Equal(8, first.Layout.AbsoluteX);
+        Assert.Equal(56, second.Layout.AbsoluteX, 0.5f);
+    }
+
+    [Fact]
     public void NestedLayout()
     {
         var root = Flex.Column().Width(400).Height(300).Children(
