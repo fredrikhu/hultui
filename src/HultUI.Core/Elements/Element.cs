@@ -124,7 +124,16 @@ public abstract class Element
     internal float? CacheForcedH;
     internal Size CacheResultSize;
 
-    internal void MarkLayoutDirty()
+    /// <summary>
+    /// Marks this element (and ancestors up to root) as needing layout on the next frame.
+    /// Call this after directly mutating <see cref="Flex"/>, <see cref="Box"/>, or
+    /// <see cref="Position"/> style properties at runtime — those property setters do not
+    /// auto-invalidate, so the layout pass would otherwise see no reason to re-run.
+    /// Most code does not need this: builder fluent calls happen before the first layout
+    /// pass, and component rebuilds invalidate via PatchFrom. This is the escape hatch
+    /// for imperative drag/animation/resize code that mutates styles directly.
+    /// </summary>
+    public void MarkLayoutDirty()
     {
         var current = (Element?)this;
         while (current is not null)
@@ -136,7 +145,12 @@ public abstract class Element
         }
     }
 
-    internal void MarkPaintDirty()
+    /// <summary>
+    /// Marks this element (and ancestors up to root) as needing repaint on the next frame
+    /// without re-running layout. Use after direct mutations that only affect appearance
+    /// (background color, opacity, etc.) so the change is visible without a full layout pass.
+    /// </summary>
+    public void MarkPaintDirty()
     {
         var current = (Element?)this;
         while (current is not null)

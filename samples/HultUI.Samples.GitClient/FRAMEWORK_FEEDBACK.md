@@ -42,6 +42,16 @@ Text.New("hello").FontSize(13f).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
 
 **Suggestion**: Add a `BorderWidth<T>(this T el, Thickness width)` and `BorderWidth<T>(this T el, float uniform)` extension in `ElementExtensions.cs`, matching the pattern of `Padding` and `Margin`.
 
+## 10. Direct style mutation does not invalidate layout — RESOLVED
+
+**Problem**: `FlexStyle`, `BoxStyle`, and `PositionStyle` are plain classes with auto-property setters. Setting `el.Flex.FlexBasis = …` (or any other style property) at runtime does *not* mark the element's layout dirty. The next frame's layout pass sees no reason to re-run, so the change is silently dropped. The fluent extensions (`.Width(…)` etc.) have the same issue, but they're typically called during initial element construction — before the first layout pass — so they "work" by accident because every element starts with `DirtyFlags.All`.
+
+This bit the SplitPane drag handler badly: pointer-down + cursor + hover all worked, but the panes didn't move because the flex basis change never reached the layout engine. Spent meaningful time before realizing the problem wasn't in the event dispatch or coordinate math.
+
+**Resolution**: `Element.MarkLayoutDirty()` and `Element.MarkPaintDirty()` are now `public` (previously `internal`). Imperative code that mutates style properties at runtime — drag handlers, animations, custom resize logic — must call `MarkLayoutDirty()` after the mutation.
+
+**Open question**: Should the style property setters auto-invalidate? That would require each style class to hold a back-pointer to its owning Element, and every property write would walk to the root. Static UI construction would pay a cost it doesn't need. The current approach (explicit invalidation as an escape hatch) seems right; the docs on `MarkLayoutDirty` should make this clear and the SplitPane sample serves as the canonical example.
+
 ## 5. SplitPane required knowledge of internal layout structure
 
 **Problem**: Building a resizable split pane required accessing `element.Layout.AbsoluteContentBox` to get the container's rendered size during a drag operation. This works, but:

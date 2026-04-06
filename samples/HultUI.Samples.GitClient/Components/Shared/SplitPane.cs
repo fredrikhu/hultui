@@ -85,6 +85,10 @@ public class SplitPane
             _splitRatio = ratio;
             _firstPanel.Flex.FlexBasis = Dimension.Percent(ratio * 100);
             _secondPanel.Flex.FlexBasis = Dimension.Percent((1 - ratio) * 100);
+
+            // Direct style mutation doesn't invalidate layout — propagate the dirty
+            // flag to root so the next frame's layout pass picks up the new basis.
+            container.MarkLayoutDirty();
         });
 
         container.On<PointerUpEvent>(_ =>
