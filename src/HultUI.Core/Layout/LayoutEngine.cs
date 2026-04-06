@@ -30,12 +30,16 @@ public sealed class LayoutEngine
     private Size ComputeLayout(Element element, LayoutConstraint constraint, float absoluteX, float absoluteY,
         float? forcedWidth = null, float? forcedHeight = null)
     {
-        // Skip clean subtrees when constraints haven't changed
+        // Skip clean subtrees when constraints haven't changed.
+        // The forced-dimension check also accepts the case where Phase 1 of an
+        // ancestor's LayoutFlexChildren computed this element with forced=null
+        // (auto) and Phase 6 now forces the natural size — that produces an
+        // identical result, so the cache hit is safe.
         if ((element.DirtyFlags & DirtyFlags.Layout) == 0
             && element.CacheConstraintW == constraint.AvailableWidth
             && element.CacheConstraintH == constraint.AvailableHeight
-            && element.CacheForcedW == forcedWidth
-            && element.CacheForcedH == forcedHeight)
+            && ForcedDimMatches(element.CacheForcedW, forcedWidth, element.Layout.Width)
+            && ForcedDimMatches(element.CacheForcedH, forcedHeight, element.Layout.Height))
         {
             return element.CacheResultSize;
         }
@@ -123,7 +127,29 @@ public sealed class LayoutEngine
         element.CacheForcedH = forcedHeight;
         element.CacheResultSize = resultSize;
 
+        // Clear this element's layout dirty flag now (not at end of PerformLayout)
+        // so the cache check can succeed on the next call within the same pass.
+        // Critical: LayoutFlexChildren calls ComputeLayout twice for each child —
+        // once in Phase 1 (measurement) and once in Phase 6 (positioning). Without
+        // this, the dirty flag stays set during the first pass and the cache always
+        // misses, causing every container to be fully laid out twice (and the work
+        // to compound exponentially with tree depth).
+        element.DirtyFlags &= ~DirtyFlags.Layout;
+
         return resultSize;
+    }
+
+    /// <summary>
+    /// Returns true when a forced-dimension cache lookup should hit. Accepts an
+    /// exact match, or the case where Phase 1 measured with no forced dimension
+    /// (cached=null) and Phase 6 now forces the element's natural size — that
+    /// produces an identical layout, so reusing the cached result is safe.
+    /// </summary>
+    private static bool ForcedDimMatches(float? cached, float? current, float layoutDim)
+    {
+        if (cached == current) return true;
+        if (current.HasValue && !cached.HasValue && current.Value == layoutDim) return true;
+        return false;
     }
 
     private Size LayoutFlexChildren(Element container, IReadOnlyList<Element> children,

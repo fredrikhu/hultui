@@ -14,6 +14,7 @@ public partial class CommitList : Component
 {
     private readonly GitRepository _repo;
     private List<GitCommit> _commits = [];
+    private string _searchQuery = "";
 
     [Reactive] public partial GitCommit? SelectedCommit { get; set; }
     [Reactive] public partial bool WorkingCopySelected { get; set; }
@@ -38,22 +39,28 @@ public partial class CommitList : Component
         _commits = _repo.GetLog();
         var status = _repo.GetStatus();
 
+        var filtered = FilterCommits(_commits, _searchQuery);
+
         return Flex.Column(gap: 0).FlexGrow(1).Background(GitClientColors.Background).Children(
             // Working copy row (always visible at top)
             BuildWorkingCopyRow(status.Count, wcSelected),
+
+            // Search bar
+            BuildSearchBar(),
 
             // Separator
             Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
 
             // Commit list
-            _commits.Count == 0
+            filtered.Count == 0
                 ? Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                     .Children(
-                        Text.New("No commits yet").FontSize(14f).TextColor(GitClientColors.TextMuted)
+                        Text.New(_searchQuery.Length > 0 ? "No matching commits" : "No commits yet")
+                            .FontSize(14f).TextColor(GitClientColors.TextMuted)
                     )
                 : VirtualListElement<GitCommit>.New()
                     .ItemHeight(36)
-                    .Items(_commits)
+                    .Items(filtered)
                     .RenderWith(commit => CommitRow.Build(commit, !wcSelected && commit == selected, SelectCommit, CopyToClipboard, OnCheckoutCommit, OnCherryPick))
                     .FlexGrow(1)
         );
@@ -107,6 +114,75 @@ public partial class CommitList : Component
         row.OnClick(_ => SelectWorkingCopy());
 
         return row;
+    }
+
+    private Element BuildSearchBar()
+    {
+        var container = Flex.Row(gap: 6)
+            .Padding(new Thickness(6, 8, 6, 8))
+            .AlignItems(AlignItems.Center)
+            .Background(GitClientColors.Surface)
+            .FlexShrink(0);
+
+        // Search icon
+        container.AddChild(
+            Text.New("\u2315").FontSize(13f).TextColor(GitClientColors.TextMuted)
+        );
+
+        // Search input
+        container.AddChild(
+            TextInput.New(_searchQuery)
+                .PlaceholderText("Filter by message, author, or hash\u2026")
+                .OnTextChanged(OnSearchChanged)
+                .FontSize(12f)
+                .FlexGrow(1)
+                .Height(Dimension.Px(26))
+                .Background(GitClientColors.Background)
+                .CornerRadius(4f)
+                .BorderColor(GitClientColors.Border)
+                .TextColor(GitClientColors.TextPrimary)
+        );
+
+        // Clear button (only when there's a query)
+        if (_searchQuery.Length > 0)
+        {
+            var clearBtn = Box.New()
+                .Width(20).Height(20)
+                .CornerRadius(10f)
+                .JustifyContent(JustifyContent.Center)
+                .AlignItems(AlignItems.Center)
+                .Cursor(CursorType.Pointer)
+                .Children(Text.New("\u2715").FontSize(10f).TextColor(GitClientColors.TextMuted));
+
+            clearBtn.OnPointerEnter(_ => clearBtn.BackgroundColor = GitClientColors.SurfaceHover);
+            clearBtn.OnPointerLeave(_ => clearBtn.BackgroundColor = Color.Transparent);
+            clearBtn.OnClick(_ => { _searchQuery = ""; Refresh(); });
+
+            container.AddChild(clearBtn);
+        }
+
+        return container;
+    }
+
+    private void OnSearchChanged(string query)
+    {
+        _searchQuery = query;
+        Refresh();
+    }
+
+    private static List<GitCommit> FilterCommits(List<GitCommit> commits, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return commits;
+
+        var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return commits.Where(c => terms.All(term =>
+            c.Subject.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            c.AuthorName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            c.AuthorEmail.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            c.ShortHash.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            c.Hash.Contains(term, StringComparison.OrdinalIgnoreCase)
+        )).ToList();
     }
 
     private void SelectWorkingCopy()
