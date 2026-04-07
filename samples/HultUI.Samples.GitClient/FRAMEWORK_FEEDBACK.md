@@ -12,9 +12,7 @@ Issues and friction points discovered while building the Git client sample.
 
 ## 2. No `MarkDirty()` on Component — RESOLVED
 
-**Status**: `Component.MarkDirty()` now exists (`src/HultUI.Core/Components/Component.cs:35`) and forwards to `Host?.ForceRebuild()`.
-
-**Follow-up**: Existing samples (`CommitList`, `StagingArea`, `App`) still use the `[Reactive] int RefreshTrigger` workaround. Worth a sweep to convert them to `MarkDirty()` and delete the counters.
+**Status**: `Component.MarkDirty()` now exists (`src/HultUI.Core/Components/Component.cs:35`) and forwards to `Host?.ForceRebuild()`. The git client sample has been swept — `App`, `CommitList`, `StagingArea`, and `Sidebar` no longer carry the `[Reactive] int RefreshTrigger` workaround; their `Refresh()` methods call `MarkDirty()` directly.
 
 ## 3. No fluent methods for TextElement.Overflow and TextElement.MaxLines
 

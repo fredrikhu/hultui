@@ -35,7 +35,6 @@ public partial class App : Component
 
     // State
     [Reactive] public partial bool ShowWorkingCopy { get; set; }
-    [Reactive] public partial int RefreshTrigger { get; set; }
 
     private Element? _workingCopyLayout;
 
@@ -64,7 +63,6 @@ public partial class App : Component
 
     public override Element Build()
     {
-        _ = RefreshTrigger; // track refresh
         var currentBranch = _repo.GetCurrentBranch();
         var branches = _repo.GetBranches();
         var currentBranchInfo = branches.FirstOrDefault(b => b.IsCurrent || b.Name == currentBranch);
@@ -197,6 +195,6 @@ public partial class App : Component
         _sidebar.Refresh();
         _commitList.Refresh();
         _stagingArea.Refresh();
-        RefreshTrigger++;
+        MarkDirty();
     }
 }

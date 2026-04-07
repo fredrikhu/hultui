@@ -16,8 +16,6 @@ public partial class Sidebar : Component
     private readonly GitRepository _repo;
     private readonly TreeView _treeView;
 
-    [Reactive] public partial int RefreshTrigger { get; set; }
-
     public Action<string>? OnBranchSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
 
@@ -29,7 +27,6 @@ public partial class Sidebar : Component
 
     public override Element Build()
     {
-        _ = RefreshTrigger;
         BuildTree();
 
         return Flex.Column(gap: 0)
@@ -52,10 +49,7 @@ public partial class Sidebar : Component
             );
     }
 
-    public void Refresh()
-    {
-        RefreshTrigger++;
-    }
+    public void Refresh() => MarkDirty();
 
     private void BuildTree()
     {

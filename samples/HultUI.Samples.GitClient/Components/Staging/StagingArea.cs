@@ -4,7 +4,6 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
-using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using GitClient.Components.Detail;
 using GitClient.Components.Shared;
@@ -28,8 +27,6 @@ public partial class StagingArea : Component
     private string? _selectedPath;
     private bool _selectedIsStaged;
 
-    [Reactive] public partial int RefreshTrigger { get; set; }
-
     public Action? OnCommitted { get; set; }
 
     public StagingArea(GitRepository repo, DiffViewer diffViewer)
@@ -40,7 +37,6 @@ public partial class StagingArea : Component
 
     public override Element Build()
     {
-        _ = RefreshTrigger;
         var statusFiles = _repo.GetStatus();
 
         // Split into staged and unstaged based on git status porcelain codes
@@ -85,10 +81,7 @@ public partial class StagingArea : Component
         );
     }
 
-    public void Refresh()
-    {
-        RefreshTrigger++;
-    }
+    public void Refresh() => MarkDirty();
 
     private Element BuildFileSection(string title, List<GitFileChange> files, bool isStaged)
     {

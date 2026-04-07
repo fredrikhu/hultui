@@ -18,7 +18,6 @@ public partial class CommitList : Component
 
     [Reactive] public partial GitCommit? SelectedCommit { get; set; }
     [Reactive] public partial bool WorkingCopySelected { get; set; }
-    [Reactive] public partial int RefreshTrigger { get; set; }
 
     public Action<GitCommit?>? OnCommitSelected { get; set; }
     public Action? OnWorkingCopySelected { get; set; }
@@ -33,7 +32,6 @@ public partial class CommitList : Component
 
     public override Element Build()
     {
-        _ = RefreshTrigger;
         var selected = SelectedCommit;
         var wcSelected = WorkingCopySelected;
         _commits = _repo.GetLog();
@@ -66,10 +64,7 @@ public partial class CommitList : Component
         );
     }
 
-    public void Refresh()
-    {
-        RefreshTrigger++;
-    }
+    public void Refresh() => MarkDirty();
 
     private Element BuildWorkingCopyRow(int changedCount, bool isSelected)
     {
