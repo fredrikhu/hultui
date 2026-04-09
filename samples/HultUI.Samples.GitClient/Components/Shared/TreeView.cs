@@ -58,6 +58,7 @@ public partial class TreeView : Component
         var row = Flex.Row(gap: 4)
             .Padding(new Thickness(4, 4 + depth * 16, 4, 8))
             .AlignItems(AlignItems.Center)
+            .FlexShrink(0)
             .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
             .Cursor(CursorType.Pointer);
         row.Key = $"tree-{depth}-{node.Label}";
