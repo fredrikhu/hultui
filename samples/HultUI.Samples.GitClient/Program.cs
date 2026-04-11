@@ -27,6 +27,16 @@ app.Theme = new Theme
     Surface = GitClientColors.Surface,
     Primary = GitClientColors.ButtonPrimary,
     Secondary = GitClientColors.TextSecondary,
+    ContextMenu = new ContextMenuTheme
+    {
+        Background = GitClientColors.Surface,
+        BorderColor = GitClientColors.BorderLight,
+        TextColor = GitClientColors.TextPrimary,
+        DisabledTextColor = GitClientColors.TextMuted,
+        HoverBackground = GitClientColors.SurfaceHover,
+        SeparatorColor = GitClientColors.Border,
+        ShortcutTextColor = GitClientColors.TextSecondary,
+    },
 };
 
 var window = app.PrimaryWindow;
