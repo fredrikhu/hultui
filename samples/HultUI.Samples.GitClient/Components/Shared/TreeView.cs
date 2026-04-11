@@ -56,7 +56,7 @@ public partial class TreeView : Component
     {
         var isSelected = SelectedNode == node;
         var row = Flex.Row(gap: 4)
-            .Padding(new Thickness(4, 4 + depth * 16, 4, 8))
+            .Padding(new Thickness(4, 8, 4, 4 + depth * 16))
             .AlignItems(AlignItems.Center)
             .FlexShrink(0)
             .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
