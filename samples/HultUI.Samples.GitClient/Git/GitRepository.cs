@@ -36,6 +36,10 @@ public class GitRepository
 
             var name = parts[0];
             var fullName = parts[1];
+
+            // Skip symbolic refs like refs/remotes/origin/HEAD
+            if (fullName.EndsWith("/HEAD")) continue;
+
             var isCurrent = parts[2] == "*";
             var isRemote = fullName.StartsWith("refs/remotes/");
             var trackingBranch = string.IsNullOrEmpty(parts[3]) ? null : parts[3];
