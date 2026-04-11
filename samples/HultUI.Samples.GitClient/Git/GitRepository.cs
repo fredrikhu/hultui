@@ -305,10 +305,59 @@ public class GitRepository
 
     // ── Stashes ──
 
-    public List<string> GetStashes()
+    public List<GitStash> GetStashes()
     {
-        var result = GitProcess.Run(Path, "stash", "list", "--format=%gd: %gs");
-        return result.Success ? [.. result.Lines] : [];
+        // %gd → "stash@{0}", %gs → "WIP on main: c8b05ce subject"
+        var result = GitProcess.Run(Path, "stash", "list",
+            $"--format=%gd{FieldSep}%gs");
+        if (!result.Success) return [];
+
+        var stashes = new List<GitStash>();
+        foreach (var line in result.Lines)
+        {
+            var parts = line.Split(FieldSep);
+            if (parts.Length < 2) continue;
+
+            var stashRef = parts[0];
+            var raw = parts[1];
+
+            // raw is "WIP on <branch>: <subject>" or "On <branch>: <subject>"
+            var colon = raw.IndexOf(':');
+            string branch = "", subject = raw;
+            if (colon >= 0)
+            {
+                var head = raw[..colon];
+                subject = raw[(colon + 1)..].TrimStart();
+                branch = head.StartsWith("WIP on ") ? head[7..]
+                    : head.StartsWith("On ") ? head[3..]
+                    : head;
+            }
+
+            stashes.Add(new GitStash(stashRef, branch, subject));
+        }
+        return stashes;
+    }
+
+    public GitResult StashCreate(string? message = null)
+    {
+        return string.IsNullOrWhiteSpace(message)
+            ? GitProcess.Run(Path, "stash", "push", "--include-untracked")
+            : GitProcess.Run(Path, "stash", "push", "--include-untracked", "-m", message);
+    }
+
+    public GitResult StashApply(string stashRef)
+    {
+        return GitProcess.Run(Path, "stash", "apply", stashRef);
+    }
+
+    public GitResult StashPop(string stashRef)
+    {
+        return GitProcess.Run(Path, "stash", "pop", stashRef);
+    }
+
+    public GitResult StashDrop(string stashRef)
+    {
+        return GitProcess.Run(Path, "stash", "drop", stashRef);
     }
 
     // ── Parsing helpers ──

@@ -60,7 +60,9 @@ public partial class App : Component
         _commitList.OnCherryPick = DoCherryPick;
         _sidebar.OnBranchSelected = OnBranchSelected;
         _sidebar.CopyToClipboard = CopyToClipboard;
+        _sidebar.OnRepoChanged = RefreshAll;
         _stagingArea.OnCommitted = OnCommitted;
+        _stagingArea.OnRepoChanged = RefreshAll;
     }
 
     public override Element Build()
