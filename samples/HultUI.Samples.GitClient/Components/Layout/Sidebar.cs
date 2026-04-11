@@ -56,9 +56,8 @@ public partial class Sidebar : Component
         );
 
         return Flex.Column(gap: 0)
-            .Width(Dimension.Px(200))
+            .FlexGrow(1)
             .Background(GitClientColors.Sidebar)
-            .FlexShrink(0)
             .Children(children.ToArray());
     }
 

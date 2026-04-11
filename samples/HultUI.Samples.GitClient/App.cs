@@ -31,6 +31,7 @@ public partial class App : Component
     private readonly CommitDetail _commitDetail;
     private readonly DiffViewer _workingDiffViewer;
     private readonly StagingArea _stagingArea;
+    private readonly SplitPane _sidebarSplit;
     private readonly SplitPane _mainSplit;
 
     // State
@@ -48,6 +49,7 @@ public partial class App : Component
         _commitDetail = new CommitDetail(repo);
         _workingDiffViewer = new DiffViewer();
         _stagingArea = new StagingArea(repo, _workingDiffViewer);
+        _sidebarSplit = new SplitPane(horizontal: true, initialRatio: 0.18f);
         _mainSplit = new SplitPane(horizontal: false, initialRatio: 0.45f);
 
         // Wire up events
@@ -80,26 +82,8 @@ public partial class App : Component
                 // Tab bar
                 TabBar.Build(_repo.Path),
 
-                // Main content area
-                Flex.Row(gap: 0).FlexGrow(1).Children(
-
-                    // Sidebar
-                    _sidebar.Mount(),
-
-                    // Sidebar border
-                    Box.New().Width(1).Background(GitClientColors.Border),
-
-                    // Content area (commit history + detail)
-                    _mainSplit.Build(
-                        // Top: commit history
-                        _commitList.Mount(),
-
-                        // Bottom: detail panel (commit detail or staging area)
-                        showWc
-                            ? BuildWorkingCopyPanel()
-                            : _commitDetail.Mount()
-                    )
-                ),
+                // Main content area (sidebar + history/detail)
+                BuildSidebarLayout(showWc),
 
                 // Status bar
                 StatusBar.Build(
@@ -112,6 +96,17 @@ public partial class App : Component
                     onPush: DoPush
                 )
             );
+    }
+
+    private Element BuildSidebarLayout(bool showWc)
+    {
+        return _sidebarSplit.Build(
+            _sidebar.Mount(),
+            _mainSplit.Build(
+                _commitList.Mount(),
+                showWc ? BuildWorkingCopyPanel() : _commitDetail.Mount()
+            )
+        );
     }
 
     private Element BuildWorkingCopyPanel()
