@@ -140,7 +140,7 @@ public static class CommitRow
             {
                 var top = new Point(LaneX(e.FromLane), 0);
                 var mid = new Point(LaneX(e.ToLane), centerY);
-                ctx.DrawLine(top, mid, LaneColor(e.ColorIndex), EdgeStroke);
+                ctx.DrawBezier(top, mid, LaneColor(e.ColorIndex), EdgeStroke);
             }
         }
 
@@ -151,7 +151,7 @@ public static class CommitRow
             {
                 var mid = new Point(LaneX(e.FromLane), centerY);
                 var bot = new Point(LaneX(e.ToLane), h);
-                ctx.DrawLine(mid, bot, LaneColor(e.ColorIndex), EdgeStroke);
+                ctx.DrawBezier(mid, bot, LaneColor(e.ColorIndex), EdgeStroke);
             }
         }
 

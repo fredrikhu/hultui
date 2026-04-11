@@ -39,6 +39,25 @@ internal sealed class SkiaCanvasDrawingContext : ICanvasDrawingContext
             paint);
     }
 
+    public void DrawBezier(Point from, Point to, Color color, float strokeWidth)
+    {
+        if (color.A == 0) return;
+        using var paint = new SKPaint
+        {
+            Color = ToSkColor(color),
+            IsStroke = true,
+            StrokeWidth = strokeWidth,
+            IsAntialias = true
+        };
+        using var path = new SKPath();
+        path.MoveTo(Bounds.X + from.X, Bounds.Y + from.Y);
+        path.CubicTo(
+            Bounds.X + from.X, float.Lerp(Bounds.Y + from.Y, Bounds.Y + to.Y, 0.5f),
+            Bounds.X + to.X, float.Lerp(Bounds.Y + from.Y, Bounds.Y + to.Y, 0.5f),
+            Bounds.X + to.X, Bounds.Y + to.Y);
+        _canvas.DrawPath(path, paint);
+    }
+
     public void DrawCircle(Point center, float radius, Color fill)
     {
         if (fill.A == 0) return;
