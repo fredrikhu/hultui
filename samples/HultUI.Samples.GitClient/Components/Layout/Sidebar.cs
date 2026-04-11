@@ -164,41 +164,12 @@ public partial class Sidebar : Component
             [
                 new ContextMenuItem { Label = "New Branch…", Action = StartCreateBranch },
             ],
-            Children = localBranches.Select(b =>
-            {
-                var isCurrent = b.IsCurrent || b.Name == currentBranch;
-                return new TreeNode
-                {
-                    Label = b.Name,
-                    Icon = isCurrent ? "\u25CF" : "\u25CB",
-                    IconColor = isCurrent
-                        ? GitClientColors.BranchCurrent
-                        : GitClientColors.BranchLocal,
-                    Tooltip = FormatBranchTooltip(b),
-                    OnClick = () => OnBranchSelected?.Invoke(b.Name),
-                    ContextMenuItems = () =>
-                    {
-                        var items = new List<ContextMenuItem>
-                        {
-                            new() { Label = $"Checkout '{b.Name}'", Action = () => CheckoutBranch(b.Name) },
-                            new() { Label = "New Branch…", Action = StartCreateBranch },
-                        };
-                        if (!isCurrent)
-                        {
-                            items.Add(ContextMenuItem.Separator());
-                            items.Add(new ContextMenuItem { Label = $"Delete '{b.Name}'", Action = () => DeleteBranch(b.Name) });
-                        }
-                        items.Add(ContextMenuItem.Separator());
-                        items.Add(new ContextMenuItem { Label = "Copy name", Action = () => CopyToClipboard?.Invoke(b.Name) });
-                        return items;
-                    },
-                    Tag = b,
-                };
-            }).ToList(),
+            Children = BuildBranchTree(localBranches, currentBranch, isRemote: false),
         };
         roots.Add(localNode);
 
-        // Remote branches — group by remote name
+        // Remote branches — strip remote prefix (e.g. "origin/") for grouping,
+        // then build path tree per remote
         var remoteBranches = branches.Where(b => b.IsRemote).ToList();
         var remoteGroups = remoteBranches
             .GroupBy(b => b.Name.Contains('/') ? b.Name[..b.Name.IndexOf('/')] : "origin")
@@ -214,13 +185,7 @@ public partial class Sidebar : Component
                 Label = g.Key,
                 Icon = "\u2601",
                 IconColor = GitClientColors.BranchRemote,
-                Children = g.Select(b => new TreeNode
-                {
-                    Label = b.Name.Contains('/') ? b.Name[(b.Name.IndexOf('/') + 1)..] : b.Name,
-                    Icon = "\u25CB",
-                    IconColor = GitClientColors.BranchRemote,
-                    Tag = b,
-                }).ToList(),
+                Children = BuildBranchTree(g.ToList(), currentBranch, isRemote: true),
                 IsExpanded = false,
             }).ToList(),
         };
@@ -265,6 +230,115 @@ public partial class Sidebar : Component
         }
 
         _treeView.Roots = roots;
+    }
+
+    /// <summary>
+    /// Builds a nested tree from branch names by splitting on '/'.
+    /// e.g. ["feature/auth/login", "feature/auth/signup", "main"]
+    /// becomes: feature > auth > [login, signup], main
+    /// </summary>
+    private List<TreeNode> BuildBranchTree(List<GitBranch> branches, string currentBranch, bool isRemote)
+    {
+        // For remote branches, strip the "origin/" prefix for display
+        string DisplayName(GitBranch b)
+        {
+            if (!isRemote) return b.Name;
+            var idx = b.Name.IndexOf('/');
+            return idx >= 0 ? b.Name[(idx + 1)..] : b.Name;
+        }
+
+        // Intermediate tree structure: each node is either a folder or a leaf branch
+        var root = new Dictionary<string, object>(); // value is either Dictionary<string,object> (folder) or GitBranch (leaf)
+
+        foreach (var b in branches)
+        {
+            var display = DisplayName(b);
+            var segments = display.Split('/');
+            var current = root;
+
+            for (int i = 0; i < segments.Length; i++)
+            {
+                var seg = segments[i];
+                if (i == segments.Length - 1)
+                {
+                    // Leaf — store the branch
+                    current[seg] = b;
+                }
+                else
+                {
+                    // Folder — get or create sub-dictionary
+                    if (!current.TryGetValue(seg, out var existing) || existing is not Dictionary<string, object> dict)
+                    {
+                        dict = new Dictionary<string, object>();
+                        current[seg] = dict;
+                    }
+                    current = dict;
+                }
+            }
+        }
+
+        return BuildTreeNodesFromDict(root, currentBranch, isRemote);
+    }
+
+    private List<TreeNode> BuildTreeNodesFromDict(Dictionary<string, object> dict, string currentBranch, bool isRemote)
+    {
+        var nodes = new List<TreeNode>();
+
+        // Sort: folders first, then leaves, both alphabetically
+        var folders = dict.Where(kv => kv.Value is Dictionary<string, object>).OrderBy(kv => kv.Key);
+        var leaves = dict.Where(kv => kv.Value is GitBranch).OrderBy(kv => kv.Key);
+
+        foreach (var (label, value) in folders)
+        {
+            var children = BuildTreeNodesFromDict((Dictionary<string, object>)value, currentBranch, isRemote);
+            nodes.Add(new TreeNode
+            {
+                Label = label,
+                Icon = "\u25B8",
+                IconColor = isRemote ? GitClientColors.BranchRemote : GitClientColors.BranchLocal,
+                Children = children,
+            });
+        }
+
+        foreach (var (label, value) in leaves)
+        {
+            var b = (GitBranch)value;
+            var isCurrent = !isRemote && (b.IsCurrent || b.Name == currentBranch);
+            nodes.Add(MakeBranchLeafNode(b, label, isCurrent, isRemote));
+        }
+
+        return nodes;
+    }
+
+    private TreeNode MakeBranchLeafNode(GitBranch b, string displayLabel, bool isCurrent, bool isRemote)
+    {
+        return new TreeNode
+        {
+            Label = displayLabel,
+            Icon = isCurrent ? "\u25CF" : "\u25CB",
+            IconColor = isCurrent ? GitClientColors.BranchCurrent
+                : isRemote ? GitClientColors.BranchRemote
+                : GitClientColors.BranchLocal,
+            Tooltip = FormatBranchTooltip(b),
+            OnClick = () => OnBranchSelected?.Invoke(b.Name),
+            ContextMenuItems = isRemote ? null : () =>
+            {
+                var items = new List<ContextMenuItem>
+                {
+                    new() { Label = $"Checkout '{b.Name}'", Action = () => CheckoutBranch(b.Name) },
+                    new() { Label = "New Branch…", Action = StartCreateBranch },
+                };
+                if (!isCurrent)
+                {
+                    items.Add(ContextMenuItem.Separator());
+                    items.Add(new ContextMenuItem { Label = $"Delete '{b.Name}'", Action = () => DeleteBranch(b.Name) });
+                }
+                items.Add(ContextMenuItem.Separator());
+                items.Add(new ContextMenuItem { Label = "Copy name", Action = () => CopyToClipboard?.Invoke(b.Name) });
+                return items;
+            },
+            Tag = b,
+        };
     }
 
     private void CheckoutBranch(string name)
