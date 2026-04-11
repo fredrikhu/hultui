@@ -37,6 +37,9 @@ public partial class CommitList : Component
         _commits = _repo.GetLog();
         var status = _repo.GetStatus();
 
+        // Compute lane assignments over the full log, not the filtered subset,
+        // so a hidden parent still produces a stable lane in its children.
+        var graph = GitGraphLayout.Compute(_commits);
         var filtered = FilterCommits(_commits, _searchQuery);
 
         return Flex.Column(gap: 0).FlexGrow(1).Background(GitClientColors.Background).Children(
@@ -59,7 +62,14 @@ public partial class CommitList : Component
                 : VirtualListElement<GitCommit>.New()
                     .ItemHeight(36)
                     .Items(filtered)
-                    .RenderWith(commit => CommitRow.Build(commit, !wcSelected && commit == selected, SelectCommit, CopyToClipboard, OnCheckoutCommit, OnCherryPick))
+                    .RenderWith(commit => CommitRow.Build(
+                        commit,
+                        graph.TryGetValue(commit.Hash, out var g) ? g : default,
+                        !wcSelected && commit == selected,
+                        SelectCommit,
+                        CopyToClipboard,
+                        OnCheckoutCommit,
+                        OnCherryPick))
                     .FlexGrow(1)
         );
     }
