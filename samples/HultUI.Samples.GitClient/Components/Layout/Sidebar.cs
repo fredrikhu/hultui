@@ -208,12 +208,7 @@ public partial class Sidebar : Component
                 Icon = "\u2691",
                 IconColor = GitClientColors.TagColor,
                 IsExpanded = false,
-                Children = tags.Take(20).Select(t => new TreeNode
-                {
-                    Label = t,
-                    Icon = "\u2691",
-                    IconColor = GitClientColors.TagColor,
-                }).ToList(),
+                Children = tags.Take(20).Select(MakeTagLeafNode).ToList(),
             };
             roots.Add(tagNode);
         }
@@ -348,6 +343,28 @@ public partial class Sidebar : Component
     {
         _repo.Checkout(name);
         Refresh();
+    }
+
+    private TreeNode MakeTagLeafNode(string tag)
+    {
+        return new TreeNode
+        {
+            Label = tag,
+            Icon = "\u2691",
+            IconColor = GitClientColors.TagColor,
+            ContextMenuItems = () =>
+            [
+                new ContextMenuItem { Label = "Copy name", Action = () => CopyToClipboard?.Invoke(tag) },
+                ContextMenuItem.Separator(),
+                new ContextMenuItem { Label = $"Delete '{tag}'", Action = () => DeleteTag(tag) },
+            ],
+        };
+    }
+
+    private void DeleteTag(string name)
+    {
+        _repo.DeleteTag(name);
+        OnRepoChanged?.Invoke();
     }
 
     private TreeNode MakeStashLeafNode(GitStash stash)

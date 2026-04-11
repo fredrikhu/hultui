@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 1.2 (Tag operations)
+**Current cursor:** ▶ Phase 1.3 (Commit amend)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -28,10 +28,10 @@ and unblock useful daily flows.
   sidebar, apply or pop it from the context menu, and drop it.
 
 ### 1.2 Tag operations
-- [ ] `GitRepository.CreateTag(string name, string? commit, string? message)`
-- [ ] `GitRepository.DeleteTag(string name)`
-- [ ] CommitRow context menu: "Tag this commit…" (inline name input pattern from Sidebar branch creation)
-- [ ] Sidebar: tag node context menu — Delete
+- [x] `GitRepository.CreateTag(string name, string? commit, string? message)`
+- [x] `GitRepository.DeleteTag(string name)`
+- [x] CommitRow context menu: "Tag this commit…" (inline name input pattern from Sidebar branch creation)
+- [x] Sidebar: tag node context menu — Delete
 - **Done when:** I can tag a commit from the history view, see the tag
   badge on that commit, and delete it from the sidebar.
 

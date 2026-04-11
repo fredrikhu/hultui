@@ -36,7 +36,8 @@ public static class CommitRow
         Action<GitCommit> onSelect,
         Action<string>? copyToClipboard = null,
         Action<string>? onCheckout = null,
-        Action<string>? onCherryPick = null)
+        Action<string>? onCherryPick = null,
+        Action<string>? onTag = null)
     {
         var row = Flex.Row(gap: 8)
             .AlignItems(AlignItems.Stretch)
@@ -118,6 +119,7 @@ public static class CommitRow
         [
             new ContextMenuItem { Label = $"Checkout '{commit.ShortHash}'", Action = () => onCheckout?.Invoke(commit.Hash) },
             new ContextMenuItem { Label = "Cherry-pick", Action = () => onCherryPick?.Invoke(commit.Hash) },
+            new ContextMenuItem { Label = "Tag this commit\u2026", Action = () => onTag?.Invoke(commit.Hash) },
             ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Copy SHA", Action = () => copyToClipboard?.Invoke(commit.Hash) },
             new ContextMenuItem { Label = "Copy commit message", Action = () => copyToClipboard?.Invoke(commit.Subject) },

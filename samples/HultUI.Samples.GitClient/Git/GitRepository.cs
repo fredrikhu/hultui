@@ -346,6 +346,29 @@ public class GitRepository
         return result.Success ? [.. result.Lines] : [];
     }
 
+    /// <summary>
+    /// Creates a tag. If <paramref name="message"/> is non-empty, an annotated
+    /// tag is created (`git tag -a -m`); otherwise a lightweight tag.
+    /// </summary>
+    public GitResult CreateTag(string name, string? commit = null, string? message = null)
+    {
+        var args = new List<string> { "tag" };
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            args.Add("-a");
+            args.Add("-m");
+            args.Add(message);
+        }
+        args.Add(name);
+        if (!string.IsNullOrWhiteSpace(commit)) args.Add(commit);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    public GitResult DeleteTag(string name)
+    {
+        return GitProcess.Run(Path, "tag", "-d", name);
+    }
+
     // ── Stashes ──
 
     public List<GitStash> GetStashes()

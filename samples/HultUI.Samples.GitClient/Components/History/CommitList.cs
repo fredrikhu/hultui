@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
@@ -16,6 +17,11 @@ public partial class CommitList : Component
     private List<GitCommit> _commits = [];
     private string _searchQuery = "";
 
+    // Inline tag-creation state. When _taggingCommitHash is non-null,
+    // a small input strip is shown above the list capturing the new tag name.
+    private string? _taggingCommitHash;
+    private string _newTagName = "";
+
     [Reactive] public partial GitCommit? SelectedCommit { get; set; }
     [Reactive] public partial bool WorkingCopySelected { get; set; }
 
@@ -24,6 +30,12 @@ public partial class CommitList : Component
     public Action<string>? CopyToClipboard { get; set; }
     public Action<string>? OnCheckoutCommit { get; set; }
     public Action<string>? OnCherryPick { get; set; }
+
+    /// <summary>
+    /// Fired after a commit-list action that mutates the repo (e.g. tagging).
+    /// The host wires this to refresh peer components like the sidebar.
+    /// </summary>
+    public Action? OnRepoChanged { get; set; }
 
     public CommitList(GitRepository repo)
     {
@@ -42,16 +54,25 @@ public partial class CommitList : Component
         var graph = GitGraphLayout.Compute(_commits);
         var filtered = FilterCommits(_commits, _searchQuery);
 
-        return Flex.Column(gap: 0).FlexGrow(1).Background(GitClientColors.Background).Children(
+        var children = new List<Element>
+        {
             // Working copy row (always visible at top)
             BuildWorkingCopyRow(status.Count, wcSelected),
 
             // Search bar
             BuildSearchBar(),
+        };
 
+        // Inline tag-name input (only when tagging a commit)
+        if (_taggingCommitHash != null)
+            children.Add(BuildNewTagInput());
+
+        children.Add(
             // Separator
-            Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
+            Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0)
+        );
 
+        children.Add(
             // Commit list
             filtered.Count == 0
                 ? Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -69,9 +90,13 @@ public partial class CommitList : Component
                         SelectCommit,
                         CopyToClipboard,
                         OnCheckoutCommit,
-                        OnCherryPick))
+                        OnCherryPick,
+                        StartTagCommit))
                     .FlexGrow(1)
         );
+
+        return Flex.Column(gap: 0).FlexGrow(1).Background(GitClientColors.Background)
+            .Children(children.ToArray());
     }
 
     public void Refresh() => MarkDirty();
@@ -188,6 +213,89 @@ public partial class CommitList : Component
             c.ShortHash.Contains(term, StringComparison.OrdinalIgnoreCase) ||
             c.Hash.Contains(term, StringComparison.OrdinalIgnoreCase)
         )).ToList();
+    }
+
+    private Element BuildNewTagInput()
+    {
+        // Find the commit being tagged so we can show its short hash as a hint.
+        var target = _commits.FirstOrDefault(c => c.Hash == _taggingCommitHash);
+        var hintText = target != null
+            ? $"Tag {target.ShortHash}\u2026"
+            : "Tag name\u2026";
+
+        var input = TextInput.New(_newTagName)
+            .PlaceholderText(hintText)
+            .OnTextChanged(text => _newTagName = text)
+            .FontSize(12f)
+            .FlexGrow(1)
+            .Height(Dimension.Px(24))
+            .Background(GitClientColors.Background)
+            .CornerRadius(3f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary);
+
+        input.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Enter) ConfirmCreateTag();
+            else if (e.Key == KeyCode.Escape) CancelCreateTag();
+        });
+
+        var confirmBtn = Box.New()
+            .Width(24).Height(24)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonPrimary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Create tag")
+            .Children(Text.New("\u2713").FontSize(12f).TextColor(Color.White));
+        confirmBtn.On<ClickEvent>(_ => ConfirmCreateTag());
+
+        var cancelBtn = Box.New()
+            .Width(24).Height(24)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonSecondary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Cancel")
+            .Children(Text.New("\u2715").FontSize(12f).TextColor(GitClientColors.TextSecondary));
+        cancelBtn.On<ClickEvent>(_ => CancelCreateTag());
+
+        return Flex.Row(gap: 4)
+            .Padding(new Thickness(4, 8, 4, 8))
+            .AlignItems(AlignItems.Center)
+            .Background(GitClientColors.Surface)
+            .FlexShrink(0)
+            .Children(input, confirmBtn, cancelBtn);
+    }
+
+    private void StartTagCommit(string commitHash)
+    {
+        _taggingCommitHash = commitHash;
+        _newTagName = "";
+        Refresh();
+    }
+
+    private void ConfirmCreateTag()
+    {
+        var name = _newTagName.Trim();
+        var hash = _taggingCommitHash;
+        if (name.Length > 0 && hash != null)
+        {
+            _repo.CreateTag(name, hash);
+            OnRepoChanged?.Invoke();
+        }
+        _taggingCommitHash = null;
+        _newTagName = "";
+        Refresh();
+    }
+
+    private void CancelCreateTag()
+    {
+        _taggingCommitHash = null;
+        _newTagName = "";
+        Refresh();
     }
 
     private void SelectWorkingCopy()

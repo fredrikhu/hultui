@@ -58,6 +58,7 @@ public partial class App : Component
         _commitList.CopyToClipboard = CopyToClipboard;
         _commitList.OnCheckoutCommit = DoCheckoutCommit;
         _commitList.OnCherryPick = DoCherryPick;
+        _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
         _sidebar.OnStashSelected = OnStashSelected;
         _sidebar.CopyToClipboard = CopyToClipboard;
