@@ -58,6 +58,46 @@ public class GitRepository
         return result.Success ? result.Stdout.Trim() : "HEAD";
     }
 
+    /// <summary>
+    /// Resolves any commit-ish (hash, branch, tag, stash ref) into a <see cref="GitCommit"/>.
+    /// Used to view stash entries through the same CommitDetail panel as regular commits —
+    /// stashes are full commit objects, so this works without any special-casing downstream.
+    /// </summary>
+    public GitCommit? GetCommit(string refOrHash)
+    {
+        var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
+        var result = GitProcess.Run(Path, "log", "-1", $"--format={format}", refOrHash);
+        if (!result.Success) return null;
+
+        var line = result.Stdout.Trim();
+        if (string.IsNullOrEmpty(line)) return null;
+
+        var parts = line.Split(FieldSep);
+        if (parts.Length < 8) return null;
+
+        var parentHashes = string.IsNullOrWhiteSpace(parts[6])
+            ? []
+            : parts[6].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        var refs = string.IsNullOrWhiteSpace(parts[7])
+            ? []
+            : parts[7].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        if (!DateTimeOffset.TryParse(parts[4], CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            date = DateTimeOffset.MinValue;
+
+        return new GitCommit(
+            Hash: parts[0],
+            ShortHash: parts[1],
+            AuthorName: parts[2],
+            AuthorEmail: parts[3],
+            AuthorDate: date,
+            Subject: parts[5],
+            ParentHashes: parentHashes,
+            Refs: refs
+        );
+    }
+
     // ── Log ──
 
     public List<GitCommit> GetLog(int maxCount = 500)
@@ -142,7 +182,10 @@ public class GitRepository
 
     public List<GitFileChange> GetCommitFiles(string commitHash)
     {
-        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-r", "--numstat", "-M", commitHash);
+        // -m --first-parent: for merge commits (and stashes, which are merges
+        // of HEAD/index/untracked), diff against the first parent instead of
+        // suppressing output entirely.
+        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", commitHash);
         if (!result.Success) return [];
 
         var changes = new List<GitFileChange>();
@@ -183,7 +226,7 @@ public class GitRepository
 
     public List<GitFileDiff> GetCommitDiff(string commitHash)
     {
-        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", commitHash);
+        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", commitHash);
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 

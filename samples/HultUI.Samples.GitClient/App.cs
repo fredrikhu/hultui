@@ -59,6 +59,7 @@ public partial class App : Component
         _commitList.OnCheckoutCommit = DoCheckoutCommit;
         _commitList.OnCherryPick = DoCherryPick;
         _sidebar.OnBranchSelected = OnBranchSelected;
+        _sidebar.OnStashSelected = OnStashSelected;
         _sidebar.CopyToClipboard = CopyToClipboard;
         _sidebar.OnRepoChanged = RefreshAll;
         _stagingArea.OnCommitted = OnCommitted;
@@ -145,6 +146,18 @@ public partial class App : Component
     {
         _repo.Checkout(branchName);
         RefreshAll();
+    }
+
+    private void OnStashSelected(GitStash stash)
+    {
+        // Stashes are real commit objects — load the WIP commit and feed it
+        // into CommitDetail just like a regular commit. The diff against the
+        // stash's first parent is what `git stash show -p` would print.
+        var commit = _repo.GetCommit(stash.Ref);
+        if (commit == null) return;
+
+        ShowWorkingCopy = false;
+        _commitDetail.Commit = commit;
     }
 
     private void OnCommitted()

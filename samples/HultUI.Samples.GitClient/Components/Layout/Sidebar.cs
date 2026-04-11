@@ -21,6 +21,7 @@ public partial class Sidebar : Component
     private string _newBranchName = "";
 
     public Action<string>? OnBranchSelected { get; set; }
+    public Action<GitStash>? OnStashSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
 
     /// <summary>
@@ -358,6 +359,7 @@ public partial class Sidebar : Component
             Icon = "\u2397",
             IconColor = GitClientColors.StashColor,
             Tooltip = $"{stash.Ref}\nOn {stash.Branch}\n{stash.Subject}",
+            OnClick = () => OnStashSelected?.Invoke(stash),
             ContextMenuItems = () =>
             [
                 new ContextMenuItem { Label = "Apply", Action = () => ApplyStash(stash.Ref) },
