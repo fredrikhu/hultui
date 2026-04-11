@@ -1,6 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
@@ -16,6 +17,9 @@ public partial class Sidebar : Component
     private readonly GitRepository _repo;
     private readonly TreeView _treeView;
 
+    private bool _isCreatingBranch;
+    private string _newBranchName = "";
+
     public Action<string>? OnBranchSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
 
@@ -29,27 +33,117 @@ public partial class Sidebar : Component
     {
         BuildTree();
 
+        var children = new List<Element>
+        {
+            // Section header
+            Box.New()
+                .Padding(new Thickness(10, 12, 6, 12))
+                .Children(
+                    Text.New("BRANCHES").FontSize(10f).FontWeight(FontWeight.Bold)
+                        .TextColor(GitClientColors.TextMuted)
+                ),
+        };
+
+        // Inline branch creation input
+        if (_isCreatingBranch)
+            children.Add(BuildNewBranchInput());
+
+        // Tree content
+        children.Add(
+            ScrollView.New().FlexGrow(1).Children(
+                _treeView.Mount()
+            )
+        );
+
         return Flex.Column(gap: 0)
             .Width(Dimension.Px(200))
             .Background(GitClientColors.Sidebar)
             .FlexShrink(0)
-            .Children(
-                // Section header
-                Box.New()
-                    .Padding(new Thickness(10, 12, 6, 12))
-                    .Children(
-                        Text.New("BRANCHES").FontSize(10f).FontWeight(FontWeight.Bold)
-                            .TextColor(GitClientColors.TextMuted)
-                    ),
-
-                // Tree content
-                ScrollView.New().FlexGrow(1).Children(
-                    _treeView.Mount()
-                )
-            );
+            .Children(children.ToArray());
     }
 
     public void Refresh() => MarkDirty();
+
+    private Element BuildNewBranchInput()
+    {
+        var input = TextInput.New(_newBranchName)
+            .PlaceholderText("Branch name…")
+            .OnTextChanged(text => _newBranchName = text)
+            .FontSize(12f)
+            .FlexGrow(1)
+            .Height(Dimension.Px(24))
+            .Background(GitClientColors.Background)
+            .CornerRadius(3f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary);
+
+        input.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Enter) ConfirmCreateBranch();
+            else if (e.Key == KeyCode.Escape) CancelCreateBranch();
+        });
+
+        var confirmBtn = Box.New()
+            .Width(24).Height(24)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonPrimary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Create branch")
+            .Children(Text.New("\u2713").FontSize(12f).TextColor(Color.White));
+        confirmBtn.On<ClickEvent>(_ => ConfirmCreateBranch());
+
+        var cancelBtn = Box.New()
+            .Width(24).Height(24)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonSecondary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Cancel")
+            .Children(Text.New("\u2715").FontSize(12f).TextColor(GitClientColors.TextSecondary));
+        cancelBtn.On<ClickEvent>(_ => CancelCreateBranch());
+
+        return Flex.Row(gap: 4)
+            .Padding(new Thickness(4, 8, 4, 8))
+            .AlignItems(AlignItems.Center)
+            .Background(GitClientColors.Surface)
+            .FlexShrink(0)
+            .Children(input, confirmBtn, cancelBtn);
+    }
+
+    private void StartCreateBranch()
+    {
+        _newBranchName = "";
+        _isCreatingBranch = true;
+        Refresh();
+    }
+
+    private void ConfirmCreateBranch()
+    {
+        var name = _newBranchName.Trim();
+        if (name.Length > 0)
+        {
+            _repo.CreateBranch(name);
+        }
+        _isCreatingBranch = false;
+        _newBranchName = "";
+        Refresh();
+    }
+
+    private void CancelCreateBranch()
+    {
+        _isCreatingBranch = false;
+        _newBranchName = "";
+        Refresh();
+    }
+
+    private void DeleteBranch(string name)
+    {
+        _repo.DeleteBranch(name);
+        Refresh();
+    }
 
     private void BuildTree()
     {
@@ -67,22 +161,40 @@ public partial class Sidebar : Component
             Label = "Local",
             Icon = "\u2442",
             IconColor = GitClientColors.BranchLocal,
-            Children = localBranches.Select(b => new TreeNode
+            ContextMenuItems = () =>
+            [
+                new ContextMenuItem { Label = "New Branch…", Action = StartCreateBranch },
+            ],
+            Children = localBranches.Select(b =>
             {
-                Label = b.Name,
-                Icon = b.IsCurrent || b.Name == currentBranch ? "\u25CF" : "\u25CB",
-                IconColor = b.IsCurrent || b.Name == currentBranch
-                    ? GitClientColors.BranchCurrent
-                    : GitClientColors.BranchLocal,
-                Tooltip = FormatBranchTooltip(b),
-                OnClick = () => OnBranchSelected?.Invoke(b.Name),
-                ContextMenuItems = () =>
-                [
-                    new ContextMenuItem { Label = $"Checkout '{b.Name}'", Action = () => CheckoutBranch(b.Name) },
-                    ContextMenuItem.Separator(),
-                    new ContextMenuItem { Label = "Copy name", Action = () => CopyToClipboard?.Invoke(b.Name) },
-                ],
-                Tag = b,
+                var isCurrent = b.IsCurrent || b.Name == currentBranch;
+                return new TreeNode
+                {
+                    Label = b.Name,
+                    Icon = isCurrent ? "\u25CF" : "\u25CB",
+                    IconColor = isCurrent
+                        ? GitClientColors.BranchCurrent
+                        : GitClientColors.BranchLocal,
+                    Tooltip = FormatBranchTooltip(b),
+                    OnClick = () => OnBranchSelected?.Invoke(b.Name),
+                    ContextMenuItems = () =>
+                    {
+                        var items = new List<ContextMenuItem>
+                        {
+                            new() { Label = $"Checkout '{b.Name}'", Action = () => CheckoutBranch(b.Name) },
+                            new() { Label = "New Branch…", Action = StartCreateBranch },
+                        };
+                        if (!isCurrent)
+                        {
+                            items.Add(ContextMenuItem.Separator());
+                            items.Add(new ContextMenuItem { Label = $"Delete '{b.Name}'", Action = () => DeleteBranch(b.Name) });
+                        }
+                        items.Add(ContextMenuItem.Separator());
+                        items.Add(new ContextMenuItem { Label = "Copy name", Action = () => CopyToClipboard?.Invoke(b.Name) });
+                        return items;
+                    },
+                    Tag = b,
+                };
             }).ToList(),
         };
         roots.Add(localNode);

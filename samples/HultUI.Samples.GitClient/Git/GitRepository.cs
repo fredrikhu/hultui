@@ -253,6 +253,25 @@ public class GitRepository
         return GitProcess.Run(Path, "push");
     }
 
+    // ── Branch management ──
+
+    public GitResult CreateBranch(string name, string? startPoint = null)
+    {
+        return startPoint != null
+            ? GitProcess.Run(Path, "branch", name, startPoint)
+            : GitProcess.Run(Path, "branch", name);
+    }
+
+    public GitResult DeleteBranch(string name, bool force = false)
+    {
+        return GitProcess.Run(Path, "branch", force ? "-D" : "-d", name);
+    }
+
+    public GitResult RenameBranch(string oldName, string newName)
+    {
+        return GitProcess.Run(Path, "branch", "-m", oldName, newName);
+    }
+
     // ── Checkout ──
 
     public GitResult Checkout(string branchName)
