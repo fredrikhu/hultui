@@ -23,6 +23,13 @@ public partial class Sidebar : Component
     public Action<string>? OnBranchSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
 
+    /// <summary>
+    /// Fired after any sidebar action that mutates the repo (stash apply,
+    /// drop, etc.). The host wires this to refresh peer components like
+    /// the commit list and staging area.
+    /// </summary>
+    public Action? OnRepoChanged { get; set; }
+
     public Sidebar(GitRepository repo)
     {
         _repo = repo;
@@ -219,12 +226,7 @@ public partial class Sidebar : Component
                 Icon = "\u2397",
                 IconColor = GitClientColors.StashColor,
                 IsExpanded = false,
-                Children = stashes.Select(s => new TreeNode
-                {
-                    Label = s,
-                    Icon = "\u2397",
-                    IconColor = GitClientColors.StashColor,
-                }).ToList(),
+                Children = stashes.Select(MakeStashLeafNode).ToList(),
             };
             roots.Add(stashNode);
         }
@@ -345,6 +347,46 @@ public partial class Sidebar : Component
     {
         _repo.Checkout(name);
         Refresh();
+    }
+
+    private TreeNode MakeStashLeafNode(GitStash stash)
+    {
+        var label = string.IsNullOrWhiteSpace(stash.Subject) ? stash.Ref : stash.Subject;
+        return new TreeNode
+        {
+            Label = label,
+            Icon = "\u2397",
+            IconColor = GitClientColors.StashColor,
+            Tooltip = $"{stash.Ref}\nOn {stash.Branch}\n{stash.Subject}",
+            ContextMenuItems = () =>
+            [
+                new ContextMenuItem { Label = "Apply", Action = () => ApplyStash(stash.Ref) },
+                new ContextMenuItem { Label = "Pop", Action = () => PopStash(stash.Ref) },
+                ContextMenuItem.Separator(),
+                new ContextMenuItem { Label = "Drop", Action = () => DropStash(stash.Ref) },
+                ContextMenuItem.Separator(),
+                new ContextMenuItem { Label = "Copy ref", Action = () => CopyToClipboard?.Invoke(stash.Ref) },
+            ],
+            Tag = stash,
+        };
+    }
+
+    private void ApplyStash(string stashRef)
+    {
+        _repo.StashApply(stashRef);
+        OnRepoChanged?.Invoke();
+    }
+
+    private void PopStash(string stashRef)
+    {
+        _repo.StashPop(stashRef);
+        OnRepoChanged?.Invoke();
+    }
+
+    private void DropStash(string stashRef)
+    {
+        _repo.StashDrop(stashRef);
+        OnRepoChanged?.Invoke();
     }
 
     private static string FormatBranchTooltip(GitBranch b)

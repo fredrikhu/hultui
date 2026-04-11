@@ -29,6 +29,13 @@ public partial class StagingArea : Component
 
     public Action? OnCommitted { get; set; }
 
+    /// <summary>
+    /// Fired after any staging-area action that mutates the repo beyond a
+    /// regular commit (e.g. creating a stash). The host wires this to
+    /// refresh peer components like the sidebar (so the new stash appears).
+    /// </summary>
+    public Action? OnRepoChanged { get; set; }
+
     public StagingArea(GitRepository repo, DiffViewer diffViewer)
     {
         _repo = repo;
@@ -77,7 +84,7 @@ public partial class StagingArea : Component
             Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
 
             // Commit area
-            BuildCommitArea(staged.Count)
+            BuildCommitArea(staged.Count, unstaged.Count + staged.Count)
         );
     }
 
@@ -191,7 +198,7 @@ public partial class StagingArea : Component
         );
     }
 
-    private Element BuildCommitArea(int stagedCount)
+    private Element BuildCommitArea(int stagedCount, int totalChanged)
     {
         return Flex.Column(gap: 8)
             .Padding(10)
@@ -207,7 +214,10 @@ public partial class StagingArea : Component
                     .BorderColor(GitClientColors.Border)
                     .TextColor(GitClientColors.TextPrimary)
                     .FontSize(13f),
-                CommitButton(stagedCount)
+                Flex.Row(gap: 8).Children(
+                    CommitButton(stagedCount),
+                    StashButton(totalChanged)
+                )
             );
     }
 
@@ -220,6 +230,7 @@ public partial class StagingArea : Component
             .JustifyContent(JustifyContent.Center)
             .AlignItems(AlignItems.Center)
             .Height(Dimension.Px(32))
+            .FlexGrow(1)
             .Cursor(CursorType.Pointer)
             .Children(
                 Text.New($"Commit ({stagedCount} file{(stagedCount == 1 ? "" : "s")})")
@@ -236,6 +247,40 @@ public partial class StagingArea : Component
         return btn;
     }
 
+    private Element StashButton(int totalChanged)
+    {
+        var enabled = totalChanged > 0;
+        var bg = enabled ? GitClientColors.ButtonSecondary : GitClientColors.Surface;
+        var fg = enabled ? GitClientColors.TextPrimary : GitClientColors.TextMuted;
+
+        var btn = Box.New()
+            .Padding(new Thickness(8, 12, 8, 12))
+            .CornerRadius(4f)
+            .Background(bg)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Height(Dimension.Px(32))
+            .FlexShrink(0)
+            .Cursor(enabled ? CursorType.Pointer : CursorType.Default)
+            .Tooltip(enabled
+                ? "Stash all changes (uses commit message as label if non-empty)"
+                : "Nothing to stash")
+            .Children(
+                Text.New("Stash")
+                    .FontSize(13f).FontWeight(FontWeight.SemiBold)
+                    .TextColor(fg)
+            );
+
+        if (enabled)
+        {
+            btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+            btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
+            btn.On<ClickEvent>(_ => DoStash());
+        }
+
+        return btn;
+    }
+
     private void DoCommit()
     {
         if (string.IsNullOrWhiteSpace(_commitMessage)) return;
@@ -245,6 +290,18 @@ public partial class StagingArea : Component
         {
             _commitMessage = "";
             OnCommitted?.Invoke();
+            Refresh();
+        }
+    }
+
+    private void DoStash()
+    {
+        var label = string.IsNullOrWhiteSpace(_commitMessage) ? null : _commitMessage;
+        var result = _repo.StashCreate(label);
+        if (result.Success)
+        {
+            _commitMessage = "";
+            OnRepoChanged?.Invoke();
             Refresh();
         }
     }
