@@ -88,6 +88,7 @@ public class CanvasElementTests
         public Rect Bounds => bounds;
         public void DrawRect(Rect rect, Color fill) { }
         public void DrawLine(Point from, Point to, Color color, float strokeWidth) { }
+        public void DrawBezier(Point from, Point to, Color color, float strokeWidth) { }
         public void DrawCircle(Point center, float radius, Color fill) { }
         public void DrawCircleStroke(Point center, float radius, Color color, float strokeWidth) { }
         public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill) { }
