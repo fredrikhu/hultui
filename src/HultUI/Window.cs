@@ -219,8 +219,12 @@ public sealed class Window : IOverlayHost, IDisposable
                 }
 
                 // Check overlays first (topmost layer), then main tree
-                var target = HitTestOverlays(pos) ?? HitTester.HitTest(_root, pos);
-                _pointerState.UpdateHover(target, pos, move.Modifiers);
+                var (overlayMoveTarget, overlayMoveOffset) = HitTestOverlays(pos);
+                var target = overlayMoveTarget ?? HitTester.HitTest(_root, pos);
+                var effectivePos = overlayMoveTarget is not null
+                    ? new Point(pos.X - overlayMoveOffset.X, pos.Y - overlayMoveOffset.Y)
+                    : pos;
+                _pointerState.UpdateHover(target, effectivePos, move.Modifiers);
                 _lastHoveredElement = target;
 
                 // Update cursor based on hovered element's resolved style
@@ -237,7 +241,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (target is not null)
                 {
                     EventDispatcher.Dispatch(
-                        new PointerMoveEvent { Position = pos, Delta = new Point(move.DeltaX, move.DeltaY), Modifiers = move.Modifiers },
+                        new PointerMoveEvent { Position = effectivePos, Delta = new Point(move.DeltaX, move.DeltaY), Modifiers = move.Modifiers },
                         target);
                 }
                 break;
@@ -285,11 +289,14 @@ public sealed class Window : IOverlayHost, IDisposable
                 }
 
                 // Check overlays first, then main tree
-                var overlayTarget = HitTestOverlays(pos);
+                var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
                 var target = overlayTarget ?? HitTester.HitTest(_root, pos);
                 if (target is null) break;
 
                 bool isOverlayHit = overlayTarget is not null;
+                var effectiveBtnPos = isOverlayHit
+                    ? new Point(pos.X - overlayOffset.X, pos.Y - overlayOffset.Y)
+                    : pos;
 
                 if (button.IsDown)
                 {
@@ -315,7 +322,7 @@ public sealed class Window : IOverlayHost, IDisposable
                             textArea.Clipboard = Clipboard;
                     }
 
-                    var downEvt = _pointerState.HandlePointerDown(target, pos, button.Button, button.Modifiers);
+                    var downEvt = _pointerState.HandlePointerDown(target, effectiveBtnPos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(downEvt, target);
 
                     // Start pointer capture for text input drag selection
@@ -341,7 +348,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 }
                 else
                 {
-                    var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, pos, button.Button, button.Modifiers);
+                    var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, effectiveBtnPos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(upEvt, target);
                     if (clickEvt is not null)
                         EventDispatcher.Dispatch(clickEvt, target);
@@ -797,7 +804,7 @@ public sealed class Window : IOverlayHost, IDisposable
         }
     }
 
-    private Element? HitTestOverlays(Point pos)
+    private (Element? element, Point offset) HitTestOverlays(Point pos)
     {
         // Test back-to-front: last overlay = topmost, checked first
         for (int i = _overlays.Count - 1; i >= 0; i--)
@@ -807,9 +814,9 @@ public sealed class Window : IOverlayHost, IDisposable
             var localPoint = new Point(pos.X - overlay.X, pos.Y - overlay.Y);
             var hit = HitTester.HitTest(overlay.Content, localPoint);
             if (hit is not null)
-                return hit;
+                return (hit, new Point(overlay.X, overlay.Y));
         }
-        return null;
+        return (null, default);
     }
 
     private void DismissOverlaysOnOutsideClick()
