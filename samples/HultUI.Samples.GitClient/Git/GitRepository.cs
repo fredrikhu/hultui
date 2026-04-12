@@ -479,6 +479,51 @@ public class GitRepository
         return GitProcess.Run(Path, "stash", "drop", stashRef);
     }
 
+    // ── Patch application ──
+
+    /// <summary>
+    /// Applies a unified diff patch via stdin to <c>git apply</c>.
+    /// <paramref name="cached"/> targets the index (stage/unstage).
+    /// <paramref name="reverse"/> inverts the patch (unstage or discard).
+    /// </summary>
+    public GitResult ApplyPatch(string patch, bool reverse = false, bool cached = false)
+    {
+        var args = new List<string> { "apply" };
+        if (cached) args.Add("--cached");
+        if (reverse) args.Add("--reverse");
+        args.Add("--unidiff-zero"); // allow zero-context hunks from single-hunk extraction
+        args.Add("-");
+        return GitProcess.RunWithStdin(Path, patch, args.ToArray());
+    }
+
+    /// <summary>
+    /// Reconstructs a minimal valid unified diff patch for a single hunk,
+    /// suitable for piping to <c>git apply</c>.
+    /// </summary>
+    public static string BuildHunkPatch(GitFileDiff file, GitDiffHunk hunk)
+    {
+        // Use \n explicitly — git patches must use LF regardless of platform
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"diff --git a/{file.Path} b/{file.Path}\n");
+        sb.Append($"{file.OldPathHeader ?? $"--- a/{file.Path}"}\n");
+        sb.Append($"{file.NewPathHeader ?? $"+++ b/{file.Path}"}\n");
+
+        sb.Append($"{hunk.Header}\n");
+        foreach (var line in hunk.Lines)
+        {
+            if (line.Kind == DiffLineKind.HunkHeader) continue;
+            var prefix = line.Kind switch
+            {
+                DiffLineKind.Addition => "+",
+                DiffLineKind.Deletion => "-",
+                _ => " ",
+            };
+            sb.Append($"{prefix}{line.Content}\n");
+        }
+
+        return sb.ToString();
+    }
+
     // ── Parsing helpers ──
 
     private static List<GitFileDiff> ParseUnifiedDiff(string diffText)
@@ -497,6 +542,14 @@ public class GitRepository
                 currentFile = new GitFileDiff(path, null, []);
                 diffs.Add(currentFile);
                 currentHunk = null;
+            }
+            else if (rawLine.StartsWith("--- ") && currentFile != null && currentHunk == null)
+            {
+                currentFile.OldPathHeader = rawLine;
+            }
+            else if (rawLine.StartsWith("+++ ") && currentFile != null && currentHunk == null)
+            {
+                currentFile.NewPathHeader = rawLine;
             }
             else if (rawLine.StartsWith("@@ ") && currentFile != null)
             {

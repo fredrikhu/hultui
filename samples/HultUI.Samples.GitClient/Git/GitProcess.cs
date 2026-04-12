@@ -52,6 +52,32 @@ public static class GitProcess
 
         return new GitResult(process.ExitCode, stdout, stderr);
     }
+
+    public static GitResult RunWithStdin(string workingDirectory, string stdin, params string[] args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+
+        using var process = Process.Start(psi)!;
+        process.StandardInput.Write(stdin);
+        process.StandardInput.Close();
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        return new GitResult(process.ExitCode, stdout, stderr);
+    }
 }
 
 public record GitResult(int ExitCode, string Stdout, string Stderr)

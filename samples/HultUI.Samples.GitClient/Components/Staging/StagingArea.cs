@@ -47,6 +47,7 @@ public partial class StagingArea : Component
     {
         _repo = repo;
         _diffViewer = diffViewer;
+        _diffViewer.OnHunkAction = OnHunkAction;
     }
 
     public override Element Build()
@@ -64,7 +65,8 @@ public partial class StagingArea : Component
         }
         else
         {
-            // Normal mode: split status files by what's in the cached diff.
+            // Query both sides independently so partially-staged files
+            // (some hunks staged, others not) appear in both sections.
             var stagedResult = GitProcess.Run(_repo.Path, "diff", "--cached", "--name-status");
             var stagedPaths = new HashSet<string>();
             foreach (var line in stagedResult.Lines)
@@ -72,7 +74,16 @@ public partial class StagingArea : Component
                 var parts = line.Split('\t');
                 if (parts.Length >= 2) stagedPaths.Add(parts[1]);
             }
-            unstaged = statusFiles.Where(f => !stagedPaths.Contains(f.Path)).ToList();
+
+            var unstagedResult = GitProcess.Run(_repo.Path, "diff", "--name-status");
+            var unstagedPaths = new HashSet<string>();
+            foreach (var line in unstagedResult.Lines)
+            {
+                var parts = line.Split('\t');
+                if (parts.Length >= 2) unstagedPaths.Add(parts[1]);
+            }
+
+            unstaged = statusFiles.Where(f => unstagedPaths.Contains(f.Path) || f.Kind == FileChangeKind.Untracked).ToList();
             staged = statusFiles.Where(f => stagedPaths.Contains(f.Path)).ToList();
         }
 
@@ -200,10 +211,7 @@ public partial class StagingArea : Component
             {
                 _selectedPath = file.Path;
                 _selectedIsStaged = isStaged;
-                var baseRef = _amend && isStaged ? "HEAD~1" : null;
-                var diffs = _repo.GetWorkingDiff(isStaged, baseRef);
-                var fileDiff = diffs.Where(d => d.Path == file.Path || d.Path.EndsWith(file.Path)).ToList();
-                _diffViewer.Diffs = fileDiff.Count > 0 ? fileDiff : diffs;
+                RefreshDiffViewer();
                 Refresh();
             });
 
@@ -363,6 +371,41 @@ public partial class StagingArea : Component
             if (string.IsNullOrEmpty(msg)) msg = "Stash failed";
             ShowStatusMessage?.Invoke(msg, true);
         }
+    }
+
+    private void RefreshDiffViewer()
+    {
+        if (_selectedPath == null) return;
+        var baseRef = _amend && _selectedIsStaged ? "HEAD~1" : null;
+        var diffs = _repo.GetWorkingDiff(_selectedIsStaged, baseRef);
+        var fileDiff = diffs.Where(d => d.Path == _selectedPath || d.Path.EndsWith(_selectedPath)).ToList();
+        _diffViewer.IsStaged = _selectedIsStaged;
+        _diffViewer.Diffs = fileDiff.Count > 0 ? fileDiff : diffs;
+    }
+
+    private void OnHunkAction(GitFileDiff file, GitDiffHunk hunk, HunkActionKind action)
+    {
+        var patch = GitRepository.BuildHunkPatch(file, hunk);
+
+        var result = action switch
+        {
+            HunkActionKind.Stage => _repo.ApplyPatch(patch, reverse: false, cached: true),
+            HunkActionKind.Unstage => _repo.ApplyPatch(patch, reverse: true, cached: true),
+            HunkActionKind.Discard => _repo.ApplyPatch(patch, reverse: true, cached: false),
+            _ => throw new ArgumentOutOfRangeException(nameof(action)),
+        };
+
+        if (!result.Success)
+        {
+            var msg = result.Stderr.Trim();
+            if (string.IsNullOrEmpty(msg)) msg = $"Hunk {action.ToString().ToLower()} failed";
+            ShowStatusMessage?.Invoke(msg, true);
+            return;
+        }
+
+        // Re-fetch diff for the same file to reflect the new state
+        RefreshDiffViewer();
+        Refresh();
     }
 
     private static Element StageAllButton(string label, Action onClick)

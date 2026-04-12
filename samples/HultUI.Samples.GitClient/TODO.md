@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 2.1 (Per-hunk staging in DiffViewer)
+**Current cursor:** ▶ Phase 2.2 (Side-by-side diff toggle)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -57,9 +57,9 @@ existing components rather than adding new ones, but each is a meaningful
 chunk of work.
 
 ### 2.1 Per-hunk staging in DiffViewer
-- [ ] Hunk header gets stage / unstage / discard buttons
-- [ ] `GitRepository.ApplyPatch(string patch, bool reverse, bool cached)` wrapping `git apply`
-- [ ] Build a single-hunk patch from a `GitDiffHunk` and apply it
+- [x] Hunk header gets stage / unstage / discard buttons
+- [x] `GitRepository.ApplyPatch(string patch, bool reverse, bool cached)` wrapping `git apply`
+- [x] Build a single-hunk patch from a `GitDiffHunk` and apply it
 - **Done when:** I can stage one hunk out of three from a modified file
   and the staging area reflects the partial state.
 
