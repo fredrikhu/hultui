@@ -33,11 +33,11 @@ public partial class App : Component
     private readonly StagingArea _stagingArea;
     private readonly SplitPane _sidebarSplit;
     private readonly SplitPane _mainSplit;
+    private readonly SplitPane _workingCopySplit;
 
     // State
     [Reactive] public partial bool ShowWorkingCopy { get; set; }
 
-    private Element? _workingCopyLayout;
     private string? _statusMessage;
     private bool _statusIsError;
     private CancellationTokenSource? _messageCts;
@@ -54,16 +54,17 @@ public partial class App : Component
         _stagingArea = new StagingArea(repo, _workingDiffViewer);
         _sidebarSplit = new SplitPane(horizontal: true, initialRatio: 0.18f);
         _mainSplit = new SplitPane(horizontal: false, initialRatio: 0.45f);
+        _workingCopySplit = new SplitPane(horizontal: true, initialRatio: 0.35f);
 
         // Wire up events
         _commitList.OnCommitSelected = OnCommitSelected;
-        _commitList.OnWorkingCopySelected = OnWorkingCopySelected;
         _commitList.CopyToClipboard = CopyToClipboard;
         _commitList.OnCheckoutCommit = DoCheckoutCommit;
         _commitList.OnCherryPick = DoCherryPick;
         _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
         _sidebar.OnStashSelected = OnStashSelected;
+        _sidebar.OnWorkingCopySelected = OnWorkingCopySelected;
         _sidebar.CopyToClipboard = CopyToClipboard;
         _sidebar.OnRepoChanged = RefreshAll;
         _sidebar.ShowStatusMessage = ShowMessage;
@@ -111,26 +112,25 @@ public partial class App : Component
 
     private Element BuildSidebarLayout(bool showWc)
     {
+        var rightPanel = showWc
+            ? BuildWorkingCopyPanel()
+            : _mainSplit.Build(
+                _commitList.Mount(),
+                _commitDetail.Mount()
+            );
+
         return _sidebarSplit.Build(
             _sidebar.Mount(),
-            _mainSplit.Build(
-                _commitList.Mount(),
-                showWc ? BuildWorkingCopyPanel() : _commitDetail.Mount()
-            )
+            rightPanel
         );
     }
 
     private Element BuildWorkingCopyPanel()
     {
-        if (_workingCopyLayout == null)
-        {
-            var splitPane = new SplitPane(horizontal: true, initialRatio: 0.35f);
-            _workingCopyLayout = splitPane.Build(
-                _stagingArea.Mount(),
-                _workingDiffViewer.Mount()
-            );
-        }
-        return _workingCopyLayout;
+        return _workingCopySplit.Build(
+            _stagingArea.Mount(),
+            _workingDiffViewer.Mount()
+        );
     }
 
     // ── Event handlers ──
@@ -140,6 +140,8 @@ public partial class App : Component
         if (commit != null)
         {
             ShowWorkingCopy = false;
+            _sidebar.WorkingCopyActive = false;
+            _sidebar.Refresh();
             _commitDetail.Commit = commit;
         }
     }
@@ -147,6 +149,8 @@ public partial class App : Component
     private void OnWorkingCopySelected()
     {
         ShowWorkingCopy = true;
+        _sidebar.WorkingCopyActive = true;
+        _sidebar.Refresh();
         _stagingArea.Refresh();
     }
 
@@ -165,6 +169,8 @@ public partial class App : Component
         if (commit == null) return;
 
         ShowWorkingCopy = false;
+        _sidebar.WorkingCopyActive = false;
+        _sidebar.Refresh();
         _commitDetail.Commit = commit;
     }
 

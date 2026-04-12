@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HultUI.Core.Elements;
 using HultUI.Core.Reactivity;
 
@@ -17,6 +18,10 @@ public sealed class ComponentHost : Element
     {
         _component = component;
         _component.Host = this;
+
+        // Key by component identity so the reconciler never patches one
+        // component's host onto a different component's host.
+        Key = $"\0CH:{RuntimeHelpers.GetHashCode(component)}";
 
         // Eagerly run first build so the element tree is ready
         // before the host is necessarily mounted in a parent.

@@ -22,7 +22,9 @@ public partial class Sidebar : Component
 
     public Action<string>? OnBranchSelected { get; set; }
     public Action<GitStash>? OnStashSelected { get; set; }
+    public Action? OnWorkingCopySelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
+    public bool WorkingCopyActive { get; set; }
 
     /// <summary>
     /// Fired after any sidebar action that mutates the repo (stash apply,
@@ -45,9 +47,16 @@ public partial class Sidebar : Component
     public override Element Build()
     {
         BuildTree();
+        var status = _repo.GetStatus();
 
         var children = new List<Element>
         {
+            // Working copy entry
+            BuildWorkingCopyRow(status.Count),
+
+            // Separator
+            Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
+
             // Section header
             Box.New()
                 .Padding(new Thickness(10, 12, 6, 12))
@@ -419,6 +428,49 @@ public partial class Sidebar : Component
         var result = _repo.StashDrop(stashRef);
         if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         OnRepoChanged?.Invoke();
+    }
+
+    private Element BuildWorkingCopyRow(int changedCount)
+    {
+        var isSelected = WorkingCopyActive;
+
+        var row = Flex.Row(gap: 8)
+            .Height(Dimension.Px(36))
+            .Padding(new Thickness(0, 12, 0, 12))
+            .AlignItems(AlignItems.Center)
+            .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
+            .Cursor(CursorType.Pointer)
+            .FlexShrink(0);
+
+        row.AddChild(
+            Box.New().Width(20).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Children(Text.New("\u270E").FontSize(12f).TextColor(GitClientColors.StatusModified))
+        );
+
+        row.AddChild(
+            Text.New("Working Copy").FontSize(13f).FontWeight(FontWeight.SemiBold)
+                .TextColor(GitClientColors.TextPrimary).FlexGrow(1)
+        );
+
+        if (changedCount > 0)
+        {
+            row.AddChild(
+                Box.New()
+                    .Padding(new Thickness(2, 8, 2, 8))
+                    .CornerRadius(10f)
+                    .Background(new Color(GitClientColors.StatusModified.R, GitClientColors.StatusModified.G, GitClientColors.StatusModified.B, 30))
+                    .Children(
+                        Text.New(changedCount.ToString()).FontSize(11f).FontWeight(FontWeight.Bold)
+                            .TextColor(GitClientColors.StatusModified)
+                    )
+            );
+        }
+
+        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnClick(_ => OnWorkingCopySelected?.Invoke());
+
+        return row;
     }
 
     private static string FormatBranchTooltip(GitBranch b)

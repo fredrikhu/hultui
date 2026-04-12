@@ -23,10 +23,8 @@ public partial class CommitList : Component
     private string _newTagName = "";
 
     [Reactive] public partial GitCommit? SelectedCommit { get; set; }
-    [Reactive] public partial bool WorkingCopySelected { get; set; }
 
     public Action<GitCommit?>? OnCommitSelected { get; set; }
-    public Action? OnWorkingCopySelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
     public Action<string>? OnCheckoutCommit { get; set; }
     public Action<string>? OnCherryPick { get; set; }
@@ -45,9 +43,7 @@ public partial class CommitList : Component
     public override Element Build()
     {
         var selected = SelectedCommit;
-        var wcSelected = WorkingCopySelected;
         _commits = _repo.GetLog();
-        var status = _repo.GetStatus();
 
         // Compute lane assignments over the full log, not the filtered subset,
         // so a hidden parent still produces a stable lane in its children.
@@ -56,9 +52,6 @@ public partial class CommitList : Component
 
         var children = new List<Element>
         {
-            // Working copy row (always visible at top)
-            BuildWorkingCopyRow(status.Count, wcSelected),
-
             // Search bar
             BuildSearchBar(),
         };
@@ -86,7 +79,7 @@ public partial class CommitList : Component
                     .RenderWith(commit => CommitRow.Build(
                         commit,
                         graph.TryGetValue(commit.Hash, out var g) ? g : default,
-                        !wcSelected && commit == selected,
+                        commit == selected,
                         SelectCommit,
                         CopyToClipboard,
                         OnCheckoutCommit,
@@ -100,51 +93,6 @@ public partial class CommitList : Component
     }
 
     public void Refresh() => MarkDirty();
-
-    private Element BuildWorkingCopyRow(int changedCount, bool isSelected)
-    {
-        var row = Flex.Row(gap: 8)
-            .Height(Dimension.Px(36))
-            .Padding(new Thickness(0, 12, 0, 12))
-            .AlignItems(AlignItems.Center)
-            .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
-            .Cursor(CursorType.Pointer)
-            .FlexShrink(0);
-
-        // Pencil icon
-        row.AddChild(
-            Box.New().Width(20).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-                .Children(Text.New("\u270E").FontSize(12f).TextColor(GitClientColors.StatusModified))
-        );
-
-        // Label
-        row.AddChild(
-            Text.New("Working Copy").FontSize(13f).FontWeight(FontWeight.SemiBold)
-                .TextColor(GitClientColors.TextPrimary).FlexGrow(1)
-        );
-
-        // Changed file count badge
-        if (changedCount > 0)
-        {
-            row.AddChild(
-                Box.New()
-                    .Padding(new Thickness(2, 8, 2, 8))
-                    .CornerRadius(10f)
-                    .Background(new Color(GitClientColors.StatusModified.R, GitClientColors.StatusModified.G, GitClientColors.StatusModified.B, 30))
-                    .Children(
-                        Text.New(changedCount.ToString()).FontSize(11f).FontWeight(FontWeight.Bold)
-                            .TextColor(GitClientColors.StatusModified)
-                    )
-            );
-        }
-
-        // Hover
-        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-        row.OnClick(_ => SelectWorkingCopy());
-
-        return row;
-    }
 
     private Element BuildSearchBar()
     {
@@ -298,16 +246,8 @@ public partial class CommitList : Component
         Refresh();
     }
 
-    private void SelectWorkingCopy()
-    {
-        SelectedCommit = null;
-        WorkingCopySelected = true;
-        OnWorkingCopySelected?.Invoke();
-    }
-
     private void SelectCommit(GitCommit commit)
     {
-        WorkingCopySelected = false;
         SelectedCommit = commit;
         OnCommitSelected?.Invoke(commit);
     }
