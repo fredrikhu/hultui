@@ -85,7 +85,6 @@ public sealed class Window : IOverlayHost, IDisposable
         Clipboard = new SDL3Clipboard(platformWindow);
         _devTools = new DevToolsOverlay(_perf);
         PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
-        PlatformWindow.Resized += OnWindowResized;
 
         if (platformWindow.Style == WindowStyle.Borderless)
             platformWindow.HitTestHandler = HandleWindowHitTest;
@@ -1028,7 +1027,6 @@ public sealed class Window : IOverlayHost, IDisposable
         if (_disposed) return;
         _disposed = true;
         PlatformWindow.EventTranslator.OnInputEvent -= HandleInputEvent;
-        PlatformWindow.Resized -= OnWindowResized;
         PlatformWindow.Dispose();
     }
 }

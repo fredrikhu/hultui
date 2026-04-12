@@ -26,7 +26,7 @@ public class ReactiveGeneratorTests
 
         var (output, diagnostics) = RunGenerator(source);
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Error);
         Assert.Contains("Signal<int>", output);
         Assert.Contains("__count_signal", output);
         Assert.Contains("public partial int Count", output);
@@ -52,7 +52,7 @@ public class ReactiveGeneratorTests
 
         var (output, diagnostics) = RunGenerator(source);
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Error);
         Assert.Contains("Signal<string>", output);
         Assert.Contains("__name_signal", output);
     }
@@ -77,7 +77,7 @@ public class ReactiveGeneratorTests
 
         var (output, diagnostics) = RunGenerator(source);
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Error);
         Assert.Contains("__x_signal", output);
         Assert.Contains("__y_signal", output);
         Assert.Contains("__label_signal", output);
@@ -104,7 +104,7 @@ public class ReactiveGeneratorTests
 
         var (output, diagnostics) = RunGenerator(source);
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Error);
         Assert.Contains("namespace MyApp.Components;", output);
         Assert.Contains("public partial class Counter", output);
     }
@@ -151,7 +151,7 @@ public class ReactiveGeneratorTests
 
         var (output, diagnostics) = RunGenerator(source);
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Error);
         Assert.Contains("new(default)", output);
     }
 

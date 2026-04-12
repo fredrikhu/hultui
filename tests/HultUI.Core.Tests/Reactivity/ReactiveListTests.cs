@@ -108,7 +108,7 @@ public class ReactiveListTests
 
         list.Clear();
         Assert.Equal(2, runCount);
-        Assert.Equal(0, list.Count);
+        Assert.Empty(list);
     }
 
     [Fact]

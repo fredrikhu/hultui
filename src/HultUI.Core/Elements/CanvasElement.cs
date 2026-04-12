@@ -7,7 +7,7 @@ public class CanvasElement : BoxElement
 {
     public Action<ICanvasDrawingContext>? Draw { get; set; }
 
-    public new static CanvasElement New(Action<ICanvasDrawingContext>? draw = null) => new() { Draw = draw };
+    public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null) => new() { Draw = draw };
 
     public override void Render(IRenderContext ctx)
     {

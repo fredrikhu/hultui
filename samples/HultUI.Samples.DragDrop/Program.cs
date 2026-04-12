@@ -103,7 +103,7 @@ partial class DragDropDemo : Component
             {
                 if (sourceList != items) // don't drop onto own list
                 {
-                    sourceList.Remove(item!);
+                    sourceList?.Remove(item!);
                     items.Add(item!);
                     DropStatus = $"Moved \"{item}\" to {title}";
                     DragCount++;

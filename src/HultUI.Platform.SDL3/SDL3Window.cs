@@ -34,8 +34,6 @@ public sealed unsafe class SDL3Window : IDisposable
 
     public EventTranslator EventTranslator { get; } = new();
 
-    public event Action? Resized;
-
     public WindowStyle Style { get; }
 
     /// <summary>
