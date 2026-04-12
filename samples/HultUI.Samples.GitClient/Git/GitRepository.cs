@@ -100,15 +100,33 @@ public class GitRepository
 
     // ── Log ──
 
-    public List<GitCommit> GetLog(int maxCount = 500)
+    public List<GitCommit> GetLog(int maxCount = 500, string? author = null,
+        string? path = null, DateTimeOffset? after = null, DateTimeOffset? before = null)
     {
         var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
 
-        var result = GitProcess.Run(Path,
+        var args = new List<string>
+        {
             "log",
             $"--max-count={maxCount}",
             $"--format={format}{RecordSep}",
-            "--all");
+            "--all",
+        };
+
+        if (!string.IsNullOrWhiteSpace(author))
+            args.Add($"--author={author}");
+        if (after.HasValue)
+            args.Add($"--after={after.Value:yyyy-MM-dd}");
+        if (before.HasValue)
+            args.Add($"--before={before.Value:yyyy-MM-dd}");
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            args.Add("--");
+            args.Add(path);
+        }
+
+        var result = GitProcess.Run(Path, args.ToArray());
 
         if (!result.Success) return [];
 

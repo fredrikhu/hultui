@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 2.3 (Filter improvements on CommitList)
+**Current cursor:** ▶ Phase 3.1 (Confirm dialog primitive)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -70,10 +70,10 @@ chunk of work.
   selection works in both views.
 
 ### 2.3 Filter improvements on CommitList
-- [ ] Path filter (`git log -- <path>`)
-- [ ] Author filter
-- [ ] Date range filter
-- [ ] Filter chips above the search box rather than overloading the single text input
+- [x] Path filter (`git log -- <path>`)
+- [x] Author filter
+- [x] Date range filter
+- [x] Filter chips above the search box rather than overloading the single text input
 - **Done when:** I can narrow the log to "everything Fredrik touched in
   Components/ this week" without leaving the UI.
 

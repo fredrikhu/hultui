@@ -1,3 +1,4 @@
+using System.Globalization;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
@@ -17,10 +18,23 @@ public partial class CommitList : Component
     private List<GitCommit> _commits = [];
     private string _searchQuery = "";
 
-    // Inline tag-creation state. When _taggingCommitHash is non-null,
-    // a small input strip is shown above the list capturing the new tag name.
+    // Inline tag-creation state
     private string? _taggingCommitHash;
     private string _newTagName = "";
+
+    // ── Filter state ──
+    private string? _pathFilter;
+    private string? _authorFilter;
+    private DateTimeOffset? _dateFrom;
+    private DateTimeOffset? _dateTo;
+
+    private FilterInputKind _showingInput = FilterInputKind.None;
+    private string _inputValue = "";
+    private string _dateFromInput = "";
+    private string _dateToInput = "";
+
+    private bool HasServerFilters =>
+        _pathFilter != null || _authorFilter != null || _dateFrom != null || _dateTo != null;
 
     [Reactive] public partial string? SelectedCommitHash { get; set; }
 
@@ -28,11 +42,6 @@ public partial class CommitList : Component
     public Action<string>? CopyToClipboard { get; set; }
     public Action<string>? OnCheckoutCommit { get; set; }
     public Action<string>? OnCherryPick { get; set; }
-
-    /// <summary>
-    /// Fired after a commit-list action that mutates the repo (e.g. tagging).
-    /// The host wires this to refresh peer components like the sidebar.
-    /// </summary>
     public Action? OnRepoChanged { get; set; }
 
     public CommitList(GitRepository repo)
@@ -43,34 +52,52 @@ public partial class CommitList : Component
     public override Element Build()
     {
         var selected = SelectedCommitHash;
-        _commits = _repo.GetLog();
+        _commits = _repo.GetLog(
+            author: _authorFilter,
+            path: _pathFilter,
+            after: _dateFrom,
+            before: _dateTo);
 
-        // Compute lane assignments over the full log, not the filtered subset,
-        // so a hidden parent still produces a stable lane in its children.
-        var graph = GitGraphLayout.Compute(_commits);
+        // When server-side filters are active, parent hashes may reference commits
+        // outside the result set. Strip those so the graph doesn't open phantom lanes.
+        var graphInput = _commits;
+        if (HasServerFilters)
+        {
+            var present = new HashSet<string>(_commits.Select(c => c.Hash));
+            graphInput = _commits.Select(c => c with
+            {
+                ParentHashes = c.ParentHashes.Where(p => present.Contains(p)).ToArray()
+            }).ToList();
+        }
+        var graph = GitGraphLayout.Compute(graphInput);
         var filtered = FilterCommits(_commits, _searchQuery);
 
-        var children = new List<Element>
-        {
-            // Search bar
-            BuildSearchBar(),
-        };
+        var children = new List<Element>();
 
-        // Inline tag-name input (only when tagging a commit)
+        // Filter chips (above search bar, only when filters are active)
+        if (HasServerFilters)
+            children.Add(BuildFilterChips());
+
+        // Search bar + filter buttons
+        children.Add(BuildSearchBar());
+
+        // Inline filter input (when one is open)
+        if (_showingInput != FilterInputKind.None)
+            children.Add(BuildFilterInput());
+
+        // Inline tag-name input
         if (_taggingCommitHash != null)
             children.Add(BuildNewTagInput());
 
         children.Add(
-            // Separator
             Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0)
         );
 
         children.Add(
-            // Commit list
             filtered.Count == 0
                 ? Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                     .Children(
-                        Text.New(_searchQuery.Length > 0 ? "No matching commits" : "No commits yet")
+                        Text.New(_searchQuery.Length > 0 || HasServerFilters ? "No matching commits" : "No commits yet")
                             .FontSize(14f).TextColor(GitClientColors.TextMuted)
                     )
                 : VirtualListElement<GitCommit>.New()
@@ -94,6 +121,8 @@ public partial class CommitList : Component
 
     public void Refresh() => MarkDirty();
 
+    // ── Search bar ──
+
     private Element BuildSearchBar()
     {
         var container = Flex.Row(gap: 6)
@@ -102,12 +131,10 @@ public partial class CommitList : Component
             .Background(GitClientColors.Surface)
             .FlexShrink(0);
 
-        // Search icon
         container.AddChild(
             Text.New("\u2315").FontSize(13f).TextColor(GitClientColors.TextMuted)
         );
 
-        // Search input
         container.AddChild(
             TextInput.New(_searchQuery)
                 .PlaceholderText("Filter by message, author, or hash\u2026")
@@ -121,7 +148,6 @@ public partial class CommitList : Component
                 .TextColor(GitClientColors.TextPrimary)
         );
 
-        // Clear button (only when there's a query)
         if (_searchQuery.Length > 0)
         {
             var clearBtn = Box.New()
@@ -139,8 +165,311 @@ public partial class CommitList : Component
             container.AddChild(clearBtn);
         }
 
+        // Filter buttons
+        container.AddChild(Box.New().Width(1).Height(16).Background(GitClientColors.Border));
+        container.AddChild(FilterButton("Path", FilterInputKind.Path));
+        container.AddChild(FilterButton("Author", FilterInputKind.Author));
+        container.AddChild(FilterButton("Date", FilterInputKind.Date));
+
         return container;
     }
+
+    private Element FilterButton(string label, FilterInputKind kind)
+    {
+        var isOpen = _showingInput == kind;
+        var bg = isOpen ? GitClientColors.ButtonPrimary : GitClientColors.ButtonSecondary;
+        var fg = isOpen ? Color.White : GitClientColors.TextSecondary;
+
+        var btn = Box.New()
+            .Padding(new Thickness(3, 6, 3, 6))
+            .CornerRadius(3f)
+            .Background(bg)
+            .Cursor(CursorType.Pointer)
+            .Children(Text.New(label).FontSize(10f).FontWeight(FontWeight.SemiBold).TextColor(fg));
+
+        if (!isOpen)
+        {
+            btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+            btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
+        }
+        btn.On<ClickEvent>(_ => ToggleFilterInput(kind));
+
+        return btn;
+    }
+
+    // ── Filter chips ──
+
+    private Element BuildFilterChips()
+    {
+        var row = Flex.Row(gap: 6)
+            .Padding(new Thickness(4, 8, 4, 8))
+            .AlignItems(AlignItems.Center)
+            .Background(GitClientColors.Surface)
+            .FlexShrink(0);
+
+        if (_pathFilter != null)
+            row.AddChild(FilterChip("Path", _pathFilter, () => { _pathFilter = null; Refresh(); }));
+        if (_authorFilter != null)
+            row.AddChild(FilterChip("Author", _authorFilter, () => { _authorFilter = null; Refresh(); }));
+        if (_dateFrom != null)
+            row.AddChild(FilterChip("After", _dateFrom.Value.ToString("yyyy-MM-dd"),
+                () => { _dateFrom = null; Refresh(); }));
+        if (_dateTo != null)
+            row.AddChild(FilterChip("Before", _dateTo.Value.ToString("yyyy-MM-dd"),
+                () => { _dateTo = null; Refresh(); }));
+
+        if (HasServerFilters)
+        {
+            row.AddChild(Box.New().FlexGrow(1));
+            var clearAll = Box.New()
+                .Padding(new Thickness(3, 6, 3, 6))
+                .CornerRadius(3f)
+                .Cursor(CursorType.Pointer)
+                .Children(Text.New("Clear all").FontSize(10f).TextColor(GitClientColors.TextMuted));
+            clearAll.On<PointerEnterEvent>(_ => clearAll.BackgroundColor = GitClientColors.SurfaceHover);
+            clearAll.On<PointerLeaveEvent>(_ => clearAll.BackgroundColor = Color.Transparent);
+            clearAll.On<ClickEvent>(_ => ClearAllFilters());
+            row.AddChild(clearAll);
+        }
+
+        return row;
+    }
+
+    private static Element FilterChip(string label, string value, Action onRemove)
+    {
+        var chip = Flex.Row(gap: 4)
+            .Padding(new Thickness(3, 8, 3, 8))
+            .CornerRadius(12f)
+            .Background(GitClientColors.SurfaceActive)
+            .AlignItems(AlignItems.Center)
+            .FlexShrink(0);
+
+        chip.AddChild(
+            Text.New(label).FontSize(10f).FontWeight(FontWeight.Bold)
+                .TextColor(GitClientColors.TextMuted)
+        );
+        chip.AddChild(
+            Text.New(value).FontSize(10f).TextColor(GitClientColors.TextPrimary)
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+        );
+
+        var removeBtn = Box.New()
+            .Width(14).Height(14)
+            .CornerRadius(7f)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Children(Text.New("\u2715").FontSize(8f).TextColor(GitClientColors.TextMuted));
+        removeBtn.On<PointerEnterEvent>(_ => removeBtn.BackgroundColor = GitClientColors.SurfaceHover);
+        removeBtn.On<PointerLeaveEvent>(_ => removeBtn.BackgroundColor = Color.Transparent);
+        removeBtn.On<ClickEvent>(e => { e.StopPropagation = true; onRemove(); });
+        chip.AddChild(removeBtn);
+
+        return chip;
+    }
+
+    // ── Inline filter inputs ──
+
+    private void ToggleFilterInput(FilterInputKind kind)
+    {
+        if (_showingInput == kind)
+        {
+            _showingInput = FilterInputKind.None;
+        }
+        else
+        {
+            _showingInput = kind;
+            // Pre-fill with current filter value
+            switch (kind)
+            {
+                case FilterInputKind.Path:
+                    _inputValue = _pathFilter ?? "";
+                    break;
+                case FilterInputKind.Author:
+                    _inputValue = _authorFilter ?? "";
+                    break;
+                case FilterInputKind.Date:
+                    _dateFromInput = _dateFrom?.ToString("yyyy-MM-dd") ?? "";
+                    _dateToInput = _dateTo?.ToString("yyyy-MM-dd") ?? "";
+                    break;
+            }
+        }
+        Refresh();
+    }
+
+    private Element BuildFilterInput()
+    {
+        var placeholder = _showingInput switch
+        {
+            FilterInputKind.Path => "Path (e.g. src/Components/)",
+            FilterInputKind.Author => "Author name or email",
+            _ => "",
+        };
+
+        return _showingInput switch
+        {
+            FilterInputKind.Path or FilterInputKind.Author =>
+                BuildTextFilterInput(placeholder, _inputValue, v => _inputValue = v, ConfirmTextFilter),
+            FilterInputKind.Date => BuildDateFilterInput(),
+            _ => Box.New(),
+        };
+    }
+
+    private Element BuildTextFilterInput(string placeholder, string value,
+        Action<string> onChanged, Action onConfirm)
+    {
+        var input = TextInput.New(value)
+            .PlaceholderText(placeholder)
+            .OnTextChanged(onChanged)
+            .FontSize(12f)
+            .FlexGrow(1)
+            .Height(Dimension.Px(24))
+            .Background(GitClientColors.Background)
+            .CornerRadius(3f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary);
+
+        input.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Enter) onConfirm();
+            else if (e.Key == KeyCode.Escape) CloseFilterInput();
+        });
+
+        return Flex.Row(gap: 4)
+            .Padding(new Thickness(4, 8, 4, 8))
+            .AlignItems(AlignItems.Center)
+            .Background(GitClientColors.Surface)
+            .FlexShrink(0)
+            .Children(
+                input,
+                ConfirmButton(onConfirm),
+                CancelButton(CloseFilterInput)
+            );
+    }
+
+    private Element BuildDateFilterInput()
+    {
+        var fromInput = TextInput.New(_dateFromInput)
+            .PlaceholderText("From (YYYY-MM-DD)")
+            .OnTextChanged(v => _dateFromInput = v)
+            .FontSize(12f)
+            .FlexGrow(1)
+            .Height(Dimension.Px(24))
+            .Background(GitClientColors.Background)
+            .CornerRadius(3f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary);
+
+        fromInput.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Enter) ConfirmDateFilter();
+            else if (e.Key == KeyCode.Escape) CloseFilterInput();
+        });
+
+        var toInput = TextInput.New(_dateToInput)
+            .PlaceholderText("To (YYYY-MM-DD)")
+            .OnTextChanged(v => _dateToInput = v)
+            .FontSize(12f)
+            .FlexGrow(1)
+            .Height(Dimension.Px(24))
+            .Background(GitClientColors.Background)
+            .CornerRadius(3f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary);
+
+        toInput.On<KeyDownEvent>(e =>
+        {
+            if (e.Key == KeyCode.Enter) ConfirmDateFilter();
+            else if (e.Key == KeyCode.Escape) CloseFilterInput();
+        });
+
+        return Flex.Row(gap: 4)
+            .Padding(new Thickness(4, 8, 4, 8))
+            .AlignItems(AlignItems.Center)
+            .Background(GitClientColors.Surface)
+            .FlexShrink(0)
+            .Children(
+                fromInput,
+                Text.New("\u2013").FontSize(12f).TextColor(GitClientColors.TextMuted),
+                toInput,
+                ConfirmButton(ConfirmDateFilter),
+                CancelButton(CloseFilterInput)
+            );
+    }
+
+    private void ConfirmTextFilter()
+    {
+        var val = _inputValue.Trim();
+        var nonEmpty = val.Length > 0 ? val : null;
+
+        if (_showingInput == FilterInputKind.Path)
+            _pathFilter = nonEmpty;
+        else if (_showingInput == FilterInputKind.Author)
+            _authorFilter = nonEmpty;
+
+        _showingInput = FilterInputKind.None;
+        Refresh();
+    }
+
+    private void ConfirmDateFilter()
+    {
+        _dateFrom = DateTimeOffset.TryParseExact(_dateFromInput.Trim(), "yyyy-MM-dd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out var from) ? from : null;
+        _dateTo = DateTimeOffset.TryParseExact(_dateToInput.Trim(), "yyyy-MM-dd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out var to) ? to : null;
+        _showingInput = FilterInputKind.None;
+        Refresh();
+    }
+
+    private void CloseFilterInput()
+    {
+        _showingInput = FilterInputKind.None;
+        Refresh();
+    }
+
+    private void ClearAllFilters()
+    {
+        _pathFilter = null;
+        _authorFilter = null;
+        _dateFrom = null;
+        _dateTo = null;
+        _showingInput = FilterInputKind.None;
+        Refresh();
+    }
+
+    // ── Shared small buttons ──
+
+    private static Element ConfirmButton(Action onClick)
+    {
+        var btn = Box.New()
+            .Width(24).Height(24)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonPrimary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Apply filter")
+            .Children(Text.New("\u2713").FontSize(12f).TextColor(Color.White));
+        btn.On<ClickEvent>(_ => onClick());
+        return btn;
+    }
+
+    private static Element CancelButton(Action onClick)
+    {
+        var btn = Box.New()
+            .Width(24).Height(24)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonSecondary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Cancel")
+            .Children(Text.New("\u2715").FontSize(12f).TextColor(GitClientColors.TextSecondary));
+        btn.On<ClickEvent>(_ => onClick());
+        return btn;
+    }
+
+    // ── Text search (client-side) ──
 
     private void OnSearchChanged(string query)
     {
@@ -163,9 +492,10 @@ public partial class CommitList : Component
         )).ToList();
     }
 
+    // ── Tag creation ──
+
     private Element BuildNewTagInput()
     {
-        // Find the commit being tagged so we can show its short hash as a hint.
         var target = _commits.FirstOrDefault(c => c.Hash == _taggingCommitHash);
         var hintText = target != null
             ? $"Tag {target.ShortHash}\u2026"
@@ -188,34 +518,16 @@ public partial class CommitList : Component
             else if (e.Key == KeyCode.Escape) CancelCreateTag();
         });
 
-        var confirmBtn = Box.New()
-            .Width(24).Height(24)
-            .CornerRadius(3f)
-            .Background(GitClientColors.ButtonPrimary)
-            .JustifyContent(JustifyContent.Center)
-            .AlignItems(AlignItems.Center)
-            .Cursor(CursorType.Pointer)
-            .Tooltip("Create tag")
-            .Children(Text.New("\u2713").FontSize(12f).TextColor(Color.White));
-        confirmBtn.On<ClickEvent>(_ => ConfirmCreateTag());
-
-        var cancelBtn = Box.New()
-            .Width(24).Height(24)
-            .CornerRadius(3f)
-            .Background(GitClientColors.ButtonSecondary)
-            .JustifyContent(JustifyContent.Center)
-            .AlignItems(AlignItems.Center)
-            .Cursor(CursorType.Pointer)
-            .Tooltip("Cancel")
-            .Children(Text.New("\u2715").FontSize(12f).TextColor(GitClientColors.TextSecondary));
-        cancelBtn.On<ClickEvent>(_ => CancelCreateTag());
-
         return Flex.Row(gap: 4)
             .Padding(new Thickness(4, 8, 4, 8))
             .AlignItems(AlignItems.Center)
             .Background(GitClientColors.Surface)
             .FlexShrink(0)
-            .Children(input, confirmBtn, cancelBtn);
+            .Children(
+                input,
+                ConfirmButton(ConfirmCreateTag),
+                CancelButton(CancelCreateTag)
+            );
     }
 
     private void StartTagCommit(string commitHash)
@@ -251,4 +563,6 @@ public partial class CommitList : Component
         SelectedCommitHash = commit.Hash;
         OnCommitSelected?.Invoke(commit);
     }
+
+    private enum FilterInputKind { None, Path, Author, Date }
 }
