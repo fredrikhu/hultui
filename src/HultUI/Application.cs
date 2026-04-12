@@ -100,6 +100,22 @@ public sealed class Application : IDisposable
                 _quitRequested = true;
                 break;
             }
+            
+            foreach (var window in _windows)
+            {
+                if (window.PlatformWindow.ResizePending)
+                {
+                    long now = Environment.TickCount64;
+                    // Only execute if 50ms has passed
+                    if (now - window.PlatformWindow.LastResizeRenderTick >= SDL3Window.ResizeThrottleMs)
+                    {
+                        window.OnWindowResized();
+                        window.PlatformWindow.LastResizeRenderTick = now;
+                        window.PlatformWindow.ResizePending = false; 
+                    }
+                    window.Root?.MarkPaintDirty();
+                }
+            }
 
             // Tick animations (marks elements dirty as needed)
             AnimationManager.Tick(deltaSeconds);

@@ -106,14 +106,11 @@ public sealed class Window : IOverlayHost, IDisposable
     internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
         || _overlays.Count > 0;
 
-    private void OnWindowResized()
+    internal void OnWindowResized()
     {
         if (_root is null) return;
         _root.MarkLayoutDirty();
         _root.MarkPaintDirty();
-        // Ensure GL context is current for this window before rendering
-        PlatformWindow.MakeCurrent();
-        RenderFrame();
     }
 
     internal void RenderFrame()

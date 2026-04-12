@@ -19,10 +19,9 @@ public sealed unsafe class SDL3Window : IDisposable
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
     private GCHandle _gcHandle;
-    private bool _inResizeRender;
     internal bool ResizePending;
-    private long _lastResizeRenderTick;
-    private const long ResizeThrottleMs = 50;
+    internal long LastResizeRenderTick;
+    internal const long ResizeThrottleMs = 500;
 
     public SDL_WindowID WindowId { get; private set; }
     public int PixelWidth { get; private set; }
@@ -127,24 +126,8 @@ public sealed unsafe class SDL3Window : IDisposable
                 if (!evt->window.windowID.Equals(window.WindowId))
                     break;
 
-                if (window._inResizeRender)
-                    break;
-
                 window.UpdateSize();
-
-                long now = Environment.TickCount64;
-                if (now - window._lastResizeRenderTick >= ResizeThrottleMs)
-                {
-                    window._lastResizeRenderTick = now;
-                    window.ResizePending = false;
-                    window._inResizeRender = true;
-                    window.Resized?.Invoke();
-                    window._inResizeRender = false;
-                }
-                else
-                {
-                    window.ResizePending = true;
-                }
+                window.ResizePending = true;
                 break;
         }
 
@@ -179,10 +162,7 @@ public sealed unsafe class SDL3Window : IDisposable
                     // After the modal resize loop ends, ensure we render
                     // the final size (the watcher may have throttled it).
                     if (_registry.TryGetValue(evt.window.windowID, out var resizeWin) && resizeWin.ResizePending)
-                    {
-                        resizeWin.ResizePending = false;
-                        resizeWin.Resized?.Invoke();
-                    }
+                        resizeWin.ResizePending = true;
                     break;
 
                 default:
