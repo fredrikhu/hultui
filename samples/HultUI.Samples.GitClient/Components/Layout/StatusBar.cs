@@ -17,11 +17,53 @@ public static class StatusBar
         int changedFiles,
         Action onFetch,
         Action onPull,
-        Action onPush)
+        Action onPush,
+        string? message = null,
+        bool messageIsError = false)
     {
         var aheadBehind = "";
         if (ahead > 0) aheadBehind += $" \u2191{ahead}";
         if (behind > 0) aheadBehind += $" \u2193{behind}";
+
+        var children = new List<Element>
+        {
+            // Branch indicator
+            Text.New("\u25CF").FontSize(10f).TextColor(GitClientColors.BranchCurrent),
+            Text.New(branchName).FontSize(12f).FontWeight(FontWeight.SemiBold)
+                .TextColor(GitClientColors.TextPrimary),
+
+            // Ahead/behind
+            aheadBehind.Length > 0
+                ? Text.New(aheadBehind.Trim()).FontSize(12f).TextColor(GitClientColors.TextSecondary)
+                : Box.New().Width(0),
+
+            // Separator
+            Box.New().Width(1).Height(16).Background(GitClientColors.Border),
+
+            // Changed files
+            Text.New($"{changedFiles} changed").FontSize(12f)
+                .TextColor(changedFiles > 0 ? GitClientColors.StatusModified : GitClientColors.TextMuted),
+
+            // Spacer
+            Box.New().FlexGrow(1),
+        };
+
+        // Operation result message
+        if (message != null)
+        {
+            var msgColor = messageIsError ? GitClientColors.StatusDeleted : GitClientColors.BranchCurrent;
+            var icon = messageIsError ? "\u2717 " : "\u2713 ";
+            children.Add(
+                Text.New(icon + message).FontSize(11f).TextColor(msgColor)
+                    .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+            );
+            children.Add(Box.New().Width(1).Height(16).Background(GitClientColors.Border));
+        }
+
+        // Action buttons
+        children.Add(ActionButton("Fetch", onFetch));
+        children.Add(ActionButton("Pull", onPull));
+        children.Add(ActionButton("Push", onPush));
 
         return Flex.Row(gap: 16)
             .AlignItems(AlignItems.Center)
@@ -29,32 +71,7 @@ public static class StatusBar
             .Background(GitClientColors.StatusBar)
             .Padding(new Thickness(0, 12, 0, 12))
             .FlexShrink(0)
-            .Children(
-                // Branch indicator
-                Text.New("\u25CF").FontSize(10f).TextColor(GitClientColors.BranchCurrent),
-                Text.New(branchName).FontSize(12f).FontWeight(FontWeight.SemiBold)
-                    .TextColor(GitClientColors.TextPrimary),
-
-                // Ahead/behind
-                aheadBehind.Length > 0
-                    ? Text.New(aheadBehind.Trim()).FontSize(12f).TextColor(GitClientColors.TextSecondary)
-                    : Box.New().Width(0),
-
-                // Separator
-                Box.New().Width(1).Height(16).Background(GitClientColors.Border),
-
-                // Changed files
-                Text.New($"{changedFiles} changed").FontSize(12f)
-                    .TextColor(changedFiles > 0 ? GitClientColors.StatusModified : GitClientColors.TextMuted),
-
-                // Spacer
-                Box.New().FlexGrow(1),
-
-                // Action buttons
-                ActionButton("Fetch", onFetch),
-                ActionButton("Pull", onPull),
-                ActionButton("Push", onPush)
-            );
+            .Children(children.ToArray());
     }
 
     private static Element ActionButton(string label, Action onClick)

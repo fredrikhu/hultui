@@ -38,6 +38,9 @@ public partial class App : Component
     [Reactive] public partial bool ShowWorkingCopy { get; set; }
 
     private Element? _workingCopyLayout;
+    private string? _statusMessage;
+    private bool _statusIsError;
+    private CancellationTokenSource? _messageCts;
 
     public App(Window window, GitRepository repo)
     {
@@ -63,8 +66,10 @@ public partial class App : Component
         _sidebar.OnStashSelected = OnStashSelected;
         _sidebar.CopyToClipboard = CopyToClipboard;
         _sidebar.OnRepoChanged = RefreshAll;
+        _sidebar.ShowStatusMessage = ShowMessage;
         _stagingArea.OnCommitted = OnCommitted;
         _stagingArea.OnRepoChanged = RefreshAll;
+        _stagingArea.ShowStatusMessage = ShowMessage;
     }
 
     public override Element Build()
@@ -97,7 +102,9 @@ public partial class App : Component
                     status.Count,
                     onFetch: DoFetch,
                     onPull: DoPull,
-                    onPush: DoPush
+                    onPush: DoPush,
+                    message: _statusMessage,
+                    messageIsError: _statusIsError
                 )
             );
     }
@@ -145,7 +152,7 @@ public partial class App : Component
 
     private void OnBranchSelected(string branchName)
     {
-        _repo.Checkout(branchName);
+        ShowResult(_repo.Checkout(branchName), $"Switched to {branchName}");
         RefreshAll();
     }
 
@@ -168,37 +175,72 @@ public partial class App : Component
 
     private void DoCheckoutCommit(string hash)
     {
-        _repo.CheckoutDetached(hash);
+        ShowResult(_repo.CheckoutDetached(hash), $"Detached HEAD at {hash[..7]}");
         RefreshAll();
     }
 
     private void DoCherryPick(string hash)
     {
-        _repo.CherryPick(hash);
+        ShowResult(_repo.CherryPick(hash), $"Cherry-picked {hash[..7]}");
         RefreshAll();
     }
 
     private void DoFetch()
     {
-        _repo.Fetch();
+        ShowResult(_repo.Fetch(), "Fetched all remotes");
         RefreshAll();
     }
 
     private void DoPull()
     {
-        _repo.Pull();
+        ShowResult(_repo.Pull(), "Pulled latest changes");
         RefreshAll();
     }
 
     private void DoPush()
     {
-        _repo.Push();
+        ShowResult(_repo.Push(), "Pushed successfully");
         RefreshAll();
     }
 
     private void CopyToClipboard(string text)
     {
         _window.Clipboard.SetText(text);
+    }
+
+    private void ShowResult(GitResult result, string? successLabel = null)
+    {
+        if (!result.Success)
+        {
+            var msg = result.Stderr.Trim();
+            if (string.IsNullOrEmpty(msg)) msg = "Operation failed";
+            ShowMessage(msg, isError: true);
+        }
+        else if (successLabel != null)
+        {
+            ShowMessage(successLabel, isError: false);
+        }
+    }
+
+    private void ShowMessage(string message, bool isError)
+    {
+        _messageCts?.Cancel();
+        _statusMessage = message;
+        _statusIsError = isError;
+
+        _messageCts = new CancellationTokenSource();
+        var token = _messageCts.Token;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(isError ? 8000 : 4000, token);
+            if (!token.IsCancellationRequested)
+            {
+                _statusMessage = null;
+                MarkDirty();
+            }
+        }, token);
+
+        MarkDirty();
     }
 
     private void RefreshAll()

@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 1.4 (Operation result feedback)
+**Current cursor:** ▶ Phase 2.1 (Per-hunk staging in DiffViewer)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -42,8 +42,8 @@ and unblock useful daily flows.
   rather than creating a new one.
 
 ### 1.4 Operation result feedback (infra)
-- [ ] Small toast or status-bar message slot for `GitResult` failures
-- [ ] Wire all `GitResult`-returning calls in `App.cs` to surface stderr on failure
+- [x] Small toast or status-bar message slot for `GitResult` failures
+- [x] Wire all `GitResult`-returning calls in `App.cs` to surface stderr on failure
 - **Done when:** A failed push (e.g. non-fast-forward) shows the git error
   text instead of silently doing nothing. This unblocks safer destructive
   operations in Phase 3.

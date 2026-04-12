@@ -38,6 +38,11 @@ public partial class StagingArea : Component
     /// </summary>
     public Action? OnRepoChanged { get; set; }
 
+    /// <summary>
+    /// Surfaces git operation results (errors) to the status bar.
+    /// </summary>
+    public Action<string, bool>? ShowStatusMessage { get; set; }
+
     public StagingArea(GitRepository repo, DiffViewer diffViewer)
     {
         _repo = repo;
@@ -334,6 +339,12 @@ public partial class StagingArea : Component
             OnCommitted?.Invoke();
             Refresh();
         }
+        else
+        {
+            var msg = result.Stderr.Trim();
+            if (string.IsNullOrEmpty(msg)) msg = "Commit failed";
+            ShowStatusMessage?.Invoke(msg, true);
+        }
     }
 
     private void DoStash()
@@ -345,6 +356,12 @@ public partial class StagingArea : Component
             _commitMessage = "";
             OnRepoChanged?.Invoke();
             Refresh();
+        }
+        else
+        {
+            var msg = result.Stderr.Trim();
+            if (string.IsNullOrEmpty(msg)) msg = "Stash failed";
+            ShowStatusMessage?.Invoke(msg, true);
         }
     }
 

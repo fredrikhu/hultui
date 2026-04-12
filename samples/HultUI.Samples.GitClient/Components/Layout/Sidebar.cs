@@ -31,6 +31,11 @@ public partial class Sidebar : Component
     /// </summary>
     public Action? OnRepoChanged { get; set; }
 
+    /// <summary>
+    /// Surfaces git operation results (errors) to the status bar.
+    /// </summary>
+    public Action<string, bool>? ShowStatusMessage { get; set; }
+
     public Sidebar(GitRepository repo)
     {
         _repo = repo;
@@ -132,7 +137,8 @@ public partial class Sidebar : Component
         var name = _newBranchName.Trim();
         if (name.Length > 0)
         {
-            _repo.CreateBranch(name);
+            var result = _repo.CreateBranch(name);
+            if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         }
         _isCreatingBranch = false;
         _newBranchName = "";
@@ -148,7 +154,8 @@ public partial class Sidebar : Component
 
     private void DeleteBranch(string name)
     {
-        _repo.DeleteBranch(name);
+        var result = _repo.DeleteBranch(name);
+        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         Refresh();
     }
 
@@ -341,7 +348,9 @@ public partial class Sidebar : Component
 
     private void CheckoutBranch(string name)
     {
-        _repo.Checkout(name);
+        var result = _repo.Checkout(name);
+        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
+        else OnRepoChanged?.Invoke();
         Refresh();
     }
 
@@ -363,7 +372,8 @@ public partial class Sidebar : Component
 
     private void DeleteTag(string name)
     {
-        _repo.DeleteTag(name);
+        var result = _repo.DeleteTag(name);
+        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         OnRepoChanged?.Invoke();
     }
 
@@ -392,19 +402,22 @@ public partial class Sidebar : Component
 
     private void ApplyStash(string stashRef)
     {
-        _repo.StashApply(stashRef);
+        var result = _repo.StashApply(stashRef);
+        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         OnRepoChanged?.Invoke();
     }
 
     private void PopStash(string stashRef)
     {
-        _repo.StashPop(stashRef);
+        var result = _repo.StashPop(stashRef);
+        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         OnRepoChanged?.Invoke();
     }
 
     private void DropStash(string stashRef)
     {
-        _repo.StashDrop(stashRef);
+        var result = _repo.StashDrop(stashRef);
+        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
         OnRepoChanged?.Invoke();
     }
 
