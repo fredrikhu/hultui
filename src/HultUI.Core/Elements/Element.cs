@@ -77,8 +77,21 @@ public abstract class Element
     /// </summary>
     public void Focus()
     {
-        if (IsFocusable)
-            FocusManager?.SetFocus(this);
+        if (!IsFocusable) return;
+
+        // FocusManager may not have been propagated yet (e.g. element was
+        // just added to the tree and style resolution hasn't run). Walk up
+        // the parent chain to find it.
+        var fm = FocusManager;
+        if (fm is null)
+        {
+            for (var p = Parent; p is not null; p = p.Parent)
+            {
+                if (p.FocusManager is not null) { fm = p.FocusManager; break; }
+            }
+        }
+
+        fm?.SetFocus(this);
     }
 
     // ──── Accessibility ────

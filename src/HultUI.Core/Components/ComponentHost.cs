@@ -32,7 +32,6 @@ public sealed class ComponentHost : Element
     {
         _component.OnBeforeBuild();
         var newTree = _component.Build();
-        _component.OnAfterBuild();
 
         if (Children.Count == 0)
         {
@@ -42,6 +41,8 @@ public sealed class ComponentHost : Element
         {
             TreeDiffer.Reconcile(this, Children[0], newTree);
         }
+
+        _component.OnAfterBuild();
     }
 
     /// <summary>
