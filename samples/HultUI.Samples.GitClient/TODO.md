@@ -103,7 +103,7 @@ done** — operation feedback + a confirm dialog primitive are prerequisites.
   commit on top of HEAD.
 
 ### 3.4 Force push
-- [ ] StatusBar: hold Shift on the Push button to force-push (or a separate menu item)
+- [ ] StatusBar: hold Shift on the Push button to force-push-with-lease (or a separate menu item)
 - [ ] Confirm dialog every time
 - **Done when:** Force push works and is impossible to trigger by accident.
 
