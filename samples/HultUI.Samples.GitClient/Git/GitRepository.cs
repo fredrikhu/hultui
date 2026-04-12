@@ -343,14 +343,29 @@ public class GitRepository
         return GitProcess.Run(Path, "fetch", "--all", "--prune");
     }
 
+    public Task<GitResult> FetchAsync()
+    {
+        return GitProcess.RunAsync(Path, "fetch", "--all", "--prune");
+    }
+
     public GitResult Pull()
     {
         return GitProcess.Run(Path, "pull");
     }
 
+    public Task<GitResult> PullAsync()
+    {
+        return GitProcess.RunAsync(Path, "pull");
+    }
+
     public GitResult Push()
     {
         return GitProcess.Run(Path, "push");
+    }
+
+    public Task<GitResult> PushAsync()
+    {
+        return GitProcess.RunAsync(Path, "push");
     }
 
     // ── Branch management ──

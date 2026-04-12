@@ -41,6 +41,7 @@ public partial class App : Component
     private string? _statusMessage;
     private bool _statusIsError;
     private CancellationTokenSource? _messageCts;
+    private bool _remoteOpRunning;
 
     public App(Window window, GitRepository repo)
     {
@@ -191,21 +192,36 @@ public partial class App : Component
         RefreshAll();
     }
 
-    private void DoFetch()
+    private async void DoFetch()
     {
-        ShowResult(_repo.Fetch(), "Fetched all remotes");
+        if (_remoteOpRunning) return;
+        _remoteOpRunning = true;
+        ShowMessage("Fetching\u2026", isError: false);
+        var result = await _repo.FetchAsync();
+        _remoteOpRunning = false;
+        ShowResult(result, "Fetched all remotes");
         RefreshAll();
     }
 
-    private void DoPull()
+    private async void DoPull()
     {
-        ShowResult(_repo.Pull(), "Pulled latest changes");
+        if (_remoteOpRunning) return;
+        _remoteOpRunning = true;
+        ShowMessage("Pulling\u2026", isError: false);
+        var result = await _repo.PullAsync();
+        _remoteOpRunning = false;
+        ShowResult(result, "Pulled latest changes");
         RefreshAll();
     }
 
-    private void DoPush()
+    private async void DoPush()
     {
-        ShowResult(_repo.Push(), "Pushed successfully");
+        if (_remoteOpRunning) return;
+        _remoteOpRunning = true;
+        ShowMessage("Pushing\u2026", isError: false);
+        var result = await _repo.PushAsync();
+        _remoteOpRunning = false;
+        ShowResult(result, "Pushed successfully");
         RefreshAll();
     }
 
