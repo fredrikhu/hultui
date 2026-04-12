@@ -107,7 +107,7 @@ public sealed class Application : IDisposable
                 {
                     long now = Environment.TickCount64;
                     // Only execute if 50ms has passed
-                    if (now - window.PlatformWindow.LastResizeRenderTick >= SDL3Window.ResizeThrottleMs)
+                    if (now - window.PlatformWindow.LastResizeRenderTick >= window.ResizeThrottleMs)
                     {
                         window.OnWindowResized();
                         window.PlatformWindow.LastResizeRenderTick = now;

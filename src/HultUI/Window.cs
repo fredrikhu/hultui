@@ -54,6 +54,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private bool _isExternalDrag;
 
     internal SDL3Window PlatformWindow { get; }
+    public long ResizeThrottleMs { get; set; } = 16;
     internal Application Application { get; }
 
     public IClipboard Clipboard { get; }

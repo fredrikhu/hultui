@@ -21,7 +21,6 @@ public sealed unsafe class SDL3Window : IDisposable
     private GCHandle _gcHandle;
     internal bool ResizePending;
     internal long LastResizeRenderTick;
-    internal const long ResizeThrottleMs = 200;
 
     public SDL_WindowID WindowId { get; private set; }
     public int PixelWidth { get; private set; }
