@@ -2,6 +2,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
@@ -73,6 +74,25 @@ public abstract class Element
     public AccessibilityRole Role { get; set; } = AccessibilityRole.None;
     public string? AccessibleName { get; set; }
     public string? AccessibleDescription { get; set; }
+
+    // ──── Refs ────
+    // Refs registered via WithRef(). During PatchFrom the source element's
+    // refs are repointed to the live (target) element so that handler
+    // closures which captured the Ref always reach the in-tree element.
+    internal List<IRef>? _refs;
+
+    /// <summary>
+    /// Register a <see cref="Ref{T}"/> on this element. The ref's
+    /// <c>Current</c> is set to this element immediately, and will be
+    /// updated to the live element when PatchFrom runs during reconciliation.
+    /// </summary>
+    public Element WithRef<T>(Ref<T> r) where T : Element
+    {
+        _refs ??= [];
+        _refs.Add(r);
+        r.Current = (T)this;
+        return this;
+    }
 
     // ──── Events ────
     private Dictionary<Type, List<EventHandlerEntry>>? _handlers;
@@ -189,26 +209,45 @@ public abstract class Element
     protected virtual void OnUnmounted() { }
 
     // ──── Tree mutation ────
+    //
+    // Lifecycle contract:
+    //   OnMounted  fires when an element enters a tree for the first time.
+    //   OnUnmounted fires when an element permanently leaves a tree.
+    //
+    // When an element is *moved* (it already has a parent and is added to a
+    // different one), neither lifecycle event fires — the element was never
+    // truly removed.  This prevents ComponentHost from tearing down its
+    // reactive Effect every time a parent component rebuilds and passes the
+    // same child through a helper like SplitPane.Build().
+
     public void AddChild(Element child)
     {
+        var wasParented = child.Parent is not null;
+
         if (child.Parent is not null)
-            child.Parent.RemoveChild(child);
+            DetachSilently(child);
 
         child.Parent = this;
         _children.Add(child);
         MarkLayoutDirty();
-        child.OnMounted();
+
+        if (!wasParented)
+            child.OnMounted();
     }
 
     public void InsertChild(int index, Element child)
     {
+        var wasParented = child.Parent is not null;
+
         if (child.Parent is not null)
-            child.Parent.RemoveChild(child);
+            DetachSilently(child);
 
         child.Parent = this;
         _children.Insert(index, child);
         MarkLayoutDirty();
-        child.OnMounted();
+
+        if (!wasParented)
+            child.OnMounted();
     }
 
     public void RemoveChild(Element child)
@@ -223,22 +262,51 @@ public abstract class Element
 
     public void ReplaceChildren(params Element[] children)
     {
+        // Snapshot which incoming children are already mounted somewhere so
+        // we can distinguish moves (silent) from first mounts (fire OnMounted).
+        var alreadyMounted = new HashSet<Element>();
+        foreach (var child in children)
+        {
+            if (child.Parent is not null)
+                alreadyMounted.Add(child);
+        }
+
+        // Remove old children. Only fire OnUnmounted for elements that are
+        // genuinely leaving — not those that reappear in the new list.
+        var newSet = new HashSet<Element>(children);
         foreach (var old in _children)
         {
-            old.OnUnmounted();
+            if (!newSet.Contains(old))
+                old.OnUnmounted();
             old.Parent = null;
         }
         _children.Clear();
 
+        // Add new children.
         foreach (var child in children)
         {
             if (child.Parent is not null)
-                child.Parent.RemoveChild(child);
+                DetachSilently(child);
+
             child.Parent = this;
             _children.Add(child);
-            child.OnMounted();
+
+            if (!alreadyMounted.Contains(child))
+                child.OnMounted();
         }
         MarkLayoutDirty();
+    }
+
+    /// <summary>
+    /// Removes <paramref name="child"/> from its current parent without
+    /// firing lifecycle events.  Used for element moves — the child is not
+    /// leaving the tree, just changing parents.
+    /// </summary>
+    private static void DetachSilently(Element child)
+    {
+        child.Parent?._children.Remove(child);
+        child.Parent?.MarkLayoutDirty();
+        child.Parent = null;
     }
 
     // ──── Patching (used by TreeDiffer) ────
@@ -259,10 +327,16 @@ public abstract class Element
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;
-        // Note: event handlers are NOT copied. Handlers from the first Build()
+        // Event handlers are NOT copied. Handlers from the first Build()
         // capture references to the existing (live) elements. Copying handlers
         // from a new Build() would bring closures pointing to detached elements.
-        // For dynamic handler behavior, read signals inside handlers instead.
+        // For cross-element references, use Ref<T> — refs ARE updated here.
+        if (source._refs != null)
+        {
+            foreach (var r in source._refs)
+                r.SetTarget(this);
+        }
+
         MarkLayoutDirty();
         MarkPaintDirty();
         MarkStyleDirty();
