@@ -42,6 +42,7 @@ public partial class App : Component
     private bool _statusIsError;
     private CancellationTokenSource? _messageCts;
     private bool _remoteOpRunning;
+    private ConfirmDialogState? _pendingConfirm;
 
     public App(Window window, GitRepository repo)
     {
@@ -69,6 +70,7 @@ public partial class App : Component
         _sidebar.CopyToClipboard = CopyToClipboard;
         _sidebar.OnRepoChanged = RefreshAll;
         _sidebar.ShowStatusMessage = ShowMessage;
+        _sidebar.ShowConfirm = ShowConfirm;
         _stagingArea.OnCommitted = OnCommitted;
         _stagingArea.OnRepoChanged = RefreshAll;
         _stagingArea.ShowStatusMessage = ShowMessage;
@@ -83,7 +85,7 @@ public partial class App : Component
         var showWc = ShowWorkingCopy;
         var repoName = Path.GetFileName(_repo.Path.TrimEnd(Path.DirectorySeparatorChar));
 
-        return Flex.Column(gap: 0)
+        var root = Flex.Column(gap: 0)
             .TextColor(GitClientColors.TextPrimary)
             .FontSize(13f)
             .Children(
@@ -109,6 +111,11 @@ public partial class App : Component
                     messageIsError: _statusIsError
                 )
             );
+
+        if (_pendingConfirm != null)
+            root.AddChild(ConfirmDialog.Build(_pendingConfirm, DismissConfirm));
+
+        return root;
     }
 
     private Element BuildSidebarLayout(bool showWc)
@@ -262,6 +269,18 @@ public partial class App : Component
             }
         }, token);
 
+        MarkDirty();
+    }
+
+    private void ShowConfirm(ConfirmDialogState state)
+    {
+        _pendingConfirm = state;
+        MarkDirty();
+    }
+
+    private void DismissConfirm()
+    {
+        _pendingConfirm = null;
         MarkDirty();
     }
 

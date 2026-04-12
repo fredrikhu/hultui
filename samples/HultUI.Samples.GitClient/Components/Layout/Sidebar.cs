@@ -38,6 +38,11 @@ public partial class Sidebar : Component
     /// </summary>
     public Action<string, bool>? ShowStatusMessage { get; set; }
 
+    /// <summary>
+    /// Shows a modal confirm dialog. The host (App) owns the dialog overlay.
+    /// </summary>
+    public Action<ConfirmDialogState>? ShowConfirm { get; set; }
+
     public Sidebar(GitRepository repo)
     {
         _repo = repo;
@@ -163,9 +168,20 @@ public partial class Sidebar : Component
 
     private void DeleteBranch(string name)
     {
-        var result = _repo.DeleteBranch(name);
-        if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
-        Refresh();
+        ShowConfirm?.Invoke(new ConfirmDialogState
+        {
+            Title = "Delete Branch",
+            Body = $"Are you sure you want to delete '{name}'? This cannot be undone.",
+            ConfirmLabel = "Delete",
+            Destructive = true,
+            OnConfirm = () =>
+            {
+                var result = _repo.DeleteBranch(name);
+                if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
+                OnRepoChanged?.Invoke();
+                Refresh();
+            },
+        });
     }
 
     private void BuildTree()

@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 3.1 (Confirm dialog primitive)
+**Current cursor:** ▶ Phase 3.2 (Reset)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -85,8 +85,8 @@ Each item here can lose work if it goes wrong. **Do not start until 1.4 is
 done** — operation feedback + a confirm dialog primitive are prerequisites.
 
 ### 3.1 Confirm dialog primitive
-- [ ] Reusable modal-style confirm with title, body, destructive/safe button styling
-- [ ] Used by every Phase 3 item and by Sidebar's existing "Delete branch"
+- [x] Reusable modal-style confirm with title, body, destructive/safe button styling
+- [x] Used by every Phase 3 item and by Sidebar's existing "Delete branch"
 
 ### 3.2 Reset
 - [ ] `GitRepository.Reset(string ref, ResetMode mode)` for soft/mixed/hard
