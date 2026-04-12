@@ -33,6 +33,13 @@ public partial class TreeView : Component
 
     public Action<TreeNode>? OnSelectionChanged { get; set; }
 
+    // Stable key-based lookups so handlers attached on the first Build can
+    // find the current node and expansion state across rebuilds.  The framework
+    // patches old elements in-place and keeps their original handlers, so
+    // capturing per-build locals in closures would go stale.
+    private Dictionary<string, TreeNode> _nodesByKey = new();
+    private readonly Dictionary<string, bool> _expansionByKey = new();
+
     public TreeView()
     {
         Roots = new ReactiveList<TreeNode>();
@@ -42,6 +49,7 @@ public partial class TreeView : Component
     {
         _ = Roots.Count; // track changes
         _ = Version; // track expand/collapse
+        _nodesByKey = new Dictionary<string, TreeNode>();
         var container = Flex.Column(gap: 0);
         var children = new List<Element>();
 
@@ -52,23 +60,32 @@ public partial class TreeView : Component
         return container;
     }
 
+    private bool GetExpanded(string key, TreeNode node)
+    {
+        return _expansionByKey.TryGetValue(key, out var e) ? e : node.IsExpanded;
+    }
+
     private void BuildNodeElements(TreeNode node, int depth, List<Element> elements)
     {
+        var key = $"tree-{depth}-{node.Label}";
+        _nodesByKey[key] = node;
+
         var isSelected = SelectedNode == node;
+        var expanded = GetExpanded(key, node);
+        var hasChildren = node.Children.Count > 0;
+
         var row = Flex.Row(gap: 4)
             .Padding(new Thickness(4, 8, 4, 4 + depth * 16))
             .AlignItems(AlignItems.Center)
             .FlexShrink(0)
             .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
             .Cursor(CursorType.Pointer);
-        row.Key = $"tree-{depth}-{node.Label}";
-
-        var hasChildren = node.Children.Count > 0;
+        row.Key = key;
 
         // Expand/collapse chevron or spacer
         if (hasChildren)
         {
-            var chevron = Text.New(node.IsExpanded ? "\u25BE" : "\u25B8")
+            var chevron = Text.New(expanded ? "\u25BE" : "\u25B8")
                 .FontSize(11f).TextColor(GitClientColors.TextMuted)
                 .Width(14);
             row.AddChild(chevron);
@@ -95,19 +112,21 @@ public partial class TreeView : Component
             label.Tooltip(node.Tooltip);
         row.AddChild(label);
 
-        // Events
+        // Events — closures capture `key` (a stable string) and read everything
+        // else through `this` (the TreeView instance) so lookups survive rebuilds.
         row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
         row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
         row.OnClick(_ =>
         {
-            if (hasChildren)
+            if (!_nodesByKey.TryGetValue(key, out var current)) return;
+            if (current.Children.Count > 0)
             {
-                node.IsExpanded = !node.IsExpanded;
+                _expansionByKey[key] = !GetExpanded(key, current);
                 Version++;
             }
-            SelectedNode = node;
-            OnSelectionChanged?.Invoke(node);
-            node.OnClick?.Invoke();
+            SelectedNode = current;
+            OnSelectionChanged?.Invoke(current);
+            current.OnClick?.Invoke();
         });
 
         if (node.ContextMenuItems != null)
@@ -119,7 +138,7 @@ public partial class TreeView : Component
         elements.Add(row);
 
         // Children
-        if (hasChildren && node.IsExpanded)
+        if (hasChildren && expanded)
         {
             foreach (var child in node.Children)
                 BuildNodeElements(child, depth + 1, elements);
