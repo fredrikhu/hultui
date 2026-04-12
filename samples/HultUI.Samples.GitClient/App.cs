@@ -149,8 +149,8 @@ public partial class App : Component
 
     private void OnWorkingCopySelected()
     {
-        ShowWorkingCopy = true;
-        _sidebar.WorkingCopyActive = true;
+        ShowWorkingCopy = !ShowWorkingCopy;
+        _sidebar.WorkingCopyActive = !_sidebar.WorkingCopyActive;
         _sidebar.Refresh();
         _stagingArea.Refresh();
     }
