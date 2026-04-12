@@ -34,6 +34,7 @@ public static class GitClientColors
     public static readonly Color DiffHunkBg = new(60, 60, 120, 60);
     public static readonly Color DiffHunkText = Color.FromHex("#818cf8");
     public static readonly Color DiffLineNumber = Color.FromHex("#4a4a68");
+    public static readonly Color DiffEmptyBg = new(40, 40, 60, 60);
 
     // ── Accents ──
     public static readonly Color BranchLocal = Color.FromHex("#60a5fa");

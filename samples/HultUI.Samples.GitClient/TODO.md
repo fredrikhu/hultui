@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 2.2 (Side-by-side diff toggle)
+**Current cursor:** ▶ Phase 2.3 (Filter improvements on CommitList)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -64,8 +64,8 @@ chunk of work.
   and the staging area reflects the partial state.
 
 ### 2.2 Side-by-side diff toggle
-- [ ] DiffViewer: unified / side-by-side toggle in its toolbar
-- [ ] New rendering path that lays old/new in two parallel columns aligned by hunk
+- [x] DiffViewer: unified / side-by-side toggle in its toolbar
+- [x] New rendering path that lays old/new in two parallel columns aligned by hunk
 - **Done when:** Toggling the mode keeps the same scroll position and
   selection works in both views.
 
