@@ -85,6 +85,7 @@ public static class StatusBar
                 Text.New(label).FontSize(11f).FontWeight(FontWeight.SemiBold)
                     .TextColor(GitClientColors.TextPrimary)
             );
+        btn.Key = $"statusbar-{label}";
 
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
