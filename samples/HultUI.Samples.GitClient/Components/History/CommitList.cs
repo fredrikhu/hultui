@@ -22,7 +22,7 @@ public partial class CommitList : Component
     private string? _taggingCommitHash;
     private string _newTagName = "";
 
-    [Reactive] public partial GitCommit? SelectedCommit { get; set; }
+    [Reactive] public partial string? SelectedCommitHash { get; set; }
 
     public Action<GitCommit?>? OnCommitSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
@@ -42,7 +42,7 @@ public partial class CommitList : Component
 
     public override Element Build()
     {
-        var selected = SelectedCommit;
+        var selected = SelectedCommitHash;
         _commits = _repo.GetLog();
 
         // Compute lane assignments over the full log, not the filtered subset,
@@ -79,7 +79,7 @@ public partial class CommitList : Component
                     .RenderWith(commit => CommitRow.Build(
                         commit,
                         graph.TryGetValue(commit.Hash, out var g) ? g : default,
-                        commit == selected,
+                        commit.Hash == selected,
                         SelectCommit,
                         CopyToClipboard,
                         OnCheckoutCommit,
@@ -248,7 +248,7 @@ public partial class CommitList : Component
 
     private void SelectCommit(GitCommit commit)
     {
-        SelectedCommit = commit;
+        SelectedCommitHash = commit.Hash;
         OnCommitSelected?.Invoke(commit);
     }
 }
