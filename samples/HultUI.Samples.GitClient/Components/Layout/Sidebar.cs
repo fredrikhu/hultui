@@ -363,7 +363,7 @@ public partial class Sidebar : Component
                 : isRemote ? GitClientColors.BranchRemote
                 : GitClientColors.BranchLocal,
             Tooltip = FormatBranchTooltip(b),
-            OnClick = () => OnBranchSelected?.Invoke(b.Name),
+            OnDoubleClick = () => OnBranchSelected?.Invoke(b.Name),
             ContextMenuItems = isRemote ? null : () =>
             {
                 var items = new List<ContextMenuItem>

@@ -116,7 +116,7 @@ public partial class TreeView : Component
         // else through `this` (the TreeView instance) so lookups survive rebuilds.
         row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
         row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-        row.OnClick(_ =>
+        row.OnClick(args =>
         {
             if (!_nodesByKey.TryGetValue(key, out var current)) return;
             if (current.Children.Count > 0)
@@ -126,7 +126,10 @@ public partial class TreeView : Component
             }
             SelectedNode = current;
             OnSelectionChanged?.Invoke(current);
-            current.OnClick?.Invoke();
+            if (args.ClickCount == 2)
+                current.OnDoubleClick?.Invoke();
+            else
+                current.OnClick?.Invoke();
         });
 
         if (node.ContextMenuItems != null)
