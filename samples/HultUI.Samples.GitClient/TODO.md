@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 1.3 (Commit amend)
+**Current cursor:** ▶ Phase 1.4 (Operation result feedback)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -36,8 +36,8 @@ and unblock useful daily flows.
   badge on that commit, and delete it from the sidebar.
 
 ### 1.3 Commit amend
-- [ ] StagingArea: "Amend last commit" checkbox next to the commit button
-- [ ] When checked, prefill the message with the previous commit's message and call `git commit --amend`
+- [x] StagingArea: "Amend last commit" checkbox next to the commit button
+- [x] When checked, prefill the message with the previous commit's message and call `git commit --amend`
 - **Done when:** Toggling amend changes the staged commit's hash in place
   rather than creating a new one.
 

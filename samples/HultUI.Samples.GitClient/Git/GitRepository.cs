@@ -230,14 +230,56 @@ public class GitRepository
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 
-    public List<GitFileDiff> GetWorkingDiff(bool staged)
+    public List<GitFileDiff> GetWorkingDiff(bool staged, string? baseRef = null)
     {
         var args = staged
-            ? new[] { "diff", "--cached" }
+            ? baseRef != null
+                ? new[] { "diff", "--cached", baseRef }
+                : new[] { "diff", "--cached" }
             : new[] { "diff" };
 
         var result = GitProcess.Run(Path, args);
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+    }
+
+    /// <summary>
+    /// Returns the staged file list diffed against a specific base ref.
+    /// Used in amend mode to diff the index against HEAD~1 so that the
+    /// previous commit's changes appear as staged.
+    /// </summary>
+    public List<GitFileChange> GetStagedFiles(string? baseRef = null)
+    {
+        var args = baseRef != null
+            ? new[] { "diff", "--cached", "--name-status", "-M", baseRef }
+            : new[] { "diff", "--cached", "--name-status", "-M" };
+
+        var result = GitProcess.Run(Path, args);
+        if (!result.Success) return [];
+
+        var files = new List<GitFileChange>();
+        foreach (var line in result.Lines)
+        {
+            var parts = line.Split('\t');
+            if (parts.Length < 2) continue;
+
+            var status = parts[0];
+            var kind = status[0] switch
+            {
+                'A' => FileChangeKind.Added,
+                'M' => FileChangeKind.Modified,
+                'D' => FileChangeKind.Deleted,
+                'R' => FileChangeKind.Renamed,
+                'C' => FileChangeKind.Copied,
+                _ => FileChangeKind.Modified,
+            };
+
+            // Renames/copies have 3 columns: status \t oldPath \t newPath
+            var path = parts.Length >= 3 ? parts[2] : parts[1];
+            var oldPath = parts.Length >= 3 ? parts[1] : null;
+
+            files.Add(new GitFileChange(path, oldPath, kind, 0, 0));
+        }
+        return files;
     }
 
     // ── Staging ──
@@ -281,6 +323,17 @@ public class GitRepository
     public GitResult Commit(string message)
     {
         return GitProcess.Run(Path, "commit", "-m", message);
+    }
+
+    public GitResult CommitAmend(string message)
+    {
+        return GitProcess.Run(Path, "commit", "--amend", "-m", message);
+    }
+
+    public string? GetLastCommitMessage()
+    {
+        var result = GitProcess.Run(Path, "log", "-1", "--format=%B");
+        return result.Success ? result.Stdout.TrimEnd() : null;
     }
 
     // ── Remote operations ──

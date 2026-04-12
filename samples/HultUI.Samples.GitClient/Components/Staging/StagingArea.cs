@@ -21,6 +21,7 @@ public partial class StagingArea : Component
     private readonly GitRepository _repo;
     private readonly DiffViewer _diffViewer;
     private string _commitMessage = "";
+    private bool _amend;
 
     // Currently-highlighted file row. Path + section together because the same
     // path can appear under both Unstaged and Staged when partially staged.
@@ -47,17 +48,28 @@ public partial class StagingArea : Component
     {
         var statusFiles = _repo.GetStatus();
 
-        // Split into staged and unstaged based on git status porcelain codes
-        var stagedResult = GitProcess.Run(_repo.Path, "diff", "--cached", "--name-status");
-        var stagedPaths = new HashSet<string>();
-        foreach (var line in stagedResult.Lines)
-        {
-            var parts = line.Split('\t');
-            if (parts.Length >= 2) stagedPaths.Add(parts[1]);
-        }
+        List<GitFileChange> unstaged, staged;
 
-        var unstaged = statusFiles.Where(f => !stagedPaths.Contains(f.Path)).ToList();
-        var staged = statusFiles.Where(f => stagedPaths.Contains(f.Path)).ToList();
+        if (_amend)
+        {
+            // In amend mode, staged = index vs HEAD~1 (includes previous commit's changes).
+            staged = _repo.GetStagedFiles("HEAD~1");
+            var stagedPaths = staged.Select(f => f.Path).ToHashSet();
+            unstaged = statusFiles.Where(f => !stagedPaths.Contains(f.Path)).ToList();
+        }
+        else
+        {
+            // Normal mode: split status files by what's in the cached diff.
+            var stagedResult = GitProcess.Run(_repo.Path, "diff", "--cached", "--name-status");
+            var stagedPaths = new HashSet<string>();
+            foreach (var line in stagedResult.Lines)
+            {
+                var parts = line.Split('\t');
+                if (parts.Length >= 2) stagedPaths.Add(parts[1]);
+            }
+            unstaged = statusFiles.Where(f => !stagedPaths.Contains(f.Path)).ToList();
+            staged = statusFiles.Where(f => stagedPaths.Contains(f.Path)).ToList();
+        }
 
         // Drop the highlight if the previously-selected file is no longer in
         // the section it was clicked from (e.g. it was just staged or discarded).
@@ -183,7 +195,8 @@ public partial class StagingArea : Component
             {
                 _selectedPath = file.Path;
                 _selectedIsStaged = isStaged;
-                var diffs = _repo.GetWorkingDiff(isStaged);
+                var baseRef = _amend && isStaged ? "HEAD~1" : null;
+                var diffs = _repo.GetWorkingDiff(isStaged, baseRef);
                 var fileDiff = diffs.Where(d => d.Path == file.Path || d.Path.EndsWith(file.Path)).ToList();
                 _diffViewer.Diffs = fileDiff.Count > 0 ? fileDiff : diffs;
                 Refresh();
@@ -203,13 +216,20 @@ public partial class StagingArea : Component
     {
         _canStash = totalChanged > 0;
 
+        var amendCheckbox = Checkbox.New(_amend, "Amend last commit")
+            .OnCheckedChanged(ToggleAmend)
+            .FontSize(12f)
+            .TextColor(GitClientColors.TextSecondary);
+        amendCheckbox.CheckboxSize = 14f;
+        amendCheckbox.CheckedColor = GitClientColors.ButtonPrimary;
+
         return Flex.Column(gap: 8)
             .Padding(10)
             .Background(GitClientColors.Surface)
             .FlexShrink(0)
             .Children(
                 TextArea.New(_commitMessage)
-                    .PlaceholderText("Commit message...")
+                    .PlaceholderText(_amend ? "Amend commit message..." : "Commit message...")
                     .OnTextChanged(text => _commitMessage = text)
                     .Height(Dimension.Px(80))
                     .Background(GitClientColors.Background)
@@ -217,6 +237,7 @@ public partial class StagingArea : Component
                     .BorderColor(GitClientColors.Border)
                     .TextColor(GitClientColors.TextPrimary)
                     .FontSize(13f),
+                amendCheckbox,
                 Flex.Row(gap: 8).Children(
                     CommitButton(stagedCount),
                     StashButton(totalChanged)
@@ -224,8 +245,24 @@ public partial class StagingArea : Component
             );
     }
 
+    private void ToggleAmend(bool amend)
+    {
+        _amend = amend;
+        if (amend)
+        {
+            var lastMessage = _repo.GetLastCommitMessage();
+            if (lastMessage != null)
+                _commitMessage = lastMessage;
+        }
+        Refresh();
+    }
+
     private Element CommitButton(int stagedCount)
     {
+        var label = _amend
+            ? "Amend Commit"
+            : $"Commit ({stagedCount} file{(stagedCount == 1 ? "" : "s")})";
+
         var btn = Box.New()
             .Padding(new Thickness(8, 0, 8, 0))
             .CornerRadius(4f)
@@ -236,7 +273,7 @@ public partial class StagingArea : Component
             .FlexGrow(1)
             .Cursor(CursorType.Pointer)
             .Children(
-                Text.New($"Commit ({stagedCount} file{(stagedCount == 1 ? "" : "s")})")
+                Text.New(label)
                     .FontSize(13f).FontWeight(FontWeight.SemiBold)
                     .TextColor(Color.White)
             );
@@ -286,10 +323,14 @@ public partial class StagingArea : Component
     {
         if (string.IsNullOrWhiteSpace(_commitMessage)) return;
 
-        var result = _repo.Commit(_commitMessage);
+        var result = _amend
+            ? _repo.CommitAmend(_commitMessage)
+            : _repo.Commit(_commitMessage);
+
         if (result.Success)
         {
             _commitMessage = "";
+            _amend = false;
             OnCommitted?.Invoke();
             Refresh();
         }
