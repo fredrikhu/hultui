@@ -89,12 +89,23 @@ public sealed class Window : IOverlayHost, IDisposable
 
         if (platformWindow.Style == WindowStyle.Borderless)
             platformWindow.HitTestHandler = HandleWindowHitTest;
+
+        _focusManager.FocusChanged += OnFocusChanged;
+    }
+
+    private void OnFocusChanged(Element? element)
+    {
+        if (element is TextInputElement textInput)
+            textInput.Clipboard = Clipboard;
+        else if (element is TextAreaElement textArea)
+            textArea.Clipboard = Clipboard;
     }
 
     public void SetRoot(Element root)
     {
         _root = root;
         root.OverlayHost = this;
+        root.FocusManager = _focusManager;
     }
 
     internal Element? Root => _root;

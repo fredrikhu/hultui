@@ -69,6 +69,17 @@ public abstract class Element
 
     // ──── Focus ────
     public bool IsFocusable { get; set; }
+    internal FocusManager? FocusManager { get; set; }
+
+    /// <summary>
+    /// Programmatically focuses this element. The element must be focusable
+    /// and attached to a tree that has a <see cref="Events.FocusManager"/>.
+    /// </summary>
+    public void Focus()
+    {
+        if (IsFocusable)
+            FocusManager?.SetFocus(this);
+    }
 
     // ──── Accessibility ────
     public AccessibilityRole Role { get; set; } = AccessibilityRole.None;

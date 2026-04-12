@@ -6,6 +6,12 @@ public sealed class FocusManager
 {
     public Element? FocusedElement { get; private set; }
 
+    /// <summary>
+    /// Called after focus changes. The Window subscribes to provide
+    /// platform services (e.g. clipboard) to the newly focused element.
+    /// </summary>
+    public Action<Element?>? FocusChanged { get; set; }
+
     public void SetFocus(Element? element)
     {
         if (ReferenceEquals(FocusedElement, element))
@@ -19,6 +25,8 @@ public sealed class FocusManager
 
         if (element is not null)
             EventDispatcher.DispatchDirect(new FocusEvent(), element);
+
+        FocusChanged?.Invoke(element);
     }
 
     public void ClearFocus() => SetFocus(null);

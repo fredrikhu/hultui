@@ -18,7 +18,9 @@ public partial class Sidebar : Component
     private readonly TreeView _treeView;
 
     private bool _isCreatingBranch;
+    private bool _pendingFocus;
     private string _newBranchName = "";
+    private readonly Ref<TextInputElement> _branchInputRef = new();
 
     public Action<string>? OnBranchSelected { get; set; }
     public Action<GitStash>? OnStashSelected { get; set; }
@@ -101,7 +103,8 @@ public partial class Sidebar : Component
             .Background(GitClientColors.Background)
             .CornerRadius(3f)
             .BorderColor(GitClientColors.Border)
-            .TextColor(GitClientColors.TextPrimary);
+            .TextColor(GitClientColors.TextPrimary)
+            .WithRef(_branchInputRef);
 
         input.On<KeyDownEvent>(e =>
         {
@@ -143,7 +146,17 @@ public partial class Sidebar : Component
     {
         _newBranchName = "";
         _isCreatingBranch = true;
+        _pendingFocus = true;
         Refresh();
+    }
+
+    protected override void OnAfterBuild()
+    {
+        if (_pendingFocus)
+        {
+            _pendingFocus = false;
+            _branchInputRef.Current?.Focus();
+        }
     }
 
     private void ConfirmCreateBranch()

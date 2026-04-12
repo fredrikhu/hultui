@@ -46,8 +46,9 @@ public static class StyleResolver
 
         foreach (var child in element.Children)
         {
-            // Propagate overlay host down the tree
+            // Propagate overlay host and focus manager down the tree
             child.OverlayHost = element.OverlayHost;
+            child.FocusManager = element.FocusManager;
 
             if ((child.DirtyFlags & DirtyFlags.Style) != 0)
                 ResolveRecursive(child, resolved, theme);
