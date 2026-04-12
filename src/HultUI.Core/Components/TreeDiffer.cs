@@ -56,6 +56,8 @@ internal static class TreeDiffer
         bool hasKeys = HasAnyKeys(oldSnapshot) || HasAnyKeys(newSnapshot);
         if (hasKeys)
             ReconcileKeyed(existing, oldSnapshot, newSnapshot);
+        else if (oldSnapshot.Length != newSnapshot.Length)
+            ReconcilePrefixSuffix(existing, oldSnapshot, newSnapshot);
         else
             ReconcileIndexed(existing, oldSnapshot, newSnapshot);
     }
@@ -122,6 +124,52 @@ internal static class TreeDiffer
         }
 
         parent.ReplaceChildren(resultChildren.ToArray());
+    }
+
+    /// <summary>
+    /// When child count changes without keys, match from both ends where types
+    /// agree, then replace the unmatched middle. This handles the common pattern
+    /// of inserting or removing elements in the middle of a list — stable elements
+    /// at the edges survive without explicit keys.
+    /// </summary>
+    private static void ReconcilePrefixSuffix(Element parent, Element[] oldChildren, Element[] newChildren)
+    {
+        int minLen = Math.Min(oldChildren.Length, newChildren.Length);
+
+        // Match prefix: same-type pairs from the start
+        int prefixLen = 0;
+        while (prefixLen < minLen && CanPatch(oldChildren[prefixLen], newChildren[prefixLen]))
+            prefixLen++;
+
+        // Match suffix: same-type pairs from the end (don't overlap prefix)
+        int suffixLen = 0;
+        int maxSuffix = minLen - prefixLen;
+        while (suffixLen < maxSuffix &&
+               CanPatch(oldChildren[oldChildren.Length - 1 - suffixLen],
+                        newChildren[newChildren.Length - 1 - suffixLen]))
+            suffixLen++;
+
+        // Patch matched prefix in-place
+        for (int i = 0; i < prefixLen; i++)
+            Patch(parent.Children[i], newChildren[i]);
+
+        // Patch matched suffix in-place (still at original indices)
+        for (int i = 0; i < suffixLen; i++)
+        {
+            int oldIdx = oldChildren.Length - suffixLen + i;
+            int newIdx = newChildren.Length - suffixLen + i;
+            Patch(parent.Children[oldIdx], newChildren[newIdx]);
+        }
+
+        // Remove old middle (reverse order to keep indices stable)
+        int oldMiddleEnd = oldChildren.Length - suffixLen;
+        for (int i = oldMiddleEnd - 1; i >= prefixLen; i--)
+            parent.RemoveChild(parent.Children[i]);
+
+        // Insert new middle
+        int newMiddleEnd = newChildren.Length - suffixLen;
+        for (int i = prefixLen; i < newMiddleEnd; i++)
+            parent.InsertChild(i, newChildren[i]);
     }
 
     private static bool CanPatch(Element existing, Element incoming) =>
