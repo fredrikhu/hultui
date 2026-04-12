@@ -26,6 +26,7 @@ public partial class StagingArea : Component
     // path can appear under both Unstaged and Staged when partially staged.
     private string? _selectedPath;
     private bool _selectedIsStaged;
+    private bool _canStash;
 
     public Action? OnCommitted { get; set; }
 
@@ -200,6 +201,8 @@ public partial class StagingArea : Component
 
     private Element BuildCommitArea(int stagedCount, int totalChanged)
     {
+        _canStash = totalChanged > 0;
+
         return Flex.Column(gap: 8)
             .Padding(10)
             .Background(GitClientColors.Surface)
@@ -238,8 +241,6 @@ public partial class StagingArea : Component
                     .TextColor(Color.White)
             );
 
-        // Always attach handlers — PatchFrom doesn't copy event handlers,
-        // so conditionally attaching them only works on the first Build().
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimary);
         btn.On<ClickEvent>(_ => DoCommit());
@@ -271,12 +272,12 @@ public partial class StagingArea : Component
                     .TextColor(fg)
             );
 
-        if (enabled)
-        {
-            btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
-            btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
-            btn.On<ClickEvent>(_ => DoStash());
-        }
+        // Handlers are always attached — PatchFrom keeps the first Build's
+        // handlers, so conditional attachment only works on the first render.
+        // Read _canStash (a field) inside the handler instead.
+        btn.On<PointerEnterEvent>(_ => { if (_canStash) btn.BackgroundColor = GitClientColors.ButtonSecondaryHover; });
+        btn.On<PointerLeaveEvent>(_ => { if (_canStash) btn.BackgroundColor = GitClientColors.ButtonSecondary; });
+        btn.On<ClickEvent>(_ => { if (_canStash) DoStash(); });
 
         return btn;
     }
