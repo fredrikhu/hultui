@@ -20,6 +20,7 @@ public static class Badge
             FileChangeKind.Renamed => ("R", GitClientColors.StatusRenamed),
             FileChangeKind.Copied => ("C", GitClientColors.StatusRenamed),
             FileChangeKind.Untracked => ("?", GitClientColors.StatusUntracked),
+            FileChangeKind.Conflicted => ("!", GitClientColors.StatusConflicted),
             _ => ("?", GitClientColors.TextMuted),
         };
 

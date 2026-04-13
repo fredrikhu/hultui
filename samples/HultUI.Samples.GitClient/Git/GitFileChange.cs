@@ -8,6 +8,7 @@ public enum FileChangeKind
     Renamed,
     Copied,
     Untracked,
+    Conflicted,
 }
 
 public record GitFileChange(

@@ -49,6 +49,7 @@ public static class GitClientColors
     public static readonly Color StatusDeleted = Color.FromHex("#f87171");
     public static readonly Color StatusRenamed = Color.FromHex("#60a5fa");
     public static readonly Color StatusUntracked = Color.FromHex("#94a3b8");
+    public static readonly Color StatusConflicted = Color.FromHex("#ef4444");
 
     // ── Selection ──
     public static readonly Color Selection = new(99, 102, 241, 60);

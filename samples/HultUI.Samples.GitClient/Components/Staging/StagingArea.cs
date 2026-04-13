@@ -27,6 +27,7 @@ public partial class StagingArea : Component
     // path can appear under both Unstaged and Staged when partially staged.
     private string? _selectedPath;
     private bool _selectedIsStaged;
+    private bool _selectedIsConflict;
     private bool _canStash;
 
     public Action? OnCommitted { get; set; }
@@ -53,6 +54,11 @@ public partial class StagingArea : Component
     public override Element Build()
     {
         var statusFiles = _repo.GetStatus();
+        var merging = _repo.IsMerging();
+
+        // Separate conflicted files from the rest
+        var conflicted = statusFiles.Where(f => f.Kind == FileChangeKind.Conflicted).ToList();
+        var nonConflict = statusFiles.Where(f => f.Kind != FileChangeKind.Conflicted).ToList();
 
         List<GitFileChange> unstaged, staged;
 
@@ -61,7 +67,7 @@ public partial class StagingArea : Component
             // In amend mode, staged = index vs HEAD~1 (includes previous commit's changes).
             staged = _repo.GetStagedFiles("HEAD~1");
             var stagedPaths = staged.Select(f => f.Path).ToHashSet();
-            unstaged = statusFiles.Where(f => !stagedPaths.Contains(f.Path)).ToList();
+            unstaged = nonConflict.Where(f => !stagedPaths.Contains(f.Path)).ToList();
         }
         else
         {
@@ -83,41 +89,164 @@ public partial class StagingArea : Component
                 if (parts.Length >= 2) unstagedPaths.Add(parts[1]);
             }
 
-            unstaged = statusFiles.Where(f => unstagedPaths.Contains(f.Path) || f.Kind == FileChangeKind.Untracked).ToList();
-            staged = statusFiles.Where(f => stagedPaths.Contains(f.Path)).ToList();
+            var conflictPaths = conflicted.Select(f => f.Path).ToHashSet();
+            unstaged = nonConflict.Where(f => unstagedPaths.Contains(f.Path) || f.Kind == FileChangeKind.Untracked).ToList();
+            staged = nonConflict.Where(f => stagedPaths.Contains(f.Path) && !conflictPaths.Contains(f.Path)).ToList();
         }
 
-        // Drop the highlight if the previously-selected file is no longer in
-        // the section it was clicked from (e.g. it was just staged or discarded).
+        // Drop the highlight if the previously-selected file is no longer present
         if (_selectedPath != null)
         {
-            var sectionFiles = _selectedIsStaged ? staged : unstaged;
-            if (!sectionFiles.Any(f => f.Path == _selectedPath))
+            bool stillPresent;
+            if (_selectedIsConflict)
+                stillPresent = conflicted.Any(f => f.Path == _selectedPath);
+            else if (_selectedIsStaged)
+                stillPresent = staged.Any(f => f.Path == _selectedPath);
+            else
+                stillPresent = unstaged.Any(f => f.Path == _selectedPath);
+
+            if (!stillPresent)
             {
                 _selectedPath = null;
                 _diffViewer.Diffs = [];
             }
         }
 
-        return Flex.Column(gap: 0).FlexGrow(1).Children(
-            // Unstaged changes
-            BuildFileSection("Unstaged Changes", unstaged, isStaged: false),
+        var children = new List<Element>();
 
-            // Separator
-            Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
+        // Conflicts section (shown when there are unresolved conflicts)
+        if (conflicted.Count > 0)
+        {
+            children.Add(BuildConflictSection(conflicted));
+            children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
+        }
 
-            // Staged changes
-            BuildFileSection("Staged Changes", staged, isStaged: true),
+        children.Add(BuildFileSection("Unstaged Changes", unstaged, isStaged: false));
+        children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
+        children.Add(BuildFileSection("Staged Changes", staged, isStaged: true));
+        children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
+        children.Add(BuildCommitArea(staged.Count, unstaged.Count + staged.Count, conflicted.Count, merging));
 
-            // Separator
-            Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
-
-            // Commit area
-            BuildCommitArea(staged.Count, unstaged.Count + staged.Count)
-        );
+        return Flex.Column(gap: 0).FlexGrow(1).Children(children.ToArray());
     }
 
     public void Refresh() => MarkDirty();
+
+    // ── Conflict section ──
+
+    private Element BuildConflictSection(List<GitFileChange> conflicted)
+    {
+        var header = Flex.Row(gap: 8)
+            .Padding(new Thickness(6, 10, 6, 10))
+            .AlignItems(AlignItems.Center)
+            .Background(new Color(GitClientColors.StatusConflicted.R, GitClientColors.StatusConflicted.G, GitClientColors.StatusConflicted.B, 20))
+            .FlexShrink(0)
+            .Children(
+                Text.New("Conflicts").FontSize(12f).FontWeight(FontWeight.SemiBold)
+                    .TextColor(GitClientColors.StatusConflicted),
+                Text.New($"({conflicted.Count})").FontSize(11f).TextColor(GitClientColors.StatusConflicted)
+            );
+
+        var fileList = Flex.Column(gap: 0);
+        var rows = new Element[conflicted.Count];
+        for (int i = 0; i < conflicted.Count; i++)
+        {
+            var file = conflicted[i];
+            var isSelected = file.Path == _selectedPath && _selectedIsConflict;
+
+            var row = Flex.Row(gap: 6)
+                .FlexShrink(0)
+                .Padding(new Thickness(4, 8, 4, 24))
+                .AlignItems(AlignItems.Center)
+                .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
+                .Cursor(CursorType.Pointer);
+            row.Key = $"conflict-{file.Path}";
+
+            row.AddChild(Badge.FileStatus(file.Kind));
+            row.AddChild(
+                Text.New(Path.GetFileName(file.Path)).FontSize(12f)
+                    .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
+                    .FlexGrow(1)
+                    .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+                    .Tooltip(file.Path)
+            );
+
+            // "Use Ours" button
+            var oursBtn = ConflictActionButton("Ours", "Use current branch version", () =>
+            {
+                var result = _repo.CheckoutOurs(file.Path);
+                if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
+                Refresh();
+            });
+            row.AddChild(oursBtn);
+
+            // "Use Theirs" button
+            var theirsBtn = ConflictActionButton("Theirs", "Use incoming branch version", () =>
+            {
+                var result = _repo.CheckoutTheirs(file.Path);
+                if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
+                Refresh();
+            });
+            row.AddChild(theirsBtn);
+
+            // "Mark Resolved" button (stages the file as-is, for manual edits)
+            var resolveBtn = ConflictActionButton("\u2713", "Mark as resolved (stage current content)", () =>
+            {
+                _repo.Stage(file.Path);
+                Refresh();
+            });
+            row.AddChild(resolveBtn);
+
+            // Click row to view ours-vs-theirs diff
+            row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+            row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+            row.OnClick(_ =>
+            {
+                _selectedPath = file.Path;
+                _selectedIsStaged = false;
+                _selectedIsConflict = true;
+                RefreshConflictDiff(file.Path);
+                Refresh();
+            });
+
+            rows[i] = row;
+        }
+        fileList.ReplaceChildren(rows);
+
+        return Flex.Column(gap: 0).FlexShrink(0).MaxHeight(Dimension.Px(200)).Children(
+            header,
+            ScrollView.New().FlexGrow(1).Children(fileList)
+        );
+    }
+
+    private static Element ConflictActionButton(string label, string tooltip, Action onClick)
+    {
+        var btn = Box.New()
+            .Padding(new Thickness(2, 6, 2, 6))
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonSecondary)
+            .Cursor(CursorType.Pointer)
+            .Tooltip(tooltip)
+            .Children(Text.New(label).FontSize(10f).FontWeight(FontWeight.SemiBold)
+                .TextColor(GitClientColors.TextPrimary));
+
+        btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
+        btn.On<ClickEvent>(e =>
+        {
+            e.StopPropagation = true;
+            onClick();
+        });
+
+        return btn;
+    }
+
+    private void RefreshConflictDiff(string path)
+    {
+        var diffs = _repo.GetConflictDiff(path);
+        _diffViewer.IsStaged = false;
+        _diffViewer.Diffs = diffs;
+    }
 
     private Element BuildFileSection(string title, List<GitFileChange> files, bool isStaged)
     {
@@ -211,6 +340,7 @@ public partial class StagingArea : Component
             {
                 _selectedPath = file.Path;
                 _selectedIsStaged = isStaged;
+                _selectedIsConflict = false;
                 RefreshDiffViewer();
                 Refresh();
             });
@@ -225,37 +355,57 @@ public partial class StagingArea : Component
         );
     }
 
-    private Element BuildCommitArea(int stagedCount, int totalChanged)
+    private Element BuildCommitArea(int stagedCount, int totalChanged, int conflictCount = 0, bool merging = false)
     {
         _canStash = totalChanged > 0;
 
-        var amendCheckbox = Checkbox.New(_amend, "Amend last commit")
-            .OnCheckedChanged(ToggleAmend)
-            .FontSize(12f)
-            .TextColor(GitClientColors.TextSecondary);
-        amendCheckbox.CheckboxSize = 14f;
-        amendCheckbox.CheckedColor = GitClientColors.ButtonPrimary;
+        var placeholder = merging ? "Merge commit message..."
+            : _amend ? "Amend commit message..."
+            : "Commit message...";
+
+        var children = new List<Element>
+        {
+            TextArea.New(_commitMessage)
+                .PlaceholderText(placeholder)
+                .OnTextChanged(text => _commitMessage = text)
+                .Height(Dimension.Px(80))
+                .Background(GitClientColors.Background)
+                .CornerRadius(4f)
+                .BorderColor(GitClientColors.Border)
+                .TextColor(GitClientColors.TextPrimary)
+                .FontSize(13f),
+        };
+
+        // Hide amend checkbox during merge (it doesn't apply)
+        if (!merging)
+        {
+            var amendCheckbox = Checkbox.New(_amend, "Amend last commit")
+                .OnCheckedChanged(ToggleAmend)
+                .FontSize(12f)
+                .TextColor(GitClientColors.TextSecondary);
+            amendCheckbox.CheckboxSize = 14f;
+            amendCheckbox.CheckedColor = GitClientColors.ButtonPrimary;
+            children.Add(amendCheckbox);
+        }
+
+        if (conflictCount > 0)
+        {
+            children.Add(
+                Text.New($"{conflictCount} conflict{(conflictCount == 1 ? "" : "s")} remaining")
+                    .FontSize(11f).TextColor(GitClientColors.StatusConflicted)
+            );
+        }
+
+        children.Add(Flex.Row(gap: 8).Children(
+            CommitButton(stagedCount, conflictCount > 0),
+            StashButton(totalChanged)
+        ));
 
         return Flex.Column(gap: 8)
             .Padding(10)
             .Background(GitClientColors.Surface)
             .FlexShrink(0)
-            .Children(
-                TextArea.New(_commitMessage)
-                    .PlaceholderText(_amend ? "Amend commit message..." : "Commit message...")
-                    .OnTextChanged(text => _commitMessage = text)
-                    .Height(Dimension.Px(80))
-                    .Background(GitClientColors.Background)
-                    .CornerRadius(4f)
-                    .BorderColor(GitClientColors.Border)
-                    .TextColor(GitClientColors.TextPrimary)
-                    .FontSize(13f),
-                amendCheckbox,
-                Flex.Row(gap: 8).Children(
-                    CommitButton(stagedCount),
-                    StashButton(totalChanged)
-                )
-            );
+            .Children(children.ToArray());
     }
 
     private void ToggleAmend(bool amend)
@@ -270,30 +420,37 @@ public partial class StagingArea : Component
         Refresh();
     }
 
-    private Element CommitButton(int stagedCount)
+    private Element CommitButton(int stagedCount, bool hasConflicts = false)
     {
         var label = _amend
             ? "Amend Commit"
             : $"Commit ({stagedCount} file{(stagedCount == 1 ? "" : "s")})";
 
+        var enabled = !hasConflicts;
+        var bg = enabled ? GitClientColors.ButtonPrimary : GitClientColors.Surface;
+        var fg = enabled ? Color.White : GitClientColors.TextMuted;
+
         var btn = Box.New()
             .Padding(new Thickness(8, 0, 8, 0))
             .CornerRadius(4f)
-            .Background(GitClientColors.ButtonPrimary)
+            .Background(bg)
             .JustifyContent(JustifyContent.Center)
             .AlignItems(AlignItems.Center)
             .Height(Dimension.Px(32))
             .FlexGrow(1)
-            .Cursor(CursorType.Pointer)
+            .Cursor(enabled ? CursorType.Pointer : CursorType.Default)
             .Children(
                 Text.New(label)
                     .FontSize(13f).FontWeight(FontWeight.SemiBold)
-                    .TextColor(Color.White)
+                    .TextColor(fg)
             );
 
-        btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimaryHover);
-        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonPrimary);
-        btn.On<ClickEvent>(_ => DoCommit());
+        if (hasConflicts)
+            btn.TooltipText = "Resolve all conflicts before committing";
+
+        btn.On<PointerEnterEvent>(_ => { if (enabled) btn.BackgroundColor = GitClientColors.ButtonPrimaryHover; });
+        btn.On<PointerLeaveEvent>(_ => { if (enabled) btn.BackgroundColor = bg; });
+        btn.On<ClickEvent>(_ => { if (enabled) DoCommit(); });
 
         return btn;
     }

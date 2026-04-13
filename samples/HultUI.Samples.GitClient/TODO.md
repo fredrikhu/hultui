@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 4.2 (Conflict resolution view)
+**Current cursor:** ▶ Phase 4.3 (Rebase)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -120,9 +120,9 @@ multi-day effort.
 - [x] On conflict, transition into the conflict state UI (4.2)
 
 ### 4.2 Conflict resolution view
-- [ ] New panel that lists conflicting files and shows three-way diff per file
-- [ ] Per-hunk "use ours" / "use theirs" / manual edit
-- [ ] `git add` + `git commit` to finalize, or `git merge --abort` to back out
+- [x] New panel that lists conflicting files and shows three-way diff per file
+- [x] Per-hunk "use ours" / "use theirs" / manual edit
+- [x] `git add` + `git commit` to finalize, or `git merge --abort` to back out
 - **Done when:** I can complete a merge that has conflicts entirely from
   inside the GitClient sample.
 

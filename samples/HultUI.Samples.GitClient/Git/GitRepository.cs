@@ -451,6 +451,80 @@ public class GitRepository
         return File.Exists(System.IO.Path.Combine(Path, ".git", "MERGE_HEAD"));
     }
 
+    /// <summary>
+    /// Returns the list of currently conflicted file paths.
+    /// </summary>
+    public List<GitFileChange> GetConflictedFiles()
+    {
+        return GetStatus().Where(f => f.Kind == FileChangeKind.Conflicted).ToList();
+    }
+
+    /// <summary>
+    /// Resolves a conflicted file by choosing "ours" (the current branch's version).
+    /// </summary>
+    public GitResult CheckoutOurs(string path)
+    {
+        var result = GitProcess.Run(Path, "checkout", "--ours", "--", path);
+        if (result.Success) Stage(path);
+        return result;
+    }
+
+    /// <summary>
+    /// Resolves a conflicted file by choosing "theirs" (the incoming branch's version).
+    /// </summary>
+    public GitResult CheckoutTheirs(string path)
+    {
+        var result = GitProcess.Run(Path, "checkout", "--theirs", "--", path);
+        if (result.Success) Stage(path);
+        return result;
+    }
+
+    /// <summary>
+    /// Returns a diff between "ours" (stage 2) and "theirs" (stage 3) for a
+    /// conflicted file, suitable for display in the diff viewer.
+    /// </summary>
+    public List<GitFileDiff> GetConflictDiff(string path)
+    {
+        // Write ours and theirs to temp files, diff them
+        var oursResult = GitProcess.Run(Path, "show", $":2:{path}");
+        var theirsResult = GitProcess.Run(Path, "show", $":3:{path}");
+        if (!oursResult.Success || !theirsResult.Success) return [];
+
+        // Use git diff --no-index to generate a unified diff
+        var oursFile = System.IO.Path.GetTempFileName();
+        var theirsFile = System.IO.Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(oursFile, oursResult.Stdout);
+            File.WriteAllText(theirsFile, theirsResult.Stdout);
+
+            // --no-index exits 1 when files differ (not an error)
+            var diffResult = GitProcess.Run(Path, "diff", "--no-index",
+                $"--src-prefix=a/", $"--dst-prefix=b/",
+                oursFile, theirsFile);
+            var diffs = ParseUnifiedDiff(diffResult.Stdout);
+
+            // Fix up the paths (temp file names → original path)
+            foreach (var d in diffs)
+            {
+                // Use reflection-free approach: create new record
+                var fixedHunks = d.Hunks;
+                var fixed_ = new GitFileDiff(path, path, fixedHunks)
+                {
+                    OldPathHeader = $"--- a/{path} (ours)",
+                    NewPathHeader = $"+++ b/{path} (theirs)",
+                };
+                diffs[diffs.IndexOf(d)] = fixed_;
+            }
+            return diffs;
+        }
+        finally
+        {
+            File.Delete(oursFile);
+            File.Delete(theirsFile);
+        }
+    }
+
     // ── Cherry-pick ──
 
     public GitResult CherryPick(string commitHash)
@@ -701,6 +775,10 @@ public class GitRepository
     {
         var index = xy[0];
         var worktree = xy[1];
+
+        // Unmerged (conflict) entries: UU, AA, DD, AU, UA, DU, UD
+        if (index == 'U' || worktree == 'U' || (index == 'A' && worktree == 'A') || (index == 'D' && worktree == 'D'))
+            return FileChangeKind.Conflicted;
 
         // Use the most specific status
         var c = index != ' ' ? index : worktree;
