@@ -525,6 +525,32 @@ public class GitRepository
         }
     }
 
+    // ── Rebase ──
+
+    public GitResult Rebase(string onto)
+    {
+        return GitProcess.Run(Path, "rebase", onto);
+    }
+
+    public GitResult RebaseAbort()
+    {
+        return GitProcess.Run(Path, "rebase", "--abort");
+    }
+
+    public GitResult RebaseContinue()
+    {
+        return GitProcess.Run(Path, "rebase", "--continue");
+    }
+
+    /// <summary>
+    /// Returns true if a rebase is in progress.
+    /// </summary>
+    public bool IsRebasing()
+    {
+        return Directory.Exists(System.IO.Path.Combine(Path, ".git", "rebase-merge"))
+            || Directory.Exists(System.IO.Path.Combine(Path, ".git", "rebase-apply"));
+    }
+
     // ── Cherry-pick ──
 
     public GitResult CherryPick(string commitHash)

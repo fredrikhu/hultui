@@ -47,6 +47,11 @@ public partial class Sidebar : Component
     public Action<string>? OnMergeBranch { get; set; }
 
     /// <summary>
+    /// Request a rebase of the current branch onto the given branch.
+    /// </summary>
+    public Action<string>? OnRebaseBranch { get; set; }
+
+    /// <summary>
     /// Shows a modal confirm dialog. The host (App) owns the dialog overlay.
     /// </summary>
     public Action<ConfirmDialogState>? ShowConfirm { get; set; }
@@ -380,6 +385,7 @@ public partial class Sidebar : Component
                 if (!isCurrent)
                 {
                     items.Add(new ContextMenuItem { Label = $"Merge '{b.Name}' into current", Action = () => OnMergeBranch?.Invoke(b.Name) });
+                    items.Add(new ContextMenuItem { Label = $"Rebase current onto '{b.Name}'", Action = () => OnRebaseBranch?.Invoke(b.Name) });
                     items.Add(ContextMenuItem.Separator());
                     items.Add(new ContextMenuItem { Label = $"Delete '{b.Name}'", Action = () => DeleteBranch(b.Name) });
                 }

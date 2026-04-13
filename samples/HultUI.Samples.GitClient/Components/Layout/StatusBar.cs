@@ -21,6 +21,9 @@ public static class StatusBar
         Action? onForcePush = null,
         bool isMerging = false,
         Action? onMergeAbort = null,
+        bool isRebasing = false,
+        Action? onRebaseAbort = null,
+        Action? onRebaseContinue = null,
         string? message = null,
         bool messageIsError = false)
     {
@@ -58,6 +61,20 @@ public static class StatusBar
             );
             if (onMergeAbort != null)
                 children.Add(ActionButton("Abort Merge", onMergeAbort));
+        }
+
+        // Rebase-in-progress indicator
+        if (isRebasing)
+        {
+            children.Add(Box.New().Width(1).Height(16).Background(GitClientColors.Border));
+            children.Add(
+                Text.New("REBASING").FontSize(10f).FontWeight(FontWeight.Bold)
+                    .TextColor(GitClientColors.StatusDeleted)
+            );
+            if (onRebaseContinue != null)
+                children.Add(ActionButton("Continue", onRebaseContinue));
+            if (onRebaseAbort != null)
+                children.Add(ActionButton("Abort Rebase", onRebaseAbort));
         }
 
         // Spacer

@@ -74,6 +74,7 @@ public partial class App : Component
         _sidebar.ShowStatusMessage = ShowMessage;
         _sidebar.ShowConfirm = ShowConfirm;
         _sidebar.OnMergeBranch = DoMerge;
+        _sidebar.OnRebaseBranch = DoRebase;
         _stagingArea.OnCommitted = OnCommitted;
         _stagingArea.OnRepoChanged = RefreshAll;
         _stagingArea.ShowStatusMessage = ShowMessage;
@@ -88,6 +89,7 @@ public partial class App : Component
         var showWc = ShowWorkingCopy;
         var repoName = Path.GetFileName(_repo.Path.TrimEnd(Path.DirectorySeparatorChar));
         var merging = _repo.IsMerging();
+        var rebasing = _repo.IsRebasing();
 
         var root = Flex.Column(gap: 0)
             .TextColor(GitClientColors.TextPrimary)
@@ -114,6 +116,9 @@ public partial class App : Component
                     onForcePush: DoForcePush,
                     isMerging: merging,
                     onMergeAbort: DoMergeAbort,
+                    isRebasing: rebasing,
+                    onRebaseAbort: DoRebaseAbort,
+                    onRebaseContinue: DoRebaseContinue,
                     message: _statusMessage,
                     messageIsError: _statusIsError
                 )
@@ -274,6 +279,64 @@ public partial class App : Component
                 RefreshAll();
             },
         });
+    }
+
+    private void DoRebase(string branchName)
+    {
+        var result = _repo.Rebase(branchName);
+        if (result.Success)
+        {
+            ShowMessage($"Rebased onto '{branchName}' successfully", isError: false);
+        }
+        else if (_repo.IsRebasing())
+        {
+            // Rebase paused due to conflicts
+            ShowMessage("Rebase conflicts \u2014 resolve, stage, then continue or abort", isError: true);
+            ShowWorkingCopy = true;
+            _sidebar.WorkingCopyActive = true;
+            _sidebar.Refresh();
+            _stagingArea.Refresh();
+        }
+        else
+        {
+            ShowResult(result);
+        }
+        RefreshAll();
+    }
+
+    private void DoRebaseAbort()
+    {
+        ShowConfirm(new ConfirmDialogState
+        {
+            Title = "Abort Rebase",
+            Body = "Abort the current rebase and return to the original branch state?\n\nAll rebase progress will be lost.",
+            ConfirmLabel = "Abort",
+            Destructive = true,
+            OnConfirm = () =>
+            {
+                ShowResult(_repo.RebaseAbort(), "Rebase aborted");
+                RefreshAll();
+            },
+        });
+    }
+
+    private void DoRebaseContinue()
+    {
+        var result = _repo.RebaseContinue();
+        if (result.Success)
+        {
+            ShowMessage("Rebase continued", isError: false);
+        }
+        else if (_repo.IsRebasing())
+        {
+            // Still conflicts on next commit
+            ShowMessage("Rebase conflicts \u2014 resolve remaining conflicts", isError: true);
+        }
+        else
+        {
+            ShowResult(result);
+        }
+        RefreshAll();
     }
 
     private async void DoFetch()
