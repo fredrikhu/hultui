@@ -422,6 +422,35 @@ public class GitRepository
         return GitProcess.Run(Path, "checkout", "--detach", commitHash);
     }
 
+    // ── Merge ──
+
+    public GitResult Merge(string branchName, MergeMode mode = MergeMode.Default)
+    {
+        var args = new List<string> { "merge" };
+        switch (mode)
+        {
+            case MergeMode.NoFastForward: args.Add("--no-ff"); break;
+            case MergeMode.FastForwardOnly: args.Add("--ff-only"); break;
+            case MergeMode.Squash: args.Add("--squash"); break;
+        }
+        args.Add(branchName);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    public GitResult MergeAbort()
+    {
+        return GitProcess.Run(Path, "merge", "--abort");
+    }
+
+    /// <summary>
+    /// Returns true if the repository is in a conflicted merge state
+    /// (MERGE_HEAD exists).
+    /// </summary>
+    public bool IsMerging()
+    {
+        return File.Exists(System.IO.Path.Combine(Path, ".git", "MERGE_HEAD"));
+    }
+
     // ── Cherry-pick ──
 
     public GitResult CherryPick(string commitHash)

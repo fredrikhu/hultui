@@ -41,6 +41,12 @@ public partial class Sidebar : Component
     public Action<string, bool>? ShowStatusMessage { get; set; }
 
     /// <summary>
+    /// Request a merge of the given branch into the current branch.
+    /// The host (App) handles mode selection and conflict state.
+    /// </summary>
+    public Action<string>? OnMergeBranch { get; set; }
+
+    /// <summary>
     /// Shows a modal confirm dialog. The host (App) owns the dialog overlay.
     /// </summary>
     public Action<ConfirmDialogState>? ShowConfirm { get; set; }
@@ -373,6 +379,7 @@ public partial class Sidebar : Component
                 };
                 if (!isCurrent)
                 {
+                    items.Add(new ContextMenuItem { Label = $"Merge '{b.Name}' into current", Action = () => OnMergeBranch?.Invoke(b.Name) });
                     items.Add(ContextMenuItem.Separator());
                     items.Add(new ContextMenuItem { Label = $"Delete '{b.Name}'", Action = () => DeleteBranch(b.Name) });
                 }

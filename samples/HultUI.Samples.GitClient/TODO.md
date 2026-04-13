@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 4.1 (Merge another branch into current)
+**Current cursor:** ▶ Phase 4.2 (Conflict resolution view)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -115,9 +115,9 @@ These each carry their own UI surface area. Pick one at a time; each is a
 multi-day effort.
 
 ### 4.1 Merge another branch into current
-- [ ] `GitRepository.Merge(string ref, MergeOptions options)` (ff/no-ff/squash)
-- [ ] Sidebar branch context menu: "Merge into current branch"
-- [ ] On conflict, transition into the conflict state UI (4.2)
+- [x] `GitRepository.Merge(string ref, MergeOptions options)` (ff/no-ff/squash)
+- [x] Sidebar branch context menu: "Merge into current branch"
+- [x] On conflict, transition into the conflict state UI (4.2)
 
 ### 4.2 Conflict resolution view
 - [ ] New panel that lists conflicting files and shows three-way diff per file

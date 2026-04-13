@@ -19,6 +19,8 @@ public static class StatusBar
         Action onPull,
         Action onPush,
         Action? onForcePush = null,
+        bool isMerging = false,
+        Action? onMergeAbort = null,
         string? message = null,
         bool messageIsError = false)
     {
@@ -44,10 +46,22 @@ public static class StatusBar
             // Changed files
             Text.New($"{changedFiles} changed").FontSize(12f)
                 .TextColor(changedFiles > 0 ? GitClientColors.StatusModified : GitClientColors.TextMuted),
-
-            // Spacer
-            Box.New().FlexGrow(1),
         };
+
+        // Merge-in-progress indicator
+        if (isMerging)
+        {
+            children.Add(Box.New().Width(1).Height(16).Background(GitClientColors.Border));
+            children.Add(
+                Text.New("MERGING").FontSize(10f).FontWeight(FontWeight.Bold)
+                    .TextColor(GitClientColors.StatusDeleted)
+            );
+            if (onMergeAbort != null)
+                children.Add(ActionButton("Abort Merge", onMergeAbort));
+        }
+
+        // Spacer
+        children.Add(Box.New().FlexGrow(1));
 
         // Operation result message
         if (message != null)

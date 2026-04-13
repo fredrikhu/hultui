@@ -73,6 +73,7 @@ public partial class App : Component
         _sidebar.OnRepoChanged = RefreshAll;
         _sidebar.ShowStatusMessage = ShowMessage;
         _sidebar.ShowConfirm = ShowConfirm;
+        _sidebar.OnMergeBranch = DoMerge;
         _stagingArea.OnCommitted = OnCommitted;
         _stagingArea.OnRepoChanged = RefreshAll;
         _stagingArea.ShowStatusMessage = ShowMessage;
@@ -86,6 +87,7 @@ public partial class App : Component
         var status = _repo.GetStatus();
         var showWc = ShowWorkingCopy;
         var repoName = Path.GetFileName(_repo.Path.TrimEnd(Path.DirectorySeparatorChar));
+        var merging = _repo.IsMerging();
 
         var root = Flex.Column(gap: 0)
             .TextColor(GitClientColors.TextPrimary)
@@ -110,6 +112,8 @@ public partial class App : Component
                     onPull: DoPull,
                     onPush: DoPush,
                     onForcePush: DoForcePush,
+                    isMerging: merging,
+                    onMergeAbort: DoMergeAbort,
                     message: _statusMessage,
                     messageIsError: _statusIsError
                 )
@@ -231,6 +235,45 @@ public partial class App : Component
             ShowResult(_repo.Reset(hash, mode), $"{label} reset to {hash[..7]}");
             RefreshAll();
         }
+    }
+
+    private void DoMerge(string branchName)
+    {
+        var result = _repo.Merge(branchName);
+        if (result.Success)
+        {
+            ShowMessage($"Merged '{branchName}' successfully", isError: false);
+        }
+        else if (_repo.IsMerging())
+        {
+            // Merge started but has conflicts — switch to working copy view
+            ShowMessage($"Merge conflicts — resolve and commit, or abort", isError: true);
+            ShowWorkingCopy = true;
+            _sidebar.WorkingCopyActive = true;
+            _sidebar.Refresh();
+            _stagingArea.Refresh();
+        }
+        else
+        {
+            ShowResult(result);
+        }
+        RefreshAll();
+    }
+
+    private void DoMergeAbort()
+    {
+        ShowConfirm(new ConfirmDialogState
+        {
+            Title = "Abort Merge",
+            Body = "Abort the current merge and return to the pre-merge state?\n\nAll merge progress will be lost.",
+            ConfirmLabel = "Abort",
+            Destructive = true,
+            OnConfirm = () =>
+            {
+                ShowResult(_repo.MergeAbort(), "Merge aborted");
+                RefreshAll();
+            },
+        });
     }
 
     private async void DoFetch()
