@@ -63,6 +63,7 @@ public partial class App : Component
         _commitList.CopyToClipboard = CopyToClipboard;
         _commitList.OnCheckoutCommit = DoCheckoutCommit;
         _commitList.OnCherryPick = DoCherryPick;
+        _commitList.OnRevert = DoRevert;
         _commitList.OnReset = DoReset;
         _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
@@ -197,6 +198,12 @@ public partial class App : Component
     private void DoCherryPick(string hash)
     {
         ShowResult(_repo.CherryPick(hash), $"Cherry-picked {hash[..7]}");
+        RefreshAll();
+    }
+
+    private void DoRevert(string hash)
+    {
+        ShowResult(_repo.Revert(hash), $"Reverted {hash[..7]}");
         RefreshAll();
     }
 

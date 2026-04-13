@@ -424,6 +424,13 @@ public class GitRepository
         return GitProcess.Run(Path, "cherry-pick", commitHash);
     }
 
+    // ── Revert ──
+
+    public GitResult Revert(string commitHash)
+    {
+        return GitProcess.Run(Path, "revert", "--no-edit", commitHash);
+    }
+
     // ── Reset ──
 
     public GitResult Reset(string commitHash, ResetMode mode)

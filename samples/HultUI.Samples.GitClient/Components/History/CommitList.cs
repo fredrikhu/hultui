@@ -42,6 +42,7 @@ public partial class CommitList : Component
     public Action<string>? CopyToClipboard { get; set; }
     public Action<string>? OnCheckoutCommit { get; set; }
     public Action<string>? OnCherryPick { get; set; }
+    public Action<string>? OnRevert { get; set; }
     public Action<string, ResetMode>? OnReset { get; set; }
     public Action? OnRepoChanged { get; set; }
 
@@ -112,6 +113,7 @@ public partial class CommitList : Component
                         CopyToClipboard,
                         OnCheckoutCommit,
                         OnCherryPick,
+                        OnRevert,
                         StartTagCommit,
                         OnReset))
                     .FlexGrow(1)

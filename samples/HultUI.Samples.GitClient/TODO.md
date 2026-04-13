@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 3.3 (Revert)
+**Current cursor:** ▶ Phase 3.4 (Force push)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -96,9 +96,9 @@ done** — operation feedback + a confirm dialog primitive are prerequisites.
   working tree, with a confirmation prompt first.
 
 ### 3.3 Revert
-- [ ] `GitRepository.Revert(string commitHash)`
-- [ ] CommitRow context menu: "Revert commit"
-- [ ] Surface conflict-on-revert via the Phase 1.4 toast
+- [x] `GitRepository.Revert(string commitHash)`
+- [x] CommitRow context menu: "Revert commit"
+- [x] Surface conflict-on-revert via the Phase 1.4 toast
 - **Done when:** Reverting a non-conflicting commit creates the inverse
   commit on top of HEAD.
 
