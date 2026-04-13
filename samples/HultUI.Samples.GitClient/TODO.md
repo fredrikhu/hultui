@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 3.4 (Force push)
+**Current cursor:** ▶ Phase 4.1 (Merge another branch into current)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -103,8 +103,8 @@ done** — operation feedback + a confirm dialog primitive are prerequisites.
   commit on top of HEAD.
 
 ### 3.4 Force push
-- [ ] StatusBar: hold Shift on the Push button to force-push-with-lease (or a separate menu item)
-- [ ] Confirm dialog every time
+- [x] StatusBar: hold Shift on the Push button to force-push-with-lease (or a separate menu item)
+- [x] Confirm dialog every time
 - **Done when:** Force push works and is impossible to trigger by accident.
 
 ---

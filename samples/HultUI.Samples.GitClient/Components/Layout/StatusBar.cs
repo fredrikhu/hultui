@@ -18,6 +18,7 @@ public static class StatusBar
         Action onFetch,
         Action onPull,
         Action onPush,
+        Action? onForcePush = null,
         string? message = null,
         bool messageIsError = false)
     {
@@ -63,7 +64,7 @@ public static class StatusBar
         // Action buttons
         children.Add(ActionButton("Fetch", onFetch));
         children.Add(ActionButton("Pull", onPull));
-        children.Add(ActionButton("Push", onPush));
+        children.Add(PushButton(onPush, onForcePush));
 
         return Flex.Row(gap: 16)
             .AlignItems(AlignItems.Center)
@@ -89,6 +90,32 @@ public static class StatusBar
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
         btn.On<ClickEvent>(_ => onClick());
+
+        return btn;
+    }
+
+    private static Element PushButton(Action onPush, Action? onForcePush)
+    {
+        var btn = Box.New()
+            .Padding(new Thickness(4, 10, 4, 10))
+            .CornerRadius(4f)
+            .Background(GitClientColors.ButtonSecondary)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Hold Shift to force push")
+            .Children(
+                Text.New("Push").FontSize(11f).FontWeight(FontWeight.SemiBold)
+                    .TextColor(GitClientColors.TextPrimary)
+            );
+
+        btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
+        btn.On<ClickEvent>(e =>
+        {
+            if (e.Modifiers.HasFlag(KeyModifiers.Shift) && onForcePush != null)
+                onForcePush();
+            else
+                onPush();
+        });
 
         return btn;
     }

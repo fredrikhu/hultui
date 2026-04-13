@@ -109,6 +109,7 @@ public partial class App : Component
                     onFetch: DoFetch,
                     onPull: DoPull,
                     onPush: DoPush,
+                    onForcePush: DoForcePush,
                     message: _statusMessage,
                     messageIsError: _statusIsError
                 )
@@ -263,6 +264,27 @@ public partial class App : Component
         _remoteOpRunning = false;
         ShowResult(result, "Pushed successfully");
         RefreshAll();
+    }
+
+    private void DoForcePush()
+    {
+        ShowConfirm(new ConfirmDialogState
+        {
+            Title = "Force Push",
+            Body = "This will overwrite the remote branch history using --force-with-lease. Other collaborators may lose work.\n\nAre you sure?",
+            ConfirmLabel = "Force Push",
+            Destructive = true,
+            OnConfirm = async () =>
+            {
+                if (_remoteOpRunning) return;
+                _remoteOpRunning = true;
+                ShowMessage("Force pushing\u2026", isError: false);
+                var result = await _repo.ForcePushAsync();
+                _remoteOpRunning = false;
+                ShowResult(result, "Force pushed successfully");
+                RefreshAll();
+            },
+        });
     }
 
     private void CopyToClipboard(string text)

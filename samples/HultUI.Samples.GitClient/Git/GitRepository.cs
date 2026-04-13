@@ -386,6 +386,11 @@ public class GitRepository
         return GitProcess.RunAsync(Path, "push");
     }
 
+    public Task<GitResult> ForcePushAsync()
+    {
+        return GitProcess.RunAsync(Path, "push", "--force-with-lease");
+    }
+
     // ── Branch management ──
 
     public GitResult CreateBranch(string name, string? startPoint = null)
