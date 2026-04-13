@@ -424,6 +424,19 @@ public class GitRepository
         return GitProcess.Run(Path, "cherry-pick", commitHash);
     }
 
+    // ── Reset ──
+
+    public GitResult Reset(string commitHash, ResetMode mode)
+    {
+        var flag = mode switch
+        {
+            ResetMode.Soft => "--soft",
+            ResetMode.Hard => "--hard",
+            _ => "--mixed",
+        };
+        return GitProcess.Run(Path, "reset", flag, commitHash);
+    }
+
     // ── Tags ──
 
     public List<string> GetTags()

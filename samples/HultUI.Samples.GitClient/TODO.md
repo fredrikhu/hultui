@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 3.2 (Reset)
+**Current cursor:** ▶ Phase 3.3 (Revert)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -89,9 +89,9 @@ done** — operation feedback + a confirm dialog primitive are prerequisites.
 - [x] Used by every Phase 3 item and by Sidebar's existing "Delete branch"
 
 ### 3.2 Reset
-- [ ] `GitRepository.Reset(string ref, ResetMode mode)` for soft/mixed/hard
-- [ ] CommitRow context menu: "Reset current branch to here" with mode submenu
-- [ ] Confirm dialog warns about working-tree loss for `--hard`
+- [x] `GitRepository.Reset(string ref, ResetMode mode)` for soft/mixed/hard
+- [x] CommitRow context menu: "Reset current branch to here" with mode submenu
+- [x] Confirm dialog warns about working-tree loss for `--hard`
 - **Done when:** Right-click → Reset → Hard moves HEAD and clears the
   working tree, with a confirmation prompt first.
 

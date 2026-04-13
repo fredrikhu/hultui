@@ -63,6 +63,7 @@ public partial class App : Component
         _commitList.CopyToClipboard = CopyToClipboard;
         _commitList.OnCheckoutCommit = DoCheckoutCommit;
         _commitList.OnCherryPick = DoCherryPick;
+        _commitList.OnReset = DoReset;
         _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
         _sidebar.OnStashSelected = OnStashSelected;
@@ -197,6 +198,31 @@ public partial class App : Component
     {
         ShowResult(_repo.CherryPick(hash), $"Cherry-picked {hash[..7]}");
         RefreshAll();
+    }
+
+    private void DoReset(string hash, ResetMode mode)
+    {
+        if (mode == ResetMode.Hard)
+        {
+            ShowConfirm(new ConfirmDialogState
+            {
+                Title = "Hard Reset",
+                Body = $"Reset current branch to {hash[..7]}?\n\nThis will discard all uncommitted changes in your working tree. This cannot be undone.",
+                ConfirmLabel = "Reset Hard",
+                Destructive = true,
+                OnConfirm = () =>
+                {
+                    ShowResult(_repo.Reset(hash, ResetMode.Hard), $"Hard reset to {hash[..7]}");
+                    RefreshAll();
+                },
+            });
+        }
+        else
+        {
+            var label = mode == ResetMode.Soft ? "Soft" : "Mixed";
+            ShowResult(_repo.Reset(hash, mode), $"{label} reset to {hash[..7]}");
+            RefreshAll();
+        }
     }
 
     private async void DoFetch()
