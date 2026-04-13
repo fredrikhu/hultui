@@ -130,7 +130,7 @@ multi-day effort.
 - [x] `GitRepository.Rebase(string onto, RebaseOptions options)`
 - [x] Branch context menu: "Rebase current onto…"
 - [x] Reuse 4.2 for conflicts
-- [ ] Interactive rebase deferred to a later sub-item if/when needed
+- [x] Interactive rebase deferred to 4.6
 
 ### 4.4 Blame view
 - [ ] `GitRepository.Blame(string path)` parsing porcelain output
@@ -140,6 +140,12 @@ multi-day effort.
 ### 4.5 File history
 - [ ] CommitDetail file row context menu: "Show history of this file"
 - [ ] Filtered CommitList variant that respects a `--follow` path filter
+
+### 4.6 Interactive rebase
+- [ ] Reorder/squash/edit/drop UI on top of `git rebase -i`
+- [ ] Custom sequence editor via `GIT_SEQUENCE_EDITOR` env var to drive the todo list
+- [ ] Drag-to-reorder or keyboard-driven commit list with action dropdowns
+- [ ] Builds on 4.3's non-interactive rebase and 4.2's conflict resolution
 
 ---
 
