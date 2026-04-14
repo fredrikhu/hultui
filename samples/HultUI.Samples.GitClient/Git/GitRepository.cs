@@ -550,6 +550,84 @@ public class GitRepository
     }
 
     /// <summary>
+    /// Returns the commits reachable from HEAD but not from <paramref name="baseRef"/>,
+    /// in the order interactive rebase expects them (oldest first). This is the same
+    /// range git would fill into the rebase-todo file.
+    /// </summary>
+    public List<GitCommit> GetRebaseRange(string baseRef)
+    {
+        var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
+        var result = GitProcess.Run(Path, "log",
+            $"--format={format}{RecordSep}", "--reverse", $"{baseRef}..HEAD");
+
+        if (!result.Success) return [];
+
+        var commits = new List<GitCommit>();
+        foreach (var record in result.Stdout.Split(RecordSep, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = record.Trim();
+            if (line.Length == 0) continue;
+            var parts = line.Split(FieldSep);
+            if (parts.Length < 8) continue;
+
+            var parentHashes = string.IsNullOrWhiteSpace(parts[6])
+                ? []
+                : parts[6].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (!DateTimeOffset.TryParse(parts[4], CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                date = DateTimeOffset.MinValue;
+
+            commits.Add(new GitCommit(
+                Hash: parts[0], ShortHash: parts[1],
+                AuthorName: parts[2], AuthorEmail: parts[3],
+                AuthorDate: date, Subject: parts[5],
+                ParentHashes: parentHashes, Refs: []));
+        }
+        return commits;
+    }
+
+    /// <summary>
+    /// Starts an interactive rebase onto <paramref name="baseRef"/> using the supplied plan.
+    /// Works by writing the todo list to a temp file and setting <c>GIT_SEQUENCE_EDITOR</c>
+    /// to a <c>cp</c> command that overwrites git's auto-generated todo with ours. Squash
+    /// and fixup combine messages without interactive editing (<c>GIT_EDITOR=true</c>
+    /// accepts the default). Conflicts pause the rebase as usual — use RebaseContinue/Abort.
+    /// </summary>
+    public GitResult InteractiveRebase(string baseRef, IReadOnlyList<RebaseEntry> plan)
+    {
+        // Drop entries are simply omitted from the todo — writing "drop <hash>" also works,
+        // but leaving them out is just as effective and keeps the todo file shorter.
+        var lines = plan
+            .Where(e => e.Op != RebaseOp.Drop)
+            .Select(e => $"{e.Op.ToKeyword()} {e.Hash} {e.Subject}");
+
+        var todoPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+            $"hultui-rebase-todo-{Guid.NewGuid():N}");
+        File.WriteAllText(todoPath, string.Join('\n', lines) + '\n');
+
+        try
+        {
+            var env = new Dictionary<string, string>
+            {
+                // git invokes "$GIT_SEQUENCE_EDITOR <todo-file>" via a shell — `cp src dst`
+                // ends up overwriting git's generated todo with ours.
+                ["GIT_SEQUENCE_EDITOR"] = $"cp {ShellQuote(todoPath)}",
+                // Squash/fixup would otherwise open $GIT_EDITOR for the combined message.
+                // `true` is a no-op that accepts whatever default git prepared.
+                ["GIT_EDITOR"] = "true",
+            };
+            return GitProcess.RunWithEnv(Path, env, "rebase", "-i", baseRef);
+        }
+        finally
+        {
+            try { File.Delete(todoPath); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    private static string ShellQuote(string path) =>
+        "'" + path.Replace("'", "'\\''") + "'";
+
+    /// <summary>
     /// Returns true if a rebase is in progress.
     /// </summary>
     public bool IsRebasing()

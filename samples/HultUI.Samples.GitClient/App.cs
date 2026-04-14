@@ -43,6 +43,7 @@ public partial class App : Component
     private CancellationTokenSource? _messageCts;
     private bool _remoteOpRunning;
     private ConfirmDialogState? _pendingConfirm;
+    private InteractiveRebaseState? _pendingRebase;
 
     public App(Window window, GitRepository repo)
     {
@@ -65,6 +66,7 @@ public partial class App : Component
         _commitList.OnCherryPick = DoCherryPick;
         _commitList.OnRevert = DoRevert;
         _commitList.OnReset = DoReset;
+        _commitList.OnInteractiveRebase = DoInteractiveRebase;
         _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
         _sidebar.OnStashSelected = OnStashSelected;
@@ -144,6 +146,9 @@ public partial class App : Component
 
         if (_pendingConfirm != null)
             root.AddChild(ConfirmDialog.Build(_pendingConfirm, DismissConfirm));
+
+        if (_pendingRebase != null)
+            root.AddChild(InteractiveRebaseDialog.Build(_pendingRebase, DismissRebase));
 
         return root;
     }
@@ -339,6 +344,68 @@ public partial class App : Component
                 RefreshAll();
             },
         });
+    }
+
+    private void DoInteractiveRebase(string baseHash)
+    {
+        var range = _repo.GetRebaseRange(baseHash);
+        if (range.Count == 0)
+        {
+            ShowMessage($"No commits between {baseHash[..7]} and HEAD", isError: true);
+            return;
+        }
+
+        var entries = range.Select(c => new RebaseEntry
+        {
+            Hash = c.Hash,
+            ShortHash = c.ShortHash,
+            Subject = c.Subject,
+        }).ToList();
+
+        _pendingRebase = new InteractiveRebaseState
+        {
+            BaseRef = baseHash,
+            BaseShortHash = baseHash[..7],
+            Entries = entries,
+            OnConfirm = plan => RunInteractiveRebase(baseHash, plan),
+        };
+        _pendingRebase.RefreshDialog = MarkDirty;
+        MarkDirty();
+    }
+
+    private void RunInteractiveRebase(string baseHash, IReadOnlyList<RebaseEntry> plan)
+    {
+        // Squash/fixup only make sense *after* a pick, so the first entry must be a pick.
+        if (plan.Count > 0 && (plan[0].Op == RebaseOp.Squash || plan[0].Op == RebaseOp.Fixup))
+        {
+            ShowMessage("The first commit cannot be squashed or fixed up — git has nothing to squash it into.", isError: true);
+            return;
+        }
+
+        var result = _repo.InteractiveRebase(baseHash, plan);
+        if (result.Success)
+        {
+            ShowMessage($"Rebased {plan.Count(e => e.Op != RebaseOp.Drop)} commit(s) onto {baseHash[..7]}", isError: false);
+        }
+        else if (_repo.IsRebasing())
+        {
+            ShowMessage("Rebase conflicts \u2014 resolve, stage, then continue or abort", isError: true);
+            ShowWorkingCopy = true;
+            _sidebar.WorkingCopyActive = true;
+            _sidebar.Refresh();
+            _stagingArea.Refresh();
+        }
+        else
+        {
+            ShowResult(result);
+        }
+        RefreshAll();
+    }
+
+    private void DismissRebase()
+    {
+        _pendingRebase = null;
+        MarkDirty();
     }
 
     private void DoRebaseContinue()

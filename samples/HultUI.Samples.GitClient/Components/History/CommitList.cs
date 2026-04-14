@@ -52,6 +52,7 @@ public partial class CommitList : Component
     public Action<string>? OnCherryPick { get; set; }
     public Action<string>? OnRevert { get; set; }
     public Action<string, ResetMode>? OnReset { get; set; }
+    public Action<string>? OnInteractiveRebase { get; set; }
     public Action? OnRepoChanged { get; set; }
 
     public CommitList(GitRepository repo)
@@ -124,7 +125,8 @@ public partial class CommitList : Component
                         OnCherryPick,
                         OnRevert,
                         StartTagCommit,
-                        OnReset))
+                        OnReset,
+                        OnInteractiveRebase))
                     .FlexGrow(1)
         );
 

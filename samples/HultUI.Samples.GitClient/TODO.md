@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 4.6 (Interactive rebase)
+**Current cursor:** ▶ Phase 5 (Polish & infrastructure)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -142,10 +142,12 @@ multi-day effort.
 - [x] Filtered CommitList variant that respects a `--follow` path filter
 
 ### 4.6 Interactive rebase
-- [ ] Reorder/squash/edit/drop UI on top of `git rebase -i`
-- [ ] Custom sequence editor via `GIT_SEQUENCE_EDITOR` env var to drive the todo list
-- [ ] Drag-to-reorder or keyboard-driven commit list with action dropdowns
-- [ ] Builds on 4.3's non-interactive rebase and 4.2's conflict resolution
+- [x] Reorder/squash/fixup/drop UI on top of `git rebase -i`
+- [x] Custom sequence editor via `GIT_SEQUENCE_EDITOR` env var to drive the todo list
+- [x] Keyboard-driven commit list with action cycling chip (no drag-and-drop)
+- [x] Builds on 4.3's non-interactive rebase and 4.2's conflict resolution
+- [ ] Reword / edit actions deferred — require mid-rebase `GIT_EDITOR` interception
+- [ ] True drag-to-reorder deferred — arrow buttons cover the same ground for now
 
 ---
 

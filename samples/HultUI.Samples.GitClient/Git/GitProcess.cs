@@ -31,6 +31,13 @@ public static class GitProcess
     }
 
     public static GitResult Run(string workingDirectory, params string[] args)
+        => RunWithEnv(workingDirectory, null, args);
+
+    /// <summary>
+    /// Same as <see cref="Run"/> but lets callers inject environment variables
+    /// like <c>GIT_SEQUENCE_EDITOR</c> used to drive interactive rebase.
+    /// </summary>
+    public static GitResult RunWithEnv(string workingDirectory, Dictionary<string, string>? env, params string[] args)
     {
         var psi = new ProcessStartInfo
         {
@@ -44,6 +51,10 @@ public static class GitProcess
 
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
+
+        if (env != null)
+            foreach (var kv in env)
+                psi.Environment[kv.Key] = kv.Value;
 
         using var process = Process.Start(psi)!;
         var stdout = process.StandardOutput.ReadToEnd();
