@@ -180,6 +180,8 @@ public partial class App : Component
             ShowWorkingCopy = false;
             _sidebar.WorkingCopyActive = false;
             _sidebar.Refresh();
+            // Bias the file pre-selection to the file whose history we're viewing, if any.
+            _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
             _commitDetail.Commit = commit;
         }
     }
@@ -209,6 +211,7 @@ public partial class App : Component
         ShowWorkingCopy = false;
         _sidebar.WorkingCopyActive = false;
         _sidebar.Refresh();
+        _commitDetail.PreferredFilePath = null;
         _commitDetail.Commit = commit;
     }
 

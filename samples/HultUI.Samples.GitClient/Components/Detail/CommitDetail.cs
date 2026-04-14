@@ -34,6 +34,13 @@ public partial class CommitDetail : Component
 
     [Reactive] public partial GitCommit? Commit { get; set; }
 
+    /// <summary>
+    /// When set, CommitDetail pre-selects this file path (if present in the current
+    /// commit's file list) instead of defaulting to the first file. Used by the file
+    /// history flow to keep focus on the file the user is following.
+    /// </summary>
+    public string? PreferredFilePath { get; set; }
+
     public Action<string>? OnCommitHashSelected { get; set; }
     public Action<string>? OnFileHistoryRequested { get; set; }
 
@@ -77,9 +84,11 @@ public partial class CommitDetail : Component
 
             if (_loadedFiles.Count > 0)
             {
-                var firstFile = _loadedFiles[0];
-                _fileTree.SelectedFile = firstFile;
-                _diffViewer.Diffs = DiffsForFile(firstFile);
+                var initialFile = (PreferredFilePath != null
+                    ? _loadedFiles.FirstOrDefault(f => f.Path == PreferredFilePath)
+                    : null) ?? _loadedFiles[0];
+                _fileTree.SelectedFile = initialFile;
+                _diffViewer.Diffs = DiffsForFile(initialFile);
             }
             else
             {

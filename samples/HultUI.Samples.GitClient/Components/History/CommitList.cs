@@ -37,6 +37,13 @@ public partial class CommitList : Component
     private bool HasServerFilters =>
         _pathFilter != null || _authorFilter != null || _dateFrom != null || _dateTo != null;
 
+    /// <summary>
+    /// When viewing the history of a specific file (via <see cref="ShowFileHistory"/>),
+    /// returns that file's path; otherwise null. Used by the App to pre-select that
+    /// file in CommitDetail when the user navigates between commits in the filtered log.
+    /// </summary>
+    public string? FollowedFilePath => _pathFollow ? _pathFilter : null;
+
     [Reactive] public partial string? SelectedCommitHash { get; set; }
 
     public Action<GitCommit?>? OnCommitSelected { get; set; }

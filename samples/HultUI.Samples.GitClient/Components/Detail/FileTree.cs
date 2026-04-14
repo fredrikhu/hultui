@@ -92,22 +92,29 @@ public partial class FileTree : Component
             var fileRef = file;
             row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
             row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-            row.OnClick(_ =>
-            {
-                SelectedFile = fileRef;
-                OnFileSelected?.Invoke(fileRef);
-            });
+            row.OnClick(_ => SelectFile(fileRef));
 
             var hasContextMenu = OnBlameRequested != null || OnHistoryRequested != null;
             if (hasContextMenu)
             {
+                // Context menu actions implicitly select the file first — users opening
+                // a right-click menu on a row expect it to be the target, even if they
+                // hadn't left-clicked it yet.
                 row.ContextMenu(() =>
                 {
                     var items = new List<ContextMenuItem>();
                     if (OnHistoryRequested != null)
-                        items.Add(new ContextMenuItem { Label = "Show history of this file", Action = () => OnHistoryRequested?.Invoke(fileRef) });
+                        items.Add(new ContextMenuItem
+                        {
+                            Label = "Show history of this file",
+                            Action = () => { SelectFile(fileRef); OnHistoryRequested?.Invoke(fileRef); },
+                        });
                     if (OnBlameRequested != null && fileRef.Kind != FileChangeKind.Deleted)
-                        items.Add(new ContextMenuItem { Label = "Blame this file", Action = () => OnBlameRequested?.Invoke(fileRef) });
+                        items.Add(new ContextMenuItem
+                        {
+                            Label = "Blame this file",
+                            Action = () => { SelectFile(fileRef); OnBlameRequested?.Invoke(fileRef); },
+                        });
                     return items;
                 });
             }
@@ -117,5 +124,11 @@ public partial class FileTree : Component
 
         container.ReplaceChildren(children);
         return ScrollView.New().FlexGrow(1).Children(container);
+    }
+
+    private void SelectFile(GitFileChange file)
+    {
+        SelectedFile = file;
+        OnFileSelected?.Invoke(file);
     }
 }
