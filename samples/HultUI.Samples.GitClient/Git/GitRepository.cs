@@ -578,6 +578,97 @@ public class GitRepository
         return GitProcess.Run(Path, "reset", flag, commitHash);
     }
 
+    // ── Blame ──
+
+    /// <summary>
+    /// Runs <c>git blame --porcelain</c> on a file at the optional commit-ish, returning
+    /// one <see cref="GitBlameLine"/> per line of the final file. Commit metadata is only
+    /// emitted once per hash in porcelain output, so we accumulate it in a dictionary as
+    /// we parse and look it up for subsequent lines from the same commit.
+    /// </summary>
+    public List<GitBlameLine> Blame(string filePath, string? commitish = null)
+    {
+        var args = new List<string> { "blame", "--porcelain" };
+        if (!string.IsNullOrEmpty(commitish)) args.Add(commitish);
+        args.Add("--");
+        args.Add(filePath);
+
+        var result = GitProcess.Run(Path, args.ToArray());
+        if (!result.Success) return [];
+
+        var commits = new Dictionary<string, (string Author, DateTimeOffset Date, string Summary)>();
+        var lines = new List<GitBlameLine>();
+
+        string? pendingHash = null;
+        int pendingFinalLine = 0;
+        string? pendingAuthor = null;
+        long? pendingAuthorTime = null;
+        string? pendingSummary = null;
+
+        foreach (var raw in result.Stdout.Split('\n'))
+        {
+            if (raw.StartsWith('\t'))
+            {
+                // Content line — finalize the pending entry
+                if (pendingHash is null) continue;
+
+                if (!commits.TryGetValue(pendingHash, out var meta))
+                {
+                    meta = (
+                        pendingAuthor ?? "",
+                        pendingAuthorTime.HasValue
+                            ? DateTimeOffset.FromUnixTimeSeconds(pendingAuthorTime.Value)
+                            : DateTimeOffset.MinValue,
+                        pendingSummary ?? ""
+                    );
+                    commits[pendingHash] = meta;
+                }
+
+                lines.Add(new GitBlameLine(
+                    CommitHash: pendingHash,
+                    ShortHash: pendingHash.Length >= 7 ? pendingHash[..7] : pendingHash,
+                    AuthorName: meta.Author,
+                    AuthorDate: meta.Date,
+                    Summary: meta.Summary,
+                    LineNumber: pendingFinalLine,
+                    Content: raw[1..]
+                ));
+
+                pendingHash = null;
+                pendingAuthor = null;
+                pendingAuthorTime = null;
+                pendingSummary = null;
+            }
+            else if (raw.Length > 40 && raw[40] == ' ' && IsHex(raw[0]))
+            {
+                // Header: <40-char hash> <orig> <final> [<count>]
+                var parts = raw.Split(' ');
+                if (parts.Length >= 3)
+                {
+                    pendingHash = parts[0];
+                    int.TryParse(parts[2], out pendingFinalLine);
+                }
+            }
+            else if (raw.StartsWith("author "))
+            {
+                pendingAuthor = raw[7..];
+            }
+            else if (raw.StartsWith("author-time "))
+            {
+                if (long.TryParse(raw[12..], out var t)) pendingAuthorTime = t;
+            }
+            else if (raw.StartsWith("summary "))
+            {
+                pendingSummary = raw[8..];
+            }
+        }
+
+        return lines;
+    }
+
+    private static bool IsHex(char c) =>
+        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+
     // ── Tags ──
 
     public List<string> GetTags()

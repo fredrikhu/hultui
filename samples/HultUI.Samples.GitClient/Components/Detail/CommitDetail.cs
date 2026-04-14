@@ -19,8 +19,8 @@ public partial class CommitDetail : Component
     private readonly GitRepository _repo;
     private readonly FileTree _fileTree;
     private readonly DiffViewer _diffViewer;
+    private readonly BlameViewer _blameViewer;
     private readonly SplitPane _splitPane;
-    private Element? _splitPaneLayout;
 
     // Memoized per-commit data — only refreshed when Commit.Hash changes.
     // Keeps file selection stable across rebuilds and avoids redundant `git diff` calls.
@@ -28,16 +28,26 @@ public partial class CommitDetail : Component
     private List<GitFileChange> _loadedFiles = [];
     private List<GitFileDiff> _loadedDiffs = [];
 
+    // Blame mode — when non-null, the right pane shows the blame for this file
+    // at the current commit instead of the diff.
+    private string? _blameFilePath;
+
     [Reactive] public partial GitCommit? Commit { get; set; }
+
+    public Action<string>? OnCommitHashSelected { get; set; }
 
     public CommitDetail(GitRepository repo)
     {
         _repo = repo;
         _fileTree = new FileTree();
         _diffViewer = new DiffViewer();
+        _blameViewer = new BlameViewer();
         _splitPane = new SplitPane(horizontal: true, initialRatio: 0.3f);
 
         _fileTree.OnFileSelected = OnFileSelected;
+        _fileTree.OnBlameRequested = OnBlameRequested;
+        _blameViewer.OnCommitSelected = hash => OnCommitHashSelected?.Invoke(hash);
+        _blameViewer.OnClose = () => { _blameFilePath = null; MarkDirty(); };
     }
 
     public override Element Build()
@@ -59,6 +69,7 @@ public partial class CommitDetail : Component
             _loadedFiles = _repo.GetCommitFiles(commit.Hash);
             _loadedDiffs = _repo.GetCommitDiff(commit.Hash);
             _loadedCommitHash = commit.Hash;
+            _blameFilePath = null;
 
             _fileTree.Files = _loadedFiles;
 
@@ -100,20 +111,32 @@ public partial class CommitDetail : Component
                 )
             );
 
-        _splitPaneLayout ??= _splitPane.Build(
-            _fileTree.Mount(),
-            _diffViewer.Mount()
-        );
+        var rightPane = _blameFilePath != null
+            ? (Element)_blameViewer.Mount()
+            : _diffViewer.Mount();
 
         return Flex.Column(gap: 0).FlexGrow(1).Children(
             header,
-            _splitPaneLayout
+            _splitPane.Build(_fileTree.Mount(), rightPane)
         );
     }
 
     private void OnFileSelected(GitFileChange file)
     {
+        // Selecting a different file exits blame mode — blame is file-scoped.
+        _blameFilePath = null;
         _diffViewer.Diffs = DiffsForFile(file);
+    }
+
+    private void OnBlameRequested(GitFileChange file)
+    {
+        var commit = Commit;
+        if (commit == null) return;
+
+        _blameFilePath = file.Path;
+        _blameViewer.FilePath = file.Path;
+        _blameViewer.Lines = _repo.Blame(file.Path, commit.Hash);
+        MarkDirty();
     }
 
     private List<GitFileDiff> DiffsForFile(GitFileChange file)

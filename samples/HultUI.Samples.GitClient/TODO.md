@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 4.4 (Blame view)
+**Current cursor:** ▶ Phase 4.5 (File history)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -133,9 +133,9 @@ multi-day effort.
 - [x] Interactive rebase deferred to 4.6
 
 ### 4.4 Blame view
-- [ ] `GitRepository.Blame(string path)` parsing porcelain output
-- [ ] New file-detail panel: each line annotated with commit/author/date
-- [ ] Click a line → jump to that commit in the history
+- [x] `GitRepository.Blame(string path)` parsing porcelain output
+- [x] New file-detail panel: each line annotated with commit/author/date
+- [x] Click a line → jump to that commit in the history
 
 ### 4.5 File history
 - [ ] CommitDetail file row context menu: "Show history of this file"

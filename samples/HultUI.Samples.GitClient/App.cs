@@ -78,6 +78,15 @@ public partial class App : Component
         _stagingArea.OnCommitted = OnCommitted;
         _stagingArea.OnRepoChanged = RefreshAll;
         _stagingArea.ShowStatusMessage = ShowMessage;
+        _commitDetail.OnCommitHashSelected = OnCommitHashSelected;
+    }
+
+    private void OnCommitHashSelected(string hash)
+    {
+        var commit = _repo.GetCommit(hash);
+        if (commit == null) return;
+        _commitList.SelectedCommitHash = hash;
+        OnCommitSelected(commit);
     }
 
     public override Element Build()

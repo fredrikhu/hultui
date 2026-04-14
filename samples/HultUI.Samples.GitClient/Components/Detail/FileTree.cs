@@ -18,6 +18,7 @@ public partial class FileTree : Component
     [Reactive] public partial GitFileChange? SelectedFile { get; set; }
 
     public Action<GitFileChange>? OnFileSelected { get; set; }
+    public Action<GitFileChange>? OnBlameRequested { get; set; }
 
     public FileTree()
     {
@@ -95,6 +96,14 @@ public partial class FileTree : Component
                 SelectedFile = fileRef;
                 OnFileSelected?.Invoke(fileRef);
             });
+
+            if (OnBlameRequested != null && fileRef.Kind != FileChangeKind.Deleted)
+            {
+                row.ContextMenu(() =>
+                [
+                    new ContextMenuItem { Label = "Blame this file", Action = () => OnBlameRequested?.Invoke(fileRef) },
+                ]);
+            }
 
             children[i] = row;
         }
