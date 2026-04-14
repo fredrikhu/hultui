@@ -79,6 +79,7 @@ public partial class App : Component
         _stagingArea.OnRepoChanged = RefreshAll;
         _stagingArea.ShowStatusMessage = ShowMessage;
         _commitDetail.OnCommitHashSelected = OnCommitHashSelected;
+        _commitDetail.OnFileHistoryRequested = OnFileHistoryRequested;
     }
 
     private void OnCommitHashSelected(string hash)
@@ -87,6 +88,14 @@ public partial class App : Component
         if (commit == null) return;
         _commitList.SelectedCommitHash = hash;
         OnCommitSelected(commit);
+    }
+
+    private void OnFileHistoryRequested(string filePath)
+    {
+        ShowWorkingCopy = false;
+        _sidebar.WorkingCopyActive = false;
+        _sidebar.Refresh();
+        _commitList.ShowFileHistory(filePath);
     }
 
     public override Element Build()

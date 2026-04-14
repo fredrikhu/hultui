@@ -35,6 +35,7 @@ public partial class CommitDetail : Component
     [Reactive] public partial GitCommit? Commit { get; set; }
 
     public Action<string>? OnCommitHashSelected { get; set; }
+    public Action<string>? OnFileHistoryRequested { get; set; }
 
     public CommitDetail(GitRepository repo)
     {
@@ -46,6 +47,7 @@ public partial class CommitDetail : Component
 
         _fileTree.OnFileSelected = OnFileSelected;
         _fileTree.OnBlameRequested = OnBlameRequested;
+        _fileTree.OnHistoryRequested = file => OnFileHistoryRequested?.Invoke(file.Path);
         _blameViewer.OnCommitSelected = hash => OnCommitHashSelected?.Invoke(hash);
         _blameViewer.OnClose = () => { _blameFilePath = null; MarkDirty(); };
     }

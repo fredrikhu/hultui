@@ -4,7 +4,7 @@ Ordered backlog for the GitClient sample. Items are grouped into phases by
 risk and dependency, not by importance — finish each phase before starting
 the next so the app stays in a usable state at every commit.
 
-**Current cursor:** ▶ Phase 4.5 (File history)
+**Current cursor:** ▶ Phase 4.6 (Interactive rebase)
 
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
@@ -138,8 +138,8 @@ multi-day effort.
 - [x] Click a line → jump to that commit in the history
 
 ### 4.5 File history
-- [ ] CommitDetail file row context menu: "Show history of this file"
-- [ ] Filtered CommitList variant that respects a `--follow` path filter
+- [x] CommitDetail file row context menu: "Show history of this file"
+- [x] Filtered CommitList variant that respects a `--follow` path filter
 
 ### 4.6 Interactive rebase
 - [ ] Reorder/squash/edit/drop UI on top of `git rebase -i`

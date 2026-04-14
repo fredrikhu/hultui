@@ -24,6 +24,7 @@ public partial class CommitList : Component
 
     // ── Filter state ──
     private string? _pathFilter;
+    private bool _pathFollow;
     private string? _authorFilter;
     private DateTimeOffset? _dateFrom;
     private DateTimeOffset? _dateTo;
@@ -58,7 +59,8 @@ public partial class CommitList : Component
             author: _authorFilter,
             path: _pathFilter,
             after: _dateFrom,
-            before: _dateTo);
+            before: _dateTo,
+            followPath: _pathFollow);
 
         // When server-side filters are active, parent hashes may reference commits
         // outside the result set. Strip those so the graph doesn't open phantom lanes.
@@ -212,7 +214,8 @@ public partial class CommitList : Component
             .FlexShrink(0);
 
         if (_pathFilter != null)
-            row.AddChild(FilterChip("Path", _pathFilter, () => { _pathFilter = null; Refresh(); }));
+            row.AddChild(FilterChip(_pathFollow ? "History of" : "Path", _pathFilter,
+                () => { _pathFilter = null; _pathFollow = false; Refresh(); }));
         if (_authorFilter != null)
             row.AddChild(FilterChip("Author", _authorFilter, () => { _authorFilter = null; Refresh(); }));
         if (_dateFrom != null)
@@ -407,7 +410,10 @@ public partial class CommitList : Component
         var nonEmpty = val.Length > 0 ? val : null;
 
         if (_showingInput == FilterInputKind.Path)
+        {
             _pathFilter = nonEmpty;
+            _pathFollow = false;
+        }
         else if (_showingInput == FilterInputKind.Author)
             _authorFilter = nonEmpty;
 
@@ -434,9 +440,24 @@ public partial class CommitList : Component
     private void ClearAllFilters()
     {
         _pathFilter = null;
+        _pathFollow = false;
         _authorFilter = null;
         _dateFrom = null;
         _dateTo = null;
+        _showingInput = FilterInputKind.None;
+        Refresh();
+    }
+
+    /// <summary>
+    /// Filters the log to the history of a single file, following renames via
+    /// <c>git log --follow</c>. Called when the user picks "Show history of this file"
+    /// from a file context menu.
+    /// </summary>
+    public void ShowFileHistory(string path)
+    {
+        _pathFilter = path;
+        _pathFollow = true;
+        _searchQuery = "";
         _showingInput = FilterInputKind.None;
         Refresh();
     }

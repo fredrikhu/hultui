@@ -19,6 +19,7 @@ public partial class FileTree : Component
 
     public Action<GitFileChange>? OnFileSelected { get; set; }
     public Action<GitFileChange>? OnBlameRequested { get; set; }
+    public Action<GitFileChange>? OnHistoryRequested { get; set; }
 
     public FileTree()
     {
@@ -97,12 +98,18 @@ public partial class FileTree : Component
                 OnFileSelected?.Invoke(fileRef);
             });
 
-            if (OnBlameRequested != null && fileRef.Kind != FileChangeKind.Deleted)
+            var hasContextMenu = OnBlameRequested != null || OnHistoryRequested != null;
+            if (hasContextMenu)
             {
                 row.ContextMenu(() =>
-                [
-                    new ContextMenuItem { Label = "Blame this file", Action = () => OnBlameRequested?.Invoke(fileRef) },
-                ]);
+                {
+                    var items = new List<ContextMenuItem>();
+                    if (OnHistoryRequested != null)
+                        items.Add(new ContextMenuItem { Label = "Show history of this file", Action = () => OnHistoryRequested?.Invoke(fileRef) });
+                    if (OnBlameRequested != null && fileRef.Kind != FileChangeKind.Deleted)
+                        items.Add(new ContextMenuItem { Label = "Blame this file", Action = () => OnBlameRequested?.Invoke(fileRef) });
+                    return items;
+                });
             }
 
             children[i] = row;

@@ -101,7 +101,8 @@ public class GitRepository
     // ── Log ──
 
     public List<GitCommit> GetLog(int maxCount = 500, string? author = null,
-        string? path = null, DateTimeOffset? after = null, DateTimeOffset? before = null)
+        string? path = null, DateTimeOffset? after = null, DateTimeOffset? before = null,
+        bool followPath = false)
     {
         var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
 
@@ -110,8 +111,14 @@ public class GitRepository
             "log",
             $"--max-count={maxCount}",
             $"--format={format}{RecordSep}",
-            "--all",
         };
+
+        // --follow tracks history across renames but only works with a single file
+        // and is incompatible with --all; use a linear, branch-scoped history instead.
+        if (followPath && !string.IsNullOrWhiteSpace(path))
+            args.Add("--follow");
+        else
+            args.Add("--all");
 
         if (!string.IsNullOrWhiteSpace(author))
             args.Add($"--author={author}");
