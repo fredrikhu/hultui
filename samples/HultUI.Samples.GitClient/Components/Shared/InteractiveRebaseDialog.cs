@@ -74,7 +74,7 @@ public static class InteractiveRebaseDialog
         );
         content.AddChild(
             Text.New($"Rebase {state.Entries.Count} commit{(state.Entries.Count == 1 ? "" : "s")} onto {state.BaseShortHash}. "
-                   + "Reorder with \u25B2/\u25BC, change the action per commit, then Confirm.")
+                   + "Reorder with \u25B2/\u25BC, click the action chip to cycle, edit the message inline for reword, then Confirm.")
                 .FontSize(12f).TextColor(GitClientColors.TextSecondary)
         );
 
@@ -160,23 +160,55 @@ public static class InteractiveRebaseDialog
             }
         }));
 
-        // Op cycler (click to cycle: pick → squash → fixup → drop → pick)
+        // Op cycler (click to cycle: pick → reword → squash → fixup → drop → pick)
         row.AddChild(OpChip(entry, state));
 
-        // Hash + subject
+        // Hash
         row.AddChild(
             Text.New(entry.ShortHash).FontSize(11f)
                 .TextColor(GitClientColors.DiffHunkText)
                 .Width(60).FlexShrink(0)
         );
-        row.AddChild(
-            Text.New(entry.Subject).FontSize(12f)
-                .TextColor(isDropped ? GitClientColors.TextMuted : GitClientColors.TextPrimary)
-                .FlexGrow(1).FlexShrink(1)
-                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
-        );
+
+        // Subject — editable in reword mode, static otherwise.
+        if (entry.Op == RebaseOp.Reword)
+        {
+            row.AddChild(BuildRewordInput(entry));
+        }
+        else
+        {
+            row.AddChild(
+                Text.New(entry.Subject).FontSize(12f)
+                    .TextColor(isDropped ? GitClientColors.TextMuted : GitClientColors.TextPrimary)
+                    .FlexGrow(1).FlexShrink(1)
+                    .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+            );
+        }
 
         return row;
+    }
+
+    private static Element BuildRewordInput(RebaseEntry entry)
+    {
+        // Keep message edits in RebaseEntry so they survive dialog rebuilds
+        // (cycling ops / moving other rows). TextInput has its own internal
+        // state that PatchFrom resets from this value each rebuild — fine,
+        // because OnTextChanged keeps NewMessage in sync before any rebuild
+        // fires, so the reset is a no-op for the actively-typing user.
+        var input = TextInput.New(entry.NewMessage ?? entry.Subject)
+            .OnTextChanged(text => entry.NewMessage = text)
+            .FontSize(12f)
+            .FlexGrow(1).FlexShrink(1)
+            .Height(Dimension.Px(22))
+            .Padding(new Thickness(2, 6, 2, 6))
+            .Background(GitClientColors.Background)
+            .CornerRadius(3f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary);
+        // Stable key so the reconciler reuses the same element across
+        // rebuilds (preserves focus + cursor position while typing).
+        input.Key = $"reword-input-{entry.Hash}";
+        return input;
     }
 
     private static Element MoveButton(string glyph, bool enabled, Action onClick)
@@ -207,6 +239,7 @@ public static class InteractiveRebaseDialog
         var (label, color) = entry.Op switch
         {
             RebaseOp.Pick => ("pick", GitClientColors.StatusAdded),
+            RebaseOp.Reword => ("reword", GitClientColors.TagColor),
             RebaseOp.Squash => ("squash", GitClientColors.BranchLocal),
             RebaseOp.Fixup => ("fixup", GitClientColors.BranchRemote),
             RebaseOp.Drop => ("drop", GitClientColors.StatusDeleted),
@@ -227,7 +260,7 @@ public static class InteractiveRebaseDialog
             .Cursor(CursorType.Pointer)
             .JustifyContent(JustifyContent.Center)
             .AlignItems(AlignItems.Center)
-            .Tooltip("Click to cycle: pick \u2192 squash \u2192 fixup \u2192 drop")
+            .Tooltip("Click to cycle: pick \u2192 reword \u2192 squash \u2192 fixup \u2192 drop")
             .Children(
                 Text.New(label).FontSize(10f).FontWeight(FontWeight.SemiBold).TextColor(color)
             );
@@ -239,11 +272,16 @@ public static class InteractiveRebaseDialog
             e.StopPropagation = true;
             entry.Op = entry.Op switch
             {
-                RebaseOp.Pick => RebaseOp.Squash,
+                RebaseOp.Pick => RebaseOp.Reword,
+                RebaseOp.Reword => RebaseOp.Squash,
                 RebaseOp.Squash => RebaseOp.Fixup,
                 RebaseOp.Fixup => RebaseOp.Drop,
                 _ => RebaseOp.Pick,
             };
+            // Seed the new message with the current subject the first time the
+            // user selects Reword so they can tweak rather than type from scratch.
+            if (entry.Op == RebaseOp.Reword && entry.NewMessage == null)
+                entry.NewMessage = entry.Subject;
             state.RefreshDialog?.Invoke();
         });
         return chip;

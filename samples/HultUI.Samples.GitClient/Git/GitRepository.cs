@@ -597,9 +597,21 @@ public class GitRepository
     {
         // Drop entries are simply omitted from the todo — writing "drop <hash>" also works,
         // but leaving them out is just as effective and keeps the todo file shorter.
-        var lines = plan
-            .Where(e => e.Op != RebaseOp.Drop)
-            .Select(e => $"{e.Op.ToKeyword()} {e.Hash} {e.Subject}");
+        //
+        // Reword: emit a "pick" followed by an "exec git commit --amend -m <msg>" line.
+        // This avoids needing to intercept $GIT_EDITOR to supply a new message mid-rebase —
+        // the amend happens immediately after git replays the commit.
+        var lines = new List<string>();
+        foreach (var e in plan)
+        {
+            if (e.Op == RebaseOp.Drop) continue;
+            lines.Add($"{e.Op.ToKeyword()} {e.Hash} {e.Subject}");
+            if (e.Op == RebaseOp.Reword)
+            {
+                var msg = string.IsNullOrWhiteSpace(e.NewMessage) ? e.Subject : e.NewMessage!;
+                lines.Add($"exec git commit --amend -m {ShellQuote(msg)}");
+            }
+        }
 
         var todoPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
             $"hultui-rebase-todo-{Guid.NewGuid():N}");
