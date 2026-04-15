@@ -2,6 +2,7 @@ using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
@@ -82,7 +83,16 @@ public partial class App : Component
         _stagingArea.ShowStatusMessage = ShowMessage;
         _commitDetail.OnCommitHashSelected = OnCommitHashSelected;
         _commitDetail.OnFileHistoryRequested = OnFileHistoryRequested;
+
+        // Attach the global Escape handler to the ComponentHost itself.
+        // When no element is focused, Window dispatches KeyDown to _root
+        // (= this host); EventDispatcher.BuildPath walks up via Parent, so
+        // handlers on children of the host are never visited in that case.
+        // OnMount() won't fire (SetRoot bypasses AddChild), so wire it here
+        // — calling Mount() from the constructor materialises the Host.
+        Mount().On<KeyDownEvent>(HandleRootKeyDown);
     }
+
 
     private void OnCommitHashSelected(string hash)
     {
@@ -406,6 +416,26 @@ public partial class App : Component
     {
         _pendingRebase = null;
         MarkDirty();
+    }
+
+    // Escape dismisses any active modal. KeyDownEvents bubble from the
+    // focused element up to the root, so this catches Escape regardless
+    // of what currently has focus (TextInputs don't swallow Escape).
+    private void HandleRootKeyDown(KeyDownEvent e)
+    {
+        if (e.Key != KeyCode.Escape) return;
+
+        if (_pendingRebase != null)
+        {
+            DismissRebase();
+            e.StopPropagation = true;
+        }
+        else if (_pendingConfirm != null)
+        {
+            _pendingConfirm.OnCancel?.Invoke();
+            DismissConfirm();
+            e.StopPropagation = true;
+        }
     }
 
     private void DoRebaseContinue()
