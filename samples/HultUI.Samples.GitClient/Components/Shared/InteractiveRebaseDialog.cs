@@ -132,9 +132,13 @@ public static class InteractiveRebaseDialog
         // FlexShrink(0) keeps the row at its natural height even when the
         // list is inside a height-bounded ScrollView — without it, the
         // column would try to compress rows to fit.
+        //
+        // Reword rows host a multi-line TextArea that grows with the
+        // message, so top-align the small fixed-height controls instead
+        // of centering them against a tall editor.
         var row = Flex.Row(gap: 8)
             .Padding(new Thickness(4, 8, 4, 8))
-            .AlignItems(AlignItems.Center)
+            .AlignItems(entry.Op == RebaseOp.Reword ? AlignItems.FlexStart : AlignItems.Center)
             .FlexShrink(0)
             .Background(isDropped ? Color.Transparent : GitClientColors.Surface)
             .CornerRadius(3f);
@@ -173,7 +177,7 @@ public static class InteractiveRebaseDialog
         // Subject — editable in reword mode, static otherwise.
         if (entry.Op == RebaseOp.Reword)
         {
-            row.AddChild(BuildRewordInput(entry));
+            row.AddChild(BuildRewordInput(entry, state));
         }
         else
         {
@@ -188,28 +192,48 @@ public static class InteractiveRebaseDialog
         return row;
     }
 
-    private static Element BuildRewordInput(RebaseEntry entry)
+    private static Element BuildRewordInput(RebaseEntry entry, InteractiveRebaseState state)
     {
-        // Keep message edits in RebaseEntry so they survive dialog rebuilds
-        // (cycling ops / moving other rows). TextInput has its own internal
-        // state that PatchFrom resets from this value each rebuild — fine,
-        // because OnTextChanged keeps NewMessage in sync before any rebuild
-        // fires, so the reset is a no-op for the actively-typing user.
-        var input = TextInput.New(entry.NewMessage ?? entry.Subject)
-            .OnTextChanged(text => entry.NewMessage = text)
+        // Multi-line editor so users can add a body below the subject.
+        // Height is derived from the explicit newline count — wrap-based
+        // growth would need the render context to measure against actual
+        // pixel widths, which isn't available during Build().
+        //
+        // On every keystroke OnTextChanged updates RebaseEntry.NewMessage
+        // directly — this keeps the source of truth in the plan. We only
+        // trigger a dialog rebuild (to recompute height) when the line
+        // count actually changes; plain typing within a line doesn't
+        // rebuild, which keeps editing cheap.
+        var text = entry.NewMessage ?? entry.Subject;
+        int lineCount = CountLines(text);
+        float lineHeight = 16f;
+        float chrome = 10f; // top+bottom padding + border
+        float height = Math.Max(1, lineCount) * lineHeight + chrome;
+
+        var area = TextArea.New(text)
+            .OnTextChanged(newText =>
+            {
+                var prevLines = CountLines(entry.NewMessage ?? entry.Subject);
+                entry.NewMessage = newText;
+                if (CountLines(newText) != prevLines)
+                    state.RefreshDialog?.Invoke();
+            })
             .FontSize(12f)
             .FlexGrow(1).FlexShrink(1)
-            .Height(Dimension.Px(22))
-            .Padding(new Thickness(2, 6, 2, 6))
+            .Height(Dimension.Px(height))
+            .Padding(new Thickness(3, 6, 3, 6))
             .Background(GitClientColors.Background)
             .CornerRadius(3f)
             .BorderColor(GitClientColors.Border)
             .TextColor(GitClientColors.TextPrimary);
         // Stable key so the reconciler reuses the same element across
         // rebuilds (preserves focus + cursor position while typing).
-        input.Key = $"reword-input-{entry.Hash}";
-        return input;
+        area.Key = $"reword-input-{entry.Hash}";
+        return area;
     }
+
+    private static int CountLines(string text) =>
+        string.IsNullOrEmpty(text) ? 1 : text.Count(c => c == '\n') + 1;
 
     private static Element MoveButton(string glyph, bool enabled, Action onClick)
     {
