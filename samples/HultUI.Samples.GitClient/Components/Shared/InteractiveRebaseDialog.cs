@@ -78,15 +78,18 @@ public static class InteractiveRebaseDialog
                 .FontSize(12f).TextColor(GitClientColors.TextSecondary)
         );
 
-        // Commit list
-        var list = Flex.Column(gap: 4)
-            .MaxHeight(Dimension.Px(400));
+        // Commit list — rows stack vertically inside a bounded ScrollView.
+        // The MaxHeight must live on the ScrollView itself (not the inner
+        // Flex.Column) so overflow actually triggers scrolling instead of
+        // just clamping the list and leaving the viewport the same size.
+        var list = Flex.Column(gap: 4);
 
         for (int i = 0; i < state.Entries.Count; i++)
             list.AddChild(BuildEntryRow(state, i));
 
         content.AddChild(
             ScrollView.New()
+                .MaxHeight(Dimension.Px(360))
                 .Background(GitClientColors.Background)
                 .CornerRadius(4f)
                 .Padding(new Thickness(4, 4, 4, 4))
@@ -126,9 +129,13 @@ public static class InteractiveRebaseDialog
         var entry = state.Entries[index];
         var isDropped = entry.Op == RebaseOp.Drop;
 
+        // FlexShrink(0) keeps the row at its natural height even when the
+        // list is inside a height-bounded ScrollView — without it, the
+        // column would try to compress rows to fit.
         var row = Flex.Row(gap: 8)
             .Padding(new Thickness(4, 8, 4, 8))
             .AlignItems(AlignItems.Center)
+            .FlexShrink(0)
             .Background(isDropped ? Color.Transparent : GitClientColors.Surface)
             .CornerRadius(3f);
         row.Key = $"rebase-entry-{entry.Hash}";
@@ -206,9 +213,13 @@ public static class InteractiveRebaseDialog
             _ => ("pick", GitClientColors.StatusAdded),
         };
 
+        // Explicit Width + Height pins the chip to pill proportions. Without
+        // Height, the default AlignItems=Stretch on the parent layout chain
+        // could let the chip grow vertically to match row height.
         var chip = Box.New()
             .Width(66)
-            .Padding(new Thickness(3, 6, 3, 6))
+            .Height(22)
+            .FlexShrink(0)
             .CornerRadius(3f)
             .Background(GitClientColors.ButtonSecondary)
             .BorderColor(color)
