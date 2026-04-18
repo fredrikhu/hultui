@@ -50,9 +50,9 @@ public static class GitProcess
         if (bridge != null && askPassHandler != null)
             _ = bridge.MonitorAsync(process, askPassHandler);
 
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        await process.WaitForExitAsync();
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        await process.WaitForExitAsync().ConfigureAwait(false);
 
         return new GitResult(process.ExitCode, stdout, stderr);
     }

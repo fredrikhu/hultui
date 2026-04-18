@@ -589,12 +589,9 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage($"Pushing to {remote}/{branch}\u2026", isError: false);
         var result = await _repo.PushToAsync(remote, branch, HandleAskPass);
-        Application.InvokeOnMainThread(() =>
-        {
-            _remoteOpRunning = false;
-            ShowResult(result, $"Pushed to {remote}/{branch}");
-            RefreshAll();
-        });
+        _remoteOpRunning = false;
+        ShowResult(result, $"Pushed to {remote}/{branch}");
+        RefreshAll();
     }
 
     private async void DoPullFrom(string remote, string branch)
@@ -603,12 +600,9 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage($"Pulling from {remote}/{branch}\u2026", isError: false);
         var result = await _repo.PullFromAsync(remote, branch, HandleAskPass);
-        Application.InvokeOnMainThread(() =>
-        {
-            _remoteOpRunning = false;
-            ShowResult(result, $"Pulled from {remote}/{branch}");
-            RefreshAll();
-        });
+        _remoteOpRunning = false;
+        ShowResult(result, $"Pulled from {remote}/{branch}");
+        RefreshAll();
     }
 
     // ── Bisect ──
@@ -732,12 +726,9 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage("Fetching\u2026", isError: false);
         var result = await _repo.FetchAsync(HandleAskPass);
-        Application.InvokeOnMainThread(() =>
-        {
-            _remoteOpRunning = false;
-            ShowResult(result, "Fetched all remotes");
-            RefreshAll();
-        });
+        _remoteOpRunning = false;
+        ShowResult(result, "Fetched all remotes");
+        RefreshAll();
     }
 
     private async void DoPull()
@@ -745,19 +736,16 @@ public partial class App : Component
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage("Pulling\u2026", isError: false);
-        GitResult result = null!;
 
+        GitResult result;
         using (_window.Tracer.BeginAsync("Git", "Pull"))
         {
             result = await _repo.PullAsync(HandleAskPass);
         }
-        
-        Application.InvokeOnMainThread(() =>
-        {
-            _remoteOpRunning = false;
-            ShowResult(result, "Pulled latest changes");
-            RefreshAll();
-        });
+
+        _remoteOpRunning = false;
+        ShowResult(result, "Pulled latest changes");
+        RefreshAll();
     }
 
     private async void DoPush()
@@ -766,12 +754,9 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage("Pushing\u2026", isError: false);
         var result = await _repo.PushAsync(HandleAskPass);
-        Application.InvokeOnMainThread(() =>
-        {
-            _remoteOpRunning = false;
-            ShowResult(result, "Pushed successfully");
-            RefreshAll();
-        });
+        _remoteOpRunning = false;
+        ShowResult(result, "Pushed successfully");
+        RefreshAll();
     }
 
     private void DoForcePush()
@@ -782,20 +767,19 @@ public partial class App : Component
             Body = "This will overwrite the remote branch history using --force-with-lease. Other collaborators may lose work.\n\nAre you sure?",
             ConfirmLabel = "Force Push",
             Destructive = true,
-            OnConfirm = async () =>
-            {
-                if (_remoteOpRunning) return;
-                _remoteOpRunning = true;
-                ShowMessage("Force pushing\u2026", isError: false);
-                var result = await _repo.ForcePushAsync(HandleAskPass);
-                Application.InvokeOnMainThread(() =>
-                {
-                    _remoteOpRunning = false;
-                    ShowResult(result, "Force pushed successfully");
-                    RefreshAll();
-                });
-            },
+            OnConfirm = DoForcePushConfirmed,
         });
+    }
+
+    private async void DoForcePushConfirmed()
+    {
+        if (_remoteOpRunning) return;
+        _remoteOpRunning = true;
+        ShowMessage("Force pushing\u2026", isError: false);
+        var result = await _repo.ForcePushAsync(HandleAskPass);
+        _remoteOpRunning = false;
+        ShowResult(result, "Force pushed successfully");
+        RefreshAll();
     }
 
     private void CopyToClipboard(string text)
@@ -817,7 +801,7 @@ public partial class App : Component
         }
     }
 
-    private void ShowMessage(string message, bool isError)
+    private async void ShowMessage(string message, bool isError)
     {
         _messageCts?.Cancel();
         _statusMessage = message;
@@ -825,20 +809,15 @@ public partial class App : Component
 
         _messageCts = new CancellationTokenSource();
         var token = _messageCts.Token;
-        _ = Task.Run(async () =>
+        MarkDirty();
+
+        try
         {
             await Task.Delay(isError ? 8000 : 4000, token);
-            if (!token.IsCancellationRequested)
-            {
-                Application.InvokeOnMainThread(() =>
-                {
-                    _statusMessage = null;
-                    MarkDirty();
-                });
-            }
-        }, token);
-
-        MarkDirty();
+            _statusMessage = null;
+            MarkDirty();
+        }
+        catch (OperationCanceledException) { }
     }
 
     private void ShowConfirm(ConfirmDialogState state)

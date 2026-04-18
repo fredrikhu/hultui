@@ -96,6 +96,13 @@ public sealed class Application : IDisposable
         if (_windows.Count == 0)
             throw new InvalidOperationException("No windows created.");
 
+        // Bind async/await continuations on this thread to the UI thread.
+        // Any `await` reached from UI-thread code resumes via _mainThreadQueue
+        // on the next frame, so user code no longer needs InvokeOnMainThread
+        // after awaits. Library I/O can opt out with ConfigureAwait(false).
+        SynchronizationContext.SetSynchronizationContext(
+            new UIThreadSynchronizationContext(_mainThreadQueue));
+
         var frameStopwatch = Stopwatch.StartNew();
 
         while (!_quitRequested && _windows.Any(w => w.IsOpen))
@@ -211,4 +218,21 @@ public sealed class Application : IDisposable
 
         SDL3Window.ShutdownSDL();
     }
+}
+
+internal sealed class UIThreadSynchronizationContext : SynchronizationContext
+{
+    private readonly ConcurrentQueue<Action> _queue;
+
+    public UIThreadSynchronizationContext(ConcurrentQueue<Action> queue)
+    {
+        _queue = queue;
+    }
+
+    public override void Post(SendOrPostCallback d, object? state)
+        => _queue.Enqueue(() => d(state));
+
+    public override void Send(SendOrPostCallback d, object? state)
+        => throw new NotSupportedException(
+            "Synchronous Send across threads is not supported; use Post or Application.InvokeOnMainThread.");
 }
