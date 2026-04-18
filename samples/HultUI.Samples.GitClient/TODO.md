@@ -148,7 +148,7 @@ multi-day effort.
 - [x] Builds on 4.3's non-interactive rebase and 4.2's conflict resolution
 - [x] Reword action — inline TextArea collects new message; emits `pick` + `exec git commit --amend -m …`
 - [x] Edit action — emits native `edit` keyword; rebase pauses and existing Continue/Abort UI takes over
-- [ ] True drag-to-reorder deferred — arrow buttons cover the same ground for now
+- [x] Drag-to-reorder — rows are draggable with edge-based insertion indicator
 
 ---
 

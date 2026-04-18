@@ -36,6 +36,7 @@ public static class InteractiveRebaseDialog
     private static readonly Color BackdropColor = new(0, 0, 0, 140);
     private static readonly Color DialogBg = Color.FromHex("#2a2a48");
     private static readonly Color DialogBorder = Color.FromHex("#3a3a5a");
+    private static readonly Color DropIndicator = Color.FromHex("#60a5fa");
 
     public static Element Build(InteractiveRebaseState state, Action dismiss)
     {
@@ -189,6 +190,9 @@ public static class InteractiveRebaseDialog
             );
         }
 
+        // ── Drag-to-reorder ──
+        WireDragReorder(row, entry, state);
+
         return row;
     }
 
@@ -234,6 +238,68 @@ public static class InteractiveRebaseDialog
 
     private static int CountLines(string text) =>
         string.IsNullOrEmpty(text) ? 1 : text.Count(c => c == '\n') + 1;
+
+    /// <summary>
+    /// Makes a row draggable and a drop target for reorder. When the user
+    /// drags a row over another, a blue line appears on the top or bottom
+    /// edge (depending on cursor position relative to the midpoint).
+    /// Dropping performs the list reorder and refreshes the dialog.
+    /// </summary>
+    private static void WireDragReorder(BoxElement row, RebaseEntry entry, InteractiveRebaseState state)
+    {
+        var defaultBg = row.BackgroundColor;
+        row.Draggable();
+
+        row.On<DragStartEvent>(e =>
+        {
+            e.DragData.Set("rebase-entry", entry);
+        });
+
+        row.On<DragOverEvent>(e =>
+        {
+            if (!e.DragData.TryGet<RebaseEntry>("rebase-entry", out var src) || src == entry)
+                return;
+
+            e.Accepted = true;
+
+            // Show insertion indicator on the nearer edge.
+            var bounds = row.Layout.AbsoluteBorderBox;
+            bool above = e.Position.Y < bounds.Y + bounds.Height / 2;
+            row.Box.BorderWidth = above
+                ? new Thickness(2, 0, 0, 0)
+                : new Thickness(0, 0, 2, 0);
+            row.BorderColor = DropIndicator;
+            row.MarkPaintDirty();
+        });
+
+        row.On<DragLeaveEvent>(_ =>
+        {
+            row.Box.BorderWidth = new Thickness(0);
+            row.MarkPaintDirty();
+        });
+
+        row.On<DropEvent>(e =>
+        {
+            if (!e.DragData.TryGet<RebaseEntry>("rebase-entry", out var src) || src == entry)
+                return;
+
+            int sourceIdx = state.Entries.IndexOf(src!);
+            int targetIdx = state.Entries.IndexOf(entry);
+            if (sourceIdx == -1 || targetIdx == -1) return;
+
+            var bounds = row.Layout.AbsoluteBorderBox;
+            bool above = e.Position.Y < bounds.Y + bounds.Height / 2;
+
+            state.Entries.RemoveAt(sourceIdx);
+            int insertIdx = above ? targetIdx : targetIdx + 1;
+            // Removing the source before the target shifts the target index down by one.
+            if (sourceIdx < insertIdx) insertIdx--;
+            state.Entries.Insert(Math.Clamp(insertIdx, 0, state.Entries.Count), src!);
+
+            row.Box.BorderWidth = new Thickness(0);
+            state.RefreshDialog?.Invoke();
+        });
+    }
 
     private static Element MoveButton(string glyph, bool enabled, Action onClick)
     {
