@@ -47,7 +47,7 @@ public partial class CommitList : Component
 
     [Reactive] public partial string? SelectedCommitHash { get; set; }
 
-    public Action<GitCommit?>? OnCommitSelected { get; set; }
+    public Action<string>? OnCommitSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
     public Action<string>? OnCheckoutCommit { get; set; }
     public Action<string>? OnCherryPick { get; set; }
@@ -600,10 +600,10 @@ public partial class CommitList : Component
         Refresh();
     }
 
-    private void SelectCommit(GitCommit commit)
+    private void SelectCommit(string hash)
     {
-        SelectedCommitHash = commit.Hash;
-        OnCommitSelected?.Invoke(commit);
+        SelectedCommitHash = hash;
+        OnCommitSelected?.Invoke(hash);
     }
 
     private enum FilterInputKind { None, Path, Author, Date }

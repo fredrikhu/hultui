@@ -76,6 +76,7 @@ public partial class App : Component
         _commitList.OnBisectStart = DoBisectStart;
         _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
+        _sidebar.OnBranchChanged = OnBranchChanged;
         _sidebar.OnStashSelected = OnStashSelected;
         _sidebar.OnWorkingCopySelected = OnWorkingCopySelected;
         _sidebar.CopyToClipboard = CopyToClipboard;
@@ -107,10 +108,7 @@ public partial class App : Component
 
     private void OnCommitHashSelected(string hash)
     {
-        var commit = _repo.GetCommit(hash);
-        if (commit == null) return;
-        _commitList.SelectedCommitHash = hash;
-        OnCommitSelected(commit);
+        OnCommitSelected(hash);
     }
 
     private void OnFileHistoryRequested(string filePath)
@@ -225,17 +223,19 @@ public partial class App : Component
 
     // ── Event handlers ──
 
-    private void OnCommitSelected(GitCommit? commit)
+    private void OnCommitSelected(string hash)
     {
-        if (commit != null)
-        {
-            ShowWorkingCopy = false;
-            _sidebar.WorkingCopyActive = false;
-            _sidebar.Refresh();
-            // Bias the file pre-selection to the file whose history we're viewing, if any.
-            _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
-            _commitDetail.Commit = commit;
-        }
+        ShowWorkingCopy = false;
+        _sidebar.WorkingCopyActive = false;
+        _sidebar.Refresh();
+
+        var commit = _repo.GetCommit(hash);
+        if (commit == null) return;
+        _commitList.SelectedCommitHash = hash;
+
+        // Bias the file pre-selection to the file whose history we're viewing, if any.
+        _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
+        _commitDetail.Commit = commit;
     }
 
     private void OnWorkingCopySelected()
@@ -246,7 +246,12 @@ public partial class App : Component
         _stagingArea.Refresh();
     }
 
-    private void OnBranchSelected(string branchName)
+    private void OnBranchSelected(string hash)
+    {
+        OnCommitSelected(hash);
+    }
+
+    private void OnBranchChanged(string branchName)
     {
         ShowResult(_repo.Checkout(branchName), $"Switched to {branchName}");
         RefreshAll();

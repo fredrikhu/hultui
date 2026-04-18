@@ -33,7 +33,7 @@ public static class CommitRow
         GitCommit commit,
         GitGraphRow graph,
         bool isSelected,
-        Action<GitCommit> onSelect,
+        Action<string>? onSelect,
         Action<string>? copyToClipboard = null,
         Action<string>? onCheckout = null,
         Action<string>? onCherryPick = null,
@@ -117,7 +117,7 @@ public static class CommitRow
         // Hover
         row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
         row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-        row.OnClick(_ => onSelect(commit));
+        row.OnClick(_ => onSelect?.Invoke(commit.Hash));
 
         // Context menu
         row.ContextMenu(() =>

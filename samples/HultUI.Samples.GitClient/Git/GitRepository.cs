@@ -23,7 +23,7 @@ public class GitRepository
     {
         var result = GitProcess.Run(Path,
             "for-each-ref",
-            "--format", $"%(refname:short){FieldSep}%(refname){FieldSep}%(HEAD){FieldSep}%(upstream:short){FieldSep}%(upstream:track,nobracket)",
+            "--format", $"%(refname:short){FieldSep}%(refname){FieldSep}%(HEAD){FieldSep}%(upstream:short){FieldSep}%(upstream:track,nobracket){FieldSep}%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)",
             "refs/heads/", "refs/remotes/");
 
         if (!result.Success) return [];
@@ -45,8 +45,10 @@ public class GitRepository
             var trackingBranch = string.IsNullOrEmpty(parts[3]) ? null : parts[3];
 
             var (ahead, behind) = ParseAheadBehind(parts[4]);
+            
+            var hash = parts[5];
 
-            branches.Add(new GitBranch(name, fullName, isCurrent, isRemote, trackingBranch, ahead, behind));
+            branches.Add(new GitBranch(name, fullName, isCurrent, isRemote, trackingBranch, ahead, behind, hash));
         }
 
         return branches;

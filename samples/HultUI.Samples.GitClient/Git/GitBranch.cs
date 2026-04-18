@@ -7,5 +7,6 @@ public record GitBranch(
     bool IsRemote,
     string? TrackingBranch,
     int AheadCount,
-    int BehindCount
+    int BehindCount,
+    string Hash
 );

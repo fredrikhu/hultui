@@ -23,6 +23,7 @@ public partial class Sidebar : Component
     private readonly Ref<TextInputElement> _branchInputRef = new();
 
     public Action<string>? OnBranchSelected { get; set; }
+    public Action<string>? OnBranchChanged { get; set; }
     public Action<GitStash>? OnStashSelected { get; set; }
     public Action? OnWorkingCopySelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
@@ -389,7 +390,8 @@ public partial class Sidebar : Component
                 : isRemote ? GitClientColors.BranchRemote
                 : GitClientColors.BranchLocal,
             Tooltip = FormatBranchTooltip(b),
-            OnDoubleClick = () => OnBranchSelected?.Invoke(b.Name),
+            OnClick = () => OnBranchSelected?.Invoke(b.Hash),
+            OnDoubleClick = () => OnBranchChanged?.Invoke(b.Name),
             ContextMenuItems = isRemote ? null : () =>
             {
                 var items = new List<ContextMenuItem>
