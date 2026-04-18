@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using HultUI.Core.Animation;
 using HultUI.Core.Components;
@@ -14,6 +15,7 @@ public sealed class Application : IDisposable
     private static Application? _current;
 
     private readonly List<Window> _windows = [];
+    private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
     private Theme _theme = Theme.Light;
     private bool _disposed;
     private bool _quitRequested;
@@ -32,6 +34,16 @@ public sealed class Application : IDisposable
 
     /// <summary>All currently tracked windows (including closed ones not yet disposed).</summary>
     public IReadOnlyList<Window> Windows => _windows;
+
+    /// <summary>
+    /// Schedules an action to run on the main (UI) thread during the next
+    /// frame. Use this to safely update component state from background
+    /// threads (e.g. filesystem watchers, async completions).
+    /// </summary>
+    public static void InvokeOnMainThread(Action action)
+    {
+        _current?._mainThreadQueue.Enqueue(action);
+    }
 
     public Theme Theme
     {
@@ -116,6 +128,10 @@ public sealed class Application : IDisposable
                     window.Root?.MarkPaintDirty();
                 }
             }
+
+            // Drain actions posted from background threads
+            while (_mainThreadQueue.TryDequeue(out var action))
+                action();
 
             // Tick animations (marks elements dirty as needed)
             AnimationManager.Tick(deltaSeconds);

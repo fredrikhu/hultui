@@ -110,7 +110,7 @@ public sealed class GitWatcher : IDisposable
                 {
                     await Task.Delay(_debounceMs, token);
                     if (!token.IsCancellationRequested)
-                        _onChange();
+                        HultUI.Application.InvokeOnMainThread(_onChange);
                 }
                 catch (TaskCanceledException) { }
             }, token);

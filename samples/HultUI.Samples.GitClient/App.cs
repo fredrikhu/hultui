@@ -521,22 +521,25 @@ public partial class App : Component
     /// Callback invoked by <see cref="AskPassBridge"/> when SSH or git needs
     /// a passphrase. Shows the password dialog and returns the user's input
     /// via a <see cref="TaskCompletionSource{T}"/>. Runs on the monitor
-    /// thread — <see cref="MarkDirty"/> schedules a UI rebuild on the main
-    /// thread automatically.
+    /// thread — marshals state changes to the main thread via
+    /// <see cref="Application.InvokeOnMainThread"/>.
     /// </summary>
     private Task<string?> HandleAskPass(string prompt)
     {
         var tcs = new TaskCompletionSource<string?>();
-        _pendingPassword = new PasswordDialogState
+        Application.InvokeOnMainThread(() =>
         {
-            Prompt = prompt,
-            OnResult = result =>
+            _pendingPassword = new PasswordDialogState
             {
-                _pendingPassword = null;
-                tcs.TrySetResult(result);
-            },
-        };
-        MarkDirty();
+                Prompt = prompt,
+                OnResult = result =>
+                {
+                    _pendingPassword = null;
+                    tcs.TrySetResult(result);
+                },
+            };
+            MarkDirty();
+        });
         return tcs.Task;
     }
 
@@ -797,8 +800,11 @@ public partial class App : Component
             await Task.Delay(isError ? 8000 : 4000, token);
             if (!token.IsCancellationRequested)
             {
-                _statusMessage = null;
-                MarkDirty();
+                Application.InvokeOnMainThread(() =>
+                {
+                    _statusMessage = null;
+                    MarkDirty();
+                });
             }
         }, token);
 
