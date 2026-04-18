@@ -21,6 +21,7 @@ public partial class CommitList : Component
     // Inline tag-creation state
     private string? _taggingCommitHash;
     private string _newTagName = "";
+    private readonly Ref<TextInputElement> _searchRef = new();
 
     // ── Filter state ──
     private string? _pathFilter;
@@ -53,6 +54,8 @@ public partial class CommitList : Component
     public Action<string>? OnRevert { get; set; }
     public Action<string, ResetMode>? OnReset { get; set; }
     public Action<string>? OnInteractiveRebase { get; set; }
+    public Action<string>? OnBisectStart { get; set; }
+    public string? BisectLabel { get; set; }
     public Action? OnRepoChanged { get; set; }
 
     public CommitList(GitRepository repo)
@@ -126,7 +129,9 @@ public partial class CommitList : Component
                         OnRevert,
                         StartTagCommit,
                         OnReset,
-                        OnInteractiveRebase))
+                        OnInteractiveRebase,
+                        OnBisectStart,
+                        BisectLabel))
                     .FlexGrow(1)
         );
 
@@ -135,6 +140,8 @@ public partial class CommitList : Component
     }
 
     public void Refresh() => MarkDirty();
+
+    public void FocusSearch() => _searchRef.Current?.Focus();
 
     // ── Search bar ──
 
@@ -161,6 +168,7 @@ public partial class CommitList : Component
                 .CornerRadius(4f)
                 .BorderColor(GitClientColors.Border)
                 .TextColor(GitClientColors.TextPrimary)
+                .WithRef(_searchRef)
         );
 
         if (_searchQuery.Length > 0)

@@ -363,6 +363,25 @@ public class GitRepository
 
     // ── Remote operations ──
 
+    public List<string> GetRemotes()
+    {
+        var result = GitProcess.Run(Path, "remote");
+        return result.Success ? result.Lines.ToList() : [];
+    }
+
+    /// <summary>
+    /// Returns the remote-tracking branches for the given remote,
+    /// e.g. ["main", "feature/foo"] for remote "origin".
+    /// </summary>
+    public List<string> GetRemoteBranches(string remote)
+    {
+        var result = GitProcess.Run(Path, "branch", "-r", "--list", $"{remote}/*", "--format", "%(refname:lstrip=3)");
+        if (!result.Success) return [];
+        return result.Lines
+            .Where(b => b != "HEAD")
+            .ToList();
+    }
+
     public GitResult Fetch()
     {
         return GitProcess.Run(Path, "fetch", "--all", "--prune");
@@ -383,6 +402,11 @@ public class GitRepository
         return GitProcess.RunAsync(Path, askPass, "pull");
     }
 
+    public Task<GitResult> PullFromAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null)
+    {
+        return GitProcess.RunAsync(Path, askPass, "pull", remote, branch);
+    }
+
     public GitResult Push()
     {
         return GitProcess.Run(Path, "push");
@@ -391,6 +415,11 @@ public class GitRepository
     public Task<GitResult> PushAsync(Func<string, Task<string?>>? askPass = null)
     {
         return GitProcess.RunAsync(Path, askPass, "push");
+    }
+
+    public Task<GitResult> PushToAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null)
+    {
+        return GitProcess.RunAsync(Path, askPass, "push", remote, branch);
     }
 
     public Task<GitResult> ForcePushAsync(Func<string, Task<string?>>? askPass = null)
@@ -852,6 +881,83 @@ public class GitRepository
     public GitResult StashDrop(string stashRef)
     {
         return GitProcess.Run(Path, "stash", "drop", stashRef);
+    }
+
+    // ── Bisect ──
+
+    public bool IsBisecting()
+    {
+        return File.Exists(System.IO.Path.Combine(Path, ".git", "BISECT_START"));
+    }
+
+    public GitResult BisectStart(string badRef, string goodRef)
+    {
+        return GitProcess.Run(Path, "bisect", "start", badRef, goodRef);
+    }
+
+    public GitResult BisectGood()
+    {
+        return GitProcess.Run(Path, "bisect", "good");
+    }
+
+    public GitResult BisectBad()
+    {
+        return GitProcess.Run(Path, "bisect", "bad");
+    }
+
+    public GitResult BisectSkip()
+    {
+        return GitProcess.Run(Path, "bisect", "skip");
+    }
+
+    public GitResult BisectReset()
+    {
+        return GitProcess.Run(Path, "bisect", "reset");
+    }
+
+    /// <summary>
+    /// Returns the bisect log showing the history of good/bad marks and
+    /// remaining range. Returns null if not bisecting.
+    /// </summary>
+    public string? GetBisectLog()
+    {
+        if (!IsBisecting()) return null;
+        var result = GitProcess.Run(Path, "bisect", "log");
+        return result.Success ? result.Stdout.Trim() : null;
+    }
+
+    // ── Submodules ──
+
+    public List<GitSubmodule> GetSubmodules()
+    {
+        var result = GitProcess.Run(Path, "submodule", "status");
+        if (!result.Success) return [];
+
+        var submodules = new List<GitSubmodule>();
+        foreach (var line in result.Lines)
+        {
+            if (line.Length < 2) continue;
+            // Format: " <hash> <path> (<describe>)" or "+<hash> <path> (<describe>)" for dirty
+            var status = line[0];
+            var rest = line[1..].TrimStart();
+            var parts = rest.Split(' ', 2);
+            if (parts.Length < 2) continue;
+
+            var hash = parts[0];
+            var pathAndDesc = parts[1];
+            var parenIdx = pathAndDesc.IndexOf(" (");
+            var path = parenIdx >= 0 ? pathAndDesc[..parenIdx] : pathAndDesc.Trim();
+            var describe = parenIdx >= 0 ? pathAndDesc[(parenIdx + 2)..].TrimEnd(')') : null;
+
+            submodules.Add(new GitSubmodule(
+                path,
+                hash,
+                describe,
+                Dirty: status == '+',
+                Uninitialized: status == '-'
+            ));
+        }
+        return submodules;
     }
 
     // ── Patch application ──

@@ -47,6 +47,9 @@ public partial class App : Component
     private ConfirmDialogState? _pendingConfirm;
     private InteractiveRebaseState? _pendingRebase;
     private PasswordDialogState? _pendingPassword;
+    private RemoteBranchDialogState? _pendingRemoteBranch;
+    private string? _bisectBadHash;
+    private bool _showShortcuts;
 
     public App(Window window, GitRepository repo)
     {
@@ -70,6 +73,7 @@ public partial class App : Component
         _commitList.OnRevert = DoRevert;
         _commitList.OnReset = DoReset;
         _commitList.OnInteractiveRebase = DoInteractiveRebase;
+        _commitList.OnBisectStart = DoBisectStart;
         _commitList.OnRepoChanged = RefreshAll;
         _sidebar.OnBranchSelected = OnBranchSelected;
         _sidebar.OnStashSelected = OnStashSelected;
@@ -127,6 +131,16 @@ public partial class App : Component
         var repoName = Path.GetFileName(_repo.Path.TrimEnd(Path.DirectorySeparatorChar));
         var merging = _repo.IsMerging();
         var rebasing = _repo.IsRebasing();
+        var bisecting = _repo.IsBisecting();
+
+        // Update bisect label for context menu in commit list
+        _commitList.BisectLabel = _bisectBadHash != null
+            ? "Bisect \u2013 mark as good (start)"
+            : bisecting ? null  // hide during active bisect
+            : null;             // default label
+        // Hide the bisect start menu item during active bisect
+        if (bisecting) _commitList.OnBisectStart = null;
+        else _commitList.OnBisectStart = DoBisectStart;
 
         var root = Flex.Column(gap: 0)
             .TextColor(GitClientColors.TextPrimary)
@@ -151,11 +165,18 @@ public partial class App : Component
                     onPull: DoPull,
                     onPush: DoPush,
                     onForcePush: DoForcePush,
+                    onPullFrom: () => ShowRemoteBranchDialog(RemoteBranchMode.Pull),
+                    onPushTo: () => ShowRemoteBranchDialog(RemoteBranchMode.Push),
                     isMerging: merging,
                     onMergeAbort: DoMergeAbort,
                     isRebasing: rebasing,
                     onRebaseAbort: DoRebaseAbort,
                     onRebaseContinue: DoRebaseContinue,
+                    isBisecting: bisecting,
+                    onBisectGood: bisecting ? DoBisectGood : null,
+                    onBisectBad: bisecting ? DoBisectBad : null,
+                    onBisectSkip: bisecting ? DoBisectSkip : null,
+                    onBisectReset: bisecting ? DoBisectReset : null,
                     message: _statusMessage,
                     messageIsError: _statusIsError
                 )
@@ -169,6 +190,12 @@ public partial class App : Component
 
         if (_pendingPassword != null)
             root.AddChild(PasswordDialog.Build(_pendingPassword, DismissPassword));
+
+        if (_pendingRemoteBranch != null)
+            root.AddChild(RemoteBranchDialog.Build(_pendingRemoteBranch, DismissRemoteBranch, MarkDirty));
+
+        if (_showShortcuts)
+            root.AddChild(KeyboardShortcutsOverlay.Build(() => { _showShortcuts = false; MarkDirty(); }));
 
         return root;
     }
@@ -428,28 +455,64 @@ public partial class App : Component
         MarkDirty();
     }
 
-    // Escape dismisses any active modal. KeyDownEvents bubble from the
-    // focused element up to the root, so this catches Escape regardless
-    // of what currently has focus (TextInputs don't swallow Escape).
+    // Global keyboard shortcuts. KeyDownEvents bubble from the focused
+    // element up to the root, so this catches shortcuts regardless of
+    // what currently has focus.
     private void HandleRootKeyDown(KeyDownEvent e)
     {
-        if (e.Key != KeyCode.Escape) return;
+        var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl);
+        var shift = e.Modifiers.HasFlag(KeyModifiers.Shift);
+        var typing = e.Target is TextInputElement or TextAreaElement;
 
-        if (_pendingPassword != null)
+        // Escape — dismiss the topmost modal/overlay
+        if (e.Key == KeyCode.Escape)
         {
-            _pendingPassword.OnResult(null);
-            DismissPassword();
-            e.StopPropagation = true;
+            if (_showShortcuts) { _showShortcuts = false; MarkDirty(); e.StopPropagation = true; }
+            else if (_pendingPassword != null) { _pendingPassword.OnResult(null); DismissPassword(); e.StopPropagation = true; }
+            else if (_pendingRemoteBranch != null) { DismissRemoteBranch(); e.StopPropagation = true; }
+            else if (_pendingRebase != null) { DismissRebase(); e.StopPropagation = true; }
+            else if (_pendingConfirm != null) { _pendingConfirm.OnCancel?.Invoke(); DismissConfirm(); e.StopPropagation = true; }
+            return;
         }
-        else if (_pendingRebase != null)
+
+        // Don't intercept shortcuts while typing in a text field
+        if (typing) return;
+
+        // ? (Shift+Slash) — toggle keyboard shortcuts overlay
+        if (e.Key == KeyCode.Slash && shift)
         {
-            DismissRebase();
+            _showShortcuts = !_showShortcuts;
+            MarkDirty();
             e.StopPropagation = true;
+            return;
         }
-        else if (_pendingConfirm != null)
+
+        // Ctrl+L — focus the commit log search
+        if (e.Key == KeyCode.L && ctrl)
         {
-            _pendingConfirm.OnCancel?.Invoke();
-            DismissConfirm();
+            if (ShowWorkingCopy)
+            {
+                ShowWorkingCopy = false;
+                _sidebar.WorkingCopyActive = false;
+                _sidebar.Refresh();
+            }
+            _commitList.FocusSearch();
+            e.StopPropagation = true;
+            return;
+        }
+
+        // Ctrl+W — toggle working copy view
+        if (e.Key == KeyCode.W && ctrl)
+        {
+            OnWorkingCopySelected();
+            e.StopPropagation = true;
+            return;
+        }
+
+        // Ctrl+F — fetch from remotes
+        if (e.Key == KeyCode.F && ctrl)
+        {
+            DoFetch();
             e.StopPropagation = true;
         }
     }
@@ -481,6 +544,152 @@ public partial class App : Component
     {
         _pendingPassword = null;
         MarkDirty();
+    }
+
+    private void ShowRemoteBranchDialog(RemoteBranchMode mode)
+    {
+        var remotes = _repo.GetRemotes();
+        if (remotes.Count == 0)
+        {
+            ShowMessage("No remotes configured", isError: true);
+            return;
+        }
+
+        _pendingRemoteBranch = new RemoteBranchDialogState
+        {
+            Mode = mode,
+            Remotes = remotes,
+            GetBranches = _repo.GetRemoteBranches,
+            OnConfirm = mode == RemoteBranchMode.Push ? DoPushTo : DoPullFrom,
+        };
+        // Auto-select the first remote
+        _pendingRemoteBranch.SelectedRemote = remotes[0];
+        _pendingRemoteBranch.Branches = _repo.GetRemoteBranches(remotes[0]);
+        MarkDirty();
+    }
+
+    private void DismissRemoteBranch()
+    {
+        _pendingRemoteBranch = null;
+        MarkDirty();
+    }
+
+    private async void DoPushTo(string remote, string branch)
+    {
+        if (_remoteOpRunning) return;
+        _remoteOpRunning = true;
+        ShowMessage($"Pushing to {remote}/{branch}\u2026", isError: false);
+        var result = await _repo.PushToAsync(remote, branch, HandleAskPass);
+        _remoteOpRunning = false;
+        ShowResult(result, $"Pushed to {remote}/{branch}");
+        RefreshAll();
+    }
+
+    private async void DoPullFrom(string remote, string branch)
+    {
+        if (_remoteOpRunning) return;
+        _remoteOpRunning = true;
+        ShowMessage($"Pulling from {remote}/{branch}\u2026", isError: false);
+        var result = await _repo.PullFromAsync(remote, branch, HandleAskPass);
+        _remoteOpRunning = false;
+        ShowResult(result, $"Pulled from {remote}/{branch}");
+        RefreshAll();
+    }
+
+    // ── Bisect ──
+
+    private void DoBisectStart(string hash)
+    {
+        if (_repo.IsBisecting())
+        {
+            ShowMessage("Already bisecting \u2014 reset first", isError: true);
+            return;
+        }
+
+        if (_bisectBadHash == null)
+        {
+            // First step: mark as bad
+            _bisectBadHash = hash;
+            ShowMessage($"Marked {hash[..7]} as bad \u2014 now right-click an older commit to mark as good", isError: false);
+            MarkDirty();
+        }
+        else
+        {
+            // Second step: mark as good, start bisect
+            var badHash = _bisectBadHash;
+            _bisectBadHash = null;
+
+            var result = _repo.BisectStart(badHash, hash);
+            if (result.Success)
+            {
+                ShowMessage("Bisect started \u2014 test the current commit and mark Good or Bad", isError: false);
+            }
+            else
+            {
+                ShowResult(result);
+            }
+            RefreshAll();
+        }
+    }
+
+    private void DoBisectGood()
+    {
+        var result = _repo.BisectGood();
+        HandleBisectStep(result);
+    }
+
+    private void DoBisectBad()
+    {
+        var result = _repo.BisectBad();
+        HandleBisectStep(result);
+    }
+
+    private void DoBisectSkip()
+    {
+        var result = _repo.BisectSkip();
+        HandleBisectStep(result);
+    }
+
+    private void HandleBisectStep(GitResult result)
+    {
+        if (!result.Success)
+        {
+            ShowResult(result);
+        }
+        else
+        {
+            // git bisect prints its status to stdout — check if it found the culprit
+            var output = result.Stdout.Trim();
+            if (output.Contains("is the first bad commit"))
+            {
+                ShowMessage("Bisect complete \u2014 found the first bad commit!", isError: false);
+            }
+            else
+            {
+                // Extract the short status line for the user
+                var lines = output.Split('\n');
+                var statusLine = lines.FirstOrDefault(l => l.StartsWith("Bisecting:")) ?? "Testing next commit\u2026";
+                ShowMessage(statusLine, isError: false);
+            }
+        }
+        RefreshAll();
+    }
+
+    private void DoBisectReset()
+    {
+        ShowConfirm(new ConfirmDialogState
+        {
+            Title = "Reset Bisect",
+            Body = "Stop bisecting and return to the original branch?",
+            ConfirmLabel = "Reset",
+            Destructive = false,
+            OnConfirm = () =>
+            {
+                var result = _repo.BisectReset();
+                ShowResult(result, "Bisect reset");
+                RefreshAll();
+            },
+        });
     }
 
     private void DoRebaseContinue()

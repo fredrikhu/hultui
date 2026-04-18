@@ -19,11 +19,18 @@ public static class StatusBar
         Action onPull,
         Action onPush,
         Action? onForcePush = null,
+        Action? onPullFrom = null,
+        Action? onPushTo = null,
         bool isMerging = false,
         Action? onMergeAbort = null,
         bool isRebasing = false,
         Action? onRebaseAbort = null,
         Action? onRebaseContinue = null,
+        bool isBisecting = false,
+        Action? onBisectGood = null,
+        Action? onBisectBad = null,
+        Action? onBisectSkip = null,
+        Action? onBisectReset = null,
         string? message = null,
         bool messageIsError = false)
     {
@@ -77,6 +84,24 @@ public static class StatusBar
                 children.Add(ActionButton("Abort Rebase", onRebaseAbort));
         }
 
+        // Bisect-in-progress indicator
+        if (isBisecting)
+        {
+            children.Add(Box.New().Width(1).Height(16).Background(GitClientColors.Border));
+            children.Add(
+                Text.New("BISECTING").FontSize(10f).FontWeight(FontWeight.Bold)
+                    .TextColor(GitClientColors.StatusModified)
+            );
+            if (onBisectGood != null)
+                children.Add(ActionButton("Good", onBisectGood));
+            if (onBisectBad != null)
+                children.Add(ActionButton("Bad", onBisectBad));
+            if (onBisectSkip != null)
+                children.Add(ActionButton("Skip", onBisectSkip));
+            if (onBisectReset != null)
+                children.Add(ActionButton("Reset", onBisectReset));
+        }
+
         // Spacer
         children.Add(Box.New().FlexGrow(1));
 
@@ -94,8 +119,8 @@ public static class StatusBar
 
         // Action buttons
         children.Add(ActionButton("Fetch", onFetch));
-        children.Add(ActionButton("Pull", onPull));
-        children.Add(PushButton(onPush, onForcePush));
+        children.Add(ButtonWithDropdown("Pull", onPull, onPullFrom));
+        children.Add(PushButton(onPush, onForcePush, onPushTo));
 
         return Flex.Row(gap: 16)
             .AlignItems(AlignItems.Center)
@@ -125,11 +150,52 @@ public static class StatusBar
         return btn;
     }
 
-    private static Element PushButton(Action onPush, Action? onForcePush)
+    private static Element ButtonWithDropdown(string label, Action onClick, Action? onDropdown)
     {
+        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
+
         var btn = Box.New()
             .Padding(new Thickness(4, 10, 4, 10))
-            .CornerRadius(4f)
+            .CornerRadius(onDropdown != null ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(4))
+            .Background(GitClientColors.ButtonSecondary)
+            .Cursor(CursorType.Pointer)
+            .Children(
+                Text.New(label).FontSize(11f).FontWeight(FontWeight.SemiBold)
+                    .TextColor(GitClientColors.TextPrimary)
+            );
+        btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
+        btn.On<ClickEvent>(_ => onClick());
+        row.AddChild(btn);
+
+        if (onDropdown != null)
+        {
+            var arrow = Box.New()
+                .Padding(new Thickness(4, 4, 4, 4))
+                .CornerRadius(new CornerRadius(0, 4, 4, 0))
+                .Background(GitClientColors.ButtonSecondary)
+                .Cursor(CursorType.Pointer)
+                .JustifyContent(JustifyContent.Center)
+                .AlignItems(AlignItems.Center)
+                .Children(
+                    Text.New("\u25BE").FontSize(10f).TextColor(GitClientColors.TextMuted)
+                );
+            arrow.On<PointerEnterEvent>(_ => arrow.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+            arrow.On<PointerLeaveEvent>(_ => arrow.BackgroundColor = GitClientColors.ButtonSecondary);
+            arrow.On<ClickEvent>(_ => onDropdown());
+            row.AddChild(arrow);
+        }
+
+        return row;
+    }
+
+    private static Element PushButton(Action onPush, Action? onForcePush, Action? onPushTo)
+    {
+        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
+
+        var btn = Box.New()
+            .Padding(new Thickness(4, 10, 4, 10))
+            .CornerRadius(onPushTo != null ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(4))
             .Background(GitClientColors.ButtonSecondary)
             .Cursor(CursorType.Pointer)
             .Tooltip("Hold Shift to force push")
@@ -137,7 +203,6 @@ public static class StatusBar
                 Text.New("Push").FontSize(11f).FontWeight(FontWeight.SemiBold)
                     .TextColor(GitClientColors.TextPrimary)
             );
-
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
         btn.On<ClickEvent>(e =>
@@ -147,7 +212,26 @@ public static class StatusBar
             else
                 onPush();
         });
+        row.AddChild(btn);
 
-        return btn;
+        if (onPushTo != null)
+        {
+            var arrow = Box.New()
+                .Padding(new Thickness(4, 4, 4, 4))
+                .CornerRadius(new CornerRadius(0, 4, 4, 0))
+                .Background(GitClientColors.ButtonSecondary)
+                .Cursor(CursorType.Pointer)
+                .JustifyContent(JustifyContent.Center)
+                .AlignItems(AlignItems.Center)
+                .Children(
+                    Text.New("\u25BE").FontSize(10f).TextColor(GitClientColors.TextMuted)
+                );
+            arrow.On<PointerEnterEvent>(_ => arrow.BackgroundColor = GitClientColors.ButtonSecondaryHover);
+            arrow.On<PointerLeaveEvent>(_ => arrow.BackgroundColor = GitClientColors.ButtonSecondary);
+            arrow.On<ClickEvent>(_ => onPushTo());
+            row.AddChild(arrow);
+        }
+
+        return row;
     }
 }

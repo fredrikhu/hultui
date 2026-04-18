@@ -40,7 +40,9 @@ public static class CommitRow
         Action<string>? onRevert = null,
         Action<string>? onTag = null,
         Action<string, ResetMode>? onReset = null,
-        Action<string>? onInteractiveRebase = null)
+        Action<string>? onInteractiveRebase = null,
+        Action<string>? onBisectStart = null,
+        string? bisectLabel = null)
     {
         var row = Flex.Row(gap: 8)
             .AlignItems(AlignItems.Stretch)
@@ -119,21 +121,34 @@ public static class CommitRow
 
         // Context menu
         row.ContextMenu(() =>
-        [
-            new ContextMenuItem { Label = $"Checkout '{commit.ShortHash}'", Action = () => onCheckout?.Invoke(commit.Hash) },
-            new ContextMenuItem { Label = "Cherry-pick", Action = () => onCherryPick?.Invoke(commit.Hash) },
-            new ContextMenuItem { Label = "Revert commit", Action = () => onRevert?.Invoke(commit.Hash) },
-            new ContextMenuItem { Label = "Tag this commit\u2026", Action = () => onTag?.Invoke(commit.Hash) },
-            ContextMenuItem.Separator(),
-            new ContextMenuItem { Label = "Reset \u2013 Soft", Action = () => onReset?.Invoke(commit.Hash, ResetMode.Soft) },
-            new ContextMenuItem { Label = "Reset \u2013 Mixed", Action = () => onReset?.Invoke(commit.Hash, ResetMode.Mixed) },
-            new ContextMenuItem { Label = "Reset \u2013 Hard\u2026", Action = () => onReset?.Invoke(commit.Hash, ResetMode.Hard) },
-            ContextMenuItem.Separator(),
-            new ContextMenuItem { Label = "Rebase onto here interactively\u2026", Action = () => onInteractiveRebase?.Invoke(commit.Hash) },
-            ContextMenuItem.Separator(),
-            new ContextMenuItem { Label = "Copy SHA", Action = () => copyToClipboard?.Invoke(commit.Hash) },
-            new ContextMenuItem { Label = "Copy commit message", Action = () => copyToClipboard?.Invoke(commit.Subject) },
-        ]);
+        {
+            var items = new List<ContextMenuItem>
+            {
+                new() { Label = $"Checkout '{commit.ShortHash}'", Action = () => onCheckout?.Invoke(commit.Hash) },
+                new() { Label = "Cherry-pick", Action = () => onCherryPick?.Invoke(commit.Hash) },
+                new() { Label = "Revert commit", Action = () => onRevert?.Invoke(commit.Hash) },
+                new() { Label = "Tag this commit\u2026", Action = () => onTag?.Invoke(commit.Hash) },
+                ContextMenuItem.Separator(),
+                new() { Label = "Reset \u2013 Soft", Action = () => onReset?.Invoke(commit.Hash, ResetMode.Soft) },
+                new() { Label = "Reset \u2013 Mixed", Action = () => onReset?.Invoke(commit.Hash, ResetMode.Mixed) },
+                new() { Label = "Reset \u2013 Hard\u2026", Action = () => onReset?.Invoke(commit.Hash, ResetMode.Hard) },
+                ContextMenuItem.Separator(),
+                new() { Label = "Rebase onto here interactively\u2026", Action = () => onInteractiveRebase?.Invoke(commit.Hash) },
+            };
+            if (onBisectStart != null)
+            {
+                items.Add(ContextMenuItem.Separator());
+                items.Add(new ContextMenuItem
+                {
+                    Label = bisectLabel ?? "Bisect \u2013 mark as bad\u2026",
+                    Action = () => onBisectStart.Invoke(commit.Hash),
+                });
+            }
+            items.Add(ContextMenuItem.Separator());
+            items.Add(new ContextMenuItem { Label = "Copy SHA", Action = () => copyToClipboard?.Invoke(commit.Hash) });
+            items.Add(new ContextMenuItem { Label = "Copy commit message", Action = () => copyToClipboard?.Invoke(commit.Subject) });
+            return items;
+        });
 
         return row;
     }

@@ -283,6 +283,21 @@ public partial class Sidebar : Component
             roots.Add(stashNode);
         }
 
+        // Submodules
+        var submodules = _repo.GetSubmodules();
+        if (submodules.Count > 0)
+        {
+            var submoduleNode = new TreeNode
+            {
+                Label = "Submodules",
+                Icon = "\u29C9",
+                IconColor = GitClientColors.TextSecondary,
+                IsExpanded = false,
+                Children = submodules.Select(MakeSubmoduleLeafNode).ToList(),
+            };
+            roots.Add(submoduleNode);
+        }
+
         _treeView.Roots = roots;
     }
 
@@ -448,6 +463,32 @@ public partial class Sidebar : Component
                 new ContextMenuItem { Label = "Copy ref", Action = () => CopyToClipboard?.Invoke(stash.Ref) },
             ],
             Tag = stash,
+        };
+    }
+
+    private TreeNode MakeSubmoduleLeafNode(GitSubmodule sub)
+    {
+        var statusIcon = sub.Uninitialized ? "\u25CB" : sub.Dirty ? "\u25D2" : "\u25CF";
+        var statusColor = sub.Uninitialized ? GitClientColors.TextMuted
+            : sub.Dirty ? GitClientColors.StatusModified
+            : GitClientColors.BranchCurrent;
+
+        var tooltip = $"{sub.Path}\n{sub.Hash[..Math.Min(7, sub.Hash.Length)]}";
+        if (sub.Describe != null) tooltip += $"\n{sub.Describe}";
+        if (sub.Dirty) tooltip += "\n(modified)";
+        if (sub.Uninitialized) tooltip += "\n(not initialized)";
+
+        return new TreeNode
+        {
+            Label = sub.Path,
+            Icon = statusIcon,
+            IconColor = statusColor,
+            Tooltip = tooltip,
+            ContextMenuItems = () =>
+            [
+                new ContextMenuItem { Label = "Copy path", Action = () => CopyToClipboard?.Invoke(sub.Path) },
+                new ContextMenuItem { Label = "Copy hash", Action = () => CopyToClipboard?.Invoke(sub.Hash) },
+            ],
         };
     }
 
