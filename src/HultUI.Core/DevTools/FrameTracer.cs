@@ -12,6 +12,7 @@ namespace HultUI.Core.DevTools;
 public sealed class FrameTracer
 {
     private readonly List<TraceEvent> _events = new();
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
     private long _recordingStart;
     private int _frameCounter;
 
@@ -59,7 +60,8 @@ public sealed class FrameTracer
     {
         long tsMicros = ToMicros(startTs - _recordingStart);
         long durMicros = ToMicros(endTs - startTs);
-        var evt = new TraceEvent(category, name, detail, tsMicros, durMicros, _frameCounter);
+        int tid = Environment.CurrentManagedThreadId;
+        var evt = new TraceEvent(category, name, detail, tsMicros, durMicros, _frameCounter, tid);
         lock (_events)
             _events.Add(evt);
     }
@@ -73,18 +75,39 @@ public sealed class FrameTracer
     {
         var sb = new StringBuilder(_events.Count * 96);
         sb.Append('[');
+        AppendThreadMetadata(sb);
         for (int i = 0; i < _events.Count; i++)
         {
-            if (i > 0) sb.Append(',');
+            sb.Append(',');
             AppendEvent(sb, _events[i]);
         }
         sb.Append(']');
         File.WriteAllText(path, sb.ToString());
     }
 
+    private void AppendThreadMetadata(StringBuilder sb)
+    {
+        // Emit a thread_name metadata event per unique tid seen, so Perfetto
+        // labels the tracks as "UI", "Worker 7", etc. instead of raw ids.
+        var seen = new HashSet<int>();
+        bool first = true;
+        foreach (var e in _events)
+        {
+            if (!seen.Add(e.Tid)) continue;
+            if (!first) sb.Append(',');
+            first = false;
+            string label = e.Tid == _uiThreadId ? "UI" : $"Worker {e.Tid}";
+            sb.Append("{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":")
+                .Append(e.Tid)
+                .Append(",\"args\":{\"name\":\"")
+                .Append(label)
+                .Append("\"}}");
+        }
+    }
+
     private static void AppendEvent(StringBuilder sb, TraceEvent e)
     {
-        sb.Append("{\"ph\":\"X\",\"pid\":1,\"tid\":1,\"cat\":\"");
+        sb.Append("{\"ph\":\"X\",\"pid\":1,\"tid\":").Append(e.Tid).Append(",\"cat\":\"");
         AppendEscaped(sb, e.Category);
         sb.Append("\",\"name\":\"");
         AppendEscaped(sb, e.Name);
@@ -120,7 +143,7 @@ public sealed class FrameTracer
     }
 
     private readonly record struct TraceEvent(
-        string Category, string Name, string? Detail, long TsMicros, long DurMicros, int Frame);
+        string Category, string Name, string? Detail, long TsMicros, long DurMicros, int Frame, int Tid);
 
     private sealed class AsyncScope : IDisposable
     {
