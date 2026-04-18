@@ -1,9 +1,10 @@
 namespace GitClient.Git;
 
 /// <summary>
-/// Actions available on each commit during interactive rebase. Pick/squash/fixup/drop
-/// map 1:1 to git's own todo keywords. Reword is special: git's built-in <c>reword</c>
-/// opens <c>$GIT_EDITOR</c> for the new message, which we don't wire up — instead the
+/// Actions available on each commit during interactive rebase. Most map 1:1 to git's
+/// own todo keywords (<c>pick</c>, <c>edit</c>, <c>squash</c>, <c>fixup</c>,
+/// <c>drop</c>). Reword is special: git's built-in <c>reword</c> opens
+/// <c>$GIT_EDITOR</c> for the new message, which we don't wire up — instead the
 /// dialog collects the message up front and we emit <c>pick</c> + <c>exec git commit
 /// --amend -m …</c> to rewrite the message non-interactively.
 /// </summary>
@@ -11,6 +12,7 @@ public enum RebaseOp
 {
     Pick,
     Reword,
+    Edit,
     Squash,
     Fixup,
     Drop,
@@ -24,7 +26,8 @@ public static class RebaseOpExtensions
     public static string ToKeyword(this RebaseOp op) => op switch
     {
         RebaseOp.Pick => "pick",
-        RebaseOp.Reword => "pick",
+        RebaseOp.Reword => "pick",  // emits "pick" + "exec git commit --amend -m …"
+        RebaseOp.Edit => "edit",
         RebaseOp.Squash => "squash",
         RebaseOp.Fixup => "fixup",
         RebaseOp.Drop => "drop",

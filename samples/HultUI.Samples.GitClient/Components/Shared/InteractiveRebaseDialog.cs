@@ -74,7 +74,7 @@ public static class InteractiveRebaseDialog
         );
         content.AddChild(
             Text.New($"Rebase {state.Entries.Count} commit{(state.Entries.Count == 1 ? "" : "s")} onto {state.BaseShortHash}. "
-                   + "Reorder with \u25B2/\u25BC, click the action chip to cycle, edit the message inline for reword, then Confirm.")
+                   + "Reorder with \u25B2/\u25BC, click the action chip to cycle (pick/reword/edit/squash/fixup/drop), then Confirm.")
                 .FontSize(12f).TextColor(GitClientColors.TextSecondary)
         );
 
@@ -264,6 +264,7 @@ public static class InteractiveRebaseDialog
         {
             RebaseOp.Pick => ("pick", GitClientColors.StatusAdded),
             RebaseOp.Reword => ("reword", GitClientColors.TagColor),
+            RebaseOp.Edit => ("edit", GitClientColors.BranchCurrent),
             RebaseOp.Squash => ("squash", GitClientColors.BranchLocal),
             RebaseOp.Fixup => ("fixup", GitClientColors.BranchRemote),
             RebaseOp.Drop => ("drop", GitClientColors.StatusDeleted),
@@ -284,7 +285,7 @@ public static class InteractiveRebaseDialog
             .Cursor(CursorType.Pointer)
             .JustifyContent(JustifyContent.Center)
             .AlignItems(AlignItems.Center)
-            .Tooltip("Click to cycle: pick \u2192 reword \u2192 squash \u2192 fixup \u2192 drop")
+            .Tooltip("Click to cycle: pick \u2192 reword \u2192 edit \u2192 squash \u2192 fixup \u2192 drop")
             .Children(
                 Text.New(label).FontSize(10f).FontWeight(FontWeight.SemiBold).TextColor(color)
             );
@@ -297,7 +298,8 @@ public static class InteractiveRebaseDialog
             entry.Op = entry.Op switch
             {
                 RebaseOp.Pick => RebaseOp.Reword,
-                RebaseOp.Reword => RebaseOp.Squash,
+                RebaseOp.Reword => RebaseOp.Edit,
+                RebaseOp.Edit => RebaseOp.Squash,
                 RebaseOp.Squash => RebaseOp.Fixup,
                 RebaseOp.Fixup => RebaseOp.Drop,
                 _ => RebaseOp.Pick,

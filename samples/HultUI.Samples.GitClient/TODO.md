@@ -146,7 +146,8 @@ multi-day effort.
 - [x] Custom sequence editor via `GIT_SEQUENCE_EDITOR` env var to drive the todo list
 - [x] Keyboard-driven commit list with action cycling chip (no drag-and-drop)
 - [x] Builds on 4.3's non-interactive rebase and 4.2's conflict resolution
-- [ ] Reword / edit actions deferred — require mid-rebase `GIT_EDITOR` interception
+- [x] Reword action — inline TextArea collects new message; emits `pick` + `exec git commit --amend -m …`
+- [x] Edit action — emits native `edit` keyword; rebase pauses and existing Continue/Abort UI takes over
 - [ ] True drag-to-reorder deferred — arrow buttons cover the same ground for now
 
 ---
