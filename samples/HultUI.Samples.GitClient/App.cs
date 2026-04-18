@@ -45,6 +45,7 @@ public partial class App : Component
     private bool _remoteOpRunning;
     private ConfirmDialogState? _pendingConfirm;
     private InteractiveRebaseState? _pendingRebase;
+    private PasswordDialogState? _pendingPassword;
 
     public App(Window window, GitRepository repo)
     {
@@ -159,6 +160,9 @@ public partial class App : Component
 
         if (_pendingRebase != null)
             root.AddChild(InteractiveRebaseDialog.Build(_pendingRebase, DismissRebase));
+
+        if (_pendingPassword != null)
+            root.AddChild(PasswordDialog.Build(_pendingPassword, DismissPassword));
 
         return root;
     }
@@ -425,7 +429,13 @@ public partial class App : Component
     {
         if (e.Key != KeyCode.Escape) return;
 
-        if (_pendingRebase != null)
+        if (_pendingPassword != null)
+        {
+            _pendingPassword.OnResult(null);
+            DismissPassword();
+            e.StopPropagation = true;
+        }
+        else if (_pendingRebase != null)
         {
             DismissRebase();
             e.StopPropagation = true;
@@ -436,6 +446,35 @@ public partial class App : Component
             DismissConfirm();
             e.StopPropagation = true;
         }
+    }
+
+    /// <summary>
+    /// Callback invoked by <see cref="AskPassBridge"/> when SSH or git needs
+    /// a passphrase. Shows the password dialog and returns the user's input
+    /// via a <see cref="TaskCompletionSource{T}"/>. Runs on the monitor
+    /// thread — <see cref="MarkDirty"/> schedules a UI rebuild on the main
+    /// thread automatically.
+    /// </summary>
+    private Task<string?> HandleAskPass(string prompt)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+        _pendingPassword = new PasswordDialogState
+        {
+            Prompt = prompt,
+            OnResult = result =>
+            {
+                _pendingPassword = null;
+                tcs.TrySetResult(result);
+            },
+        };
+        MarkDirty();
+        return tcs.Task;
+    }
+
+    private void DismissPassword()
+    {
+        _pendingPassword = null;
+        MarkDirty();
     }
 
     private void DoRebaseContinue()
@@ -462,7 +501,7 @@ public partial class App : Component
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage("Fetching\u2026", isError: false);
-        var result = await _repo.FetchAsync();
+        var result = await _repo.FetchAsync(HandleAskPass);
         _remoteOpRunning = false;
         ShowResult(result, "Fetched all remotes");
         RefreshAll();
@@ -473,7 +512,7 @@ public partial class App : Component
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage("Pulling\u2026", isError: false);
-        var result = await _repo.PullAsync();
+        var result = await _repo.PullAsync(HandleAskPass);
         _remoteOpRunning = false;
         ShowResult(result, "Pulled latest changes");
         RefreshAll();
@@ -484,7 +523,7 @@ public partial class App : Component
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage("Pushing\u2026", isError: false);
-        var result = await _repo.PushAsync();
+        var result = await _repo.PushAsync(HandleAskPass);
         _remoteOpRunning = false;
         ShowResult(result, "Pushed successfully");
         RefreshAll();
@@ -503,7 +542,7 @@ public partial class App : Component
                 if (_remoteOpRunning) return;
                 _remoteOpRunning = true;
                 ShowMessage("Force pushing\u2026", isError: false);
-                var result = await _repo.ForcePushAsync();
+                var result = await _repo.ForcePushAsync(HandleAskPass);
                 _remoteOpRunning = false;
                 ShowResult(result, "Force pushed successfully");
                 RefreshAll();

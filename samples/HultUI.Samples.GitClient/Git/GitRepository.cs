@@ -368,9 +368,9 @@ public class GitRepository
         return GitProcess.Run(Path, "fetch", "--all", "--prune");
     }
 
-    public Task<GitResult> FetchAsync()
+    public Task<GitResult> FetchAsync(Func<string, Task<string?>>? askPass = null)
     {
-        return GitProcess.RunAsync(Path, "fetch", "--all", "--prune");
+        return GitProcess.RunAsync(Path, askPass, "fetch", "--all", "--prune");
     }
 
     public GitResult Pull()
@@ -378,9 +378,9 @@ public class GitRepository
         return GitProcess.Run(Path, "pull");
     }
 
-    public Task<GitResult> PullAsync()
+    public Task<GitResult> PullAsync(Func<string, Task<string?>>? askPass = null)
     {
-        return GitProcess.RunAsync(Path, "pull");
+        return GitProcess.RunAsync(Path, askPass, "pull");
     }
 
     public GitResult Push()
@@ -388,14 +388,14 @@ public class GitRepository
         return GitProcess.Run(Path, "push");
     }
 
-    public Task<GitResult> PushAsync()
+    public Task<GitResult> PushAsync(Func<string, Task<string?>>? askPass = null)
     {
-        return GitProcess.RunAsync(Path, "push");
+        return GitProcess.RunAsync(Path, askPass, "push");
     }
 
-    public Task<GitResult> ForcePushAsync()
+    public Task<GitResult> ForcePushAsync(Func<string, Task<string?>>? askPass = null)
     {
-        return GitProcess.RunAsync(Path, "push", "--force-with-lease");
+        return GitProcess.RunAsync(Path, askPass, "push", "--force-with-lease");
     }
 
     // ── Branch management ──

@@ -7,7 +7,19 @@ namespace GitClient.Git;
 /// </summary>
 public static class GitProcess
 {
-    public static async Task<GitResult> RunAsync(string workingDirectory, params string[] args)
+    public static Task<GitResult> RunAsync(string workingDirectory, params string[] args)
+        => RunAsync(workingDirectory, null, args);
+
+    /// <summary>
+    /// Runs a git command asynchronously. When <paramref name="askPassHandler"/>
+    /// is non-null, SSH/git credential prompts are routed through it instead of
+    /// the terminal. The handler receives the prompt text and should return the
+    /// passphrase, or null to cancel.
+    /// </summary>
+    public static async Task<GitResult> RunAsync(
+        string workingDirectory,
+        Func<string, Task<string?>>? askPassHandler,
+        params string[] args)
     {
         var psi = new ProcessStartInfo
         {
@@ -22,9 +34,24 @@ public static class GitProcess
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
+        using var bridge = askPassHandler != null ? new AskPassBridge() : null;
+        bridge?.ConfigureProcess(psi);
+
         using var process = Process.Start(psi)!;
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
+
+        // Close stdin immediately so SSH can't read from the terminal.
+        if (psi.RedirectStandardInput)
+            process.StandardInput.Close();
+
+        // Run output readers and askpass monitor concurrently.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        if (bridge != null && askPassHandler != null)
+            _ = bridge.MonitorAsync(process, askPassHandler);
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
         await process.WaitForExitAsync();
 
         return new GitResult(process.ExitCode, stdout, stderr);
