@@ -34,6 +34,7 @@ public partial class CommitList : Component
     private string _inputValue = "";
     private string _dateFromInput = "";
     private string _dateToInput = "";
+    private readonly Ref<VirtualListElement<GitCommit>> _virtualListRef = new();
 
     private bool HasServerFilters =>
         _pathFilter != null || _authorFilter != null || _dateFrom != null || _dateTo != null;
@@ -133,6 +134,7 @@ public partial class CommitList : Component
                         OnBisectStart,
                         BisectLabel))
                     .FlexGrow(1)
+                    .WithRef(_virtualListRef)
         );
 
         return Flex.Column(gap: 0).FlexGrow(1).Background(GitClientColors.Background)
@@ -607,4 +609,13 @@ public partial class CommitList : Component
     }
 
     private enum FilterInputKind { None, Path, Author, Date }
+
+    public void ScrollTo(string hash)
+    {
+        var index = _commits.FindIndex(x => x.Hash == hash);
+        if (index == -1 || _virtualListRef.Current is not { } vl) return;
+        vl.ScrollOffsetY = index * vl.ItemHeight;
+        vl.MarkLayoutDirty();
+        vl.MarkPaintDirty();
+    }
 }

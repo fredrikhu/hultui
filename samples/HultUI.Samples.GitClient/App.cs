@@ -232,6 +232,7 @@ public partial class App : Component
         var commit = _repo.GetCommit(hash);
         if (commit == null) return;
         _commitList.SelectedCommitHash = hash;
+        _commitList.ScrollTo(hash);
 
         // Bias the file pre-selection to the file whose history we're viewing, if any.
         _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
