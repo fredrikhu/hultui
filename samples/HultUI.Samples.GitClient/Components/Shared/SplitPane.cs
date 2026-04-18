@@ -21,6 +21,7 @@ namespace GitClient.Components.Shared;
 public class SplitPane
 {
     private readonly bool _horizontal;
+    private readonly string _key;
     private float _splitRatio;
     private bool _dragging;
 
@@ -31,12 +32,19 @@ public class SplitPane
     {
         _horizontal = horizontal;
         _splitRatio = initialRatio;
+        // Unique key prevents the reconciler from patching one SplitPane's
+        // container over another's when they swap positions in the tree.
+        // Without this, handlers from the first SplitPane persist on the
+        // live element, causing axis mismatches (e.g. a vertical split's
+        // Y-axis handler on a horizontal split's container).
+        _key = $"split-{Guid.NewGuid():N}";
     }
 
     public Element Build(Element first, Element second)
     {
         var direction = _horizontal ? FlexDirection.Row : FlexDirection.Column;
         var container = Box.New();
+        container.Key = _key;
         container.Flex.Direction = direction;
         container.Flex.FlexGrow = 1;
 
