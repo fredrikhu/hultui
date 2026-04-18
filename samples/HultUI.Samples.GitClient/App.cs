@@ -583,9 +583,12 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage($"Pushing to {remote}/{branch}\u2026", isError: false);
         var result = await _repo.PushToAsync(remote, branch, HandleAskPass);
-        _remoteOpRunning = false;
-        ShowResult(result, $"Pushed to {remote}/{branch}");
-        RefreshAll();
+        Application.InvokeOnMainThread(() =>
+        {
+            _remoteOpRunning = false;
+            ShowResult(result, $"Pushed to {remote}/{branch}");
+            RefreshAll();
+        });
     }
 
     private async void DoPullFrom(string remote, string branch)
@@ -594,9 +597,12 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage($"Pulling from {remote}/{branch}\u2026", isError: false);
         var result = await _repo.PullFromAsync(remote, branch, HandleAskPass);
-        _remoteOpRunning = false;
-        ShowResult(result, $"Pulled from {remote}/{branch}");
-        RefreshAll();
+        Application.InvokeOnMainThread(() =>
+        {
+            _remoteOpRunning = false;
+            ShowResult(result, $"Pulled from {remote}/{branch}");
+            RefreshAll();
+        });
     }
 
     // ── Bisect ──
@@ -720,9 +726,12 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage("Fetching\u2026", isError: false);
         var result = await _repo.FetchAsync(HandleAskPass);
-        _remoteOpRunning = false;
-        ShowResult(result, "Fetched all remotes");
-        RefreshAll();
+        Application.InvokeOnMainThread(() =>
+        {
+            _remoteOpRunning = false;
+            ShowResult(result, "Fetched all remotes");
+            RefreshAll();
+        });
     }
 
     private async void DoPull()
@@ -731,9 +740,12 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage("Pulling\u2026", isError: false);
         var result = await _repo.PullAsync(HandleAskPass);
-        _remoteOpRunning = false;
-        ShowResult(result, "Pulled latest changes");
-        RefreshAll();
+        Application.InvokeOnMainThread(() =>
+        {
+            _remoteOpRunning = false;
+            ShowResult(result, "Pulled latest changes");
+            RefreshAll();
+        });
     }
 
     private async void DoPush()
@@ -742,9 +754,12 @@ public partial class App : Component
         _remoteOpRunning = true;
         ShowMessage("Pushing\u2026", isError: false);
         var result = await _repo.PushAsync(HandleAskPass);
-        _remoteOpRunning = false;
-        ShowResult(result, "Pushed successfully");
-        RefreshAll();
+        Application.InvokeOnMainThread(() =>
+        {
+            _remoteOpRunning = false;
+            ShowResult(result, "Pushed successfully");
+            RefreshAll();
+        });
     }
 
     private void DoForcePush()
@@ -761,9 +776,12 @@ public partial class App : Component
                 _remoteOpRunning = true;
                 ShowMessage("Force pushing\u2026", isError: false);
                 var result = await _repo.ForcePushAsync(HandleAskPass);
-                _remoteOpRunning = false;
-                ShowResult(result, "Force pushed successfully");
-                RefreshAll();
+                Application.InvokeOnMainThread(() =>
+                {
+                    _remoteOpRunning = false;
+                    ShowResult(result, "Force pushed successfully");
+                    RefreshAll();
+                });
             },
         });
     }
