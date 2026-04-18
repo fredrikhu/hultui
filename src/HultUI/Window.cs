@@ -18,6 +18,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private readonly FocusManager _focusManager = new();
     private readonly PointerState _pointerState = new();
     private readonly PerformanceCounters _perf = new();
+    private readonly FrameTracer _tracer = new();
     private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Element? _lastHoveredElement;
@@ -59,6 +60,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
     public IClipboard Clipboard { get; }
     public PerformanceCounters Performance => _perf;
+    public FrameTracer Tracer => _tracer;
     public DevToolsOverlay DevTools => _devTools;
     public bool IsOpen => PlatformWindow.IsOpen && !_disposed;
     public WindowStyle Style => PlatformWindow.Style;
@@ -81,7 +83,7 @@ public sealed class Window : IOverlayHost, IDisposable
     {
         Application = application;
         PlatformWindow = platformWindow;
-        _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext);
+        _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext, _tracer);
         Clipboard = new SDL3Clipboard(platformWindow);
         _devTools = new DevToolsOverlay(_perf);
         PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
@@ -128,28 +130,40 @@ public sealed class Window : IOverlayHost, IDisposable
     {
         if (_root is null) return;
 
+        _tracer.MarkFrame();
+        using var _frameTrace = _tracer.Begin("Frame", "Frame");
+
         var theme = Application.Theme;
 
         // Style resolution (only if any element has style changes)
         _perf.BeginStyle();
-        if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
+        using (_tracer.Begin("Phase", "Style"))
         {
-            StyleResolver.Resolve(_root, theme);
-            ClearFlags(_root, DirtyFlags.Style);
+            if (_root.DirtyFlags.HasFlag(DirtyFlags.Style))
+            {
+                StyleResolver.Resolve(_root, theme);
+                ClearFlags(_root, DirtyFlags.Style);
+            }
         }
         _perf.EndStyle();
 
         // Layout (only if any element has layout changes)
         _perf.BeginLayout();
-        if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
-            _layoutEngine.PerformLayout(_root, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+        using (_tracer.Begin("Phase", "Layout"))
+        {
+            if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
+                _layoutEngine.PerformLayout(_root, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+        }
         _perf.EndLayout();
 
         // Render (user content only — DevTools excluded from timing)
         var ctx = PlatformWindow.Surface.RenderContext;
         ctx.BeginFrame(PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, PlatformWindow.ScaleFactor, theme.Background);
         _perf.BeginRender();
-        ElementRenderer.RenderTree(_root, ctx);
+        using (_tracer.Begin("Phase", "Render"))
+        {
+            ElementRenderer.RenderTree(_root, ctx, _tracer);
+        }
         _perf.EndRender();
 
         // Drag ghost overlay
@@ -172,8 +186,11 @@ public sealed class Window : IOverlayHost, IDisposable
 
         // Present + swap
         _perf.BeginPresent();
-        PlatformWindow.Surface.Present();
-        PlatformWindow.SwapBuffers();
+        using (_tracer.Begin("Phase", "Present"))
+        {
+            PlatformWindow.Surface.Present();
+            PlatformWindow.SwapBuffers();
+        }
         _perf.EndPresent();
     }
 
@@ -389,6 +406,14 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (!_devTools.IsEnabled)
                         _devTools.HoveredElement = null;
                     break;
+                }
+
+                if (key.IsDown && key.KeyCode == KeyCode.F11)
+                {
+                    if (!Tracer.IsRecording)
+                        Tracer.StartRecording();
+                    else
+                        Tracer.StopRecording("/tmp/hultui-trace.json");
                 }
 
                 // Context menu keyboard navigation

@@ -1,3 +1,4 @@
+using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 
@@ -8,13 +9,18 @@ namespace HultUI.Core.Rendering;
 
 public static class ElementRenderer
 {
-    public static void RenderTree(Element root, IRenderContext ctx)
+    public static void RenderTree(Element root, IRenderContext ctx, FrameTracer? tracer = null)
     {
-        RenderElement(root, ctx);
+        RenderElement(root, ctx, tracer);
     }
 
-    private static void RenderElement(Element element, IRenderContext ctx)
+    private static void RenderElement(Element element, IRenderContext ctx, FrameTracer? tracer)
     {
+        using var _trace = tracer is null
+            ? default
+            : tracer.Begin("Render", element.GetType().Name, element.Key ?? element.Name);
+
+
         bool hasOpacity = element.Opacity < 1f;
         if (hasOpacity)
             ctx.PushOpacity(element.Opacity);
@@ -33,7 +39,7 @@ public static class ElementRenderer
 
             var scrollChildren = ZOrderHelper.GetChildrenInZOrder(element);
             for (int i = 0; i < scrollChildren.Count; i++)
-                RenderElement(scrollChildren[i], ctx);
+                RenderElement(scrollChildren[i], ctx, tracer);
 
             ctx.Pop(); // translate
             ctx.Pop(); // clip
@@ -56,7 +62,7 @@ public static class ElementRenderer
         // Render children in z-order
         var children = ZOrderHelper.GetChildrenInZOrder(element);
         for (int i = 0; i < children.Count; i++)
-            RenderElement(children[i], ctx);
+            RenderElement(children[i], ctx, tracer);
 
         if (needsClip)
             ctx.Pop();

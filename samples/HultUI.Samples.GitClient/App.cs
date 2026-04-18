@@ -745,7 +745,13 @@ public partial class App : Component
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage("Pulling\u2026", isError: false);
-        var result = await _repo.PullAsync(HandleAskPass);
+        GitResult result = null!;
+
+        using (_window.Tracer.BeginAsync("Git", "Pull"))
+        {
+            result = await _repo.PullAsync(HandleAskPass);
+        }
+        
         Application.InvokeOnMainThread(() =>
         {
             _remoteOpRunning = false;

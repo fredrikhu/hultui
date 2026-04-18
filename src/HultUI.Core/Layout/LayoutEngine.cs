@@ -1,4 +1,5 @@
 using System.Buffers;
+using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -8,10 +9,12 @@ namespace HultUI.Core.Layout;
 public sealed class LayoutEngine
 {
     private readonly IMeasureContext _measureContext;
+    private readonly FrameTracer? _tracer;
 
-    public LayoutEngine(IMeasureContext measureContext)
+    public LayoutEngine(IMeasureContext measureContext, FrameTracer? tracer = null)
     {
         _measureContext = measureContext;
+        _tracer = tracer;
     }
 
     public void PerformLayout(Element root, float availableWidth, float availableHeight, bool forceRootFill = true)
@@ -30,6 +33,10 @@ public sealed class LayoutEngine
     private Size ComputeLayout(Element element, LayoutConstraint constraint, float absoluteX, float absoluteY,
         float? forcedWidth = null, float? forcedHeight = null)
     {
+        using var _trace = _tracer is null
+            ? default
+            : _tracer.Begin("Layout", element.GetType().Name, element.Key ?? element.Name);
+
         // Skip clean subtrees when constraints haven't changed.
         // The forced-dimension check also accepts the case where Phase 1 of an
         // ancestor's LayoutFlexChildren computed this element with forced=null
