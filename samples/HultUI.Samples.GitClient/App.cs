@@ -35,6 +35,7 @@ public partial class App : Component
     private readonly SplitPane _sidebarSplit;
     private readonly SplitPane _mainSplit;
     private readonly SplitPane _workingCopySplit;
+    private readonly GitWatcher _watcher;
 
     // State
     [Reactive] public partial bool ShowWorkingCopy { get; set; }
@@ -92,6 +93,11 @@ public partial class App : Component
         // OnMount() won't fire (SetRoot bypasses AddChild), so wire it here
         // — calling Mount() from the constructor materialises the Host.
         Mount().On<KeyDownEvent>(HandleRootKeyDown);
+
+        // Watch the repo for external changes (other editors, terminal git
+        // commands). The debounced callback fires RefreshAll on the UI thread
+        // via MarkDirty().
+        _watcher = new GitWatcher(repo.Path, RefreshAll);
     }
 
 

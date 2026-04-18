@@ -156,7 +156,7 @@ multi-day effort.
 
 Don't start until Phase 4 is at a stopping point.
 
-- [ ] Auto-refresh via filesystem watcher on `.git/HEAD`, `.git/index`, working tree
+- [x] Auto-refresh via filesystem watcher on `.git/HEAD`, `.git/index`, working tree
 - [ ] Keyboard shortcuts surfaced in a "?" overlay (Ctrl+P for branches, Ctrl+L for log filter, etc.)
 - [ ] Push-to / pull-from specific remote+branch dialog
 - [ ] Submodules sub-tree in Sidebar
