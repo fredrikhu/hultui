@@ -419,6 +419,22 @@ public sealed class LayoutEngine
     private Size MeasureSize(Element element, LayoutConstraint constraint,
         float? forcedWidth = null, float? forcedHeight = null)
     {
+        // Cache hit: each ancestor's Phase 1 re-measures this element with
+        // identical (constraint, forced) inputs, so the result is reusable
+        // both within a pass and across frames. CacheMeasureValid is cleared
+        // by MarkLayoutDirty (which propagates up from any changed descendant),
+        // so a hit here means the cached size is still authoritative — no need
+        // to consult DirtyFlags.Layout (that flag belongs to ComputeLayout's
+        // cache, which gates whether descendant positions need re-writing).
+        if (element.CacheMeasureValid
+            && element.CacheMeasureConstraintW == constraint.AvailableWidth
+            && element.CacheMeasureConstraintH == constraint.AvailableHeight
+            && element.CacheMeasureForcedW == forcedWidth
+            && element.CacheMeasureForcedH == forcedHeight)
+        {
+            return element.CacheMeasureResult;
+        }
+
         using var _trace = _tracer is null
             ? default
             : _tracer.Begin("Measure", element.GetType().Name, element.Key ?? element.Name);
@@ -464,7 +480,21 @@ public sealed class LayoutEngine
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
 
-        return new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+        var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+
+        element.CacheMeasureConstraintW = constraint.AvailableWidth;
+        element.CacheMeasureConstraintH = constraint.AvailableHeight;
+        element.CacheMeasureForcedW = forcedWidth;
+        element.CacheMeasureForcedH = forcedHeight;
+        element.CacheMeasureResult = resultSize;
+        element.CacheMeasureValid = true;
+
+        // Do NOT clear DirtyFlags.Layout here — it belongs to ComputeLayout,
+        // which uses it to decide whether to re-lay out descendant positions.
+        // Clearing it here would let Phase 6's cache hit on stale child
+        // positions when the subtree was reconciled with new elements.
+
+        return resultSize;
     }
 
     /// <summary>

@@ -168,6 +168,18 @@ public abstract class Element
     internal float? CacheForcedH;
     internal Size CacheResultSize;
 
+    // ──── Measure cache (Phase 1 sizing without writing Layout) ────
+    // Each ancestor's flex Phase 1 calls MeasureSize on this element. Without
+    // this cache, that's O(depth) measure passes per frame — see LayoutEngine
+    // for the full rationale. CacheMeasureValid distinguishes "never cached"
+    // from "cached size happens to be (0,0)".
+    internal bool CacheMeasureValid;
+    internal float CacheMeasureConstraintW;
+    internal float CacheMeasureConstraintH;
+    internal float? CacheMeasureForcedW;
+    internal float? CacheMeasureForcedH;
+    internal Size CacheMeasureResult;
+
     /// <summary>
     /// Marks this element (and ancestors up to root) as needing layout on the next frame.
     /// Call this after directly mutating <see cref="Flex"/>, <see cref="Box"/>, or
@@ -185,6 +197,12 @@ public abstract class Element
             if ((current.DirtyFlags & DirtyFlags.Layout) != 0)
                 break;
             current.DirtyFlags |= DirtyFlags.Layout;
+            // Invalidate the cached MeasureSize result for this element and
+            // every ancestor: the changed subtree may produce a different
+            // outer size at the next Phase 1 cascade. The layout cache
+            // (CacheConstraintW/H/...) is gated by DirtyFlags.Layout, so it's
+            // already invalidated implicitly.
+            current.CacheMeasureValid = false;
             current = current.Parent;
         }
     }
