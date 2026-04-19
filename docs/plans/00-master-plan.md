@@ -7,6 +7,12 @@ Execution plan for addressing feedback from the Git client sample
 
 > **All plans complete.**
 
+## Phase 5 — Layout
+
+| # | Plan | Status |
+|---|------|--------|
+| 9 | [Grid layout (CSS-Grid subset)](09-grid-layout.md) | Done |
+
 ## Phase 1 — Trivial Fluent API Additions
 
 No design decisions needed. Straightforward additions to `ElementExtensions.cs`.

@@ -7,5 +7,4 @@
 
 ## Deferred
 - IME composition / candidate list support (basic text input works, full CJK composition later)
-- Momentum / fling scrolling on ScrollView
 - Platform accessibility bridges (AT-SPI2, UIAutomation, NSAccessibility)

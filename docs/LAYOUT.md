@@ -5,6 +5,10 @@ control layout: `Box` (sizing, spacing, overflow), `Flex` (direction, alignment,
 grow/shrink), and `Position` (absolute positioning). Builder extension methods
 provide a fluent API on top of these.
 
+> For tabular layouts where cells in different rows must align to the same
+> column boundaries (data grids, property inspectors, settings forms), see
+> [`GRID.md`](GRID.md).
+
 ```csharp
 using HultUI.Core.Builders;    // Flex, Box, Text, ElementExtensions
 using HultUI.Core.Layout;      // FlexDirection, JustifyContent, AlignItems, AlignSelf,

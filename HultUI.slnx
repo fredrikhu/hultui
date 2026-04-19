@@ -12,6 +12,7 @@
     <Project Path="samples/HultUI.Samples.CustomChrome/HultUI.Samples.CustomChrome.csproj" />
     <Project Path="samples/HultUI.Samples.VirtualList/HultUI.Samples.VirtualList.csproj" />
     <Project Path="samples/HultUI.Samples.GitClient/HultUI.Samples.GitClient.csproj" />
+    <Project Path="samples/HultUI.Samples.Grid/HultUI.Samples.Grid.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />

@@ -33,8 +33,8 @@ public static class ElementExtensions
     public static T FlexBasis<T>(this T el, Dimension basis) where T : Element { el.Flex.FlexBasis = basis; return el; }
     public static T Gap<T>(this T el, float gap) where T : Element { el.Flex.Gap = gap; return el; }
     public static T JustifyContent<T>(this T el, JustifyContent jc) where T : Element { el.Flex.JustifyContent = jc; return el; }
-    public static T AlignItems<T>(this T el, AlignItems ai) where T : Element { el.Flex.AlignItems = ai; return el; }
-    public static T AlignSelf<T>(this T el, AlignSelf a) where T : Element { el.Flex.AlignSelf = a; return el; }
+    public static T AlignItems<T>(this T el, AlignItems ai) where T : Element { el.Flex.AlignItems = ai; el.Grid.AlignItems = ai; return el; }
+    public static T AlignSelf<T>(this T el, AlignSelf a) where T : Element { el.Flex.AlignSelf = a; el.GridItem.AlignSelf = a; return el; }
     public static T AlignContent<T>(this T el, AlignContent ac) where T : Element { el.Flex.AlignContent = ac; return el; }
 
     // ──── Box visual properties ────
@@ -109,6 +109,17 @@ public static class ElementExtensions
     public static T OnDragOver<T>(this T el, Action<DragOverEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDrop<T>(this T el, Action<DropEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragEnd<T>(this T el, Action<DragEndEvent> handler) where T : Element { el.On(handler); return el; }
+
+    // ──── Grid container ────
+    public static T RowGap<T>(this T el, float gap) where T : Element { el.Grid.RowGap = gap; el.Flex.RowGap = gap; return el; }
+    public static T ColumnGap<T>(this T el, float gap) where T : Element { el.Grid.ColumnGap = gap; el.Flex.ColumnGap = gap; return el; }
+    public static T JustifyItems<T>(this T el, JustifyItems items) where T : Element { el.Grid.JustifyItems = items; return el; }
+
+    // ──── Grid item placement ────
+    public static T GridRow<T>(this T el, int row) where T : Element { el.GridItem.Row = row; return el; }
+    public static T GridColumn<T>(this T el, int col) where T : Element { el.GridItem.Column = col; return el; }
+    public static T GridCell<T>(this T el, int row, int col) where T : Element { el.GridItem.Row = row; el.GridItem.Column = col; return el; }
+    public static T JustifySelf<T>(this T el, JustifySelf self) where T : Element { el.GridItem.JustifySelf = self; return el; }
 
     // ──── VirtualList properties ────
     public static VirtualListElement<T> ItemHeight<T>(this VirtualListElement<T> el, float height) { el.ItemHeight = height; return el; }

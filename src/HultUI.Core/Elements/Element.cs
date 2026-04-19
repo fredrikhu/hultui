@@ -24,6 +24,8 @@ public abstract class Element
     public FlexStyle Flex { get; } = new();
     public BoxStyle Box { get; } = new();
     public PositionStyle Position { get; } = new();
+    public GridStyle Grid { get; } = new();
+    public GridItemStyle GridItem { get; } = new();
 
     // ──── Layout output ────
     public LayoutResult Layout { get; internal set; }
@@ -359,6 +361,8 @@ public abstract class Element
         Flex.CopyFrom(source.Flex);
         Box.CopyFrom(source.Box);
         Position.CopyFrom(source.Position);
+        Grid.CopyFrom(source.Grid);
+        GridItem.CopyFrom(source.GridItem);
         Inherited.CopyFrom(source.Inherited);
         IsFocusable = source.IsFocusable;
         Draggable = source.Draggable;

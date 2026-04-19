@@ -6,7 +6,7 @@ using HultUI.Core.Rendering;
 
 namespace HultUI.Core.Layout;
 
-public sealed class LayoutEngine
+public sealed partial class LayoutEngine
 {
     private readonly IMeasureContext _measureContext;
     private readonly FrameTracer? _tracer;
@@ -87,6 +87,12 @@ public sealed class LayoutEngine
         if (!hasFlow)
         {
             contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
+        }
+        else if (element.Grid.HasTemplate)
+        {
+            contentSize = LayoutGridChildren(element, children, contentAvailW, contentAvailH,
+                contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
+                contentAbsY: absoluteY + outerSpacing.Top + margin.Top);
         }
         else
         {
@@ -466,6 +472,10 @@ public sealed class LayoutEngine
         if (!hasFlow)
         {
             contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
+        }
+        else if (element.Grid.HasTemplate)
+        {
+            contentSize = MeasureGridChildrenSize(element, children, contentAvailW, contentAvailH);
         }
         else
         {
