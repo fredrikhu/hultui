@@ -17,16 +17,23 @@ var labelColor = Color.FromHex("#475569");
 var hintColor = Color.FromHex("#94A3B8");
 var headerColor = Color.FromHex("#1E293B");
 
-var root = Flex.Column(gap: 24).Padding(24).Background(bg).Children(
+var root = Flex.Column().Background(bg).Children(
 
-    Text.New("HultUI Grid Layout").FontSize(24).FontWeight(FontWeight.Bold)
-        .TextColor(headerColor),
-    Text.New("Three layouts that flex can't do cleanly").FontSize(13)
-        .TextColor(hintColor),
+    // Header strip stays pinned; panels scroll below it
+    Flex.Column(gap: 4).Padding(new Thickness(24, 24, 8, 24)).FlexShrink(0).Children(
+        Text.New("HultUI Grid Layout").FontSize(24).FontWeight(FontWeight.Bold)
+            .TextColor(headerColor),
+        Text.New("Three layouts that flex can't do cleanly").FontSize(13)
+            .TextColor(hintColor)
+    ),
 
-    BuildPropertyInspector(),
-    BuildSettingsDialog(),
-    BuildTabularData()
+    ScrollView.New().FlexGrow(1).Padding(new Thickness(0, 24, 24, 24)).Children(
+        Flex.Column(gap: 24).Children(
+            BuildPropertyInspector(),
+            BuildSettingsDialog(),
+            BuildTabularData()
+        )
+    )
 );
 
 using var app = new Application("HultUI Grid Demo", 820, 720);
@@ -135,7 +142,11 @@ Element BuildTabularData()
 // ──── Helpers ────
 
 Element Panel(string title, Element body) =>
-    Flex.Column(gap: 12).Padding(20).Background(panelBg)
+    // FlexShrink(0): panels keep their natural height; the outer ScrollView
+    // handles the case where the window can't fit everything. Without this,
+    // the flex parent would shrink each panel and grid auto-rows (which match
+    // CSS Grid by NOT shrinking) would overflow the panel border.
+    Flex.Column(gap: 12).Padding(20).FlexShrink(0).Background(panelBg)
         .BorderColor(border).BorderWidth(1f).CornerRadius(8f)
         .Children(
             Text.New(title).FontSize(16).FontWeight(FontWeight.SemiBold)
@@ -150,6 +161,7 @@ Element Label(string text, int row, int col) =>
 TextInputElement Input(string placeholder, int row, int col) =>
     TextInput.New().GridCell(row, col)
         .PlaceholderText(placeholder)
+        .Height(32)
         .Background(panelBg).BorderColor(border).BorderWidth(1f).CornerRadius(4f)
         .Padding(new Thickness(6, 10));
 

@@ -202,6 +202,24 @@ fixed row schema — virtualization and `auto` rows are fundamentally
 incompatible (you cannot know max-content height without measuring every
 row).
 
+### Auto tracks don't shrink
+
+`auto` tracks are sized to their cell content and **do not shrink** when the
+grid container is forced smaller than its natural size (e.g. by a flex
+parent's shrink distribution). This matches CSS Grid (`auto` ≈ `minmax(auto, auto)`,
+not `minmax(0, auto)`).
+
+In practice: if a grid sits inside a flex container with content that doesn't
+fit, the grid will overflow rather than compress. Two common fixes:
+
+```csharp
+// 1. Tell flex not to shrink the grid container
+panelContainingGrid.FlexShrink(0);
+
+// 2. Or wrap the area in a ScrollView so overflow scrolls
+ScrollView.New().FlexGrow(1).Children(myGrid)
+```
+
 ---
 
 ## 8. Not Yet Supported
