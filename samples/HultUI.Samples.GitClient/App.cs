@@ -108,7 +108,7 @@ public partial class App : Component
 
     private void OnCommitHashSelected(string hash)
     {
-        OnCommitSelected(hash);
+        OnCommitSelected(hash, scrollToCommit: false);
     }
 
     private void OnFileHistoryRequested(string filePath)
@@ -223,7 +223,7 @@ public partial class App : Component
 
     // ── Event handlers ──
 
-    private void OnCommitSelected(string hash)
+    private void OnCommitSelected(string hash, bool scrollToCommit)
     {
         ShowWorkingCopy = false;
         _sidebar.WorkingCopyActive = false;
@@ -232,7 +232,8 @@ public partial class App : Component
         var commit = _repo.GetCommit(hash);
         if (commit == null) return;
         _commitList.SelectedCommitHash = hash;
-        _commitList.ScrollTo(hash);
+        if (scrollToCommit)
+            _commitList.ScrollTo(hash);
 
         // Bias the file pre-selection to the file whose history we're viewing, if any.
         _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
@@ -249,7 +250,7 @@ public partial class App : Component
 
     private void OnBranchSelected(string hash)
     {
-        OnCommitSelected(hash);
+        OnCommitSelected(hash, scrollToCommit: true);
     }
 
     private void OnBranchChanged(string branchName)
