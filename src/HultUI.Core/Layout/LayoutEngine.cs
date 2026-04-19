@@ -364,6 +364,13 @@ public sealed class LayoutEngine
             // explicit-basis case used to assign basisOrSize (border-box), which
             // caused flex distribution to under-count sibling margins and Phase 6
             // to double-count them when forcing the dimension.
+            // Phase 1 must measure WITHOUT writing element.Layout or polluting
+            // the layout cache. Phase 6 will then call ComputeLayout with the
+            // flex-resolved size, which is the single authoritative layout pass.
+            // Calling ComputeLayout here would write a cache entry keyed on
+            // forcedWidth=null (or basis), which Phase 6's call with the resolved
+            // size would always miss — causing the entire subtree to be laid out
+            // twice at every container level (exponential cascade with depth).
             Size measured;
             if (child.Children.Count == 0)
             {
@@ -382,14 +389,14 @@ public sealed class LayoutEngine
                     : new LayoutConstraint(crossAvailable, mainAvailable);
                 float? fw = isRow ? (float?)basisOrSize : null;
                 float? fh = isRow ? null : (float?)basisOrSize;
-                measured = ComputeLayout(child, childConstraint, 0, 0, forcedWidth: fw, forcedHeight: fh);
+                measured = MeasureSize(child, childConstraint, fw, fh);
             }
             else
             {
                 var childConstraint = isRow
                     ? new LayoutConstraint(mainAvailable, crossAvailable)
                     : new LayoutConstraint(crossAvailable, mainAvailable);
-                measured = ComputeLayout(child, childConstraint, 0, 0);
+                measured = MeasureSize(child, childConstraint);
             }
 
             hypotheticalMain = isRow ? measured.Width : measured.Height;
@@ -399,6 +406,125 @@ public sealed class LayoutEngine
         }
 
         return (array, count);
+    }
+
+    /// <summary>
+    /// Container counterpart to <see cref="MeasureLeafSize"/>. Returns the outer
+    /// (margin-box) size of an element subtree without writing element.Layout or
+    /// updating the layout cache. Recurses through children via
+    /// <see cref="MeasureFlexChildrenSize"/>, which routes back into this method
+    /// (and <see cref="MeasureLeafSize"/> for leaves), keeping the entire Phase 1
+    /// measurement in a write-free subgraph.
+    /// </summary>
+    private Size MeasureSize(Element element, LayoutConstraint constraint,
+        float? forcedWidth = null, float? forcedHeight = null)
+    {
+        using var _trace = _tracer is null
+            ? default
+            : _tracer.Begin("Measure", element.GetType().Name, element.Key ?? element.Name);
+
+        var box = element.Box;
+        var outerSpacing = box.Padding + box.BorderWidth;
+        var margin = box.Margin;
+
+        var resolvedW = forcedWidth ?? box.Width.Resolve(constraint.AvailableWidth);
+        var resolvedH = forcedHeight ?? box.Height.Resolve(constraint.AvailableHeight);
+
+        var contentAvailW = (resolvedW ?? constraint.AvailableWidth) - outerSpacing.Horizontal;
+        var contentAvailH = (resolvedH ?? constraint.AvailableHeight) - outerSpacing.Vertical;
+        contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
+        contentAvailH = float.IsNegative(contentAvailH) ? 0 : contentAvailH;
+
+        var children = element.Children;
+        bool hasFlow = false;
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (children[i].Position.Type != PositionType.Absolute)
+            {
+                hasFlow = true;
+                break;
+            }
+        }
+
+        Size contentSize;
+        if (!hasFlow)
+        {
+            contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
+        }
+        else
+        {
+            bool hasDefiniteCross = (element.Flex.Direction is FlexDirection.Row or FlexDirection.RowReverse)
+                ? resolvedH != null
+                : resolvedW != null;
+            contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH, hasDefiniteCross);
+        }
+
+        var finalW = resolvedW ?? (contentSize.Width + outerSpacing.Horizontal);
+        var finalH = resolvedH ?? (contentSize.Height + outerSpacing.Vertical);
+        finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
+        finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
+
+        return new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+    }
+
+    /// <summary>
+    /// Measure-only mirror of <see cref="LayoutFlexChildren"/>. Runs Phases 1-4
+    /// (measure items, collect lines, resolve grow/shrink, compute line cross
+    /// sizes) and returns the resulting content (border-box) size. Skips Phase 6
+    /// positioning entirely — descendants are not written.
+    /// </summary>
+    private Size MeasureFlexChildrenSize(Element container, IReadOnlyList<Element> children,
+        float contentAvailW, float contentAvailH, bool hasDefiniteCross)
+    {
+        var flex = container.Flex;
+        bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+        bool isWrap = flex.Wrap is not FlexWrap.NoWrap;
+
+        float mainAvailable = isRow ? contentAvailW : contentAvailH;
+        float crossAvailable = isRow ? contentAvailH : contentAvailW;
+        float mainGap = isRow ? flex.ResolvedColumnGap : flex.ResolvedRowGap;
+        float crossGap = isRow ? flex.ResolvedRowGap : flex.ResolvedColumnGap;
+
+        bool scrollOnMain = isRow
+            ? container.Box.OverflowX == Overflow.Scroll
+            : container.Box.OverflowY == Overflow.Scroll;
+        float mainDistribute = scrollOnMain ? float.MaxValue / 2 : mainAvailable;
+
+        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
+        try
+        {
+            var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
+
+            foreach (var line in lines)
+                ResolveFlexGrowShrink(line, mainDistribute, mainGap);
+
+            ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
+
+            float totalMain = 0;
+            float totalCross = 0;
+            for (int li = 0; li < lines.Count; li++)
+            {
+                var line = lines[li];
+                totalCross += line.CrossSize;
+                if (li > 0) totalCross += crossGap;
+
+                float lineMain = 0;
+                for (int i = 0; i < line.Items.Count; i++)
+                {
+                    lineMain += line.Items[i].MainSize;
+                    if (i > 0) lineMain += mainGap;
+                }
+                if (lineMain > totalMain) totalMain = lineMain;
+            }
+
+            return isRow
+                ? new Size(totalMain, totalCross)
+                : new Size(totalCross, totalMain);
+        }
+        finally
+        {
+            ArrayPool<FlexItem>.Shared.Return(itemsArray, clearArray: true);
+        }
     }
 
     /// <summary>
