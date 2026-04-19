@@ -30,6 +30,24 @@ public partial class StagingArea : Component
     private bool _selectedIsConflict;
     private bool _canStash;
 
+    // Folder-expansion state for the tree-rendered file sections. Keyed by
+    // "{section}:{fullPath}" where section is "u" (unstaged), "s" (staged), "c"
+    // (conflict) — the same folder can appear in multiple sections when files
+    // are partially staged, so they need independent expand state.
+    private readonly Dictionary<string, bool> _expanded = new();
+
+    private const int IndentPx = 14;
+    private const int ChevronWidth = 14;
+
+    private bool IsExpanded(string section, string fullPath) =>
+        !_expanded.TryGetValue($"{section}:{fullPath}", out var v) || v;
+
+    private void ToggleExpanded(string section, string fullPath)
+    {
+        _expanded[$"{section}:{fullPath}"] = !IsExpanded(section, fullPath);
+        Refresh();
+    }
+
     public Action? OnCommitted { get; set; }
 
     /// <summary>
@@ -148,75 +166,114 @@ public partial class StagingArea : Component
             );
 
         var fileList = Flex.Column(gap: 0);
-        var rows = new Element[conflicted.Count];
-        for (int i = 0; i < conflicted.Count; i++)
-        {
-            var file = conflicted[i];
-            var isSelected = file.Path == _selectedPath && _selectedIsConflict;
-
-            var row = Flex.Row(gap: 6)
-                .FlexShrink(0)
-                .Padding(new Thickness(4, 8, 4, 24))
-                .AlignItems(AlignItems.Center)
-                .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
-                .Cursor(CursorType.Pointer);
-            row.Key = $"conflict-{file.Path}";
-
-            row.AddChild(Badge.FileStatus(file.Kind));
-            row.AddChild(
-                Text.New(Path.GetFileName(file.Path)).FontSize(12f)
-                    .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
-                    .FlexGrow(1)
-                    .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
-                    .Tooltip(file.Path)
-            );
-
-            // "Use Ours" button
-            var oursBtn = ConflictActionButton("Ours", "Use current branch version", () =>
-            {
-                var result = _repo.CheckoutOurs(file.Path);
-                if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
-                Refresh();
-            });
-            row.AddChild(oursBtn);
-
-            // "Use Theirs" button
-            var theirsBtn = ConflictActionButton("Theirs", "Use incoming branch version", () =>
-            {
-                var result = _repo.CheckoutTheirs(file.Path);
-                if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
-                Refresh();
-            });
-            row.AddChild(theirsBtn);
-
-            // "Mark Resolved" button (stages the file as-is, for manual edits)
-            var resolveBtn = ConflictActionButton("\u2713", "Mark as resolved (stage current content)", () =>
-            {
-                _repo.Stage(file.Path);
-                Refresh();
-            });
-            row.AddChild(resolveBtn);
-
-            // Click row to view ours-vs-theirs diff
-            row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-            row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-            row.OnClick(_ =>
-            {
-                _selectedPath = file.Path;
-                _selectedIsStaged = false;
-                _selectedIsConflict = true;
-                RefreshConflictDiff(file.Path);
-                Refresh();
-            });
-
-            rows[i] = row;
-        }
-        fileList.ReplaceChildren(rows);
+        var rows = new List<Element>();
+        foreach (var node in PathTree.Build(conflicted))
+            AppendConflictNode(node, depth: 0, rows);
+        fileList.ReplaceChildren(rows.ToArray());
 
         return Flex.Column(gap: 0).FlexShrink(0).MaxHeight(Dimension.Px(200)).Children(
             header,
             ScrollView.New().FlexGrow(1).Children(fileList)
         );
+    }
+
+    private void AppendConflictNode(PathTreeNode node, int depth, List<Element> rows)
+    {
+        if (node.IsFile)
+        {
+            rows.Add(BuildConflictFileRow(node, depth));
+            return;
+        }
+        rows.Add(BuildFolderRow("c", node, depth));
+        if (IsExpanded("c", node.FullPath))
+            foreach (var child in node.Children) AppendConflictNode(child, depth + 1, rows);
+    }
+
+    private Element BuildConflictFileRow(PathTreeNode node, int depth)
+    {
+        var file = node.File!;
+        var isSelected = file.Path == _selectedPath && _selectedIsConflict;
+        var leftPad = 8 + depth * IndentPx + ChevronWidth;
+
+        var row = Flex.Row(gap: 6)
+            .FlexShrink(0)
+            .Padding(new Thickness(4, 8, 4, leftPad))
+            .AlignItems(AlignItems.Center)
+            .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
+            .Cursor(CursorType.Pointer);
+        row.Key = $"conflict-file-{file.Path}";
+
+        row.AddChild(Badge.FileStatus(file.Kind));
+        row.AddChild(
+            Text.New(node.Segment).FontSize(12f)
+                .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
+                .FlexGrow(1)
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+                .Tooltip(file.Path)
+        );
+
+        row.AddChild(ConflictActionButton("Ours", "Use current branch version", () =>
+        {
+            var result = _repo.CheckoutOurs(file.Path);
+            if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
+            Refresh();
+        }));
+
+        row.AddChild(ConflictActionButton("Theirs", "Use incoming branch version", () =>
+        {
+            var result = _repo.CheckoutTheirs(file.Path);
+            if (!result.Success) ShowStatusMessage?.Invoke(result.Stderr.Trim(), true);
+            Refresh();
+        }));
+
+        row.AddChild(ConflictActionButton("\u2713", "Mark as resolved (stage current content)", () =>
+        {
+            _repo.Stage(file.Path);
+            Refresh();
+        }));
+
+        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnClick(_ =>
+        {
+            _selectedPath = file.Path;
+            _selectedIsStaged = false;
+            _selectedIsConflict = true;
+            RefreshConflictDiff(file.Path);
+            Refresh();
+        });
+
+        return row;
+    }
+
+    // Folder row shared by all three file sections — the `section` key ("u"/"s"/"c")
+    // namespaces expansion state so the same folder can be independently open/closed
+    // under Unstaged, Staged, and Conflicts.
+    private Element BuildFolderRow(string section, PathTreeNode node, int depth)
+    {
+        var expanded = IsExpanded(section, node.FullPath);
+        var leftPad = 8 + depth * IndentPx;
+
+        var row = Flex.Row(gap: 4)
+            .FlexShrink(0)
+            .Padding(new Thickness(4, 8, 4, leftPad))
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer);
+        row.Key = $"staging-{section}-dir-{node.FullPath}";
+
+        row.AddChild(Text.New(expanded ? "\u25BE" : "\u25B8")
+            .FontSize(11f).TextColor(GitClientColors.TextMuted).Width(ChevronWidth));
+        row.AddChild(Text.New(node.Segment).FontSize(12f)
+            .TextColor(GitClientColors.TextSecondary)
+            .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        row.AddChild(Text.New($"({node.FileCount})").FontSize(11f).TextColor(GitClientColors.TextMuted));
+
+        var fullPath = node.FullPath;
+        row.OnPointerEnter(_ => row.BackgroundColor = GitClientColors.SurfaceHover);
+        row.OnPointerLeave(_ => row.BackgroundColor = Color.Transparent);
+        row.OnClick(_ => ToggleExpanded(section, fullPath));
+
+        return row;
     }
 
     private static Element ConflictActionButton(string label, string tooltip, Action onClick)
@@ -268,91 +325,108 @@ public partial class StagingArea : Component
                 })
             );
 
+        var section = isStaged ? "s" : "u";
         var fileList = Flex.Column(gap: 0);
-        var rows = new Element[files.Count];
-        for (int i = 0; i < files.Count; i++)
+        var rows = new List<Element>();
+        foreach (var node in PathTree.Build(files))
+            AppendStagingNode(node, depth: 0, section, isStaged, rows);
+        fileList.ReplaceChildren(rows.ToArray());
+
+        return Flex.Column(gap: 0).FlexGrow(1).Children(
+            header,
+            ScrollView.New().FlexGrow(1).Children(fileList)
+        );
+    }
+
+    private void AppendStagingNode(PathTreeNode node, int depth, string section, bool isStaged, List<Element> rows)
+    {
+        if (node.IsFile)
         {
-            var file = files[i];
-            var isSelected = file.Path == _selectedPath && isStaged == _selectedIsStaged;
+            rows.Add(BuildStagingFileRow(node, depth, isStaged));
+            return;
+        }
+        rows.Add(BuildFolderRow(section, node, depth));
+        if (IsExpanded(section, node.FullPath))
+            foreach (var child in node.Children) AppendStagingNode(child, depth + 1, section, isStaged, rows);
+    }
 
-            var row = Flex.Row(gap: 6)
-                .FlexShrink(0)
-                .Padding(new Thickness(4, 8, 4, 24))
-                .AlignItems(AlignItems.Center)
-                .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
-                .Cursor(CursorType.Pointer);
-            row.Key = $"staging-{(isStaged ? "s" : "u")}-{file.Path}";
+    private Element BuildStagingFileRow(PathTreeNode node, int depth, bool isStaged)
+    {
+        var file = node.File!;
+        var isSelected = file.Path == _selectedPath && isStaged == _selectedIsStaged && !_selectedIsConflict;
+        var leftPad = 8 + depth * IndentPx + ChevronWidth;
 
-            row.AddChild(Badge.FileStatus(file.Kind));
-            row.AddChild(
-                Text.New(Path.GetFileName(file.Path)).FontSize(12f)
-                    .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
-                    .FlexGrow(1)
-                    .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
-            );
+        var row = Flex.Row(gap: 6)
+            .FlexShrink(0)
+            .Padding(new Thickness(4, 8, 4, leftPad))
+            .AlignItems(AlignItems.Center)
+            .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
+            .Cursor(CursorType.Pointer);
+        row.Key = $"staging-{(isStaged ? "s" : "u")}-file-{file.Path}";
 
-            // Discard button (unstaged only — destructive, no confirmation in this sample)
-            if (!isStaged)
-            {
-                var discardBtn = Box.New()
-                    .Width(20).Height(18)
-                    .CornerRadius(3f)
-                    .Background(GitClientColors.ButtonSecondary)
-                    .JustifyContent(JustifyContent.Center)
-                    .AlignItems(AlignItems.Center)
-                    .Cursor(CursorType.Pointer)
-                    .Tooltip("Discard changes")
-                    .Children(Text.New("\u2715").FontSize(11f).TextColor(GitClientColors.StatusDeleted));
+        row.AddChild(Badge.FileStatus(file.Kind));
+        row.AddChild(
+            Text.New(node.Segment).FontSize(12f)
+                .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
+                .FlexGrow(1)
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+                .Tooltip(file.Path)
+        );
 
-                discardBtn.On<ClickEvent>(e =>
-                {
-                    e.StopPropagation = true;
-                    _repo.DiscardChanges(file);
-                    Refresh();
-                });
-                row.AddChild(discardBtn);
-            }
-
-            // Stage/unstage button
-            var actionLabel = isStaged ? "\u2212" : "+";
-            var actionBtn = Box.New()
+        // Discard button (unstaged only — destructive, no confirmation in this sample)
+        if (!isStaged)
+        {
+            var discardBtn = Box.New()
                 .Width(20).Height(18)
                 .CornerRadius(3f)
                 .Background(GitClientColors.ButtonSecondary)
                 .JustifyContent(JustifyContent.Center)
                 .AlignItems(AlignItems.Center)
                 .Cursor(CursorType.Pointer)
-                .Children(Text.New(actionLabel).FontSize(12f).TextColor(GitClientColors.TextPrimary));
+                .Tooltip("Discard changes")
+                .Children(Text.New("\u2715").FontSize(11f).TextColor(GitClientColors.StatusDeleted));
 
-            actionBtn.On<ClickEvent>(e =>
+            discardBtn.On<ClickEvent>(e =>
             {
                 e.StopPropagation = true;
-                if (isStaged) _repo.Unstage(file.Path);
-                else _repo.Stage(file.Path);
+                _repo.DiscardChanges(file);
                 Refresh();
             });
-            row.AddChild(actionBtn);
-
-            // Click row to view diff
-            row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-            row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-            row.OnClick(_ =>
-            {
-                _selectedPath = file.Path;
-                _selectedIsStaged = isStaged;
-                _selectedIsConflict = false;
-                RefreshDiffViewer();
-                Refresh();
-            });
-
-            rows[i] = row;
+            row.AddChild(discardBtn);
         }
-        fileList.ReplaceChildren(rows);
 
-        return Flex.Column(gap: 0).FlexGrow(1).Children(
-            header,
-            ScrollView.New().FlexGrow(1).Children(fileList)
-        );
+        // Stage/unstage button
+        var actionLabel = isStaged ? "\u2212" : "+";
+        var actionBtn = Box.New()
+            .Width(20).Height(18)
+            .CornerRadius(3f)
+            .Background(GitClientColors.ButtonSecondary)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Children(Text.New(actionLabel).FontSize(12f).TextColor(GitClientColors.TextPrimary));
+
+        actionBtn.On<ClickEvent>(e =>
+        {
+            e.StopPropagation = true;
+            if (isStaged) _repo.Unstage(file.Path);
+            else _repo.Stage(file.Path);
+            Refresh();
+        });
+        row.AddChild(actionBtn);
+
+        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnClick(_ =>
+        {
+            _selectedPath = file.Path;
+            _selectedIsStaged = isStaged;
+            _selectedIsConflict = false;
+            RefreshDiffViewer();
+            Refresh();
+        });
+
+        return row;
     }
 
     private Element BuildCommitArea(int stagedCount, int totalChanged, int conflictCount = 0, bool merging = false)

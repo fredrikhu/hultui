@@ -12,14 +12,27 @@ using GitClient.Theme;
 
 namespace GitClient.Components.Detail;
 
+/// <summary>
+/// Shows the files changed in a commit as a folder tree. Folders carry aggregate +/- counts
+/// so you can see at a glance where in the codebase a commit landed.
+/// </summary>
 public partial class FileTree : Component
 {
     [Reactive] public partial List<GitFileChange> Files { get; set; }
     [Reactive] public partial GitFileChange? SelectedFile { get; set; }
+    [Reactive] public partial int Version { get; set; }
 
     public Action<GitFileChange>? OnFileSelected { get; set; }
     public Action<GitFileChange>? OnBlameRequested { get; set; }
     public Action<GitFileChange>? OnHistoryRequested { get; set; }
+
+    // Expansion state keyed by folder FullPath. Default (missing) is expanded; we only
+    // store explicit user toggles. Survives rebuilds so the tree doesn't re-expand every
+    // time Files changes.
+    private readonly Dictionary<string, bool> _expanded = new();
+
+    private const int IndentPx = 14;
+    private const int ChevronWidth = 14;
 
     public FileTree()
     {
@@ -30,6 +43,7 @@ public partial class FileTree : Component
     {
         var files = Files;
         var selected = SelectedFile;
+        _ = Version;
 
         if (files.Count == 0)
         {
@@ -38,92 +52,137 @@ public partial class FileTree : Component
                 .Children(Text.New("No files").FontSize(12f).TextColor(GitClientColors.TextMuted));
         }
 
+        var tree = PathTree.Build(files);
         var container = Flex.Column(gap: 0);
-        var children = new Element[files.Count];
+        var rows = new List<Element>();
+        foreach (var node in tree) AppendNode(node, depth: 0, selected, rows);
+        container.ReplaceChildren(rows.ToArray());
+        return ScrollView.New().FlexGrow(1).Children(container);
+    }
 
-        for (int i = 0; i < files.Count; i++)
+    private bool IsExpanded(string fullPath) =>
+        !_expanded.TryGetValue(fullPath, out var v) || v;
+
+    private void AppendNode(PathTreeNode node, int depth, GitFileChange? selected, List<Element> rows)
+    {
+        if (node.IsFile)
         {
-            var file = files[i];
-            var isSelected = file == selected;
-
-            var row = Flex.Row(gap: 6)
-                .Padding(new Thickness(4, 8, 4, 8))
-                .AlignItems(AlignItems.Center)
-                .FlexShrink(0)
-                .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
-                .Cursor(CursorType.Pointer);
-            row.Key = $"file-{file.Path}";
-
-            // Status badge
-            row.AddChild(Badge.FileStatus(file.Kind));
-
-            // File name (just the filename, not the full path)
-            var fileName = Path.GetFileName(file.Path);
-            var dirName = Path.GetDirectoryName(file.Path)?.Replace('\\', '/');
-
-            row.AddChild(
-                Text.New(fileName).FontSize(12f)
-                    .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
-                    .FlexShrink(1)
-                    .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
-            );
-
-            if (!string.IsNullOrEmpty(dirName))
-            {
-                row.AddChild(
-                    Text.New(dirName).FontSize(11f)
-                        .TextColor(GitClientColors.TextMuted)
-                        .FlexShrink(1)
-                        .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
-                );
-            }
-
-            // +/- counts
-            if (file.Additions > 0 || file.Deletions > 0)
-            {
-                row.AddChild(Box.New().FlexGrow(1));
-                if (file.Additions > 0)
-                    row.AddChild(Text.New($"+{file.Additions}").FontSize(11f).TextColor(GitClientColors.DiffAddText));
-                if (file.Deletions > 0)
-                    row.AddChild(Text.New($"-{file.Deletions}").FontSize(11f).TextColor(GitClientColors.DiffDelText));
-            }
-
-            // Events
-            var fileRef = file;
-            row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-            row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
-            row.OnClick(_ => SelectFile(fileRef));
-
-            var hasContextMenu = OnBlameRequested != null || OnHistoryRequested != null;
-            if (hasContextMenu)
-            {
-                // Context menu actions implicitly select the file first — users opening
-                // a right-click menu on a row expect it to be the target, even if they
-                // hadn't left-clicked it yet.
-                row.ContextMenu(() =>
-                {
-                    var items = new List<ContextMenuItem>();
-                    if (OnHistoryRequested != null)
-                        items.Add(new ContextMenuItem
-                        {
-                            Label = "Show history of this file",
-                            Action = () => { SelectFile(fileRef); OnHistoryRequested?.Invoke(fileRef); },
-                        });
-                    if (OnBlameRequested != null && fileRef.Kind != FileChangeKind.Deleted)
-                        items.Add(new ContextMenuItem
-                        {
-                            Label = "Blame this file",
-                            Action = () => { SelectFile(fileRef); OnBlameRequested?.Invoke(fileRef); },
-                        });
-                    return items;
-                });
-            }
-
-            children[i] = row;
+            rows.Add(BuildFileRow(node, depth, selected));
+            return;
         }
 
-        container.ReplaceChildren(children);
-        return ScrollView.New().FlexGrow(1).Children(container);
+        rows.Add(BuildFolderRow(node, depth));
+        if (IsExpanded(node.FullPath))
+            foreach (var child in node.Children) AppendNode(child, depth + 1, selected, rows);
+    }
+
+    private Element BuildFolderRow(PathTreeNode node, int depth)
+    {
+        var expanded = IsExpanded(node.FullPath);
+        var leftPad = 8 + depth * IndentPx;
+
+        var row = Flex.Row(gap: 4)
+            .Padding(new Thickness(4, 8, 4, leftPad))
+            .AlignItems(AlignItems.Center)
+            .FlexShrink(0)
+            .Cursor(CursorType.Pointer);
+        row.Key = $"file-tree-dir-{node.FullPath}";
+
+        row.AddChild(Text.New(expanded ? "\u25BE" : "\u25B8")
+            .FontSize(11f).TextColor(GitClientColors.TextMuted).Width(ChevronWidth));
+
+        row.AddChild(Text.New(node.Segment).FontSize(12f)
+            .TextColor(GitClientColors.TextSecondary)
+            .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+
+        row.AddChild(Text.New($"({node.FileCount})").FontSize(11f).TextColor(GitClientColors.TextMuted));
+
+        if (node.Additions > 0 || node.Deletions > 0)
+        {
+            row.AddChild(Box.New().FlexGrow(1));
+            if (node.Additions > 0)
+                row.AddChild(Text.New($"+{node.Additions}").FontSize(11f).TextColor(GitClientColors.DiffAddText));
+            if (node.Deletions > 0)
+                row.AddChild(Text.New($"-{node.Deletions}").FontSize(11f).TextColor(GitClientColors.DiffDelText));
+        }
+
+        var fullPath = node.FullPath;
+        row.OnPointerEnter(_ => row.BackgroundColor = GitClientColors.SurfaceHover);
+        row.OnPointerLeave(_ => row.BackgroundColor = Color.Transparent);
+        row.OnClick(_ =>
+        {
+            _expanded[fullPath] = !IsExpanded(fullPath);
+            Version++;
+        });
+
+        return row;
+    }
+
+    private Element BuildFileRow(PathTreeNode node, int depth, GitFileChange? selected)
+    {
+        var file = node.File!;
+        var isSelected = file == selected;
+        // File rows reserve the chevron column so badges line up with folder labels.
+        var leftPad = 8 + depth * IndentPx + ChevronWidth;
+
+        var row = Flex.Row(gap: 6)
+            .Padding(new Thickness(4, 8, 4, leftPad))
+            .AlignItems(AlignItems.Center)
+            .FlexShrink(0)
+            .Background(isSelected ? GitClientColors.Selection : Color.Transparent)
+            .Cursor(CursorType.Pointer);
+        row.Key = $"file-tree-file-{file.Path}";
+
+        row.AddChild(Badge.FileStatus(file.Kind));
+
+        row.AddChild(
+            Text.New(node.Segment).FontSize(12f)
+                .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
+                .FlexShrink(1)
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+                .Tooltip(file.Path)
+        );
+
+        if (file.Additions > 0 || file.Deletions > 0)
+        {
+            row.AddChild(Box.New().FlexGrow(1));
+            if (file.Additions > 0)
+                row.AddChild(Text.New($"+{file.Additions}").FontSize(11f).TextColor(GitClientColors.DiffAddText));
+            if (file.Deletions > 0)
+                row.AddChild(Text.New($"-{file.Deletions}").FontSize(11f).TextColor(GitClientColors.DiffDelText));
+        }
+
+        var fileRef = file;
+        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
+        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnClick(_ => SelectFile(fileRef));
+
+        var hasContextMenu = OnBlameRequested != null || OnHistoryRequested != null;
+        if (hasContextMenu)
+        {
+            // Context menu actions implicitly select the file first — users opening
+            // a right-click menu on a row expect it to be the target, even if they
+            // hadn't left-clicked it yet.
+            row.ContextMenu(() =>
+            {
+                var items = new List<ContextMenuItem>();
+                if (OnHistoryRequested != null)
+                    items.Add(new ContextMenuItem
+                    {
+                        Label = "Show history of this file",
+                        Action = () => { SelectFile(fileRef); OnHistoryRequested?.Invoke(fileRef); },
+                    });
+                if (OnBlameRequested != null && fileRef.Kind != FileChangeKind.Deleted)
+                    items.Add(new ContextMenuItem
+                    {
+                        Label = "Blame this file",
+                        Action = () => { SelectFile(fileRef); OnBlameRequested?.Invoke(fileRef); },
+                    });
+                return items;
+            });
+        }
+
+        return row;
     }
 
     private void SelectFile(GitFileChange file)
