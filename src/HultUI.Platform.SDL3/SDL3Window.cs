@@ -22,6 +22,13 @@ public sealed unsafe class SDL3Window : IDisposable
     internal bool ResizePending;
     internal long LastResizeRenderTick;
 
+    /// <summary>
+    /// Invoked from the event watcher during a Win32 modal resize loop,
+    /// when <see cref="SDL_PollEvent"/> is blocked and the main loop cannot
+    /// drive frames itself. Implementers are expected to throttle.
+    /// </summary>
+    internal Action? LiveResizeFrame { get; set; }
+
     public SDL_WindowID WindowId { get; private set; }
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
@@ -125,6 +132,13 @@ public sealed unsafe class SDL3Window : IDisposable
 
                 window.UpdateSize();
                 window.ResizePending = true;
+
+                // Win32 enters a modal resize loop (WM_ENTERSIZEMOVE) that
+                // blocks SDL_PollEvent until the mouse is released. The
+                // event watcher is the only code path that runs during
+                // that pump, so drive a live frame from here on Windows.
+                if (OperatingSystem.IsWindows())
+                    window.LiveResizeFrame?.Invoke();
                 break;
         }
 

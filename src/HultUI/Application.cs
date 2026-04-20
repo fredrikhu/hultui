@@ -84,8 +84,23 @@ public sealed class Application : IDisposable
     {
         var sdlWindow = new SDL3Window(title, width, height, style);
         var window = new Window(this, sdlWindow);
+        sdlWindow.LiveResizeFrame = () => RenderLiveResizeFrame(window);
         _windows.Add(window);
         return window;
+    }
+
+    private static void RenderLiveResizeFrame(Window window)
+    {
+        var platform = window.PlatformWindow;
+        long now = Environment.TickCount64;
+        if (now - platform.LastResizeRenderTick < window.ResizeThrottleMs)
+            return;
+
+        platform.MakeCurrent();
+        window.OnWindowResized();
+        window.RenderFrame();
+        platform.LastResizeRenderTick = now;
+        platform.ResizePending = false;
     }
 
     /// <summary>
