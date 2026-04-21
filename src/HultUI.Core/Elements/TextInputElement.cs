@@ -492,10 +492,24 @@ public class TextInputElement : BoxElement
             ? string.Concat(_text.AsSpan(0, _cursorPos), _composition.Text, _text.AsSpan(_cursorPos))
             : _text;
 
-        // IME caret sits after the active segment (standard convention).
-        int caretIndex = composing
-            ? _cursorPos + _composition.SegmentStart + _composition.SegmentLength
-            : _cursorPos;
+        // IME caret placement. SDL's start/length are ambiguous (Wayland
+        // sends cursor_begin/cursor_end, other backends send active-segment
+        // start/length). When the IME doesn't specify anything non-trivial
+        // (both zero), put the caret at the end of the preedit — the
+        // behavior users expect and what Firefox/Chrome/GTK do. Otherwise
+        // trust the IME's specified position.
+        int caretIndex;
+        if (composing)
+        {
+            if (_composition.SegmentStart == 0 && _composition.SegmentLength == 0)
+                caretIndex = _cursorPos + _composition.Text.Length;
+            else
+                caretIndex = _cursorPos + _composition.SegmentStart + _composition.SegmentLength;
+        }
+        else
+        {
+            caretIndex = _cursorPos;
+        }
 
         float cursorX = caretIndex > 0 && displayText.Length > 0
             ? ctx.MeasureText(displayText[..caretIndex], style).Width
@@ -504,13 +518,17 @@ public class TextInputElement : BoxElement
             ? ctx.MeasureText(displayText, style).Width
             : 0;
 
-        // Auto-scroll to keep cursor visible
-        float scrollPadding = style.FontSize; // one em of padding when scrolling
+        // Auto-scroll to keep cursor visible. Clamp to [0, maxScroll] so that
+        // when the text shrinks (e.g. after an IME commit replaces a wide
+        // preedit with shorter committed text) the offset snaps back and the
+        // caret doesn't end up pinned to the left edge.
+        float scrollPadding = style.FontSize;
+        float maxScroll = Math.Max(0, totalTextWidth + scrollPadding - contentBox.Width);
         if (cursorX - _scrollOffset > contentBox.Width - CursorWidth)
             _scrollOffset = cursorX - contentBox.Width + CursorWidth + scrollPadding;
         if (cursorX - _scrollOffset < 0)
             _scrollOffset = cursorX;
-        _scrollOffset = Math.Max(0, _scrollOffset);
+        _scrollOffset = Math.Clamp(_scrollOffset, 0, maxScroll);
 
         ctx.PushClip(contentBox);
 

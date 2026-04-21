@@ -877,10 +877,16 @@ public class TextAreaElement : BoxElement
                     ctx.DrawRect(new Rect(cursorBaseX + segX, cy + lh - 2f, segEnd - segX, 2f), CursorColor);
                 }
 
-                // IME caret lands after the active segment
+                // IME caret placement — see TextInputElement for rationale.
+                // (0,0) from SDL is ambiguous and usually means "no preference";
+                // default to the end of the preedit. Non-zero values pin the
+                // caret to the IME-specified position.
+                int caretChars = _composition.SegmentStart == 0 && _composition.SegmentLength == 0
+                    ? preedit.Length
+                    : _composition.SegmentStart + _composition.SegmentLength;
                 float caretOffsetInPreedit = _renderCtx is not null
-                    ? _renderCtx.MeasureText(preedit[..(_composition.SegmentStart + _composition.SegmentLength)], style).Width
-                    : (_composition.SegmentStart + _composition.SegmentLength) * style.FontSize * 0.6f;
+                    ? _renderCtx.MeasureText(preedit[..caretChars], style).Width
+                    : caretChars * style.FontSize * 0.6f;
                 caretX = cursorBaseX + caretOffsetInPreedit;
             }
 
