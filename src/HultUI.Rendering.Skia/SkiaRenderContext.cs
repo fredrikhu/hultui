@@ -18,10 +18,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private readonly SKFont _pooledFont = new() { Subpixel = true };
     private bool _disposed;
 
-    // Text blob cache: avoids re-shaping text (string → glyphs) every frame
-    private readonly Dictionary<TextBlobKey, SKTextBlob?> _textBlobCache = new();
-    private const int TextBlobCacheMaxSize = 2048;
-    private readonly record struct TextBlobKey(string Text, nint Typeface, float FontSize);
+    // Cached positioned-blob per ShapedRun instance. Shaping itself is cached by
+    // TextPipeline.MeasurementCache — this cache is only to skip the blob-builder
+    // copy when the same run is drawn repeatedly (same frame, or across frames
+    // when the layout cache returns the same ShapedRun reference).
+    private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new();
+    private const int RunBlobCacheMaxSize = 2048;
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
@@ -94,8 +96,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
             foreach (var run in line.Runs)
             {
-                var typeface = (SKTypeface)run.Font.NativeHandle;
-                var blob = GetOrCreateTextBlob(run.Text, typeface, run.FontSize);
+                var blob = BuildShapedBlob(run);
                 if (blob is not null)
                     Canvas.DrawText(blob, bounds.X + run.OffsetX, lineY, _pooledPaint);
             }
@@ -233,30 +234,45 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return new SkiaCanvasDrawingContext(Canvas, bounds);
     }
 
-    // ── Text blob cache ──
+    // ── Text blob building (positioned from HarfBuzz-shaped glyphs) ──
 
-    private SKTextBlob? GetOrCreateTextBlob(string text, SKTypeface typeface, float fontSize)
+    private SKTextBlob? BuildShapedBlob(ShapedRun run)
     {
-        var key = new TextBlobKey(text, typeface.Handle, fontSize);
-        if (_textBlobCache.TryGetValue(key, out var cached))
+        if (_runBlobCache.TryGetValue(run, out var cached))
             return cached;
 
+        if (run.Glyphs.Length == 0)
+            return null;
+
+        var typeface = (SKTypeface)run.Font.NativeHandle;
         _pooledFont.Typeface = typeface;
-        _pooledFont.Size = fontSize;
-        var blob = SKTextBlob.Create(text, _pooledFont);
+        _pooledFont.Size = run.FontSize;
 
-        if (_textBlobCache.Count >= TextBlobCacheMaxSize)
-            ClearTextBlobCache();
+        using var builder = new SKTextBlobBuilder();
+        var buffer = builder.AllocatePositionedRun(_pooledFont, run.Glyphs.Length);
+        var glyphSpan = buffer.Glyphs;
+        var positionSpan = buffer.Positions;
 
-        _textBlobCache[key] = blob;
+        for (int i = 0; i < run.Glyphs.Length; i++)
+        {
+            glyphSpan[i] = (ushort)run.Glyphs[i].GlyphId;
+            positionSpan[i] = new SKPoint(run.Glyphs[i].X, run.Glyphs[i].Y);
+        }
+
+        var blob = builder.Build();
+
+        if (_runBlobCache.Count >= RunBlobCacheMaxSize)
+            ClearRunBlobCache();
+
+        _runBlobCache[run] = blob;
         return blob;
     }
 
-    private void ClearTextBlobCache()
+    private void ClearRunBlobCache()
     {
-        foreach (var blob in _textBlobCache.Values)
+        foreach (var blob in _runBlobCache.Values)
             blob?.Dispose();
-        _textBlobCache.Clear();
+        _runBlobCache.Clear();
     }
 
     // ── Conversion helpers ──
@@ -295,7 +311,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        ClearTextBlobCache();
+        ClearRunBlobCache();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
     }
