@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Rendering.Skia;
@@ -246,6 +247,20 @@ public sealed unsafe class SDL3Window : IDisposable
             SDL_SetClipboardText(ptr);
         }
     }
+
+    public void SetTextInputArea(Rect caretRect, int cursorOffset)
+    {
+        var rect = new SDL_Rect
+        {
+            x = (int)caretRect.X,
+            y = (int)caretRect.Y,
+            w = Math.Max(1, (int)caretRect.Width),
+            h = Math.Max(1, (int)caretRect.Height)
+        };
+        SDL_SetTextInputArea(_window, &rect, cursorOffset);
+    }
+
+    public void ClearComposition() => SDL_ClearComposition(_window);
 
     private static SDL_SystemCursor MapCursorType(CursorType cursor) => cursor switch
     {

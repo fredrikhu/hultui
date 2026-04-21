@@ -466,4 +466,41 @@ public class TextAreaElementTests
         Assert.Equal(0, starts[0]);
         Assert.Equal(3, starts[1]);
     }
+
+    // ──── IME composition ────
+
+    [Fact]
+    public void TextEditing_StoresPreeditWithoutMutatingText()
+    {
+        var area = CreateArea("abc");
+        area.CursorPosition = 1;
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni", SegmentStart = 0, SegmentLength = 2 }, area);
+
+        Assert.True(area.IsComposing);
+        Assert.Equal("ni", area.CompositionText);
+        Assert.Equal("abc", area.Text);
+    }
+
+    [Fact]
+    public void TextInput_AfterComposition_CommitsAndClearsPreedit()
+    {
+        var area = CreateArea("abc");
+        area.CursorPosition = 3;
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, area);
+        EventDispatcher.Dispatch(new TextInputEvent { Text = "你" }, area);
+
+        Assert.False(area.IsComposing);
+        Assert.Equal("abc你", area.Text);
+    }
+
+    [Fact]
+    public void Blur_WhileComposing_ClearsPreedit()
+    {
+        var area = CreateArea("abc");
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, area);
+        EventDispatcher.DispatchDirect(new BlurEvent(), area);
+
+        Assert.False(area.IsComposing);
+        Assert.Equal("abc", area.Text);
+    }
 }

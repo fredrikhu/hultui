@@ -17,6 +17,7 @@ public class TextInputElement : BoxElement
     private bool _isDragging;
     private float _scrollOffset; // horizontal scroll for text wider than the box
     private IRenderContext? _renderCtx; // cached for hit-testing with real font metrics
+    private CompositionState _composition;
 
     public string Text
     {
@@ -59,6 +60,21 @@ public class TextInputElement : BoxElement
     /// </summary>
     public IClipboard? Clipboard { get; set; }
 
+    /// <summary>
+    /// IME host — set by Window when this element gains focus. Used to position
+    /// the OS candidate window and cancel composition on blur.
+    /// </summary>
+    public ITextInputHost? TextInputHost { get; set; }
+
+    /// <summary>
+    /// Current IME preedit string. Empty when no composition is active.
+    /// Exposed for tests and custom rendering hooks.
+    /// </summary>
+    public string CompositionText => _composition.Text ?? "";
+    public int CompositionSegmentStart => _composition.SegmentStart;
+    public int CompositionSegmentLength => _composition.SegmentLength;
+    public bool IsComposing => _composition.IsActive;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var ti = theme.TextInput;
@@ -82,8 +98,18 @@ public class TextInputElement : BoxElement
         Inherited.Cursor = CursorType.Text;
 
         On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        On<BlurEvent>(_ =>
+        {
+            _focused = false;
+            if (_composition.IsActive)
+            {
+                _composition.Clear();
+                TextInputHost?.ClearComposition();
+            }
+            MarkPaintDirty();
+        });
         On<TextInputEvent>(OnTextInput);
+        On<TextEditingEvent>(OnTextEditing);
         On<KeyDownEvent>(OnKeyDown);
         On<PointerDownEvent>(OnPointerDown);
         On<PointerMoveEvent>(OnPointerMove);
@@ -120,11 +146,24 @@ public class TextInputElement : BoxElement
     private void OnTextInput(TextInputEvent evt)
     {
         if (!_focused) return;
+        // IME commit arrives as a normal TextInput — the selection was already
+        // consumed when composition started, so only clear the preedit.
+        _composition.Clear();
         DeleteSelection();
         _text = _text.Insert(_cursorPos, evt.Text);
         _cursorPos += evt.Text.Length;
         _selectionStart = _cursorPos;
         NotifyChanged();
+        MarkPaintDirty();
+    }
+
+    private void OnTextEditing(TextEditingEvent evt)
+    {
+        if (!_focused) return;
+        // IMEs replace the current selection on first composition event.
+        if (!_composition.IsActive && evt.Text.Length > 0 && HasSelection)
+            DeleteSelection();
+        _composition.Set(evt.Text, evt.SegmentStart, evt.SegmentLength);
         MarkPaintDirty();
     }
 
@@ -422,7 +461,6 @@ public class TextInputElement : BoxElement
         _renderCtx = ctx; // cache for hit-testing
 
         // Draw background/border
-        var borderColor = _focused ? FocusBorderColor : BorderColor;
         var origBorder = BorderColor;
         if (_focused) BorderColor = FocusBorderColor;
         base.Render(ctx);
@@ -431,12 +469,23 @@ public class TextInputElement : BoxElement
         var contentBox = Layout.AbsoluteContentBox;
         var style = ResolvedInherited;
 
-        // Measure text widths using real font metrics
-        float cursorX = _cursorPos > 0 && !string.IsNullOrEmpty(_text)
-            ? ctx.MeasureText(_text[.._cursorPos], style).Width
+        // When composing, the preedit is visually inserted at the caret but not
+        // part of _text. displayText contains both for measurement/rendering.
+        bool composing = _composition.IsActive;
+        string displayText = composing
+            ? string.Concat(_text.AsSpan(0, _cursorPos), _composition.Text, _text.AsSpan(_cursorPos))
+            : _text;
+
+        // IME caret sits after the active segment (standard convention).
+        int caretIndex = composing
+            ? _cursorPos + _composition.SegmentStart + _composition.SegmentLength
+            : _cursorPos;
+
+        float cursorX = caretIndex > 0 && displayText.Length > 0
+            ? ctx.MeasureText(displayText[..caretIndex], style).Width
             : 0;
-        float totalTextWidth = !string.IsNullOrEmpty(_text)
-            ? ctx.MeasureText(_text, style).Width
+        float totalTextWidth = displayText.Length > 0
+            ? ctx.MeasureText(displayText, style).Width
             : 0;
 
         // Auto-scroll to keep cursor visible
@@ -449,8 +498,8 @@ public class TextInputElement : BoxElement
 
         ctx.PushClip(contentBox);
 
-        // Draw selection highlight
-        if (HasSelection)
+        // Selection highlight (suppressed during composition — IMEs don't show it)
+        if (HasSelection && !composing)
         {
             float selStartX = SelectionStart > 0
                 ? ctx.MeasureText(_text[..SelectionStart], style).Width
@@ -464,24 +513,50 @@ public class TextInputElement : BoxElement
         }
 
         // Draw text or placeholder
-        if (string.IsNullOrEmpty(_text) && !string.IsNullOrEmpty(Placeholder) && !_focused)
+        if (displayText.Length == 0 && !string.IsNullOrEmpty(Placeholder) && !_focused)
         {
             var placeholderStyle = style with { TextColor = PlaceholderColor };
             ctx.DrawText(Placeholder, contentBox, placeholderStyle, TextOverflow.Clip, 1);
         }
-        else if (!string.IsNullOrEmpty(_text))
+        else if (displayText.Length > 0)
         {
             var textRect = new Rect(contentBox.X - _scrollOffset, contentBox.Y, totalTextWidth + scrollPadding, contentBox.Height);
-            ctx.DrawText(_text, textRect, style, TextOverflow.Clip, 1);
+            ctx.DrawText(displayText, textRect, style, TextOverflow.Clip, 1);
         }
 
-        // Draw cursor (sized to text line height, centered vertically)
+        float textHeight = ctx.MeasureText("X", style).Height;
+        float textTop = contentBox.Y + (contentBox.Height - textHeight) / 2;
+
+        // Preedit underline
+        if (composing)
+        {
+            float preStart = ctx.MeasureText(displayText[.._cursorPos], style).Width;
+            float preEnd = ctx.MeasureText(displayText[..(_cursorPos + _composition.Text.Length)], style).Width;
+            float underlineY = textTop + textHeight;
+
+            ctx.DrawRect(new Rect(
+                contentBox.X + preStart - _scrollOffset, underlineY,
+                preEnd - preStart, 1f), CursorColor);
+
+            if (_composition.SegmentLength > 0)
+            {
+                int segStartIdx = _cursorPos + _composition.SegmentStart;
+                int segEndIdx = segStartIdx + _composition.SegmentLength;
+                float segStartX = ctx.MeasureText(displayText[..segStartIdx], style).Width;
+                float segEndX = ctx.MeasureText(displayText[..segEndIdx], style).Width;
+                ctx.DrawRect(new Rect(
+                    contentBox.X + segStartX - _scrollOffset, underlineY,
+                    segEndX - segStartX, 2f), CursorColor);
+            }
+        }
+
+        // Caret + IME area
         if (_focused)
         {
             float cx = contentBox.X + cursorX - _scrollOffset;
-            float textHeight = ctx.MeasureText("X", style).Height;
-            float cy = contentBox.Y + (contentBox.Height - textHeight) / 2;
-            ctx.DrawRect(new Rect(cx, cy, CursorWidth, textHeight), CursorColor);
+            var caretRect = new Rect(cx, textTop, CursorWidth, textHeight);
+            ctx.DrawRect(caretRect, CursorColor);
+            TextInputHost?.SetInputArea(caretRect, 0);
         }
 
         ctx.Pop(); // clip

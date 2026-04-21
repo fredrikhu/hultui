@@ -17,6 +17,7 @@ public class TextAreaElement : BoxElement
     private bool _isDragging;
     private float _scrollOffsetY;
     private IRenderContext? _renderCtx;
+    private CompositionState _composition;
 
     // Wrapped-line cache: each entry is the char index where that line starts.
     // Line i spans _lineStarts[i] .. _lineStarts[i+1]-1 (or end of text).
@@ -69,6 +70,12 @@ public class TextAreaElement : BoxElement
     public Action<string>? TextChanged { get; set; }
 
     public IClipboard? Clipboard { get; set; }
+    public ITextInputHost? TextInputHost { get; set; }
+
+    public string CompositionText => _composition.Text ?? "";
+    public int CompositionSegmentStart => _composition.SegmentStart;
+    public int CompositionSegmentLength => _composition.SegmentLength;
+    public bool IsComposing => _composition.IsActive;
 
     /// <summary>True while the user is dragging to select text.</summary>
     public bool IsDragging => _isDragging;
@@ -102,8 +109,18 @@ public class TextAreaElement : BoxElement
         Inherited.Cursor = CursorType.Text;
 
         On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        On<BlurEvent>(_ =>
+        {
+            _focused = false;
+            if (_composition.IsActive)
+            {
+                _composition.Clear();
+                TextInputHost?.ClearComposition();
+            }
+            MarkPaintDirty();
+        });
         On<TextInputEvent>(OnTextInput);
+        On<TextEditingEvent>(OnTextEditing);
         On<KeyDownEvent>(OnKeyDown);
         On<PointerDownEvent>(OnPointerDown);
         On<PointerMoveEvent>(OnPointerMove);
@@ -322,9 +339,19 @@ public class TextAreaElement : BoxElement
     private void OnTextInput(TextInputEvent evt)
     {
         if (!_focused) return;
+        _composition.Clear();
         DeleteSelection();
         InsertText(evt.Text);
         NotifyChanged();
+        MarkPaintDirty();
+    }
+
+    private void OnTextEditing(TextEditingEvent evt)
+    {
+        if (!_focused) return;
+        if (!_composition.IsActive && evt.Text.Length > 0 && HasSelection)
+            DeleteSelection();
+        _composition.Set(evt.Text, evt.SegmentStart, evt.SegmentLength);
         MarkPaintDirty();
     }
 
@@ -802,15 +829,53 @@ public class TextAreaElement : BoxElement
             }
         }
 
-        // Draw cursor
+        // Draw cursor + preedit
         if (_focused)
         {
             if (cursorLine < 0)
                 (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
             int cursorLineStart = starts[cursorLine];
-            float cx = contentBox.X + MeasureSubstring(cursorLineStart, _cursorPos - cursorLineStart, style);
+            float cursorBaseX = contentBox.X + MeasureSubstring(cursorLineStart, _cursorPos - cursorLineStart, style);
             float cy = contentBox.Y + cursorLine * lh - _scrollOffsetY;
-            ctx.DrawRect(new Rect(cx, cy, CursorWidth, lh), CursorColor);
+
+            float caretX = cursorBaseX;
+
+            // Preedit overlay — rendered inline at the caret on its line. We do NOT
+            // re-wrap the text around it; long preedits may overflow the right edge.
+            // CJK preedits are almost always short, so this is a deliberate v1 trade.
+            if (_composition.IsActive)
+            {
+                var preedit = _composition.Text;
+                float preeditWidth = _renderCtx is not null
+                    ? _renderCtx.MeasureText(preedit, style).Width
+                    : preedit.Length * style.FontSize * 0.6f;
+                var preRect = new Rect(cursorBaseX, cy, preeditWidth, lh);
+                ctx.DrawText(preedit, preRect, style, TextOverflow.Clip, 1);
+
+                // Thin underline across the preedit
+                ctx.DrawRect(new Rect(cursorBaseX, cy + lh - 1f, preeditWidth, 1f), CursorColor);
+
+                // Thick underline under the active segment
+                if (_composition.SegmentLength > 0 && _renderCtx is not null)
+                {
+                    float segX = _composition.SegmentStart > 0
+                        ? _renderCtx.MeasureText(preedit[.._composition.SegmentStart], style).Width
+                        : 0;
+                    float segEnd = _renderCtx.MeasureText(
+                        preedit[..(_composition.SegmentStart + _composition.SegmentLength)], style).Width;
+                    ctx.DrawRect(new Rect(cursorBaseX + segX, cy + lh - 2f, segEnd - segX, 2f), CursorColor);
+                }
+
+                // IME caret lands after the active segment
+                float caretOffsetInPreedit = _renderCtx is not null
+                    ? _renderCtx.MeasureText(preedit[..(_composition.SegmentStart + _composition.SegmentLength)], style).Width
+                    : (_composition.SegmentStart + _composition.SegmentLength) * style.FontSize * 0.6f;
+                caretX = cursorBaseX + caretOffsetInPreedit;
+            }
+
+            var caretRect = new Rect(caretX, cy, CursorWidth, lh);
+            ctx.DrawRect(caretRect, CursorColor);
+            TextInputHost?.SetInputArea(caretRect, 0);
         }
 
         ctx.Pop(); // clip

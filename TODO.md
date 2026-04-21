@@ -1,10 +1,9 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
-- **TextArea** — Separate `TextAreaElement` (not extending TextInputElement). Word wrapping with word-boundary breaks. 2D cursor navigation (Up/Down/Home/End per line, Ctrl+Home/End for document). Cross-line selection via shift+arrows, shift+click, click-drag. Vertical scroll with cursor auto-follow and scrollbar. Enter inserts newlines. Triple-click selects line. Context menu with cut/copy/paste/select-all. Reuses TextInputTheme for styling. Wired into Window for drag-capture and clipboard. 41 unit tests.
+- **IME composition** — `SDL_EVENT_TEXT_EDITING` plumbed through `EventTranslator → TextEditingEvent`. `TextInputElement` and `TextAreaElement` render the preedit inline at the caret with a thin underline across the whole preedit and a thick underline on the active IME segment. `SDL_SetTextInputArea` is called each frame on the focused input so OS candidate windows snap to the caret; `SDL_ClearComposition` fires on blur. Custom candidate-list rendering is deliberately skipped — the OS-native window is used instead. New `ITextInputHost` abstraction in `HultUI.Core.Platform`; `SDL3TextInputHost` is the implementation. 9 unit tests covering the state machine.
 
 ## Up Next (in order)
 
 ## Deferred
-- IME composition / candidate list support (basic text input works, full CJK composition later)
 - Platform accessibility bridges (AT-SPI2, UIAutomation, NSAccessibility)

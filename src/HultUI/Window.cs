@@ -59,6 +59,7 @@ public sealed class Window : IOverlayHost, IDisposable
     internal Application Application { get; }
 
     public IClipboard Clipboard { get; }
+    public ITextInputHost TextInputHost { get; }
     public PerformanceCounters Performance => _perf;
     public FrameTracer Tracer => _tracer;
     public DevToolsOverlay DevTools => _devTools;
@@ -85,6 +86,7 @@ public sealed class Window : IOverlayHost, IDisposable
         PlatformWindow = platformWindow;
         _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext, _tracer);
         Clipboard = new SDL3Clipboard(platformWindow);
+        TextInputHost = new SDL3TextInputHost(platformWindow);
         _devTools = new DevToolsOverlay(_perf);
         PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
 
@@ -97,9 +99,15 @@ public sealed class Window : IOverlayHost, IDisposable
     private void OnFocusChanged(Element? element)
     {
         if (element is TextInputElement textInput)
+        {
             textInput.Clipboard = Clipboard;
+            textInput.TextInputHost = TextInputHost;
+        }
         else if (element is TextAreaElement textArea)
+        {
             textArea.Clipboard = Clipboard;
+            textArea.TextInputHost = TextInputHost;
+        }
     }
 
     public void SetRoot(Element root)
@@ -476,6 +484,18 @@ public sealed class Window : IOverlayHost, IDisposable
             {
                 var target = _focusManager.FocusedElement ?? _root;
                 EventDispatcher.Dispatch(new TextInputEvent { Text = textInput.Text }, target);
+                break;
+            }
+
+            case InputEvent.TextEditingInput editInput:
+            {
+                var target = _focusManager.FocusedElement ?? _root;
+                EventDispatcher.Dispatch(new TextEditingEvent
+                {
+                    Text = editInput.Text,
+                    SegmentStart = editInput.SegmentStart,
+                    SegmentLength = editInput.SegmentLength,
+                }, target);
                 break;
             }
 

@@ -70,6 +70,15 @@ public sealed unsafe class EventTranslator
                     OnInputEvent?.Invoke(new InputEvent.TextInputInput(text));
                 break;
 
+            case (uint)SDL_EventType.SDL_EVENT_TEXT_EDITING:
+            {
+                // edit.text is owned by SDL and only valid during this callback — copy it.
+                var editText = Marshal.PtrToStringUTF8((IntPtr)evt->edit.text) ?? "";
+                OnInputEvent?.Invoke(new InputEvent.TextEditingInput(
+                    editText, evt->edit.start, evt->edit.length));
+                break;
+            }
+
             case (uint)SDL_EventType.SDL_EVENT_DROP_BEGIN:
                 OnInputEvent?.Invoke(new InputEvent.DropBeginInput());
                 break;
@@ -224,6 +233,7 @@ public abstract record InputEvent
     public record MouseWheelInput(float MouseX, float MouseY, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
     public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat) : InputEvent;
     public record TextInputInput(string Text) : InputEvent;
+    public record TextEditingInput(string Text, int SegmentStart, int SegmentLength) : InputEvent;
     public record DropBeginInput() : InputEvent;
     public record DropPositionInput(float X, float Y) : InputEvent;
     public record DropFileInput(string Path) : InputEvent;

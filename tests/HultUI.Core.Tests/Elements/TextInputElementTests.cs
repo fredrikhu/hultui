@@ -1,6 +1,7 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using Xunit;
@@ -223,5 +224,105 @@ public class TextInputElementTests
 
         EventDispatcher.Dispatch(new PointerUpEvent { Position = new Point(8, 5), Button = 0 }, input);
         Assert.False(input.IsDragging);
+    }
+
+    // ──── IME composition (preedit) ────
+
+    [Fact]
+    public void TextEditing_SetsCompositionWithoutMutatingText()
+    {
+        var input = CreateInput("abc");
+        input.CursorPosition = 2;
+
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni", SegmentStart = 0, SegmentLength = 2 }, input);
+
+        Assert.True(input.IsComposing);
+        Assert.Equal("ni", input.CompositionText);
+        Assert.Equal("abc", input.Text);
+        Assert.Equal(2, input.CursorPosition);
+    }
+
+    [Fact]
+    public void TextEditing_EmptyText_ClearsComposition()
+    {
+        var input = CreateInput("abc");
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, input);
+        Assert.True(input.IsComposing);
+
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "" }, input);
+
+        Assert.False(input.IsComposing);
+        Assert.Equal("", input.CompositionText);
+    }
+
+    [Fact]
+    public void TextInput_AfterComposition_ClearsPreeditAndInsertsCommit()
+    {
+        var input = CreateInput("abc");
+        input.CursorPosition = 3;
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, input);
+        Assert.True(input.IsComposing);
+
+        EventDispatcher.Dispatch(new TextInputEvent { Text = "你" }, input);
+
+        Assert.False(input.IsComposing);
+        Assert.Equal("abc你", input.Text);
+        Assert.Equal(4, input.CursorPosition);
+    }
+
+    [Fact]
+    public void TextEditing_WithSelection_DeletesSelectionOnFirstEvent()
+    {
+        var input = CreateInput("hello world");
+        // Select " world" (positions 5..11)
+        input.CursorPosition = 5;
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.End, Modifiers = KeyModifiers.Shift }, input);
+        Assert.True(input.HasSelection);
+
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, input);
+
+        Assert.Equal("hello", input.Text);
+        Assert.False(input.HasSelection);
+        Assert.True(input.IsComposing);
+
+        // Subsequent TextEditing events should NOT re-delete (nothing selected).
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "nih", SegmentStart = 0, SegmentLength = 3 }, input);
+        Assert.Equal("hello", input.Text);
+        Assert.Equal("nih", input.CompositionText);
+    }
+
+    [Fact]
+    public void Blur_WhileComposing_ClearsCompositionAndCallsHost()
+    {
+        var input = CreateInput("abc");
+        var host = new FakeTextInputHost();
+        input.TextInputHost = host;
+        EventDispatcher.Dispatch(new TextEditingEvent { Text = "ni" }, input);
+        Assert.True(input.IsComposing);
+
+        EventDispatcher.DispatchDirect(new BlurEvent(), input);
+
+        Assert.False(input.IsComposing);
+        Assert.Equal(1, host.ClearCompositionCalls);
+    }
+
+    [Fact]
+    public void Blur_WithoutComposition_DoesNotCallHost()
+    {
+        var input = CreateInput("abc");
+        var host = new FakeTextInputHost();
+        input.TextInputHost = host;
+
+        EventDispatcher.DispatchDirect(new BlurEvent(), input);
+
+        Assert.Equal(0, host.ClearCompositionCalls);
+    }
+
+    private sealed class FakeTextInputHost : ITextInputHost
+    {
+        public int SetInputAreaCalls;
+        public int ClearCompositionCalls;
+        public void SetInputArea(Rect caretRect, int cursorOffset) => SetInputAreaCalls++;
+        public void ClearComposition() => ClearCompositionCalls++;
     }
 }
