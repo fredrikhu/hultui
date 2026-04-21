@@ -325,4 +325,82 @@ public class TextInputElementTests
         public void SetInputArea(Rect caretRect, int cursorOffset) => SetInputAreaCalls++;
         public void ClearComposition() => ClearCompositionCalls++;
     }
+
+    // ──── UTF-16 surrogate pairs (emojis) ────
+
+    // U+1F600 GRINNING FACE (😀) = surrogate pair [D83D, DE00]
+    // Using concatenation so no string escapes are needed.
+    private const string Grin = "\uD83D\uDE00";
+    private const string Heart = "\uD83D\uDC96";
+
+    [Fact]
+    public void Backspace_AcrossEmoji_RemovesWholePair()
+    {
+        var input = CreateInput($"a{Grin}");
+        Assert.Equal(3, input.Text.Length); // 'a' + 2 surrogate halves
+        input.CursorPosition = input.Text.Length;
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Backspace }, input);
+
+        Assert.Equal("a", input.Text);
+        Assert.Equal(1, input.CursorPosition);
+    }
+
+    [Fact]
+    public void Delete_AcrossEmoji_RemovesWholePair()
+    {
+        var input = CreateInput($"{Grin}b");
+        input.CursorPosition = 0;
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Delete }, input);
+
+        Assert.Equal("b", input.Text);
+        Assert.Equal(0, input.CursorPosition);
+    }
+
+    [Fact]
+    public void ArrowLeft_OverEmoji_JumpsByPair()
+    {
+        var input = CreateInput($"a{Grin}"); // length 3
+        input.CursorPosition = 3;
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Left }, input);
+
+        Assert.Equal(1, input.CursorPosition); // skipped both halves
+    }
+
+    [Fact]
+    public void ArrowRight_OverEmoji_JumpsByPair()
+    {
+        var input = CreateInput($"a{Grin}b"); // length 4
+        input.CursorPosition = 1;
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Right }, input);
+
+        Assert.Equal(3, input.CursorPosition); // past both halves, before 'b'
+    }
+
+    [Fact]
+    public void CursorPosition_MidSurrogatePair_SnapsBack()
+    {
+        var input = CreateInput($"a{Grin}b");
+
+        input.CursorPosition = 2; // between high and low surrogate
+
+        Assert.Equal(1, input.CursorPosition); // snapped to start of pair
+    }
+
+    [Fact]
+    public void BackspaceSecondLastEmoji_DoesNotCrashAndRemovesIt()
+    {
+        // Repro for the reported crash: paste several emojis, backspace second-last.
+        var input = CreateInput($"{Grin}{Heart}{Grin}");
+        Assert.Equal(6, input.Text.Length);
+        input.CursorPosition = 4; // after the middle emoji
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Backspace }, input);
+
+        Assert.Equal($"{Grin}{Grin}", input.Text);
+        Assert.Equal(2, input.CursorPosition);
+    }
 }

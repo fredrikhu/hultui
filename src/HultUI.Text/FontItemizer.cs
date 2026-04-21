@@ -22,10 +22,21 @@ internal static class FontItemizer
         int i = 0;
         while (i < text.Length)
         {
-            int codepoint = char.IsHighSurrogate(text[i]) && i + 1 < text.Length
-                ? char.ConvertToUtf32(text[i], text[i + 1])
-                : text[i];
-            int charLen = codepoint > 0xFFFF ? 2 : 1;
+            // Guard against malformed input (lone or swapped surrogates).
+            // Valid pairs are decoded to their codepoint; anything else is treated
+            // as a BMP char so the shaper renders .notdef instead of crashing.
+            int codepoint;
+            int charLen;
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                codepoint = char.ConvertToUtf32(text[i], text[i + 1]);
+                charLen = 2;
+            }
+            else
+            {
+                codepoint = text[i];
+                charLen = 1;
+            }
 
             // Resolve font for this codepoint
             IResolvedFont resolvedFont;

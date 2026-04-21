@@ -178,15 +178,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (string.IsNullOrEmpty(text) || _pipeline is null)
             return Size.Zero;
 
-        // Use SKFont.MeasureText directly — this matches SKCanvas.DrawText's advance widths
-        // exactly, avoiding the HarfBuzz vs SkiaSharp measurement discrepancy.
-        var font = _pipeline.Fonts.Resolve(style.FontFamily, style.FontWeight, FontSlant.Normal);
-        var typeface = (SKTypeface)font.NativeHandle;
-        _pooledFont.Typeface = typeface;
-        _pooledFont.Size = style.FontSize;
-        float width = _pooledFont.MeasureText(text);
-        float height = _pooledFont.Spacing; // line height (ascent + descent + leading)
-        return new Size(width, height);
+        // Route through the same pipeline DrawText uses so CJK / emoji characters
+        // are measured with their fallback fonts, not the primary font's .notdef
+        // (which would return 0 width and put the caret in the wrong place).
+        var layout = _pipeline.Layout(text, style, float.PositiveInfinity, maxLines: 1);
+        return layout.Size;
     }
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)

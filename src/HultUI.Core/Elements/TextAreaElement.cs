@@ -50,9 +50,35 @@ public class TextAreaElement : BoxElement
         get => _cursorPos;
         set
         {
-            _cursorPos = Math.Clamp(value, 0, _text.Length);
+            _cursorPos = SnapToBoundary(Math.Clamp(value, 0, _text.Length));
             _selectionStart = _cursorPos;
         }
+    }
+
+    // ──── UTF-16 surrogate-pair stepping (see TextInputElement for rationale) ────
+    private int StepLeft(int pos)
+    {
+        if (pos <= 0) return 0;
+        if (pos >= 2 && char.IsLowSurrogate(_text[pos - 1]) && char.IsHighSurrogate(_text[pos - 2]))
+            return pos - 2;
+        return pos - 1;
+    }
+
+    private int StepRight(int pos)
+    {
+        if (pos >= _text.Length) return _text.Length;
+        if (pos + 1 < _text.Length && char.IsHighSurrogate(_text[pos]) && char.IsLowSurrogate(_text[pos + 1]))
+            return pos + 2;
+        return pos + 1;
+    }
+
+    private int SnapToBoundary(int pos)
+    {
+        if (pos > 0 && pos < _text.Length
+            && char.IsLowSurrogate(_text[pos])
+            && char.IsHighSurrogate(_text[pos - 1]))
+            return pos - 1;
+        return pos;
     }
 
     public int SelectionStart => Math.Min(_selectionStart, _cursorPos);
@@ -429,17 +455,9 @@ public class TextAreaElement : BoxElement
                     DeleteSelection();
                 else if (_cursorPos > 0)
                 {
-                    if (ctrl)
-                    {
-                        int target = FindWordBoundaryLeft(_cursorPos);
-                        _text = _text.Remove(target, _cursorPos - target);
-                        _cursorPos = target;
-                    }
-                    else
-                    {
-                        _text = _text.Remove(_cursorPos - 1, 1);
-                        _cursorPos--;
-                    }
+                    int target = ctrl ? FindWordBoundaryLeft(_cursorPos) : StepLeft(_cursorPos);
+                    _text = _text.Remove(target, _cursorPos - target);
+                    _cursorPos = target;
                     _selectionStart = _cursorPos;
                     _needsScrollToCursor = true;
                     InvalidateLines();
@@ -453,15 +471,8 @@ public class TextAreaElement : BoxElement
                     DeleteSelection();
                 else if (_cursorPos < _text.Length)
                 {
-                    if (ctrl)
-                    {
-                        int target = FindWordBoundaryRight(_cursorPos);
-                        _text = _text.Remove(_cursorPos, target - _cursorPos);
-                    }
-                    else
-                    {
-                        _text = _text.Remove(_cursorPos, 1);
-                    }
+                    int target = ctrl ? FindWordBoundaryRight(_cursorPos) : StepRight(_cursorPos);
+                    _text = _text.Remove(_cursorPos, target - _cursorPos);
                     InvalidateLines();
                 }
                 _preferredX = -1;
@@ -593,7 +604,7 @@ public class TextAreaElement : BoxElement
             return;
         }
 
-        _cursorPos = Math.Clamp(_cursorPos + delta, 0, _text.Length);
+        _cursorPos = delta < 0 ? StepLeft(_cursorPos) : StepRight(_cursorPos);
         if (!extendSelection)
             _selectionStart = _cursorPos;
         _needsScrollToCursor = true;
@@ -601,7 +612,7 @@ public class TextAreaElement : BoxElement
 
     private void MoveCursorTo(int pos, bool extendSelection)
     {
-        _cursorPos = Math.Clamp(pos, 0, _text.Length);
+        _cursorPos = SnapToBoundary(Math.Clamp(pos, 0, _text.Length));
         if (!extendSelection)
             _selectionStart = _cursorPos;
         _needsScrollToCursor = true;
@@ -730,7 +741,7 @@ public class TextAreaElement : BoxElement
         if (lineEnd > lineStart && lineEnd <= _text.Length && _text[lineEnd - 1] == '\n')
             lineEnd--;
 
-        return HitTestLinePosition(lineStart, lineEnd, localX, style);
+        return SnapToBoundary(HitTestLinePosition(lineStart, lineEnd, localX, style));
     }
 
     /// <summary>
