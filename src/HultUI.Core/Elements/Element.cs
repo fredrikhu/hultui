@@ -71,6 +71,18 @@ public abstract class Element
 
     // ──── Focus ────
     public bool IsFocusable { get; set; }
+
+    /// <summary>
+    /// Controls Tab traversal order, following HTML <c>tabindex</c> semantics:
+    ///   <list type="bullet">
+    ///     <item><c>&gt; 0</c>: visited first, ascending (ties broken by document order).</item>
+    ///     <item><c>== 0</c> (default): visited after all positives, in document order.</item>
+    ///     <item><c>&lt; 0</c>: focusable programmatically via <see cref="Focus"/> but skipped by Tab.</item>
+    ///   </list>
+    /// Has no effect unless <see cref="IsFocusable"/> is true.
+    /// </summary>
+    public int TabIndex { get; set; }
+
     internal FocusManager? FocusManager { get; set; }
 
     /// <summary>
@@ -365,6 +377,7 @@ public abstract class Element
         GridItem.CopyFrom(source.GridItem);
         Inherited.CopyFrom(source.Inherited);
         IsFocusable = source.IsFocusable;
+        TabIndex = source.TabIndex;
         Draggable = source.Draggable;
         IsWindowDragRegion = source.IsWindowDragRegion;
         TooltipText = source.TooltipText;

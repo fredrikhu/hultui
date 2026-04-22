@@ -3,8 +3,10 @@ using HultUI.Core.Elements;
 namespace HultUI.Core.Events;
 
 /// <summary>
-/// Collects focusable elements in document order (depth-first, pre-order)
-/// and provides next/previous navigation for Tab/Shift+Tab.
+/// Collects focusable elements and provides next/previous navigation for Tab/Shift+Tab.
+/// Follows HTML <c>tabindex</c> semantics: positive values are sequenced first in ascending
+/// order, then zero values in document order. Negative values are skipped (still focusable
+/// programmatically via <see cref="Element.Focus"/>).
 /// </summary>
 internal static class FocusTraversal
 {
@@ -40,14 +42,19 @@ internal static class FocusTraversal
 
     private static List<Element> CollectFocusable(Element root)
     {
-        var result = new List<Element>();
-        CollectRecursive(root, result);
-        return result;
+        var inDocOrder = new List<Element>();
+        CollectRecursive(root, inDocOrder);
+
+        // OrderBy is a stable sort, so equal TabIndex values preserve document order.
+        // Mapping 0 → int.MaxValue places zero-indexed elements after all positive ones.
+        return inDocOrder
+            .OrderBy(e => e.TabIndex == 0 ? int.MaxValue : e.TabIndex)
+            .ToList();
     }
 
     private static void CollectRecursive(Element element, List<Element> result)
     {
-        if (element.IsFocusable)
+        if (element.IsFocusable && element.TabIndex >= 0)
             result.Add(element);
 
         foreach (var child in element.Children)

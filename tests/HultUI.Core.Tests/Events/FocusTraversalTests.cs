@@ -142,4 +142,75 @@ public class FocusTraversalTests
         Assert.False(new BoxElement().IsFocusable);
         Assert.False(new TextElement().IsFocusable);
     }
+
+    [Fact]
+    public void TabIndex_PositiveValuesVisitedFirst_InAscendingOrder()
+    {
+        // Document order: a, b, c, d — but TabIndex overrides it.
+        var root = new BoxElement();
+        var a = new BoxElement { IsFocusable = true, Name = "a", TabIndex = 0 };
+        var b = new BoxElement { IsFocusable = true, Name = "b", TabIndex = 2 };
+        var c = new BoxElement { IsFocusable = true, Name = "c", TabIndex = 1 };
+        var d = new BoxElement { IsFocusable = true, Name = "d", TabIndex = 0 };
+        root.AddChild(a);
+        root.AddChild(b);
+        root.AddChild(c);
+        root.AddChild(d);
+
+        var fm = new FocusManager();
+        fm.MoveFocusNext(root); Assert.Equal("c", fm.FocusedElement?.Name); // TabIndex=1 first
+        fm.MoveFocusNext(root); Assert.Equal("b", fm.FocusedElement?.Name); // TabIndex=2 next
+        fm.MoveFocusNext(root); Assert.Equal("a", fm.FocusedElement?.Name); // TabIndex=0, doc order
+        fm.MoveFocusNext(root); Assert.Equal("d", fm.FocusedElement?.Name); // TabIndex=0, doc order
+        fm.MoveFocusNext(root); Assert.Equal("c", fm.FocusedElement?.Name); // wraps to top of sequence
+    }
+
+    [Fact]
+    public void TabIndex_EqualPositiveValues_PreserveDocumentOrder()
+    {
+        var root = new BoxElement();
+        var a = new BoxElement { IsFocusable = true, Name = "a", TabIndex = 1 };
+        var b = new BoxElement { IsFocusable = true, Name = "b", TabIndex = 1 };
+        var c = new BoxElement { IsFocusable = true, Name = "c", TabIndex = 1 };
+        root.AddChild(a);
+        root.AddChild(b);
+        root.AddChild(c);
+
+        var fm = new FocusManager();
+        fm.MoveFocusNext(root); Assert.Equal("a", fm.FocusedElement?.Name);
+        fm.MoveFocusNext(root); Assert.Equal("b", fm.FocusedElement?.Name);
+        fm.MoveFocusNext(root); Assert.Equal("c", fm.FocusedElement?.Name);
+    }
+
+    [Fact]
+    public void TabIndex_Negative_SkippedByTabButStillProgrammaticallyFocusable()
+    {
+        var root = new BoxElement();
+        var a = new BoxElement { IsFocusable = true, Name = "a" };
+        var skip = new BoxElement { IsFocusable = true, Name = "skip", TabIndex = -1 };
+        var b = new BoxElement { IsFocusable = true, Name = "b" };
+        root.AddChild(a);
+        root.AddChild(skip);
+        root.AddChild(b);
+
+        var fm = new FocusManager();
+        fm.MoveFocusNext(root); Assert.Equal("a", fm.FocusedElement?.Name);
+        fm.MoveFocusNext(root); Assert.Equal("b", fm.FocusedElement?.Name); // skip is skipped
+        fm.MoveFocusNext(root); Assert.Equal("a", fm.FocusedElement?.Name); // wraps
+
+        // But SetFocus still works — programmatic focus bypasses TabIndex.
+        fm.SetFocus(skip);
+        Assert.Equal("skip", fm.FocusedElement?.Name);
+
+        // And Tab from a TabIndex<0 element still advances to the next Tab-eligible one.
+        fm.MoveFocusNext(root);
+        Assert.Equal("a", fm.FocusedElement?.Name);
+    }
+
+    [Fact]
+    public void TabIndex_DefaultIsZero()
+    {
+        Assert.Equal(0, new BoxElement().TabIndex);
+        Assert.Equal(0, new ButtonElement().TabIndex);
+    }
 }
