@@ -20,6 +20,7 @@ public sealed unsafe class SDL3Window : IDisposable
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
     private GCHandle _gcHandle;
+    private bool _textInputActive;
     internal bool ResizePending;
     internal long LastResizeRenderTick;
 
@@ -95,8 +96,9 @@ public sealed unsafe class SDL3Window : IDisposable
         // Create SkiaSharp surface with SDL3 GL proc resolver
         _surface = new SkiaGLRenderSurface(GetGLProcAddress);
 
-        // Enable text input events (SDL3 requires explicit activation)
-        SDL_StartTextInput(_window);
+        // Text input is enabled on focus (see StartTextInput) — leaving it
+        // always on would make the Win32 IMM/TSF consume dead keys and
+        // IME-toggle hotkeys even over non-text UI.
 
         // Register in the static window registry
         WindowId = SDL_GetWindowID(_window);
@@ -246,6 +248,20 @@ public sealed unsafe class SDL3Window : IDisposable
         {
             SDL_SetClipboardText(ptr);
         }
+    }
+
+    public void StartTextInput()
+    {
+        if (_textInputActive) return;
+        _textInputActive = true;
+        SDL_StartTextInput(_window);
+    }
+
+    public void StopTextInput()
+    {
+        if (!_textInputActive) return;
+        _textInputActive = false;
+        SDL_StopTextInput(_window);
     }
 
     public void SetTextInputArea(Rect caretRect, int cursorOffset)

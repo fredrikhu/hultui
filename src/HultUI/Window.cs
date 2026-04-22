@@ -102,11 +102,17 @@ public sealed class Window : IOverlayHost, IDisposable
         {
             textInput.Clipboard = Clipboard;
             textInput.TextInputHost = TextInputHost;
+            TextInputHost.StartTextInput();
         }
         else if (element is TextAreaElement textArea)
         {
             textArea.Clipboard = Clipboard;
             textArea.TextInputHost = TextInputHost;
+            TextInputHost.StartTextInput();
+        }
+        else
+        {
+            TextInputHost.StopTextInput();
         }
     }
 

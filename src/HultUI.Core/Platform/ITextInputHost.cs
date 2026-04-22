@@ -11,6 +11,19 @@ namespace HultUI.Core.Platform;
 public interface ITextInputHost
 {
     /// <summary>
+    /// Enables OS text input routing for the window. Must be paired with
+    /// <see cref="StopTextInput"/> when focus leaves text-editable elements —
+    /// otherwise the IME stays armed and dead keys / IME-toggle hotkeys are
+    /// consumed even over non-text UI (notably on Windows IMM/TSF).
+    /// </summary>
+    void StartTextInput();
+
+    /// <summary>
+    /// Disables OS text input routing for the window.
+    /// </summary>
+    void StopTextInput();
+
+    /// <summary>
     /// Reports the caret rectangle (in window logical coordinates) to the OS IME.
     /// <paramref name="cursorOffset"/> is the cursor's horizontal offset inside the rect.
     /// </summary>

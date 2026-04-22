@@ -322,6 +322,10 @@ public class TextInputElementTests
     {
         public int SetInputAreaCalls;
         public int ClearCompositionCalls;
+        public int StartTextInputCalls;
+        public int StopTextInputCalls;
+        public void StartTextInput() => StartTextInputCalls++;
+        public void StopTextInput() => StopTextInputCalls++;
         public void SetInputArea(Rect caretRect, int cursorOffset) => SetInputAreaCalls++;
         public void ClearComposition() => ClearCompositionCalls++;
     }
