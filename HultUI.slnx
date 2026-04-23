@@ -27,5 +27,6 @@
     <Project Path="tests/HultUI.Text.Tests/HultUI.Text.Tests.csproj" />
     <Project Path="tests/HultUI.Rendering.Skia.Tests/HultUI.Rendering.Skia.Tests.csproj" />
     <Project Path="tests/HultUI.SourceGenerators.Tests/HultUI.SourceGenerators.Tests.csproj" />
+    <Project Path="tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj" />
   </Folder>
 </Solution>
