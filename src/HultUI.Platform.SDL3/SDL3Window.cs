@@ -304,7 +304,10 @@ public sealed unsafe class SDL3Window : IDisposable
         int pw, ph, lw, lh;
         SDL_GetWindowSizeInPixels(_window, &pw, &ph);
         SDL_GetWindowSize(_window, &lw, &lh);
-        float scale = SDL_GetWindowDisplayScale(_window);
+        // Pixel density (pixel_size / logical_size) — NOT DisplayScale, which
+        // on Windows also multiplies in the OS DPI preference and would paint
+        // content larger than the framebuffer.
+        float scale = SDL_GetWindowPixelDensity(_window);
 
         if (pw == PixelWidth && ph == PixelHeight && lw == LogicalWidth && lh == LogicalHeight
             && scale == ScaleFactor)
