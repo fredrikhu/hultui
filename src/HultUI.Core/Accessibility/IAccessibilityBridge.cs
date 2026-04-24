@@ -2,27 +2,35 @@ namespace HultUI.Core.Accessibility;
 
 /// <summary>
 /// Platform abstraction for exposing the accessibility tree to OS assistive technologies.
-/// Implementations would map AccessibilityNodes to platform-specific APIs:
-/// - Windows: UIAutomation
-/// - macOS: NSAccessibility
-/// - Linux: AT-SPI2
+/// Implementations map <see cref="AccessibilityNode"/>s to platform-specific APIs:
+///   Windows → UIAutomation,
+///   macOS   → NSAccessibility,
+///   Linux   → AT-SPI2.
 /// </summary>
 public interface IAccessibilityBridge
 {
     /// <summary>
-    /// Called after layout when the accessibility tree has been rebuilt.
-    /// The bridge should diff against its previous state and notify the platform
-    /// of any changes.
+    /// Cheap probe for "is any assistive tech listening right now". Polled per
+    /// frame; when false the Window skips building/diffing the a11y tree.
     /// </summary>
-    void Update(AccessibilityNode root);
+    bool IsActive { get; }
 
     /// <summary>
-    /// Called when focus changes to a new element.
+    /// Apply a structural delta computed by <see cref="AccessibilityTreeDiffer"/>.
+    /// Called at most once per frame — only when the element tree's <c>Children</c>
+    /// dirty flag was set during the frame.
+    /// </summary>
+    void ApplyChanges(TreeDiff diff);
+
+    /// <summary>
+    /// Focus changed to a different element (or to nothing). The node, when
+    /// non-null, belongs to the most recently applied tree snapshot.
     /// </summary>
     void NotifyFocusChanged(AccessibilityNode? focused);
 
     /// <summary>
-    /// Called when a property of a node changes (e.g., text content, checked state).
+    /// A single property on an already-known node changed without the tree
+    /// structure changing. Property names come from <see cref="AccessibilityProperties"/>.
     /// </summary>
     void NotifyPropertyChanged(AccessibilityNode node, string propertyName);
 }

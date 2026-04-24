@@ -374,6 +374,21 @@ public sealed unsafe class SDL3Window : IDisposable
         return SDL_GetError() ?? "Unknown error";
     }
 
+    /// <summary>
+    /// Returns the native Win32 <c>HWND</c> for this window on Windows, or
+    /// <see cref="IntPtr.Zero"/> on other platforms / if the window was
+    /// destroyed. Used by the UIA accessibility bridge.
+    /// </summary>
+    public IntPtr GetWin32Hwnd()
+    {
+        if (_window == null) return IntPtr.Zero;
+        if (!OperatingSystem.IsWindows()) return IntPtr.Zero;
+
+        var props = SDL_GetWindowProperties(_window);
+        fixed (byte* name = SDL_PROP_WINDOW_WIN32_HWND_POINTER)
+            return SDL_GetPointerProperty(props, name, IntPtr.Zero);
+    }
+
     private static byte[] MarshalUtf8(string text)
     {
         var bytes = new byte[System.Text.Encoding.UTF8.GetByteCount(text) + 1];

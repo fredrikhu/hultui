@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -20,6 +21,7 @@ public class RadioButtonElement : Element
             if (_isChecked == value) return;
             _isChecked = value;
             MarkPaintDirty();
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.IsSelected);
         }
     }
 

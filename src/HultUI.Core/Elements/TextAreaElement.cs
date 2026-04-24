@@ -37,11 +37,15 @@ public class TextAreaElement : BoxElement
         get => _text;
         set
         {
-            _text = value ?? "";
+            var newValue = value ?? "";
+            bool changed = _text != newValue;
+            _text = newValue;
             _cursorPos = Math.Min(_cursorPos, _text.Length);
             _selectionStart = _cursorPos;
             InvalidateLines();
             MarkPaintDirty();
+            if (changed)
+                NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
         }
     }
 
@@ -712,7 +716,11 @@ public class TextAreaElement : BoxElement
         InvalidateLines();
     }
 
-    private void NotifyChanged() => TextChanged?.Invoke(_text);
+    private void NotifyChanged()
+    {
+        TextChanged?.Invoke(_text);
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
+    }
 
     private static bool IsWordBreak(char c) => char.IsWhiteSpace(c) || char.IsPunctuation(c);
 

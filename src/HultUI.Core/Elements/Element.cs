@@ -113,6 +113,31 @@ public abstract class Element
     public string? AccessibleName { get; set; }
     public string? AccessibleDescription { get; set; }
 
+    /// <summary>
+    /// Set by <see cref="Window"/> on the root when a platform accessibility
+    /// bridge is active. Descendants discover it by walking up <see cref="Parent"/>
+    /// in <see cref="NotifyAccessibilityPropertyChanged"/>.
+    /// </summary>
+    internal IElementPropertyObserver? AccessibilityObserver { get; set; }
+
+    /// <summary>
+    /// Announces that an accessibility-visible property on this element changed
+    /// (e.g. a checkbox was toggled, a text input's value was replaced). Walks
+    /// up the parent chain to deliver to the root-scoped observer, if any.
+    /// Use constants from <see cref="AccessibilityProperties"/> for the name.
+    /// </summary>
+    protected internal void NotifyAccessibilityPropertyChanged(string propertyName)
+    {
+        for (Element? current = this; current is not null; current = current.Parent)
+        {
+            if (current.AccessibilityObserver is { } observer)
+            {
+                observer.OnElementPropertyChanged(this, propertyName);
+                return;
+            }
+        }
+    }
+
     // ──── Refs ────
     // Refs registered via WithRef(). During PatchFrom the source element's
     // refs are repointed to the live (target) element so that handler

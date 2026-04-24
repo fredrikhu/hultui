@@ -24,10 +24,14 @@ public class TextInputElement : BoxElement
         get => _text;
         set
         {
-            _text = value ?? "";
+            var newValue = value ?? "";
+            bool changed = _text != newValue;
+            _text = newValue;
             _cursorPos = Math.Min(_cursorPos, _text.Length);
             _selectionStart = _cursorPos;
             MarkPaintDirty();
+            if (changed)
+                NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
         }
     }
 
@@ -439,6 +443,7 @@ public class TextInputElement : BoxElement
     private void NotifyChanged()
     {
         TextChanged?.Invoke(_text);
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.Value);
     }
 
     /// <summary>

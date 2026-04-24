@@ -9,41 +9,45 @@ public static class AccessibilityTreeBuilder
     /// Builds an accessibility tree from the element tree rooted at the given element.
     /// Decorative containers (BoxElements with no role, name, or semantic children) are
     /// flattened — their children are promoted to the parent accessibility node.
+    /// When <paramref name="focusManager"/> is supplied, the focused element gets
+    /// <see cref="AccessibilityNode.IsFocused"/> set.
     /// </summary>
-    public static AccessibilityNode Build(Element root)
+    public static AccessibilityNode Build(Element root, FocusManager? focusManager = null)
     {
-        var role = ResolveRole(root);
-        var node = new AccessibilityNode(
-            root.Id,
-            role,
-            ResolveName(root),
-            root.AccessibleDescription,
-            root.Layout.AbsoluteBorderBox);
-
-        BuildChildren(root, node);
+        var node = CreateNode(root, focusManager);
+        BuildChildren(root, node, focusManager);
         return node;
     }
 
-    private static void BuildChildren(Element element, AccessibilityNode parent)
+    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager)
+    {
+        return new AccessibilityNode(
+            element.Id,
+            ResolveRole(element),
+            ResolveName(element),
+            element.AccessibleDescription,
+            element.Layout.AbsoluteBorderBox,
+            isFocusable: element.IsFocusable,
+            isFocused: focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element),
+            isEnabled: true,
+            isToggled: ResolveIsToggled(element),
+            value: ResolveValue(element));
+    }
+
+    private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager)
     {
         foreach (var child in element.Children)
         {
             if (IsSemantic(child))
             {
-                var childNode = new AccessibilityNode(
-                    child.Id,
-                    ResolveRole(child),
-                    ResolveName(child),
-                    child.AccessibleDescription,
-                    child.Layout.AbsoluteBorderBox);
-
+                var childNode = CreateNode(child, focusManager);
                 parent.AddChild(childNode);
-                BuildChildren(child, childNode);
+                BuildChildren(child, childNode, focusManager);
             }
             else
             {
                 // Flatten: promote this element's children directly into parent
-                BuildChildren(child, parent);
+                BuildChildren(child, parent, focusManager);
             }
         }
     }
@@ -106,6 +110,26 @@ public static class AccessibilityTreeBuilder
         if (element is TextElement text && !string.IsNullOrEmpty(text.Content))
             return text.Content;
 
+        // Labels on checkboxes/radios serve as the accessible name when no
+        // explicit AccessibleName is set.
+        if (element is CheckboxElement checkbox && !string.IsNullOrEmpty(checkbox.Label))
+            return checkbox.Label;
+        if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label))
+            return radio.Label;
+
         return element.Name;
     }
+
+    internal static bool? ResolveIsToggled(Element element) => element switch
+    {
+        CheckboxElement cb => cb.IsChecked,
+        _ => null
+    };
+
+    internal static string? ResolveValue(Element element) => element switch
+    {
+        TextInputElement ti => ti.Text,
+        TextAreaElement ta => ta.Text,
+        _ => null
+    };
 }

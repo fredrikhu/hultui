@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.DevTools;
@@ -39,6 +40,12 @@ public sealed class Window : IOverlayHost, IDisposable
     // ──── Context menu state ────
     private OverlayHandle _contextMenuOverlay;
     private ContextMenuElement? _contextMenuElement;
+
+    // ──── Accessibility state ────
+    private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
+    private AccessibilityNode? _previousA11yTree;
+    private readonly AccessibilityObserverAdapter _a11yObserver;
+    private Sdl3UiaHostBridge? _uiaHost;
 
     // ──── Drag & Drop state ────
     private const float DragThreshold = 5f;
@@ -88,12 +95,43 @@ public sealed class Window : IOverlayHost, IDisposable
         Clipboard = new SDL3Clipboard(platformWindow);
         TextInputHost = new SDL3TextInputHost(platformWindow);
         _devTools = new DevToolsOverlay(_perf);
+        _a11yObserver = new AccessibilityObserverAdapter(this);
         PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
 
         if (platformWindow.Style == WindowStyle.Borderless)
             platformWindow.HitTestHandler = HandleWindowHitTest;
 
         _focusManager.FocusChanged += OnFocusChanged;
+
+        // Platform accessibility bridge: inactive until an AT probes. On
+        // Windows this wires an SDL message hook for WM_GETOBJECT; on Linux
+        // it attempts a connection to the AT-SPI bus. Either way it falls
+        // back to NullAccessibilityBridge if the platform can't be reached.
+        _accessibilityBridge = AccessibilityBridgeFactory.Create(this);
+    }
+
+    internal void SetUiaHostBridge(Sdl3UiaHostBridge host) => _uiaHost = host;
+
+    /// <summary>
+    /// Walks the element tree looking for an element with the given
+    /// <see cref="ElementId"/>. Used by the accessibility host bridge to
+    /// route UIA actions back to the originating element. Returns null if
+    /// the element has been removed.
+    /// </summary>
+    internal Element? FindElement(ElementId id)
+    {
+        return _root is null ? null : FindInTree(_root, id);
+    }
+
+    private static Element? FindInTree(Element e, ElementId id)
+    {
+        if (e.Id == id) return e;
+        foreach (var child in e.Children)
+        {
+            var found = FindInTree(child, id);
+            if (found is not null) return found;
+        }
+        return null;
     }
 
     private void OnFocusChanged(Element? element)
@@ -114,6 +152,32 @@ public sealed class Window : IOverlayHost, IDisposable
         {
             TextInputHost.StopTextInput();
         }
+
+        if (_accessibilityBridge.IsActive)
+            _accessibilityBridge.NotifyFocusChanged(FindA11yNode(element));
+    }
+
+    /// <summary>
+    /// Locates the AccessibilityNode matching the given element in the last
+    /// applied tree snapshot. Returns null if the element isn't represented
+    /// (e.g. it was flattened out as a decorative container) or no snapshot
+    /// has been built yet.
+    /// </summary>
+    private AccessibilityNode? FindA11yNode(Element? element)
+    {
+        if (element is null || _previousA11yTree is null) return null;
+        return FindById(_previousA11yTree, element.Id);
+    }
+
+    private static AccessibilityNode? FindById(AccessibilityNode node, ElementId id)
+    {
+        if (node.ElementId == id) return node;
+        foreach (var child in node.Children)
+        {
+            var found = FindById(child, id);
+            if (found is not null) return found;
+        }
+        return null;
     }
 
     public void SetRoot(Element root)
@@ -121,6 +185,8 @@ public sealed class Window : IOverlayHost, IDisposable
         _root = root;
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
+        root.AccessibilityObserver = _a11yObserver;
+        _previousA11yTree = null;
     }
 
     internal Element? Root => _root;
@@ -143,6 +209,12 @@ public sealed class Window : IOverlayHost, IDisposable
     internal void RenderFrame()
     {
         if (_root is null) return;
+
+        // Drain queued UI-thread actions from the accessibility host bridge.
+        // UIA callbacks run on worker threads and enqueue here; this is where
+        // they get executed against the element tree.
+        if (OperatingSystem.IsWindows())
+            _uiaHost?.DrainPendingActions();
 
         _tracer.MarkFrame();
         using var _frameTrace = _tracer.Begin("Frame", "Frame");
@@ -169,6 +241,21 @@ public sealed class Window : IOverlayHost, IDisposable
                 _layoutEngine.PerformLayout(_root, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
         }
         _perf.EndLayout();
+
+        // Accessibility: rebuild + diff when the tree's structure changed and
+        // something is actually listening. The Null bridge's IsActive is false,
+        // so this is a single boolean read for apps with no AT attached.
+        if (_accessibilityBridge.IsActive && _root.DirtyFlags.HasFlag(DirtyFlags.Children))
+        {
+            using (_tracer.Begin("Phase", "A11y"))
+            {
+                var newTree = AccessibilityTreeBuilder.Build(_root, _focusManager);
+                var diff = AccessibilityTreeDiffer.Diff(_previousA11yTree, newTree);
+                if (!diff.IsEmpty)
+                    _accessibilityBridge.ApplyChanges(diff);
+                _previousA11yTree = newTree;
+            }
+        }
 
         // Render (user content only — DevTools excluded from timing)
         var ctx = PlatformWindow.Surface.RenderContext;
@@ -1078,6 +1165,23 @@ public sealed class Window : IOverlayHost, IDisposable
         if (_disposed) return;
         _disposed = true;
         PlatformWindow.EventTranslator.OnInputEvent -= HandleInputEvent;
+        (_accessibilityBridge as IDisposable)?.Dispose();
         PlatformWindow.Dispose();
+    }
+
+    /// <summary>
+    /// Bridges per-element accessibility notifications into the Window-owned
+    /// bridge. Elements fire these when their a11y-visible state changes
+    /// (checkbox toggled, text value edited) without any structural rebuild.
+    /// </summary>
+    private sealed class AccessibilityObserverAdapter(Window window) : IElementPropertyObserver
+    {
+        public void OnElementPropertyChanged(Element element, string propertyName)
+        {
+            if (!window._accessibilityBridge.IsActive) return;
+            var node = window.FindA11yNode(element);
+            if (node is null) return;
+            window._accessibilityBridge.NotifyPropertyChanged(node, propertyName);
+        }
     }
 }
