@@ -46,6 +46,7 @@ public partial class App : Component
     private bool _remoteOpRunning;
     private ConfirmDialogState? _pendingConfirm;
     private InteractiveRebaseState? _pendingRebase;
+    private InteractiveRebaseDialog? _rebaseDialog;
     private PasswordDialogState? _pendingPassword;
     private RemoteBranchDialogState? _pendingRemoteBranch;
     private string? _bisectBadHash;
@@ -183,8 +184,8 @@ public partial class App : Component
         if (_pendingConfirm != null)
             root.AddChild(ConfirmDialog.Build(_pendingConfirm, DismissConfirm));
 
-        if (_pendingRebase != null)
-            root.AddChild(InteractiveRebaseDialog.Build(_pendingRebase, DismissRebase));
+        if (_rebaseDialog != null)
+            root.AddChild(_rebaseDialog.Mount());
 
         if (_pendingPassword != null)
             root.AddChild(PasswordDialog.Build(_pendingPassword, DismissPassword));
@@ -423,7 +424,9 @@ public partial class App : Component
             Entries = entries,
             OnConfirm = plan => RunInteractiveRebase(baseHash, plan),
         };
-        _pendingRebase.RefreshDialog = MarkDirty;
+        // The dialog component owns its own MarkDirty via state.RefreshDialog,
+        // so App only rebuilds when the dialog is added or removed.
+        _rebaseDialog = new InteractiveRebaseDialog(_pendingRebase, DismissRebase);
         MarkDirty();
     }
 
@@ -459,6 +462,7 @@ public partial class App : Component
     private void DismissRebase()
     {
         _pendingRebase = null;
+        _rebaseDialog = null;
         MarkDirty();
     }
 
