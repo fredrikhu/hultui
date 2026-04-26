@@ -207,28 +207,22 @@ public static class InteractiveRebaseDialog
         row.AccessibleName = $"Commit {entry.ShortHash}: {entry.Subject}. Action {entry.Op}.";
         row.WithRef(rowRef);
 
-        // Track focus in state so the focus ring survives rebuilds (PatchFrom
-        // would otherwise reset BorderColor/BorderWidth from the new tree).
-        // Also apply the border directly so a focus change without a rebuild
-        // repaints immediately.
+        // Track focus in state and let Build apply the border. Doing it solely
+        // through state avoids dual-mutation bugs: with both FocusEvent and Build
+        // mutating BorderColor/BorderWidth, an out-of-sync FocusEvent (e.g. one
+        // dispatched to an orphaned element after a panel-replace rebuild) leaves
+        // the live element's border stuck on.
         row.On<FocusEvent>(_ =>
         {
+            if (state.FocusedHash == entry.Hash) return;
             state.FocusedHash = entry.Hash;
-            row.BorderColor = FocusRingColor;
-            if (row.Box.BorderWidth == new Thickness(0))
-                row.Box.BorderWidth = new Thickness(1);
-            row.MarkPaintDirty();
+            state.RefreshDialog?.Invoke();
         });
         row.On<BlurEvent>(_ =>
         {
-            if (state.FocusedHash == entry.Hash) state.FocusedHash = null;
-            // Only clear the border if it's the focus ring (not a drag indicator).
-            if (row.Box.BorderWidth == new Thickness(1))
-            {
-                row.BorderColor = Color.Transparent;
-                row.Box.BorderWidth = new Thickness(0);
-            }
-            row.MarkPaintDirty();
+            if (state.FocusedHash != entry.Hash) return;
+            state.FocusedHash = null;
+            state.RefreshDialog?.Invoke();
         });
 
         // Keyboard shortcuts only fire when the row itself is the target —
