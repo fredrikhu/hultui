@@ -46,7 +46,6 @@ public partial class App : Component
     private bool _remoteOpRunning;
     private ConfirmDialogState? _pendingConfirm;
     private InteractiveRebaseState? _pendingRebase;
-    private InteractiveRebaseDialog? _rebaseDialog;
     private PasswordDialogState? _pendingPassword;
     private RemoteBranchDialogState? _pendingRemoteBranch;
     private string? _bisectBadHash;
@@ -184,8 +183,8 @@ public partial class App : Component
         if (_pendingConfirm != null)
             root.AddChild(ConfirmDialog.Build(_pendingConfirm, DismissConfirm));
 
-        if (_rebaseDialog != null)
-            root.AddChild(_rebaseDialog.Mount());
+        if (_pendingRebase != null)
+            root.AddChild(InteractiveRebaseDialog.Build(_pendingRebase, DismissRebase));
 
         if (_pendingPassword != null)
             root.AddChild(PasswordDialog.Build(_pendingPassword, DismissPassword));
@@ -197,6 +196,31 @@ public partial class App : Component
             root.AddChild(KeyboardShortcutsOverlay.Build(() => { _showShortcuts = false; MarkDirty(); }));
 
         return root;
+    }
+
+    /// <summary>
+    /// Dispatch focus requests parked on dialog state during the previous
+    /// rebuild. Done here (not in the dialog) because the rebase dialog is
+    /// a static builder — it has no lifecycle hook of its own. Doing the
+    /// focus call before reconciliation completes would target an
+    /// about-to-be-replaced element instead of the live one.
+    /// </summary>
+    protected override void OnAfterBuild()
+    {
+        if (_pendingRebase is { } rebase)
+        {
+            if (rebase.PendingRowFocus is { } hash
+                && rebase.RowRefs.TryGetValue(hash, out var rowRef))
+            {
+                rowRef.Current?.Focus();
+                rebase.PendingRowFocus = null;
+            }
+            if (rebase.PendingDropdownFocus)
+            {
+                rebase.PendingDropdownFocus = false;
+                rebase.DropdownRef.Current?.Focus();
+            }
+        }
     }
 
     private Element BuildSidebarLayout(bool showWc)
@@ -423,10 +447,10 @@ public partial class App : Component
             BaseShortHash = baseHash[..7],
             Entries = entries,
             OnConfirm = plan => RunInteractiveRebase(baseHash, plan),
+            // Initial focus lands on the first row when the dialog mounts.
+            PendingRowFocus = entries[0].Hash,
         };
-        // The dialog component owns its own MarkDirty via state.RefreshDialog,
-        // so App only rebuilds when the dialog is added or removed.
-        _rebaseDialog = new InteractiveRebaseDialog(_pendingRebase, DismissRebase);
+        _pendingRebase.RefreshDialog = MarkDirty;
         MarkDirty();
     }
 
@@ -462,7 +486,6 @@ public partial class App : Component
     private void DismissRebase()
     {
         _pendingRebase = null;
-        _rebaseDialog = null;
         MarkDirty();
     }
 
