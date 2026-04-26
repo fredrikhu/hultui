@@ -207,22 +207,36 @@ public static class InteractiveRebaseDialog
         row.AccessibleName = $"Commit {entry.ShortHash}: {entry.Subject}. Action {entry.Op}.";
         row.WithRef(rowRef);
 
-        // Track focus in state and let Build apply the border. Doing it solely
-        // through state avoids dual-mutation bugs: with both FocusEvent and Build
-        // mutating BorderColor/BorderWidth, an out-of-sync FocusEvent (e.g. one
-        // dispatched to an orphaned element after a panel-replace rebuild) leaves
-        // the live element's border stuck on.
+        // Track focus and paint the border directly on the *live* row — not on
+        // the closure's `row`, which can be an orphan after a panel-replace
+        // rebuild (e.g. when the dropdown opens). state.RowRefs[hash].Current
+        // is repointed to the live tree by PatchFrom each rebuild, so it always
+        // refers to the element actually rendered on screen.
+        //
+        // We deliberately do NOT call RefreshDialog from these handlers:
+        // every focus change would trigger a synchronous nested App rebuild,
+        // and a single arrow-key press would cascade through Blur+Focus events
+        // each spawning their own rebuild, freezing the UI.
         row.On<FocusEvent>(_ =>
         {
-            if (state.FocusedHash == entry.Hash) return;
             state.FocusedHash = entry.Hash;
-            state.RefreshDialog?.Invoke();
+            var live = state.RowRefs.GetValueOrDefault(entry.Hash)?.Current;
+            if (live is null) return;
+            live.BorderColor = FocusRingColor;
+            if (live.Box.BorderWidth == new Thickness(0))
+                live.Box.BorderWidth = new Thickness(1);
+            live.MarkPaintDirty();
         });
         row.On<BlurEvent>(_ =>
         {
-            if (state.FocusedHash != entry.Hash) return;
-            state.FocusedHash = null;
-            state.RefreshDialog?.Invoke();
+            if (state.FocusedHash == entry.Hash) state.FocusedHash = null;
+            var live = state.RowRefs.GetValueOrDefault(entry.Hash)?.Current;
+            if (live is null) return;
+            // Only clear if it's the focus ring, not a drag indicator.
+            if (live.Box.BorderWidth != new Thickness(1)) return;
+            live.BorderColor = Color.Transparent;
+            live.Box.BorderWidth = new Thickness(0);
+            live.MarkPaintDirty();
         });
 
         // Keyboard shortcuts only fire when the row itself is the target —
