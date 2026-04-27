@@ -115,6 +115,9 @@ public sealed unsafe class SDL3Window : IDisposable
         if (style == WindowStyle.Borderless)
             SDL_SetWindowHitTest(_window, &HitTestNativeCallback, GCHandle.ToIntPtr(_gcHandle));
 
+        // Give the platform backend a chance to settle the real pixel size
+        // before the first frame on high-DPI displays.
+        SDL_SyncWindow(_window);
         UpdateSize();
         IsOpen = true;
     }
@@ -128,6 +131,9 @@ public sealed unsafe class SDL3Window : IDisposable
         {
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN:
             case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
                 // Only handle events for this specific window
                 if (!evt->window.windowID.Equals(window.WindowId))
@@ -172,11 +178,19 @@ public sealed unsafe class SDL3Window : IDisposable
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
-                    // After the modal resize loop ends, ensure we render
-                    // the final size (the watcher may have throttled it).
+                    // After startup, monitor moves, or the modal resize loop,
+                    // render the final size only if the watcher observed
+                    // an unhandled size/scale change. This preserves resize
+                    // throttling for events already handled by live resize.
                     if (_registry.TryGetValue(evt.window.windowID, out var resizeWin) && resizeWin.ResizePending)
+                    {
+                        resizeWin.UpdateSize();
                         resizeWin.ResizePending = true;
+                    }
                     break;
 
                 default:

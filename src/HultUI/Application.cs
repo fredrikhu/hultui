@@ -140,7 +140,7 @@ public sealed class Application : IDisposable
                 if (window.PlatformWindow.ResizePending)
                 {
                     long now = Environment.TickCount64;
-                    // Only execute if 50ms has passed
+                    // Only relayout when the resize throttle interval has passed.
                     if (now - window.PlatformWindow.LastResizeRenderTick >= window.ResizeThrottleMs)
                     {
                         window.OnWindowResized();
