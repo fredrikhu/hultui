@@ -390,6 +390,7 @@ public partial class Sidebar : Component
                 : isRemote ? GitClientColors.BranchRemote
                 : GitClientColors.BranchLocal,
             Tooltip = FormatBranchTooltip(b),
+            Trailing = !isRemote ? BuildBranchAheadBehind(b) : null,
             OnClick = () => OnBranchSelected?.Invoke(b.Hash),
             OnDoubleClick = () => OnBranchChanged?.Invoke(b.Name),
             ContextMenuItems = isRemote ? null : () =>
@@ -412,6 +413,35 @@ public partial class Sidebar : Component
             },
             Tag = b,
         };
+    }
+
+    private static Element? BuildBranchAheadBehind(GitBranch b)
+    {
+        if (b.AheadCount == 0 && b.BehindCount == 0) return null;
+
+        var row = Flex.Row(gap: 4)
+            .AlignItems(AlignItems.Center)
+            .FlexShrink(0);
+
+        if (b.AheadCount > 0)
+        {
+            row.AddChild(Text.New($"\u2191{b.AheadCount}")
+                .FontSize(11f)
+                .FontWeight(FontWeight.SemiBold)
+                .TextColor(GitClientColors.BranchLocal)
+                .Tooltip($"Ahead of {b.TrackingBranch ?? "upstream"} by {b.AheadCount}"));
+        }
+
+        if (b.BehindCount > 0)
+        {
+            row.AddChild(Text.New($"\u2193{b.BehindCount}")
+                .FontSize(11f)
+                .FontWeight(FontWeight.SemiBold)
+                .TextColor(GitClientColors.BranchRemote)
+                .Tooltip($"Behind {b.TrackingBranch ?? "upstream"} by {b.BehindCount}"));
+        }
+
+        return row;
     }
 
     private void CheckoutBranch(string name)

@@ -23,6 +23,7 @@ public class TreeNode
     public bool IsSelected { get; set; }
     public string? Tooltip { get; init; }
     public object? Tag { get; init; }
+    public Element? Trailing { get; init; }
 }
 
 public partial class TreeView : Component
@@ -107,10 +108,19 @@ public partial class TreeView : Component
 
         // Label
         var label = Text.New(node.Label).FontSize(13f)
-            .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary);
+            .TextColor(isSelected ? GitClientColors.TextPrimary : GitClientColors.TextSecondary)
+            .FlexShrink(1)
+            .OverflowMode(TextOverflow.Ellipsis)
+            .MaxLines(1);
         if (node.Tooltip != null)
             label.Tooltip(node.Tooltip);
         row.AddChild(label);
+
+        if (node.Trailing != null)
+        {
+            row.AddChild(Box.New().FlexGrow(1));
+            row.AddChild(node.Trailing);
+        }
 
         // Events — closures capture `key` (a stable string) and read everything
         // else through `this` (the TreeView instance) so lookups survive rebuilds.
