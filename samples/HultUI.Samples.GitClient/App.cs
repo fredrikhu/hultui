@@ -141,6 +141,8 @@ public partial class App : Component
         var root = Flex.Column(gap: 0)
             .TextColor(GitClientColors.TextPrimary)
             .FontSize(13f)
+            .BorderWidth(1f)
+            .BorderColor(GitClientColors.BorderLight)
             .Children(
                 TitleBar.Build(
                     _window,
