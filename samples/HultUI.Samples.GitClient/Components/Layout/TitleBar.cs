@@ -4,13 +4,19 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Rendering.Skia;
 using GitClient.Theme;
 
 namespace GitClient.Components.Layout;
 
 public static class TitleBar
 {
+    private static readonly Lazy<SkiaImageSource> FetchIcon = new(() => SkiaImageSource.FromFile("Assets/fetch.png"));
+    private static readonly Lazy<SkiaImageSource> PullIcon = new(() => SkiaImageSource.FromFile("Assets/pull.png"));
+    private static readonly Lazy<SkiaImageSource> PushIcon = new(() => SkiaImageSource.FromFile("Assets/push.png"));
+
     public static Element Build(
         Window window,
         string branchName,
@@ -61,9 +67,9 @@ public static class TitleBar
     {
         var children = new List<Element>
         {
-            ActionButton("Fetch", onFetch),
-            ButtonWithDropdown("Pull", onPull, onPullFrom),
-            PushButton(onPush, onForcePush, onPushTo),
+            ActionButton("Fetch", onFetch, FetchIcon.Value),
+            ButtonWithDropdown("Pull", onPull, onPullFrom, PullIcon.Value),
+            PushButton(onPush, onForcePush, onPushTo, PushIcon.Value),
         };
 
         if (isMerging)
@@ -156,7 +162,7 @@ public static class TitleBar
         Box.New().Width(1).Height(16).Background(GitClientColors.Border)
           .Margin(new Thickness(0, 4, 0, 4));
 
-    private static Element ActionButton(string label, Action onClick)
+    private static Element ActionButton(string label, Action onClick, IImageSource? icon = null)
     {
         var btn = Box.New()
             .Padding(new Thickness(4, 10, 4, 10))
@@ -164,8 +170,7 @@ public static class TitleBar
             .Background(GitClientColors.ButtonSecondary)
             .Cursor(CursorType.Pointer)
             .Children(
-                Text.New(label).FontSize(11f).FontWeight(FontWeight.SemiBold)
-                    .TextColor(GitClientColors.TextPrimary)
+                ButtonContent(label, icon)
             );
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
@@ -173,7 +178,21 @@ public static class TitleBar
         return btn;
     }
 
-    private static Element ButtonWithDropdown(string label, Action onClick, Action? onDropdown)
+    private static Element ButtonContent(string label, IImageSource? icon)
+    {
+        var labelText = Text.New(label).FontSize(11f).FontWeight(FontWeight.SemiBold)
+            .TextColor(GitClientColors.TextPrimary);
+
+        if (icon is null)
+            return labelText;
+
+        return Flex.Row(gap: 6).AlignItems(AlignItems.Center).Children(
+            Image.New(icon).Size(Dimension.Px(14), Dimension.Px(14)),
+            labelText
+        );
+    }
+
+    private static Element ButtonWithDropdown(string label, Action onClick, Action? onDropdown, IImageSource? icon = null)
     {
         var row = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
 
@@ -183,8 +202,7 @@ public static class TitleBar
             .Background(GitClientColors.ButtonSecondary)
             .Cursor(CursorType.Pointer)
             .Children(
-                Text.New(label).FontSize(11f).FontWeight(FontWeight.SemiBold)
-                    .TextColor(GitClientColors.TextPrimary)
+                ButtonContent(label, icon)
             );
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
@@ -212,7 +230,7 @@ public static class TitleBar
         return row;
     }
 
-    private static Element PushButton(Action onPush, Action? onForcePush, Action? onPushTo)
+    private static Element PushButton(Action onPush, Action? onForcePush, Action? onPushTo, IImageSource? icon = null)
     {
         var row = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
 
@@ -223,8 +241,7 @@ public static class TitleBar
             .Cursor(CursorType.Pointer)
             .Tooltip("Hold Shift to force push")
             .Children(
-                Text.New("Push").FontSize(11f).FontWeight(FontWeight.SemiBold)
-                    .TextColor(GitClientColors.TextPrimary)
+                ButtonContent("Push", icon)
             );
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondaryHover);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = GitClientColors.ButtonSecondary);
