@@ -172,7 +172,7 @@ public partial class CommitList : Component
     private Element BuildSearchBar()
     {
         var container = Flex.Row(gap: 6)
-            .Padding(new Thickness(6, 8, 6, 8))
+            .Padding(new Thickness(5, 8, 5, 8))
             .AlignItems(AlignItems.Center)
             .Background(GitClientColors.Surface)
             .FlexShrink(0);
