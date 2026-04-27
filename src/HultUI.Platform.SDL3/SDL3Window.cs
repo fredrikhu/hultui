@@ -211,7 +211,14 @@ public sealed unsafe class SDL3Window : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static SDL_HitTestResult HitTestNativeCallback(SDL_Window* window, SDL_Point* area, IntPtr data)
     {
-        var self = (SDL3Window)GCHandle.FromIntPtr(data).Target!;
+        // Exceptions out of an [UnmanagedCallersOnly] method tear down the
+        // runtime, so guard against a stale/freed GCHandle — SDL can fire
+        // this during window destruction after Dispose freed it.
+        if (area == null || data == IntPtr.Zero)
+            return SDL_HitTestResult.SDL_HITTEST_NORMAL;
+        var handle = GCHandle.FromIntPtr(data);
+        if (!handle.IsAllocated || handle.Target is not SDL3Window self)
+            return SDL_HitTestResult.SDL_HITTEST_NORMAL;
         if (self.HitTestHandler is { } handler)
             return (SDL_HitTestResult)handler(area->x, area->y);
         return SDL_HitTestResult.SDL_HITTEST_NORMAL;
@@ -405,6 +412,13 @@ public sealed unsafe class SDL3Window : IDisposable
         _registry.Remove(WindowId);
 
         SDL_RemoveEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
+
+        // Clear the hit test before freeing the handle — SDL_DestroyWindow
+        // can fire the callback during teardown, and a freed GCHandle would
+        // crash the runtime via the [UnmanagedCallersOnly] callback.
+        if (_window != null && Style == WindowStyle.Borderless)
+            SDL_SetWindowHitTest(_window, null, IntPtr.Zero);
+
         if (_gcHandle.IsAllocated)
             _gcHandle.Free();
 
