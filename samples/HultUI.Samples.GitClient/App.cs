@@ -51,6 +51,8 @@ public partial class App : Component, IDisposable
     private string? _bisectBadHash;
     private bool _showShortcuts;
 
+    public Func<Element>? BuildBelowTitleBar { get; set; }
+
     public App(Window window, GitRepository repo)
     {
         _window = window;
@@ -138,39 +140,45 @@ public partial class App : Component, IDisposable
         if (bisecting) _commitList.OnBisectStart = null;
         else _commitList.OnBisectStart = DoBisectStart;
 
+        var children = new List<Element>
+        {
+            TitleBar.Build(
+                _window,
+                currentBranch,
+                currentBranchInfo?.AheadCount ?? 0,
+                currentBranchInfo?.BehindCount ?? 0,
+                onFetch: DoFetch,
+                onPull: DoPull,
+                onPush: DoPush,
+                onForcePush: DoForcePush,
+                onPullFrom: () => ShowRemoteBranchDialog(RemoteBranchMode.Pull),
+                onPushTo: () => ShowRemoteBranchDialog(RemoteBranchMode.Push),
+                isMerging: merging,
+                onMergeAbort: DoMergeAbort,
+                isRebasing: rebasing,
+                onRebaseAbort: DoRebaseAbort,
+                onRebaseContinue: DoRebaseContinue,
+                isBisecting: bisecting,
+                onBisectGood: bisecting ? DoBisectGood : null,
+                onBisectBad: bisecting ? DoBisectBad : null,
+                onBisectSkip: bisecting ? DoBisectSkip : null,
+                onBisectReset: bisecting ? DoBisectReset : null,
+                message: _statusMessage,
+                messageIsError: _statusIsError
+            ),
+        };
+
+        if (BuildBelowTitleBar != null)
+            children.Add(BuildBelowTitleBar());
+
+        children.Add(BuildSidebarLayout(showWc));
+
         var root = Flex.Column(gap: 0)
             .TextColor(GitClientColors.TextPrimary)
             .FontSize(13f)
             .BorderWidth(1f)
             .BorderColor(GitClientColors.BorderLight)
-            .Children(
-                TitleBar.Build(
-                    _window,
-                    currentBranch,
-                    currentBranchInfo?.AheadCount ?? 0,
-                    currentBranchInfo?.BehindCount ?? 0,
-                    onFetch: DoFetch,
-                    onPull: DoPull,
-                    onPush: DoPush,
-                    onForcePush: DoForcePush,
-                    onPullFrom: () => ShowRemoteBranchDialog(RemoteBranchMode.Pull),
-                    onPushTo: () => ShowRemoteBranchDialog(RemoteBranchMode.Push),
-                    isMerging: merging,
-                    onMergeAbort: DoMergeAbort,
-                    isRebasing: rebasing,
-                    onRebaseAbort: DoRebaseAbort,
-                    onRebaseContinue: DoRebaseContinue,
-                    isBisecting: bisecting,
-                    onBisectGood: bisecting ? DoBisectGood : null,
-                    onBisectBad: bisecting ? DoBisectBad : null,
-                    onBisectSkip: bisecting ? DoBisectSkip : null,
-                    onBisectReset: bisecting ? DoBisectReset : null,
-                    message: _statusMessage,
-                    messageIsError: _statusIsError
-                ),
-
-                BuildSidebarLayout(showWc)
-            );
+            .Children(children.ToArray());
 
         if (_pendingConfirm != null)
             root.AddChild(ConfirmDialog.Build(_pendingConfirm, DismissConfirm));
@@ -874,4 +882,6 @@ public partial class App : Component, IDisposable
         _messageCts?.Cancel();
         _messageCts?.Dispose();
     }
+
+    public void RefreshChrome() => MarkDirty();
 }

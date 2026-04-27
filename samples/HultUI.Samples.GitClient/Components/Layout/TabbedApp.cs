@@ -43,7 +43,6 @@ public sealed class TabbedApp : Component, IDisposable
             .FontSize(13f)
             .Background(GitClientColors.Background)
             .Children(
-                BuildTabStrip(),
                 Active.App.Mount().FlexGrow(1)
             );
 
@@ -163,6 +162,7 @@ public sealed class TabbedApp : Component, IDisposable
         if (index < 0 || index >= _tabs.Count || index == _activeIndex) return;
         _activeIndex = index;
         PersistTabs();
+        RefreshRepositoryChrome();
         MarkDirty();
     }
 
@@ -181,6 +181,7 @@ public sealed class TabbedApp : Component, IDisposable
             _activeIndex--;
 
         PersistTabs();
+        RefreshRepositoryChrome();
         MarkDirty();
     }
 
@@ -219,6 +220,7 @@ public sealed class TabbedApp : Component, IDisposable
 
         _pendingOpenRepository = null;
         PersistTabs();
+        RefreshRepositoryChrome();
         MarkDirty();
     }
 
@@ -233,7 +235,17 @@ public sealed class TabbedApp : Component, IDisposable
         var fullPath = Path.GetFullPath(path);
         if (_tabs.Any(t => SamePath(t.Path, fullPath))) return;
 
-        _tabs.Add(new RepositoryTab(fullPath, new App(_window, new GitRepository(fullPath))));
+        var app = new App(_window, new GitRepository(fullPath))
+        {
+            BuildBelowTitleBar = BuildTabStrip,
+        };
+        _tabs.Add(new RepositoryTab(fullPath, app));
+    }
+
+    private void RefreshRepositoryChrome()
+    {
+        foreach (var tab in _tabs)
+            tab.App.RefreshChrome();
     }
 
     private void PersistTabs()
