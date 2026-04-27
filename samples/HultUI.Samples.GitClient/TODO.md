@@ -6,6 +6,9 @@ the next so the app stays in a usable state at every commit.
 
 **Current cursor:** ▶ Phase 5 (Polish & infrastructure)
 
+Next planning note: options/settings work is captured in
+[`OPTIONS_DIALOG_PLAN.md`](OPTIONS_DIALOG_PLAN.md).
+
 When picking up work: read the cursor, do the next unchecked item, move
 the cursor pointer down, check the box. Items inside a phase can be
 reordered freely; phases should be done in order because later phases
