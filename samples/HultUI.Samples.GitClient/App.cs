@@ -124,9 +124,7 @@ public partial class App : Component
         var currentBranch = _repo.GetCurrentBranch();
         var branches = _repo.GetBranches();
         var currentBranchInfo = branches.FirstOrDefault(b => b.IsCurrent || b.Name == currentBranch);
-        var status = _repo.GetStatus();
         var showWc = ShowWorkingCopy;
-        var repoName = Path.GetFileName(_repo.Path.TrimEnd(Path.DirectorySeparatorChar));
         var merging = _repo.IsMerging();
         var rebasing = _repo.IsRebasing();
         var bisecting = _repo.IsBisecting();
@@ -144,21 +142,11 @@ public partial class App : Component
             .TextColor(GitClientColors.TextPrimary)
             .FontSize(13f)
             .Children(
-                // Title bar
-                TitleBar.Build(_window, repoName, currentBranch),
-
-                // Tab bar
-                TabBar.Build(_repo.Path),
-
-                // Main content area (sidebar + history/detail)
-                BuildSidebarLayout(showWc),
-
-                // Status bar
-                StatusBar.Build(
+                TitleBar.Build(
+                    _window,
                     currentBranch,
                     currentBranchInfo?.AheadCount ?? 0,
                     currentBranchInfo?.BehindCount ?? 0,
-                    status.Count,
                     onFetch: DoFetch,
                     onPull: DoPull,
                     onPush: DoPush,
@@ -177,7 +165,9 @@ public partial class App : Component
                     onBisectReset: bisecting ? DoBisectReset : null,
                     message: _statusMessage,
                     messageIsError: _statusIsError
-                )
+                ),
+
+                BuildSidebarLayout(showWc)
             );
 
         if (_pendingConfirm != null)
