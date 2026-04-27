@@ -29,6 +29,7 @@ public partial class StagingArea : Component
     private FileChangeKind? _selectedKind;
     private bool _selectedIsStaged;
     private bool _selectedIsConflict;
+    private bool _canCommit;
     private bool _canStash;
 
     // Folder-expansion state for the tree-rendered file sections. Keyed by
@@ -453,24 +454,24 @@ public partial class StagingArea : Component
 
     private Element BuildCommitArea(int stagedCount, int totalChanged, int conflictCount = 0, bool merging = false)
     {
+        _canCommit = conflictCount == 0;
         _canStash = totalChanged > 0;
 
         var placeholder = merging ? "Merge commit message..."
             : _amend ? "Amend commit message..."
             : "Commit message...";
 
-        var children = new List<Element>
-        {
-            TextArea.New(_commitMessage)
-                .PlaceholderText(placeholder)
-                .OnTextChanged(text => _commitMessage = text)
-                .Height(Dimension.Px(80))
-                .Background(GitClientColors.Background)
-                .CornerRadius(4f)
-                .BorderColor(GitClientColors.Border)
-                .TextColor(GitClientColors.TextPrimary)
-                .FontSize(13f),
-        };
+        var messageInput = TextArea.New(_commitMessage)
+            .PlaceholderText(placeholder)
+            .OnTextChanged(text => _commitMessage = text)
+            .Height(Dimension.Px(80))
+            .Background(GitClientColors.Background)
+            .CornerRadius(4f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary)
+            .FontSize(13f);
+
+        var children = new List<Element> { messageInput };
 
         // Hide amend checkbox during merge (it doesn't apply)
         if (!merging)
@@ -497,11 +498,24 @@ public partial class StagingArea : Component
             StashButton(totalChanged)
         ));
 
-        return Flex.Column(gap: 8)
+        var commitArea = Flex.Column(gap: 8)
             .Padding(10)
             .Background(GitClientColors.Surface)
             .FlexShrink(0)
             .Children(children.ToArray());
+
+        commitArea.On<KeyDownEvent>(EventPhase.Capture, e =>
+        {
+            if (e.Target is not TextAreaElement
+                || e.Key != KeyCode.Enter
+                || !e.Modifiers.HasFlag(KeyModifiers.Ctrl))
+                return;
+
+            e.StopPropagation = true;
+            if (_canCommit) DoCommit();
+        });
+
+        return commitArea;
     }
 
     private void ToggleAmend(bool amend)
@@ -522,9 +536,8 @@ public partial class StagingArea : Component
             ? "Amend Commit"
             : $"Commit ({stagedCount} file{(stagedCount == 1 ? "" : "s")})";
 
-        var enabled = !hasConflicts;
-        var bg = enabled ? GitClientColors.ButtonPrimary : GitClientColors.Surface;
-        var fg = enabled ? Color.White : GitClientColors.TextMuted;
+        var bg = _canCommit ? GitClientColors.ButtonPrimary : GitClientColors.Surface;
+        var fg = _canCommit ? Color.White : GitClientColors.TextMuted;
 
         var btn = Box.New()
             .Padding(new Thickness(8, 0, 8, 0))
@@ -534,7 +547,7 @@ public partial class StagingArea : Component
             .AlignItems(AlignItems.Center)
             .Height(Dimension.Px(32))
             .FlexGrow(1)
-            .Cursor(enabled ? CursorType.Pointer : CursorType.Default)
+            .Cursor(_canCommit ? CursorType.Pointer : CursorType.Default)
             .Children(
                 Text.New(label)
                     .FontSize(13f).FontWeight(FontWeight.SemiBold)
@@ -544,9 +557,9 @@ public partial class StagingArea : Component
         if (hasConflicts)
             btn.TooltipText = "Resolve all conflicts before committing";
 
-        btn.On<PointerEnterEvent>(_ => { if (enabled) btn.BackgroundColor = GitClientColors.ButtonPrimaryHover; });
-        btn.On<PointerLeaveEvent>(_ => { if (enabled) btn.BackgroundColor = bg; });
-        btn.On<ClickEvent>(_ => { if (enabled) DoCommit(); });
+        btn.On<PointerEnterEvent>(_ => { if (_canCommit) btn.BackgroundColor = GitClientColors.ButtonPrimaryHover; });
+        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = _canCommit ? GitClientColors.ButtonPrimary : GitClientColors.Surface);
+        btn.On<ClickEvent>(_ => { if (_canCommit) DoCommit(); });
 
         return btn;
     }

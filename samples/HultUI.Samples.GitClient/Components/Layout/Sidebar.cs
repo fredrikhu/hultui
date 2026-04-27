@@ -216,6 +216,7 @@ public partial class Sidebar : Component
         var tags = _repo.GetTags();
         var stashes = _repo.GetStashes();
         var currentBranch = _repo.GetCurrentBranch();
+        EnsureSelectedBranch(branches, currentBranch);
 
         var roots = new ReactiveList<TreeNode>();
 
@@ -301,6 +302,16 @@ public partial class Sidebar : Component
         }
 
         _treeView.Roots = roots;
+    }
+
+    private void EnsureSelectedBranch(List<GitBranch> branches, string currentBranch)
+    {
+        if (_selectedBranchFullName != null && branches.Any(b => b.FullName == _selectedBranchFullName))
+            return;
+
+        _selectedBranchFullName = branches
+            .FirstOrDefault(b => !b.IsRemote && (b.IsCurrent || b.Name == currentBranch))
+            ?.FullName;
     }
 
     /// <summary>
