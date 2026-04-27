@@ -30,6 +30,7 @@ public sealed class TabbedApp : Component, IDisposable
             throw new InvalidOperationException("At least one repository path is required.");
 
         _activeIndex = Math.Clamp(activeIndex, 0, _tabs.Count - 1);
+        RefreshRepositoryChrome();
         PersistTabs();
         _window.Closed += Dispose;
 
