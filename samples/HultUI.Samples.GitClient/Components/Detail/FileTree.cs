@@ -42,7 +42,7 @@ public partial class FileTree : Component
     public override Element Build()
     {
         var files = Files;
-        var selected = SelectedFile;
+        var selectedPath = SelectedFile?.Path;
         _ = Version;
 
         if (files.Count == 0)
@@ -55,7 +55,7 @@ public partial class FileTree : Component
         var tree = PathTree.Build(files);
         var container = Flex.Column(gap: 0);
         var rows = new List<Element>();
-        foreach (var node in tree) AppendNode(node, depth: 0, selected, rows);
+        foreach (var node in tree) AppendNode(node, depth: 0, selectedPath, rows);
         container.ReplaceChildren(rows.ToArray());
         return ScrollView.New().FlexGrow(1).Children(container);
     }
@@ -63,17 +63,17 @@ public partial class FileTree : Component
     private bool IsExpanded(string fullPath) =>
         !_expanded.TryGetValue(fullPath, out var v) || v;
 
-    private void AppendNode(PathTreeNode node, int depth, GitFileChange? selected, List<Element> rows)
+    private void AppendNode(PathTreeNode node, int depth, string? selectedPath, List<Element> rows)
     {
         if (node.IsFile)
         {
-            rows.Add(BuildFileRow(node, depth, selected));
+            rows.Add(BuildFileRow(node, depth, selectedPath));
             return;
         }
 
         rows.Add(BuildFolderRow(node, depth));
         if (IsExpanded(node.FullPath))
-            foreach (var child in node.Children) AppendNode(child, depth + 1, selected, rows);
+            foreach (var child in node.Children) AppendNode(child, depth + 1, selectedPath, rows);
     }
 
     private Element BuildFolderRow(PathTreeNode node, int depth)
@@ -118,10 +118,10 @@ public partial class FileTree : Component
         return row;
     }
 
-    private Element BuildFileRow(PathTreeNode node, int depth, GitFileChange? selected)
+    private Element BuildFileRow(PathTreeNode node, int depth, string? selectedPath)
     {
         var file = node.File!;
-        var isSelected = file == selected;
+        var isSelected = file.Path == selectedPath;
         // File rows reserve the chevron column so badges line up with folder labels.
         var leftPad = 8 + depth * IndentPx + ChevronWidth;
 
@@ -153,8 +153,17 @@ public partial class FileTree : Component
         }
 
         var fileRef = file;
-        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnPointerEnter(_ =>
+        {
+            if (SelectedFile?.Path != fileRef.Path)
+                row.BackgroundColor = GitClientColors.SurfaceHover;
+        });
+        row.OnPointerLeave(_ =>
+        {
+            row.BackgroundColor = SelectedFile?.Path == fileRef.Path
+                ? GitClientColors.Selection
+                : Color.Transparent;
+        });
         row.OnClick(_ => SelectFile(fileRef));
 
         var hasContextMenu = OnBlameRequested != null || OnHistoryRequested != null;

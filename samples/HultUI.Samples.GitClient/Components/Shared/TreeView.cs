@@ -71,7 +71,7 @@ public partial class TreeView : Component
         var key = $"tree-{depth}-{node.Label}";
         _nodesByKey[key] = node;
 
-        var isSelected = SelectedNode == node;
+        var isSelected = node.IsSelected || SelectedNode == node;
         var expanded = GetExpanded(key, node);
         var hasChildren = node.Children.Count > 0;
 
@@ -124,8 +124,18 @@ public partial class TreeView : Component
 
         // Events — closures capture `key` (a stable string) and read everything
         // else through `this` (the TreeView instance) so lookups survive rebuilds.
-        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnPointerEnter(_ =>
+        {
+            var selected = _nodesByKey.TryGetValue(key, out var current)
+                           && (current.IsSelected || SelectedNode == current);
+            if (!selected) row.BackgroundColor = GitClientColors.SurfaceHover;
+        });
+        row.OnPointerLeave(_ =>
+        {
+            var selected = _nodesByKey.TryGetValue(key, out var current)
+                           && (current.IsSelected || SelectedNode == current);
+            row.BackgroundColor = selected ? GitClientColors.Selection : Color.Transparent;
+        });
         row.OnClick(args =>
         {
             if (!_nodesByKey.TryGetValue(key, out var current)) return;

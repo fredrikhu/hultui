@@ -153,8 +153,8 @@ public partial class CommitDetail : Component
     private List<GitFileDiff> DiffsForFile(GitFileChange file)
     {
         var fileDiff = _loadedDiffs
-            .Where(d => d.Path == file.Path || d.Path.EndsWith(file.Path))
+            .Where(d => d.Path == file.Path || d.OldPath == file.Path)
             .ToList();
-        return fileDiff.Count > 0 ? fileDiff : _loadedDiffs;
+        return fileDiff;
     }
 }

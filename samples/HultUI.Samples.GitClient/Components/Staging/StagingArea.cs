@@ -26,6 +26,7 @@ public partial class StagingArea : Component
     // Currently-highlighted file row. Path + section together because the same
     // path can appear under both Unstaged and Staged when partially staged.
     private string? _selectedPath;
+    private FileChangeKind? _selectedKind;
     private bool _selectedIsStaged;
     private bool _selectedIsConflict;
     private bool _canStash;
@@ -126,6 +127,7 @@ public partial class StagingArea : Component
             if (!stillPresent)
             {
                 _selectedPath = null;
+                _selectedKind = null;
                 _diffViewer.Diffs = [];
             }
         }
@@ -232,11 +234,21 @@ public partial class StagingArea : Component
             Refresh();
         }));
 
-        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnPointerEnter(_ =>
+        {
+            if (!IsSelected(file.Path, isStaged: false, isConflict: true))
+                row.BackgroundColor = GitClientColors.SurfaceHover;
+        });
+        row.OnPointerLeave(_ =>
+        {
+            row.BackgroundColor = IsSelected(file.Path, isStaged: false, isConflict: true)
+                ? GitClientColors.Selection
+                : Color.Transparent;
+        });
         row.OnClick(_ =>
         {
             _selectedPath = file.Path;
+            _selectedKind = file.Kind;
             _selectedIsStaged = false;
             _selectedIsConflict = true;
             RefreshConflictDiff(file.Path);
@@ -415,11 +427,21 @@ public partial class StagingArea : Component
         });
         row.AddChild(actionBtn);
 
-        row.OnPointerEnter(_ => { if (!isSelected) row.BackgroundColor = GitClientColors.SurfaceHover; });
-        row.OnPointerLeave(_ => { if (!isSelected) row.BackgroundColor = Color.Transparent; });
+        row.OnPointerEnter(_ =>
+        {
+            if (!IsSelected(file.Path, isStaged, isConflict: false))
+                row.BackgroundColor = GitClientColors.SurfaceHover;
+        });
+        row.OnPointerLeave(_ =>
+        {
+            row.BackgroundColor = IsSelected(file.Path, isStaged, isConflict: false)
+                ? GitClientColors.Selection
+                : Color.Transparent;
+        });
         row.OnClick(_ =>
         {
             _selectedPath = file.Path;
+            _selectedKind = file.Kind;
             _selectedIsStaged = isStaged;
             _selectedIsConflict = false;
             RefreshDiffViewer();
@@ -607,12 +629,24 @@ public partial class StagingArea : Component
     private void RefreshDiffViewer()
     {
         if (_selectedPath == null) return;
+        if (!_selectedIsStaged && _selectedKind == FileChangeKind.Untracked)
+        {
+            _diffViewer.IsStaged = false;
+            _diffViewer.Diffs = _repo.GetUntrackedFileDiff(_selectedPath);
+            return;
+        }
+
         var baseRef = _amend && _selectedIsStaged ? "HEAD~1" : null;
         var diffs = _repo.GetWorkingDiff(_selectedIsStaged, baseRef);
-        var fileDiff = diffs.Where(d => d.Path == _selectedPath || d.Path.EndsWith(_selectedPath)).ToList();
+        var fileDiff = diffs.Where(d => d.Path == _selectedPath || d.OldPath == _selectedPath).ToList();
         _diffViewer.IsStaged = _selectedIsStaged;
-        _diffViewer.Diffs = fileDiff.Count > 0 ? fileDiff : diffs;
+        _diffViewer.Diffs = fileDiff;
     }
+
+    private bool IsSelected(string path, bool isStaged, bool isConflict) =>
+        _selectedPath == path
+        && _selectedIsStaged == isStaged
+        && _selectedIsConflict == isConflict;
 
     private void OnHunkAction(GitFileDiff file, GitDiffHunk hunk, HunkActionKind action)
     {
@@ -655,4 +689,3 @@ public partial class StagingArea : Component
         return btn;
     }
 }
-

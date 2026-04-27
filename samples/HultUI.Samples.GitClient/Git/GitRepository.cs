@@ -269,6 +269,32 @@ public class GitRepository
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 
+    public List<GitFileDiff> GetUntrackedFileDiff(string filePath)
+    {
+        var fullPath = System.IO.Path.Combine(Path, filePath);
+        if (!File.Exists(fullPath)) return [];
+
+        var lines = File.ReadAllLines(fullPath);
+        var hunkLines = new List<GitDiffLine>
+        {
+            new(DiffLineKind.HunkHeader, $"@@ -0,0 +1,{lines.Length} @@", null, null),
+        };
+
+        for (var i = 0; i < lines.Length; i++)
+            hunkLines.Add(new GitDiffLine(DiffLineKind.Addition, lines[i], null, i + 1));
+
+        var diff = new GitFileDiff(filePath, null,
+        [
+            new GitDiffHunk($"@@ -0,0 +1,{lines.Length} @@", hunkLines),
+        ])
+        {
+            OldPathHeader = "--- /dev/null",
+            NewPathHeader = $"+++ b/{filePath}",
+        };
+
+        return [diff];
+    }
+
     /// <summary>
     /// Returns the staged file list diffed against a specific base ref.
     /// Used in amend mode to diff the index against HEAD~1 so that the
