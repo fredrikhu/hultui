@@ -22,9 +22,10 @@ public static class KeyboardShortcutsOverlay
     private static readonly (string Key, string Description)[] Shortcuts =
     [
         ("?", "Show / hide this help"),
-        ("Ctrl+L", "Focus commit log search"),
+        ("Ctrl+F", "Show / hide commit search"),
+        ("Ctrl+L", "Focus commit search"),
+        ("Ctrl+O", "Open repository"),
         ("Ctrl+W", "Toggle working copy view"),
-        ("Ctrl+F", "Fetch from remotes"),
         ("Escape", "Close dialog / overlay"),
     ];
 

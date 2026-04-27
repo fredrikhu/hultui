@@ -21,7 +21,7 @@ namespace GitClient;
 /// Root application component. Orchestrates the main layout and connects
 /// the git backend to all sub-components via reactive state.
 /// </summary>
-public partial class App : Component
+public partial class App : Component, IDisposable
 {
     private readonly Window _window;
     private readonly GitRepository _repo;
@@ -501,7 +501,21 @@ public partial class App : Component
             return;
         }
 
-        // Don't intercept shortcuts while typing in a text field
+        // Ctrl+F — show/focus commit search; hide it when the search field is focused.
+        if (e.Key == KeyCode.F && ctrl)
+        {
+            if (ShowWorkingCopy)
+            {
+                ShowWorkingCopy = false;
+                _sidebar.WorkingCopyActive = false;
+                _sidebar.Refresh();
+            }
+            _commitList.ToggleSearchFromShortcut();
+            e.StopPropagation = true;
+            return;
+        }
+
+        // Don't intercept the remaining shortcuts while typing in a text field
         if (typing) return;
 
         // ? (Shift+Slash) — toggle keyboard shortcuts overlay
@@ -535,12 +549,6 @@ public partial class App : Component
             return;
         }
 
-        // Ctrl+F — fetch from remotes
-        if (e.Key == KeyCode.F && ctrl)
-        {
-            DoFetch();
-            e.StopPropagation = true;
-        }
     }
 
     /// <summary>
@@ -858,5 +866,12 @@ public partial class App : Component
         _commitList.Refresh();
         _stagingArea.Refresh();
         MarkDirty();
+    }
+
+    public void Dispose()
+    {
+        _watcher.Dispose();
+        _messageCts?.Cancel();
+        _messageCts?.Dispose();
     }
 }

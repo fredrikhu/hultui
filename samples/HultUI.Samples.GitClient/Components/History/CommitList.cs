@@ -17,6 +17,9 @@ public partial class CommitList : Component
     private readonly GitRepository _repo;
     private List<GitCommit> _commits = [];
     private string _searchQuery = "";
+    private bool _searchVisible;
+    private bool _searchFocused;
+    private bool _pendingSearchFocus;
 
     // Inline tag-creation state
     private string? _taggingCommitHash;
@@ -95,7 +98,8 @@ public partial class CommitList : Component
             children.Add(BuildFilterChips());
 
         // Search bar + filter buttons
-        children.Add(BuildSearchBar());
+        if (_searchVisible)
+            children.Add(BuildSearchBar());
 
         // Inline filter input (when one is open)
         if (_showingInput != FilterInputKind.None)
@@ -143,7 +147,29 @@ public partial class CommitList : Component
 
     public void Refresh() => MarkDirty();
 
-    public void FocusSearch() => _searchRef.Current?.Focus();
+    public void FocusSearch()
+    {
+        _searchVisible = true;
+        _pendingSearchFocus = true;
+        Refresh();
+    }
+
+    public void ToggleSearchFromShortcut()
+    {
+        if (_searchVisible && _searchFocused)
+            HideSearch();
+        else
+            FocusSearch();
+    }
+
+    protected override void OnAfterBuild()
+    {
+        if (_pendingSearchFocus)
+        {
+            _pendingSearchFocus = false;
+            _searchRef.Current?.Focus();
+        }
+    }
 
     // ── Search bar ──
 
@@ -159,19 +185,20 @@ public partial class CommitList : Component
             Text.New("\u2315").FontSize(13f).TextColor(GitClientColors.TextMuted)
         );
 
-        container.AddChild(
-            TextInput.New(_searchQuery)
-                .PlaceholderText("Filter by message, author, or hash\u2026")
-                .OnTextChanged(OnSearchChanged)
-                .FontSize(12f)
-                .FlexGrow(1)
-                .Height(Dimension.Px(26))
-                .Background(GitClientColors.Background)
-                .CornerRadius(4f)
-                .BorderColor(GitClientColors.Border)
-                .TextColor(GitClientColors.TextPrimary)
-                .WithRef(_searchRef)
-        );
+        var input = TextInput.New(_searchQuery)
+            .PlaceholderText("Filter by message, author, or hash\u2026")
+            .OnTextChanged(OnSearchChanged)
+            .FontSize(12f)
+            .FlexGrow(1)
+            .Height(Dimension.Px(26))
+            .Background(GitClientColors.Background)
+            .CornerRadius(4f)
+            .BorderColor(GitClientColors.Border)
+            .TextColor(GitClientColors.TextPrimary)
+            .WithRef(_searchRef);
+        input.On<FocusEvent>(_ => _searchFocused = true);
+        input.On<BlurEvent>(_ => _searchFocused = false);
+        container.AddChild(input);
 
         if (_searchQuery.Length > 0)
         {
@@ -189,6 +216,21 @@ public partial class CommitList : Component
 
             container.AddChild(clearBtn);
         }
+
+        var closeBtn = Box.New()
+            .Width(20).Height(20)
+            .CornerRadius(10f)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Close search")
+            .Children(Text.New("\u2715").FontSize(10f).TextColor(GitClientColors.TextMuted));
+
+        closeBtn.OnPointerEnter(_ => closeBtn.BackgroundColor = GitClientColors.SurfaceHover);
+        closeBtn.OnPointerLeave(_ => closeBtn.BackgroundColor = Color.Transparent);
+        closeBtn.OnClick(_ => HideSearch());
+
+        container.AddChild(closeBtn);
 
         // Filter buttons
         container.AddChild(Box.New().Width(1).Height(16).Background(GitClientColors.Border));
@@ -518,6 +560,16 @@ public partial class CommitList : Component
     private void OnSearchChanged(string query)
     {
         _searchQuery = query;
+        Refresh();
+    }
+
+    private void HideSearch()
+    {
+        _searchVisible = false;
+        _searchFocused = false;
+        _pendingSearchFocus = false;
+        _searchQuery = "";
+        _showingInput = FilterInputKind.None;
         Refresh();
     }
 

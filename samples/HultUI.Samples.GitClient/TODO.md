@@ -157,7 +157,7 @@ multi-day effort.
 Don't start until Phase 4 is at a stopping point.
 
 - [x] Auto-refresh via filesystem watcher on `.git/HEAD`, `.git/index`, working tree
-- [x] Keyboard shortcuts surfaced in a "?" overlay (Ctrl+L for log filter, Ctrl+W for working copy, Ctrl+F for fetch)
+- [x] Keyboard shortcuts surfaced in a "?" overlay (Ctrl+F / Ctrl+L for log filter, Ctrl+O for repositories, Ctrl+W for working copy)
 - [x] Push-to / pull-from specific remote+branch dialog
 - [x] Submodules sub-tree in Sidebar
 - [x] Bisect mode
