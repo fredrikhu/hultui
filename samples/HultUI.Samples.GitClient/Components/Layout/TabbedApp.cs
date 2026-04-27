@@ -155,6 +155,9 @@ public sealed class TabbedApp : Component, IDisposable
             DismissOpenRepositoryDialog();
             e.StopPropagation = true;
         }
+
+        if (!e.StopPropagation && _pendingOpenRepository == null)
+            Active.App.HandleGlobalKeyDown(e);
     }
 
     private void SwitchTo(int index)

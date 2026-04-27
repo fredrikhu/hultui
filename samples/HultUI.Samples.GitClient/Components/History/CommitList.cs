@@ -18,7 +18,6 @@ public partial class CommitList : Component
     private List<GitCommit> _commits = [];
     private string _searchQuery = "";
     private bool _searchVisible;
-    private bool _searchFocused;
     private bool _pendingSearchFocus;
 
     // Inline tag-creation state
@@ -156,10 +155,7 @@ public partial class CommitList : Component
 
     public void ToggleSearchFromShortcut()
     {
-        if (_searchVisible && _searchFocused)
-            HideSearch();
-        else
-            FocusSearch();
+        FocusSearch();
     }
 
     protected override void OnAfterBuild()
@@ -196,8 +192,14 @@ public partial class CommitList : Component
             .BorderColor(GitClientColors.Border)
             .TextColor(GitClientColors.TextPrimary)
             .WithRef(_searchRef);
-        input.On<FocusEvent>(_ => _searchFocused = true);
-        input.On<BlurEvent>(_ => _searchFocused = false);
+        input.On<KeyDownEvent>(e =>
+        {
+            if (e.Key != KeyCode.Escape)
+                return;
+
+            HideSearch();
+            e.StopPropagation = true;
+        });
         container.AddChild(input);
 
         if (_searchQuery.Length > 0)
@@ -566,7 +568,6 @@ public partial class CommitList : Component
     private void HideSearch()
     {
         _searchVisible = false;
-        _searchFocused = false;
         _pendingSearchFocus = false;
         _searchQuery = "";
         _showingInput = FilterInputKind.None;

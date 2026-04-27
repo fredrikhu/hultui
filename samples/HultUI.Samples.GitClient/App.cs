@@ -489,10 +489,12 @@ public partial class App : Component, IDisposable
         MarkDirty();
     }
 
-    // Global keyboard shortcuts. KeyDownEvents bubble from the focused
-    // element up to the root, so this catches shortcuts regardless of
-    // what currently has focus.
-    private void HandleRootKeyDown(KeyDownEvent e)
+    private void HandleRootKeyDown(KeyDownEvent e) => HandleGlobalKeyDown(e);
+
+    // Global keyboard shortcuts. KeyDownEvents bubble from focused elements
+    // inside this repository app. When no element is focused, TabbedApp
+    // receives the event at its root and forwards it here.
+    public void HandleGlobalKeyDown(KeyDownEvent e)
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl);
         var shift = e.Modifiers.HasFlag(KeyModifiers.Shift);

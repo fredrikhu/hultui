@@ -128,6 +128,45 @@ public class FocusTraversalTests
     }
 
     [Fact]
+    public void RemoveChild_ClearsFocusInsideRemovedSubtree()
+    {
+        var root = new BoxElement();
+        var parent = new BoxElement();
+        var input = new TextInputElement { Name = "input" };
+        parent.AddChild(input);
+        root.AddChild(parent);
+
+        var fm = new FocusManager();
+        root.FocusManager = fm;
+        parent.FocusManager = fm;
+        input.FocusManager = fm;
+
+        fm.SetFocus(input);
+        root.RemoveChild(parent);
+
+        Assert.Null(fm.FocusedElement);
+    }
+
+    [Fact]
+    public void ReplaceChildren_PreservesFocusForRetainedChild()
+    {
+        var root = new BoxElement();
+        var focused = new TextInputElement { Name = "focused" };
+        var removed = new BoxElement();
+        root.ReplaceChildren(removed, focused);
+
+        var fm = new FocusManager();
+        root.FocusManager = fm;
+        focused.FocusManager = fm;
+        removed.FocusManager = fm;
+
+        fm.SetFocus(focused);
+        root.ReplaceChildren(focused);
+
+        Assert.Same(focused, fm.FocusedElement);
+    }
+
+    [Fact]
     public void InteractiveElements_AreFocusableByDefault()
     {
         Assert.True(new ButtonElement().IsFocusable);

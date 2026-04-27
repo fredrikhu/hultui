@@ -335,6 +335,7 @@ public abstract class Element
     {
         if (_children.Remove(child))
         {
+            ClearFocusIfRemoved(child);
             child.OnUnmounted();
             child.Parent = null;
             MarkLayoutDirty();
@@ -358,7 +359,10 @@ public abstract class Element
         foreach (var old in _children)
         {
             if (!newSet.Contains(old))
+            {
+                ClearFocusIfRemoved(old);
                 old.OnUnmounted();
+            }
             old.Parent = null;
         }
         _children.Clear();
@@ -388,6 +392,23 @@ public abstract class Element
         child.Parent?._children.Remove(child);
         child.Parent?.MarkLayoutDirty();
         child.Parent = null;
+    }
+
+    private void ClearFocusIfRemoved(Element removed)
+    {
+        var fm = FocusManager ?? removed.FocusManager;
+        if (fm?.FocusedElement is { } focused && ContainsElement(removed, focused))
+            fm.ClearFocus();
+    }
+
+    private static bool ContainsElement(Element root, Element candidate)
+    {
+        for (Element? current = candidate; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, root))
+                return true;
+        }
+        return false;
     }
 
     // ──── Patching (used by TreeDiffer) ────
