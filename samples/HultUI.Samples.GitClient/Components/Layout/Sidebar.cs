@@ -20,7 +20,7 @@ public partial class Sidebar : Component
     private bool _isCreatingBranch;
     private bool _pendingFocus;
     private string _newBranchName = "";
-    private string? _selectedBranchHash;
+    private string? _selectedBranchFullName;
     private readonly Ref<TextInputElement> _branchInputRef = new();
 
     public Action<string>? OnBranchSelected { get; set; }
@@ -390,17 +390,17 @@ public partial class Sidebar : Component
             IconColor = isCurrent ? GitClientColors.BranchCurrent
                 : isRemote ? GitClientColors.BranchRemote
                 : GitClientColors.BranchLocal,
-            IsSelected = b.Hash == _selectedBranchHash,
+            IsSelected = b.FullName == _selectedBranchFullName,
             Tooltip = FormatBranchTooltip(b),
             Trailing = !isRemote ? BuildBranchAheadBehind(b) : null,
             OnClick = () =>
             {
-                _selectedBranchHash = b.Hash;
+                _selectedBranchFullName = b.FullName;
                 OnBranchSelected?.Invoke(b.Hash);
             },
             OnDoubleClick = () =>
             {
-                _selectedBranchHash = b.Hash;
+                _selectedBranchFullName = b.FullName;
                 OnBranchChanged?.Invoke(b.Name);
             },
             ContextMenuItems = isRemote ? null : () =>
