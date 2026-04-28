@@ -23,31 +23,17 @@ if (repoPaths.Count == 0)
 }
 
 var activeIndex = args.Length > 0 ? 0 : settings.ActiveRepositoryIndex;
+settings.RepositoryPaths = repoPaths;
+settings.ActiveRepositoryIndex = activeIndex;
+GitClientColors.Use(settings.Appearance.ThemeMode);
 
 Console.WriteLine($"Opening {repoPaths.Count} repository tab(s):");
 foreach (var path in repoPaths)
     Console.WriteLine($"  {path}");
 
 using var app = new Application("HultGit", 1200, 800, WindowStyle.Borderless);
-app.Theme = new Theme
-{
-    Background = GitClientColors.Background,
-    TextColor = GitClientColors.TextPrimary,
-    Surface = GitClientColors.Surface,
-    Primary = GitClientColors.ButtonPrimary,
-    Secondary = GitClientColors.TextSecondary,
-    ContextMenu = new ContextMenuTheme
-    {
-        Background = GitClientColors.Surface,
-        BorderColor = GitClientColors.BorderLight,
-        TextColor = GitClientColors.TextPrimary,
-        DisabledTextColor = GitClientColors.TextMuted,
-        HoverBackground = GitClientColors.SurfaceHover,
-        SeparatorColor = GitClientColors.Border,
-        ShortcutTextColor = GitClientColors.TextSecondary,
-    },
-};
+app.Theme = GitClientColors.ToHultTheme();
 
 var window = app.PrimaryWindow;
-app.SetRoot(new TabbedApp(window, repoPaths, activeIndex).Mount());
+app.SetRoot(new TabbedApp(app, window, settings).Mount());
 app.Run();

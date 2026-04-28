@@ -25,6 +25,7 @@ public partial class App : Component, IDisposable
 {
     private readonly Window _window;
     private readonly GitRepository _repo;
+    private readonly GitClientSettingsData _settings;
 
     // Sub-components
     private readonly Sidebar _sidebar;
@@ -53,10 +54,11 @@ public partial class App : Component, IDisposable
 
     public Func<Element>? BuildBelowTitleBar { get; set; }
 
-    public App(Window window, GitRepository repo)
+    public App(Window window, GitRepository repo, GitClientSettingsData settings)
     {
         _window = window;
         _repo = repo;
+        _settings = settings;
 
         _sidebar = new Sidebar(repo);
         _commitList = new CommitList(repo);
@@ -559,6 +561,27 @@ public partial class App : Component, IDisposable
             return;
         }
 
+        // Ctrl+D - open selected file in configured external diff tool
+        if (e.Key == KeyCode.D && ctrl)
+        {
+            OpenExternalDiffForSelection();
+            e.StopPropagation = true;
+            return;
+        }
+
+    }
+
+    private void OpenExternalDiffForSelection()
+    {
+        bool ok;
+        string error;
+        if (ShowWorkingCopy)
+            ok = _stagingArea.TryOpenExternalDiff(_settings.ExternalTools, out error);
+        else
+            ok = _commitDetail.TryOpenExternalDiff(_settings.ExternalTools, out error);
+
+        if (!ok)
+            ShowMessage(error, isError: true);
     }
 
     /// <summary>
@@ -637,9 +660,9 @@ public partial class App : Component, IDisposable
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage($"Pulling from {remote}/{branch}\u2026", isError: false);
-        var result = await _repo.PullFromAsync(remote, branch, HandleAskPass);
+        var result = await _repo.PullFromAsync(remote, branch, HandleAskPass, CreatePullOptions());
         _remoteOpRunning = false;
-        ShowResult(result, $"Pulled from {remote}/{branch}");
+        HandlePullResult(result, $"Pulled from {remote}/{branch}");
         RefreshAll();
     }
 
@@ -763,9 +786,26 @@ public partial class App : Component, IDisposable
         if (_remoteOpRunning) return;
         _remoteOpRunning = true;
         ShowMessage("Fetching\u2026", isError: false);
-        var result = await _repo.FetchAsync(HandleAskPass);
+        var result = await _repo.FetchAsync(HandleAskPass, _settings.Git.PruneOnFetch);
         _remoteOpRunning = false;
         ShowResult(result, "Fetched all remotes");
+        RefreshAll();
+    }
+
+    public async Task AutoFetchAsync()
+    {
+        if (_remoteOpRunning) return;
+
+        _remoteOpRunning = true;
+        var result = await _repo.FetchAsync(HandleAskPass, _settings.Git.PruneOnFetch);
+        _remoteOpRunning = false;
+
+        if (!result.Success)
+        {
+            ShowResult(result);
+            return;
+        }
+
         RefreshAll();
     }
 
@@ -778,12 +818,40 @@ public partial class App : Component, IDisposable
         GitResult result;
         using (_window.Tracer.BeginAsync("Git", "Pull"))
         {
-            result = await _repo.PullAsync(HandleAskPass);
+            result = await _repo.PullAsync(HandleAskPass, CreatePullOptions());
         }
 
         _remoteOpRunning = false;
-        ShowResult(result, "Pulled latest changes");
+        HandlePullResult(result, "Pulled latest changes");
         RefreshAll();
+    }
+
+    private PullOptions CreatePullOptions() => new()
+    {
+        Strategy = _settings.Git.PullStrategy,
+        AutoStash = _settings.Git.PullAutoStash,
+        Prune = _settings.Git.PruneOnFetch,
+    };
+
+    private void HandlePullResult(GitResult result, string successLabel)
+    {
+        if (result.Success)
+        {
+            ShowMessage(successLabel, isError: false);
+            return;
+        }
+
+        if (_repo.IsRebasing())
+        {
+            ShowMessage("Pull rebase conflicts - resolve, stage, then continue or abort", isError: true);
+            ShowWorkingCopy = true;
+            _sidebar.WorkingCopyActive = true;
+            _sidebar.Refresh();
+            _stagingArea.Refresh();
+            return;
+        }
+
+        ShowResult(result);
     }
 
     private async void DoPush()

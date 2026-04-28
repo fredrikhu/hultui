@@ -295,6 +295,24 @@ public class GitRepository
         return [diff];
     }
 
+    public string? GetFileText(string gitRef, string filePath)
+    {
+        var result = GitProcess.Run(Path, "show", $"{gitRef}:{filePath}");
+        return result.Success ? result.Stdout : null;
+    }
+
+    public string? GetIndexFileText(string filePath)
+    {
+        var result = GitProcess.Run(Path, "show", $":{filePath}");
+        return result.Success ? result.Stdout : null;
+    }
+
+    public string? GetWorkingFileText(string filePath)
+    {
+        var fullPath = System.IO.Path.Combine(Path, filePath);
+        return File.Exists(fullPath) ? File.ReadAllText(fullPath) : null;
+    }
+
     /// <summary>
     /// Returns the staged file list diffed against a specific base ref.
     /// Used in amend mode to diff the index against HEAD~1 so that the
@@ -410,29 +428,60 @@ public class GitRepository
             .ToList();
     }
 
-    public GitResult Fetch()
+    public GitResult Fetch(bool prune = true)
     {
-        return GitProcess.Run(Path, "fetch", "--all", "--prune");
+        var args = new List<string> { "fetch", "--all" };
+        if (prune) args.Add("--prune");
+        return GitProcess.Run(Path, args.ToArray());
     }
 
-    public Task<GitResult> FetchAsync(Func<string, Task<string?>>? askPass = null)
+    public Task<GitResult> FetchAsync(Func<string, Task<string?>>? askPass = null, bool prune = true)
     {
-        return GitProcess.RunAsync(Path, askPass, "fetch", "--all", "--prune");
+        var args = new List<string> { "fetch", "--all" };
+        if (prune) args.Add("--prune");
+        return GitProcess.RunAsync(Path, askPass, args.ToArray());
     }
 
-    public GitResult Pull()
+    public GitResult Pull(PullOptions? options = null)
     {
-        return GitProcess.Run(Path, "pull");
+        return GitProcess.Run(Path, BuildPullArgs(options).ToArray());
     }
 
-    public Task<GitResult> PullAsync(Func<string, Task<string?>>? askPass = null)
+    public Task<GitResult> PullAsync(Func<string, Task<string?>>? askPass = null, PullOptions? options = null)
     {
-        return GitProcess.RunAsync(Path, askPass, "pull");
+        return GitProcess.RunAsync(Path, askPass, BuildPullArgs(options).ToArray());
     }
 
-    public Task<GitResult> PullFromAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null)
+    public Task<GitResult> PullFromAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null, PullOptions? options = null)
     {
-        return GitProcess.RunAsync(Path, askPass, "pull", remote, branch);
+        var args = BuildPullArgs(options);
+        args.Add(remote);
+        args.Add(branch);
+        return GitProcess.RunAsync(Path, askPass, args.ToArray());
+    }
+
+    private static List<string> BuildPullArgs(PullOptions? options)
+    {
+        options ??= new PullOptions();
+
+        var args = new List<string> { "pull" };
+        switch (options.Strategy)
+        {
+            case PullStrategy.Rebase:
+                args.Add("--rebase");
+                break;
+            case PullStrategy.FastForwardOnly:
+                args.Add("--ff-only");
+                break;
+        }
+
+        if (options.AutoStash)
+            args.Add("--autostash");
+
+        if (options.Prune)
+            args.Add("--prune");
+
+        return args;
     }
 
     public GitResult Push()

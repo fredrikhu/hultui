@@ -6,17 +6,24 @@ without redoing discovery.
 
 ## Current State
 
-- Settings live in `GitClientSettingsData` and currently persist only
-  `RepositoryPaths` and `ActiveRepositoryIndex`.
-- `TabbedApp.PersistTabs()` rewrites the whole settings object, so the first
-  options pass should preserve new fields when saving tab state.
-- Pull currently goes through `GitRepository.PullAsync()` / `PullFromAsync()`
-  and runs plain `git pull`.
+- Implemented slices:
+  - Settings groups and options dialog shell.
+  - Appearance tab with dark/light theme switching.
+  - Git tab pull behavior for merge/rebase/fast-forward-only, auto-stash, and prune.
+  - General tab auto-fetch interval for current repository or all open repositories.
+  - External Tools tab for VS Code/custom diff command plus `Ctrl+D` launch from
+    Working Copy and Commit Details.
+- Settings live in `GitClientSettingsData` and now persist repository tabs plus
+  `General`, `Git`, `ExternalTools`, and `Appearance` option groups.
+- `TabbedApp.PersistTabs()` updates repository fields on the shared settings
+  object, preserving option groups when tab state changes.
+- Pull now goes through `GitRepository.PullAsync()` / `PullFromAsync()` with
+  `PullOptions`.
 - Repository watching already exists through `GitWatcher`, with a hard-coded
-  300 ms debounce but no timed fetch loop.
+  300 ms debounce. Timed auto-fetch is owned by `TabbedApp`.
 - The open repository flow uses `OpenRepositoryDialog`, a modal with a text
   input path field.
-- The Git client theme is static in `GitClientColors` and assumes dark colors.
+- `GitClientColors` now delegates to the active dark/light palette.
 
 ## Options Dialog Shape
 

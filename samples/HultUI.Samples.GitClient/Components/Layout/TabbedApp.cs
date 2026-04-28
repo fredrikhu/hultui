@@ -14,24 +14,34 @@ namespace GitClient.Components.Layout;
 
 public sealed class TabbedApp : Component, IDisposable
 {
+    private readonly Application _application;
     private readonly Window _window;
+    private readonly GitClientSettingsData _settings;
     private readonly List<RepositoryTab> _tabs = [];
     private int _activeIndex;
     private OpenRepositoryDialogState? _pendingOpenRepository;
+    private OptionsDialogState? _pendingOptions;
+    private Timer? _autoFetchTimer;
+    private bool _autoFetchRunning;
+    private bool _disposed;
 
-    public TabbedApp(Window window, IEnumerable<string> repositoryPaths, int activeIndex)
+    public TabbedApp(Application application, Window window, GitClientSettingsData settings)
     {
+        _application = application;
         _window = window;
+        _settings = settings;
+        _settings.Normalize();
 
-        foreach (var path in repositoryPaths)
+        foreach (var path in _settings.RepositoryPaths)
             AddTab(path);
 
         if (_tabs.Count == 0)
             throw new InvalidOperationException("At least one repository path is required.");
 
-        _activeIndex = Math.Clamp(activeIndex, 0, _tabs.Count - 1);
+        _activeIndex = Math.Clamp(_settings.ActiveRepositoryIndex, 0, _tabs.Count - 1);
         RefreshRepositoryChrome();
         PersistTabs();
+        ConfigureAutoFetchTimer();
         _window.Closed += Dispose;
 
         Mount().On<KeyDownEvent>(HandleRootKeyDown);
@@ -49,6 +59,9 @@ public sealed class TabbedApp : Component, IDisposable
 
         if (_pendingOpenRepository != null)
             root.AddChild(OpenRepositoryDialog.Build(_pendingOpenRepository, DismissOpenRepositoryDialog));
+
+        if (_pendingOptions != null)
+            root.AddChild(OptionsDialog.Build(_pendingOptions, DismissOptionsDialog));
 
         return root;
     }
@@ -76,6 +89,7 @@ public sealed class TabbedApp : Component, IDisposable
             row.AddChild(BuildTab(_tabs[i], i));
 
         row.AddChild(BuildOpenButton());
+        row.AddChild(BuildOptionsButton());
         row.AddChild(Box.New().FlexGrow(1).WindowDrag());
         return row;
     }
@@ -144,6 +158,22 @@ public sealed class TabbedApp : Component, IDisposable
         return btn;
     }
 
+    private Element BuildOptionsButton()
+    {
+        var btn = Box.New()
+            .Width(34)
+            .JustifyContent(JustifyContent.Center)
+            .AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Options")
+            .Children(Text.New("...").FontSize(13f).TextColor(GitClientColors.TextSecondary));
+
+        btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = GitClientColors.SurfaceHover);
+        btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = Color.Transparent);
+        btn.On<ClickEvent>(_ => ShowOptionsDialog());
+        return btn;
+    }
+
     private void HandleRootKeyDown(KeyDownEvent e)
     {
         if (e.Key == KeyCode.O && e.Modifiers.HasFlag(KeyModifiers.Ctrl))
@@ -156,8 +186,13 @@ public sealed class TabbedApp : Component, IDisposable
             DismissOpenRepositoryDialog();
             e.StopPropagation = true;
         }
+        else if (e.Key == KeyCode.Escape && _pendingOptions != null)
+        {
+            DismissOptionsDialog();
+            e.StopPropagation = true;
+        }
 
-        if (!e.StopPropagation && _pendingOpenRepository == null)
+        if (!e.StopPropagation && _pendingOpenRepository == null && _pendingOptions == null)
             Active.App.HandleGlobalKeyDown(e);
     }
 
@@ -234,12 +269,79 @@ public sealed class TabbedApp : Component, IDisposable
         MarkDirty();
     }
 
+    private void ShowOptionsDialog()
+    {
+        _pendingOptions = new OptionsDialogState
+        {
+            Settings = _settings,
+            OnSettingsChanged = OnSettingsChanged,
+        };
+        MarkDirty();
+    }
+
+    private void DismissOptionsDialog()
+    {
+        _pendingOptions = null;
+        MarkDirty();
+    }
+
+    private void OnSettingsChanged()
+    {
+        _settings.Normalize();
+        GitClientColors.Use(_settings.Appearance.ThemeMode);
+        _application.Theme = GitClientColors.ToHultTheme();
+        ConfigureAutoFetchTimer();
+        PersistSettings();
+        RefreshRepositoryChrome();
+        MarkDirty();
+    }
+
+    private void ConfigureAutoFetchTimer()
+    {
+        _autoFetchTimer?.Dispose();
+        _autoFetchTimer = null;
+
+        if (!_settings.General.AutoFetchEnabled)
+            return;
+
+        var interval = TimeSpan.FromMinutes(Math.Clamp(_settings.General.AutoFetchIntervalMinutes, 1, 120));
+        _autoFetchTimer = new Timer(_ =>
+        {
+            if (_disposed || _autoFetchRunning) return;
+            Application.InvokeOnMainThread(RunAutoFetch);
+        }, null, interval, interval);
+    }
+
+    private async void RunAutoFetch()
+    {
+        if (_disposed || _autoFetchRunning || !_settings.General.AutoFetchEnabled)
+            return;
+
+        _autoFetchRunning = true;
+        try
+        {
+            var targets = _settings.General.AutoFetchMode == AutoFetchMode.AllOpenRepositories
+                ? _tabs.ToArray()
+                : [Active];
+
+            foreach (var tab in targets)
+            {
+                if (_disposed) break;
+                await tab.App.AutoFetchAsync();
+            }
+        }
+        finally
+        {
+            _autoFetchRunning = false;
+        }
+    }
+
     private void AddTab(string path)
     {
         var fullPath = Path.GetFullPath(path);
         if (_tabs.Any(t => SamePath(t.Path, fullPath))) return;
 
-        var app = new App(_window, new GitRepository(fullPath))
+        var app = new App(_window, new GitRepository(fullPath), _settings)
         {
             BuildBelowTitleBar = BuildTabStrip,
         };
@@ -254,12 +356,12 @@ public sealed class TabbedApp : Component, IDisposable
 
     private void PersistTabs()
     {
-        GitClientSettings.Save(new GitClientSettingsData
-        {
-            RepositoryPaths = _tabs.Select(t => t.Path).ToList(),
-            ActiveRepositoryIndex = _activeIndex,
-        });
+        _settings.RepositoryPaths = _tabs.Select(t => t.Path).ToList();
+        _settings.ActiveRepositoryIndex = _activeIndex;
+        PersistSettings();
     }
+
+    private void PersistSettings() => GitClientSettings.Save(_settings);
 
     private static bool SamePath(string left, string right) =>
         string.Equals(
@@ -269,7 +371,10 @@ public sealed class TabbedApp : Component, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _window.Closed -= Dispose;
+        _autoFetchTimer?.Dispose();
+        _autoFetchTimer = null;
         foreach (var tab in _tabs)
             tab.Dispose();
         _tabs.Clear();

@@ -139,6 +139,33 @@ public partial class CommitDetail : Component
         _diffViewer.Diffs = DiffsForFile(file);
     }
 
+    public bool TryOpenExternalDiff(ExternalToolOptions options, out string error)
+    {
+        error = "";
+        var commit = Commit;
+        var file = _fileTree.SelectedFile;
+        if (commit == null || file == null)
+        {
+            error = "Select a commit file first.";
+            return false;
+        }
+
+        var oldPath = file.OldPath ?? file.Path;
+        var parentRef = commit.ParentHashes.Length > 0 ? commit.ParentHashes[0] : null;
+        var left = parentRef == null ? "" : _repo.GetFileText(parentRef, oldPath) ?? "";
+        var right = _repo.GetFileText(commit.Hash, file.Path) ?? "";
+
+        return ExternalDiffLauncher.TryLaunch(options, new ExternalDiffRequest
+        {
+            RepoPath = _repo.Path,
+            RelativePath = file.Path,
+            LeftLabel = parentRef == null ? "empty" : parentRef[..Math.Min(7, parentRef.Length)],
+            LeftContent = left,
+            RightLabel = commit.ShortHash,
+            RightContent = right,
+        }, out error);
+    }
+
     private void OnBlameRequested(GitFileChange file)
     {
         var commit = Commit;

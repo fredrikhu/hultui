@@ -153,6 +153,52 @@ public partial class StagingArea : Component
 
     public void Refresh() => MarkDirty();
 
+    public bool TryOpenExternalDiff(ExternalToolOptions options, out string error)
+    {
+        error = "";
+        if (_selectedPath == null)
+        {
+            error = "Select a working copy file first.";
+            return false;
+        }
+
+        string left;
+        string right;
+
+        if (_selectedIsConflict)
+        {
+            error = "External merge launch is not wired for conflicts yet.";
+            return false;
+        }
+        else if (_selectedIsStaged)
+        {
+            left = _repo.GetFileText("HEAD", _selectedPath) ?? "";
+            right = _repo.GetIndexFileText(_selectedPath) ?? "";
+        }
+        else if (_selectedKind == FileChangeKind.Untracked)
+        {
+            left = "";
+            right = _repo.GetWorkingFileText(_selectedPath) ?? "";
+        }
+        else
+        {
+            left = _repo.GetIndexFileText(_selectedPath)
+                   ?? _repo.GetFileText("HEAD", _selectedPath)
+                   ?? "";
+            right = _repo.GetWorkingFileText(_selectedPath) ?? "";
+        }
+
+        return ExternalDiffLauncher.TryLaunch(options, new ExternalDiffRequest
+        {
+            RepoPath = _repo.Path,
+            RelativePath = _selectedPath,
+            LeftLabel = _selectedIsStaged ? "index-base" : "head",
+            LeftContent = left,
+            RightLabel = _selectedIsStaged ? "index" : "worktree",
+            RightContent = right,
+        }, out error);
+    }
+
     // ── Conflict section ──
 
     private Element BuildConflictSection(List<GitFileChange> conflicted)
