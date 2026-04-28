@@ -292,8 +292,9 @@ public sealed class TabbedApp : Component, IDisposable
         _application.Theme = GitClientColors.ToHultTheme();
         ConfigureAutoFetchTimer();
         PersistSettings();
-        RefreshRepositoryChrome();
-        MarkDirty();
+        // Theme palette is read inline in every component's Build() — flipping
+        // it doesn't reactively notify them, so force a global rebuild.
+        _application.RebuildAll();
     }
 
     private void ConfigureAutoFetchTimer()

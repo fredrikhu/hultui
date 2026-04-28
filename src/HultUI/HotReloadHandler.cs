@@ -16,7 +16,7 @@ internal static class HotReloadHandler
     /// <summary>Called by the runtime after metadata has been updated.</summary>
     public static void UpdateApplication(Type[]? updatedTypes)
     {
-        Application.Current?.ForceRebuildAll();
+        Application.Current?.RebuildAll();
     }
 }
 #endif

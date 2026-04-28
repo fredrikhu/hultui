@@ -197,10 +197,12 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>
-    /// Forces all component hosts to rebuild, then marks all windows for re-render.
-    /// Called by hot reload when code changes are applied.
+    /// Forces every component host across all windows to rebuild, then
+    /// marks all windows for re-render. Use after changing global state
+    /// (e.g. a theme palette swap) that components read but don't subscribe
+    /// to reactively. Hot reload also uses this when code changes apply.
     /// </summary>
-    internal void ForceRebuildAll()
+    public void RebuildAll()
     {
         foreach (var window in _windows)
         {
@@ -209,6 +211,7 @@ public sealed class Application : IDisposable
             window.MarkStyleDirty();
         }
     }
+
 
     private static void ForceRebuildTree(Element element)
     {

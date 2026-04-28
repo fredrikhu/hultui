@@ -103,7 +103,7 @@ public static class OptionsDialog
         var active = state.ActiveTab == tab;
         var bg = active ? GitClientColors.Selection : Color.Transparent;
         var hoverBg = active ? GitClientColors.Selection : GitClientColors.SurfaceHover;
-        var item = Box.New()
+        var item = Flex.Row(gap: 0)
             .Width(Dimension.Percent(100))
             .Height(32)
             .Padding(new Thickness(0, 10, 0, 10))
