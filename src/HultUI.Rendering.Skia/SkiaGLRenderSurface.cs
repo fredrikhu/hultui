@@ -1,21 +1,16 @@
 using HultUI.Core.Rendering;
 using HultUI.Text;
 using SkiaSharp;
-using System.Runtime.InteropServices;
 
 namespace HultUI.Rendering.Skia;
 
 public sealed class SkiaGLRenderSurface : IRenderSurface
 {
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate void GlViewportDelegate(int x, int y, int width, int height);
-
     private readonly GRGlInterface _glInterface;
     private readonly GRContext _grContext;
     private readonly SkiaRenderContext _renderContext = new();
     private readonly SkiaMeasureContext _measureContext;
     private readonly TextPipeline _pipeline;
-    private readonly GlViewportDelegate? _glViewport;
 
     private GRBackendRenderTarget? _renderTarget;
     private SKSurface? _surface;
@@ -28,10 +23,6 @@ public sealed class SkiaGLRenderSurface : IRenderSurface
 
     public SkiaGLRenderSurface(Func<string, IntPtr> glGetProcAddress)
     {
-        var viewportPtr = glGetProcAddress("glViewport");
-        if (viewportPtr != IntPtr.Zero)
-            _glViewport = Marshal.GetDelegateForFunctionPointer<GlViewportDelegate>(viewportPtr);
-
         _glInterface = GRGlInterface.CreateOpenGl(name => glGetProcAddress(name))
             ?? throw new InvalidOperationException("Failed to create SkiaSharp GL interface");
         _grContext = GRContext.CreateGl(_glInterface)
@@ -62,7 +53,9 @@ public sealed class SkiaGLRenderSurface : IRenderSurface
         _surface = SKSurface.Create(_grContext, _renderTarget, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888)
             ?? throw new InvalidOperationException($"Failed to create SkiaSharp surface ({widthPx}x{heightPx})");
 
-        _glViewport?.Invoke(0, 0, widthPx, heightPx);
+        // Tell Skia its cached view state (viewport, scissor) is stale — it
+        // will re-issue glViewport on the next draw using its own loader,
+        // sized from the GRBackendRenderTarget.
         _grContext.ResetContext(GRGlBackendState.View);
 
         _renderContext.SetCanvas(_surface.Canvas);
