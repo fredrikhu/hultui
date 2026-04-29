@@ -8,6 +8,7 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using GitClient.Components.Shared;
 using GitClient.Git;
+using GitClient.Platform;
 using GitClient.Theme;
 
 namespace GitClient.Components.Layout;
@@ -17,6 +18,7 @@ public sealed class TabbedApp : Component, IDisposable
     private readonly Application _application;
     private readonly Window _window;
     private readonly GitClientSettingsData _settings;
+    private readonly IFolderPicker _folderPicker;
     private readonly List<RepositoryTab> _tabs = [];
     private int _activeIndex;
     private OpenRepositoryDialogState? _pendingOpenRepository;
@@ -25,11 +27,12 @@ public sealed class TabbedApp : Component, IDisposable
     private bool _autoFetchRunning;
     private bool _disposed;
 
-    public TabbedApp(Application application, Window window, GitClientSettingsData settings)
+    public TabbedApp(Application application, Window window, GitClientSettingsData settings, IFolderPicker? folderPicker = null)
     {
         _application = application;
         _window = window;
         _settings = settings;
+        _folderPicker = folderPicker ?? new NativeFolderPicker();
         _settings.Normalize();
 
         foreach (var path in _settings.RepositoryPaths)
@@ -230,8 +233,51 @@ public sealed class TabbedApp : Component, IDisposable
         {
             Path = "",
             OnConfirm = ConfirmOpenRepository,
+            OnBrowse = _folderPicker.IsAvailable ? BrowseOpenRepositoryAsync : null,
         };
         MarkDirty();
+    }
+
+    private async Task BrowseOpenRepositoryAsync()
+    {
+        if (_pendingOpenRepository is not { } dialog)
+            return;
+
+        dialog.BrowseRunning = true;
+        dialog.Error = null;
+        MarkDirty();
+
+        try
+        {
+            var initialDirectory = string.IsNullOrWhiteSpace(dialog.Path)
+                ? Active.Path
+                : dialog.Path;
+            var selected = await _folderPicker.PickFolderAsync(initialDirectory);
+            if (_pendingOpenRepository != dialog)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(selected))
+            {
+                dialog.Path = selected;
+                ConfirmOpenRepository(selected);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            if (_pendingOpenRepository == dialog)
+                dialog.Error = "The folder picker could not be opened. Paste a repository path instead.";
+        }
+        finally
+        {
+            if (_pendingOpenRepository == dialog)
+            {
+                dialog.BrowseRunning = false;
+                MarkDirty();
+            }
+        }
     }
 
     private void ConfirmOpenRepository(string path)
@@ -259,6 +305,10 @@ public sealed class TabbedApp : Component, IDisposable
 
         _pendingOpenRepository = null;
         PersistTabs();
+        // App eagerly runs its first Build() in its constructor, before
+        // AddTab's object initializer sets BuildBelowTitleBar — so the new
+        // tab's initial tree has no tab strip. Mark every tab's App dirty
+        // here so they all re-render with the current tab list.
         RefreshRepositoryChrome();
         MarkDirty();
     }
@@ -342,10 +392,7 @@ public sealed class TabbedApp : Component, IDisposable
         var fullPath = Path.GetFullPath(path);
         if (_tabs.Any(t => SamePath(t.Path, fullPath))) return;
 
-        var app = new App(_window, new GitRepository(fullPath), _settings)
-        {
-            BuildBelowTitleBar = BuildTabStrip,
-        };
+        var app = new App(_window, new GitRepository(fullPath), _settings, BuildTabStrip);
         _tabs.Add(new RepositoryTab(fullPath, app));
     }
 

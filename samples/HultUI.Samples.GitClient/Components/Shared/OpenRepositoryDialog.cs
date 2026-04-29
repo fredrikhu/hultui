@@ -14,8 +14,10 @@ public sealed class OpenRepositoryDialogState
     public string Path { get; set; } = "";
     public string? Error { get; set; }
     public bool PendingFocus { get; set; } = true;
+    public bool BrowseRunning { get; set; }
     public Ref<TextInputElement> InputRef { get; } = new();
     public required Action<string> OnConfirm { get; init; }
+    public Func<Task>? OnBrowse { get; init; }
 }
 
 public static class OpenRepositoryDialog
@@ -84,7 +86,27 @@ public static class OpenRepositoryDialog
         var content = Flex.Column(gap: 14);
         content.AddChild(Text.New("Open Repository").FontSize(16f).FontWeight(FontWeight.Bold)
             .TextColor(GitClientColors.TextPrimary));
-        content.AddChild(input);
+        if (state.OnBrowse != null)
+        {
+            content.AddChild(Flex.Row(gap: 8)
+                .AlignItems(AlignItems.Center)
+                .Children(
+                    input.FlexGrow(1),
+                    BuildButton(
+                        state.BrowseRunning ? "..." : "Browse",
+                        GitClientColors.ButtonSecondary,
+                        GitClientColors.ButtonSecondaryHover,
+                        GitClientColors.TextSecondary,
+                        () =>
+                        {
+                            if (!state.BrowseRunning)
+                                _ = state.OnBrowse();
+                        })));
+        }
+        else
+        {
+            content.AddChild(input);
+        }
 
         if (!string.IsNullOrWhiteSpace(state.Error))
             content.AddChild(Text.New(state.Error).FontSize(12f).TextColor(GitClientColors.StatusDeleted));
@@ -92,8 +114,17 @@ public static class OpenRepositoryDialog
         var buttons = Flex.Row(gap: 8)
             .JustifyContent(JustifyContent.FlexEnd)
             .AlignItems(AlignItems.Center);
-        buttons.AddChild(BuildButton("Cancel", GitClientColors.ButtonSecondary, GitClientColors.ButtonSecondaryHover, dismiss));
-        buttons.AddChild(BuildButton("Open", GitClientColors.ButtonPrimary, GitClientColors.ButtonPrimaryHover,
+        buttons.AddChild(BuildButton(
+            "Cancel",
+            GitClientColors.ButtonSecondary,
+            GitClientColors.ButtonSecondaryHover,
+            GitClientColors.TextSecondary,
+            dismiss));
+        buttons.AddChild(BuildButton(
+            "Open",
+            GitClientColors.ButtonPrimary,
+            GitClientColors.ButtonPrimaryHover,
+            GitClientColors.ButtonPrimaryText,
             () => state.OnConfirm(state.Path)));
 
         content.AddChild(buttons);
@@ -102,7 +133,7 @@ public static class OpenRepositoryDialog
         return backdrop;
     }
 
-    private static Element BuildButton(string label, Color bg, Color hoverBg, Action onClick)
+    private static Element BuildButton(string label, Color bg, Color hoverBg, Color textColor, Action onClick)
     {
         var btn = Box.New()
             .Padding(new Thickness(8, 16, 8, 16))
@@ -110,7 +141,7 @@ public static class OpenRepositoryDialog
             .Background(bg)
             .Cursor(CursorType.Pointer)
             .Children(Text.New(label).FontSize(13f).FontWeight(FontWeight.SemiBold)
-                .TextColor(Color.White));
+                .TextColor(textColor));
 
         btn.On<PointerEnterEvent>(_ => btn.BackgroundColor = hoverBg);
         btn.On<PointerLeaveEvent>(_ => btn.BackgroundColor = bg);

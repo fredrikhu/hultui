@@ -26,6 +26,7 @@ public partial class App : Component, IDisposable
     private readonly Window _window;
     private readonly GitRepository _repo;
     private readonly GitClientSettingsData _settings;
+    private readonly Func<Element>? _buildBelowTitleBar;
 
     // Sub-components
     private readonly Sidebar _sidebar;
@@ -52,13 +53,16 @@ public partial class App : Component, IDisposable
     private string? _bisectBadHash;
     private bool _showShortcuts;
 
-    public Func<Element>? BuildBelowTitleBar { get; set; }
-
-    public App(Window window, GitRepository repo, GitClientSettingsData settings)
+    public App(Window window, GitRepository repo, GitClientSettingsData settings,
+        Func<Element>? buildBelowTitleBar = null)
     {
         _window = window;
         _repo = repo;
         _settings = settings;
+        // Captured before the Mount() call below so the eager initial Build()
+        // already sees this lambda — wiring it via a setter after construction
+        // would leave the first render missing the tab strip.
+        _buildBelowTitleBar = buildBelowTitleBar;
 
         _sidebar = new Sidebar(repo);
         _commitList = new CommitList(repo);
@@ -170,8 +174,8 @@ public partial class App : Component, IDisposable
             ),
         };
 
-        if (BuildBelowTitleBar != null)
-            children.Add(BuildBelowTitleBar());
+        if (_buildBelowTitleBar != null)
+            children.Add(_buildBelowTitleBar());
 
         children.Add(BuildSidebarLayout(showWc));
 

@@ -87,6 +87,7 @@ public static class GitClientColors
     // Buttons.
     public static Color ButtonPrimary => _active.ButtonPrimary;
     public static Color ButtonPrimaryHover => _active.ButtonPrimaryHover;
+    public static Color ButtonPrimaryText => _active.ButtonPrimaryText;
     public static Color ButtonSecondary => _active.ButtonSecondary;
     public static Color ButtonSecondaryHover => _active.ButtonSecondaryHover;
 
@@ -133,6 +134,7 @@ public sealed record GitClientPalette(
     Color SelectionBorder,
     Color ButtonPrimary,
     Color ButtonPrimaryHover,
+    Color ButtonPrimaryText,
     Color ButtonSecondary,
     Color ButtonSecondaryHover,
     Color DialogBackdrop,
@@ -176,6 +178,7 @@ public sealed record GitClientPalette(
         SelectionBorder: Color.FromHex("#6366f1"),
         ButtonPrimary: Color.FromHex("#6366f1"),
         ButtonPrimaryHover: Color.FromHex("#4f46e5"),
+        ButtonPrimaryText: Color.FromHex("#ffffff"),
         ButtonSecondary: Color.FromHex("#374151"),
         ButtonSecondaryHover: Color.FromHex("#4b5563"),
         DialogBackdrop: new Color(0, 0, 0, 140),
@@ -219,6 +222,7 @@ public sealed record GitClientPalette(
         SelectionBorder: Color.FromHex("#2563eb"),
         ButtonPrimary: Color.FromHex("#2563eb"),
         ButtonPrimaryHover: Color.FromHex("#1d4ed8"),
+        ButtonPrimaryText: Color.FromHex("#ffffff"),
         ButtonSecondary: Color.FromHex("#e2e8f0"),
         ButtonSecondaryHover: Color.FromHex("#cbd5e1"),
         DialogBackdrop: new Color(15, 23, 42, 80),
