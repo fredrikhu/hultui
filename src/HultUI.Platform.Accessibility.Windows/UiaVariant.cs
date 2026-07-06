@@ -10,11 +10,14 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// strings that were set this way (UIA does it for us once it copies).
 /// </summary>
 [SupportedOSPlatform("windows")]
-[StructLayout(LayoutKind.Explicit, Size = 24)]
+[StructLayout(LayoutKind.Explicit, Size = 16)]
 internal struct UiaVariant
 {
-    // VARTYPE (ushort) at offset 0, 6 bytes of reserved header, 8-byte value
-    // union starting at offset 8. Size 24 accommodates DECIMAL on 64-bit.
+    // A Win32 VARIANT is exactly 16 bytes on both x86 and x64: VARTYPE
+    // (ushort) at offset 0, 6 bytes of reserved header, then an 8-byte value
+    // union at offset 8 (DECIMAL aliases the whole 16 bytes). GetPropertyValue
+    // writes this struct into a VARIANT that UIA allocated, so the size MUST
+    // match — an oversized struct overruns UIA's buffer (0xC0000409).
     [FieldOffset(0)] public ushort Vt;
     [FieldOffset(8)] public IntPtr PointerValue;
     [FieldOffset(8)] public int IntValue;

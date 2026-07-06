@@ -116,9 +116,10 @@ internal sealed class UiaFragment :
 
     public int GetHostRawElementProvider(out IRawElementProviderSimple? pRetVal)
     {
-        // Only the root fragment chains to the HWND host provider — child
-        // fragments return null so UIA doesn't double-walk the tree.
-        pRetVal = Node.Parent is null ? _bridge.HostProvider : null;
+        // Host chaining lives on the fragment root (UiaFragmentRoot). Element
+        // fragments — including the app-root element — must return null, or UIA
+        // double-walks to the HWND host.
+        pRetVal = null;
         return 0;
     }
 
@@ -126,23 +127,30 @@ internal sealed class UiaFragment :
 
     public int Navigate(int direction, out IRawElementProviderFragment? pRetVal)
     {
+        // Snapshot Node once: the UI thread may swap it via UpdateFrom while
+        // this runs on a UIA worker thread. Each Node is an immutable per-frame
+        // tree, so its Parent/Children are safe to walk once captured.
+        var node = Node;
         pRetVal = direction switch
         {
-            UiaInterop.NavigateDirection_Parent => _bridge.GetFragment(Node.Parent?.ElementId),
-            UiaInterop.NavigateDirection_FirstChild when Node.Children.Count > 0
-                => _bridge.GetFragment(Node.Children[0].ElementId),
-            UiaInterop.NavigateDirection_LastChild when Node.Children.Count > 0
-                => _bridge.GetFragment(Node.Children[^1].ElementId),
-            UiaInterop.NavigateDirection_NextSibling => Sibling(+1),
-            UiaInterop.NavigateDirection_PreviousSibling => Sibling(-1),
+            // The app-root element's parent is the fragment root (the window).
+            UiaInterop.NavigateDirection_Parent => node.Parent is null
+                ? _bridge.FragmentRoot
+                : _bridge.GetFragment(node.Parent.ElementId),
+            UiaInterop.NavigateDirection_FirstChild when node.Children.Count > 0
+                => _bridge.GetFragment(node.Children[0].ElementId),
+            UiaInterop.NavigateDirection_LastChild when node.Children.Count > 0
+                => _bridge.GetFragment(node.Children[^1].ElementId),
+            UiaInterop.NavigateDirection_NextSibling => Sibling(node, +1),
+            UiaInterop.NavigateDirection_PreviousSibling => Sibling(node, -1),
             _ => null,
         };
         return 0;
     }
 
-    private IRawElementProviderFragment? Sibling(int delta)
+    private IRawElementProviderFragment? Sibling(AccessibilityNode node, int delta)
     {
-        var parent = Node.Parent;
+        var parent = node.Parent;
         if (parent is null) return null;
         var siblings = parent.Children;
         for (int i = 0; i < siblings.Count; i++)
@@ -157,10 +165,10 @@ internal sealed class UiaFragment :
 
     public int GetRuntimeId(out IntPtr pRetVal)
     {
-        // UIA expects a SAFEARRAY of int here. Returning null is valid and
-        // tells UIA to use COM-pointer identity instead, which works for us
-        // because wrappers are cached by ElementId.
-        pRetVal = IntPtr.Zero;
+        // A stable runtime id (ElementId survives tree rebuilds) lets UIA track
+        // element identity even though our COM wrappers are recreated on each
+        // structural change. UIA takes ownership of the returned SAFEARRAY.
+        pRetVal = UiaInterop.BuildRuntimeId(ElementId.Value);
         return 0;
     }
 

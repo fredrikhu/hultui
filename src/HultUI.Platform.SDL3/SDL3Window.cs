@@ -125,30 +125,45 @@ public sealed unsafe class SDL3Window : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static SDLBool EventWatchCallback(IntPtr userdata, SDL_Event* evt)
     {
-        var window = (SDL3Window)GCHandle.FromIntPtr(userdata).Target!;
-
-        switch (evt->type)
+        // Exceptions escaping an [UnmanagedCallersOnly] method tear down the
+        // runtime with no managed stack trace — the process just dies. Guard
+        // the whole body so a stale GCHandle or a throwing live-resize frame
+        // is logged and swallowed instead of silently killing the app.
+        try
         {
-            case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
-            case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-            case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
-            case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN:
-            case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
-                // Only handle events for this specific window
-                if (!evt->window.windowID.Equals(window.WindowId))
+            if (userdata == IntPtr.Zero)
+                return true;
+            var handle = GCHandle.FromIntPtr(userdata);
+            if (!handle.IsAllocated || handle.Target is not SDL3Window window)
+                return true;
+
+            switch (evt->type)
+            {
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
+                    // Only handle events for this specific window
+                    if (!evt->window.windowID.Equals(window.WindowId))
+                        break;
+
+                    window.UpdateSize();
+                    window.ResizePending = true;
+
+                    // Win32 enters a modal resize loop (WM_ENTERSIZEMOVE) that
+                    // blocks SDL_PollEvent until the mouse is released. The
+                    // event watcher is the only code path that runs during
+                    // that pump, so drive a live frame from here on Windows.
+                    if (OperatingSystem.IsWindows())
+                        window.LiveResizeFrame?.Invoke();
                     break;
-
-                window.UpdateSize();
-                window.ResizePending = true;
-
-                // Win32 enters a modal resize loop (WM_ENTERSIZEMOVE) that
-                // blocks SDL_PollEvent until the mouse is released. The
-                // event watcher is the only code path that runs during
-                // that pump, so drive a live frame from here on Windows.
-                if (OperatingSystem.IsWindows())
-                    window.LiveResizeFrame?.Invoke();
-                break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[HultUI] EventWatchCallback failed: {ex}");
         }
 
         return true;

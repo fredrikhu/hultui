@@ -61,15 +61,26 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static unsafe SDLBool MessageHookCallback(IntPtr userdata, MSG* msg)
     {
-        var self = (Sdl3UiaHostBridge?)GCHandle.FromIntPtr(userdata).Target;
-        if (self is null || self._handler is null || msg is null)
-            return (SDLBool)true;
+        // This runs for every Win32 message. An exception escaping an
+        // [UnmanagedCallersOnly] method tears down the runtime, and a stale
+        // GCHandle during teardown would throw — guard both. We always return
+        // true ("continue dispatching") so UIA's WM_GETOBJECT still reaches the
+        // normal window proc regardless of what the handler did.
+        try
+        {
+            if (userdata == IntPtr.Zero) return (SDLBool)true;
+            var handle = GCHandle.FromIntPtr(userdata);
+            if (!handle.IsAllocated || handle.Target is not Sdl3UiaHostBridge self)
+                return (SDLBool)true;
+            if (self._handler is null || msg is null)
+                return (SDLBool)true;
 
-        bool handled = self._handler(msg->hwnd, msg->message, (IntPtr)msg->wParam, msg->lParam);
-        // Returning true means "continue dispatching". UIA's WM_GETOBJECT must
-        // be passed through the normal window proc either way, so we always
-        // return true regardless of whether we handled the reply.
-        _ = handled;
+            self._handler(msg->hwnd, msg->message, (IntPtr)msg->wParam, msg->lParam);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[HultUI] UIA message hook failed: {ex}");
+        }
         return (SDLBool)true;
     }
 
