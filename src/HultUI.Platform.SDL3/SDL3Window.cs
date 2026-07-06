@@ -385,6 +385,15 @@ public sealed unsafe class SDL3Window : IDisposable
         if (_sdlInitialized) return;
         _sdlInitialized = true;
 
+        // Tell SDL the app renders the IME composition (preedit) itself. Without
+        // this, SDL leaves composition to the OS's native overlay, which never
+        // appears because we draw our own text via Skia — so the candidate
+        // window shows but the inline preedit does not. With it, SDL delivers
+        // the composition as SDL_EVENT_TEXT_EDITING events for inline drawing,
+        // while the native candidate list stays (we don't claim "candidates").
+        // Must be set before text input starts.
+        SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
+
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
     }
