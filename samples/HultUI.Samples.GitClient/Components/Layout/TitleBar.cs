@@ -13,9 +13,12 @@ namespace GitClient.Components.Layout;
 
 public static class TitleBar
 {
-    private static readonly Lazy<SkiaImageSource> FetchIcon = new(() => SkiaImageSource.FromFile("Assets/fetch.png"));
-    private static readonly Lazy<SkiaImageSource> PullIcon = new(() => SkiaImageSource.FromFile("Assets/pull.png"));
-    private static readonly Lazy<SkiaImageSource> PushIcon = new(() => SkiaImageSource.FromFile("Assets/push.png"));
+    private static readonly Lazy<SkiaImageSource> FetchIcon = new(() => SkiaImageSource.FromFile(IconPath("fetch.png")));
+    private static readonly Lazy<SkiaImageSource> PullIcon = new(() => SkiaImageSource.FromFile(IconPath("pull.png")));
+    private static readonly Lazy<SkiaImageSource> PushIcon = new(() => SkiaImageSource.FromFile(IconPath("push.png")));
+
+    private static string IconPath(string fileName) =>
+        Path.Combine(AppContext.BaseDirectory, "Assets", fileName);
 
     public static Element Build(
         Window window,
