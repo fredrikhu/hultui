@@ -50,7 +50,7 @@ public partial class CommitList : Component
 
     [Reactive] public partial string? SelectedCommitHash { get; set; }
 
-    public Action<string, bool>? OnCommitSelected { get; set; }
+    public Action<GitCommit, bool>? OnCommitSelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
     public Action<string>? OnCheckoutCommit { get; set; }
     public Action<string>? OnCherryPick { get; set; }
@@ -658,7 +658,11 @@ public partial class CommitList : Component
     private void SelectCommit(string hash)
     {
         SelectedCommitHash = hash;
-        OnCommitSelected?.Invoke(hash, false);
+        // The commit object is already in memory (from GetLog) — pass it so the
+        // host doesn't re-fetch it with a synchronous `git log -1` on the click.
+        var commit = _commits.FirstOrDefault(c => c.Hash == hash);
+        if (commit != null)
+            OnCommitSelected?.Invoke(commit, false);
     }
 
     private enum FilterInputKind { None, Path, Author, Date }

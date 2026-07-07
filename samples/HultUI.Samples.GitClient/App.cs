@@ -124,7 +124,7 @@ public partial class App : Component, IDisposable
 
     private void OnCommitHashSelected(string hash)
     {
-        OnCommitSelected(hash, scrollToCommit: false);
+        SelectCommitByHash(hash, scrollToCommit: false);
     }
 
     private void OnFileHistoryRequested(string filePath)
@@ -263,21 +263,36 @@ public partial class App : Component, IDisposable
 
     // ── Event handlers ──
 
-    private void OnCommitSelected(string hash, bool scrollToCommit)
+    private void OnCommitSelected(GitCommit commit, bool scrollToCommit)
     {
-        ShowWorkingCopy = false;
-        _sidebar.WorkingCopyActive = false;
-        _sidebar.Refresh();
+        // Coalesce the reactive writes so the commit list, detail pane, and
+        // working-copy highlight rebuild in a single pass instead of one flush
+        // per assignment.
+        ReactiveRuntime.Batch(() =>
+        {
+            // Selecting a commit doesn't change branches/tags/stashes — clearing
+            // the working-copy highlight (via the setter) is the only sidebar
+            // effect, so don't Refresh() it (that would reload sidebar git).
+            ShowWorkingCopy = false;
+            _sidebar.WorkingCopyActive = false;
+            _commitList.SelectedCommitHash = commit.Hash;
+            if (scrollToCommit)
+                _commitList.ScrollTo(commit.Hash);
 
+            // Bias the file pre-selection to the file whose history we're viewing, if any.
+            _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
+            _commitDetail.Commit = commit;
+        });
+    }
+
+    // Hash-based entry point (branch selection, blame/parent-hash navigation)
+    // where we don't already hold the commit object — one `git log -1` here is
+    // fine since these paths are infrequent, unlike clicking a list row.
+    private void SelectCommitByHash(string hash, bool scrollToCommit)
+    {
         var commit = _repo.GetCommit(hash);
         if (commit == null) return;
-        _commitList.SelectedCommitHash = hash;
-        if (scrollToCommit)
-            _commitList.ScrollTo(hash);
-
-        // Bias the file pre-selection to the file whose history we're viewing, if any.
-        _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
-        _commitDetail.Commit = commit;
+        OnCommitSelected(commit, scrollToCommit);
     }
 
     private void OnWorkingCopySelected()
@@ -292,7 +307,7 @@ public partial class App : Component, IDisposable
 
     private void OnBranchSelected(string hash)
     {
-        OnCommitSelected(hash, scrollToCommit: true);
+        SelectCommitByHash(hash, scrollToCommit: true);
     }
 
     private void OnBranchChanged(string branchName)
@@ -309,11 +324,13 @@ public partial class App : Component, IDisposable
         var commit = _repo.GetCommit(stash.Ref);
         if (commit == null) return;
 
-        ShowWorkingCopy = false;
-        _sidebar.WorkingCopyActive = false;
-        _sidebar.Refresh();
-        _commitDetail.PreferredFilePath = null;
-        _commitDetail.Commit = commit;
+        ReactiveRuntime.Batch(() =>
+        {
+            ShowWorkingCopy = false;
+            _sidebar.WorkingCopyActive = false;
+            _commitDetail.PreferredFilePath = null;
+            _commitDetail.Commit = commit;
+        });
     }
 
     private void OnCommitted()
