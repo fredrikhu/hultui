@@ -1007,6 +1007,12 @@ public class GitRepository
 
     public List<GitSubmodule> GetSubmodules()
     {
+        // `git submodule status` shells out to a slow helper (~400ms on Windows)
+        // even when there are no submodules. Skip it entirely unless a
+        // .gitmodules file exists — a cheap filesystem check.
+        if (!File.Exists(System.IO.Path.Combine(Path, ".gitmodules")))
+            return [];
+
         var result = GitProcess.Run(Path, "submodule", "status");
         if (!result.Success) return [];
 

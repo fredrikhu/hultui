@@ -42,6 +42,14 @@ public partial class App : Component, IDisposable
     // State
     [Reactive] public partial bool ShowWorkingCopy { get; set; }
 
+    // Branch name + ahead/behind for the title bar come from `git for-each-ref`,
+    // loaded off the UI thread so it doesn't hitch every rebuild (including view
+    // toggles). Cached by _refreshGen, which RefreshAll bumps on repo changes.
+    private readonly AsyncLoader<HeaderInfo> _headerData = new(new HeaderInfo("HEAD", 0, 0));
+    private int _refreshGen;
+
+    private readonly record struct HeaderInfo(string Branch, int Ahead, int Behind);
+
     private string? _statusMessage;
     private bool _statusIsError;
     private CancellationTokenSource? _messageCts;
@@ -129,13 +137,14 @@ public partial class App : Component, IDisposable
 
     public override Element Build()
     {
-        var currentBranch = _repo.GetCurrentBranch();
-        var branches = _repo.GetBranches();
-        var currentBranchInfo = branches.FirstOrDefault(b => b.IsCurrent || b.Name == currentBranch);
+        _headerData.Load(_refreshGen, LoadHeaderInfo);
+        var header = _headerData.Value;
+        var currentBranch = header.Branch;
+
         var showWc = ShowWorkingCopy;
-        var merging = _repo.IsMerging();
-        var rebasing = _repo.IsRebasing();
-        var bisecting = _repo.IsBisecting();
+        var merging = _repo.IsMerging();      // cheap: checks .git/MERGE_HEAD
+        var rebasing = _repo.IsRebasing();    // cheap: checks .git/rebase-* dirs
+        var bisecting = _repo.IsBisecting();  // cheap: checks .git/BISECT_START
 
         // Update bisect label for context menu in commit list
         _commitList.BisectLabel = _bisectBadHash != null
@@ -151,8 +160,8 @@ public partial class App : Component, IDisposable
             TitleBar.Build(
                 _window,
                 currentBranch,
-                currentBranchInfo?.AheadCount ?? 0,
-                currentBranchInfo?.BehindCount ?? 0,
+                header.Ahead,
+                header.Behind,
                 onFetch: DoFetch,
                 onPull: DoPull,
                 onPush: DoPush,
@@ -273,10 +282,12 @@ public partial class App : Component, IDisposable
 
     private void OnWorkingCopySelected()
     {
+        // Pure view switch: no git data changed. The WorkingCopyActive setter
+        // does a UI-only sidebar rebuild, and the staging area loads its own
+        // data (cached) when Build mounts it. Forcing Refresh() here would
+        // re-query git on every toggle.
         ShowWorkingCopy = !ShowWorkingCopy;
         _sidebar.WorkingCopyActive = !_sidebar.WorkingCopyActive;
-        _sidebar.Refresh();
-        _stagingArea.Refresh();
     }
 
     private void OnBranchSelected(string hash)
@@ -944,10 +955,20 @@ public partial class App : Component, IDisposable
 
     private void RefreshAll()
     {
+        _refreshGen++;
         _sidebar.Refresh();
         _commitList.Refresh();
         _stagingArea.Refresh();
         MarkDirty();
+    }
+
+    // Runs on a thread-pool thread — no UI/reactive access.
+    private HeaderInfo LoadHeaderInfo()
+    {
+        var currentBranch = _repo.GetCurrentBranch();
+        var branches = _repo.GetBranches();
+        var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == currentBranch);
+        return new HeaderInfo(currentBranch, info?.AheadCount ?? 0, info?.BehindCount ?? 0);
     }
 
     public void Dispose()

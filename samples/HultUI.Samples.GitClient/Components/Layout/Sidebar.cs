@@ -23,12 +23,42 @@ public partial class Sidebar : Component
     private string? _selectedBranchFullName;
     private readonly Ref<TextInputElement> _branchInputRef = new();
 
+    // Branch/tag/stash/status data is loaded off the UI thread — see
+    // LoadSidebarData. Keyed by _refreshGen, bumped by Refresh() when repo
+    // state changes, so UI-only rebuilds (highlight, input toggles) are cache
+    // hits and don't re-query git.
+    private readonly AsyncLoader<SidebarData> _data = new(SidebarData.Empty);
+    private int _refreshGen;
+
+    private sealed record SidebarData(
+        List<GitBranch> Branches,
+        List<string> Tags,
+        List<GitStash> Stashes,
+        string CurrentBranch,
+        List<GitSubmodule> Submodules,
+        int StatusCount)
+    {
+        public static readonly SidebarData Empty = new([], [], [], "HEAD", [], 0);
+    }
+
     public Action<string>? OnBranchSelected { get; set; }
     public Action<string>? OnBranchChanged { get; set; }
     public Action<GitStash>? OnStashSelected { get; set; }
     public Action? OnWorkingCopySelected { get; set; }
     public Action<string>? CopyToClipboard { get; set; }
-    public bool WorkingCopyActive { get; set; }
+
+    private bool _workingCopyActive;
+    public bool WorkingCopyActive
+    {
+        get => _workingCopyActive;
+        set
+        {
+            if (_workingCopyActive == value) return;
+            _workingCopyActive = value;
+            // Highlight change only — re-render from cached data, no git reload.
+            MarkDirty();
+        }
+    }
 
     /// <summary>
     /// Fired after any sidebar action that mutates the repo (stash apply,
@@ -66,13 +96,17 @@ public partial class Sidebar : Component
 
     public override Element Build()
     {
-        BuildTree();
-        var status = _repo.GetStatus();
+        // Branches/tags/stashes/status are loaded off the UI thread; Build
+        // renders from the cached snapshot.
+        _data.Load(_refreshGen, LoadSidebarData);
+        var data = _data.Value;
+
+        BuildTree(data);
 
         var children = new List<Element>
         {
             // Working copy entry
-            BuildWorkingCopyRow(status.Count),
+            BuildWorkingCopyRow(data.StatusCount),
 
             // Separator
             Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0),
@@ -103,7 +137,28 @@ public partial class Sidebar : Component
             .Children(children.ToArray());
     }
 
-    public void Refresh() => MarkDirty();
+    /// <summary>
+    /// Signals that repo state changed (branch/tag/stash mutation, external
+    /// edit), reloading sidebar data off the UI thread. For pure UI re-renders
+    /// use <c>MarkDirty()</c> so git isn't re-queried.
+    /// </summary>
+    public void Refresh()
+    {
+        _refreshGen++;
+        MarkDirty();
+    }
+
+    // Runs on a thread-pool thread — no UI/reactive access.
+    private SidebarData LoadSidebarData()
+    {
+        var branches = _repo.GetBranches();
+        var tags = _repo.GetTags();
+        var stashes = _repo.GetStashes();
+        var currentBranch = _repo.GetCurrentBranch();
+        var submodules = _repo.GetSubmodules();
+        var statusCount = _repo.GetStatus().Count;
+        return new SidebarData(branches, tags, stashes, currentBranch, submodules, statusCount);
+    }
 
     private Element BuildNewBranchInput()
     {
@@ -160,7 +215,8 @@ public partial class Sidebar : Component
         _newBranchName = "";
         _isCreatingBranch = true;
         _pendingFocus = true;
-        Refresh();
+        // Showing the inline input is UI-only — no git reload.
+        MarkDirty();
     }
 
     protected override void OnAfterBuild()
@@ -189,7 +245,8 @@ public partial class Sidebar : Component
     {
         _isCreatingBranch = false;
         _newBranchName = "";
-        Refresh();
+        // Hiding the inline input is UI-only — no git reload.
+        MarkDirty();
     }
 
     private void DeleteBranch(string name)
@@ -210,12 +267,12 @@ public partial class Sidebar : Component
         });
     }
 
-    private void BuildTree()
+    private void BuildTree(SidebarData data)
     {
-        var branches = _repo.GetBranches();
-        var tags = _repo.GetTags();
-        var stashes = _repo.GetStashes();
-        var currentBranch = _repo.GetCurrentBranch();
+        var branches = data.Branches;
+        var tags = data.Tags;
+        var stashes = data.Stashes;
+        var currentBranch = data.CurrentBranch;
         EnsureSelectedBranch(branches, currentBranch);
 
         var roots = new ReactiveList<TreeNode>();
@@ -287,7 +344,7 @@ public partial class Sidebar : Component
         }
 
         // Submodules
-        var submodules = _repo.GetSubmodules();
+        var submodules = data.Submodules;
         if (submodules.Count > 0)
         {
             var submoduleNode = new TreeNode

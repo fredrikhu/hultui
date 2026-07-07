@@ -28,6 +28,13 @@ public partial class CommitDetail : Component
     private List<GitFileChange> _loadedFiles = [];
     private List<GitFileDiff> _loadedDiffs = [];
 
+    // The file list + full diff are loaded off the UI thread (git diff-tree can
+    // be slow for large commits). Keyed by commit hash, so re-selecting a commit
+    // is a cache hit. Applied via ApplyCommitData when the load lands.
+    private readonly AsyncLoader<CommitData> _loader = new(new CommitData([], []));
+
+    private sealed record CommitData(List<GitFileChange> Files, List<GitFileDiff> Diffs);
+
     // Blame mode — when non-null, the right pane shows the blame for this file
     // at the current commit instead of the diff.
     private string? _blameFilePath;
@@ -73,29 +80,13 @@ public partial class CommitDetail : Component
                 );
         }
 
-        if (commit.Hash != _loadedCommitHash)
-        {
-            _loadedFiles = _repo.GetCommitFiles(commit.Hash);
-            _loadedDiffs = _repo.GetCommitDiff(commit.Hash);
-            _loadedCommitHash = commit.Hash;
-            _blameFilePath = null;
+        // Load this commit's files + diff off the UI thread; cached per hash.
+        // IsLoading is read below so Build re-runs when the load completes.
+        _loader.Load(commit.Hash,
+            () => new CommitData(_repo.GetCommitFiles(commit.Hash), _repo.GetCommitDiff(commit.Hash)),
+            data => ApplyCommitData(commit.Hash, data));
 
-            _fileTree.Files = _loadedFiles;
-
-            if (_loadedFiles.Count > 0)
-            {
-                var initialFile = (PreferredFilePath != null
-                    ? _loadedFiles.FirstOrDefault(f => f.Path == PreferredFilePath)
-                    : null) ?? _loadedFiles[0];
-                _fileTree.SelectedFile = initialFile;
-                _diffViewer.Diffs = DiffsForFile(initialFile);
-            }
-            else
-            {
-                _fileTree.SelectedFile = null;
-                _diffViewer.Diffs = [];
-            }
-        }
+        bool ready = !_loader.IsLoading && _loadedCommitHash == commit.Hash;
 
         // Commit info header
         var header = Flex.Column(gap: 4)
@@ -117,19 +108,59 @@ public partial class CommitDetail : Component
                     Text.New(commit.AuthorDate.ToString("yyyy-MM-dd HH:mm")).FontSize(12f)
                         .TextColor(GitClientColors.TextMuted),
                     Text.New("\u2022").FontSize(8f).TextColor(GitClientColors.TextMuted),
-                    Text.New($"{_loadedFiles.Count} file{(_loadedFiles.Count == 1 ? "" : "s")} changed").FontSize(12f)
+                    Text.New(ready
+                            ? $"{_loadedFiles.Count} file{(_loadedFiles.Count == 1 ? "" : "s")} changed"
+                            : "loading\u2026").FontSize(12f)
                         .TextColor(GitClientColors.TextMuted)
                 )
             );
 
-        var rightPane = _blameFilePath != null
-            ? (Element)_blameViewer.Mount()
-            : _diffViewer.Mount();
+        Element body;
+        if (ready)
+        {
+            var rightPane = _blameFilePath != null
+                ? (Element)_blameViewer.Mount()
+                : _diffViewer.Mount();
+            body = _splitPane.Build(_fileTree.Mount(), rightPane);
+        }
+        else
+        {
+            body = Box.New().FlexGrow(1)
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Background(GitClientColors.Background)
+                .Children(
+                    Text.New("Loading changes\u2026").FontSize(13f).TextColor(GitClientColors.TextMuted)
+                );
+        }
 
-        return Flex.Column(gap: 0).FlexGrow(1).Children(
-            header,
-            _splitPane.Build(_fileTree.Mount(), rightPane)
-        );
+        return Flex.Column(gap: 0).FlexGrow(1).Children(header, body);
+    }
+
+    // Runs on the UI thread once the background load lands. Mirrors the old
+    // synchronous load block: swaps in the new commit's files/diffs and picks
+    // an initial file selection.
+    private void ApplyCommitData(string hash, CommitData data)
+    {
+        _loadedFiles = data.Files;
+        _loadedDiffs = data.Diffs;
+        _loadedCommitHash = hash;
+        _blameFilePath = null;
+
+        _fileTree.Files = _loadedFiles;
+
+        if (_loadedFiles.Count > 0)
+        {
+            var initialFile = (PreferredFilePath != null
+                ? _loadedFiles.FirstOrDefault(f => f.Path == PreferredFilePath)
+                : null) ?? _loadedFiles[0];
+            _fileTree.SelectedFile = initialFile;
+            _diffViewer.Diffs = DiffsForFile(initialFile);
+        }
+        else
+        {
+            _fileTree.SelectedFile = null;
+            _diffViewer.Diffs = [];
+        }
     }
 
     private void OnFileSelected(GitFileChange file)

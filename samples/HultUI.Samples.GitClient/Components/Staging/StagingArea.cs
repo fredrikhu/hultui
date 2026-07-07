@@ -23,6 +23,22 @@ public partial class StagingArea : Component
     private string _commitMessage = "";
     private bool _amend;
 
+    // Working-copy file data (status + staged/unstaged partition) is loaded off
+    // the UI thread — see LoadWorkingCopy. _refreshGen is the loader key: it's
+    // bumped by Refresh() whenever the repo state changes (stage, commit,
+    // external edit), so re-showing the view without changes is a cache hit.
+    private readonly AsyncLoader<WorkingCopy> _data = new(WorkingCopy.Empty);
+    private int _refreshGen;
+
+    private sealed record WorkingCopy(
+        List<GitFileChange> Conflicted,
+        List<GitFileChange> Unstaged,
+        List<GitFileChange> Staged,
+        bool Merging)
+    {
+        public static readonly WorkingCopy Empty = new([], [], [], false);
+    }
+
     // Currently-highlighted file row. Path + section together because the same
     // path can appear under both Unstaged and Staged when partially staged.
     private string? _selectedPath;
@@ -47,7 +63,9 @@ public partial class StagingArea : Component
     private void ToggleExpanded(string section, string fullPath)
     {
         _expanded[$"{section}:{fullPath}"] = !IsExpanded(section, fullPath);
-        Refresh();
+        // Folder expand/collapse is a pure UI change — re-render without
+        // re-querying git (MarkDirty, not Refresh).
+        MarkDirty();
     }
 
     public Action? OnCommitted { get; set; }
@@ -72,6 +90,51 @@ public partial class StagingArea : Component
     }
 
     public override Element Build()
+    {
+        // Kick off (or reuse) the off-thread load of status + staged/unstaged
+        // partition. Build stays cheap — it renders whatever is currently
+        // loaded; when a fresh load lands it triggers another rebuild.
+        _data.Load(_refreshGen, LoadWorkingCopy, ReconcileSelection);
+        var data = _data.Value;
+
+        var conflicted = data.Conflicted;
+        var unstaged = data.Unstaged;
+        var staged = data.Staged;
+        var merging = data.Merging;
+
+        var children = new List<Element>();
+
+        // Conflicts section (shown when there are unresolved conflicts)
+        if (conflicted.Count > 0)
+        {
+            children.Add(BuildConflictSection(conflicted));
+            children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
+        }
+
+        children.Add(BuildFileSection("Unstaged Changes", unstaged, isStaged: false));
+        children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
+        children.Add(BuildFileSection("Staged Changes", staged, isStaged: true));
+        children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
+        children.Add(BuildCommitArea(staged.Count, unstaged.Count + staged.Count, conflicted.Count, merging));
+
+        return Flex.Column(gap: 0).FlexGrow(1).Children(children.ToArray());
+    }
+
+    /// <summary>
+    /// Signals that the repo state changed (stage/unstage/commit/external edit),
+    /// so the working-copy file data is reloaded off the UI thread. For pure UI
+    /// re-renders (selection, folder expand) use <c>MarkDirty()</c> instead so
+    /// git isn't re-queried.
+    /// </summary>
+    public void Refresh()
+    {
+        _refreshGen++;
+        MarkDirty();
+    }
+
+    // Runs on a thread-pool thread — must not touch UI or reactive state.
+    // Mirrors the old synchronous Build() logic, just relocated off-thread.
+    private WorkingCopy LoadWorkingCopy()
     {
         var statusFiles = _repo.GetStatus();
         var merging = _repo.IsMerging();
@@ -114,44 +177,28 @@ public partial class StagingArea : Component
             staged = nonConflict.Where(f => stagedPaths.Contains(f.Path) && !conflictPaths.Contains(f.Path)).ToList();
         }
 
-        // Drop the highlight if the previously-selected file is no longer present
-        if (_selectedPath != null)
-        {
-            bool stillPresent;
-            if (_selectedIsConflict)
-                stillPresent = conflicted.Any(f => f.Path == _selectedPath);
-            else if (_selectedIsStaged)
-                stillPresent = staged.Any(f => f.Path == _selectedPath);
-            else
-                stillPresent = unstaged.Any(f => f.Path == _selectedPath);
-
-            if (!stillPresent)
-            {
-                _selectedPath = null;
-                _selectedKind = null;
-                _diffViewer.Diffs = [];
-            }
-        }
-
-        var children = new List<Element>();
-
-        // Conflicts section (shown when there are unresolved conflicts)
-        if (conflicted.Count > 0)
-        {
-            children.Add(BuildConflictSection(conflicted));
-            children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
-        }
-
-        children.Add(BuildFileSection("Unstaged Changes", unstaged, isStaged: false));
-        children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
-        children.Add(BuildFileSection("Staged Changes", staged, isStaged: true));
-        children.Add(Box.New().Height(1).Background(GitClientColors.Border).FlexShrink(0));
-        children.Add(BuildCommitArea(staged.Count, unstaged.Count + staged.Count, conflicted.Count, merging));
-
-        return Flex.Column(gap: 0).FlexGrow(1).Children(children.ToArray());
+        return new WorkingCopy(conflicted, unstaged, staged, merging);
     }
 
-    public void Refresh() => MarkDirty();
+    // Runs on the UI thread once fresh data lands — drop a selection that no
+    // longer exists so the diff pane doesn't keep showing a stale file.
+    private void ReconcileSelection(WorkingCopy data)
+    {
+        if (_selectedPath == null) return;
+
+        bool stillPresent = _selectedIsConflict
+            ? data.Conflicted.Any(f => f.Path == _selectedPath)
+            : _selectedIsStaged
+                ? data.Staged.Any(f => f.Path == _selectedPath)
+                : data.Unstaged.Any(f => f.Path == _selectedPath);
+
+        if (!stillPresent)
+        {
+            _selectedPath = null;
+            _selectedKind = null;
+            _diffViewer.Diffs = [];
+        }
+    }
 
     public bool TryOpenExternalDiff(ExternalToolOptions options, out string error)
     {
@@ -299,7 +346,8 @@ public partial class StagingArea : Component
             _selectedIsStaged = false;
             _selectedIsConflict = true;
             RefreshConflictDiff(file.Path);
-            Refresh();
+            // Selection highlight is a UI-only change — don't re-query git.
+            MarkDirty();
         });
 
         return row;
@@ -492,7 +540,8 @@ public partial class StagingArea : Component
             _selectedIsStaged = isStaged;
             _selectedIsConflict = false;
             RefreshDiffViewer();
-            Refresh();
+            // Selection highlight is a UI-only change — don't re-query git.
+            MarkDirty();
         });
 
         return row;
