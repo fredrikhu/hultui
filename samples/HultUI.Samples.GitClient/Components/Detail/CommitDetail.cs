@@ -115,8 +115,14 @@ public partial class CommitDetail : Component
                 )
             );
 
+        // Keep the currently-loaded files/diff on screen while the next commit
+        // loads in the background. ApplyCommitData swaps the content in one
+        // atomic batch, so the panel updates in a single frame instead of
+        // blanking to a placeholder (and back) on every commit switch. The
+        // placeholder only shows on the very first load, when there's no prior
+        // content to hold stable.
         Element body;
-        if (ready)
+        if (_loadedCommitHash != null)
         {
             var rightPane = _blameFilePath != null
                 ? (Element)_blameViewer.Mount()
