@@ -122,6 +122,38 @@ ReactiveRuntime.Batch(() =>
 
 Without the batch, the effect would fire after `firstName` is set (printing "Bob Smith") and again after `lastName` is set (printing "Bob Jones"). With the batch, only the final result triggers the effect.
 
+### Automatic batching of event handlers
+
+You rarely need to call `Batch` by hand: **the framework wraps every event dispatch in a batch automatically.** A handler that updates several signals — even across different components — coalesces into a single rebuild that flushes when the event finishes.
+
+```csharp
+box.On<ClickEvent>(_ =>
+{
+    _selectedId.Value = id;      // no manual Batch needed —
+    _showDetail.Value = true;    // these three writes coalesce into
+    _detail.Item = item;         // one rebuild at the end of dispatch
+});
+```
+
+This is safe because event handlers already read cached layout from the previous frame (layout runs once per frame, after the whole event burst), and the batch always flushes before the next frame. The one thing it changes: a handler no longer sees its *own* rebuild partway through — if you write a signal and then need the resulting element to exist (to focus or measure it), the rebuild hasn't happened yet.
+
+For that, prefer the existing pattern of deferring to `OnAfterBuild` (see the Component Model section). When you genuinely need the rebuild mid-handler, escape hatches are available:
+
+| API | Effect |
+|---|---|
+| `ReactiveRuntime.FlushNow()` | Runs pending effects immediately, even inside the batch. Write your signals, call it, then read the rebuilt element. |
+| `using (ReactiveRuntime.SuspendBatching())` | Within the scope, writes flush immediately (pre-auto-batch behaviour). |
+| `ReactiveRuntime.AutoBatch = false` | Global off switch — restores immediate per-write flushing everywhere. A last resort. |
+
+```csharp
+input.On<KeyDownEvent>(_ =>
+{
+    _showRename.Value = true;      // triggers a rebuild that creates the field
+    ReactiveRuntime.FlushNow();    // apply it now
+    _renameRef.Current?.Focus();   // the field exists — focus it
+});
+```
+
 ---
 
 ## Component Model

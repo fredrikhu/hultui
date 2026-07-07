@@ -265,24 +265,21 @@ public partial class App : Component, IDisposable
 
     private void OnCommitSelected(GitCommit commit, bool scrollToCommit)
     {
-        // Coalesce the reactive writes so the commit list, detail pane, and
-        // working-copy highlight rebuild in a single pass instead of one flush
-        // per assignment.
-        ReactiveRuntime.Batch(() =>
-        {
-            // Selecting a commit doesn't change branches/tags/stashes — clearing
-            // the working-copy highlight (via the setter) is the only sidebar
-            // effect, so don't Refresh() it (that would reload sidebar git).
-            ShowWorkingCopy = false;
-            _sidebar.WorkingCopyActive = false;
-            _commitList.SelectedCommitHash = commit.Hash;
-            if (scrollToCommit)
-                _commitList.ScrollTo(commit.Hash);
+        // These reactive writes coalesce into a single rebuild automatically —
+        // this runs inside the event dispatch, which batches (ReactiveRuntime.AutoBatch).
+        //
+        // Selecting a commit doesn't change branches/tags/stashes — clearing the
+        // working-copy highlight (via the setter) is the only sidebar effect, so
+        // don't Refresh() it (that would reload sidebar git).
+        ShowWorkingCopy = false;
+        _sidebar.WorkingCopyActive = false;
+        _commitList.SelectedCommitHash = commit.Hash;
+        if (scrollToCommit)
+            _commitList.ScrollTo(commit.Hash);
 
-            // Bias the file pre-selection to the file whose history we're viewing, if any.
-            _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
-            _commitDetail.Commit = commit;
-        });
+        // Bias the file pre-selection to the file whose history we're viewing, if any.
+        _commitDetail.PreferredFilePath = _commitList.FollowedFilePath;
+        _commitDetail.Commit = commit;
     }
 
     // Hash-based entry point (branch selection, blame/parent-hash navigation)
@@ -324,13 +321,11 @@ public partial class App : Component, IDisposable
         var commit = _repo.GetCommit(stash.Ref);
         if (commit == null) return;
 
-        ReactiveRuntime.Batch(() =>
-        {
-            ShowWorkingCopy = false;
-            _sidebar.WorkingCopyActive = false;
-            _commitDetail.PreferredFilePath = null;
-            _commitDetail.Commit = commit;
-        });
+        // Coalesced automatically by the event-dispatch batch (see OnCommitSelected).
+        ShowWorkingCopy = false;
+        _sidebar.WorkingCopyActive = false;
+        _commitDetail.PreferredFilePath = null;
+        _commitDetail.Commit = commit;
     }
 
     private void OnCommitted()
