@@ -314,6 +314,77 @@ Direct mutation and reactive components can coexist in the same application. Use
 
 ---
 
+## Keeping `Build()` Cheap: Off-Thread Data with `AsyncLoader`
+
+`Build()` runs inside an Effect and re-runs on **every** change to a signal it reads — a selection, a hover, a resize, a parent rebuild. It must therefore be **pure and fast**: assemble an element tree from already-available state and return.
+
+**Never do blocking work in `Build()`** — file or network I/O, spawning a subprocess, or heavy computation. `Build()` runs on the UI thread, so anything slow there freezes the whole app: no frames render until it returns.
+
+### The symptom
+
+If the UI hitches when you open or switch to a view, the cause is almost always a synchronous call in some component's `Build()`. It does **not** show up as a slow *frame* in a trace — frames stay fast — it shows up as a **gap between frames** where the UI thread is blocked and nothing renders. (A frame profiler that only times the render phase will look perfectly healthy while the app freezes.)
+
+### The fix: `AsyncLoader<T>`
+
+`AsyncLoader<T>` (namespace `HultUI`) runs the slow work on a thread-pool thread and exposes the result reactively, so `Build()` renders from a cached snapshot and updates when the data lands.
+
+```csharp
+partial class UserPanel : Component
+{
+    private readonly AsyncLoader<UserProfile?> _profile = new(null);
+
+    [Reactive] public partial int UserId { get; set; }
+
+    public override Element Build()
+    {
+        // Off-thread load, keyed by UserId. Same id = cache hit; a new id
+        // supersedes an in-flight older load. Build stays cheap.
+        _profile.Load(UserId, () => _api.FetchProfile(UserId));
+
+        if (_profile.IsLoading && _profile.Value is null)
+            return Spinner();
+
+        return ProfileCard(_profile.Value);
+    }
+}
+```
+
+- `Load(key, produce)` runs `produce` on a background thread when `key` changes, then applies the result on the UI thread (via `Application.InvokeOnMainThread`), triggering one rebuild.
+- `Value` / `IsLoading` are reactive reads — reading them in `Build()` makes it re-run when the load completes.
+- `produce` runs off the UI thread and **must not touch elements or reactive state**. Do that in the optional `onLoaded` callback, which runs on the UI thread once the result is applied (inside a batch, before the rebuild) — use it to reconcile dependent state, e.g. dropping a selection that no longer exists in the freshly loaded data.
+
+### `Refresh()` (reload) vs `MarkDirty()` (re-render)
+
+The loader **key** decides whether the expensive work re-runs. Choose it so that **UI-only rebuilds are cache hits**:
+
+- For a view showing a specific entity, key on the entity's id — re-selecting it is a cache hit.
+- For a view with no natural key, use a monotonic **refresh generation** counter. Bump it only when the underlying data actually changed; leave plain re-renders alone.
+
+```csharp
+private readonly AsyncLoader<IReadOnlyList<Row>> _rows = new([]);
+private int _gen;
+
+public override Element Build()
+{
+    _rows.Load(_gen, LoadRows);          // cache hit unless _gen changed
+    return Table(_rows.Value, _selectedRow);
+}
+
+// Underlying data changed (saved, deleted, external edit) → reload.
+public void Refresh() { _gen++; MarkDirty(); }
+
+// UI-only change (selection, expand/collapse) → re-render from cache, no reload.
+private void OnRowClicked(Row r) { _selectedRow = r; MarkDirty(); }
+```
+
+The discipline in one line: **`Refresh()` bumps the generation (data changed → reload); `MarkDirty()` re-renders from cached data (UI-only).** Wiring a selection or expand-toggle to a data-reloading `Refresh()` re-runs the load on every click — a common and easy-to-miss source of latency.
+
+### Stable content across reloads
+
+Because `Build()` renders from the cached `Value`, you can keep the previous result on screen while the next one loads instead of blanking to a spinner — gate the placeholder on "have we ever loaded anything" rather than "is a load in flight." Since the result is applied in a single batch, the view swaps from old to new in one frame with no empty state in between.
+
+---
+
 ## Key Imports
 
 | Namespace | What it provides |
@@ -321,3 +392,4 @@ Direct mutation and reactive components can coexist in the same application. Use
 | `HultUI.Core.Reactivity` | `Signal<T>`, `Computed<T>`, `Effect`, `ReactiveRuntime`, `[Reactive]` |
 | `HultUI.Core.Components` | `Component`, `ComponentHost` |
 | `HultUI.Core.Builders` | `Flex`, `Box`, `Text`, and other element builders |
+| `HultUI` | `Application`, `Window`, `AsyncLoader<T>` |
