@@ -14,13 +14,23 @@ public sealed unsafe class EventTranslator
     public delegate void InputEventHandler(InputEvent evt);
     public event InputEventHandler? OnInputEvent;
 
+    /// <summary>
+    /// Factor applied to incoming SDL window-coordinate positions to convert
+    /// them into the layout units the element tree lives in. Kept current by
+    /// <see cref="SDL3Window.UpdateSize"/>; defaults to 1 until the first sync.
+    /// Scroll wheel deltas are left untouched — they are scroll amounts, not
+    /// positions.
+    /// </summary>
+    internal float InputScale { get; set; } = 1f;
+
     internal void ProcessEvent(SDL_Event* evt)
     {
+        float s = InputScale;
         switch (evt->type)
         {
             case (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN:
                 OnInputEvent?.Invoke(new InputEvent.MouseButtonInput(
-                    evt->button.x, evt->button.y,
+                    evt->button.x * s, evt->button.y * s,
                     MapMouseButton(evt->button.button),
                     IsDown: true,
                     TranslateKeyMod(SDL_GetModState())));
@@ -28,7 +38,7 @@ public sealed unsafe class EventTranslator
 
             case (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP:
                 OnInputEvent?.Invoke(new InputEvent.MouseButtonInput(
-                    evt->button.x, evt->button.y,
+                    evt->button.x * s, evt->button.y * s,
                     MapMouseButton(evt->button.button),
                     IsDown: false,
                     TranslateKeyMod(SDL_GetModState())));
@@ -36,14 +46,14 @@ public sealed unsafe class EventTranslator
 
             case (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION:
                 OnInputEvent?.Invoke(new InputEvent.MouseMoveInput(
-                    evt->motion.x, evt->motion.y,
-                    evt->motion.xrel, evt->motion.yrel,
+                    evt->motion.x * s, evt->motion.y * s,
+                    evt->motion.xrel * s, evt->motion.yrel * s,
                     TranslateKeyMod(SDL_GetModState())));
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL:
                 OnInputEvent?.Invoke(new InputEvent.MouseWheelInput(
-                    evt->wheel.mouse_x, evt->wheel.mouse_y,
+                    evt->wheel.mouse_x * s, evt->wheel.mouse_y * s,
                     evt->wheel.x, evt->wheel.y,
                     TranslateKeyMod(SDL_GetModState())));
                 break;
@@ -84,7 +94,7 @@ public sealed unsafe class EventTranslator
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_DROP_POSITION:
-                OnInputEvent?.Invoke(new InputEvent.DropPositionInput(evt->drop.x, evt->drop.y));
+                OnInputEvent?.Invoke(new InputEvent.DropPositionInput(evt->drop.x * s, evt->drop.y * s));
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_DROP_FILE:

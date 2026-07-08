@@ -238,7 +238,7 @@ public sealed class Window : IOverlayHost, IDisposable
         using (_tracer.Begin("Phase", "Layout"))
         {
             if (_root.DirtyFlags.HasFlag(DirtyFlags.Layout))
-                _layoutEngine.PerformLayout(_root, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+                _layoutEngine.PerformLayout(_root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
         }
         _perf.EndLayout();
 
@@ -259,7 +259,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
         // Render (user content only — DevTools excluded from timing)
         var ctx = PlatformWindow.Surface.RenderContext;
-        ctx.BeginFrame(PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, PlatformWindow.ScaleFactor, theme.Background);
+        ctx.BeginFrame(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, PlatformWindow.DisplayScale, theme.Background);
         _perf.BeginRender();
         using (_tracer.Begin("Phase", "Render"))
         {
@@ -276,7 +276,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
         // DevTools overlay (second pass, not timed)
         _perf.ElementCount = PerformanceCounters.CountElements(_root);
-        _devTools.Render(ctx, _root, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight);
+        _devTools.Render(ctx, _root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
 
         ctx.EndFrame();
 
@@ -683,7 +683,7 @@ public sealed class Window : IOverlayHost, IDisposable
             if (!_dragVisualLayoutDone)
             {
                 StyleResolver.Resolve(_dragVisual, Application.Theme);
-                _layoutEngine.PerformLayout(_dragVisual, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, forceRootFill: false);
+                _layoutEngine.PerformLayout(_dragVisual, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
                 _dragVisualLayoutDone = true;
             }
 
@@ -881,12 +881,12 @@ public sealed class Window : IOverlayHost, IDisposable
         StyleResolver.Resolve(content, theme);
         entry.StyleResolved = true;
 
-        _layoutEngine.PerformLayout(content, PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, forceRootFill: false);
+        _layoutEngine.PerformLayout(content, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
         entry.LayoutDone = true;
 
         // Clamp to viewport so the overlay stays on screen
-        float vw = PlatformWindow.LogicalWidth;
-        float vh = PlatformWindow.LogicalHeight;
+        float vw = PlatformWindow.LayoutWidth;
+        float vh = PlatformWindow.LayoutHeight;
         if (entry.X + content.Layout.Width > vw)
             entry.X = Math.Max(0, vw - content.Layout.Width);
         if (entry.Y + content.Layout.Height > vh)
@@ -940,7 +940,7 @@ public sealed class Window : IOverlayHost, IDisposable
             if (!overlay.LayoutDone || content.DirtyFlags.HasFlag(DirtyFlags.Layout))
             {
                 _layoutEngine.PerformLayout(content,
-                    PlatformWindow.LogicalWidth, PlatformWindow.LogicalHeight, forceRootFill: false);
+                    PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, forceRootFill: false);
                 overlay.LayoutDone = true;
             }
 
@@ -1108,8 +1108,10 @@ public sealed class Window : IOverlayHost, IDisposable
 
     private int HandleWindowHitTest(int x, int y)
     {
-        int w = PlatformWindow.LogicalWidth;
-        int h = PlatformWindow.LogicalHeight;
+        // x, y arrive already converted to layout units (see SDL3Window's hit
+        // test callback), so compare against the layout viewport, not pixels.
+        int w = (int)PlatformWindow.LayoutWidth;
+        int h = (int)PlatformWindow.LayoutHeight;
         int border = ResizeBorderWidth;
 
         // Don't show resize handles when maximized

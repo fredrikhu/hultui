@@ -32,11 +32,41 @@ public sealed unsafe class SDL3Window : IDisposable
     internal Action? LiveResizeFrame { get; set; }
 
     public SDL_WindowID WindowId { get; private set; }
+
+    /// <summary>Framebuffer width in physical pixels.</summary>
     public int PixelWidth { get; private set; }
+
+    /// <summary>Framebuffer height in physical pixels.</summary>
     public int PixelHeight { get; private set; }
-    public int LogicalWidth { get; private set; }
-    public int LogicalHeight { get; private set; }
-    public float ScaleFactor { get; private set; } = 1f;
+
+    /// <summary>
+    /// OS-recommended content scale (1.0, 1.5, 2.0…). Drives how large the UI
+    /// appears and how many physical pixels each density-independent unit maps
+    /// to. This — not pixel density — is what makes the UI track the monitor's
+    /// scaling setting; on Windows pixel density stays 1.0 at every scale.
+    /// </summary>
+    public float DisplayScale { get; private set; } = 1f;
+
+    /// <summary>
+    /// Physical pixels per SDL window coordinate (pixel_size / window_size).
+    /// Only used to translate incoming SDL input coordinates into layout units.
+    /// On Windows this is 1.0; on macOS Retina it is the backing-store scale.
+    /// </summary>
+    public float PixelDensity { get; private set; } = 1f;
+
+    /// <summary>Layout viewport width in density-independent units (<see cref="PixelWidth"/> / <see cref="DisplayScale"/>).</summary>
+    public float LayoutWidth => PixelWidth / DisplayScale;
+
+    /// <summary>Layout viewport height in density-independent units (<see cref="PixelHeight"/> / <see cref="DisplayScale"/>).</summary>
+    public float LayoutHeight => PixelHeight / DisplayScale;
+
+    /// <summary>
+    /// Factor converting SDL window-coordinate input into layout units
+    /// (<see cref="PixelDensity"/> / <see cref="DisplayScale"/>). SDL delivers
+    /// pointer positions in window coordinates; layout, hit-testing and events
+    /// all run in layout units.
+    /// </summary>
+    public float InputScale => PixelDensity / DisplayScale;
 
     public IRenderSurface Surface => _surface ?? throw new InvalidOperationException("Window not initialized");
     public bool IsOpen { get; private set; }
@@ -119,6 +149,21 @@ public sealed unsafe class SDL3Window : IDisposable
         // before the first frame on high-DPI displays.
         SDL_SyncWindow(_window);
         UpdateSize();
+
+        // The requested size is in density-independent units, but SDL created
+        // the window in window coordinates (which equal pixels on Windows). On
+        // a scaled display the two differ, so resize once to give the app the
+        // content area it asked for: e.g. an 800-DIP window becomes 1200 px at
+        // 150%. InputScale ≈ 1 (100% displays, macOS Retina) is a no-op.
+        if (Math.Abs(InputScale - 1f) > 0.001f)
+        {
+            SDL_SetWindowSize(_window,
+                (int)MathF.Round(width / InputScale),
+                (int)MathF.Round(height / InputScale));
+            SDL_SyncWindow(_window);
+            UpdateSize();
+        }
+
         IsOpen = true;
     }
 
@@ -249,7 +294,11 @@ public sealed unsafe class SDL3Window : IDisposable
         if (!handle.IsAllocated || handle.Target is not SDL3Window self)
             return SDL_HitTestResult.SDL_HITTEST_NORMAL;
         if (self.HitTestHandler is { } handler)
-            return (SDL_HitTestResult)handler(area->x, area->y);
+        {
+            // area is in SDL window coordinates; the handler works in layout units.
+            float s = self.InputScale;
+            return (SDL_HitTestResult)handler((int)(area->x * s), (int)(area->y * s));
+        }
         return SDL_HitTestResult.SDL_HITTEST_NORMAL;
     }
 
@@ -302,12 +351,14 @@ public sealed unsafe class SDL3Window : IDisposable
 
     public void SetTextInputArea(Rect caretRect, int cursorOffset)
     {
+        // caretRect is in layout units; SDL wants window coordinates.
+        float toWindow = 1f / InputScale;
         var rect = new SDL_Rect
         {
-            x = (int)caretRect.X,
-            y = (int)caretRect.Y,
-            w = Math.Max(1, (int)caretRect.Width),
-            h = Math.Max(1, (int)caretRect.Height)
+            x = (int)(caretRect.X * toWindow),
+            y = (int)(caretRect.Y * toWindow),
+            w = Math.Max(1, (int)(caretRect.Width * toWindow)),
+            h = Math.Max(1, (int)(caretRect.Height * toWindow))
         };
         SDL_SetTextInputArea(_window, &rect, cursorOffset);
     }
@@ -337,25 +388,58 @@ public sealed unsafe class SDL3Window : IDisposable
     /// </summary>
     internal bool UpdateSize()
     {
-        int pw, ph, lw, lh;
+        int pw, ph;
         SDL_GetWindowSizeInPixels(_window, &pw, &ph);
-        SDL_GetWindowSize(_window, &lw, &lh);
-        // Pixel density (pixel_size / logical_size) — NOT DisplayScale, which
-        // on Windows also multiplies in the OS DPI preference and would paint
-        // content larger than the framebuffer.
-        float scale = SDL_GetWindowPixelDensity(_window);
 
-        if (pw == PixelWidth && ph == PixelHeight && lw == LogicalWidth && lh == LogicalHeight
-            && scale == ScaleFactor)
+        // Pixel density (pixel_size / window_size) only tells us how many
+        // physical pixels back a window coordinate — on Windows it is 1.0 at
+        // every scale. DisplayScale carries the OS DPI preference (1.5 at
+        // 150%, etc.); laying out in DIP units and scaling the canvas by it is
+        // what makes the UI grow with the monitor's scaling setting instead of
+        // rendering 1:1 in raw pixels.
+        float density = SDL_GetWindowPixelDensity(_window);
+        float displayScale = SDL_GetWindowDisplayScale(_window);
+        if (density <= 0f) density = 1f;
+        if (displayScale <= 0f) displayScale = 1f;
+
+        if (pw == PixelWidth && ph == PixelHeight
+            && density == PixelDensity && displayScale == DisplayScale)
             return false;
+
+        // The window moved to a monitor with a different scaling setting, but
+        // its physical pixel size stayed the same — so the DIP viewport (and
+        // thus the amount of visible content) would jump. Resize to keep the
+        // DIP size constant, the standard DPI-change behavior. We only correct
+        // this when the pixel size was left untouched; if the platform already
+        // resized the window for the new scale, the DIP size is preserved and
+        // there's nothing to do. Skipped while maximized (the OS owns the size)
+        // and on the first sync (PixelWidth == 0, handled by the constructor).
+        bool scaleOnlyChange = pw == PixelWidth && ph == PixelHeight
+            && displayScale != DisplayScale && PixelWidth > 0 && !IsMaximized;
+        float prevLayoutW = LayoutWidth;
+        float prevLayoutH = LayoutHeight;
 
         PixelWidth = pw;
         PixelHeight = ph;
-        LogicalWidth = lw;
-        LogicalHeight = lh;
-        ScaleFactor = scale;
+        PixelDensity = density;
+        DisplayScale = displayScale;
+        EventTranslator.InputScale = InputScale;
 
-        _surface?.Resize(pw, ph, ScaleFactor);
+        if (scaleOnlyChange)
+        {
+            // Resize to preserve the DIP viewport. SDL_SetWindowSize takes
+            // window coordinates (pixels / density); the resulting resize event
+            // re-enters with the new pixel size (scale now unchanged, so no
+            // further resize). Re-query so the surface below matches this pass.
+            SDL_SetWindowSize(_window,
+                (int)MathF.Round(prevLayoutW / InputScale),
+                (int)MathF.Round(prevLayoutH / InputScale));
+            SDL_GetWindowSizeInPixels(_window, &pw, &ph);
+            PixelWidth = pw;
+            PixelHeight = ph;
+        }
+
+        _surface?.Resize(pw, ph, displayScale);
         return true;
     }
 
