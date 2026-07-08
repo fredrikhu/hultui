@@ -146,8 +146,8 @@ public sealed class DevToolsOverlay
 
     private void RenderPerformanceHud(IRenderContext ctx, float viewportWidth)
     {
-        float hudW = 200;
-        float hudH = 96;
+        float hudW = 260;
+        float hudH = 110;
         float hudX = viewportWidth - hudW - 8;
         float hudY = 8;
 
@@ -158,16 +158,19 @@ public sealed class DevToolsOverlay
         float x = hudX + 8;
         float y = hudY + 6;
 
-        ctx.DrawText($"FPS: {_perf.Fps:F0}  ({_perf.AverageFrameTimeMs:F1} ms avg)", new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
-        y += lineH;
-        ctx.DrawText($"Style: {_perf.StyleTimeMs:F2} ms", new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
-        y += lineH;
-        ctx.DrawText($"Layout: {_perf.LayoutTimeMs:F2} ms", new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
-        y += lineH;
-        ctx.DrawText($"Render: {_perf.RenderTimeMs:F2} ms", new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
-        y += lineH;
-        ctx.DrawText($"Present: {_perf.PresentTimeMs:F2} ms", new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
-        y += lineH;
-        ctx.DrawText($"Elements: {_perf.ElementCount}", new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
+        int peakSeconds = (int)PerformanceCounters.PeakWindow.TotalSeconds;
+        void Line(string text)
+        {
+            ctx.DrawText(text, new Rect(x, y, hudW - 16, lineH), style, TextOverflow.Clip, 1);
+            y += lineH;
+        }
+
+        Line($"FPS: {_perf.Fps:F0}  ({_perf.AverageFrameTimeMs:F1} ms avg, {_perf.FrameTimePeakMs:F1} max)");
+        Line($"(peak = slowest pass in last {peakSeconds}s)");
+        Line($"Style:   {_perf.StyleTimeMs,6:F2} ms  (peak {_perf.StyleTimePeakMs:F2})");
+        Line($"Layout:  {_perf.LayoutTimeMs,6:F2} ms  (peak {_perf.LayoutTimePeakMs:F2})");
+        Line($"Render:  {_perf.RenderTimeMs,6:F2} ms  (peak {_perf.RenderTimePeakMs:F2})");
+        Line($"Present: {_perf.PresentTimeMs,6:F2} ms  (peak {_perf.PresentTimePeakMs:F2})");
+        Line($"Elements: {_perf.ElementCount}");
     }
 }
