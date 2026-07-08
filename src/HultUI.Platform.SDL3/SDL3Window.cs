@@ -78,9 +78,32 @@ public sealed unsafe class SDL3Window : IDisposable
     /// <summary>
     /// Delegate called by the SDL hit test callback. Receives logical (x, y) and
     /// returns an SDL_HitTestResult value as int.
-    /// Set by Window.cs for borderless windows.
+    /// Set by Window.cs for borderless windows (non-Windows path).
     /// </summary>
     public Func<int, int, int>? HitTestHandler { get; set; }
+
+    private WindowsCustomFrame? _customFrame;
+
+    /// <summary>
+    /// True when this window uses the native Windows custom frame (borderless on
+    /// Windows) rather than SDL's borderless + hit-test path. In that mode Windows
+    /// drives resize/move through <see cref="IsWindowDragPoint"/> and
+    /// <see cref="ResizableEdges"/> instead of <see cref="HitTestHandler"/>.
+    /// </summary>
+    public bool UsesWindowsNativeFrame => _customFrame is not null;
+
+    /// <summary>Which edges the native frame allows resizing from. Set by Window.cs.</summary>
+    internal ResizeEdges ResizableEdges { get; set; } = ResizeEdges.All;
+
+    /// <summary>Resize-border grab thickness in density-independent units. Set by Window.cs.</summary>
+    internal int ResizeBorderDip { get; set; } = 8;
+
+    /// <summary>
+    /// Returns true when the given layout-unit point is a window drag region
+    /// (and not over an interactive element). Used by the native frame's
+    /// <c>WM_NCHITTEST</c> to report the caption area. Set by Window.cs.
+    /// </summary>
+    internal Func<int, int, bool>? IsWindowDragPoint { get; set; }
 
     public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
     {
@@ -102,7 +125,12 @@ public sealed unsafe class SDL3Window : IDisposable
             | SDL_WindowFlags.SDL_WINDOW_RESIZABLE
             | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
-        if (style == WindowStyle.Borderless)
+        // On Windows a borderless window keeps its native frame and hides the
+        // title bar via a WndProc subclass (see WindowsCustomFrame) so it still
+        // gets the DWM shadow, accent border and Aero Snap. Everywhere else the
+        // SDL borderless flag + hit-test path is used.
+        bool useWindowsNativeFrame = style == WindowStyle.Borderless && OperatingSystem.IsWindows();
+        if (style == WindowStyle.Borderless && !useWindowsNativeFrame)
             flags |= SDL_WindowFlags.SDL_WINDOW_BORDERLESS;
 
         var titleBytes = MarshalUtf8(title);
@@ -140,10 +168,16 @@ public sealed unsafe class SDL3Window : IDisposable
         _gcHandle = GCHandle.Alloc(this);
         SDL_AddEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
 
-        // For borderless windows, register the hit test callback so SDL knows
-        // which regions are draggable (title bar) and resizable (edges).
-        if (style == WindowStyle.Borderless)
+        // For SDL-borderless windows, register the hit test callback so SDL
+        // knows which regions are draggable (title bar) and resizable (edges).
+        // The Windows native frame drives this through WM_NCHITTEST instead.
+        if (style == WindowStyle.Borderless && !useWindowsNativeFrame)
             SDL_SetWindowHitTest(_window, &HitTestNativeCallback, GCHandle.ToIntPtr(_gcHandle));
+
+        // The redundant IsWindows() check (implied by useWindowsNativeFrame)
+        // satisfies the platform-compatibility analyzer at the call site.
+        if (useWindowsNativeFrame && OperatingSystem.IsWindows())
+            _customFrame = WindowsCustomFrame.Install(this, GetWin32Hwnd());
 
         // Give the platform backend a chance to settle the real pixel size
         // before the first frame on high-DPI displays.
@@ -532,6 +566,11 @@ public sealed unsafe class SDL3Window : IDisposable
         _disposed = true;
 
         _registry.Remove(WindowId);
+
+        // Restore SDL's window procedure before the window is destroyed.
+        if (OperatingSystem.IsWindows())
+            _customFrame?.Dispose();
+        _customFrame = null;
 
         SDL_RemoveEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
 

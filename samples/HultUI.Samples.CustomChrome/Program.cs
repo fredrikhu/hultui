@@ -93,13 +93,15 @@ partial class CustomChromeDemo : Component
 
                 Text.New("This window has no OS title bar. The title bar above is built "
                     + "entirely with HultUI elements. You can drag the window by the title bar, "
-                    + "resize from any edge or corner, and use the window control buttons.")
+                    + "resize from any edge or corner, and use the window control buttons. "
+                    + "On Windows it keeps the native shadow, rounded corners and snap layouts.")
                     .FontSize(13f).TextColor(new Color(160, 160, 180)),
 
                 Section("Features",
                     Flex.Column(gap: 8).Children(
                         FeatureItem("Window dragging from custom title bar"),
-                        FeatureItem("Edge and corner resize (6px invisible border)"),
+                        FeatureItem("Edge and corner resize from all four sides"),
+                        FeatureItem("Native DWM shadow, rounded corners and Aero Snap on Windows"),
                         FeatureItem("Minimize, maximize/restore, and close buttons"),
                         FeatureItem("Buttons inside drag region are still clickable")
                     )

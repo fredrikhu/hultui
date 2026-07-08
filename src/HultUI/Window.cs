@@ -80,8 +80,27 @@ public sealed class Window : IOverlayHost, IDisposable
     public void Restore() => PlatformWindow.Restore();
     public void ToggleMaximize() { if (IsMaximized) Restore(); else Maximize(); }
 
-    /// <summary>Width in pixels of the invisible resize border for borderless windows.</summary>
-    public int ResizeBorderWidth { get; set; } = 6;
+    /// <summary>Thickness (in density-independent units) of the invisible resize border for borderless windows.</summary>
+    public int ResizeBorderWidth
+    {
+        get => _resizeBorderWidth;
+        set { _resizeBorderWidth = value; PlatformWindow.ResizeBorderDip = value; }
+    }
+    private int _resizeBorderWidth = 6;
+
+    /// <summary>
+    /// Which edges a borderless window can be resized from. Corners are enabled
+    /// whenever both adjacent edges are. Defaults to all four edges; set it to
+    /// <see cref="ResizeEdges.SidesAndBottom"/> to drop top-edge resize when a
+    /// custom title bar sits flush against the top. On Windows this drives the
+    /// native frame's resize hit-testing; elsewhere the SDL hit-test path.
+    /// </summary>
+    public ResizeEdges ResizableEdges
+    {
+        get => _resizableEdges;
+        set { _resizableEdges = value; PlatformWindow.ResizableEdges = value; }
+    }
+    private ResizeEdges _resizableEdges = ResizeEdges.All;
 
     public Theme? ActiveTheme => Application.Theme;
 
@@ -99,7 +118,17 @@ public sealed class Window : IOverlayHost, IDisposable
         PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
 
         if (platformWindow.Style == WindowStyle.Borderless)
-            platformWindow.HitTestHandler = HandleWindowHitTest;
+        {
+            platformWindow.ResizeBorderDip = _resizeBorderWidth;
+            platformWindow.ResizableEdges = _resizableEdges;
+
+            if (platformWindow.UsesWindowsNativeFrame)
+                // Native Windows frame: Windows resizes/moves the window itself
+                // via WM_NCHITTEST; it only needs to know the drag regions.
+                platformWindow.IsWindowDragPoint = IsWindowDragRegion;
+            else
+                platformWindow.HitTestHandler = HandleWindowHitTest;
+        }
 
         _focusManager.FocusChanged += OnFocusChanged;
 
@@ -1117,10 +1146,11 @@ public sealed class Window : IOverlayHost, IDisposable
         // Don't show resize handles when maximized
         if (!IsMaximized)
         {
-            bool left = x < border;
-            bool right = x >= w - border;
-            bool top = y < border;
-            bool bottom = y >= h - border;
+            var edges = _resizableEdges;
+            bool left = (edges & ResizeEdges.Left) != 0 && x < border;
+            bool right = (edges & ResizeEdges.Right) != 0 && x >= w - border;
+            bool top = (edges & ResizeEdges.Top) != 0 && y < border;
+            bool bottom = (edges & ResizeEdges.Bottom) != 0 && y >= h - border;
 
             if (top && left) return 2;     // SDL_HITTEST_RESIZE_TOPLEFT
             if (top && right) return 4;    // SDL_HITTEST_RESIZE_TOPRIGHT
@@ -1132,17 +1162,21 @@ public sealed class Window : IOverlayHost, IDisposable
             if (right) return 5;           // SDL_HITTEST_RESIZE_RIGHT
         }
 
-        // Check element tree for drag regions.
-        // If the hit element itself has event handlers (e.g. a button inside the title bar),
-        // return NORMAL so the click reaches our event system instead of starting a window drag.
-        if (_root is not null)
-        {
-            var hit = HitTester.HitTest(_root, new Point(x, y));
-            if (hit is not null && !hit.HasAnyEventHandlers && HasWindowDragAncestor(hit))
-                return 1; // SDL_HITTEST_DRAGGABLE
-        }
+        return IsWindowDragRegion(x, y) ? 1 /* DRAGGABLE */ : 0 /* NORMAL */;
+    }
 
-        return 0; // SDL_HITTEST_NORMAL
+    /// <summary>
+    /// True when the given layout-unit point falls in a window drag region and
+    /// not over an interactive element. Used by both the SDL hit-test path and
+    /// the Windows native frame to decide the caption/drag area. If the hit
+    /// element itself has event handlers (e.g. a button in the title bar), the
+    /// click belongs to it, not to window dragging.
+    /// </summary>
+    private bool IsWindowDragRegion(int x, int y)
+    {
+        if (_root is null) return false;
+        var hit = HitTester.HitTest(_root, new Point(x, y));
+        return hit is not null && !hit.HasAnyEventHandlers && HasWindowDragAncestor(hit);
     }
 
     private static bool HasWindowDragAncestor(Element element)
