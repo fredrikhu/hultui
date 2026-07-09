@@ -89,6 +89,14 @@ internal static unsafe class NativeProvider
     private const int TearoffSize = 16; // { vtbl(8), back(8) }
 
     private static readonly Guid IID_IUnknown = new("00000000-0000-0000-C000-000000000046");
+    // Marker interface. Claiming it tells COM/UIA the object is free-threaded, so
+    // it is marshalled with the lightweight free-threaded marshaler instead of a
+    // per-object standard proxy/stub — an order of magnitude faster to navigate.
+    private static readonly Guid IID_IAgileObject = new("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90");
+    // IServiceProvider: UIA QIs every provider for this (to reach the MSAA
+    // bridge / extra services). Implementing it — even to say "no service" —
+    // lets UIA cache the answer instead of re-asking cross-process constantly.
+    private static readonly Guid IID_IServiceProvider = new("6d5140c1-7436-11ce-8034-00aa006009fa");
     private static readonly Guid IID_Simple = new("d6dd68d1-86fd-4332-8666-9abedea2d24c");
     private static readonly Guid IID_Fragment = new("f7063da8-8359-439c-9297-bbc5299a7d87");
     private static readonly Guid IID_FragmentRoot = new("620ce2a5-ab8f-40a9-86cb-de3c75599b58");
@@ -105,9 +113,13 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtToggle;
     private static readonly IntPtr VtValue;
     private static readonly IntPtr VtSelectionItem;
+    private static readonly IntPtr VtServiceProvider;
 
     static NativeProvider()
     {
+        VtServiceProvider = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, Guid*, Guid*, IntPtr*, int>)&SP_QueryService);
+
         VtSimple = BuildVtable(
             (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Simple_GetProviderOptions,
             (IntPtr)(delegate* unmanaged<IntPtr, int, IntPtr*, int>)&Simple_GetPatternProvider,
@@ -191,6 +203,9 @@ internal static unsafe class NativeProvider
         if (logic is INativeValue) { vt[n] = VtValue; iids[n] = IID_Value; n++; }
         if (logic is INativeSelectionItem) { vt[n] = VtSelectionItem; iids[n] = IID_SelectionItem; n++; }
         if (n == 0) return IntPtr.Zero;
+        // Every provider also exposes IServiceProvider (see IID note) so UIA
+        // caches the "no extra service" answer instead of re-QIing constantly.
+        vt[n] = VtServiceProvider; iids[n] = IID_IServiceProvider; n++;
 
         nuint size = (nuint)(TearoffsStart + n * TearoffSize + n * sizeof(Guid));
         byte* obj = (byte*)NativeMemory.AllocZeroed(size, 1);
@@ -255,7 +270,13 @@ internal static unsafe class NativeProvider
         {
             byte* b = Base(pThis);
             Guid want = *riid;
-            if (want == IID_IUnknown) { *ppv = (IntPtr)(b + TearoffsStart); AddRefBase(b); return 0; }
+            // IUnknown and IAgileObject both resolve to the primary tear-off:
+            // IAgileObject is a marker (IUnknown-shaped), and claiming it makes
+            // UIA marshal us as free-threaded (much cheaper to navigate).
+            if (want == IID_IUnknown || want == IID_IAgileObject)
+            {
+                *ppv = (IntPtr)(b + TearoffsStart); AddRefBase(b); return 0;
+            }
 
             int count = *(int*)(b + HdrCount);
             Guid* iidBase = (Guid*)(b + TearoffsStart + count * TearoffSize);
@@ -314,6 +335,13 @@ internal static unsafe class NativeProvider
     // ── IRawElementProviderFragmentRoot ──
     [UnmanagedCallersOnly] private static int Root_ElementProviderFromPoint(IntPtr t, double x, double y, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).ElementProviderFromPoint(x, y, out *p); } catch { *p = IntPtr.Zero; return 0; } }
     [UnmanagedCallersOnly] private static int Root_GetFocus(IntPtr t, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).GetFocus(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+
+    // ── IServiceProvider ──
+    [UnmanagedCallersOnly] private static int SP_QueryService(IntPtr t, Guid* service, Guid* riid, IntPtr* ppv)
+    {
+        if (ppv != null) *ppv = IntPtr.Zero;
+        return unchecked((int)0x80004002); // E_NOINTERFACE — we expose no extra services
+    }
 
     // ── pattern providers ──
     [UnmanagedCallersOnly] private static int Invoke_Invoke(IntPtr t) { try { return ((INativeInvoke)Target(t)!).Invoke(); } catch { return 0; } }

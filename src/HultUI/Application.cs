@@ -171,11 +171,31 @@ public sealed class Application : IDisposable
             }
 
             if (!anyRendered && !AnimationManager.HasActiveAnimations)
-                Thread.Sleep(16);
+                IdleWait(16);
 
             // Clean up closed windows
             CleanupClosedWindows();
         }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint MsgWaitForMultipleObjectsEx(uint nCount, IntPtr pHandles, uint dwMilliseconds, uint dwWakeMask, uint dwFlags);
+
+    /// <summary>
+    /// Idle-frame wait. A plain <see cref="Thread.Sleep(int)"/> does not process
+    /// Win32 <em>sent</em> messages, so a UIA query that reaches the window as a
+    /// sent message (e.g. via the accessibility host provider / MSAA bridge) would
+    /// stall for the whole interval — making assistive technologies very slow to
+    /// walk the tree. On Windows, wait in a message-aware way so an incoming
+    /// message wakes us immediately while a truly idle app still parks the CPU.
+    /// </summary>
+    private static void IdleWait(int milliseconds)
+    {
+        if (OperatingSystem.IsWindows())
+            MsgWaitForMultipleObjectsEx(0, IntPtr.Zero, (uint)milliseconds,
+                0x04FF /* QS_ALLINPUT */, 0x0004 /* MWMO_INPUTAVAILABLE */);
+        else
+            Thread.Sleep(milliseconds);
     }
 
     private void OnWindowCloseRequested(SDL3Window platformWindow)
