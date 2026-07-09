@@ -312,6 +312,84 @@ public class AccessibilityTreeBuilderTests
         Assert.Empty(btn.Children);
     }
 
+    private static AccessibilityNode? FindByName(AccessibilityNode node, string name)
+    {
+        if (node.Name == name) return node;
+        foreach (var child in node.Children)
+            if (FindByName(child, name) is { } found) return found;
+        return null;
+    }
+
+    [Fact]
+    public void Build_ScrollOffset_ShiftsDescendantBoundsButNotScrollView()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 200;
+        root.Box.Height = 400;
+
+        var scroll = ScrollViewElement.New();
+        scroll.AccessibleName = "viewport";
+        scroll.Box.Width = 200;
+        scroll.Box.Height = 100;
+
+        var child = BoxElement.New();
+        child.AccessibleName = "row";
+        child.Box.Width = 200;
+        child.Box.Height = 500; // taller than the viewport, so it can scroll
+        scroll.AddChild(child);
+        root.AddChild(scroll);
+
+        Layout(root, 200, 400);
+        scroll.UpdateContentSize();
+
+        var before = AccessibilityTreeBuilder.Build(root);
+        var childBefore = FindByName(before, "row")!.BoundingRect;
+        var viewportBefore = FindByName(before, "viewport")!.BoundingRect;
+
+        scroll.ScrollOffsetY = 50;
+        Assert.Equal(50, scroll.ScrollOffsetY); // sanity: the offset actually took
+
+        var after = AccessibilityTreeBuilder.Build(root);
+        var childAfter = FindByName(after, "row")!.BoundingRect;
+        var viewportAfter = FindByName(after, "viewport")!.BoundingRect;
+
+        // The scrolled content moves up by the offset; the viewport stays put.
+        Assert.Equal(childBefore.Y - 50, childAfter.Y, 3);
+        Assert.Equal(childBefore.X, childAfter.X, 3);
+        Assert.Equal(viewportBefore.Y, viewportAfter.Y, 3);
+    }
+
+    [Fact]
+    public void ScrollOffsetChange_NotifiesBoundingRect()
+    {
+        var scroll = ScrollViewElement.New();
+        scroll.Box.Width = 200;
+        scroll.Box.Height = 100;
+        var child = BoxElement.New();
+        child.Box.Width = 200;
+        child.Box.Height = 500;
+        scroll.AddChild(child);
+        Layout(scroll, 200, 100);
+        scroll.UpdateContentSize();
+
+        var observer = new RecordingObserver();
+        scroll.AccessibilityObserver = observer;
+
+        scroll.ScrollOffsetY = 40;
+
+        Assert.Contains(observer.Changes,
+            c => c.Property == AccessibilityProperties.BoundingRect);
+    }
+
+    private sealed class RecordingObserver : IElementPropertyObserver
+    {
+        public List<(Element Element, string Property)> Changes { get; } = [];
+
+        public void OnElementPropertyChanged(Element element, string propertyName)
+            => Changes.Add((element, propertyName));
+    }
+
     [Fact]
     public void Build_SetsCorrectBoundingRects()
     {

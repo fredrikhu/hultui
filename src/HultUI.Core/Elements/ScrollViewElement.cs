@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -15,13 +16,27 @@ public partial class ScrollViewElement : BoxElement
     public float ScrollOffsetX
     {
         get => _scrollOffsetX;
-        set => _scrollOffsetX = ClampX(value);
+        set
+        {
+            float clamped = ClampX(value);
+            if (clamped == _scrollOffsetX) return;
+            _scrollOffsetX = clamped;
+            // Children's on-screen positions shifted, so every descendant node's
+            // accessibility bounds changed — refresh the a11y tree.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+        }
     }
 
     public float ScrollOffsetY
     {
         get => _scrollOffsetY;
-        set => _scrollOffsetY = ClampY(value);
+        set
+        {
+            float clamped = ClampY(value);
+            if (clamped == _scrollOffsetY) return;
+            _scrollOffsetY = clamped;
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
+        }
     }
 
     public float ContentWidth => _contentWidth;

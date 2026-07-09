@@ -1,6 +1,7 @@
 using System.Text;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Accessibility;
 
@@ -15,19 +16,31 @@ public static class AccessibilityTreeBuilder
     /// </summary>
     public static AccessibilityNode Build(Element root, FocusManager? focusManager = null)
     {
-        var node = CreateNode(root, focusManager);
-        BuildChildren(root, node, focusManager);
+        var node = CreateNode(root, focusManager, 0f, 0f);
+        var (cx, cy) = ChildScroll(root, 0f, 0f);
+        BuildChildren(root, node, focusManager, cx, cy);
         return node;
     }
 
-    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager)
+    // Element AbsoluteBorderBox is laid out ignoring scroll — a ScrollView shifts
+    // its children only at render time. So the on-screen rect of a node is its
+    // box minus the accumulated scroll offset of its ancestor scroll views. We
+    // thread that accumulation down the element tree (which the a11y flattening
+    // walks anyway) and bake scroll-adjusted rects into the nodes, so bounds and
+    // hit-testing match what the user actually sees.
+    private static (float x, float y) ChildScroll(Element element, float accX, float accY)
+        => element is ScrollViewElement sv ? (accX + sv.ScrollOffsetX, accY + sv.ScrollOffsetY) : (accX, accY);
+
+    private static AccessibilityNode CreateNode(Element element, FocusManager? focusManager, float scrollX, float scrollY)
     {
+        var box = element.Layout.AbsoluteBorderBox;
+        var onScreen = new Rect(box.X - scrollX, box.Y - scrollY, box.Width, box.Height);
         return new AccessibilityNode(
             element.Id,
             ResolveRole(element),
             ResolveName(element),
             element.AccessibleDescription,
-            element.Layout.AbsoluteBorderBox,
+            onScreen,
             isFocusable: element.IsFocusable,
             isFocused: focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element),
             isEnabled: true,
@@ -35,25 +48,29 @@ public static class AccessibilityTreeBuilder
             value: ResolveValue(element));
     }
 
-    private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager)
+    private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager,
+        float scrollX, float scrollY)
     {
         foreach (var child in element.Children)
         {
+            // The child's own box sits in the parent's scroll space; its own
+            // scroll (if it's a ScrollView) applies to its descendants.
+            var (cx, cy) = ChildScroll(child, scrollX, scrollY);
             if (IsSemantic(child))
             {
-                var childNode = CreateNode(child, focusManager);
+                var childNode = CreateNode(child, focusManager, scrollX, scrollY);
                 parent.AddChild(childNode);
                 // A text-only button (or other name-from-content role) folds its
                 // text into its own accessible name; don't also expose that text
                 // as child nodes — that matches native controls and stops a
                 // screen reader announcing the label twice.
                 if (!ConsumesTextContent(child))
-                    BuildChildren(child, childNode, focusManager);
+                    BuildChildren(child, childNode, focusManager, cx, cy);
             }
             else
             {
                 // Flatten: promote this element's children directly into parent
-                BuildChildren(child, parent, focusManager);
+                BuildChildren(child, parent, focusManager, cx, cy);
             }
         }
     }
