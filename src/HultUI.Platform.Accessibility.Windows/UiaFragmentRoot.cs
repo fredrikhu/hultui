@@ -5,28 +5,22 @@ using HultUI.Core.Primitives;
 namespace HultUI.Platform.Accessibility.Windows;
 
 /// <summary>
-/// Top-level fragment for a window. A UIA client reaches this through the
-/// <c>WM_GETOBJECT</c> handler in <see cref="WindowsAccessibilityBridge"/>;
-/// from here it can walk the tree, hit-test, and resolve focus.
+/// Provider logic for the window/root. A UIA client reaches this through the
+/// <c>WM_GETOBJECT</c> handler in <see cref="WindowsAccessibilityBridge"/>; from
+/// here it can walk the tree, hit-test, and resolve focus. Exposed to UIA as a
+/// native object implementing IRawElementProviderSimple / Fragment /
+/// FragmentRoot (see <see cref="NativeProvider"/>). Methods that return another
+/// provider hand back a native IUnknown* the caller owns.
 /// </summary>
-/// <remarks>
-/// A fragment root must expose all three provider interfaces: UIA first
-/// <c>QueryInterface</c>s the object returned from <c>WM_GETOBJECT</c> for
-/// <see cref="IRawElementProviderSimple"/>, then walks it as an
-/// <see cref="IRawElementProviderFragment"/>. This object is the window itself;
-/// its single child is the app-root element node.
-/// </remarks>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge) :
-    IRawElementProviderSimple,
-    IRawElementProviderFragment,
-    IRawElementProviderFragmentRoot
+internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge)
+    : INativeSimple, INativeFragment, INativeFragmentRoot
 {
-    // ──── IRawElementProviderSimple
+    // ── IRawElementProviderSimple ──
 
     public int GetProviderOptions(out int pRetVal)
     {
-        pRetVal = UiaInterop.ProviderOptions_ServerSideProvider | UiaInterop.ProviderOptions_UseComThreading;
+        pRetVal = UiaInterop.ProviderOptions_ServerSideProvider;
         return 0;
     }
 
@@ -44,25 +38,25 @@ internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge) :
         return 0;
     }
 
-    public int GetHostRawElementProvider(out IRawElementProviderSimple? pRetVal)
+    public int GetHostRawElementProvider(out IntPtr pRetVal)
     {
-        // The crucial link: this chains the provider tree to the HWND host
-        // provider so UIA connects our fragments to the real window.
-        pRetVal = bridge.HostProvider;
+        // The crucial link: chains our tree to the HWND host provider so UIA
+        // connects the fragments to the real window.
+        pRetVal = bridge.HostProviderRef();
         return 0;
     }
 
-    // ──── IRawElementProviderFragment
+    // ── IRawElementProviderFragment ──
 
-    public int Navigate(int direction, out IRawElementProviderFragment? pRetVal)
+    public int Navigate(int direction, out IntPtr pRetVal)
     {
         // The root's only child is the app-root element node; it has no parent
         // or siblings (the host provider supplies the chain above the window).
         pRetVal = direction switch
         {
             UiaInterop.NavigateDirection_FirstChild or UiaInterop.NavigateDirection_LastChild
-                => bridge.GetFragment(bridge.RootNode?.ElementId),
-            _ => null,
+                => bridge.NativeFragment(bridge.RootNode?.ElementId),
+            _ => IntPtr.Zero,
         };
         return 0;
     }
@@ -77,8 +71,7 @@ internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge) :
 
     public int GetBoundingRectangle(out UiaRect pRetVal)
     {
-        // Empty tells UIA to fall back to the host provider's window rect.
-        pRetVal = default;
+        pRetVal = default; // empty -> UIA falls back to the host provider's window rect
         return 0;
     }
 
@@ -90,40 +83,35 @@ internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge) :
 
     public int SetFocus() => 0;
 
-    public int GetFragmentRoot(out IRawElementProviderFragmentRoot? pRetVal)
+    public int GetFragmentRoot(out IntPtr pRetVal)
     {
-        pRetVal = this;
+        pRetVal = bridge.NativeRootFragmentRoot();
         return 0;
     }
 
-    // ──── IRawElementProviderFragmentRoot
+    // ── IRawElementProviderFragmentRoot ──
 
-    public int ElementProviderFromPoint(double x, double y, out IRawElementProviderFragment? pRetVal)
+    public int ElementProviderFromPoint(double x, double y, out IntPtr pRetVal)
     {
         var root = bridge.RootNode;
-        if (root is null) { pRetVal = null; return 0; }
+        if (root is null) { pRetVal = IntPtr.Zero; return 0; }
 
-        // UIA gives us screen coords; convert back to window-local.
         var local = bridge.FromScreen(new Point((float)x, (float)y));
-
-        // Walk deepest-first: return the innermost node whose bounds contain the point.
         var hit = HitTest(root, local);
-        pRetVal = hit is null ? null : bridge.GetFragment(hit.ElementId);
+        pRetVal = hit is null ? IntPtr.Zero : bridge.NativeFragment(hit.ElementId);
         return 0;
     }
 
-    public int GetFocus(out IRawElementProviderFragment? pRetVal)
+    public int GetFocus(out IntPtr pRetVal)
     {
         var focusedId = bridge.FocusedNodeId;
-        pRetVal = focusedId is null ? null : bridge.GetFragment(focusedId.Value);
+        pRetVal = focusedId is null ? IntPtr.Zero : bridge.NativeFragment(focusedId.Value);
         return 0;
     }
 
     private static AccessibilityNode? HitTest(AccessibilityNode node, Point localPoint)
     {
         if (!node.BoundingRect.Contains(localPoint)) return null;
-
-        // Prefer deepest match: walk children back-to-front (later siblings paint on top).
         for (int i = node.Children.Count - 1; i >= 0; i--)
         {
             var inner = HitTest(node.Children[i], localPoint);

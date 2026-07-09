@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using HultUI.Core.Elements;
 
@@ -7,11 +8,11 @@ namespace HultUI.Platform.Accessibility.Windows;
 /// Pattern providers look up their target element via the bridge each time a
 /// UIA client invokes them, so they don't become stale across tree rebuilds.
 /// The actual element mutation routes through the same event/handler path as
-/// pointer clicks — this keeps behavior identical whether a human or an AT
-/// triggered it.
+/// pointer clicks — behavior is identical whether a human or an AT triggered it.
+/// Exposed to UIA as native objects (see <see cref="NativeProvider"/>).
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaInvokeProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : IInvokeProvider
+internal sealed class UiaInvokeProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeInvoke
 {
     public int Invoke()
     {
@@ -21,7 +22,7 @@ internal sealed class UiaInvokeProvider(WindowsAccessibilityBridge bridge, Eleme
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : IToggleProvider
+internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeToggle
 {
     public int Toggle()
     {
@@ -42,30 +43,30 @@ internal sealed class UiaToggleProvider(WindowsAccessibilityBridge bridge, Eleme
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : IValueProvider
+internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeValue
 {
-    public int SetValue(string val)
+    public int SetValue(IntPtr pwsz)
     {
-        bridge.SetValue(elementId, val);
+        bridge.SetValue(elementId, Marshal.PtrToStringUni(pwsz) ?? "");
         return 0;
     }
 
-    public int GetValue(out string pRetVal)
+    public int GetValue(out IntPtr pRetVal)
     {
-        pRetVal = bridge.GetValue(elementId) ?? "";
+        pRetVal = Marshal.StringToBSTR(bridge.GetValue(elementId) ?? "");
         return 0;
     }
 
-    public int GetIsReadOnly(out bool pRetVal)
+    public int GetIsReadOnly(out int pRetVal)
     {
-        pRetVal = false;
+        pRetVal = 0; // VARIANT_FALSE
         return 0;
     }
 }
 
 [SupportedOSPlatform("windows")]
 internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
-    : ISelectionItemProvider
+    : INativeSelectionItem
 {
     public int Select()
     {
@@ -79,21 +80,17 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
         return 0;
     }
 
-    public int RemoveFromSelection()
+    public int RemoveFromSelection() => 0; // radio buttons can't be unselected this way
+
+    public int GetIsSelected(out int pRetVal)
     {
-        // Radio buttons can't be unselected this way — S_OK, no-op.
+        pRetVal = bridge.GetToggleState(elementId) == true ? -1 : 0; // VARIANT_BOOL
         return 0;
     }
 
-    public int GetIsSelected(out bool pRetVal)
+    public int GetSelectionContainer(out IntPtr pRetVal)
     {
-        pRetVal = bridge.GetToggleState(elementId) == true;
-        return 0;
-    }
-
-    public int GetSelectionContainer(out IRawElementProviderSimple? pRetVal)
-    {
-        pRetVal = null;
+        pRetVal = IntPtr.Zero;
         return 0;
     }
 }

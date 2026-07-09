@@ -15,9 +15,25 @@ internal static partial class UiaInterop
     /// <summary>lParam value on <c>WM_GETOBJECT</c> for UIA root queries.</summary>
     public const int UiaRootObjectId = -25;
 
+    // Returns an LRESULT (pointer-sized); the window procedure must return it
+    // verbatim so UIA connects the provider.
     [LibraryImport("UIAutomationCore.dll")]
-    public static partial int UiaReturnRawElementProvider(
+    public static partial nint UiaReturnRawElementProvider(
         IntPtr hwnd, IntPtr wParam, IntPtr lParam, IntPtr provider);
+
+    // ── Window-procedure subclassing (serve WM_GETOBJECT from the real WndProc,
+    //    not SDL's message-pump hook, which never sees the sent message). ──
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    public static partial IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [LibraryImport("user32.dll", EntryPoint = "CallWindowProcW")]
+    public static partial IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    public static partial IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    public const int GWLP_WNDPROC = -4;
+    public const uint WM_GETOBJECT = 0x003D;
 
     [LibraryImport("UIAutomationCore.dll")]
     public static partial int UiaHostProviderFromHwnd(IntPtr hwnd, out IntPtr provider);

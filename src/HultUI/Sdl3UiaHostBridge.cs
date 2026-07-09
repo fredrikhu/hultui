@@ -1,11 +1,8 @@
 using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Platform.Accessibility.Windows;
-using SDL;
-using static SDL.SDL3;
 
 namespace HultUI;
 
@@ -16,16 +13,14 @@ namespace HultUI;
 /// either snapshot everything (we do, for reads) or marshal writes onto the
 /// UI thread. This adapter uses a <see cref="ConcurrentQueue{T}"/> drained at
 /// the start of each frame, so element mutations happen on the same thread as
-/// the render loop.
+/// the render loop. (<c>WM_GETOBJECT</c> is serviced by the bridge's own
+/// window-procedure subclass, so no SDL message hook is involved.)
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 {
     private readonly Window _window;
     private readonly ConcurrentQueue<Action> _pendingActions = new();
-    private UiaMessageHandler? _handler;
-    private GCHandle _gcHandle;
-    private bool _hookInstalled;
 
     public Sdl3UiaHostBridge(Window window)
     {
@@ -40,48 +35,6 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
             try { action(); }
             catch { /* never let AT clients crash the UI loop */ }
         }
-    }
-
-    public unsafe void InstallMessageHook(UiaMessageHandler handler)
-    {
-        _handler = handler;
-        _gcHandle = GCHandle.Alloc(this);
-        SDL_SetWindowsMessageHook(&MessageHookCallback, GCHandle.ToIntPtr(_gcHandle));
-        _hookInstalled = true;
-    }
-
-    public unsafe void UninstallMessageHook()
-    {
-        if (!_hookInstalled) return;
-        SDL_SetWindowsMessageHook(null, IntPtr.Zero);
-        if (_gcHandle.IsAllocated) _gcHandle.Free();
-        _hookInstalled = false;
-    }
-
-    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static unsafe SDLBool MessageHookCallback(IntPtr userdata, MSG* msg)
-    {
-        // This runs for every Win32 message. An exception escaping an
-        // [UnmanagedCallersOnly] method tears down the runtime, and a stale
-        // GCHandle during teardown would throw — guard both. We always return
-        // true ("continue dispatching") so UIA's WM_GETOBJECT still reaches the
-        // normal window proc regardless of what the handler did.
-        try
-        {
-            if (userdata == IntPtr.Zero) return (SDLBool)true;
-            var handle = GCHandle.FromIntPtr(userdata);
-            if (!handle.IsAllocated || handle.Target is not Sdl3UiaHostBridge self)
-                return (SDLBool)true;
-            if (self._handler is null || msg is null)
-                return (SDLBool)true;
-
-            self._handler(msg->hwnd, msg->message, (IntPtr)msg->wParam, msg->lParam);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[HultUI] UIA message hook failed: {ex}");
-        }
-        return (SDLBool)true;
     }
 
     // ──── Actions — enqueue for UI-thread drain
@@ -147,7 +100,6 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 
     public void Dispose()
     {
-        UninstallMessageHook();
         _pendingActions.Clear();
     }
 }

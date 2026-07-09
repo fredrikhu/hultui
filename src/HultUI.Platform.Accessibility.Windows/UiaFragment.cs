@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
@@ -7,22 +6,19 @@ using HultUI.Core.Primitives;
 namespace HultUI.Platform.Accessibility.Windows;
 
 /// <summary>
-/// UIA wrapper for a single <see cref="AccessibilityNode"/>. Wrappers are
-/// cached in <see cref="WindowsAccessibilityBridge"/> keyed by
-/// <see cref="ElementId"/> so COM identity stays stable across tree rebuilds —
-/// UIA clients compare providers by reference.
+/// Provider logic for a single <see cref="AccessibilityNode"/>. Logic objects
+/// are cached in <see cref="WindowsAccessibilityBridge"/> keyed by
+/// <see cref="ElementId"/>; UIA identity is tracked by the stable runtime id
+/// (see <see cref="GetRuntimeId"/>), so the native COM wrappers can be created
+/// on demand. Exposed to UIA as IRawElementProviderSimple / Fragment.
 /// </summary>
 /// <remarks>
 /// Property values are snapshot-copied here (Name, Role, Value, etc.) rather
-/// than fetched live through the node reference. UIA may call provider methods
-/// from worker threads; snapshots avoid cross-thread element access and also
-/// keep wrappers valid briefly after a node has been removed (UIA sometimes
-/// queries just-removed providers before fully disconnecting).
+/// than read live through the node reference — UIA may call provider methods
+/// from worker threads, so snapshots avoid cross-thread element access.
 /// </remarks>
 [SupportedOSPlatform("windows")]
-internal sealed class UiaFragment :
-    IRawElementProviderSimple,
-    IRawElementProviderFragment
+internal sealed class UiaFragment : INativeSimple, INativeFragment
 {
     private readonly WindowsAccessibilityBridge _bridge;
     public ElementId ElementId { get; }
@@ -65,17 +61,16 @@ internal sealed class UiaFragment :
         _isToggled = node.IsToggled;
     }
 
-    // ──── IRawElementProviderSimple
+    // ── IRawElementProviderSimple ──
 
     public int GetProviderOptions(out int pRetVal)
     {
-        pRetVal = UiaInterop.ProviderOptions_ServerSideProvider | UiaInterop.ProviderOptions_UseComThreading;
+        pRetVal = UiaInterop.ProviderOptions_ServerSideProvider;
         return 0;
     }
 
     public int GetPatternProvider(int patternId, out IntPtr pPatternProvider)
     {
-        pPatternProvider = IntPtr.Zero;
         object? provider = _role switch
         {
             AccessibilityRole.Button when patternId == UiaInterop.UIA_InvokePatternId
@@ -89,10 +84,7 @@ internal sealed class UiaFragment :
             _ => null,
         };
 
-        if (provider is null)
-            return 0; // S_OK + null out-ptr means "pattern not supported"
-
-        pPatternProvider = UiaComWrappers.GetIUnknown(provider);
+        pPatternProvider = provider is null ? IntPtr.Zero : NativeProvider.Create(provider);
         return 0;
     }
 
@@ -114,41 +106,43 @@ internal sealed class UiaFragment :
         return 0;
     }
 
-    public int GetHostRawElementProvider(out IRawElementProviderSimple? pRetVal)
+    public int GetHostRawElementProvider(out IntPtr pRetVal)
     {
-        // Host chaining lives on the fragment root (UiaFragmentRoot). Element
-        // fragments — including the app-root element — must return null, or UIA
-        // double-walks to the HWND host.
-        pRetVal = null;
+        // Host chaining lives on the fragment root only; element fragments must
+        // return null or UIA double-walks to the HWND host.
+        pRetVal = IntPtr.Zero;
         return 0;
     }
 
-    // ──── IRawElementProviderFragment
+    // ── IRawElementProviderFragment ──
 
-    public int Navigate(int direction, out IRawElementProviderFragment? pRetVal)
+    public int Navigate(int direction, out IntPtr pRetVal)
     {
-        // Snapshot Node once: the UI thread may swap it via UpdateFrom while
-        // this runs on a UIA worker thread. Each Node is an immutable per-frame
-        // tree, so its Parent/Children are safe to walk once captured.
+        // Snapshot Node once: the UI thread may swap it via UpdateFrom while this
+        // runs on a UIA worker thread. Each Node is an immutable per-frame tree.
         var node = Node;
-        pRetVal = direction switch
+
+        if (direction == UiaInterop.NavigateDirection_Parent)
         {
-            // The app-root element's parent is the fragment root (the window).
-            UiaInterop.NavigateDirection_Parent => node.Parent is null
-                ? _bridge.FragmentRoot
-                : _bridge.GetFragment(node.Parent.ElementId),
-            UiaInterop.NavigateDirection_FirstChild when node.Children.Count > 0
-                => _bridge.GetFragment(node.Children[0].ElementId),
-            UiaInterop.NavigateDirection_LastChild when node.Children.Count > 0
-                => _bridge.GetFragment(node.Children[^1].ElementId),
+            // Navigate returns IRawElementProviderFragment*: the root's Fragment
+            // tear-off when this is the app-root element.
+            pRetVal = node.Parent is null ? _bridge.NativeRootFragment() : _bridge.NativeFragment(node.Parent.ElementId);
+            return 0;
+        }
+
+        ElementId? target = direction switch
+        {
+            UiaInterop.NavigateDirection_FirstChild when node.Children.Count > 0 => node.Children[0].ElementId,
+            UiaInterop.NavigateDirection_LastChild when node.Children.Count > 0 => node.Children[^1].ElementId,
             UiaInterop.NavigateDirection_NextSibling => Sibling(node, +1),
             UiaInterop.NavigateDirection_PreviousSibling => Sibling(node, -1),
             _ => null,
         };
+        pRetVal = target is null ? IntPtr.Zero : _bridge.NativeFragment(target.Value);
         return 0;
     }
 
-    private IRawElementProviderFragment? Sibling(AccessibilityNode node, int delta)
+    private ElementId? Sibling(AccessibilityNode node, int delta)
     {
         var parent = node.Parent;
         if (parent is null) return null;
@@ -158,7 +152,7 @@ internal sealed class UiaFragment :
             if (siblings[i].ElementId != ElementId) continue;
             int ni = i + delta;
             if (ni < 0 || ni >= siblings.Count) return null;
-            return _bridge.GetFragment(siblings[ni].ElementId);
+            return siblings[ni].ElementId;
         }
         return null;
     }
@@ -166,8 +160,7 @@ internal sealed class UiaFragment :
     public int GetRuntimeId(out IntPtr pRetVal)
     {
         // A stable runtime id (ElementId survives tree rebuilds) lets UIA track
-        // element identity even though our COM wrappers are recreated on each
-        // structural change. UIA takes ownership of the returned SAFEARRAY.
+        // element identity even though the native wrappers are created on demand.
         pRetVal = UiaInterop.BuildRuntimeId(ElementId.Value);
         return 0;
     }
@@ -175,13 +168,7 @@ internal sealed class UiaFragment :
     public int GetBoundingRectangle(out UiaRect pRetVal)
     {
         var screen = _bridge.ToScreen(_bounds);
-        pRetVal = new UiaRect
-        {
-            Left = screen.X,
-            Top = screen.Y,
-            Width = screen.Width,
-            Height = screen.Height,
-        };
+        pRetVal = new UiaRect { Left = screen.X, Top = screen.Y, Width = screen.Width, Height = screen.Height };
         return 0;
     }
 
@@ -197,13 +184,13 @@ internal sealed class UiaFragment :
         return 0;
     }
 
-    public int GetFragmentRoot(out IRawElementProviderFragmentRoot? pRetVal)
+    public int GetFragmentRoot(out IntPtr pRetVal)
     {
-        pRetVal = _bridge.FragmentRoot;
+        pRetVal = _bridge.NativeRootFragmentRoot();
         return 0;
     }
 
-    // ──── Helpers
+    // ── Helpers ──
 
     private static int MapControlType(AccessibilityRole role) => role switch
     {

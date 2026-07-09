@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
@@ -8,22 +9,24 @@ using HultUI.Core.Primitives;
 namespace HultUI.Platform.Accessibility.Windows;
 
 /// <summary>
-/// UIAutomation bridge. Built by
-/// <c>HultUI.AccessibilityBridgeFactory</c> when running on Windows and an
-/// assistive tech is probing. Owns a per-window fragment root and a cache of
-/// per-node <see cref="UiaFragment"/> wrappers keyed by
-/// <see cref="ElementId"/>.
+/// UIAutomation bridge. Built by <c>HultUI.AccessibilityBridgeFactory</c> when
+/// running on Windows. Owns a per-window fragment root and a cache of per-node
+/// <see cref="UiaFragment"/> logic objects keyed by <see cref="ElementId"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Client/host hooks — installing an SDL message hook for <c>WM_GETOBJECT</c>,
-/// routing element mutations back to the UI thread — are provided by the host
-/// via the constructor. The bridge is transport-agnostic so it can later be
-/// shared with a non-SDL host without changes.
+/// Providers are exposed to UIA as hand-built native COM objects (see
+/// <see cref="NativeProvider"/>) rather than <c>ComWrappers</c> CCWs, which
+/// UIAutomationCore access-violates on released .NET 10.
+/// </para>
+/// <para>
+/// <c>WM_GETOBJECT</c> is a <em>sent</em> message, so it is serviced from a
+/// window-procedure subclass installed here — not SDL's message-pump hook,
+/// which only runs for queued messages and so never delivered the provider.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposable
+public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposable
 {
     private readonly IntPtr _hwnd;
     private readonly IUiaHostBridge _host;
@@ -31,12 +34,16 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
     // UIA calls provider methods (Navigate, GetFocus, …) from worker threads
     // while the UI thread mutates this in ApplyChanges — must be concurrent.
     private readonly ConcurrentDictionary<ElementId, UiaFragment> _wrappers = new();
-    private IRawElementProviderSimple? _hostProvider;
+    private IntPtr _hostProviderPtr;
     private AccessibilityNode? _rootNode;
     // ElementId? (nullable ulong) isn't torn-read-safe across threads; store the
     // focused id as a raw long (0 = none) accessed via Volatile.
     private long _focusedIdRaw;
     private bool _disposed;
+
+    // WndProc subclassing state.
+    private IntPtr _originalWndProc;
+    private static readonly ConcurrentDictionary<IntPtr, WindowsAccessibilityBridge> _byHwnd = new();
 
     public WindowsAccessibilityBridge(IntPtr hwnd, IUiaHostBridge host)
     {
@@ -44,29 +51,23 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
         _host = host;
         _fragmentRoot = new UiaFragmentRoot(this);
 
-        UiaInterop.UiaHostProviderFromHwnd(hwnd, out var hostProviderPtr);
-        if (hostProviderPtr != IntPtr.Zero)
-        {
-            _hostProvider = (IRawElementProviderSimple)UiaComWrappers.GetObject(hostProviderPtr);
-            Marshal.Release(hostProviderPtr);
-        }
+        UiaInterop.UiaHostProviderFromHwnd(hwnd, out _hostProviderPtr);
 
-        _host.InstallMessageHook(OnWindowMessage);
+        // Serve WM_GETOBJECT from the real window procedure.
+        _byHwnd[hwnd] = this;
+        delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, IntPtr, IntPtr> proc = &WndProc;
+        _originalWndProc = UiaInterop.SetWindowLongPtr(hwnd, UiaInterop.GWLP_WNDPROC, (IntPtr)proc);
     }
 
     public bool IsActive => UiaInterop.UiaClientsAreListening();
 
-    // Proactively raising UIA events (UiaRaiseStructureChangedEvent, etc.)
-    // fast-fails the process (0xC0000409) on the first call and hasn't been
-    // validated against a real screen reader yet. Keep it opt-in so the app
-    // runs by default; the passive provider tree (served on WM_GETOBJECT) still
-    // lets an assistive tech navigate/read on demand. Set HULTUI_UIA_EVENTS=1
-    // to re-enable while debugging with an AT attached.
+    // Raising UIA events proactively is opt-in: the ComWrappers path used to
+    // fast-fail, and the native-object path here hasn't been validated against a
+    // real screen reader yet. The passive tree (served on WM_GETOBJECT) already
+    // lets an assistive tech navigate/read on demand. HULTUI_UIA_EVENTS=1 to try.
     private static readonly bool RaiseEvents =
         Environment.GetEnvironmentVariable("HULTUI_UIA_EVENTS") == "1";
 
-    internal IRawElementProviderSimple? HostProvider => _hostProvider;
-    internal UiaFragmentRoot FragmentRoot => _fragmentRoot;
     internal AccessibilityNode? RootNode => Volatile.Read(ref _rootNode);
 
     internal ElementId? FocusedNodeId
@@ -78,44 +79,57 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
         }
     }
 
-    internal UiaFragment? GetFragment(ElementId? id)
+    // ── Native-object factory (all return AddRef'd pointers UIA will Release).
+    //    Each call names the interface the COM method returns, so the caller
+    //    gets the matching tear-off (see NativeProvider.As). ──
+
+    /// <summary>The root as IRawElementProviderSimple* (WM_GETOBJECT, events).</summary>
+    internal IntPtr NativeRootSimple() => NativeProvider.Create(_fragmentRoot, NativeProvider.As.Simple);
+
+    /// <summary>The root as IRawElementProviderFragment* (a fragment's parent).</summary>
+    internal IntPtr NativeRootFragment() => NativeProvider.Create(_fragmentRoot, NativeProvider.As.Fragment);
+
+    /// <summary>The root as IRawElementProviderFragmentRoot* (GetFragmentRoot).</summary>
+    internal IntPtr NativeRootFragmentRoot() => NativeProvider.Create(_fragmentRoot, NativeProvider.As.FragmentRoot);
+
+    /// <summary>A cached fragment as IRawElementProviderFragment* (Navigate, hit-test, focus), or null.</summary>
+    internal IntPtr NativeFragment(ElementId? id)
     {
-        if (id is null) return null;
-        return _wrappers.TryGetValue(id.Value, out var f) ? f : null;
+        if (id is null || !_wrappers.TryGetValue(id.Value, out var wrapper)) return IntPtr.Zero;
+        return NativeProvider.Create(wrapper, NativeProvider.As.Fragment);
     }
+
+    /// <summary>A cached fragment as IRawElementProviderSimple* (events), or null.</summary>
+    private IntPtr NativeFragmentSimple(ElementId? id)
+    {
+        if (id is null || !_wrappers.TryGetValue(id.Value, out var wrapper)) return IntPtr.Zero;
+        return NativeProvider.Create(wrapper, NativeProvider.As.Simple);
+    }
+
+    /// <summary>The HWND host provider, AddRef'd (chains our tree to the window's non-client tree).</summary>
+    internal IntPtr HostProviderRef()
+    {
+        if (_hostProviderPtr == IntPtr.Zero) return IntPtr.Zero;
+        Marshal.AddRef(_hostProviderPtr);
+        return _hostProviderPtr;
+    }
+
+    // ── Accessibility tree upkeep ──
 
     public void ApplyChanges(TreeDiff diff)
     {
-        // Track root separately — it's the only fragment with a null parent and
-        // the one that chains to the host provider.
         foreach (var added in diff.Added)
         {
             var wrapper = new UiaFragment(this, added.Node);
             _wrappers[added.Node.ElementId] = wrapper;
             if (added.Parent is null)
                 Volatile.Write(ref _rootNode, added.Node);
-
-            // Raised on the PARENT provider. We use the *bulk* change type
-            // rather than ChildAdded: ChildAdded/ChildRemoved require a
-            // non-null runtime-id array identifying the specific child, and
-            // passing null there makes UIAutomationCore fail-fast (0xC0000409).
-            // The bulk variants signal "this container's children changed"
-            // and accept a null runtime id, which fits our whole-subtree
-            // rebuilds. See RaiseStructureChanged.
             RaiseStructureChanged(added.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkAdded);
         }
 
         foreach (var removed in diff.Removed)
         {
-            // Always drop the wrapper; only tell UIA to disconnect it when
-            // events are enabled (UiaDisconnectProvider is an "active" call in
-            // the same family as the raise APIs — see RaiseEvents).
-            if (_wrappers.TryRemove(removed.Node.ElementId, out var wrapper) && RaiseEvents)
-            {
-                IntPtr punk = UiaComWrappers.GetIUnknown(wrapper);
-                try { UiaInterop.UiaDisconnectProvider(punk); }
-                finally { Marshal.Release(punk); }
-            }
+            _wrappers.TryRemove(removed.Node.ElementId, out _);
             RaiseStructureChanged(removed.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
         }
 
@@ -133,13 +147,11 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
     public void NotifyFocusChanged(AccessibilityNode? focused)
     {
         Volatile.Write(ref _focusedIdRaw, focused is null ? 0L : unchecked((long)focused.ElementId.Value));
-        if (!RaiseEvents) return;
-        if (focused is null) return;
-        if (!_wrappers.TryGetValue(focused.ElementId, out var wrapper)) return;
-
-        IntPtr punk = UiaComWrappers.GetIUnknown(wrapper);
-        try { UiaInterop.UiaRaiseAutomationEvent(punk, UiaInterop.UIA_AutomationFocusChangedEventId); }
-        finally { Marshal.Release(punk); }
+        if (!RaiseEvents || focused is null) return;
+        IntPtr prov = NativeFragmentSimple(focused.ElementId);
+        if (prov == IntPtr.Zero) return;
+        try { UiaInterop.UiaRaiseAutomationEvent(prov, UiaInterop.UIA_AutomationFocusChangedEventId); }
+        finally { Marshal.Release(prov); }
     }
 
     public void NotifyPropertyChanged(AccessibilityNode node, string propertyName)
@@ -152,29 +164,15 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
     private void RaiseStructureChanged(ElementId? parentId, int changeType)
     {
         if (!RaiseEvents) return;
-
-        var provider = parentId is null
-            ? (object)_fragmentRoot
-            : GetFragment(parentId.Value);
-        if (provider is null) return;
-
-        // Passing a null runtime id (IntPtr.Zero, 0) is only valid for the
-        // container-level change types (ChildrenBulkAdded/Removed,
-        // ChildrenInvalidated, ChildrenReordered). ChildAdded/ChildRemoved
-        // require a non-null runtime id for the specific child or UIA
-        // fail-fasts (0xC0000409) — callers must not pass those here.
-        IntPtr punk = UiaComWrappers.GetIUnknown(provider);
-        try { UiaInterop.UiaRaiseStructureChangedEvent(punk, changeType, IntPtr.Zero, 0); }
-        finally { Marshal.Release(punk); }
+        IntPtr prov = parentId is null ? NativeRootSimple() : NativeFragmentSimple(parentId.Value);
+        if (prov == IntPtr.Zero) return;
+        try { UiaInterop.UiaRaiseStructureChangedEvent(prov, changeType, IntPtr.Zero, 0); }
+        finally { Marshal.Release(prov); }
     }
 
-    private static void RaisePropertyChanged(UiaFragment wrapper, string propertyName)
+    private void RaisePropertyChanged(UiaFragment wrapper, string propertyName)
     {
         if (!RaiseEvents) return;
-
-        // Map the neutral property name onto a UIA property ID. Unmapped
-        // properties are silently ignored (fine for this release — we add
-        // them as we wire more).
         int propertyId = propertyName switch
         {
             AccessibilityProperties.Name => UiaInterop.UIA_NamePropertyId,
@@ -188,40 +186,42 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
         };
         if (propertyId == 0) return;
 
-        // UIA wants the new value in the event. Reuse the wrapper's snapshot
-        // via GetPropertyValue; the old value is left VT_EMPTY (we don't track
-        // prior values). The event call copies the VARIANTs, so we own and must
-        // free any BSTR we allocated for the new value.
         wrapper.GetPropertyValue(propertyId, out var newValue);
         var oldValue = UiaVariant.Empty;
+        IntPtr prov = NativeFragmentSimple(wrapper.ElementId);
+        if (prov == IntPtr.Zero) { newValue.Free(); return; }
+        try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(prov, propertyId, oldValue, newValue); }
+        finally { newValue.Free(); Marshal.Release(prov); }
+    }
 
-        IntPtr punk = UiaComWrappers.GetIUnknown(wrapper);
-        try { UiaInterop.UiaRaiseAutomationPropertyChangedEvent(punk, propertyId, oldValue, newValue); }
-        finally
+    // ── Window procedure: serve WM_GETOBJECT with the native root provider ──
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        try
         {
-            newValue.Free();
-            Marshal.Release(punk);
+            if (!_byHwnd.TryGetValue(hwnd, out var self))
+                return UiaInterop.DefWindowProc(hwnd, msg, wParam, lParam);
+
+            if (msg == UiaInterop.WM_GETOBJECT && (int)lParam == UiaInterop.UiaRootObjectId)
+            {
+                IntPtr root = self.NativeRootSimple(); // UiaReturnRawElementProvider wants IRawElementProviderSimple*
+                IntPtr lresult = UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, root);
+                Marshal.Release(root); // UIA took its own reference
+                return lresult;
+            }
+
+            return UiaInterop.CallWindowProc(self._originalWndProc, hwnd, msg, wParam, lParam);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[HultUI] accessibility WndProc failed: {ex}");
+            return UiaInterop.DefWindowProc(hwnd, msg, wParam, lParam);
         }
     }
 
-    /// <summary>
-    /// Invoked by the host's SDL message hook when a <c>WM_GETOBJECT</c>
-    /// arrives on our HWND. Returning true tells the host the message was
-    /// handled.
-    /// </summary>
-    private bool OnWindowMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
-    {
-        if (hwnd != _hwnd) return false;
-        if (message != 0x003D /* WM_GETOBJECT */) return false;
-        if (lParam.ToInt32() != UiaInterop.UiaRootObjectId) return false;
-
-        IntPtr rootPunk = UiaComWrappers.GetIUnknown(_fragmentRoot);
-        try { UiaInterop.UiaReturnRawElementProvider(hwnd, wParam, lParam, rootPunk); }
-        finally { Marshal.Release(rootPunk); }
-        return true;
-    }
-
-    // ──── Coordinate conversion
+    // ── Coordinate conversion ──
 
     internal Rect ToScreen(Rect windowLocal)
     {
@@ -232,14 +232,12 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
 
     internal Point FromScreen(Point screen)
     {
-        // Reverse of ToScreen. Client-to-screen offset is additive, so compute
-        // the origin in screen coords once and subtract.
         var origin = new UiaInterop.PointNative { X = 0, Y = 0 };
         UiaInterop.ClientToScreen(_hwnd, ref origin);
         return new Point(screen.X - origin.X, screen.Y - origin.Y);
     }
 
-    // ──── Actions routed back to the app
+    // ── Actions routed back to the app ──
 
     internal void InvokeElement(ElementId id) => _host.InvokeElement(id);
     internal void ToggleElement(ElementId id) => _host.ToggleElement(id);
@@ -253,27 +251,17 @@ public sealed class WindowsAccessibilityBridge : IAccessibilityBridge, IDisposab
     {
         if (_disposed) return;
         _disposed = true;
-        _host.UninstallMessageHook();
 
-        // Only issue UiaDisconnectProvider when events were enabled — it's in
-        // the same "active" UIA family that fast-fails on this path.
-        if (RaiseEvents)
-        {
-            foreach (var wrapper in _wrappers.Values)
-            {
-                IntPtr punk = UiaComWrappers.GetIUnknown(wrapper);
-                try { UiaInterop.UiaDisconnectProvider(punk); }
-                finally { Marshal.Release(punk); }
-            }
-        }
+        if (_originalWndProc != IntPtr.Zero)
+            UiaInterop.SetWindowLongPtr(_hwnd, UiaInterop.GWLP_WNDPROC, _originalWndProc);
+        _byHwnd.TryRemove(_hwnd, out _);
+
         _wrappers.Clear();
 
-        if (RaiseEvents && _hostProvider is not null)
+        if (_hostProviderPtr != IntPtr.Zero)
         {
-            IntPtr punk = UiaComWrappers.GetIUnknown(_hostProvider);
-            try { UiaInterop.UiaDisconnectProvider(punk); }
-            finally { Marshal.Release(punk); }
+            Marshal.Release(_hostProviderPtr);
+            _hostProviderPtr = IntPtr.Zero;
         }
-        _hostProvider = null;
     }
 }

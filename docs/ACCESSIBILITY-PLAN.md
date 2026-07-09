@@ -25,8 +25,9 @@ macOS (NSAccessibility) is deferred.
   `OnFocusChanged` handler.
 - SDL3 window exposes HWND via
   `SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, ...)`.
-- Projects target `net10.0`, `HultUI` is `IsAotCompatible=true` — use
-  `[GeneratedComInterface]` for UIA, avoid runtime COM where possible.
+- Projects target `net10.0`, `HultUI` is `IsAotCompatible=true` — expose UIA
+  providers as hand-built native COM objects (see `NativeProvider.cs`); avoid
+  `ComWrappers`/runtime COM, which UIAutomationCore rejects on .NET 10.
 
 ## Confirmed decisions
 
@@ -105,10 +106,17 @@ Files:
   `UiaClientsAreListening`, `UiaDisconnectProvider`. Constants for
   `UIA_*ControlTypeId`, `UIA_*PropertyId`, `UIA_*PatternId`,
   `StructureChangeType`, `NavigateDirection`.
-- **`UiaComInterfaces.cs`** — `[GeneratedComInterface]` definitions for
-  `IRawElementProviderSimple`, `IRawElementProviderFragment`,
-  `IRawElementProviderFragmentRoot`, `IInvokeProvider`, `IToggleProvider`,
-  `ISelectionItemProvider`, `IValueProvider`. (Guids from UIAutomationCore.)
+- **`NativeProvider.cs`** — exposes the managed provider logic to UIA as
+  hand-built **native** COM objects (unmanaged memory + a tear-off per interface,
+  each with a vtable of `[UnmanagedCallersOnly]` thunks). This replaced a
+  `StrategyBasedComWrappers` + `[GeneratedComInterface]` approach: on released
+  .NET 10, handing such a CCW to `UiaReturnRawElementProvider` access-violates
+  inside UIAutomationCore before it even calls the provider. A native object is
+  marshalled/called correctly, keeps the assembly AOT-friendly, and needs no
+  Windows-Desktop/WPF dependency. The managed side implements the plain
+  `INative*` interfaces defined in this file.
+- **`UiaComInterfaces.cs`** — shared blittable structs (`UiaRect`). The provider
+  interface GUIDs live in `NativeProvider.cs`.
 - **`UiaFragmentRoot.cs`** — one per window. Implements all three provider
   interfaces. `ElementProviderFromPoint` walks the node tree doing point-in-rect,
   returning the deepest hit. `GetFocus` returns the currently focused wrapper.
@@ -124,14 +132,17 @@ Files:
   - `GetPatternProvider(patternId)` dispatches to pattern impls based on role.
 - **`WindowsAccessibilityBridge.cs`** — the `IAccessibilityBridge` impl.
   - Polls `UiaClientsAreListening()` for `IsActive`.
-  - Installs SDL message hook via `SDL_SetWindowsMessageHook` (SDL3 has this),
-    filters for `WM_GETOBJECT` with `lParam == UiaRootObjectId`, calls
-    `UiaReturnRawElementProvider(hwnd, wParam, lParam, fragmentRoot)`.
-  - `ApplyChanges(diff)`:
-    - For each Removed: `UiaRaiseStructureChangedEvent(parent, ChildRemoved, runtimeId)`,
-      then `UiaDisconnectProvider(wrapper)`; drop from cache.
-    - For each Added: `UiaRaiseStructureChangedEvent(parent, ChildAdded, null)`.
-    - For each PropertyChanged: `UiaRaiseAutomationPropertyChangedEvent`.
+  - Subclasses the window procedure (`SetWindowLongPtrW(GWLP_WNDPROC)`) and, on
+    `WM_GETOBJECT` with `lParam == UiaRootObjectId`, returns
+    `UiaReturnRawElementProvider(hwnd, wParam, lParam, nativeRoot)`'s LRESULT.
+    `WM_GETOBJECT` is a *sent* message, so it must be serviced from the window
+    procedure — SDL's `SDL_SetWindowsMessageHook` only runs in the message pump
+    and never sees it, so the earlier hook-based approach never connected the
+    provider (and, when it occasionally did, crashed — see `NativeProvider.cs`).
+  - `ApplyChanges(diff)` updates the per-`ElementId` wrapper cache and, when
+    `HULTUI_UIA_EVENTS=1`, raises the corresponding bulk structure-changed /
+    property-changed events. Events are opt-in for now; the passive tree served
+    on `WM_GETOBJECT` already lets an AT navigate and read on demand.
   - `NotifyFocusChanged`: `UiaRaiseAutomationEvent(wrapper, UIA_AutomationFocusChangedEventId)`.
   - Cache `UiaFragment` wrappers keyed by `ElementId` so COM identity is stable.
 - **Pattern impls** (same file or separate):

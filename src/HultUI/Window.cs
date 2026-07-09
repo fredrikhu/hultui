@@ -44,6 +44,7 @@ public sealed class Window : IOverlayHost, IDisposable
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
     private AccessibilityNode? _previousA11yTree;
+    private bool _a11yWasActive;
     private readonly AccessibilityObserverAdapter _a11yObserver;
     private Sdl3UiaHostBridge? _uiaHost;
 
@@ -226,7 +227,11 @@ public sealed class Window : IOverlayHost, IDisposable
     }
 
     internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
-        || _overlays.Count > 0;
+        || _overlays.Count > 0
+        // Render once when an assistive tech attaches, so the accessibility tree
+        // gets built even if the app is otherwise idle (the build runs in the
+        // render pass). After that frame _a11yWasActive is set and this clears.
+        || (!_a11yWasActive && _accessibilityBridge.IsActive);
 
     internal void OnWindowResized()
     {
@@ -273,8 +278,11 @@ public sealed class Window : IOverlayHost, IDisposable
 
         // Accessibility: rebuild + diff when the tree's structure changed and
         // something is actually listening. The Null bridge's IsActive is false,
-        // so this is a single boolean read for apps with no AT attached.
-        if (_accessibilityBridge.IsActive && _root.DirtyFlags.HasFlag(DirtyFlags.Children))
+        // so this is a single boolean read for apps with no AT attached. The
+        // first frame after an assistive tech attaches also forces a full build
+        // (structure isn't dirty by then, but the client has nothing yet).
+        bool a11yActive = _accessibilityBridge.IsActive;
+        if (a11yActive && (!_a11yWasActive || _root.DirtyFlags.HasFlag(DirtyFlags.Children)))
         {
             using (_tracer.Begin("Phase", "A11y"))
             {
@@ -285,6 +293,12 @@ public sealed class Window : IOverlayHost, IDisposable
                 _previousA11yTree = newTree;
             }
         }
+        else if (!a11yActive && _a11yWasActive)
+        {
+            // Client detached — drop the snapshot so the next attach rebuilds fresh.
+            _previousA11yTree = null;
+        }
+        _a11yWasActive = a11yActive;
 
         // Render (user content only — DevTools excluded from timing)
         var ctx = PlatformWindow.Surface.RenderContext;
