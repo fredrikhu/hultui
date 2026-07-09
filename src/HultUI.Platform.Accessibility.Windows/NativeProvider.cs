@@ -169,12 +169,14 @@ internal static unsafe class NativeProvider
 
     /// <summary>
     /// Creates a native COM object wrapping <paramref name="logic"/>, exposing a
-    /// tear-off for every provider interface it implements. Returns the tear-off
-    /// for interface <paramref name="which"/> (the primary IUnknown by default)
-    /// with a reference count of 1 (the caller owns it). All tear-offs of one
-    /// object share the ref count and IUnknown identity.
+    /// tear-off for every provider interface it implements. Returns the primary
+    /// (tear-off[0]) IUnknown pointer with a reference count of 1 — the caller
+    /// owns that reference. Use <see cref="Tearoff"/> to obtain the pointer for a
+    /// specific interface (all tear-offs share one ref count and IUnknown
+    /// identity). Callers that cache the object hold this reference for the
+    /// object's lifetime and hand out AddRef'd tear-offs.
     /// </summary>
-    public static IntPtr Create(object logic, As which = As.Primary)
+    public static IntPtr Create(object logic)
     {
         Span<IntPtr> vt = stackalloc IntPtr[8];
         Span<Guid> iids = stackalloc Guid[8];
@@ -197,23 +199,42 @@ internal static unsafe class NativeProvider
         *(int*)(obj + HdrCount) = n;
 
         Guid* iidBase = (Guid*)(obj + TearoffsStart + n * TearoffSize);
-        int selected = 0; // default: primary (tear-off[0])
-        Guid wantIid = which switch
-        {
-            As.Simple => IID_Simple,
-            As.Fragment => IID_Fragment,
-            As.FragmentRoot => IID_FragmentRoot,
-            _ => default,
-        };
         for (int i = 0; i < n; i++)
         {
             IntPtr* tear = (IntPtr*)(obj + TearoffsStart + i * TearoffSize);
             tear[0] = vt[i];          // vtable
             tear[1] = (IntPtr)obj;    // back-pointer to object base
             iidBase[i] = iids[i];
-            if (which != As.Primary && iids[i] == wantIid) selected = i;
         }
-        return (IntPtr)(obj + TearoffsStart + selected * TearoffSize);
+        return (IntPtr)(obj + TearoffsStart); // primary = tear-off[0]
+    }
+
+    /// <summary>
+    /// Given any tear-off pointer of an object, returns the tear-off pointer for
+    /// interface <paramref name="which"/> (falling back to the primary), and
+    /// AddRefs the shared object so the returned pointer carries a reference the
+    /// caller must Release. A COM method must return the pointer whose vtable
+    /// matches its declared return type.
+    /// </summary>
+    public static IntPtr Tearoff(IntPtr anyTearoff, As which)
+    {
+        if (anyTearoff == IntPtr.Zero) return IntPtr.Zero;
+        byte* b = Base(anyTearoff);
+        AddRefBase(b);
+        if (which == As.Primary) return (IntPtr)(b + TearoffsStart);
+
+        Guid want = which switch
+        {
+            As.Simple => IID_Simple,
+            As.Fragment => IID_Fragment,
+            As.FragmentRoot => IID_FragmentRoot,
+            _ => IID_IUnknown,
+        };
+        int count = *(int*)(b + HdrCount);
+        Guid* iidBase = (Guid*)(b + TearoffsStart + count * TearoffSize);
+        for (int i = 0; i < count; i++)
+            if (iidBase[i] == want) return (IntPtr)(b + TearoffsStart + i * TearoffSize);
+        return (IntPtr)(b + TearoffsStart); // primary fallback
     }
 
     // ── helpers to recover state inside a thunk ──

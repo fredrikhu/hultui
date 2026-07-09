@@ -41,6 +41,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     private long _focusedIdRaw;
     private bool _disposed;
 
+    // Cached native COM objects — one per element (and one for the root), so
+    // repeated Navigate/GetFragmentRoot/etc. reuse a stable object instead of
+    // allocating a fresh one per call. The bridge holds one reference to each;
+    // clients get AddRef'd tear-offs. Released when the element leaves the tree.
+    private readonly object _nativeLock = new();
+    private IntPtr _rootNative;
+    private readonly ConcurrentDictionary<ElementId, IntPtr> _nativeByElement = new();
+
     // WndProc subclassing state.
     private IntPtr _originalWndProc;
     private static readonly ConcurrentDictionary<IntPtr, WindowsAccessibilityBridge> _byHwnd = new();
@@ -61,12 +69,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     public bool IsActive => UiaInterop.UiaClientsAreListening();
 
-    // Raising UIA events proactively is opt-in: the ComWrappers path used to
-    // fast-fail, and the native-object path here hasn't been validated against a
-    // real screen reader yet. The passive tree (served on WM_GETOBJECT) already
-    // lets an assistive tech navigate/read on demand. HULTUI_UIA_EVENTS=1 to try.
+    // Raise UIA events (structure/property/focus changed) so an assistive tech
+    // refreshes live as the tree changes. This used to fast-fail on the
+    // ComWrappers path; with native provider objects it works. Opt out with
+    // HULTUI_UIA_EVENTS=0 if a specific screen reader misbehaves.
     private static readonly bool RaiseEvents =
-        Environment.GetEnvironmentVariable("HULTUI_UIA_EVENTS") == "1";
+        Environment.GetEnvironmentVariable("HULTUI_UIA_EVENTS") != "0";
 
     internal AccessibilityNode? RootNode => Volatile.Read(ref _rootNode);
 
@@ -83,28 +91,49 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     //    Each call names the interface the COM method returns, so the caller
     //    gets the matching tear-off (see NativeProvider.As). ──
 
+    /// <summary>The cached native root object (bridge-owned reference).</summary>
+    private IntPtr RootNativePrimary()
+    {
+        IntPtr p = Volatile.Read(ref _rootNative);
+        if (p != IntPtr.Zero) return p;
+        lock (_nativeLock)
+        {
+            if (_rootNative == IntPtr.Zero)
+                _rootNative = NativeProvider.Create(_fragmentRoot); // refcount 1 = bridge's ref
+            return _rootNative;
+        }
+    }
+
+    /// <summary>The cached native object for an element, or Zero if it has no wrapper.</summary>
+    private IntPtr ElementNativePrimary(ElementId id)
+    {
+        if (_nativeByElement.TryGetValue(id, out var p)) return p;
+        if (!_wrappers.TryGetValue(id, out var wrapper)) return IntPtr.Zero;
+        lock (_nativeLock)
+        {
+            if (_nativeByElement.TryGetValue(id, out p)) return p;
+            p = NativeProvider.Create(wrapper); // refcount 1 = bridge's ref
+            _nativeByElement[id] = p;
+            return p;
+        }
+    }
+
     /// <summary>The root as IRawElementProviderSimple* (WM_GETOBJECT, events).</summary>
-    internal IntPtr NativeRootSimple() => NativeProvider.Create(_fragmentRoot, NativeProvider.As.Simple);
+    internal IntPtr NativeRootSimple() => NativeProvider.Tearoff(RootNativePrimary(), NativeProvider.As.Simple);
 
     /// <summary>The root as IRawElementProviderFragment* (a fragment's parent).</summary>
-    internal IntPtr NativeRootFragment() => NativeProvider.Create(_fragmentRoot, NativeProvider.As.Fragment);
+    internal IntPtr NativeRootFragment() => NativeProvider.Tearoff(RootNativePrimary(), NativeProvider.As.Fragment);
 
     /// <summary>The root as IRawElementProviderFragmentRoot* (GetFragmentRoot).</summary>
-    internal IntPtr NativeRootFragmentRoot() => NativeProvider.Create(_fragmentRoot, NativeProvider.As.FragmentRoot);
+    internal IntPtr NativeRootFragmentRoot() => NativeProvider.Tearoff(RootNativePrimary(), NativeProvider.As.FragmentRoot);
 
     /// <summary>A cached fragment as IRawElementProviderFragment* (Navigate, hit-test, focus), or null.</summary>
     internal IntPtr NativeFragment(ElementId? id)
-    {
-        if (id is null || !_wrappers.TryGetValue(id.Value, out var wrapper)) return IntPtr.Zero;
-        return NativeProvider.Create(wrapper, NativeProvider.As.Fragment);
-    }
+        => id is null ? IntPtr.Zero : NativeProvider.Tearoff(ElementNativePrimary(id.Value), NativeProvider.As.Fragment);
 
     /// <summary>A cached fragment as IRawElementProviderSimple* (events), or null.</summary>
     private IntPtr NativeFragmentSimple(ElementId? id)
-    {
-        if (id is null || !_wrappers.TryGetValue(id.Value, out var wrapper)) return IntPtr.Zero;
-        return NativeProvider.Create(wrapper, NativeProvider.As.Simple);
-    }
+        => id is null ? IntPtr.Zero : NativeProvider.Tearoff(ElementNativePrimary(id.Value), NativeProvider.As.Simple);
 
     /// <summary>The HWND host provider, AddRef'd (chains our tree to the window's non-client tree).</summary>
     internal IntPtr HostProviderRef()
@@ -125,7 +154,12 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
         foreach (var added in diff.Added)
         {
-            _wrappers[added.Node.ElementId] = new UiaFragment(this, added.Node);
+            // Keep the wrapper stable per ElementId so the cached native object
+            // (which wraps it) stays valid; only create one the first time.
+            if (_wrappers.TryGetValue(added.Node.ElementId, out var existing))
+                existing.UpdateFrom(added.Node);
+            else
+                _wrappers[added.Node.ElementId] = new UiaFragment(this, added.Node);
             // The parent's child set changed: refresh its snapshot so Navigate
             // returns the new children (a persistent parent isn't in
             // PropertyChanged when only its children changed).
@@ -136,6 +170,10 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         foreach (var removed in diff.Removed)
         {
             _wrappers.TryRemove(removed.Node.ElementId, out _);
+            // Drop the bridge's reference to the element's cached native object;
+            // it frees once any client references are also released.
+            if (_nativeByElement.TryRemove(removed.Node.ElementId, out var native))
+                Marshal.Release(native);
             RefreshParent(removed.Parent);
             RaiseStructureChanged(removed.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
         }
@@ -280,6 +318,15 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         _byHwnd.TryRemove(_hwnd, out _);
 
         _wrappers.Clear();
+
+        // Drop the bridge's references to cached native objects.
+        lock (_nativeLock)
+        {
+            foreach (var native in _nativeByElement.Values)
+                Marshal.Release(native);
+            _nativeByElement.Clear();
+            if (_rootNative != IntPtr.Zero) { Marshal.Release(_rootNative); _rootNative = IntPtr.Zero; }
+        }
 
         if (_hostProviderPtr != IntPtr.Zero)
         {
