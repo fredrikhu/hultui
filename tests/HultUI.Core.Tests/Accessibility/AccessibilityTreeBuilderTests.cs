@@ -201,6 +201,118 @@ public class AccessibilityTreeBuilderTests
     }
 
     [Fact]
+    public void ResolveName_Button_DerivesNameFromChildText()
+    {
+        var button = BoxElement.New();
+        button.On<ClickEvent>(_ => { });
+        button.AddChild(TextElement.New("Click Me"));
+
+        var name = AccessibilityTreeBuilder.ResolveName(button);
+        Assert.Equal("Click Me", name);
+    }
+
+    [Fact]
+    public void Build_TextOnlyButton_TakesChildTextAsNameAndIsLeaf()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+
+        var button = BoxElement.New();
+        button.On<ClickEvent>(_ => { });
+        button.AddChild(TextElement.New("Click Me"));
+        root.AddChild(button);
+
+        Layout(root);
+
+        var tree = AccessibilityTreeBuilder.Build(root);
+
+        Assert.Single(tree.Children);
+        var btn = tree.Children[0];
+        Assert.Equal(AccessibilityRole.Button, btn.Role);
+        Assert.Equal("Click Me", btn.Name);
+        // The text was folded into the button's name, not exposed as a child.
+        Assert.Empty(btn.Children);
+    }
+
+    [Fact]
+    public void Build_ExplicitlyNamedButton_KeepsChildText()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+
+        var button = BoxElement.New();
+        button.AccessibleName = "Save document";
+        button.On<ClickEvent>(_ => { });
+        button.AddChild(TextElement.New("Save"));
+        root.AddChild(button);
+
+        Layout(root);
+
+        var tree = AccessibilityTreeBuilder.Build(root);
+
+        var btn = tree.Children[0];
+        Assert.Equal("Save document", btn.Name);
+        // Explicit name may differ from the text, so the label is preserved.
+        Assert.Single(btn.Children);
+        Assert.Equal("Save", btn.Children[0].Name);
+    }
+
+    [Fact]
+    public void Build_ButtonWithNonTextContent_DerivesNameButKeepsChildren()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+
+        var button = BoxElement.New();
+        button.On<ClickEvent>(_ => { });
+        var icon = new ImageElement();
+        icon.AccessibleName = "icon";
+        button.AddChild(icon);
+        button.AddChild(TextElement.New("Delete"));
+        root.AddChild(button);
+
+        Layout(root);
+
+        var tree = AccessibilityTreeBuilder.Build(root);
+
+        var btn = tree.Children[0];
+        Assert.Equal(AccessibilityRole.Button, btn.Role);
+        Assert.Equal("Delete", btn.Name);
+        // A non-label descendant (the image) means children are preserved.
+        Assert.Contains(btn.Children, c => c.Role == AccessibilityRole.Image);
+    }
+
+    [Fact]
+    public void Build_ButtonWithText_ThroughDecorativeWrapper_DerivesName()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+
+        var button = BoxElement.New();
+        button.On<ClickEvent>(_ => { });
+        var wrapper = BoxElement.New(); // decorative
+        wrapper.AddChild(TextElement.New("Submit"));
+        button.AddChild(wrapper);
+        root.AddChild(button);
+
+        Layout(root);
+
+        var tree = AccessibilityTreeBuilder.Build(root);
+
+        var btn = tree.Children[0];
+        Assert.Equal("Submit", btn.Name);
+        Assert.Empty(btn.Children);
+    }
+
+    [Fact]
     public void Build_SetsCorrectBoundingRects()
     {
         var root = BoxElement.New();

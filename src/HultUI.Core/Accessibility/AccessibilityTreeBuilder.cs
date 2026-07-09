@@ -1,3 +1,4 @@
+using System.Text;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 
@@ -42,7 +43,12 @@ public static class AccessibilityTreeBuilder
             {
                 var childNode = CreateNode(child, focusManager);
                 parent.AddChild(childNode);
-                BuildChildren(child, childNode, focusManager);
+                // A text-only button (or other name-from-content role) folds its
+                // text into its own accessible name; don't also expose that text
+                // as child nodes — that matches native controls and stops a
+                // screen reader announcing the label twice.
+                if (!ConsumesTextContent(child))
+                    BuildChildren(child, childNode, focusManager);
             }
             else
             {
@@ -117,7 +123,72 @@ public static class AccessibilityTreeBuilder
         if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label))
             return radio.Label;
 
+        // Name from content: a button with no explicit name takes the
+        // concatenated text of its descendants (e.g. a Box wrapping Text "Save").
+        if (IsNameFromContentRole(ResolveRole(element)) && GetContentText(element) is { } content)
+            return content;
+
         return element.Name;
+    }
+
+    /// <summary>
+    /// Roles whose accessible name is derived from descendant text when no
+    /// explicit <see cref="Element.AccessibleName"/> is set (as in the UIA/HTML
+    /// "name from content" rule). Currently buttons.
+    /// </summary>
+    private static bool IsNameFromContentRole(AccessibilityRole role)
+        => role == AccessibilityRole.Button;
+
+    /// <summary>
+    /// Concatenates the text of an element's descendant <see cref="TextElement"/>s
+    /// in document order, or <c>null</c> if there is none.
+    /// </summary>
+    internal static string? GetContentText(Element element)
+    {
+        var sb = new StringBuilder();
+        AppendContentText(element, sb);
+        return sb.Length == 0 ? null : sb.ToString();
+    }
+
+    private static void AppendContentText(Element element, StringBuilder sb)
+    {
+        foreach (var child in element.Children)
+        {
+            if (child is TextElement text && !string.IsNullOrEmpty(text.Content))
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append(text.Content);
+            }
+            AppendContentText(child, sb);
+        }
+    }
+
+    /// <summary>
+    /// True when a node's descendant text is fully captured by its own accessible
+    /// name, so the text children can be dropped from the tree. Requires a
+    /// name-from-content role, no explicit name (else the name may differ from the
+    /// text), and only plain-text semantic descendants (no nested controls/images
+    /// to preserve).
+    /// </summary>
+    private static bool ConsumesTextContent(Element element)
+    {
+        if (element.AccessibleName is not null)
+            return false;
+        if (!IsNameFromContentRole(ResolveRole(element)))
+            return false;
+        return HasOnlyTextDescendants(element);
+    }
+
+    private static bool HasOnlyTextDescendants(Element element)
+    {
+        foreach (var child in element.Children)
+        {
+            if (IsSemantic(child) && ResolveRole(child) != AccessibilityRole.Label)
+                return false;
+            if (!HasOnlyTextDescendants(child))
+                return false;
+        }
+        return true;
     }
 
     internal static bool? ResolveIsToggled(Element element) => element switch
