@@ -263,6 +263,24 @@ public abstract class Element
         }
     }
 
+    /// <summary>
+    /// Marks this element (and ancestors up to root) as having had a structural
+    /// change to its children. Distinct from <see cref="MarkLayoutDirty"/>: only
+    /// child add/remove/replace sets this, so the accessibility tree can rebuild
+    /// on real structure changes without rebuilding on every resize or animation.
+    /// </summary>
+    internal void MarkChildrenDirty()
+    {
+        var current = (Element?)this;
+        while (current is not null)
+        {
+            if ((current.DirtyFlags & DirtyFlags.Children) != 0)
+                break;
+            current.DirtyFlags |= DirtyFlags.Children;
+            current = current.Parent;
+        }
+    }
+
     internal void MarkStyleDirty()
     {
         // Propagate down (inherited style may change for descendants)
@@ -311,6 +329,7 @@ public abstract class Element
         child.Parent = this;
         _children.Add(child);
         MarkLayoutDirty();
+        MarkChildrenDirty();
 
         if (!wasParented)
             child.OnMounted();
@@ -326,6 +345,7 @@ public abstract class Element
         child.Parent = this;
         _children.Insert(index, child);
         MarkLayoutDirty();
+        MarkChildrenDirty();
 
         if (!wasParented)
             child.OnMounted();
@@ -339,6 +359,7 @@ public abstract class Element
             child.OnUnmounted();
             child.Parent = null;
             MarkLayoutDirty();
+            MarkChildrenDirty();
         }
     }
 
@@ -380,6 +401,7 @@ public abstract class Element
                 child.OnMounted();
         }
         MarkLayoutDirty();
+        MarkChildrenDirty();
     }
 
     /// <summary>
@@ -391,6 +413,7 @@ public abstract class Element
     {
         child.Parent?._children.Remove(child);
         child.Parent?.MarkLayoutDirty();
+        child.Parent?.MarkChildrenDirty();
         child.Parent = null;
     }
 

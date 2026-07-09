@@ -1,3 +1,4 @@
+using System.Threading;
 using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
@@ -17,7 +18,15 @@ using HultUI.Core.Styling;
 
 using var app = new Application("HultUI Accessibility", 720, 540, WindowStyle.Borderless);
 app.Theme = Theme.Dark;
-app.SetRoot(new AccessibilityDemo(app.PrimaryWindow).Mount());
+var demo = new AccessibilityDemo(app.PrimaryWindow);
+app.SetRoot(demo.Mount());
+
+// Simulate content that loads after the window is up (like a commit list): the
+// rows appear a moment later. They must show up in the accessibility tree even
+// if an assistive tech attached while the list was still empty.
+using var loader = new Timer(_ => Application.InvokeOnMainThread(() => demo.RowCount = 6),
+    null, 1500, Timeout.Infinite);
+
 app.Run();
 
 partial class AccessibilityDemo : Component
@@ -26,6 +35,7 @@ partial class AccessibilityDemo : Component
 
     [Reactive] public partial int ClickCount { get; set; }
     [Reactive] public partial bool Checked { get; set; }
+    [Reactive] public partial int RowCount { get; set; }
 
     public AccessibilityDemo(Window window) => _window = window;
 
@@ -64,10 +74,23 @@ partial class AccessibilityDemo : Component
 
                     Checkbox.New(Checked, "Enable the thing").OnCheckedChanged(v => Checked = v),
 
-                    TextInput.New().PlaceholderText("Type your name").Width(Dimension.Px(240))
+                    TextInput.New().PlaceholderText("Type your name").Width(Dimension.Px(240)),
+
+                    Text.New(RowCount == 0 ? "Loading commits…" : "Commits")
+                        .FontSize(15f).FontWeight(FontWeight.SemiBold),
+                    BuildCommitList()
                 )
             )
         );
+    }
+
+    private Element BuildCommitList()
+    {
+        var list = Flex.Column(gap: 4);
+        for (int i = 0; i < RowCount; i++)
+            list.Children(Text.New($"commit #{i + 1}: did a thing").FontSize(12f)
+                .TextColor(new Color(150, 160, 190)));
+        return list;
     }
 
     private Element CloseButton()

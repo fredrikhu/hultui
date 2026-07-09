@@ -299,6 +299,8 @@ public sealed class Window : IOverlayHost, IDisposable
             _previousA11yTree = null;
         }
         _a11yWasActive = a11yActive;
+        // Note: the Children flag is cleared with everything else by
+        // ClearAllFlags at the end of the frame, below.
 
         // Render (user content only — DevTools excluded from timing)
         var ctx = PlatformWindow.Surface.RenderContext;
