@@ -24,7 +24,7 @@ app.SetRoot(demo.Mount());
 // Simulate content that loads after the window is up (like a commit list): the
 // rows appear a moment later. They must show up in the accessibility tree even
 // if an assistive tech attached while the list was still empty.
-using var loader = new Timer(_ => Application.InvokeOnMainThread(() => demo.RowCount = 6),
+using var loader = new Timer(_ => Application.InvokeOnMainThread(() => demo.RowCount = 40),
     null, 1500, Timeout.Infinite);
 
 app.Run();
@@ -61,7 +61,7 @@ partial class AccessibilityDemo : Component
                         + "to UI Automation and the controls below are navigable and actionable.")
                         .FontSize(13f).TextColor(new Color(160, 160, 180)),
 
-                    Flex.Row(gap: 12).AlignItems(AlignItems.Center).Children(
+                    Flex.Row(gap: 12).AlignItems(AlignItems.Center).FlexShrink(0).Children(
                         Box.New()
                             .Padding(new Thickness(8, 18, 8, 18))
                             .Background(new Color(99, 102, 241))
@@ -86,11 +86,15 @@ partial class AccessibilityDemo : Component
 
     private Element BuildCommitList()
     {
-        var list = Flex.Column(gap: 4);
+        var rows = new Element[RowCount];
         for (int i = 0; i < RowCount; i++)
-            list.Children(Text.New($"commit #{i + 1}: did a thing").FontSize(12f)
-                .TextColor(new Color(150, 160, 190)));
-        return list;
+            rows[i] = Text.New($"commit #{i + 1}: did a thing").FontSize(12f)
+                .TextColor(new Color(150, 160, 190))
+                // FlexShrink(0) so the column keeps each row's natural height and
+                // overflows (scrolls) instead of squishing them together.
+                .FlexShrink(0);
+        // Children() replaces, so build all rows up front and set them once.
+        return Flex.Column(gap: 4).FlexShrink(0).Children(rows);
     }
 
     private Element CloseButton()
