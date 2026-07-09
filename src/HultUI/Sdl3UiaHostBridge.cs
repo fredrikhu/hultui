@@ -29,6 +29,13 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 
     public float ContentScale => _window.PlatformWindow.DisplayScale;
 
+    /// <summary>
+    /// True when a UIA action is queued but not yet run. The render loop folds
+    /// this into <c>NeedsRender</c> so an action posted from a UIA worker thread
+    /// wakes an otherwise-idle app to drain it (see <see cref="DrainPendingActions"/>).
+    /// </summary>
+    public bool HasPendingActions => !_pendingActions.IsEmpty;
+
     /// <summary>Called by <see cref="Window"/> once per frame to run queued actions on the UI thread.</summary>
     public void DrainPendingActions()
     {

@@ -29,10 +29,4 @@ public interface IAccessibilityBridge
     /// non-null, belongs to the most recently applied tree snapshot.
     /// </summary>
     void NotifyFocusChanged(AccessibilityNode? focused);
-
-    /// <summary>
-    /// A single property on an already-known node changed without the tree
-    /// structure changing. Property names come from <see cref="AccessibilityProperties"/>.
-    /// </summary>
-    void NotifyPropertyChanged(AccessibilityNode node, string propertyName);
 }

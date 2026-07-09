@@ -88,16 +88,6 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IDisposable
         _bus.EmitStateChanged(focused.ElementId, "focused", active: true);
     }
 
-    public void NotifyPropertyChanged(AccessibilityNode node, string propertyName)
-    {
-        if (!_registered || _bus is null) return;
-        if (!_exports.TryGetValue(node.ElementId, out var export)) return;
-        export.UpdateFrom(node);
-        var atSpiProp = AtSpiConstants.MapProperty(propertyName);
-        if (!string.IsNullOrEmpty(atSpiProp))
-            _bus.EmitPropertyChange(node.ElementId, atSpiProp);
-    }
-
     public void Dispose()
     {
         if (_disposed) return;

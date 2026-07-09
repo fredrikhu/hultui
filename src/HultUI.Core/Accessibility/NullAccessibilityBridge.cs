@@ -11,5 +11,4 @@ public sealed class NullAccessibilityBridge : IAccessibilityBridge
     public bool IsActive => false;
     public void ApplyChanges(TreeDiff diff, AccessibilityNode root) { }
     public void NotifyFocusChanged(AccessibilityNode? focused) { }
-    public void NotifyPropertyChanged(AccessibilityNode node, string propertyName) { }
 }

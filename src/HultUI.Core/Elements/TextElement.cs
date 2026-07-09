@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -17,6 +18,10 @@ public class TextElement : Element
             _content = value;
             MarkLayoutDirty();
             MarkPaintDirty();
+            // Text content is this element's accessible name (and, when it labels
+            // a button, the button's name-from-content), so a change is an
+            // a11y-visible property change.
+            NotifyAccessibilityPropertyChanged(AccessibilityProperties.Name);
         }
     }
 

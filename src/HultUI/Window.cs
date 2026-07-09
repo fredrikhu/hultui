@@ -45,6 +45,11 @@ public sealed class Window : IOverlayHost, IDisposable
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
     private AccessibilityNode? _previousA11yTree;
     private bool _a11yWasActive;
+    // Set when an element reports an a11y-visible property change (a text label's
+    // content, a checkbox toggle, …). Such changes aren't structural, so they
+    // force the next frame to rebuild+diff the tree — that regenerates the node
+    // snapshots (Name, bounds, …) and emits precise property-changed events.
+    private bool _a11yPropertyDirty;
     private readonly AccessibilityObserverAdapter _a11yObserver;
     private Sdl3UiaHostBridge? _uiaHost;
 
@@ -231,7 +236,14 @@ public sealed class Window : IOverlayHost, IDisposable
         // Render once when an assistive tech attaches, so the accessibility tree
         // gets built even if the app is otherwise idle (the build runs in the
         // render pass). After that frame _a11yWasActive is set and this clears.
-        || (!_a11yWasActive && _accessibilityBridge.IsActive);
+        || (!_a11yWasActive && _accessibilityBridge.IsActive)
+        // An a11y-visible property changed (e.g. a label's text) with no visual
+        // change of its own; the tree refresh happens in the render pass.
+        || (_a11yPropertyDirty && _accessibilityBridge.IsActive)
+        // A UIA action (invoke/toggle/set-value/focus) queued from a worker
+        // thread must run even when the app is idle; draining happens in the
+        // render pass, so a pending action forces a frame.
+        || (_uiaHost?.HasPendingActions ?? false);
 
     internal void OnWindowResized()
     {
@@ -282,7 +294,7 @@ public sealed class Window : IOverlayHost, IDisposable
         // first frame after an assistive tech attaches also forces a full build
         // (structure isn't dirty by then, but the client has nothing yet).
         bool a11yActive = _accessibilityBridge.IsActive;
-        if (a11yActive && (!_a11yWasActive || _root.DirtyFlags.HasFlag(DirtyFlags.Children)))
+        if (a11yActive && (!_a11yWasActive || _a11yPropertyDirty || _root.DirtyFlags.HasFlag(DirtyFlags.Children)))
         {
             using (_tracer.Begin("Phase", "A11y"))
             {
@@ -298,6 +310,7 @@ public sealed class Window : IOverlayHost, IDisposable
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
         }
+        _a11yPropertyDirty = false;
         _a11yWasActive = a11yActive;
         // Note: the Children flag is cleared with everything else by
         // ClearAllFlags at the end of the frame, below.
@@ -1222,18 +1235,20 @@ public sealed class Window : IOverlayHost, IDisposable
     }
 
     /// <summary>
-    /// Bridges per-element accessibility notifications into the Window-owned
-    /// bridge. Elements fire these when their a11y-visible state changes
-    /// (checkbox toggled, text value edited) without any structural rebuild.
+    /// Bridges per-element accessibility notifications into the Window. Elements
+    /// fire these when an a11y-visible property changes (a checkbox toggled, a
+    /// label's text replaced) without any structural change. We flag the tree for
+    /// a rebuild+diff next frame rather than patching a single node: the rebuild
+    /// regenerates every snapshot from current state (so derived values like a
+    /// button's name-from-content stay correct) and the diff emits exactly the
+    /// property-changed events that platforms forward to assistive tech.
     /// </summary>
     private sealed class AccessibilityObserverAdapter(Window window) : IElementPropertyObserver
     {
         public void OnElementPropertyChanged(Element element, string propertyName)
         {
-            if (!window._accessibilityBridge.IsActive) return;
-            var node = window.FindA11yNode(element);
-            if (node is null) return;
-            window._accessibilityBridge.NotifyPropertyChanged(node, propertyName);
+            if (window._accessibilityBridge.IsActive)
+                window._a11yPropertyDirty = true;
         }
     }
 }

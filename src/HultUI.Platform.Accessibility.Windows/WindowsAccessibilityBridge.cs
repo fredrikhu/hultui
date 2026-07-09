@@ -241,13 +241,6 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         finally { Marshal.Release(prov); }
     }
 
-    public void NotifyPropertyChanged(AccessibilityNode node, string propertyName)
-    {
-        if (!_wrappers.TryGetValue(node.ElementId, out var wrapper)) return;
-        wrapper.UpdateFrom(node);
-        RaisePropertyChanged(wrapper, propertyName);
-    }
-
     private void RaiseStructureChanged(ElementId? parentId, int changeType)
     {
         if (!RaiseEvents) return;
