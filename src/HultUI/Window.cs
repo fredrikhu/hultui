@@ -289,7 +289,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 var newTree = AccessibilityTreeBuilder.Build(_root, _focusManager);
                 var diff = AccessibilityTreeDiffer.Diff(_previousA11yTree, newTree);
                 if (!diff.IsEmpty)
-                    _accessibilityBridge.ApplyChanges(diff);
+                    _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
             }
         }

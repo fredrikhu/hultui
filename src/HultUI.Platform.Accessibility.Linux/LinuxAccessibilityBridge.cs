@@ -53,7 +53,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IDisposable
         }
     }
 
-    public void ApplyChanges(TreeDiff diff)
+    public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
     {
         if (!_registered || _bus is null) return;
 

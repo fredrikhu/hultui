@@ -9,7 +9,7 @@ public sealed class NullAccessibilityBridge : IAccessibilityBridge
     public static readonly NullAccessibilityBridge Instance = new();
 
     public bool IsActive => false;
-    public void ApplyChanges(TreeDiff diff) { }
+    public void ApplyChanges(TreeDiff diff, AccessibilityNode root) { }
     public void NotifyFocusChanged(AccessibilityNode? focused) { }
     public void NotifyPropertyChanged(AccessibilityNode node, string propertyName) { }
 }

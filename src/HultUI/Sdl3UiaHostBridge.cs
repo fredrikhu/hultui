@@ -27,6 +27,8 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         _window = window;
     }
 
+    public float ContentScale => _window.PlatformWindow.DisplayScale;
+
     /// <summary>Called by <see cref="Window"/> once per frame to run queued actions on the UI thread.</summary>
     public void DrainPendingActions()
     {

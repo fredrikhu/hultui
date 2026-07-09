@@ -18,9 +18,11 @@ public interface IAccessibilityBridge
     /// <summary>
     /// Apply a structural delta computed by <see cref="AccessibilityTreeDiffer"/>.
     /// Called at most once per frame — only when the element tree's <c>Children</c>
-    /// dirty flag was set during the frame.
+    /// dirty flag was set during the frame. <paramref name="root"/> is the current
+    /// full snapshot the diff produced; bridges that hit-test or hold per-node
+    /// snapshots need it to stay current when only deep structure changed.
     /// </summary>
-    void ApplyChanges(TreeDiff diff);
+    void ApplyChanges(TreeDiff diff, AccessibilityNode root);
 
     /// <summary>
     /// Focus changed to a different element (or to nothing). The node, when

@@ -116,25 +116,35 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     // ── Accessibility tree upkeep ──
 
-    public void ApplyChanges(TreeDiff diff)
+    public void ApplyChanges(TreeDiff diff, AccessibilityNode root)
     {
+        // Always track the current full tree — ElementProviderFromPoint hit-tests
+        // against it, and it must reflect deep changes even when the root node's
+        // own properties didn't change.
+        Volatile.Write(ref _rootNode, root);
+
         foreach (var added in diff.Added)
         {
-            var wrapper = new UiaFragment(this, added.Node);
-            _wrappers[added.Node.ElementId] = wrapper;
-            if (added.Parent is null)
-                Volatile.Write(ref _rootNode, added.Node);
+            _wrappers[added.Node.ElementId] = new UiaFragment(this, added.Node);
+            // The parent's child set changed: refresh its snapshot so Navigate
+            // returns the new children (a persistent parent isn't in
+            // PropertyChanged when only its children changed).
+            RefreshParent(added.Parent);
             RaiseStructureChanged(added.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkAdded);
         }
 
         foreach (var removed in diff.Removed)
         {
             _wrappers.TryRemove(removed.Node.ElementId, out _);
+            RefreshParent(removed.Parent);
             RaiseStructureChanged(removed.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
         }
 
         foreach (var reorderedParent in diff.Reordered)
+        {
+            RefreshParent(reorderedParent);
             RaiseStructureChanged(reorderedParent.ElementId, UiaInterop.StructureChangeType_ChildrenReordered);
+        }
 
         foreach (var change in diff.PropertyChanged)
         {
@@ -142,6 +152,13 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
             wrapper.UpdateFrom(change.Node);
             RaisePropertyChanged(wrapper, change.PropertyName);
         }
+    }
+
+    /// <summary>Point a parent's cached wrapper at its new node so its child list is current.</summary>
+    private void RefreshParent(AccessibilityNode? parent)
+    {
+        if (parent is not null && _wrappers.TryGetValue(parent.ElementId, out var wrapper))
+            wrapper.UpdateFrom(parent);
     }
 
     public void NotifyFocusChanged(AccessibilityNode? focused)
@@ -223,18 +240,24 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     // ── Coordinate conversion ──
 
-    internal Rect ToScreen(Rect windowLocal)
+    // Element bounds are in density-independent layout units; UIA works in
+    // physical screen pixels. Scale by the display scale (DPI) before/after the
+    // client<->screen origin shift, which ClientToScreen does in physical pixels.
+    internal Rect ToScreen(Rect layoutRect)
     {
-        var origin = new UiaInterop.PointNative { X = (int)windowLocal.X, Y = (int)windowLocal.Y };
+        float s = _host.ContentScale;
+        var origin = new UiaInterop.PointNative { X = (int)(layoutRect.X * s), Y = (int)(layoutRect.Y * s) };
         UiaInterop.ClientToScreen(_hwnd, ref origin);
-        return new Rect(origin.X, origin.Y, windowLocal.Width, windowLocal.Height);
+        return new Rect(origin.X, origin.Y, layoutRect.Width * s, layoutRect.Height * s);
     }
 
     internal Point FromScreen(Point screen)
     {
+        float s = _host.ContentScale;
         var origin = new UiaInterop.PointNative { X = 0, Y = 0 };
         UiaInterop.ClientToScreen(_hwnd, ref origin);
-        return new Point(screen.X - origin.X, screen.Y - origin.Y);
+        if (s <= 0f) s = 1f;
+        return new Point((screen.X - origin.X) / s, (screen.Y - origin.Y) / s);
     }
 
     // ── Actions routed back to the app ──

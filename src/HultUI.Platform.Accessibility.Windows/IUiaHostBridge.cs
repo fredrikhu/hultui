@@ -20,6 +20,14 @@ public interface IUiaHostBridge
     void SetValue(ElementId id, string value);
     void RequestFocus(ElementId id);
 
+    /// <summary>
+    /// Current display scale (OS DPI factor, e.g. 1.5 at 150%). Element bounds
+    /// are in density-independent layout units; the bridge multiplies by this to
+    /// convert to the physical client pixels UIA reports. Read live so it tracks
+    /// the window moving between monitors of different scaling.
+    /// </summary>
+    float ContentScale { get; }
+
     // Reads from UIA. Should be safe to call from worker threads — hosts
     // either snapshot or marshal internally.
     string? GetValue(ElementId id);
