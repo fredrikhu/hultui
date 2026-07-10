@@ -186,6 +186,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return layout.Size;
     }
 
+    public IReadOnlyList<TextLineBox> LayoutTextLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    {
+        if (string.IsNullOrEmpty(text) || _pipeline is null)
+            return [];
+
+        var layout = _pipeline.Layout(text, style, maxWidth, maxLines);
+        var boxes = new TextLineBox[layout.Lines.Count];
+        for (int i = 0; i < layout.Lines.Count; i++)
+        {
+            var line = layout.Lines[i];
+            boxes[i] = new TextLineBox(line.Start, line.Length, line.OffsetY, line.Height, line.Width);
+        }
+        return boxes;
+    }
+
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)
     {
         if (color.A == 0) return;

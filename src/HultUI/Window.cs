@@ -26,6 +26,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private ScrollViewElement? _scrollbarDragTarget;
     private TextInputElement? _textInputDragTarget;
     private TextAreaElement? _textAreaDragTarget;
+    private TextElement? _textElementDragTarget;
     private bool _disposed;
 
     // ──── Overlay state ────
@@ -383,6 +384,12 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
+                if (_textElementDragTarget is not null)
+                {
+                    _textElementDragTarget.UpdateDragPosition(pos);
+                    break;
+                }
+
                 // If actively dragging (internal), update drag hover
                 if (_isDragging && !_isExternalDrag)
                 {
@@ -472,6 +479,12 @@ public sealed class Window : IOverlayHost, IDisposable
                     _textAreaDragTarget = null;
                 }
 
+                if (!button.IsDown && _textElementDragTarget is not null)
+                {
+                    _textElementDragTarget.EndDrag();
+                    _textElementDragTarget = null;
+                }
+
                 // Check overlays first, then main tree
                 var (overlayTarget, overlayOffset) = HitTestOverlays(pos);
                 var target = overlayTarget ?? HitTester.HitTest(_root, pos);
@@ -504,6 +517,8 @@ public sealed class Window : IOverlayHost, IDisposable
                             textInput.Clipboard = Clipboard;
                         else if (focusTarget is TextAreaElement textArea)
                             textArea.Clipboard = Clipboard;
+                        else if (focusTarget is TextElement selectableLabel && selectableLabel.Selectable)
+                            selectableLabel.Clipboard = Clipboard;
                     }
 
                     var downEvt = _pointerState.HandlePointerDown(target, effectiveBtnPos, button.Button, button.Modifiers);
@@ -514,9 +529,11 @@ public sealed class Window : IOverlayHost, IDisposable
                         _textInputDragTarget = dragInput;
                     else if (!isOverlayHit && button.Button == 0 && target is TextAreaElement dragArea && dragArea.IsDragging)
                         _textAreaDragTarget = dragArea;
+                    else if (!isOverlayHit && button.Button == 0 && target is TextElement dragLabel && dragLabel.IsDragging)
+                        _textElementDragTarget = dragLabel;
 
                     // Record potential drag source if the element (or ancestor) is draggable
-                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null)
+                    if (!isOverlayHit && button.Button == 0 && _textInputDragTarget is null && _textAreaDragTarget is null && _textElementDragTarget is null)
                     {
                         var draggable = FindDraggableAncestor(target);
                         if (draggable is not null)
@@ -612,6 +629,8 @@ public sealed class Window : IOverlayHost, IDisposable
                         tabFocusedInput.Clipboard = Clipboard;
                     else if (_focusManager.FocusedElement is TextAreaElement tabFocusedArea)
                         tabFocusedArea.Clipboard = Clipboard;
+                    else if (_focusManager.FocusedElement is TextElement tabFocusedLabel && tabFocusedLabel.Selectable)
+                        tabFocusedLabel.Clipboard = Clipboard;
                     break;
                 }
 

@@ -32,6 +32,17 @@ public sealed class TextLine
     public float Height => Ascent + Descent + Leading;
     public float OffsetY { get; internal set; }
 
+    /// <summary>Index of this line's first character in the original string.</summary>
+    public int Start { get; internal set; }
+
+    /// <summary>
+    /// Number of characters of the original string this line spans, including any
+    /// trailing whitespace consumed at the wrap point (but not an explicit
+    /// newline, which sits between lines). Used to map selection offsets and
+    /// pointer positions back to the source text.
+    /// </summary>
+    public int Length { get; internal set; }
+
     public TextLine(IReadOnlyList<ShapedRun> runs, float width, float ascent, float descent, float leading)
     {
         Runs = runs;

@@ -168,6 +168,46 @@ public class TextPipelineTests
         Assert.Equal("Hello", layout.Lines[0].Runs[0].Text);
     }
 
+    // ── Source character ranges (for selectable text) ──
+
+    [Fact]
+    public void SingleLine_CoversWholeString()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("Hello", DefaultStyle, 500, null);
+        Assert.Single(layout.Lines);
+        Assert.Equal(0, layout.Lines[0].Start);
+        Assert.Equal(5, layout.Lines[0].Length);
+    }
+
+    [Fact]
+    public void ExplicitNewline_LinesHaveContiguousSourceRanges()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("Line1\nLine2", DefaultStyle, 500, null);
+        Assert.Equal(2, layout.Lines.Count);
+        // First line spans "Line1"; the '\n' at index 5 sits between the lines.
+        Assert.Equal(0, layout.Lines[0].Start);
+        Assert.Equal(5, layout.Lines[0].Length);
+        Assert.Equal(6, layout.Lines[1].Start);
+        Assert.Equal(5, layout.Lines[1].Length);
+    }
+
+    [Fact]
+    public void WrappedLines_SourceRangesAreContiguous()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // Wraps into multiple lines; each line's Start should equal the previous
+        // line's Start+Length (no gap, since there is no explicit newline).
+        var layout = pipeline.Layout("aaa bbb ccc ddd", DefaultStyle, 40, null);
+        Assert.True(layout.Lines.Count >= 2);
+        for (int i = 1; i < layout.Lines.Count; i++)
+            Assert.Equal(layout.Lines[i - 1].Start + layout.Lines[i - 1].Length, layout.Lines[i].Start);
+        // The last line reaches the end of the string.
+        var last = layout.Lines[^1];
+        Assert.Equal(15, last.Start + last.Length);
+    }
+
     // ── Size ──
 
     [Fact]

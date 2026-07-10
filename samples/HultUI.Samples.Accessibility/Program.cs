@@ -60,9 +60,12 @@ partial class AccessibilityDemo : Component
             ScrollView.New().FlexGrow(1).Children(
                 Flex.Column(gap: 16).Padding(24).FlexShrink(0).Children(
                     Text.New("Accessible UI").FontSize(22f).FontWeight(FontWeight.Bold),
+                    // Selectable label: drag to select, double/triple-click,
+                    // Ctrl+C or right-click Copy. Selection is opt-in per label.
                     Text.New("Attach inspect.exe or Narrator. Every element here is exposed "
-                        + "to UI Automation and the controls below are navigable and actionable.")
-                        .FontSize(13f).TextColor(new Color(160, 160, 180)),
+                        + "to UI Automation and the controls below are navigable and actionable. "
+                        + "This paragraph is selectable — drag across it and press Ctrl+C.")
+                        .FontSize(13f).TextColor(new Color(160, 160, 180)).Selectable(),
 
                     Flex.Row(gap: 12).AlignItems(AlignItems.Center).FlexShrink(0).Children(
                         Box.New()

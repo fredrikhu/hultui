@@ -55,7 +55,7 @@ public sealed class TextPipeline
 
         if (totalWidth <= maxWidth && !text.Contains('\n'))
         {
-            return BuildSingleLineLayout(shapedRuns, totalWidth);
+            return BuildSingleLineLayout(shapedRuns, totalWidth, text.Length);
         }
 
         // Step 4: Find line break opportunities and break into lines
@@ -63,7 +63,7 @@ public sealed class TextPipeline
         return BreakIntoLines(text, shapedRuns, fontRuns, style, breakPoints, maxWidth, maxLines);
     }
 
-    private static TextLayout BuildSingleLineLayout(List<ShapedRun> runs, float totalWidth)
+    private static TextLayout BuildSingleLineLayout(List<ShapedRun> runs, float totalWidth, int textLength)
     {
         float maxAscent = 0, maxDescent = 0, maxLeading = 0;
         float x = 0;
@@ -77,7 +77,7 @@ public sealed class TextPipeline
             maxLeading = Math.Max(maxLeading, run.Font.Leading * run.FontSize);
         }
 
-        var line = new TextLine(runs, totalWidth, maxAscent, maxDescent, maxLeading);
+        var line = new TextLine(runs, totalWidth, maxAscent, maxDescent, maxLeading) { Start = 0, Length = textLength };
         return new TextLayout([line], new Size(totalWidth, line.Height));
     }
 
@@ -125,7 +125,7 @@ public sealed class TextPipeline
             {
                 // Emit current line
                 string lineText = text[textOffset..allBreaks[s - 1]];
-                lines.Add(ShapeLineText(lineText, style));
+                lines.Add(ShapeLineText(lineText, style, textOffset));
                 textOffset = segEnd;
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
@@ -143,7 +143,7 @@ public sealed class TextPipeline
             {
                 // Break here — emit line up to previous segment
                 string lineText = text[textOffset..allBreaks[s - 1]];
-                lines.Add(ShapeLineText(lineText, style));
+                lines.Add(ShapeLineText(lineText, style, textOffset));
                 textOffset = allBreaks[s - 1];
                 lineWidth = 0;
                 if (maxLines.HasValue && lines.Count >= maxLines.Value)
@@ -158,7 +158,7 @@ public sealed class TextPipeline
         {
             string lineText = text[textOffset..];
             if (lineText.Length > 0)
-                lines.Add(ShapeLineText(lineText, style));
+                lines.Add(ShapeLineText(lineText, style, textOffset));
         }
 
         // Position lines vertically
@@ -174,7 +174,7 @@ public sealed class TextPipeline
         return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
     }
 
-    private TextLine ShapeLineText(string lineText, ResolvedInheritedStyle style)
+    private TextLine ShapeLineText(string lineText, ResolvedInheritedStyle style, int start)
     {
         // Trim trailing whitespace for width calculation but keep for shaping
         var trimmed = lineText.TrimEnd();
@@ -205,6 +205,6 @@ public sealed class TextPipeline
             maxLeading = primaryFont.Leading * style.FontSize;
         }
 
-        return new TextLine(runs, width, maxAscent, maxDescent, maxLeading);
+        return new TextLine(runs, width, maxAscent, maxDescent, maxLeading) { Start = start, Length = lineText.Length };
     }
 }

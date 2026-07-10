@@ -18,6 +18,15 @@ public interface IRenderContext
     /// </summary>
     Size MeasureText(string text, ResolvedInheritedStyle style);
 
+    /// <summary>
+    /// Lays out <paramref name="text"/> into lines under the same wrapping rules
+    /// <see cref="DrawText"/> uses, and returns each line's source character range
+    /// and vertical placement. Selectable text uses this to map pointer positions
+    /// and selection offsets across wrapped lines. Returns an empty list for empty
+    /// text.
+    /// </summary>
+    IReadOnlyList<TextLineBox> LayoutTextLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines);
+
     void PushClip(Rect clipRect);
     void PushRoundedClip(Rect clipRect, CornerRadius radius);
     void PushTranslate(float x, float y);
@@ -29,6 +38,15 @@ public interface IRenderContext
     void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null);
     void EndFrame();
 }
+
+/// <summary>
+/// One laid-out line of text: its character range in the source string
+/// (<see cref="Start"/>, <see cref="Length"/>), its vertical offset from the text
+/// origin (<see cref="OffsetY"/>), and its <see cref="Height"/> and drawn
+/// <see cref="Width"/>. Line-relative x positions are recovered by measuring
+/// substrings of the source text with <see cref="IRenderContext.MeasureText"/>.
+/// </summary>
+public readonly record struct TextLineBox(int Start, int Length, float OffsetY, float Height, float Width);
 
 public interface IImageSource
 {

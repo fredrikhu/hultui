@@ -61,6 +61,10 @@ public static class ElementExtensions
     public static T TextOverflow<T>(this T el, TextOverflow overflow) where T : TextElement { el.Overflow = overflow; return el; }
     public static T MaxLines<T>(this T el, int lines) where T : TextElement { el.MaxLines = lines; return el; }
 
+    /// <summary>Lets the user select and copy this label's text with the mouse
+    /// (drag to select, double/triple-click, Ctrl+C, right-click Copy).</summary>
+    public static T Selectable<T>(this T el, bool value = true) where T : TextElement { el.Selectable = value; return el; }
+
     // ──── Image properties ────
     public static T ImageFit<T>(this T el, ImageFit fit) where T : ImageElement { el.Fit = fit; return el; }
     public static T ImageSource<T>(this T el, IImageSource source) where T : ImageElement { el.Source = source; return el; }
