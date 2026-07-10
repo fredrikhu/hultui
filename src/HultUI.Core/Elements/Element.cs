@@ -15,6 +15,13 @@ public abstract class Element
     public string? Key { get; set; }
     public string? Name { get; set; }
 
+    /// <summary>
+    /// Stable, non-localized identifier exposed to UI Automation as AutomationId.
+    /// Unlike the accessible name, it's meant for test/automation selectors
+    /// (e.g. FlaUI's <c>ByAutomationId</c>), so keep it constant across runs.
+    /// </summary>
+    public string? AutomationId { get; set; }
+
     // ──── Tree structure ────
     public Element? Parent { get; internal set; }
     private readonly List<Element> _children = [];
@@ -455,6 +462,7 @@ public abstract class Element
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;
+        AutomationId = source.AutomationId;
         // Event handlers are NOT copied. Handlers from the first Build()
         // capture references to the existing (live) elements. Copying handlers
         // from a new Build() would bring closures pointing to detached elements.

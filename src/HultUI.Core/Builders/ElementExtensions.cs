@@ -86,6 +86,7 @@ public static class ElementExtensions
     public static T AccessibleRole<T>(this T el, AccessibilityRole role) where T : Element { el.Role = role; return el; }
     public static T AccessibleName<T>(this T el, string name) where T : Element { el.AccessibleName = name; return el; }
     public static T AccessibleDescription<T>(this T el, string desc) where T : Element { el.AccessibleDescription = desc; return el; }
+    public static T AutomationId<T>(this T el, string id) where T : Element { el.AutomationId = id; return el; }
 
     // ──── Events ────
     public static T OnClick<T>(this T el, Action<ClickEvent> handler) where T : Element { el.On(handler); return el; }

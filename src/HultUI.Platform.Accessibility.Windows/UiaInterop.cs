@@ -112,6 +112,7 @@ internal static partial class UiaInterop
     // ──── UIA property IDs (a small, curated subset — add as we wire more
     //      patterns). Reference: Microsoft Docs / UIAutomationCore.h.
     public const int UIA_NamePropertyId = 30005;
+    public const int UIA_AutomationIdPropertyId = 30011;
     public const int UIA_HelpTextPropertyId = 30013;
     public const int UIA_BoundingRectanglePropertyId = 30001;
     public const int UIA_IsKeyboardFocusablePropertyId = 30009;
@@ -126,10 +127,12 @@ internal static partial class UiaInterop
     public const int UIA_CheckBoxControlTypeId = 50002;
     public const int UIA_EditControlTypeId = 50004;
     public const int UIA_GroupControlTypeId = 50026;
+    public const int UIA_HyperlinkControlTypeId = 50005;
     public const int UIA_ImageControlTypeId = 50006;
     public const int UIA_ListControlTypeId = 50008;
     public const int UIA_ListItemControlTypeId = 50007;
     public const int UIA_PaneControlTypeId = 50033;
+    public const int UIA_SliderControlTypeId = 50015;
     public const int UIA_RadioButtonControlTypeId = 50013;
     public const int UIA_ScrollBarControlTypeId = 50014;
     public const int UIA_SeparatorControlTypeId = 50038;

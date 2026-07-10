@@ -27,6 +27,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private string? _name;
     private string? _description;
     private string? _value;
+    private string? _automationId;
     private AccessibilityRole _role;
     private Rect _bounds;
     private bool _isFocusable;
@@ -53,6 +54,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _name = node.Name;
         _description = node.Description;
         _value = node.Value;
+        _automationId = node.AutomationId;
         _role = node.Role;
         _bounds = node.BoundingRect;
         _isFocusable = node.IsFocusable;
@@ -97,6 +99,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         pRetVal = propertyId switch
         {
             UiaInterop.UIA_NamePropertyId when _name is not null => UiaVariant.FromBStr(_name),
+            UiaInterop.UIA_AutomationIdPropertyId when _automationId is not null => UiaVariant.FromBStr(_automationId),
             UiaInterop.UIA_HelpTextPropertyId when _description is not null => UiaVariant.FromBStr(_description),
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(MapControlType(_role)),
             UiaInterop.UIA_IsKeyboardFocusablePropertyId => UiaVariant.FromBool(_isFocusable),
@@ -223,6 +226,16 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.Tab => UiaInterop.UIA_TabControlTypeId,
         AccessibilityRole.Separator => UiaInterop.UIA_SeparatorControlTypeId,
         AccessibilityRole.Application => UiaInterop.UIA_WindowControlTypeId,
+        AccessibilityRole.Link => UiaInterop.UIA_HyperlinkControlTypeId,
+        AccessibilityRole.Slider => UiaInterop.UIA_SliderControlTypeId,
+        // Toggle switches read as check boxes (with toggle state) to UIA.
+        AccessibilityRole.Switch => UiaInterop.UIA_CheckBoxControlTypeId,
+        // No dedicated UIA control type: headings/alerts are text, dialogs are
+        // windows, and a tab panel is a plain container.
+        AccessibilityRole.Heading => UiaInterop.UIA_TextControlTypeId,
+        AccessibilityRole.Alert => UiaInterop.UIA_TextControlTypeId,
+        AccessibilityRole.Dialog => UiaInterop.UIA_WindowControlTypeId,
+        AccessibilityRole.TabPanel => UiaInterop.UIA_PaneControlTypeId,
         _ => UiaInterop.UIA_PaneControlTypeId,
     };
 }

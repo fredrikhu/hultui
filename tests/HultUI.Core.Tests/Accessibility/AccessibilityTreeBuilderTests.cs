@@ -391,6 +391,26 @@ public class AccessibilityTreeBuilderTests
     }
 
     [Fact]
+    public void Build_PropagatesAutomationId()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+
+        var button = BoxElement.New();
+        button.AutomationId = "submit";
+        button.AccessibleName = "Submit";
+        button.On<ClickEvent>(_ => { });
+        root.AddChild(button);
+
+        Layout(root);
+
+        var tree = AccessibilityTreeBuilder.Build(root);
+        Assert.Equal("submit", tree.Children[0].AutomationId);
+    }
+
+    [Fact]
     public void Build_SetsCorrectBoundingRects()
     {
         var root = BoxElement.New();

@@ -56,7 +56,8 @@ public static class AccessibilityTreeBuilder
             isFocused: focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element),
             isEnabled: true,
             isToggled: ResolveIsToggled(element),
-            value: ResolveValue(element));
+            value: ResolveValue(element),
+            automationId: element.AutomationId);
     }
 
     private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager,

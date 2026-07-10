@@ -28,6 +28,9 @@ public sealed class AccessibilityNode
     /// </summary>
     public string? Value { get; }
 
+    /// <summary>Stable automation identifier (UIA AutomationId), for test selectors.</summary>
+    public string? AutomationId { get; }
+
     public AccessibilityNode? Parent { get; private set; }
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
@@ -50,7 +53,8 @@ public sealed class AccessibilityNode
         bool isFocused = false,
         bool isEnabled = true,
         bool? isToggled = null,
-        string? value = null)
+        string? value = null,
+        string? automationId = null)
     {
         ElementId = elementId;
         Role = role;
@@ -62,6 +66,7 @@ public sealed class AccessibilityNode
         IsEnabled = isEnabled;
         IsToggled = isToggled;
         Value = value;
+        AutomationId = automationId;
     }
 
     internal void AddChild(AccessibilityNode child)
