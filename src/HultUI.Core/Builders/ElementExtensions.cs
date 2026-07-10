@@ -79,6 +79,12 @@ public static class ElementExtensions
     // ──── Checkbox properties ────
     public static T OnCheckedChanged<T>(this T el, Action<bool> handler) where T : CheckboxElement { el.OnChanged = handler; return el; }
 
+    // ──── Slider properties ────
+    public static SliderElement Value(this SliderElement el, double value) { el.Value = value; return el; }
+    public static SliderElement Range(this SliderElement el, double min, double max) { el.Minimum = min; el.Maximum = max; return el; }
+    public static SliderElement Step(this SliderElement el, double step) { el.Step = step; return el; }
+    public static SliderElement OnValueChanged(this SliderElement el, Action<double> handler) { el.OnChanged = handler; return el; }
+
     // ──── RadioButton properties ────
     public static T OnRadioChanged<T>(this T el, Action<bool> handler) where T : RadioButtonElement { el.OnChanged = handler; return el; }
 

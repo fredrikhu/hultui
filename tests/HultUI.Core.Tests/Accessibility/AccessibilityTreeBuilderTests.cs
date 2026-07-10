@@ -29,6 +29,12 @@ public class AccessibilityTreeBuilderTests
     }
 
     [Fact]
+    public void SliderElement_InfersSliderRole()
+    {
+        Assert.Equal(AccessibilityRole.Slider, AccessibilityTreeBuilder.ResolveRole(SliderElement.New()));
+    }
+
+    [Fact]
     public void ImageElement_InfersImageRole()
     {
         var img = new ImageElement();

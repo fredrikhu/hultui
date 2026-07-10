@@ -209,6 +209,24 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         _ => 0f,        // NoAmount
     };
 
+    public bool TryGetRangeValue(ElementId id, out RangeValueInfo info)
+    {
+        info = default;
+        try
+        {
+            if (GetElementOrNull(id) is not IRangeValueElement r) return false;
+            info = new RangeValueInfo(r.Value, r.Minimum, r.Maximum, r.SmallChange, r.LargeChange, r.IsReadOnly);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    public void SetRangeValue(ElementId id, double value) => _pendingActions.Enqueue(() =>
+    {
+        if (GetElementOrNull(id) is IRangeValueElement r && !r.IsReadOnly)
+            r.SetAccessibleValue(value);
+    });
+
     public bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect)
     {
         layoutRect = default;

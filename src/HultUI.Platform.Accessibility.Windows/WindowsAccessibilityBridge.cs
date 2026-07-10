@@ -172,6 +172,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal void SetScrollPercent(ElementId id, double h, double v) => _host.SetScrollPercent(id, h, v);
     internal void ScrollByAmount(ElementId id, int h, int v) => _host.ScrollByAmount(id, h, v);
 
+    internal bool TryGetRangeValue(ElementId id, out RangeValueInfo info) => _host.TryGetRangeValue(id, out info);
+    internal void SetRangeValue(ElementId id, double value) => _host.SetRangeValue(id, value);
+
     /// <summary>Snapshot expand state of a node (null = not expandable), for ExpandCollapse.</summary>
     internal bool? GetExpanded(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Expanded : null;
 

@@ -150,6 +150,7 @@ internal static partial class UiaInterop
     public const int UIA_ValuePatternId = 10002;
     public const int UIA_ExpandCollapsePatternId = 10005;
     public const int UIA_ScrollPatternId = 10004;
+    public const int UIA_RangeValuePatternId = 10003;
 
     // ──── ScrollAmount + "no scroll" sentinel
     public const int ScrollAmount_LargeDecrement = 0;

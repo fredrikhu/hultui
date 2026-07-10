@@ -269,8 +269,11 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 - **Scroll** — scroll views and virtualized lists; read scroll percent/view size
   and programmatically scroll (`SetScrollPercent`, `Scroll` by line/page).
+- **RangeValue** — `SliderElement` (and anything implementing `IRangeValueElement`);
+  read/set the value and its bounds.
 
-Not yet wired (candidates): `RangeValue` (sliders), container-level `Selection`.
+Not yet wired (candidates): container-level `Selection` (needs a SAFEARRAY of
+providers), a UIA `ItemContainer` on virtualized lists.
 
 ## Out of scope (follow-ups)
 

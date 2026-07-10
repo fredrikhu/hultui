@@ -48,6 +48,10 @@ public interface IUiaHostBridge
     bool TryGetScrollInfo(ElementId id, out ScrollInfo info);
     void SetScrollPercent(ElementId id, double horizontalPercent, double verticalPercent);
     void ScrollByAmount(ElementId id, int horizontalAmount, int verticalAmount);
+
+    // RangeValue pattern for a slider.
+    bool TryGetRangeValue(ElementId id, out RangeValueInfo info);
+    void SetRangeValue(ElementId id, double value);
 }
 
 /// <summary>UIA ScrollPattern state for a scroll view. Percents are 0..100, or -1 (no scroll).</summary>
@@ -55,3 +59,8 @@ public readonly record struct ScrollInfo(
     double HorizontalPercent, double VerticalPercent,
     double HorizontalViewSize, double VerticalViewSize,
     bool HorizontallyScrollable, bool VerticallyScrollable);
+
+/// <summary>UIA RangeValuePattern state for a slider.</summary>
+public readonly record struct RangeValueInfo(
+    double Value, double Minimum, double Maximum,
+    double SmallChange, double LargeChange, bool IsReadOnly);

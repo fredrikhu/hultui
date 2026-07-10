@@ -97,6 +97,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaSelectionItemProvider(_bridge, ElementId),
             AccessibilityRole.TextInput when patternId == UiaInterop.UIA_ValuePatternId
                 => new UiaValueProvider(_bridge, ElementId),
+            AccessibilityRole.Slider when patternId == UiaInterop.UIA_RangeValuePatternId
+                => new UiaRangeValueProvider(_bridge, ElementId),
             // Scroll views and (scrollable) lists expose the Scroll pattern.
             (AccessibilityRole.ScrollView or AccessibilityRole.List) when patternId == UiaInterop.UIA_ScrollPatternId
                 => new UiaScrollProvider(_bridge, ElementId),

@@ -175,3 +175,25 @@ internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, Eleme
     public int GetVerticallyScrollable(out int pRetVal)
     { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) && i.VerticallyScrollable ? -1 : 0; return 0; }
 }
+
+/// <summary>
+/// RangeValue for a slider. State is read live from the element; SetValue
+/// marshals onto the UI thread. BOOL out-params use VARIANT_BOOL (-1 = true).
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaRangeValueProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeRangeValue
+{
+    public int SetValue(double value) { bridge.SetRangeValue(elementId, value); return 0; }
+    public int GetValue(out double pRetVal)
+    { pRetVal = bridge.TryGetRangeValue(elementId, out var i) ? i.Value : 0; return 0; }
+    public int GetIsReadOnly(out int pRetVal)
+    { pRetVal = bridge.TryGetRangeValue(elementId, out var i) && i.IsReadOnly ? -1 : 0; return 0; }
+    public int GetMaximum(out double pRetVal)
+    { pRetVal = bridge.TryGetRangeValue(elementId, out var i) ? i.Maximum : 0; return 0; }
+    public int GetMinimum(out double pRetVal)
+    { pRetVal = bridge.TryGetRangeValue(elementId, out var i) ? i.Minimum : 0; return 0; }
+    public int GetLargeChange(out double pRetVal)
+    { pRetVal = bridge.TryGetRangeValue(elementId, out var i) ? i.LargeChange : 0; return 0; }
+    public int GetSmallChange(out double pRetVal)
+    { pRetVal = bridge.TryGetRangeValue(elementId, out var i) ? i.SmallChange : 0; return 0; }
+}

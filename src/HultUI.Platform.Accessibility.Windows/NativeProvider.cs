@@ -58,6 +58,18 @@ internal interface INativeSelectionItem
 internal interface INativeExpandCollapse { int Expand(); int Collapse(); int GetExpandCollapseState(out int pRetVal); }
 
 [SupportedOSPlatform("windows")]
+internal interface INativeRangeValue
+{
+    int SetValue(double value);
+    int GetValue(out double pRetVal);
+    int GetIsReadOnly(out int pRetVal);
+    int GetMaximum(out double pRetVal);
+    int GetMinimum(out double pRetVal);
+    int GetLargeChange(out double pRetVal);
+    int GetSmallChange(out double pRetVal);
+}
+
+[SupportedOSPlatform("windows")]
 internal interface INativeScroll
 {
     int Scroll(int horizontalAmount, int verticalAmount);
@@ -122,6 +134,7 @@ internal static unsafe class NativeProvider
     private static readonly Guid IID_SelectionItem = new("2acad808-b2d4-452d-a407-91ff1ad167b2");
     private static readonly Guid IID_ExpandCollapse = new("d847d3a5-cab0-4a98-8c32-ecb45c59ad24");
     private static readonly Guid IID_Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a");
+    private static readonly Guid IID_RangeValue = new("36dc7aef-33e6-4691-afe1-2be7274b3d33");
 
     // Prebuilt shared vtables (one per interface), allocated once.
     private static readonly IntPtr VtSimple;
@@ -133,6 +146,7 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtSelectionItem;
     private static readonly IntPtr VtExpandCollapse;
     private static readonly IntPtr VtScroll;
+    private static readonly IntPtr VtRangeValue;
     private static readonly IntPtr VtServiceProvider;
 
     static NativeProvider()
@@ -191,6 +205,15 @@ internal static unsafe class NativeProvider
             (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&Scr_GetVViewSize,
             (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Scr_GetHScrollable,
             (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Scr_GetVScrollable);
+
+        VtRangeValue = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, double, int>)&RV_SetValue,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetValue,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&RV_GetIsReadOnly,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetMaximum,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetMinimum,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetLargeChange,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetSmallChange);
     }
 
     private static IntPtr BuildVtable(params IntPtr[] methods)
@@ -239,6 +262,7 @@ internal static unsafe class NativeProvider
         if (logic is INativeSelectionItem) { vt[n] = VtSelectionItem; iids[n] = IID_SelectionItem; n++; }
         if (logic is INativeExpandCollapse) { vt[n] = VtExpandCollapse; iids[n] = IID_ExpandCollapse; n++; }
         if (logic is INativeScroll) { vt[n] = VtScroll; iids[n] = IID_Scroll; n++; }
+        if (logic is INativeRangeValue) { vt[n] = VtRangeValue; iids[n] = IID_RangeValue; n++; }
         if (n == 0) return IntPtr.Zero;
         // Every provider also exposes IServiceProvider (see IID note) so UIA
         // caches the "no extra service" answer instead of re-QIing constantly.
@@ -403,4 +427,11 @@ internal static unsafe class NativeProvider
     [UnmanagedCallersOnly] private static int Scr_GetVViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalViewSize(out double v); *p = v; return hr; } catch { *p = 100; return 0; } }
     [UnmanagedCallersOnly] private static int Scr_GetHScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontallyScrollable(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
     [UnmanagedCallersOnly] private static int Scr_GetVScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticallyScrollable(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int RV_SetValue(IntPtr t, double val) { try { return ((INativeRangeValue)Target(t)!).SetValue(val); } catch { return 0; } }
+    [UnmanagedCallersOnly] private static int RV_GetValue(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetValue(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int RV_GetIsReadOnly(IntPtr t, int* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetIsReadOnly(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int RV_GetMaximum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMaximum(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int RV_GetMinimum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMinimum(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int RV_GetLargeChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetLargeChange(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int RV_GetSmallChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetSmallChange(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
 }

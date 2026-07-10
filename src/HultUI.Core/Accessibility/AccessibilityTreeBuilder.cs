@@ -204,6 +204,7 @@ public static class AccessibilityTreeBuilder
     {
         TextInputElement => AccessibilityRole.TextInput,
         TextAreaElement => AccessibilityRole.TextInput,
+        SliderElement => AccessibilityRole.Slider,
         CheckboxElement => AccessibilityRole.Checkbox,
         RadioButtonElement => AccessibilityRole.RadioButton,
         TextElement => AccessibilityRole.Label,
