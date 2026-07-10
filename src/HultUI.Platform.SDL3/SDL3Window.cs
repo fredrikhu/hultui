@@ -121,9 +121,15 @@ public sealed unsafe class SDL3Window : IDisposable
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_BLUE_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GLAttr.SDL_GL_ALPHA_SIZE, 8);
 
+        // Create the window hidden. Its GL back buffer is uninitialized until we
+        // render and swap the first frame; if the window were visible before then
+        // the OS would composite that garbage (a black/white flash), made worse on
+        // Windows by the custom frame's SWP_FRAMECHANGED repaint below. The app
+        // loop calls Show() right after the first frame is presented instead.
         var flags = SDL_WindowFlags.SDL_WINDOW_OPENGL
             | SDL_WindowFlags.SDL_WINDOW_RESIZABLE
-            | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY;
+            | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY
+            | SDL_WindowFlags.SDL_WINDOW_HIDDEN;
 
         // On Windows a borderless window keeps its native frame and hides the
         // title bar via a WndProc subclass (see WindowsCustomFrame) so it still
@@ -340,6 +346,20 @@ public sealed unsafe class SDL3Window : IDisposable
     {
         SDL_GL_SwapWindow(_window);
     }
+
+    /// <summary>
+    /// Reveals the window (created hidden). Call once, right after the first
+    /// frame has been rendered and swapped, so the window's first visible
+    /// composite shows real content instead of the uninitialized GL surface.
+    /// No-op on subsequent calls.
+    /// </summary>
+    public void EnsureShown()
+    {
+        if (_shown || _window == null) return;
+        _shown = true;
+        SDL_ShowWindow(_window);
+    }
+    private bool _shown;
 
     public void SetCursor(CursorType cursor)
     {

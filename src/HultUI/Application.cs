@@ -167,6 +167,10 @@ public sealed class Application : IDisposable
                 window.Performance.BeginFrame();
                 window.RenderFrame();
                 window.Performance.EndFrame();
+                // The window is created hidden; reveal it only now that its first
+                // frame has been presented, so the OS never composites the blank
+                // GL surface. No-op after the first frame.
+                window.PlatformWindow.EnsureShown();
                 anyRendered = true;
             }
 
