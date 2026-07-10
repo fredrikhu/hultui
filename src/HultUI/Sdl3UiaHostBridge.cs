@@ -136,13 +136,41 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 
     public bool GetItemSelected(ElementId listId, int index)
     {
-        try { return GetElementOrNull(listId) is IAccessibleItemSource s && s.SelectedIndex == index; }
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s && s.IsItemSelected(index); }
         catch { return false; }
     }
 
     public int GetSelectedIndex(ElementId listId)
     {
         try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.SelectedIndex : -1; }
+        catch { return -1; }
+    }
+
+    public bool GetCanSelectMultiple(ElementId listId)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s && s.CanSelectMultiple; }
+        catch { return false; }
+    }
+
+    public IReadOnlyList<int> GetSelectedIndices(ElementId listId)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.SelectedIndices : []; }
+        catch { return []; }
+    }
+
+    public void SelectItemOnly(ElementId listId, int index) => _pendingActions.Enqueue(() =>
+    {
+        if (GetElementOrNull(listId) is IAccessibleItemSource s) s.SelectOnly(index);
+    });
+
+    public void SetItemSelected(ElementId listId, int index, bool selected) => _pendingActions.Enqueue(() =>
+    {
+        if (GetElementOrNull(listId) is IAccessibleItemSource s) s.SetItemSelected(index, selected);
+    });
+
+    public int FindItemIndex(ElementId listId, int startAfter, AccessibleItemQuery query)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.FindItem(startAfter, query) : -1; }
         catch { return -1; }
     }
 

@@ -194,6 +194,66 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     /// <summary>The list's selected item index (-1 for none), for the Selection pattern.</summary>
     internal int GetSelectedIndex(ElementId listId) => _host.GetSelectedIndex(listId);
 
+    /// <summary>All selected item indices of a list, ascending, for container Selection.</summary>
+    internal IReadOnlyList<int> GetSelectedIndices(ElementId listId) => _host.GetSelectedIndices(listId);
+
+    /// <summary>Whether a list allows multi-selection, for container Selection.</summary>
+    internal bool GetCanSelectMultiple(ElementId listId) => _host.GetCanSelectMultiple(listId);
+
+    /// <summary>
+    /// Resolves an item provider's element id to its owning list and index — for
+    /// both virtualized items (encoded ids) and eager list-item nodes (real nodes
+    /// whose parent is a List). Returns false for anything that isn't a list item
+    /// (e.g. a radio button, which shares the SelectionItem provider).
+    /// </summary>
+    private bool TryResolveItem(ElementId itemId, out ElementId listId, out int index)
+    {
+        if (VirtualItemId.TryDecode(itemId, out listId, out index))
+            return true;
+        if (_wrappers.TryGetValue(itemId, out var w) && w.Node.Parent is { } parent
+            && parent.Role == AccessibilityRole.List)
+        {
+            var kids = parent.Children;
+            for (int i = 0; i < kids.Count; i++)
+                if (kids[i].ElementId == itemId) { listId = parent.ElementId; index = i; return true; }
+        }
+        listId = default;
+        index = -1;
+        return false;
+    }
+
+    /// <summary>SelectionItem.Select on a list item — sole selection. False if not a list item.</summary>
+    internal bool TrySelectItemOnly(ElementId itemId)
+    {
+        if (!TryResolveItem(itemId, out var listId, out var index)) return false;
+        _host.SelectItemOnly(listId, index);
+        return true;
+    }
+
+    /// <summary>SelectionItem.AddToSelection/RemoveFromSelection on a list item. False if not one.</summary>
+    internal bool TrySetItemSelected(ElementId itemId, bool selected)
+    {
+        if (!TryResolveItem(itemId, out var listId, out var index)) return false;
+        _host.SetItemSelected(listId, index, selected);
+        return true;
+    }
+
+    /// <summary>Whether a list item is selected; false (not handled) if it isn't a list item.</summary>
+    internal bool TryGetItemSelected(ElementId itemId, out bool selected)
+    {
+        if (TryResolveItem(itemId, out var listId, out var index))
+        {
+            selected = _host.GetItemSelected(listId, index);
+            return true;
+        }
+        selected = false;
+        return false;
+    }
+
+    /// <summary>The selection container (owning list, as Simple) of a list item, or null.</summary>
+    internal IntPtr ItemSelectionContainer(ElementId itemId)
+        => TryResolveItem(itemId, out var listId, out _) ? NativeFragmentSimple(listId) : IntPtr.Zero;
+
     /// <summary>
     /// Resolves an <c>ItemContainer.FindItemByProperty</c> <c>pStartAfter</c>
     /// provider back to its item index within <paramref name="listId"/>, or -1
@@ -219,34 +279,38 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     }
 
     /// <summary>
-    /// Finds the first item after <paramref name="startIndex"/> whose property
-    /// matches and returns its provider (AddRef'd Simple), or null. Reads item
-    /// data through the host without realizing UIA nodes, so a client can jump
-    /// straight to a match in a huge list instead of walking every sibling.
-    /// A property id of 0 matches any item (used to enumerate).
+    /// Finds the first item after <paramref name="startIndex"/> matching a UIA
+    /// property (Name / IsSelected, or 0 for any) and returns its provider
+    /// (AddRef'd Simple), or null. The lookup itself runs in the item source (via
+    /// the host), so a source with an index can skip the linear scan — either way
+    /// only the matched item is realized as a provider, never the whole list.
     /// </summary>
     internal IntPtr FindItemByProperty(ElementId listId, int startIndex, int propertyId, string? value)
     {
-        int count = _host.GetItemCount(listId);
-        for (int i = Math.Max(startIndex + 1, 0); i < count; i++)
+        AccessibleItemQuery query;
+        switch (propertyId)
         {
-            bool match = propertyId switch
-            {
-                0 => true,
-                UiaInterop.UIA_NamePropertyId => value is not null && _host.GetItemLabel(listId, i) == value,
-                UiaInterop.UIA_SelectionItemIsSelectedPropertyId => _host.GetItemSelected(listId, i),
-                _ => false,
-            };
-            if (match) return ItemSimpleProvider(listId, i);
+            case 0:
+                query = new AccessibleItemQuery(AccessibleItemProperty.Any);
+                break;
+            case UiaInterop.UIA_NamePropertyId:
+                if (value is null) return IntPtr.Zero;
+                query = new AccessibleItemQuery(AccessibleItemProperty.Name, value);
+                break;
+            case UiaInterop.UIA_SelectionItemIsSelectedPropertyId:
+                query = new AccessibleItemQuery(AccessibleItemProperty.Selected);
+                break;
+            default:
+                return IntPtr.Zero; // unsupported property — no match
         }
-        return IntPtr.Zero;
+        int idx = _host.FindItemIndex(listId, startIndex, query);
+        return idx >= 0 ? ItemSimpleProvider(listId, idx) : IntPtr.Zero;
     }
 
     internal int GetVirtualItemCount(ElementId listId) => _host.GetItemCount(listId);
 
     internal string? GetVirtualItemLabel(ElementId listId, int index) => _host.GetItemLabel(listId, index);
 
-    internal bool GetVirtualItemSelected(ElementId listId, int index) => _host.GetItemSelected(listId, index);
 
     internal bool GetVirtualItemOffscreen(ElementId listId, int index) => _host.GetItemOffscreen(listId, index);
 

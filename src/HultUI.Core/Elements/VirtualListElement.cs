@@ -35,14 +35,64 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// <summary>
     /// Index of the selected item (-1 for none), surfaced to assistive tech as the
     /// UIA selection. Set it to keep the a11y selection in sync with your own.
+    /// In multi-select mode (see <see cref="CanSelectMultiple"/>) the selection is
+    /// tracked as a set instead — see <see cref="SelectedIndices"/>.
     /// </summary>
     public int SelectedIndex { get; set; } = -1;
+
+    /// <summary>
+    /// When true, the list manages a set of selected indices that assistive tech
+    /// can extend via UIA <c>SelectionItem.AddToSelection</c> — surfaced to the
+    /// container's Selection pattern as a multi-item selection.
+    /// </summary>
+    public bool CanSelectMultiple { get; set; }
+
+    private readonly HashSet<int> _multiSelected = [];
+
+    /// <summary>The current multi-selection, ascending (empty in single-select mode).</summary>
+    public IReadOnlyList<int> SelectedIndices => _multiSelected.Order().ToArray();
+
+    /// <summary>Raised after the multi-selection changes (via assistive tech or code).</summary>
+    public Action<IReadOnlyList<int>>? OnSelectionChanged { get; set; }
+
+    private void NotifySelectionChanged()
+    {
+        MarkPaintDirty();
+        OnSelectionChanged?.Invoke(SelectedIndices);
+    }
 
     // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
     //    virtualization hasn't materialized as elements. ──
     int IAccessibleItemSource.ItemCount => _items.Count;
     float IAccessibleItemSource.ItemHeight => _itemHeight;
     int IAccessibleItemSource.SelectedIndex => SelectedIndex;
+    bool IAccessibleItemSource.CanSelectMultiple => CanSelectMultiple;
+
+    IReadOnlyList<int> IAccessibleItemSource.SelectedIndices =>
+        CanSelectMultiple ? SelectedIndices
+                          : (SelectedIndex >= 0 ? new[] { SelectedIndex } : []);
+
+    bool IAccessibleItemSource.IsItemSelected(int index) =>
+        CanSelectMultiple ? _multiSelected.Contains(index) : index == SelectedIndex;
+
+    void IAccessibleItemSource.SelectOnly(int index)
+    {
+        if (!CanSelectMultiple)
+        {
+            ((IAccessibleItemSource)this).ActivateItem(index);
+            return;
+        }
+        _multiSelected.Clear();
+        if (index >= 0 && index < _items.Count) _multiSelected.Add(index);
+        NotifySelectionChanged();
+    }
+
+    void IAccessibleItemSource.SetItemSelected(int index, bool selected)
+    {
+        if (!CanSelectMultiple || index < 0 || index >= _items.Count) return;
+        bool changed = selected ? _multiSelected.Add(index) : _multiSelected.Remove(index);
+        if (changed) NotifySelectionChanged();
+    }
 
     string? IAccessibleItemSource.GetItemLabel(int index)
     {
@@ -320,6 +370,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             SelectedIndex = vl.SelectedIndex;
             OnItemActivate = vl.OnItemActivate;
             AccessibleLabel = vl.AccessibleLabel;
+            CanSelectMultiple = vl.CanSelectMultiple;
+            OnSelectionChanged = vl.OnSelectionChanged;
+            // The live multi-selection lives on the mounted instance (it's mutated
+            // by AT, not rebuilt), so only adopt the rebuilt set when it carries one.
+            if (vl._multiSelected.Count > 0)
+            {
+                _multiSelected.Clear();
+                foreach (var i in vl._multiSelected) _multiSelected.Add(i);
+            }
 
             // Only update items if reference changed
             if (!ReferenceEquals(_items, vl._items))

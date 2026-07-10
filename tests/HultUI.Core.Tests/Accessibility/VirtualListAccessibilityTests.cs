@@ -177,6 +177,86 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
+    public void VirtualList_MultiSelect_AddsRemovesAndReportsSelection()
+    {
+        var list = MakeList(10);
+        list.CanSelectMultiple = true;
+        var src = (IAccessibleItemSource)list;
+        Assert.True(src.CanSelectMultiple);
+
+        src.SetItemSelected(2, true);
+        src.SetItemSelected(5, true);
+        Assert.Equal(new[] { 2, 5 }, src.SelectedIndices);
+        Assert.True(src.IsItemSelected(2));
+        Assert.False(src.IsItemSelected(3));
+
+        src.SetItemSelected(2, false);
+        Assert.Equal(new[] { 5 }, src.SelectedIndices);
+
+        // SelectOnly replaces the whole set.
+        src.SelectOnly(8);
+        Assert.Equal(new[] { 8 }, src.SelectedIndices);
+    }
+
+    [Fact]
+    public void VirtualList_MultiSelect_FiresOnSelectionChanged()
+    {
+        var list = MakeList(10);
+        list.CanSelectMultiple = true;
+        IReadOnlyList<int>? last = null;
+        list.OnSelectionChanged = s => last = s;
+
+        ((IAccessibleItemSource)list).SetItemSelected(3, true);
+
+        Assert.Equal(new[] { 3 }, last);
+    }
+
+    [Fact]
+    public void VirtualList_SingleSelect_SelectOnlyActivates()
+    {
+        // Without multi-select, SelectionItem.Select routes to activation — the
+        // app owns the selection via its activate handler.
+        var list = MakeList(10);
+        string? activated = null;
+        list.OnItemActivate = s => activated = s;
+
+        ((IAccessibleItemSource)list).SelectOnly(4);
+
+        Assert.Equal("row 4", activated);
+        Assert.False(((IAccessibleItemSource)list).CanSelectMultiple);
+    }
+
+    [Fact]
+    public void VirtualList_PatchFrom_CarriesMultiSelectMode()
+    {
+        var mounted = MakeList(10);
+        mounted.CanSelectMultiple = true;
+        ((IAccessibleItemSource)mounted).SetItemSelected(1, true);
+
+        // A re-render with no live selection must not wipe the mounted set.
+        var rebuilt = MakeList(10);
+        rebuilt.CanSelectMultiple = true;
+        mounted.PatchFrom(rebuilt);
+
+        Assert.True(((IAccessibleItemSource)mounted).CanSelectMultiple);
+        Assert.Equal(new[] { 1 }, ((IAccessibleItemSource)mounted).SelectedIndices);
+    }
+
+    [Fact]
+    public void VirtualList_FindItem_MatchesByNameAndSelection()
+    {
+        var list = MakeList(10);
+        var src = (IAccessibleItemSource)list;
+
+        Assert.Equal(3, src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Name, "row 3")));
+        Assert.Equal(-1, src.FindItem(3, new AccessibleItemQuery(AccessibleItemProperty.Name, "row 3"))); // exclusive start
+        Assert.Equal(0, src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Any)));
+
+        list.SelectedIndex = 6;
+        Assert.Equal(6, src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Selected)));
+    }
+
+    [Fact]
     public void VirtualList_ActivateItem_InvokesHandlerWithItem()
     {
         var list = MakeList(10);
@@ -195,6 +275,57 @@ public class VirtualListAccessibilityTests
         ((IAccessibleItemSource)list).ActivateItem(99);
         ((IAccessibleItemSource)list).ActivateItem(-1);
         Assert.Equal(0, calls);
+    }
+
+    // Minimal source that leaves every optional member on its default — exercises
+    // the interface's default single-select + linear-scan implementations.
+    private sealed class StubSource(int count, int selected = -1) : IAccessibleItemSource
+    {
+        public int ItemCount => count;
+        public float ItemHeight => 10f;
+        public int SelectedIndex => selected;
+        public string? GetItemLabel(int index) => $"item {index}";
+        public void ActivateItem(int index) { }
+    }
+
+    // Source with its own index — overrides FindItem to skip the scan entirely.
+    private sealed class IndexedSource(int count, int findResult) : IAccessibleItemSource
+    {
+        public int ItemCount => count;
+        public float ItemHeight => 10f;
+        public int SelectedIndex => -1;
+        public string? GetItemLabel(int index) => $"item {index}";
+        public void ActivateItem(int index) { }
+        public int FindItem(int startAfter, AccessibleItemQuery query) => findResult;
+    }
+
+    [Fact]
+    public void IAccessibleItemSource_Defaults_AreSingleSelect()
+    {
+        IAccessibleItemSource src = new StubSource(5, selected: 2);
+        Assert.False(src.CanSelectMultiple);
+        Assert.Equal(new[] { 2 }, src.SelectedIndices);
+        Assert.True(src.IsItemSelected(2));
+        Assert.False(src.IsItemSelected(0));
+        Assert.Equal(2, src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Selected)));
+        Assert.Equal(3, src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Name, "item 3")));
+    }
+
+    [Fact]
+    public void IAccessibleItemSource_NoSelection_ReportsEmpty()
+    {
+        IAccessibleItemSource src = new StubSource(5);
+        Assert.Empty(src.SelectedIndices);
+        Assert.Equal(-1, src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Selected)));
+    }
+
+    [Fact]
+    public void IAccessibleItemSource_FindItem_OverrideIsHonored()
+    {
+        // A source with its own index can answer without the linear scan.
+        IAccessibleItemSource src = new IndexedSource(1_000_000, findResult: 999_999);
+        Assert.Equal(999_999,
+            src.FindItem(-1, new AccessibleItemQuery(AccessibleItemProperty.Name, "item 999999")));
     }
 
     [Fact]

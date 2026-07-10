@@ -1,3 +1,4 @@
+using System.Linq;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -119,6 +120,42 @@ public sealed class AccessibilitySampleTests : IDisposable
         Retry.WhileFalse(
             () => Find("expander").Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value == ExpandCollapseState.Collapsed,
             timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "did not collapse");
+    }
+
+    [Fact]
+    public void MultiSelectList_ExposesContainerAndPerItemSelection()
+    {
+        var list = Find("toppings");
+        var selection = list.Patterns.Selection.Pattern;
+        Assert.True(selection.CanSelectMultiple.Value);
+        Assert.Empty(selection.Selection.Value);
+
+        Find("toppings").FindFirstChild(cf => cf.ByName("Cheese"))!
+            .Patterns.SelectionItem.Pattern.AddToSelection();
+        Find("toppings").FindFirstChild(cf => cf.ByName("Olives"))!
+            .Patterns.SelectionItem.Pattern.AddToSelection();
+
+        Retry.WhileFalse(
+            () => Find("toppings").Patterns.Selection.Pattern.Selection.Value.Length == 2,
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true,
+            timeoutMessage: "container selection did not reflect two selected items");
+
+        var names = Find("toppings").Patterns.Selection.Pattern.Selection.Value
+            .Select(e => e.Name).OrderBy(n => n).ToArray();
+        Assert.Equal(new[] { "Cheese", "Olives" }, names);
+
+        // Removing one drops it from the container selection too.
+        Find("toppings").FindFirstChild(cf => cf.ByName("Cheese"))!
+            .Patterns.SelectionItem.Pattern.RemoveFromSelection();
+
+        Retry.WhileFalse(
+            () =>
+            {
+                var sel = Find("toppings").Patterns.Selection.Pattern.Selection.Value;
+                return sel.Length == 1 && sel[0].Name == "Olives";
+            },
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true,
+            timeoutMessage: "removing an item did not update the container selection");
     }
 
     public void Dispose()

@@ -108,12 +108,29 @@ partial class AccessibilityDemo : Component
                             : Box.New()
                     ),
 
+                    // Multi-select list — exposes the container Selection pattern
+                    // (CanSelectMultiple) and per-item add/remove selection.
+                    Text.New("Toppings (multi-select)").FontSize(15f).FontWeight(FontWeight.SemiBold),
+                    BuildToppingsList(),
+
                     Text.New(RowCount == 0 ? "Loading commits…" : "Commits")
                         .FontSize(15f).FontWeight(FontWeight.SemiBold),
                     BuildCommitList()
                 )
             )
         );
+    }
+
+    private Element BuildToppingsList()
+    {
+        var toppings = new[] { "Cheese", "Mushrooms", "Olives", "Onions", "Peppers" };
+        var list = VirtualListElement<string>.New()
+            .ItemHeight(28)
+            .Items(toppings)
+            .RenderWith(t => Text.New(t).FontSize(13f).FlexShrink(0))
+            .CanSelectMultiple();
+        list.AutomationId = "toppings";
+        return list.Height(Dimension.Px(28 * toppings.Length)).FlexShrink(0);
     }
 
     private Element BuildCommitList()

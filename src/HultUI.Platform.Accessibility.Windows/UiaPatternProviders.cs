@@ -69,26 +69,34 @@ internal sealed class UiaValueProvider(WindowsAccessibilityBridge bridge, Elemen
 internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
     : INativeSelectionItem
 {
+    // This provider serves both list items (virtualized and eager) and radio
+    // buttons. The bridge resolves list items to (list, index) — for anything it
+    // doesn't recognize as a list item, we fall back to the radio-button path.
+
     public int Select()
     {
-        bridge.SelectElement(elementId);
+        if (!bridge.TrySelectItemOnly(elementId)) bridge.SelectElement(elementId);
         return 0;
     }
 
     public int AddToSelection()
     {
-        bridge.SelectElement(elementId);
+        if (!bridge.TrySetItemSelected(elementId, true)) bridge.SelectElement(elementId);
         return 0;
     }
 
-    public int RemoveFromSelection() => 0; // single-select: can't be deselected this way
+    public int RemoveFromSelection()
+    {
+        bridge.TrySetItemSelected(elementId, false); // no-op for radios / single-select
+        return 0;
+    }
 
     public int GetIsSelected(out int pRetVal)
     {
-        // A list item is selected when it's the list's selected index; a radio
-        // button is selected when it's checked.
-        bool selected = VirtualItemId.TryDecode(elementId, out var listId, out var index)
-            ? bridge.GetVirtualItemSelected(listId, index)
+        // A list item's selection comes from its source; a radio is selected when
+        // it's checked.
+        bool selected = bridge.TryGetItemSelected(elementId, out bool s)
+            ? s
             : bridge.GetToggleState(elementId) == true;
         pRetVal = selected ? -1 : 0; // VARIANT_BOOL
         return 0;
@@ -97,33 +105,44 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
     public int GetSelectionContainer(out IntPtr pRetVal)
     {
         // A list item's selection container is its list; a radio's is implicit.
-        pRetVal = VirtualItemId.TryDecode(elementId, out var listId, out _)
-            ? bridge.NativeFragmentSimple(listId)
-            : IntPtr.Zero;
+        pRetVal = bridge.ItemSelectionContainer(elementId);
         return 0;
     }
 }
 
 /// <summary>
-/// Container-level Selection for a list. Reports the currently selected item as a
-/// one-element array (empty when nothing is selected); single-select today, so it
-/// advertises neither multi-select nor a required selection. Complements the
-/// per-item <see cref="UiaSelectionItemProvider"/>.
+/// Container-level Selection for a list. Reports every selected item as an array
+/// (empty when nothing is selected) and advertises whether the list is
+/// multi-select. Complements the per-item <see cref="UiaSelectionItemProvider"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class UiaSelectionProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeSelection
 {
     public int GetSelection(out IntPtr pRetVal)
     {
-        int sel = bridge.GetSelectedIndex(elementId);
-        IntPtr item = sel >= 0 ? bridge.ItemSimpleProvider(elementId, sel) : IntPtr.Zero;
-        pRetVal = item == IntPtr.Zero
-            ? UiaInterop.BuildProviderArray(ReadOnlySpan<IntPtr>.Empty)
-            : UiaInterop.BuildProviderArray(stackalloc IntPtr[] { item });
+        var indices = bridge.GetSelectedIndices(elementId);
+        if (indices.Count == 0)
+        {
+            pRetVal = UiaInterop.BuildProviderArray(ReadOnlySpan<IntPtr>.Empty);
+            return 0;
+        }
+
+        // Materialize a provider per selected item; skip any that don't resolve so
+        // the array never carries null slots (UIA would Release them).
+        Span<IntPtr> providers = indices.Count <= 16 ? stackalloc IntPtr[indices.Count] : new IntPtr[indices.Count];
+        int n = 0;
+        for (int i = 0; i < indices.Count; i++)
+        {
+            IntPtr p = bridge.ItemSimpleProvider(elementId, indices[i]);
+            if (p != IntPtr.Zero) providers[n++] = p;
+        }
+        pRetVal = UiaInterop.BuildProviderArray(providers[..n]);
         return 0;
     }
 
-    public int GetCanSelectMultiple(out int pRetVal) { pRetVal = 0; return 0; }
+    public int GetCanSelectMultiple(out int pRetVal)
+    { pRetVal = bridge.GetCanSelectMultiple(elementId) ? -1 : 0; return 0; }
+
     public int GetIsSelectionRequired(out int pRetVal) { pRetVal = 0; return 0; }
 }
 

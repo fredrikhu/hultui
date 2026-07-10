@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 
@@ -42,6 +43,16 @@ public interface IUiaHostBridge
     bool GetItemSelected(ElementId listId, int index);
     /// <summary>The list's selected item index, or -1 (for the Selection pattern).</summary>
     int GetSelectedIndex(ElementId listId);
+    /// <summary>Whether the list allows selecting more than one item at once.</summary>
+    bool GetCanSelectMultiple(ElementId listId);
+    /// <summary>All selected item indices, ascending (for the container Selection pattern).</summary>
+    IReadOnlyList<int> GetSelectedIndices(ElementId listId);
+    /// <summary>Makes <paramref name="index"/> the sole selection (SelectionItem.Select).</summary>
+    void SelectItemOnly(ElementId listId, int index);
+    /// <summary>Adds/removes <paramref name="index"/> from a multi-selection.</summary>
+    void SetItemSelected(ElementId listId, int index, bool selected);
+    /// <summary>Finds an item by property without realizing all items (ItemContainer), or -1.</summary>
+    int FindItemIndex(ElementId listId, int startAfter, AccessibleItemQuery query);
     bool GetItemOffscreen(ElementId listId, int index);
     /// <summary>The item's on-screen rect in layout units (scroll-adjusted like a node's bounds).</summary>
     bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect);
