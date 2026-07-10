@@ -136,3 +136,42 @@ internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridg
         return 0;
     }
 }
+
+/// <summary>
+/// Scroll pattern for a scroll view / virtualized list. State is read live from
+/// the element; Scroll and SetScrollPercent marshal onto the UI thread. The
+/// BOOL out-params use VARIANT_BOOL (-1 = true).
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaScrollProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeScroll
+{
+    public int Scroll(int horizontalAmount, int verticalAmount)
+    {
+        bridge.ScrollByAmount(elementId, horizontalAmount, verticalAmount);
+        return 0;
+    }
+
+    public int SetScrollPercent(double horizontalPercent, double verticalPercent)
+    {
+        bridge.SetScrollPercent(elementId, horizontalPercent, verticalPercent);
+        return 0;
+    }
+
+    public int GetHorizontalScrollPercent(out double pRetVal)
+    { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) ? i.HorizontalPercent : -1; return 0; }
+
+    public int GetVerticalScrollPercent(out double pRetVal)
+    { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) ? i.VerticalPercent : -1; return 0; }
+
+    public int GetHorizontalViewSize(out double pRetVal)
+    { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) ? i.HorizontalViewSize : 100; return 0; }
+
+    public int GetVerticalViewSize(out double pRetVal)
+    { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) ? i.VerticalViewSize : 100; return 0; }
+
+    public int GetHorizontallyScrollable(out int pRetVal)
+    { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) && i.HorizontallyScrollable ? -1 : 0; return 0; }
+
+    public int GetVerticallyScrollable(out int pRetVal)
+    { pRetVal = bridge.TryGetScrollInfo(elementId, out var i) && i.VerticallyScrollable ? -1 : 0; return 0; }
+}

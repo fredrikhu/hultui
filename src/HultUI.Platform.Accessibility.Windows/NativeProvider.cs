@@ -57,6 +57,19 @@ internal interface INativeSelectionItem
 [SupportedOSPlatform("windows")]
 internal interface INativeExpandCollapse { int Expand(); int Collapse(); int GetExpandCollapseState(out int pRetVal); }
 
+[SupportedOSPlatform("windows")]
+internal interface INativeScroll
+{
+    int Scroll(int horizontalAmount, int verticalAmount);
+    int SetScrollPercent(double horizontalPercent, double verticalPercent);
+    int GetHorizontalScrollPercent(out double pRetVal);
+    int GetVerticalScrollPercent(out double pRetVal);
+    int GetHorizontalViewSize(out double pRetVal);
+    int GetVerticalViewSize(out double pRetVal);
+    int GetHorizontallyScrollable(out int pRetVal);
+    int GetVerticallyScrollable(out int pRetVal);
+}
+
 /// <summary>
 /// Wraps a managed provider logic object in a genuine native COM object —
 /// unmanaged memory holding one tear-off per supported interface, each with a
@@ -108,6 +121,7 @@ internal static unsafe class NativeProvider
     private static readonly Guid IID_Value = new("c7935180-6fb3-4201-b174-7df73adbf64a");
     private static readonly Guid IID_SelectionItem = new("2acad808-b2d4-452d-a407-91ff1ad167b2");
     private static readonly Guid IID_ExpandCollapse = new("d847d3a5-cab0-4a98-8c32-ecb45c59ad24");
+    private static readonly Guid IID_Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a");
 
     // Prebuilt shared vtables (one per interface), allocated once.
     private static readonly IntPtr VtSimple;
@@ -118,6 +132,7 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtValue;
     private static readonly IntPtr VtSelectionItem;
     private static readonly IntPtr VtExpandCollapse;
+    private static readonly IntPtr VtScroll;
     private static readonly IntPtr VtServiceProvider;
 
     static NativeProvider()
@@ -166,6 +181,16 @@ internal static unsafe class NativeProvider
             (IntPtr)(delegate* unmanaged<IntPtr, int>)&EC_Expand,
             (IntPtr)(delegate* unmanaged<IntPtr, int>)&EC_Collapse,
             (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&EC_GetState);
+
+        VtScroll = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, int, int, int>)&Scr_Scroll,
+            (IntPtr)(delegate* unmanaged<IntPtr, double, double, int>)&Scr_SetScrollPercent,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&Scr_GetHPercent,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&Scr_GetVPercent,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&Scr_GetHViewSize,
+            (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&Scr_GetVViewSize,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Scr_GetHScrollable,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Scr_GetVScrollable);
     }
 
     private static IntPtr BuildVtable(params IntPtr[] methods)
@@ -213,6 +238,7 @@ internal static unsafe class NativeProvider
         if (logic is INativeValue) { vt[n] = VtValue; iids[n] = IID_Value; n++; }
         if (logic is INativeSelectionItem) { vt[n] = VtSelectionItem; iids[n] = IID_SelectionItem; n++; }
         if (logic is INativeExpandCollapse) { vt[n] = VtExpandCollapse; iids[n] = IID_ExpandCollapse; n++; }
+        if (logic is INativeScroll) { vt[n] = VtScroll; iids[n] = IID_Scroll; n++; }
         if (n == 0) return IntPtr.Zero;
         // Every provider also exposes IServiceProvider (see IID note) so UIA
         // caches the "no extra service" answer instead of re-QIing constantly.
@@ -369,4 +395,12 @@ internal static unsafe class NativeProvider
     [UnmanagedCallersOnly] private static int EC_Expand(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Expand(); } catch { return 0; } }
     [UnmanagedCallersOnly] private static int EC_Collapse(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Collapse(); } catch { return 0; } }
     [UnmanagedCallersOnly] private static int EC_GetState(IntPtr t, int* p) { try { int hr = ((INativeExpandCollapse)Target(t)!).GetExpandCollapseState(out int v); *p = v; return hr; } catch { *p = 3; return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_Scroll(IntPtr t, int h, int v) { try { return ((INativeScroll)Target(t)!).Scroll(h, v); } catch { return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_SetScrollPercent(IntPtr t, double h, double v) { try { return ((INativeScroll)Target(t)!).SetScrollPercent(h, v); } catch { return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_GetHPercent(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontalScrollPercent(out double v); *p = v; return hr; } catch { *p = -1; return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_GetVPercent(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalScrollPercent(out double v); *p = v; return hr; } catch { *p = -1; return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_GetHViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontalViewSize(out double v); *p = v; return hr; } catch { *p = 100; return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_GetVViewSize(IntPtr t, double* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticalViewSize(out double v); *p = v; return hr; } catch { *p = 100; return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_GetHScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetHorizontallyScrollable(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int Scr_GetVScrollable(IntPtr t, int* p) { try { int hr = ((INativeScroll)Target(t)!).GetVerticallyScrollable(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
 }

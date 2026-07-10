@@ -43,4 +43,15 @@ public interface IUiaHostBridge
     bool GetItemOffscreen(ElementId listId, int index);
     /// <summary>The item's on-screen rect in layout units (scroll-adjusted like a node's bounds).</summary>
     bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect);
+
+    // Scroll pattern for a scroll view / virtualized list.
+    bool TryGetScrollInfo(ElementId id, out ScrollInfo info);
+    void SetScrollPercent(ElementId id, double horizontalPercent, double verticalPercent);
+    void ScrollByAmount(ElementId id, int horizontalAmount, int verticalAmount);
 }
+
+/// <summary>UIA ScrollPattern state for a scroll view. Percents are 0..100, or -1 (no scroll).</summary>
+public readonly record struct ScrollInfo(
+    double HorizontalPercent, double VerticalPercent,
+    double HorizontalViewSize, double VerticalViewSize,
+    bool HorizontallyScrollable, bool VerticallyScrollable);

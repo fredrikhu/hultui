@@ -267,9 +267,10 @@ Elements expose these to UIA today (property/pattern → how to opt in):
   Expand/Collapse reuse the element's click-to-toggle.
 - **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
   from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
+- **Scroll** — scroll views and virtualized lists; read scroll percent/view size
+  and programmatically scroll (`SetScrollPercent`, `Scroll` by line/page).
 
-Not yet wired (candidates): `Scroll` (on scroll views), `RangeValue` (sliders),
-container-level `Selection`.
+Not yet wired (candidates): `RangeValue` (sliders), container-level `Selection`.
 
 ## Out of scope (follow-ups)
 

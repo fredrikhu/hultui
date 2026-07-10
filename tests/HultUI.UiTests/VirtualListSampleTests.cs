@@ -69,6 +69,25 @@ public sealed class VirtualListSampleTests : IDisposable
         Assert.True(last!.Properties.IsOffscreen.Value);
     }
 
+    [Fact]
+    public void List_SupportsScrollPattern()
+    {
+        var list = List();
+        var scroll = list.Patterns.Scroll.Pattern;
+        Assert.True(scroll.VerticallyScrollable.Value);
+        Assert.InRange(scroll.VerticalScrollPercent.Value, -0.01, 1.0); // starts at the top
+
+        scroll.SetScrollPercent(-1 /* keep horizontal */, 50.0);
+
+        Retry.WhileFalse(
+            () => list.Patterns.Scroll.Pattern.VerticalScrollPercent.Value > 40,
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true,
+            timeoutMessage: "vertical scroll percent did not update");
+
+        // After scrolling halfway, the very first item is far above the viewport.
+        Assert.True(list.FindFirstChild()!.Properties.IsOffscreen.Value);
+    }
+
     public void Dispose()
     {
         _automation.Dispose();

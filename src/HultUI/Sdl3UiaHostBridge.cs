@@ -156,6 +156,59 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         catch { return true; }
     }
 
+    public bool TryGetScrollInfo(ElementId id, out ScrollInfo info)
+    {
+        info = default;
+        try
+        {
+            if (GetElementOrNull(id) is not ScrollViewElement sv) return false;
+            var vp = sv.Layout.AbsoluteContentBox;
+            double maxY = Math.Max(0, sv.ContentHeight - vp.Height);
+            double maxX = Math.Max(0, sv.ContentWidth - vp.Width);
+            double vPercent = maxY > 0 ? sv.ScrollOffsetY / maxY * 100 : UiaNoScroll;
+            double hPercent = maxX > 0 ? sv.ScrollOffsetX / maxX * 100 : UiaNoScroll;
+            double vView = sv.ContentHeight > 0 ? Math.Min(100, vp.Height / sv.ContentHeight * 100) : 100;
+            double hView = sv.ContentWidth > 0 ? Math.Min(100, vp.Width / sv.ContentWidth * 100) : 100;
+            info = new ScrollInfo(hPercent, vPercent, hView, vView, maxX > 0, maxY > 0);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private const double UiaNoScroll = -1.0;
+
+    public void SetScrollPercent(ElementId id, double horizontalPercent, double verticalPercent) =>
+        _pendingActions.Enqueue(() =>
+        {
+            if (GetElementOrNull(id) is not ScrollViewElement sv) return;
+            var vp = sv.Layout.AbsoluteContentBox;
+            if (verticalPercent >= 0)
+                sv.ScrollOffsetY = (float)(verticalPercent / 100 * Math.Max(0, sv.ContentHeight - vp.Height));
+            if (horizontalPercent >= 0)
+                sv.ScrollOffsetX = (float)(horizontalPercent / 100 * Math.Max(0, sv.ContentWidth - vp.Width));
+            sv.MarkPaintDirty();
+        });
+
+    public void ScrollByAmount(ElementId id, int horizontalAmount, int verticalAmount) =>
+        _pendingActions.Enqueue(() =>
+        {
+            if (GetElementOrNull(id) is not ScrollViewElement sv) return;
+            var vp = sv.Layout.AbsoluteContentBox;
+            sv.ScrollOffsetY += AmountToDelta(verticalAmount, vp.Height);
+            sv.ScrollOffsetX += AmountToDelta(horizontalAmount, vp.Width);
+            sv.MarkPaintDirty();
+        });
+
+    // A line is a fixed step; a page is the viewport extent.
+    private static float AmountToDelta(int scrollAmount, float viewport) => scrollAmount switch
+    {
+        0 => -viewport, // LargeDecrement
+        1 => -40f,      // SmallDecrement
+        3 => viewport,  // LargeIncrement
+        4 => 40f,       // SmallIncrement
+        _ => 0f,        // NoAmount
+    };
+
     public bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect)
     {
         layoutRect = default;
