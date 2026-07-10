@@ -4,6 +4,7 @@ namespace HultUI.UiTests;
 internal static class SamplePath
 {
     public static string Accessibility() => Resolve("HultUI.Samples.Accessibility");
+    public static string VirtualList() => Resolve("HultUI.Samples.VirtualList");
 
     private static string Resolve(string sample)
     {

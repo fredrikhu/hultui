@@ -138,6 +138,7 @@ public partial class CommitList : Component
                         BisectLabel))
                     .AccessibleItemLabel(c => $"{c.Subject}, by {c.AuthorName}, {c.ShortHash}")
                     .OnActivateItem(c => SelectCommit(c.Hash))
+                    .SelectedIndex(selected is null ? -1 : filtered.FindIndex(c => c.Hash == selected))
                     .FlexGrow(1)
                     .WithRef(_virtualListRef)
         );

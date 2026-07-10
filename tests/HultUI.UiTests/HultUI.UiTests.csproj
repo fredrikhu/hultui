@@ -23,8 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Build the sample so its exe exists; don't reference its assembly. -->
+    <!-- Build the samples so their exes exist; don't reference their assemblies. -->
     <ProjectReference Include="..\..\samples\HultUI.Samples.Accessibility\HultUI.Samples.Accessibility.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\HultUI.Samples.VirtualList\HultUI.Samples.VirtualList.csproj"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 

@@ -21,8 +21,12 @@ var virtualList = VirtualListElement<ItemData>.New()
     // 100k items — exercises the on-demand accessibility path (items exposed to a
     // screen reader without materializing them all).
     .AccessibleItemLabel(item => item.Label)
-    .OnActivateItem(item => selectedText.Content = $"Selected {item.Label}")
     .FlexGrow(1);
+virtualList.OnItemActivate = item =>
+{
+    virtualList.SelectedIndex = item.Index;
+    selectedText.Content = $"Selected {item.Label}";
+};
 
 var root = Flex.Column(gap: 0).Children(
 
