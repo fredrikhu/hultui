@@ -38,6 +38,7 @@ partial class AccessibilityDemo : Component
     [Reactive] public partial bool Checked { get; set; }
     [Reactive] public partial int RowCount { get; set; }
     [Reactive] public partial bool DetailsExpanded { get; set; }
+    [Reactive] public partial double Volume { get; set; }
 
     public AccessibilityDemo(Window window) => _window = window;
 
@@ -81,6 +82,15 @@ partial class AccessibilityDemo : Component
 
                     TextInput.New().AutomationId("name-input")
                         .PlaceholderText("Type your name").Width(Dimension.Px(240)),
+
+                    // Slider — exposes the RangeValue pattern.
+                    Flex.Row(gap: 12).AlignItems(AlignItems.Center).FlexShrink(0).Children(
+                        Text.New("Volume").FontSize(13f),
+                        Slider.New(Volume, 0, 100).AutomationId("volume").AccessibleName("Volume")
+                            .Width(Dimension.Px(200)).OnValueChanged(v => Volume = v),
+                        Text.New($"{Volume:0}").AutomationId("volume-value").FontSize(13f)
+                            .TextColor(new Color(160, 160, 180))
+                    ),
 
                     // Expandable tree item — exposes the ExpandCollapse pattern.
                     Flex.Column(gap: 4).FlexShrink(0).Children(

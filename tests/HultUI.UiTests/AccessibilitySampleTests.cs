@@ -83,6 +83,27 @@ public sealed class AccessibilitySampleTests : IDisposable
     }
 
     [Fact]
+    public void Slider_ExposesRangeValueAndSetValueWorks()
+    {
+        var slider = Find("volume");
+        Assert.Equal(ControlType.Slider, slider.ControlType);
+
+        var range = slider.Patterns.RangeValue.Pattern;
+        Assert.Equal(0.0, range.Value.Value, 0.5);
+        Assert.Equal(100.0, range.Maximum.Value, 0.5);
+        Assert.Equal(0.0, range.Minimum.Value, 0.5);
+
+        range.SetValue(75);
+
+        Retry.WhileFalse(
+            () => Math.Abs(Find("volume").Patterns.RangeValue.Pattern.Value.Value - 75) < 0.5,
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "slider value did not update");
+        Retry.WhileFalse(
+            () => Find("volume-value").Name == "75",
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "displayed value did not update");
+    }
+
+    [Fact]
     public void Expander_ReportsAndTogglesExpandCollapseState()
     {
         var expander = Find("expander");
