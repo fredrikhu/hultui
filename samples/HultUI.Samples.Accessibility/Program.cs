@@ -63,18 +63,22 @@ partial class AccessibilityDemo : Component
 
                     Flex.Row(gap: 12).AlignItems(AlignItems.Center).FlexShrink(0).Children(
                         Box.New()
+                            .AutomationId("click-me")
                             .Padding(new Thickness(8, 18, 8, 18))
                             .Background(new Color(99, 102, 241))
                             .CornerRadius(6f)
                             .Cursor(CursorType.Pointer)
                             .OnClick(_ => ClickCount++)
                             .Children(Text.New("Click Me").FontSize(13f).FontWeight(FontWeight.SemiBold)),
-                        Text.New($"Clicked {count} time(s)").FontSize(13f).TextColor(new Color(160, 160, 180))
+                        Text.New($"Clicked {count} time(s)").AutomationId("click-count")
+                            .FontSize(13f).TextColor(new Color(160, 160, 180))
                     ),
 
-                    Checkbox.New(Checked, "Enable the thing").OnCheckedChanged(v => Checked = v),
+                    Checkbox.New(Checked, "Enable the thing").AutomationId("enable-thing")
+                        .OnCheckedChanged(v => Checked = v),
 
-                    TextInput.New().PlaceholderText("Type your name").Width(Dimension.Px(240)),
+                    TextInput.New().AutomationId("name-input")
+                        .PlaceholderText("Type your name").Width(Dimension.Px(240)),
 
                     Text.New(RowCount == 0 ? "Loading commits…" : "Commits")
                         .FontSize(15f).FontWeight(FontWeight.SemiBold),
