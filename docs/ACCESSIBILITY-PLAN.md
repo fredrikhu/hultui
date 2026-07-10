@@ -226,6 +226,24 @@ Files:
   - Linux: run a sample, open `accerciser`, verify tree. Run `orca` and
     alt-tab in — it should announce the window title and focused control.
 
+## Virtualized lists
+
+A `VirtualListElement` only materializes on-screen rows as elements, so the a11y
+tree would otherwise expose just those. `IAccessibleItemSource` (implemented by
+the list) lets the tree builder expose every item as a `ListItem` node under a
+`List` container, with labels from item data (`AccessibleItemLabel`) and
+scroll-adjusted positions — so assistive tech can read/navigate the whole list.
+Incremental plan toward large lists:
+
+- **Increment 1 (done):** eager exposure of all items, capped at
+  `AccessibilityTreeBuilder.MaxEagerVirtualItems` (larger lists degrade to their
+  realized rows). Read & navigate only. Covers e.g. a few-hundred-commit history.
+- **Increment 2:** activation — route an AT `Invoke`/`Select` on a `ListItem`
+  back to the list (`ActivateItem(index)`) so off-screen items can be opened.
+- **Increment 3:** on-demand item provisioning (UIA `ItemContainer` /
+  `VirtualizedItem`, or a lazy provider) so very large lists don't build every
+  node eagerly or re-emit every bounds change on scroll. Lifts the cap.
+
 ## Out of scope (follow-ups)
 
 - `ITextProvider` for rich text-pattern navigation (UIA).
@@ -234,6 +252,7 @@ Files:
 - UIA `LiveRegion` / AT-SPI live regions.
 - Accessibility for overlays, tooltips, context menus.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
+- List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 
 ## Pick-up checklist
 

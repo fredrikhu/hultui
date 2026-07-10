@@ -8,6 +8,15 @@ namespace HultUI.Core.Accessibility;
 public static class AccessibilityTreeBuilder
 {
     /// <summary>
+    /// Upper bound on how many items a virtualized list expands into individual
+    /// accessibility nodes. The whole a11y tree is rebuilt on scroll, so eagerly
+    /// materializing every item only scales to lists of moderate size (this covers
+    /// e.g. a git history of a few hundred commits). Larger lists degrade to
+    /// exposing just their realized rows until on-demand item provisioning lands.
+    /// </summary>
+    internal const int MaxEagerVirtualItems = 2000;
+
+    /// <summary>
     /// Builds an accessibility tree from the element tree rooted at the given element.
     /// Decorative containers (BoxElements with no role, name, or semantic children) are
     /// flattened — their children are promoted to the parent accessibility node.
@@ -18,7 +27,8 @@ public static class AccessibilityTreeBuilder
     {
         var node = CreateNode(root, focusManager, 0f, 0f);
         var (cx, cy) = ChildScroll(root, 0f, 0f);
-        BuildChildren(root, node, focusManager, cx, cy);
+        if (!TryBuildVirtualItems(root, node, cx, cy))
+            BuildChildren(root, node, focusManager, cx, cy);
         return node;
     }
 
@@ -60,11 +70,11 @@ public static class AccessibilityTreeBuilder
             {
                 var childNode = CreateNode(child, focusManager, scrollX, scrollY);
                 parent.AddChild(childNode);
-                // A text-only button (or other name-from-content role) folds its
-                // text into its own accessible name; don't also expose that text
-                // as child nodes — that matches native controls and stops a
-                // screen reader announcing the label twice.
-                if (!ConsumesTextContent(child))
+                // A virtualized list only materializes on-screen rows as elements;
+                // expose every item to assistive tech instead. Otherwise, unless a
+                // text-only button folded its text into its own name (which would
+                // double-announce), walk the real children.
+                if (!TryBuildVirtualItems(child, childNode, cx, cy) && !ConsumesTextContent(child))
                     BuildChildren(child, childNode, focusManager, cx, cy);
             }
             else
@@ -74,6 +84,61 @@ public static class AccessibilityTreeBuilder
             }
         }
     }
+
+    /// <summary>
+    /// If the element is a virtualized list small enough to expand eagerly, emits
+    /// its item nodes and returns true; otherwise returns false so the caller
+    /// falls back to walking realized children.
+    /// </summary>
+    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, float scrollX, float scrollY)
+    {
+        if (element is IAccessibleItemSource source && source.ItemCount <= MaxEagerVirtualItems)
+        {
+            BuildVirtualItems(element, source, node, scrollX, scrollY);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Emits one <see cref="AccessibilityRole.ListItem"/> node per item of a
+    /// virtualized list — including the off-screen items the list hasn't realized
+    /// as elements. Item positions are derived from the fixed item height and the
+    /// list's content box, scroll-adjusted like any other node so bounds and
+    /// hit-testing stay correct as the list scrolls.
+    /// </summary>
+    private static void BuildVirtualItems(Element list, IAccessibleItemSource source,
+        AccessibilityNode listNode, float scrollX, float scrollY)
+    {
+        int count = source.ItemCount;
+        if (count == 0) return;
+
+        float itemHeight = source.ItemHeight;
+        var content = list.Layout.AbsoluteContentBox;
+        for (int i = 0; i < count; i++)
+        {
+            float top = content.Y + i * itemHeight;
+            var rect = new Rect(content.X - scrollX, top - scrollY, content.Width, itemHeight);
+            listNode.AddChild(new AccessibilityNode(
+                VirtualItemId(list.Id, i),
+                AccessibilityRole.ListItem,
+                source.GetItemLabel(i),
+                description: null,
+                rect,
+                isFocusable: false,
+                isFocused: false,
+                isEnabled: true,
+                isToggled: null,
+                value: null));
+        }
+    }
+
+    // Virtual items have no backing element, so they need stable synthetic ids.
+    // Real ids come from a small incrementing counter (well under 2^63); marking
+    // the top bit keeps synthetic ids from ever colliding with them, and packing
+    // (listId, index) keeps each item's id stable across rebuilds and scrolls.
+    private static ElementId VirtualItemId(ElementId listId, int index)
+        => new((1UL << 63) | ((listId.Value & 0x7FFF_FFFFUL) << 32) | (uint)index);
 
     /// <summary>
     /// Determines whether an element is semantically meaningful in the accessibility tree.
@@ -115,6 +180,9 @@ public static class AccessibilityTreeBuilder
         RadioButtonElement => AccessibilityRole.RadioButton,
         TextElement => AccessibilityRole.Label,
         ImageElement => AccessibilityRole.Image,
+        // Checked before ScrollViewElement: a virtualized list derives from it but
+        // is semantically a list of items.
+        IAccessibleItemSource => AccessibilityRole.List,
         ScrollViewElement => AccessibilityRole.ScrollView,
         CanvasElement => AccessibilityRole.Group,
         BoxElement box when box.HasEventHandler<ClickEvent>() => AccessibilityRole.Button,

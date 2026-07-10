@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -10,11 +11,30 @@ namespace HultUI.Core.Elements;
 /// Uses a fixed item height for efficient offset calculation and element recycling.
 /// Extends ScrollViewElement to reuse scroll rendering, hit testing, and scrollbar UI.
 /// </summary>
-public sealed class VirtualListElement<T> : ScrollViewElement
+public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSource
 {
     private IReadOnlyList<T> _items = [];
     private float _itemHeight = 40f;
     private Func<T, Element>? _itemTemplate;
+
+    /// <summary>
+    /// Optional accessible label for an item, used by assistive tech to name each
+    /// row. Should read cheaply from item data — it may be called for every item.
+    /// Falls back to <c>item?.ToString()</c> when unset.
+    /// </summary>
+    public Func<T, string?>? AccessibleLabel { get; set; }
+
+    // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
+    //    virtualization hasn't materialized as elements. ──
+    int IAccessibleItemSource.ItemCount => _items.Count;
+    float IAccessibleItemSource.ItemHeight => _itemHeight;
+
+    string? IAccessibleItemSource.GetItemLabel(int index)
+    {
+        if (index < 0 || index >= _items.Count) return null;
+        var item = _items[index];
+        return AccessibleLabel is not null ? AccessibleLabel(item) : item?.ToString();
+    }
 
     // Visible range tracking
     private int _visibleStart = -1;

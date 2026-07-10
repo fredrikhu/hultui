@@ -200,6 +200,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.TextInput => UiaInterop.UIA_EditControlTypeId,
         AccessibilityRole.Label => UiaInterop.UIA_TextControlTypeId,
         AccessibilityRole.Image => UiaInterop.UIA_ImageControlTypeId,
+        AccessibilityRole.List => UiaInterop.UIA_ListControlTypeId,
+        AccessibilityRole.ListItem => UiaInterop.UIA_ListItemControlTypeId,
         AccessibilityRole.ScrollView => UiaInterop.UIA_PaneControlTypeId,
         AccessibilityRole.Group => UiaInterop.UIA_GroupControlTypeId,
         AccessibilityRole.Tab => UiaInterop.UIA_TabControlTypeId,
