@@ -118,6 +118,7 @@ internal static partial class UiaInterop
     public const int UIA_IsKeyboardFocusablePropertyId = 30009;
     public const int UIA_HasKeyboardFocusPropertyId = 30008;
     public const int UIA_IsEnabledPropertyId = 30010;
+    public const int UIA_IsOffscreenPropertyId = 30022;
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_ValueValuePropertyId = 30045;
     public const int UIA_ToggleToggleStatePropertyId = 30086;

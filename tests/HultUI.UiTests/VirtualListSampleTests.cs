@@ -56,6 +56,19 @@ public sealed class VirtualListSampleTests : IDisposable
             timeoutMessage: "item did not become selected after Select()");
     }
 
+    [Fact]
+    public void ListItems_ReportOffscreenState()
+    {
+        var list = List();
+        var first = list.FindFirstChild();
+        Assert.False(first!.Properties.IsOffscreen.Value); // top item is visible
+
+        // The last of 100k items is far below the viewport — reached instantly.
+        var last = _automation.TreeWalkerFactory.GetRawViewWalker().GetLastChild(list);
+        Assert.NotNull(last);
+        Assert.True(last!.Properties.IsOffscreen.Value);
+    }
+
     public void Dispose()
     {
         _automation.Dispose();

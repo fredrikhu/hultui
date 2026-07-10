@@ -53,6 +53,7 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
                 => UiaVariant.FromBStr(name),
             UiaInterop.UIA_ControlTypePropertyId => UiaVariant.FromInt(UiaInterop.UIA_ListItemControlTypeId),
             UiaInterop.UIA_IsEnabledPropertyId => UiaVariant.FromBool(true),
+            UiaInterop.UIA_IsOffscreenPropertyId => UiaVariant.FromBool(bridge.GetVirtualItemOffscreen(listId, index)),
             _ => UiaVariant.Empty,
         };
         return 0;

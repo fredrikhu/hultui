@@ -28,9 +28,31 @@ public static class AccessibilityTreeBuilder
     {
         var node = CreateNode(root, focusManager, 0f, 0f);
         var (cx, cy) = ChildScroll(root, 0f, 0f);
-        if (!TryBuildVirtualItems(root, node, cx, cy))
-            BuildChildren(root, node, focusManager, cx, cy);
+        // The root is the top-level visible region; descendants clipped out of it
+        // (and out of any scroll view along the way) are marked offscreen.
+        var childClip = ClipForChildren(root, node.BoundingRect, 0f, 0f);
+        if (!TryBuildVirtualItems(root, node, cx, cy, childClip))
+            BuildChildren(root, node, focusManager, cx, cy, childClip);
         return node;
+    }
+
+    private static bool RectsIntersect(Rect a, Rect b) =>
+        a.X < b.Right && b.X < a.Right && a.Y < b.Bottom && b.Y < a.Bottom;
+
+    private static Rect IntersectRects(Rect a, Rect b)
+    {
+        float x = Math.Max(a.X, b.X), y = Math.Max(a.Y, b.Y);
+        float right = Math.Min(a.Right, b.Right), bottom = Math.Min(a.Bottom, b.Bottom);
+        return new Rect(x, y, Math.Max(0, right - x), Math.Max(0, bottom - y));
+    }
+
+    /// <summary>The visible region for an element's children: its own clip, narrowed
+    /// to the scroll-view viewport if this element scrolls.</summary>
+    private static Rect ClipForChildren(Element element, Rect clip, float scrollX, float scrollY)
+    {
+        if (element is not ScrollViewElement) return clip;
+        var cb = element.Layout.AbsoluteContentBox;
+        return IntersectRects(clip, new Rect(cb.X - scrollX, cb.Y - scrollY, cb.Width, cb.Height));
     }
 
     // Element AbsoluteBorderBox is laid out ignoring scroll — a ScrollView shifts
@@ -62,28 +84,30 @@ public static class AccessibilityTreeBuilder
     }
 
     private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager,
-        float scrollX, float scrollY)
+        float scrollX, float scrollY, Rect clip)
     {
         foreach (var child in element.Children)
         {
             // The child's own box sits in the parent's scroll space; its own
             // scroll (if it's a ScrollView) applies to its descendants.
             var (cx, cy) = ChildScroll(child, scrollX, scrollY);
+            var childClip = ClipForChildren(child, clip, scrollX, scrollY);
             if (IsSemantic(child))
             {
                 var childNode = CreateNode(child, focusManager, scrollX, scrollY);
+                childNode.IsOffscreen = !RectsIntersect(clip, childNode.BoundingRect);
                 parent.AddChild(childNode);
                 // A virtualized list only materializes on-screen rows as elements;
                 // expose every item to assistive tech instead. Otherwise, unless a
                 // text-only button folded its text into its own name (which would
                 // double-announce), walk the real children.
-                if (!TryBuildVirtualItems(child, childNode, cx, cy) && !ConsumesTextContent(child))
-                    BuildChildren(child, childNode, focusManager, cx, cy);
+                if (!TryBuildVirtualItems(child, childNode, cx, cy, childClip) && !ConsumesTextContent(child))
+                    BuildChildren(child, childNode, focusManager, cx, cy, childClip);
             }
             else
             {
                 // Flatten: promote this element's children directly into parent
-                BuildChildren(child, parent, focusManager, cx, cy);
+                BuildChildren(child, parent, focusManager, cx, cy, childClip);
             }
         }
     }
@@ -93,13 +117,13 @@ public static class AccessibilityTreeBuilder
     /// its item nodes and returns true; otherwise returns false so the caller
     /// falls back to walking realized children.
     /// </summary>
-    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, float scrollX, float scrollY)
+    private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, float scrollX, float scrollY, Rect clip)
     {
         if (element is not IAccessibleItemSource source) return false;
         if (source.ItemCount <= MaxEagerVirtualItems)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).
-            BuildVirtualItems(element, source, node, scrollX, scrollY);
+            BuildVirtualItems(element, source, node, scrollX, scrollY, clip);
         else
             // Too large to expand eagerly: mark it so the bridge provisions items
             // on demand by index instead of building/diffing them all.
@@ -115,7 +139,7 @@ public static class AccessibilityTreeBuilder
     /// hit-testing stay correct as the list scrolls.
     /// </summary>
     private static void BuildVirtualItems(Element list, IAccessibleItemSource source,
-        AccessibilityNode listNode, float scrollX, float scrollY)
+        AccessibilityNode listNode, float scrollX, float scrollY, Rect clip)
     {
         int count = source.ItemCount;
         if (count == 0) return;
@@ -136,7 +160,10 @@ public static class AccessibilityTreeBuilder
                 isFocused: false,
                 isEnabled: true,
                 isToggled: null,
-                value: null));
+                value: null)
+            {
+                IsOffscreen = !RectsIntersect(clip, rect),
+            });
         }
     }
 

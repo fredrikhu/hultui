@@ -40,6 +40,7 @@ public interface IUiaHostBridge
     int GetItemCount(ElementId listId);
     string? GetItemLabel(ElementId listId, int index);
     bool GetItemSelected(ElementId listId, int index);
+    bool GetItemOffscreen(ElementId listId, int index);
     /// <summary>The item's on-screen rect in layout units (scroll-adjusted like a node's bounds).</summary>
     bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect);
 }

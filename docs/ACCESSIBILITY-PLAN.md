@@ -265,9 +265,11 @@ Elements expose these to UIA today (property/pattern → how to opt in):
 - **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
 - **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
   Expand/Collapse reuse the element's click-to-toggle.
+- **IsOffscreen** — nodes (and virtual items) clipped out of the visible viewport,
+  from the scroll-adjusted bounds vs. the window ∩ ancestor scroll viewports.
 
-Not yet wired (candidates): `IsOffscreen`, `Scroll` (on scroll views),
-`RangeValue` (sliders), container-level `Selection`.
+Not yet wired (candidates): `Scroll` (on scroll views), `RangeValue` (sliders),
+container-level `Selection`.
 
 ## Out of scope (follow-ups)
 

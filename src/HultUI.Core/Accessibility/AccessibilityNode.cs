@@ -34,6 +34,9 @@ public sealed class AccessibilityNode
     /// <summary>Expanded state for an expandable node, or null if not expandable.</summary>
     public bool? Expanded { get; }
 
+    /// <summary>True when the node is scrolled/clipped out of the visible viewport.</summary>
+    public bool IsOffscreen { get; internal set; }
+
     public AccessibilityNode? Parent { get; private set; }
     public IReadOnlyList<AccessibilityNode> Children => _children;
 

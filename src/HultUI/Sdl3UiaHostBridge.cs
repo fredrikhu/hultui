@@ -140,6 +140,22 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         catch { return false; }
     }
 
+    public bool GetItemOffscreen(ElementId listId, int index)
+    {
+        try
+        {
+            if (GetElementOrNull(listId) is not ScrollViewElement sv || sv is not IAccessibleItemSource src)
+                return true;
+            if (index < 0 || index >= src.ItemCount) return true;
+            // The item is offscreen when it sits above or below the list's own
+            // viewport (its dominant clip), given the current scroll.
+            float itemTop = index * src.ItemHeight - sv.ScrollOffsetY;
+            float viewportHeight = sv.Layout.AbsoluteContentBox.Height;
+            return itemTop + src.ItemHeight <= 0f || itemTop >= viewportHeight;
+        }
+        catch { return true; }
+    }
+
     public bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect)
     {
         layoutRect = default;

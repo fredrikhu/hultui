@@ -411,6 +411,32 @@ public class AccessibilityTreeBuilderTests
     }
 
     [Fact]
+    public void Build_ChildBelowScrollViewport_IsOffscreen()
+    {
+        var scroll = ScrollViewElement.New();
+        scroll.Box.Width = 200;
+        scroll.Box.Height = 100; // viewport shows only the first 100px
+
+        var a = BoxElement.New();
+        a.AccessibleName = "a";
+        a.Box.Width = 200;
+        a.Box.Height = 100;
+        var b = BoxElement.New();
+        b.AccessibleName = "b";
+        b.Box.Width = 200;
+        b.Box.Height = 100; // stacks below the viewport
+
+        scroll.AddChild(a);
+        scroll.AddChild(b);
+        _layout.PerformLayout(scroll, 200, 100);
+        scroll.UpdateContentSize();
+
+        var tree = AccessibilityTreeBuilder.Build(scroll);
+        Assert.False(FindByName(tree, "a")!.IsOffscreen);
+        Assert.True(FindByName(tree, "b")!.IsOffscreen);
+    }
+
+    [Fact]
     public void Build_PropagatesExpandedState()
     {
         var root = BoxElement.New();

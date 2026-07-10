@@ -75,6 +75,15 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
+    public void VirtualList_ItemsBeyondViewport_AreOffscreen()
+    {
+        // viewport 100, itemHeight 20 → ~5 visible; the rest are offscreen.
+        var tree = BuildLaidOut(MakeList(100));
+        Assert.False(tree.Children[0].IsOffscreen);
+        Assert.True(tree.Children[50].IsOffscreen);
+    }
+
+    [Fact]
     public void VirtualList_Scroll_ShiftsItemBounds()
     {
         var list = MakeList(100);
