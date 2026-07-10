@@ -160,6 +160,88 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         return fragment;
     }
 
+    /// <summary>
+    /// A freshly built IRawElementProviderSimple* for a virtualized list item —
+    /// the Simple-tear-off sibling of <see cref="NativeVirtualItem"/>, used where
+    /// UIA wants an item as a plain provider (selection container membership,
+    /// ItemContainer results). The returned pointer carries one reference.
+    /// </summary>
+    internal IntPtr NativeVirtualItemSimple(ElementId listId, int index)
+    {
+        IntPtr primary = NativeProvider.Create(new UiaVirtualItem(this, listId, index));
+        if (primary == IntPtr.Zero) return IntPtr.Zero;
+        IntPtr simple = NativeProvider.Tearoff(primary, NativeProvider.As.Simple);
+        Marshal.Release(primary); // hand the caller the simple tear-off's single reference
+        return simple;
+    }
+
+    /// <summary>
+    /// The IRawElementProviderSimple* (AddRef'd) for item <paramref name="index"/>
+    /// of a list — the same provider UIA navigation would yield, so its runtime id
+    /// matches. A lazy list returns an on-demand virtual item; an eager list
+    /// returns its real child node (returning a virtual item there would mint a
+    /// different runtime id and break UIA identity). Null when out of range.
+    /// </summary>
+    internal IntPtr ItemSimpleProvider(ElementId listId, int index)
+    {
+        if (index < 0 || !_wrappers.TryGetValue(listId, out var w)) return IntPtr.Zero;
+        var node = w.Node; // immutable per-frame snapshot
+        if (node.IsVirtualItemContainer)
+            return index < _host.GetItemCount(listId) ? NativeVirtualItemSimple(listId, index) : IntPtr.Zero;
+        return index < node.Children.Count ? NativeFragmentSimple(node.Children[index].ElementId) : IntPtr.Zero;
+    }
+
+    /// <summary>The list's selected item index (-1 for none), for the Selection pattern.</summary>
+    internal int GetSelectedIndex(ElementId listId) => _host.GetSelectedIndex(listId);
+
+    /// <summary>
+    /// Resolves an <c>ItemContainer.FindItemByProperty</c> <c>pStartAfter</c>
+    /// provider back to its item index within <paramref name="listId"/>, or -1
+    /// (search from the start) for null or an unrecognized provider.
+    /// </summary>
+    internal int DecodeItemIndex(ElementId listId, IntPtr startAfter)
+    {
+        switch (NativeProvider.LogicOf(startAfter))
+        {
+            case UiaVirtualItem vi when vi.ListId == listId:
+                return vi.Index;
+            case UiaFragment f:
+                if (_wrappers.TryGetValue(listId, out var w))
+                {
+                    var kids = w.Node.Children;
+                    for (int i = 0; i < kids.Count; i++)
+                        if (kids[i].ElementId == f.ElementId) return i;
+                }
+                return -1;
+            default:
+                return -1;
+        }
+    }
+
+    /// <summary>
+    /// Finds the first item after <paramref name="startIndex"/> whose property
+    /// matches and returns its provider (AddRef'd Simple), or null. Reads item
+    /// data through the host without realizing UIA nodes, so a client can jump
+    /// straight to a match in a huge list instead of walking every sibling.
+    /// A property id of 0 matches any item (used to enumerate).
+    /// </summary>
+    internal IntPtr FindItemByProperty(ElementId listId, int startIndex, int propertyId, string? value)
+    {
+        int count = _host.GetItemCount(listId);
+        for (int i = Math.Max(startIndex + 1, 0); i < count; i++)
+        {
+            bool match = propertyId switch
+            {
+                0 => true,
+                UiaInterop.UIA_NamePropertyId => value is not null && _host.GetItemLabel(listId, i) == value,
+                UiaInterop.UIA_SelectionItemIsSelectedPropertyId => _host.GetItemSelected(listId, i),
+                _ => false,
+            };
+            if (match) return ItemSimpleProvider(listId, i);
+        }
+        return IntPtr.Zero;
+    }
+
     internal int GetVirtualItemCount(ElementId listId) => _host.GetItemCount(listId);
 
     internal string? GetVirtualItemLabel(ElementId listId, int index) => _host.GetItemLabel(listId, index);

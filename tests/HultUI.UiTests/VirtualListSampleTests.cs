@@ -88,6 +88,38 @@ public sealed class VirtualListSampleTests : IDisposable
         Assert.True(list.FindFirstChild()!.Properties.IsOffscreen.Value);
     }
 
+    [Fact]
+    public void List_ExposesContainerSelection()
+    {
+        var selection = List().Patterns.Selection.Pattern;
+        Assert.False(selection.CanSelectMultiple.Value);
+        Assert.Empty(selection.Selection.Value); // nothing selected initially
+
+        List().FindFirstChild()!.Patterns.SelectionItem.Pattern.Select();
+
+        Retry.WhileFalse(
+            () =>
+            {
+                var sel = List().Patterns.Selection.Pattern.Selection.Value;
+                return sel.Length == 1 && sel[0].Name == "Item #0";
+            },
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true,
+            timeoutMessage: "container selection did not reflect the selected item");
+    }
+
+    [Fact]
+    public void List_FindsItemByName_WithoutWalking()
+    {
+        // The container locates a deep item straight from its data — no walking
+        // 42 siblings — and returns exactly that element.
+        var found = List().Patterns.ItemContainer.Pattern.FindItemByProperty(
+            null, _automation.PropertyLibrary.Element.Name, "Item #42");
+
+        Assert.NotNull(found);
+        Assert.Equal("Item #42", found!.Name);
+        Assert.Equal(ControlType.ListItem, found.ControlType);
+    }
+
     public void Dispose()
     {
         _automation.Dispose();

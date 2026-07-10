@@ -102,6 +102,28 @@ internal static partial class UiaInterop
     /// <summary>Sentinel first element of a runtime id — UIA prepends the HWND prefix.</summary>
     public const int UiaAppendRuntimeId = 3;
 
+    /// <summary>
+    /// Builds a SAFEARRAY of <c>IRawElementProviderSimple*</c> (VT_UNKNOWN) from
+    /// the given provider pointers — used by <c>ISelectionProvider.GetSelection</c>.
+    /// Each pointer's reference is transferred into the array (we write the slots
+    /// directly rather than via SafeArrayPutElement, which would AddRef); UIA
+    /// Releases every element when it frees the array. Pass an empty span for an
+    /// empty selection — that returns a valid zero-length array, not null.
+    /// </summary>
+    public static IntPtr BuildProviderArray(ReadOnlySpan<IntPtr> providers)
+    {
+        const ushort VT_UNKNOWN = 13;
+        IntPtr psa = SafeArrayCreateVector(VT_UNKNOWN, 0, (uint)providers.Length);
+        if (psa == IntPtr.Zero || providers.Length == 0)
+            return psa;
+        if (SafeArrayAccessData(psa, out IntPtr data) != 0)
+            return psa; // array exists but couldn't be filled — still valid to return
+        for (int i = 0; i < providers.Length; i++)
+            Marshal.WriteIntPtr(data, i * IntPtr.Size, providers[i]);
+        SafeArrayUnaccessData(psa);
+        return psa;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct PointNative
     {
@@ -122,6 +144,7 @@ internal static partial class UiaInterop
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_ValueValuePropertyId = 30045;
     public const int UIA_ToggleToggleStatePropertyId = 30086;
+    public const int UIA_SelectionItemIsSelectedPropertyId = 30079;
 
     // ──── UIA control-type IDs
     public const int UIA_ButtonControlTypeId = 50000;
@@ -145,12 +168,14 @@ internal static partial class UiaInterop
 
     // ──── UIA pattern IDs
     public const int UIA_InvokePatternId = 10000;
+    public const int UIA_SelectionPatternId = 10001;
     public const int UIA_SelectionItemPatternId = 10010;
     public const int UIA_TogglePatternId = 10015;
     public const int UIA_ValuePatternId = 10002;
     public const int UIA_ExpandCollapsePatternId = 10005;
     public const int UIA_ScrollPatternId = 10004;
     public const int UIA_RangeValuePatternId = 10003;
+    public const int UIA_ItemContainerPatternId = 10019;
 
     // ──── ScrollAmount + "no scroll" sentinel
     public const int ScrollAmount_LargeDecrement = 0;

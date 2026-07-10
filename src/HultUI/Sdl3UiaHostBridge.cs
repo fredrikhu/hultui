@@ -140,6 +140,12 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         catch { return false; }
     }
 
+    public int GetSelectedIndex(ElementId listId)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.SelectedIndex : -1; }
+        catch { return -1; }
+    }
+
     public bool GetItemOffscreen(ElementId listId, int index)
     {
         try

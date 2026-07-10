@@ -43,6 +43,10 @@ internal struct UiaVariant
     public static UiaVariant FromBStr(string s) =>
         new() { Vt = VT_BSTR, PointerValue = Marshal.StringToBSTR(s) };
 
+    /// <summary>The BSTR value as a string, or null when this VARIANT isn't a string.</summary>
+    public readonly string? AsString() =>
+        Vt == VT_BSTR && PointerValue != IntPtr.Zero ? Marshal.PtrToStringBSTR(PointerValue) : null;
+
     /// <summary>
     /// Release any heap allocation owned by this VARIANT (currently only BSTR).
     /// Called on local stack VARIANTs we chose not to hand off to UIA — once

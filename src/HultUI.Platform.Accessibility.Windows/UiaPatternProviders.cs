@@ -105,6 +105,46 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
 }
 
 /// <summary>
+/// Container-level Selection for a list. Reports the currently selected item as a
+/// one-element array (empty when nothing is selected); single-select today, so it
+/// advertises neither multi-select nor a required selection. Complements the
+/// per-item <see cref="UiaSelectionItemProvider"/>.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaSelectionProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeSelection
+{
+    public int GetSelection(out IntPtr pRetVal)
+    {
+        int sel = bridge.GetSelectedIndex(elementId);
+        IntPtr item = sel >= 0 ? bridge.ItemSimpleProvider(elementId, sel) : IntPtr.Zero;
+        pRetVal = item == IntPtr.Zero
+            ? UiaInterop.BuildProviderArray(ReadOnlySpan<IntPtr>.Empty)
+            : UiaInterop.BuildProviderArray(stackalloc IntPtr[] { item });
+        return 0;
+    }
+
+    public int GetCanSelectMultiple(out int pRetVal) { pRetVal = 0; return 0; }
+    public int GetIsSelectionRequired(out int pRetVal) { pRetVal = 0; return 0; }
+}
+
+/// <summary>
+/// ItemContainer for a list: locates an item by property (name / selection)
+/// without the client walking every sibling — the win for large virtualized
+/// lists, where the match is found from item data and only that one item is
+/// realized as a provider.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaItemContainerProvider(WindowsAccessibilityBridge bridge, ElementId elementId) : INativeItemContainer
+{
+    public int FindItemByProperty(IntPtr pStartAfter, int propertyId, UiaVariant value, out IntPtr pFound)
+    {
+        int start = bridge.DecodeItemIndex(elementId, pStartAfter);
+        pFound = bridge.FindItemByProperty(elementId, start, propertyId, value.AsString());
+        return 0;
+    }
+}
+
+/// <summary>
 /// ExpandCollapse for a tree item / expander. State comes from the node snapshot;
 /// Expand/Collapse reuse the element's click-to-toggle (via Invoke), acting only
 /// when the current state actually needs to change.

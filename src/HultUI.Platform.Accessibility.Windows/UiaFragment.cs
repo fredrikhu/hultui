@@ -102,6 +102,12 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             // Scroll views and (scrollable) lists expose the Scroll pattern.
             (AccessibilityRole.ScrollView or AccessibilityRole.List) when patternId == UiaInterop.UIA_ScrollPatternId
                 => new UiaScrollProvider(_bridge, ElementId),
+            // A list is a selection container and supports finding items by property
+            // (both valuable for large virtualized lists — no per-item walk needed).
+            AccessibilityRole.List when patternId == UiaInterop.UIA_SelectionPatternId
+                => new UiaSelectionProvider(_bridge, ElementId),
+            AccessibilityRole.List when patternId == UiaInterop.UIA_ItemContainerPatternId
+                => new UiaItemContainerProvider(_bridge, ElementId),
             // Any expandable element (regardless of role) exposes ExpandCollapse.
             _ when patternId == UiaInterop.UIA_ExpandCollapsePatternId && _expanded is not null
                 => new UiaExpandCollapseProvider(_bridge, ElementId),

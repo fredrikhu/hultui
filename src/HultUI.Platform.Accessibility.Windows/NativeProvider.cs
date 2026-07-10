@@ -70,6 +70,24 @@ internal interface INativeRangeValue
 }
 
 [SupportedOSPlatform("windows")]
+internal interface INativeSelection
+{
+    // GetSelection returns a SAFEARRAY of IRawElementProviderSimple* (VT_UNKNOWN).
+    int GetSelection(out IntPtr pRetVal);
+    int GetCanSelectMultiple(out int pRetVal);
+    int GetIsSelectionRequired(out int pRetVal);
+}
+
+[SupportedOSPlatform("windows")]
+internal interface INativeItemContainer
+{
+    // Returns the found item as IRawElementProviderSimple* (AddRef'd), or null.
+    // pStartAfter is a provider we previously handed out (or null to search from
+    // the start); value is a by-value VARIANT.
+    int FindItemByProperty(IntPtr pStartAfter, int propertyId, UiaVariant value, out IntPtr pFound);
+}
+
+[SupportedOSPlatform("windows")]
 internal interface INativeScroll
 {
     int Scroll(int horizontalAmount, int verticalAmount);
@@ -135,6 +153,8 @@ internal static unsafe class NativeProvider
     private static readonly Guid IID_ExpandCollapse = new("d847d3a5-cab0-4a98-8c32-ecb45c59ad24");
     private static readonly Guid IID_Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a");
     private static readonly Guid IID_RangeValue = new("36dc7aef-33e6-4691-afe1-2be7274b3d33");
+    private static readonly Guid IID_Selection = new("fb8b03af-3bdf-48d4-bd36-1a65793be168");
+    private static readonly Guid IID_ItemContainer = new("e747770b-39ce-4382-ab30-d8fb3f336f24");
 
     // Prebuilt shared vtables (one per interface), allocated once.
     private static readonly IntPtr VtSimple;
@@ -147,6 +167,8 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtExpandCollapse;
     private static readonly IntPtr VtScroll;
     private static readonly IntPtr VtRangeValue;
+    private static readonly IntPtr VtSelection;
+    private static readonly IntPtr VtItemContainer;
     private static readonly IntPtr VtServiceProvider;
 
     static NativeProvider()
@@ -214,6 +236,14 @@ internal static unsafe class NativeProvider
             (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetMinimum,
             (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetLargeChange,
             (IntPtr)(delegate* unmanaged<IntPtr, double*, int>)&RV_GetSmallChange);
+
+        VtSelection = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&Sel2_GetSelection,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Sel2_GetCanSelectMultiple,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Sel2_GetIsSelectionRequired);
+
+        VtItemContainer = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, int, UiaVariant, IntPtr*, int>)&IC_FindItemByProperty);
     }
 
     private static IntPtr BuildVtable(params IntPtr[] methods)
@@ -263,6 +293,8 @@ internal static unsafe class NativeProvider
         if (logic is INativeExpandCollapse) { vt[n] = VtExpandCollapse; iids[n] = IID_ExpandCollapse; n++; }
         if (logic is INativeScroll) { vt[n] = VtScroll; iids[n] = IID_Scroll; n++; }
         if (logic is INativeRangeValue) { vt[n] = VtRangeValue; iids[n] = IID_RangeValue; n++; }
+        if (logic is INativeSelection) { vt[n] = VtSelection; iids[n] = IID_Selection; n++; }
+        if (logic is INativeItemContainer) { vt[n] = VtItemContainer; iids[n] = IID_ItemContainer; n++; }
         if (n == 0) return IntPtr.Zero;
         // Every provider also exposes IServiceProvider (see IID note) so UIA
         // caches the "no extra service" answer instead of re-QIing constantly.
@@ -312,6 +344,15 @@ internal static unsafe class NativeProvider
             if (iidBase[i] == want) return (IntPtr)(b + TearoffsStart + i * TearoffSize);
         return (IntPtr)(b + TearoffsStart); // primary fallback
     }
+
+    /// <summary>
+    /// Recovers the managed logic object behind one of <em>our</em> tear-off
+    /// pointers — used when UIA hands a provider we created back to us (e.g.
+    /// <c>ItemContainer.FindItemByProperty</c>'s <c>pStartAfter</c>). Only valid
+    /// for pointers this class produced; passing a foreign COM pointer is
+    /// undefined. Returns null for <see cref="IntPtr.Zero"/>.
+    /// </summary>
+    public static object? LogicOf(IntPtr tearoff) => tearoff == IntPtr.Zero ? null : Target(tearoff);
 
     // ── helpers to recover state inside a thunk ──
     private static byte* Base(IntPtr pThis) => (byte*)*((IntPtr*)pThis + 1);
@@ -434,4 +475,8 @@ internal static unsafe class NativeProvider
     [UnmanagedCallersOnly] private static int RV_GetMinimum(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetMinimum(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
     [UnmanagedCallersOnly] private static int RV_GetLargeChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetLargeChange(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
     [UnmanagedCallersOnly] private static int RV_GetSmallChange(IntPtr t, double* p) { try { int hr = ((INativeRangeValue)Target(t)!).GetSmallChange(out double v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int Sel2_GetSelection(IntPtr t, IntPtr* p) { try { return ((INativeSelection)Target(t)!).GetSelection(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int Sel2_GetCanSelectMultiple(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetCanSelectMultiple(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int Sel2_GetIsSelectionRequired(IntPtr t, int* p) { try { int hr = ((INativeSelection)Target(t)!).GetIsSelectionRequired(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
+    [UnmanagedCallersOnly] private static int IC_FindItemByProperty(IntPtr t, IntPtr startAfter, int propertyId, UiaVariant value, IntPtr* p) { try { return ((INativeItemContainer)Target(t)!).FindItemByProperty(startAfter, propertyId, value, out *p); } catch { *p = IntPtr.Zero; return 0; } }
 }

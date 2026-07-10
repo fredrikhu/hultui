@@ -22,6 +22,12 @@ namespace HultUI.Platform.Accessibility.Windows;
 internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementId listId, int index)
     : INativeSimple, INativeFragment
 {
+    /// <summary>The owning list, so ItemContainer can decode a startAfter item.</summary>
+    public ElementId ListId => listId;
+
+    /// <summary>This item's index within the list.</summary>
+    public int Index => index;
+
     // ── IRawElementProviderSimple ──
 
     public int GetProviderOptions(out int pRetVal)
