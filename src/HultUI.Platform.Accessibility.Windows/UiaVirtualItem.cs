@@ -32,11 +32,16 @@ internal sealed class UiaVirtualItem(WindowsAccessibilityBridge bridge, ElementI
 
     public int GetPatternProvider(int patternId, out IntPtr pPatternProvider)
     {
-        // Invokable, routed through the synthetic id back to the list's
-        // ActivateItem — the same path materialized list items use.
-        pPatternProvider = patternId == UiaInterop.UIA_InvokePatternId
-            ? NativeProvider.Create(new UiaInvokeProvider(bridge, VirtualItemId.For(listId, index)))
-            : IntPtr.Zero;
+        // Invoke and SelectionItem both route through the synthetic id back to the
+        // list — the same path materialized list items use.
+        var id = VirtualItemId.For(listId, index);
+        object? provider = patternId switch
+        {
+            UiaInterop.UIA_InvokePatternId => new UiaInvokeProvider(bridge, id),
+            UiaInterop.UIA_SelectionItemPatternId => new UiaSelectionItemProvider(bridge, id),
+            _ => null,
+        };
+        pPatternProvider = provider is null ? IntPtr.Zero : NativeProvider.Create(provider);
         return 0;
     }
 

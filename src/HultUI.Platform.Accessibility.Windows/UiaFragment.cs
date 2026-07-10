@@ -78,9 +78,12 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             AccessibilityRole.Button when patternId == UiaInterop.UIA_InvokePatternId
                 => new UiaInvokeProvider(_bridge, ElementId),
             // List items are invokable so assistive tech can activate any row —
-            // including virtualized ones whose id routes back to the owning list.
+            // including virtualized ones whose id routes back to the owning list —
+            // and expose selection so it can report/move to the selected row.
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_InvokePatternId
                 => new UiaInvokeProvider(_bridge, ElementId),
+            AccessibilityRole.ListItem when patternId == UiaInterop.UIA_SelectionItemPatternId
+                => new UiaSelectionItemProvider(_bridge, ElementId),
             AccessibilityRole.Checkbox when patternId == UiaInterop.UIA_TogglePatternId
                 => new UiaToggleProvider(_bridge, ElementId),
             AccessibilityRole.RadioButton when patternId == UiaInterop.UIA_SelectionItemPatternId

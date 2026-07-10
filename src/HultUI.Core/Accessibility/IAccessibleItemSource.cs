@@ -20,6 +20,12 @@ public interface IAccessibleItemSource
     float ItemHeight { get; }
 
     /// <summary>
+    /// Index of the currently selected item, or -1 if none. Exposed so assistive
+    /// tech can report and move to the selection (UIA SelectionItem). Single-select.
+    /// </summary>
+    int SelectedIndex { get; }
+
+    /// <summary>
     /// Accessible label for the item at <paramref name="index"/>, or <c>null</c>.
     /// Must be cheap: read from item data, never materialize the item's template
     /// element (that would defeat virtualization).

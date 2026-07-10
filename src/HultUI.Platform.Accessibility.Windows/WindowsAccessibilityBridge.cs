@@ -131,8 +131,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal IntPtr NativeFragment(ElementId? id)
         => id is null ? IntPtr.Zero : NativeProvider.Tearoff(ElementNativePrimary(id.Value), NativeProvider.As.Fragment);
 
-    /// <summary>A cached fragment as IRawElementProviderSimple* (events), or null.</summary>
-    private IntPtr NativeFragmentSimple(ElementId? id)
+    /// <summary>A cached fragment as IRawElementProviderSimple* (events, selection container), or null.</summary>
+    internal IntPtr NativeFragmentSimple(ElementId? id)
         => id is null ? IntPtr.Zero : NativeProvider.Tearoff(ElementNativePrimary(id.Value), NativeProvider.As.Simple);
 
     /// <summary>The HWND host provider, AddRef'd (chains our tree to the window's non-client tree).</summary>
@@ -163,6 +163,8 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     internal int GetVirtualItemCount(ElementId listId) => _host.GetItemCount(listId);
 
     internal string? GetVirtualItemLabel(ElementId listId, int index) => _host.GetItemLabel(listId, index);
+
+    internal bool GetVirtualItemSelected(ElementId listId, int index) => _host.GetItemSelected(listId, index);
 
     internal bool TryGetVirtualItemScreenRect(ElementId listId, int index, out Rect screen)
     {

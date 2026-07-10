@@ -32,10 +32,17 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     public Action<T>? OnItemActivate { get; set; }
 
+    /// <summary>
+    /// Index of the selected item (-1 for none), surfaced to assistive tech as the
+    /// UIA selection. Set it to keep the a11y selection in sync with your own.
+    /// </summary>
+    public int SelectedIndex { get; set; } = -1;
+
     // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
     //    virtualization hasn't materialized as elements. ──
     int IAccessibleItemSource.ItemCount => _items.Count;
     float IAccessibleItemSource.ItemHeight => _itemHeight;
+    int IAccessibleItemSource.SelectedIndex => SelectedIndex;
 
     string? IAccessibleItemSource.GetItemLabel(int index)
     {

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 
 namespace HultUI.Platform.Accessibility.Windows;
@@ -80,17 +81,25 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
         return 0;
     }
 
-    public int RemoveFromSelection() => 0; // radio buttons can't be unselected this way
+    public int RemoveFromSelection() => 0; // single-select: can't be deselected this way
 
     public int GetIsSelected(out int pRetVal)
     {
-        pRetVal = bridge.GetToggleState(elementId) == true ? -1 : 0; // VARIANT_BOOL
+        // A list item is selected when it's the list's selected index; a radio
+        // button is selected when it's checked.
+        bool selected = VirtualItemId.TryDecode(elementId, out var listId, out var index)
+            ? bridge.GetVirtualItemSelected(listId, index)
+            : bridge.GetToggleState(elementId) == true;
+        pRetVal = selected ? -1 : 0; // VARIANT_BOOL
         return 0;
     }
 
     public int GetSelectionContainer(out IntPtr pRetVal)
     {
-        pRetVal = IntPtr.Zero;
+        // A list item's selection container is its list; a radio's is implicit.
+        pRetVal = VirtualItemId.TryDecode(elementId, out var listId, out _)
+            ? bridge.NativeFragmentSimple(listId)
+            : IntPtr.Zero;
         return 0;
     }
 }

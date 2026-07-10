@@ -74,6 +74,13 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 
     public void SelectElement(ElementId id) => _pendingActions.Enqueue(() =>
     {
+        // Selecting a virtualized-list item is its activation (single-select).
+        if (VirtualItemId.TryDecode(id, out var listId, out var index))
+        {
+            if (GetElementOrNull(listId) is IAccessibleItemSource source)
+                source.ActivateItem(index);
+            return;
+        }
         if (GetElementOrNull(id) is RadioButtonElement rb)
         {
             if (!rb.IsChecked)
@@ -125,6 +132,12 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
     {
         try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.GetItemLabel(index) : null; }
         catch { return null; }
+    }
+
+    public bool GetItemSelected(ElementId listId, int index)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s && s.SelectedIndex == index; }
+        catch { return false; }
     }
 
     public bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect)

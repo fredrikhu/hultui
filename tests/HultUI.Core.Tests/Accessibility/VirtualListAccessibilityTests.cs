@@ -139,6 +139,15 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
+    public void VirtualList_SelectedIndex_DefaultsToNoneAndRoundTrips()
+    {
+        var list = MakeList(10);
+        Assert.Equal(-1, ((IAccessibleItemSource)list).SelectedIndex);
+        list.SelectedIndex = 4;
+        Assert.Equal(4, ((IAccessibleItemSource)list).SelectedIndex);
+    }
+
+    [Fact]
     public void VirtualList_ActivateItem_InvokesHandlerWithItem()
     {
         var list = MakeList(10);
