@@ -24,6 +24,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     /// </summary>
     public Func<T, string?>? AccessibleLabel { get; set; }
 
+    /// <summary>
+    /// Optional handler run when assistive tech activates an item (its primary
+    /// action, as a click would do). Lets a screen-reader user act on any item,
+    /// including off-screen ones the list hasn't realized. Wire it to the same
+    /// logic your row's click handler uses.
+    /// </summary>
+    public Action<T>? OnItemActivate { get; set; }
+
     // ── IAccessibleItemSource: exposes all items to the a11y tree, even the ones
     //    virtualization hasn't materialized as elements. ──
     int IAccessibleItemSource.ItemCount => _items.Count;
@@ -34,6 +42,12 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (index < 0 || index >= _items.Count) return null;
         var item = _items[index];
         return AccessibleLabel is not null ? AccessibleLabel(item) : item?.ToString();
+    }
+
+    void IAccessibleItemSource.ActivateItem(int index)
+    {
+        if (index >= 0 && index < _items.Count)
+            OnItemActivate?.Invoke(_items[index]);
     }
 
     // Visible range tracking

@@ -113,6 +113,53 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
+    public void VirtualItemId_RoundTrips()
+    {
+        var listId = new ElementId(12345);
+        var id = VirtualItemId.For(listId, 678);
+        Assert.True(VirtualItemId.TryDecode(id, out var decodedList, out var index));
+        Assert.Equal(listId, decodedList);
+        Assert.Equal(678, index);
+    }
+
+    [Fact]
+    public void VirtualItemId_RealElementIdIsNotVirtual()
+    {
+        Assert.False(VirtualItemId.TryDecode(new ElementId(42), out _, out _));
+    }
+
+    [Fact]
+    public void BuilderItemId_DecodesToOwningListAndIndex()
+    {
+        var list = MakeList(10);
+        var tree = BuildLaidOut(list);
+        Assert.True(VirtualItemId.TryDecode(tree.Children[7].ElementId, out var listId, out var index));
+        Assert.Equal(list.Id, listId);
+        Assert.Equal(7, index);
+    }
+
+    [Fact]
+    public void VirtualList_ActivateItem_InvokesHandlerWithItem()
+    {
+        var list = MakeList(10);
+        string? activated = null;
+        list.OnItemActivate = s => activated = s;
+        ((IAccessibleItemSource)list).ActivateItem(3);
+        Assert.Equal("row 3", activated);
+    }
+
+    [Fact]
+    public void VirtualList_ActivateItem_OutOfRange_DoesNotInvoke()
+    {
+        var list = MakeList(3);
+        int calls = 0;
+        list.OnItemActivate = _ => calls++;
+        ((IAccessibleItemSource)list).ActivateItem(99);
+        ((IAccessibleItemSource)list).ActivateItem(-1);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public void VirtualList_OverCap_DegradesToRealizedRowsNotPerItemNodes()
     {
         // Above the eager cap we must not expand every item (that wouldn't scale);

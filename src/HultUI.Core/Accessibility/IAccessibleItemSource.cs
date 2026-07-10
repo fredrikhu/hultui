@@ -25,4 +25,12 @@ public interface IAccessibleItemSource
     /// element (that would defeat virtualization).
     /// </summary>
     string? GetItemLabel(int index);
+
+    /// <summary>
+    /// Performs the item's primary action (as a click would) when assistive tech
+    /// invokes it — the container routes this to the item at <paramref name="index"/>,
+    /// so even off-screen, unrealized items can be activated. A no-op if the
+    /// container has no activation wired.
+    /// </summary>
+    void ActivateItem(int index);
 }

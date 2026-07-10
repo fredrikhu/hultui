@@ -120,7 +120,7 @@ public static class AccessibilityTreeBuilder
             float top = content.Y + i * itemHeight;
             var rect = new Rect(content.X - scrollX, top - scrollY, content.Width, itemHeight);
             listNode.AddChild(new AccessibilityNode(
-                VirtualItemId(list.Id, i),
+                VirtualItemId.For(list.Id, i),
                 AccessibilityRole.ListItem,
                 source.GetItemLabel(i),
                 description: null,
@@ -133,12 +133,6 @@ public static class AccessibilityTreeBuilder
         }
     }
 
-    // Virtual items have no backing element, so they need stable synthetic ids.
-    // Real ids come from a small incrementing counter (well under 2^63); marking
-    // the top bit keeps synthetic ids from ever colliding with them, and packing
-    // (listId, index) keeps each item's id stable across rebuilds and scrolls.
-    private static ElementId VirtualItemId(ElementId listId, int index)
-        => new((1UL << 63) | ((listId.Value & 0x7FFF_FFFFUL) << 32) | (uint)index);
 
     /// <summary>
     /// Determines whether an element is semantically meaningful in the accessibility tree.

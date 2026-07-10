@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Platform.Accessibility.Windows;
@@ -48,8 +49,18 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 
     // ──── Actions — enqueue for UI-thread drain
 
-    public void InvokeElement(ElementId id) =>
-        _pendingActions.Enqueue(() => EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, GetElementOrNull(id) ?? Throw()));
+    public void InvokeElement(ElementId id) => _pendingActions.Enqueue(() =>
+    {
+        // A virtualized-list item has no element of its own; route its activation
+        // back to the owning list by index (works even for off-screen items).
+        if (VirtualItemId.TryDecode(id, out var listId, out var index))
+        {
+            if (GetElementOrNull(listId) is IAccessibleItemSource source)
+                source.ActivateItem(index);
+            return;
+        }
+        EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, GetElementOrNull(id) ?? Throw());
+    });
 
     public void ToggleElement(ElementId id) => _pendingActions.Enqueue(() =>
     {

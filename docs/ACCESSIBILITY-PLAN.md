@@ -238,8 +238,10 @@ Incremental plan toward large lists:
 - **Increment 1 (done):** eager exposure of all items, capped at
   `AccessibilityTreeBuilder.MaxEagerVirtualItems` (larger lists degrade to their
   realized rows). Read & navigate only. Covers e.g. a few-hundred-commit history.
-- **Increment 2:** activation — route an AT `Invoke`/`Select` on a `ListItem`
-  back to the list (`ActivateItem(index)`) so off-screen items can be opened.
+- **Increment 2 (done):** activation — a `ListItem` exposes the UIA Invoke
+  pattern; its synthetic id routes back through `IAccessibleItemSource.ActivateItem(index)`
+  (wire it via `OnActivateItem`) so assistive tech can act on any item, including
+  off-screen ones.
 - **Increment 3:** on-demand item provisioning (UIA `ItemContainer` /
   `VirtualizedItem`, or a lazy provider) so very large lists don't build every
   node eagerly or re-emit every bounds change on scroll. Lifts the cap.

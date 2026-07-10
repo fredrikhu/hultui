@@ -126,6 +126,7 @@ public static class ElementExtensions
     public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
     public static VirtualListElement<T> AccessibleItemLabel<T>(this VirtualListElement<T> el, Func<T, string?> label) { el.AccessibleLabel = label; return el; }
+    public static VirtualListElement<T> OnActivateItem<T>(this VirtualListElement<T> el, Action<T> handler) { el.OnItemActivate = handler; return el; }
 
     // ──── Tooltip ────
     public static T Tooltip<T>(this T el, string text) where T : Element { el.TooltipText = text; return el; }
