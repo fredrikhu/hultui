@@ -13,7 +13,7 @@
 - Linux AT-SPI2: finish per-object D-Bus export (`Accessible`, `Component`, `Application`, `Action`), wire `Socket.Embed`, emit `children-changed`, `PropertyChange`, `StateChanged::focused` signals; verify with `accerciser` + `orca`.
 
 ## Deferred
-- UIA `ITextProvider` (word-by-word reader navigation) — currently exposed via `IValueProvider`.
+- UIA `ITextProvider` (word-by-word reader navigation) — currently exposed via `IValueProvider`. Would also let selectable labels (`TextElement.Selectable`) report their selected sub-range to assistive tech via `GetSelection`/`RangeFromPoint`; today mouse/keyboard selection works but a screen reader reads the label as a whole.
 - AT-SPI `Text` / `EditableText` interfaces.
 - macOS `NSAccessibility` bridge.
 - LiveRegion / alert announcements.
