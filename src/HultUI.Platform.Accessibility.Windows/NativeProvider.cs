@@ -54,6 +54,9 @@ internal interface INativeSelectionItem
     int GetIsSelected(out int pRetVal); int GetSelectionContainer(out IntPtr pRetVal);
 }
 
+[SupportedOSPlatform("windows")]
+internal interface INativeExpandCollapse { int Expand(); int Collapse(); int GetExpandCollapseState(out int pRetVal); }
+
 /// <summary>
 /// Wraps a managed provider logic object in a genuine native COM object —
 /// unmanaged memory holding one tear-off per supported interface, each with a
@@ -104,6 +107,7 @@ internal static unsafe class NativeProvider
     private static readonly Guid IID_Toggle = new("56d00bd0-c4f4-433c-a836-1a52a57e0892");
     private static readonly Guid IID_Value = new("c7935180-6fb3-4201-b174-7df73adbf64a");
     private static readonly Guid IID_SelectionItem = new("2acad808-b2d4-452d-a407-91ff1ad167b2");
+    private static readonly Guid IID_ExpandCollapse = new("d847d3a5-cab0-4a98-8c32-ecb45c59ad24");
 
     // Prebuilt shared vtables (one per interface), allocated once.
     private static readonly IntPtr VtSimple;
@@ -113,6 +117,7 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtToggle;
     private static readonly IntPtr VtValue;
     private static readonly IntPtr VtSelectionItem;
+    private static readonly IntPtr VtExpandCollapse;
     private static readonly IntPtr VtServiceProvider;
 
     static NativeProvider()
@@ -156,6 +161,11 @@ internal static unsafe class NativeProvider
             (IntPtr)(delegate* unmanaged<IntPtr, int>)&Sel_RemoveFromSelection,
             (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&Sel_GetIsSelected,
             (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&Sel_GetSelectionContainer);
+
+        VtExpandCollapse = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, int>)&EC_Expand,
+            (IntPtr)(delegate* unmanaged<IntPtr, int>)&EC_Collapse,
+            (IntPtr)(delegate* unmanaged<IntPtr, int*, int>)&EC_GetState);
     }
 
     private static IntPtr BuildVtable(params IntPtr[] methods)
@@ -190,8 +200,8 @@ internal static unsafe class NativeProvider
     /// </summary>
     public static IntPtr Create(object logic)
     {
-        Span<IntPtr> vt = stackalloc IntPtr[8];
-        Span<Guid> iids = stackalloc Guid[8];
+        Span<IntPtr> vt = stackalloc IntPtr[10];
+        Span<Guid> iids = stackalloc Guid[10];
         int n = 0;
         // Order matters: tear-off[0] is the IUnknown identity. Simple first for
         // fragments; the single pattern interface first for pattern providers.
@@ -202,6 +212,7 @@ internal static unsafe class NativeProvider
         if (logic is INativeToggle) { vt[n] = VtToggle; iids[n] = IID_Toggle; n++; }
         if (logic is INativeValue) { vt[n] = VtValue; iids[n] = IID_Value; n++; }
         if (logic is INativeSelectionItem) { vt[n] = VtSelectionItem; iids[n] = IID_SelectionItem; n++; }
+        if (logic is INativeExpandCollapse) { vt[n] = VtExpandCollapse; iids[n] = IID_ExpandCollapse; n++; }
         if (n == 0) return IntPtr.Zero;
         // Every provider also exposes IServiceProvider (see IID note) so UIA
         // caches the "no extra service" answer instead of re-QIing constantly.
@@ -355,4 +366,7 @@ internal static unsafe class NativeProvider
     [UnmanagedCallersOnly] private static int Sel_RemoveFromSelection(IntPtr t) { try { return ((INativeSelectionItem)Target(t)!).RemoveFromSelection(); } catch { return 0; } }
     [UnmanagedCallersOnly] private static int Sel_GetIsSelected(IntPtr t, int* p) { try { int hr = ((INativeSelectionItem)Target(t)!).GetIsSelected(out int v); *p = v; return hr; } catch { *p = 0; return 0; } }
     [UnmanagedCallersOnly] private static int Sel_GetSelectionContainer(IntPtr t, IntPtr* p) { try { return ((INativeSelectionItem)Target(t)!).GetSelectionContainer(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+    [UnmanagedCallersOnly] private static int EC_Expand(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Expand(); } catch { return 0; } }
+    [UnmanagedCallersOnly] private static int EC_Collapse(IntPtr t) { try { return ((INativeExpandCollapse)Target(t)!).Collapse(); } catch { return 0; } }
+    [UnmanagedCallersOnly] private static int EC_GetState(IntPtr t, int* p) { try { int hr = ((INativeExpandCollapse)Target(t)!).GetExpandCollapseState(out int v); *p = v; return hr; } catch { *p = 3; return 0; } }
 }

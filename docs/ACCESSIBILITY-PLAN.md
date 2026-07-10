@@ -250,8 +250,24 @@ navigate, and act on the whole list at any size. Built in increments, all done:
   fast-path switch, not a ceiling.
 
 Remaining refinements (nice-to-have): a UIA `ScrollPattern` / `ItemContainer`
-`FindItemByProperty` on the container, and selection state (`SelectionItem`
-`IsSelected`) so a screen reader announces which item is selected.
+`FindItemByProperty` on the container, and the container-level `Selection` pattern
+(`ISelectionProvider.GetSelection`, needs a SAFEARRAY of providers).
+
+## Patterns & properties supported
+
+Elements expose these to UIA today (property/pattern → how to opt in):
+
+- **AutomationId** — `AutomationId("id")` (stable test selectors).
+- **Name / HelpText / ControlType / IsEnabled / bounds** — from role + name.
+- **Invoke** — buttons and list items (routes to click/activation).
+- **Toggle** — checkboxes.
+- **Value** — text inputs.
+- **SelectionItem** (`IsSelected` + `Select`) — list items (`VirtualListElement.SelectedIndex`).
+- **ExpandCollapse** — any element with `AccessibleExpanded` set (e.g. tree items);
+  Expand/Collapse reuse the element's click-to-toggle.
+
+Not yet wired (candidates): `IsOffscreen`, `Scroll` (on scroll views),
+`RangeValue` (sliders), container-level `Selection`.
 
 ## Out of scope (follow-ups)
 

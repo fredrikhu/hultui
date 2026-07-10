@@ -411,6 +411,42 @@ public class AccessibilityTreeBuilderTests
     }
 
     [Fact]
+    public void Build_PropagatesExpandedState()
+    {
+        var root = BoxElement.New();
+        root.Role = AccessibilityRole.Application;
+        root.Box.Width = 400;
+        root.Box.Height = 400;
+
+        var item = BoxElement.New();
+        item.Role = AccessibilityRole.TreeItem;
+        item.AccessibleName = "Node";
+        item.AccessibleExpanded = false;
+        root.AddChild(item);
+
+        Layout(root);
+
+        var tree = AccessibilityTreeBuilder.Build(root);
+        Assert.Equal(AccessibilityRole.TreeItem, tree.Children[0].Role);
+        Assert.False(tree.Children[0].Expanded);
+    }
+
+    [Fact]
+    public void Build_NonExpandableElement_HasNullExpanded()
+    {
+        var text = TextElement.New("plain");
+        var container = BoxElement.New();
+        container.Role = AccessibilityRole.Application;
+        container.Box.Width = 100;
+        container.Box.Height = 100;
+        container.AddChild(text);
+        Layout(container);
+
+        var tree = AccessibilityTreeBuilder.Build(container);
+        Assert.Null(tree.Children[0].Expanded);
+    }
+
+    [Fact]
     public void Build_SetsCorrectBoundingRects()
     {
         var root = BoxElement.New();

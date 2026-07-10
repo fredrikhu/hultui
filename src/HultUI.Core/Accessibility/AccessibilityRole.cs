@@ -22,5 +22,7 @@ public enum AccessibilityRole : byte
     Link,
     Separator,
     Group,
+    Tree,
+    TreeItem,
     Application
 }

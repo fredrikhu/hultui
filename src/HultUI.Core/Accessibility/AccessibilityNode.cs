@@ -31,6 +31,9 @@ public sealed class AccessibilityNode
     /// <summary>Stable automation identifier (UIA AutomationId), for test selectors.</summary>
     public string? AutomationId { get; }
 
+    /// <summary>Expanded state for an expandable node, or null if not expandable.</summary>
+    public bool? Expanded { get; }
+
     public AccessibilityNode? Parent { get; private set; }
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
@@ -54,7 +57,8 @@ public sealed class AccessibilityNode
         bool isEnabled = true,
         bool? isToggled = null,
         string? value = null,
-        string? automationId = null)
+        string? automationId = null,
+        bool? expanded = null)
     {
         ElementId = elementId;
         Role = role;
@@ -67,6 +71,7 @@ public sealed class AccessibilityNode
         IsToggled = isToggled;
         Value = value;
         AutomationId = automationId;
+        Expanded = expanded;
     }
 
     internal void AddChild(AccessibilityNode child)

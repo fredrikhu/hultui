@@ -57,7 +57,8 @@ public static class AccessibilityTreeBuilder
             isEnabled: true,
             isToggled: ResolveIsToggled(element),
             value: ResolveValue(element),
-            automationId: element.AutomationId);
+            automationId: element.AutomationId,
+            expanded: element.AccessibleExpanded);
     }
 
     private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager,

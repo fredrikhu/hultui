@@ -166,6 +166,9 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
     internal bool GetVirtualItemSelected(ElementId listId, int index) => _host.GetItemSelected(listId, index);
 
+    /// <summary>Snapshot expand state of a node (null = not expandable), for ExpandCollapse.</summary>
+    internal bool? GetExpanded(ElementId id) => _wrappers.TryGetValue(id, out var w) ? w.Expanded : null;
+
     internal bool TryGetVirtualItemScreenRect(ElementId listId, int index, out Rect screen)
     {
         if (_host.TryGetItemLayout(listId, index, out var layout))

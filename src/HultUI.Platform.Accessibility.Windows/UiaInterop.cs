@@ -138,6 +138,8 @@ internal static partial class UiaInterop
     public const int UIA_SeparatorControlTypeId = 50038;
     public const int UIA_TabControlTypeId = 50018;
     public const int UIA_TextControlTypeId = 50020;
+    public const int UIA_TreeControlTypeId = 50023;
+    public const int UIA_TreeItemControlTypeId = 50024;
     public const int UIA_WindowControlTypeId = 50032;
 
     // ──── UIA pattern IDs
@@ -145,6 +147,13 @@ internal static partial class UiaInterop
     public const int UIA_SelectionItemPatternId = 10010;
     public const int UIA_TogglePatternId = 10015;
     public const int UIA_ValuePatternId = 10002;
+    public const int UIA_ExpandCollapsePatternId = 10005;
+
+    // ──── ExpandCollapseState
+    public const int ExpandCollapseState_Collapsed = 0;
+    public const int ExpandCollapseState_Expanded = 1;
+    public const int ExpandCollapseState_PartiallyExpanded = 2;
+    public const int ExpandCollapseState_LeafNode = 3;
 
     // ──── UIA event IDs
     public const int UIA_AutomationFocusChangedEventId = 20005;

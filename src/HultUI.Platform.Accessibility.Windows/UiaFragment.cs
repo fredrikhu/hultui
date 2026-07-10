@@ -34,6 +34,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     private bool _isFocused;
     private bool _isEnabled;
     private bool? _isToggled;
+    private bool? _expanded;
+
+    /// <summary>Snapshot expand state (null = not expandable), read by the ExpandCollapse provider.</summary>
+    public bool? Expanded => _expanded;
 
     public UiaFragment(WindowsAccessibilityBridge bridge, AccessibilityNode node)
     {
@@ -61,6 +65,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         _isFocused = node.IsFocused;
         _isEnabled = node.IsEnabled;
         _isToggled = node.IsToggled;
+        _expanded = node.Expanded;
     }
 
     // ── IRawElementProviderSimple ──
@@ -90,6 +95,9 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaSelectionItemProvider(_bridge, ElementId),
             AccessibilityRole.TextInput when patternId == UiaInterop.UIA_ValuePatternId
                 => new UiaValueProvider(_bridge, ElementId),
+            // Any expandable element (regardless of role) exposes ExpandCollapse.
+            _ when patternId == UiaInterop.UIA_ExpandCollapsePatternId && _expanded is not null
+                => new UiaExpandCollapseProvider(_bridge, ElementId),
             _ => null,
         };
 
@@ -224,6 +232,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.Image => UiaInterop.UIA_ImageControlTypeId,
         AccessibilityRole.List => UiaInterop.UIA_ListControlTypeId,
         AccessibilityRole.ListItem => UiaInterop.UIA_ListItemControlTypeId,
+        AccessibilityRole.Tree => UiaInterop.UIA_TreeControlTypeId,
+        AccessibilityRole.TreeItem => UiaInterop.UIA_TreeItemControlTypeId,
         AccessibilityRole.ScrollView => UiaInterop.UIA_PaneControlTypeId,
         AccessibilityRole.Group => UiaInterop.UIA_GroupControlTypeId,
         AccessibilityRole.Tab => UiaInterop.UIA_TabControlTypeId,

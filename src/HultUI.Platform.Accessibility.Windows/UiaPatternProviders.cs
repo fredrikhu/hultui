@@ -103,3 +103,36 @@ internal sealed class UiaSelectionItemProvider(WindowsAccessibilityBridge bridge
         return 0;
     }
 }
+
+/// <summary>
+/// ExpandCollapse for a tree item / expander. State comes from the node snapshot;
+/// Expand/Collapse reuse the element's click-to-toggle (via Invoke), acting only
+/// when the current state actually needs to change.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal sealed class UiaExpandCollapseProvider(WindowsAccessibilityBridge bridge, ElementId elementId)
+    : INativeExpandCollapse
+{
+    public int Expand()
+    {
+        if (bridge.GetExpanded(elementId) == false) bridge.InvokeElement(elementId);
+        return 0;
+    }
+
+    public int Collapse()
+    {
+        if (bridge.GetExpanded(elementId) == true) bridge.InvokeElement(elementId);
+        return 0;
+    }
+
+    public int GetExpandCollapseState(out int pRetVal)
+    {
+        pRetVal = bridge.GetExpanded(elementId) switch
+        {
+            true => UiaInterop.ExpandCollapseState_Expanded,
+            false => UiaInterop.ExpandCollapseState_Collapsed,
+            _ => UiaInterop.ExpandCollapseState_LeafNode,
+        };
+        return 0;
+    }
+}

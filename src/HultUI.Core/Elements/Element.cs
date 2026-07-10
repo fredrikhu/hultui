@@ -118,6 +118,14 @@ public abstract class Element
     // ──── Accessibility ────
     public AccessibilityRole Role { get; set; } = AccessibilityRole.None;
     public string? AccessibleName { get; set; }
+
+    /// <summary>
+    /// Expanded state for an expandable node (e.g. a tree item), exposed as the
+    /// UIA ExpandCollapse pattern: <c>null</c> = not expandable, <c>true</c> =
+    /// expanded, <c>false</c> = collapsed. Expand/Collapse from assistive tech
+    /// reuse the element's click handler, so wire the node to toggle on click.
+    /// </summary>
+    public bool? AccessibleExpanded { get; set; }
     public string? AccessibleDescription { get; set; }
 
     /// <summary>
@@ -463,6 +471,7 @@ public abstract class Element
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;
         AutomationId = source.AutomationId;
+        AccessibleExpanded = source.AccessibleExpanded;
         // Event handlers are NOT copied. Handlers from the first Build()
         // capture references to the existing (live) elements. Copying handlers
         // from a new Build() would bring closures pointing to detached elements.
