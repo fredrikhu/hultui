@@ -136,6 +136,7 @@ public partial class CommitList : Component
                         OnInteractiveRebase,
                         OnBisectStart,
                         BisectLabel))
+                    .AccessibleItemLabel(c => $"{c.Subject}, by {c.AuthorName}, {c.ShortHash}")
                     .FlexGrow(1)
                     .WithRef(_virtualListRef)
         );
