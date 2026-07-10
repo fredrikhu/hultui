@@ -268,6 +268,12 @@ public sealed class Window : IOverlayHost, IDisposable
 
         var theme = Application.Theme;
 
+        // Capture the layout-dirty state now: the layout pass below clears
+        // DirtyFlags.Layout per element, so by the accessibility phase it's gone.
+        // A layout change (window/pane resize) moves elements without adding or
+        // removing any, and their bounding rects must be re-snapshotted for UIA.
+        bool layoutWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Layout);
+
         // Style resolution (only if any element has style changes)
         _perf.BeginStyle();
         using (_tracer.Begin("Phase", "Style"))
@@ -289,13 +295,20 @@ public sealed class Window : IOverlayHost, IDisposable
         }
         _perf.EndLayout();
 
-        // Accessibility: rebuild + diff when the tree's structure changed and
-        // something is actually listening. The Null bridge's IsActive is false,
-        // so this is a single boolean read for apps with no AT attached. The
-        // first frame after an assistive tech attaches also forces a full build
-        // (structure isn't dirty by then, but the client has nothing yet).
+        // Accessibility: rebuild + diff when the tree changed and something is
+        // actually listening. The Null bridge's IsActive is false, so this is a
+        // single boolean read for apps with no AT attached. The first frame after
+        // an assistive tech attaches also forces a full build (nothing is dirty
+        // by then, but the client has nothing yet). A layout change is included
+        // as well as a structural (Children) one: resizing the window or a pane
+        // moves elements without adding/removing any, and their bounding rects
+        // must be re-snapshotted so UIA reports current positions (the differ
+        // already emits BoundingRect changes). This rebuild only runs while an AT
+        // is attached, so idle apps pay nothing.
         bool a11yActive = _accessibilityBridge.IsActive;
-        if (a11yActive && (!_a11yWasActive || _a11yPropertyDirty || _root.DirtyFlags.HasFlag(DirtyFlags.Children)))
+        if (a11yActive && (!_a11yWasActive || _a11yPropertyDirty
+            || _root.DirtyFlags.HasFlag(DirtyFlags.Children)
+            || layoutWasDirty))
         {
             using (_tracer.Begin("Phase", "A11y"))
             {

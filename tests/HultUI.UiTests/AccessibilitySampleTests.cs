@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Runtime.InteropServices;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -158,12 +159,66 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeoutMessage: "removing an item did not update the container selection");
     }
 
+    [Fact]
+    public void ResizingWindow_UpdatesReportedBounds()
+    {
+        // Wait until the sample's deferred row load has fired (header flips to
+        // "Commits"). That load is a structural change that rebuilds the whole
+        // a11y tree; doing it first ensures the *only* thing that can refresh
+        // bounds during the resize below is the layout-change path under test —
+        // otherwise a coincidental structural rebuild could mask a regression.
+        Retry.WhileNull(
+            () => _window.FindFirstDescendant(cf => cf.ByName("Commits")),
+            timeout: TimeSpan.FromSeconds(10), throwOnTimeout: true,
+            timeoutMessage: "deferred commit load did not complete");
+
+        // The close button is right-aligned in the title bar, so its screen X
+        // tracks the window's right edge. Its UIA bounding rect must follow a
+        // resize — a resize only marks layout (not structure) dirty, so this
+        // guards the accessibility tree being refreshed on layout changes too.
+        double originalX = Find("close-button").BoundingRectangle.X;
+
+        var hwnd = _window.Properties.NativeWindowHandle.ValueOrDefault;
+        Assert.NotEqual(IntPtr.Zero, hwnd);
+        Assert.True(GetWindowRect(hwnd, out var rect), "GetWindowRect failed");
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+
+        // Shrink the width by 200px from the right (SWP_NOMOVE keeps the top-left
+        // corner fixed). The custom-frame window exposes no Transform pattern, so
+        // drive the resize through Win32 directly.
+        Assert.True(
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, width - 200, height, SWP_NOMOVE | SWP_NOZORDER),
+            "SetWindowPos failed");
+
+        Retry.WhileFalse(
+            () => Find("close-button").BoundingRectangle.X < originalX - 100,
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true,
+            timeoutMessage: "close button's reported bounds did not follow the window resize");
+    }
+
     public void Dispose()
     {
         _automation.Dispose();
         try { _app.Close(); } catch { /* best effort */ }
         _app.Dispose();
     }
+
+    // ── Win32 window resize (the custom frame has no UIA Transform pattern) ──
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 }
 
 [CollectionDefinition("ui", DisableParallelization = true)]

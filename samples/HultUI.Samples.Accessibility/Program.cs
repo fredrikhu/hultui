@@ -152,6 +152,7 @@ partial class AccessibilityDemo : Component
     private Element CloseButton()
     {
         var b = Box.New()
+            .AutomationId("close-button")
             .Width(Dimension.Px(36)).Height(Dimension.Px(28))
             .CornerRadius(4f).Cursor(CursorType.Pointer);
         b.Flex.JustifyContent = JustifyContent.Center;
