@@ -59,13 +59,13 @@ partial class AccessibilityDemo : Component
                 ),
             ScrollView.New().FlexGrow(1).Children(
                 Flex.Column(gap: 16).Padding(24).FlexShrink(0).Children(
-                    Text.New("Accessible UI").FontSize(22f).FontWeight(FontWeight.Bold),
+                    Text.New("Accessible UI").FontSize(22f).FontWeight(FontWeight.Bold).FlexShrink(0),
                     // Selectable label: drag to select, double/triple-click,
                     // Ctrl+C or right-click Copy. Selection is opt-in per label.
                     Text.New("Attach inspect.exe or Narrator. Every element here is exposed "
                         + "to UI Automation and the controls below are navigable and actionable. "
                         + "This paragraph is selectable — drag across it and press Ctrl+C.")
-                        .FontSize(13f).TextColor(new Color(160, 160, 180)).Selectable(),
+                        .FontSize(13f).TextColor(new Color(160, 160, 180)).FlexShrink(0).Selectable(),
 
                     Flex.Row(gap: 12).AlignItems(AlignItems.Center).FlexShrink(0).Children(
                         Box.New()
@@ -81,10 +81,10 @@ partial class AccessibilityDemo : Component
                     ),
 
                     Checkbox.New(Checked, "Enable the thing").AutomationId("enable-thing")
-                        .OnCheckedChanged(v => Checked = v),
+                        .OnCheckedChanged(v => Checked = v).FlexShrink(0),
 
                     TextInput.New().AutomationId("name-input")
-                        .PlaceholderText("Type your name").Width(Dimension.Px(240)),
+                        .PlaceholderText("Type your name").Width(Dimension.Px(240)).FlexShrink(0),
 
                     // Slider — exposes the RangeValue pattern.
                     Flex.Row(gap: 12).AlignItems(AlignItems.Center).FlexShrink(0).Children(
@@ -113,11 +113,11 @@ partial class AccessibilityDemo : Component
 
                     // Multi-select list — exposes the container Selection pattern
                     // (CanSelectMultiple) and per-item add/remove selection.
-                    Text.New("Toppings (multi-select)").FontSize(15f).FontWeight(FontWeight.SemiBold),
+                    Text.New("Toppings (multi-select)").FontSize(15f).FontWeight(FontWeight.SemiBold).FlexShrink(0),
                     BuildToppingsList(),
 
                     Text.New(RowCount == 0 ? "Loading commits…" : "Commits")
-                        .FontSize(15f).FontWeight(FontWeight.SemiBold),
+                        .FontSize(15f).FontWeight(FontWeight.SemiBold).FlexShrink(0),
                     BuildCommitList()
                 )
             )
