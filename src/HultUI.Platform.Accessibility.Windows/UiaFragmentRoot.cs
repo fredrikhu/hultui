@@ -98,6 +98,13 @@ internal sealed class UiaFragmentRoot(WindowsAccessibilityBridge bridge)
 
         var local = bridge.FromScreen(new Point((float)x, (float)y));
         var hit = HitTest(root, local);
+        if (hit is not null && hit.IsVirtualItemContainer)
+        {
+            // The container has no child nodes; resolve the point to an item index.
+            int idx = bridge.VirtualItemIndexAt(hit.ElementId, local);
+            pRetVal = idx >= 0 ? bridge.NativeVirtualItem(hit.ElementId, idx) : bridge.NativeFragment(hit.ElementId);
+            return 0;
+        }
         pRetVal = hit is null ? IntPtr.Zero : bridge.NativeFragment(hit.ElementId);
         return 0;
     }

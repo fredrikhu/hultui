@@ -143,6 +143,48 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
         return _hostProviderPtr;
     }
 
+    // ── On-demand items for large virtualized lists (IsVirtualItemContainer) ──
+
+    /// <summary>
+    /// A freshly built IRawElementProviderFragment* for a virtualized list item.
+    /// Not cached: there may be millions, and UIA tracks identity by the item's
+    /// stable runtime id, so a new object per navigation result is fine. The
+    /// returned pointer carries the single reference UIA will release.
+    /// </summary>
+    internal IntPtr NativeVirtualItem(ElementId listId, int index)
+    {
+        IntPtr primary = NativeProvider.Create(new UiaVirtualItem(this, listId, index));
+        if (primary == IntPtr.Zero) return IntPtr.Zero;
+        IntPtr fragment = NativeProvider.Tearoff(primary, NativeProvider.As.Fragment);
+        Marshal.Release(primary); // hand the caller the fragment's single reference
+        return fragment;
+    }
+
+    internal int GetVirtualItemCount(ElementId listId) => _host.GetItemCount(listId);
+
+    internal string? GetVirtualItemLabel(ElementId listId, int index) => _host.GetItemLabel(listId, index);
+
+    internal bool TryGetVirtualItemScreenRect(ElementId listId, int index, out Rect screen)
+    {
+        if (_host.TryGetItemLayout(listId, index, out var layout))
+        {
+            screen = ToScreen(layout);
+            return true;
+        }
+        screen = default;
+        return false;
+    }
+
+    /// <summary>The item index under a point (in layout space) of a virtual list, or -1.</summary>
+    internal int VirtualItemIndexAt(ElementId listId, Point local)
+    {
+        if (!_host.TryGetItemLayout(listId, 0, out var first) || first.Height <= 0) return -1;
+        if (local.X < first.X || local.X > first.X + first.Width) return -1;
+        int count = _host.GetItemCount(listId);
+        int i = (int)Math.Floor((local.Y - first.Y) / first.Height);
+        return i >= 0 && i < count ? i : -1;
+    }
+
     // ── Accessibility tree upkeep ──
 
     public void ApplyChanges(TreeDiff diff, AccessibilityNode root)

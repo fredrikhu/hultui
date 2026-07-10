@@ -230,21 +230,28 @@ Files:
 
 A `VirtualListElement` only materializes on-screen rows as elements, so the a11y
 tree would otherwise expose just those. `IAccessibleItemSource` (implemented by
-the list) lets the tree builder expose every item as a `ListItem` node under a
-`List` container, with labels from item data (`AccessibleItemLabel`) and
-scroll-adjusted positions — so assistive tech can read/navigate the whole list.
-Incremental plan toward large lists:
+the list) lets the accessibility layer expose every item as a `ListItem` under a
+`List`, with labels from item data (`AccessibleItemLabel`), scroll-adjusted
+positions, and activation (`OnActivateItem`) — so assistive tech can read,
+navigate, and act on the whole list at any size. Built in increments, all done:
 
-- **Increment 1 (done):** eager exposure of all items, capped at
-  `AccessibilityTreeBuilder.MaxEagerVirtualItems` (larger lists degrade to their
-  realized rows). Read & navigate only. Covers e.g. a few-hundred-commit history.
+- **Increment 1 (done):** expose all items — read & navigate. Eagerly materializes
+  each item as a `ListItem` node.
 - **Increment 2 (done):** activation — a `ListItem` exposes the UIA Invoke
-  pattern; its synthetic id routes back through `IAccessibleItemSource.ActivateItem(index)`
-  (wire it via `OnActivateItem`) so assistive tech can act on any item, including
-  off-screen ones.
-- **Increment 3:** on-demand item provisioning (UIA `ItemContainer` /
-  `VirtualizedItem`, or a lazy provider) so very large lists don't build every
-  node eagerly or re-emit every bounds change on scroll. Lifts the cap.
+  pattern; its synthetic id routes back through `IAccessibleItemSource.ActivateItem(index)`.
+- **Increment 3 (done):** on-demand provisioning for large lists. Above
+  `AccessibilityTreeBuilder.MaxEagerVirtualItems` a list is marked
+  `IsVirtualItemContainer` and emits no child nodes; the bridge synthesizes a
+  fresh `UiaVirtualItem` per navigation result (identity via the stable
+  `VirtualItemId` runtime id, so no caching), resolving name/bounds/count live
+  through `IUiaHostBridge`. Nothing is built eagerly and scrolling recomputes
+  bounds on demand rather than re-emitting per-item events — verified with a
+  100k-item list (navigate, hit-test, invoke all instant). The cap is now just a
+  fast-path switch, not a ceiling.
+
+Remaining refinements (nice-to-have): a UIA `ScrollPattern` / `ItemContainer`
+`FindItemByProperty` on the container, and selection state (`SelectionItem`
+`IsSelected`) so a screen reader announces which item is selected.
 
 ## Out of scope (follow-ups)
 

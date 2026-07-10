@@ -8,11 +8,12 @@ namespace HultUI.Core.Accessibility;
 public static class AccessibilityTreeBuilder
 {
     /// <summary>
-    /// Upper bound on how many items a virtualized list expands into individual
-    /// accessibility nodes. The whole a11y tree is rebuilt on scroll, so eagerly
-    /// materializing every item only scales to lists of moderate size (this covers
-    /// e.g. a git history of a few hundred commits). Larger lists degrade to
-    /// exposing just their realized rows until on-demand item provisioning lands.
+    /// Switch point between the two ways a virtualized list exposes its items.
+    /// At or below this count, every item is materialized as a child node (simple,
+    /// and hit-testable straight off the snapshot tree). Above it, the list is
+    /// marked <see cref="AccessibilityNode.IsVirtualItemContainer"/> and the bridge
+    /// provisions items on demand by index, so a list of any size costs nothing
+    /// until assistive tech walks into it.
     /// </summary>
     internal const int MaxEagerVirtualItems = 2000;
 
@@ -92,12 +93,16 @@ public static class AccessibilityTreeBuilder
     /// </summary>
     private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, float scrollX, float scrollY)
     {
-        if (element is IAccessibleItemSource source && source.ItemCount <= MaxEagerVirtualItems)
-        {
+        if (element is not IAccessibleItemSource source) return false;
+        if (source.ItemCount <= MaxEagerVirtualItems)
+            // Small enough: materialize every item as a child node (fast, and
+            // supports hit-testing directly off the snapshot tree).
             BuildVirtualItems(element, source, node, scrollX, scrollY);
-            return true;
-        }
-        return false;
+        else
+            // Too large to expand eagerly: mark it so the bridge provisions items
+            // on demand by index instead of building/diffing them all.
+            node.IsVirtualItemContainer = true;
+        return true;
     }
 
     /// <summary>

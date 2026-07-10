@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using HultUI.Core.Elements;
+using HultUI.Core.Primitives;
 
 namespace HultUI.Platform.Accessibility.Windows;
 
@@ -32,4 +33,12 @@ public interface IUiaHostBridge
     // either snapshot or marshal internally.
     string? GetValue(ElementId id);
     bool? GetToggleState(ElementId id);
+
+    // On-demand item queries for a large virtualized list (see
+    // AccessibilityNode.IsVirtualItemContainer). Called from worker threads for
+    // items that were never materialized as elements — hosts read defensively.
+    int GetItemCount(ElementId listId);
+    string? GetItemLabel(ElementId listId, int index);
+    /// <summary>The item's on-screen rect in layout units (scroll-adjusted like a node's bounds).</summary>
+    bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect);
 }

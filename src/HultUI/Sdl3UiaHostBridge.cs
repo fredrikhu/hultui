@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
+using HultUI.Core.Primitives;
 using HultUI.Platform.Accessibility.Windows;
 
 namespace HultUI;
@@ -113,6 +114,43 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         RadioButtonElement rb => rb.IsChecked,
         _ => null,
     };
+
+    public int GetItemCount(ElementId listId)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.ItemCount : 0; }
+        catch { return 0; }
+    }
+
+    public string? GetItemLabel(ElementId listId, int index)
+    {
+        try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.GetItemLabel(index) : null; }
+        catch { return null; }
+    }
+
+    public bool TryGetItemLayout(ElementId listId, int index, out Rect layoutRect)
+    {
+        layoutRect = default;
+        try
+        {
+            if (GetElementOrNull(listId) is not ScrollViewElement sv || sv is not IAccessibleItemSource src)
+                return false;
+            if (index < 0 || index >= src.ItemCount) return false;
+
+            // The item sits in the list's content box at index * itemHeight, moved
+            // by the list's own scroll and by every ancestor scroll view — the same
+            // adjustment AccessibilityTreeBuilder bakes into materialized nodes.
+            var content = sv.Layout.AbsoluteContentBox;
+            float ancestorX = 0f, ancestorY = 0f;
+            for (var p = sv.Parent; p is not null; p = p.Parent)
+                if (p is ScrollViewElement asv) { ancestorX += asv.ScrollOffsetX; ancestorY += asv.ScrollOffsetY; }
+
+            float top = content.Y - ancestorY - sv.ScrollOffsetY + index * src.ItemHeight;
+            float left = content.X - ancestorX - sv.ScrollOffsetX;
+            layoutRect = new Rect(left, top, content.Width, src.ItemHeight);
+            return true;
+        }
+        catch { return false; }
+    }
 
     private Element? GetElementOrNull(ElementId id) => _window.FindElement(id);
 

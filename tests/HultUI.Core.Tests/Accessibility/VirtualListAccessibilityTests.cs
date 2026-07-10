@@ -160,14 +160,21 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
-    public void VirtualList_OverCap_DegradesToRealizedRowsNotPerItemNodes()
+    public void VirtualList_AtOrBelowCap_IsNotAVirtualItemContainer()
     {
-        // Above the eager cap we must not expand every item (that wouldn't scale);
-        // fall back to just the realized rows so a huge list can't freeze the app.
+        var tree = BuildLaidOut(MakeList(AccessibilityTreeBuilder.MaxEagerVirtualItems));
+        Assert.False(tree.IsVirtualItemContainer);
+        Assert.Equal(AccessibilityTreeBuilder.MaxEagerVirtualItems, tree.Children.Count);
+    }
+
+    [Fact]
+    public void VirtualList_OverCap_BecomesLazyContainerWithNoChildNodes()
+    {
+        // Above the eager cap the list must NOT expand every item (that wouldn't
+        // scale); it is marked for on-demand provisioning and emits no children.
         var tree = BuildLaidOut(MakeList(AccessibilityTreeBuilder.MaxEagerVirtualItems + 1));
         Assert.Equal(AccessibilityRole.List, tree.Role);
-        Assert.True(tree.Children.Count <= 50,
-            $"expected only realized rows, got {tree.Children.Count}");
-        Assert.DoesNotContain(tree.Children, c => c.Role == AccessibilityRole.ListItem);
+        Assert.True(tree.IsVirtualItemContainer);
+        Assert.Empty(tree.Children);
     }
 }

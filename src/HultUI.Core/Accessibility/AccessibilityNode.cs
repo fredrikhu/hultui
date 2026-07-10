@@ -31,6 +31,13 @@ public sealed class AccessibilityNode
     public AccessibilityNode? Parent { get; private set; }
     public IReadOnlyList<AccessibilityNode> Children => _children;
 
+    /// <summary>
+    /// True when this node is a virtualized list whose items are provided on
+    /// demand rather than as child nodes (used for very large lists). The bridge
+    /// synthesizes item providers by index instead of walking <see cref="Children"/>.
+    /// </summary>
+    public bool IsVirtualItemContainer { get; internal set; }
+
     private readonly List<AccessibilityNode> _children = [];
 
     internal AccessibilityNode(

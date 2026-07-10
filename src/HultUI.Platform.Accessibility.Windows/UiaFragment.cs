@@ -134,6 +134,18 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
             return 0;
         }
 
+        // A large virtualized list has no child nodes; provide its items on demand.
+        // (Its own siblings fall through to the normal logic below.)
+        if (node.IsVirtualItemContainer &&
+            (direction == UiaInterop.NavigateDirection_FirstChild || direction == UiaInterop.NavigateDirection_LastChild))
+        {
+            int count = _bridge.GetVirtualItemCount(ElementId);
+            pRetVal = count <= 0 ? IntPtr.Zero
+                : _bridge.NativeVirtualItem(ElementId,
+                    direction == UiaInterop.NavigateDirection_FirstChild ? 0 : count - 1);
+            return 0;
+        }
+
         ElementId? target = direction switch
         {
             UiaInterop.NavigateDirection_FirstChild when node.Children.Count > 0 => node.Children[0].ElementId,
