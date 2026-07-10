@@ -82,6 +82,24 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeoutMessage: "text input value did not update");
     }
 
+    [Fact]
+    public void Expander_ReportsAndTogglesExpandCollapseState()
+    {
+        var expander = Find("expander");
+        Assert.Equal(ExpandCollapseState.Collapsed,
+            expander.Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value);
+
+        expander.Patterns.ExpandCollapse.Pattern.Expand();
+        Retry.WhileFalse(
+            () => Find("expander").Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value == ExpandCollapseState.Expanded,
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "did not expand");
+
+        Find("expander").Patterns.ExpandCollapse.Pattern.Collapse();
+        Retry.WhileFalse(
+            () => Find("expander").Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value == ExpandCollapseState.Collapsed,
+            timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "did not collapse");
+    }
+
     public void Dispose()
     {
         _automation.Dispose();

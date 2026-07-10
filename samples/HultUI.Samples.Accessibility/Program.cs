@@ -1,5 +1,6 @@
 using System.Threading;
 using HultUI;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
@@ -36,6 +37,7 @@ partial class AccessibilityDemo : Component
     [Reactive] public partial int ClickCount { get; set; }
     [Reactive] public partial bool Checked { get; set; }
     [Reactive] public partial int RowCount { get; set; }
+    [Reactive] public partial bool DetailsExpanded { get; set; }
 
     public AccessibilityDemo(Window window) => _window = window;
 
@@ -79,6 +81,22 @@ partial class AccessibilityDemo : Component
 
                     TextInput.New().AutomationId("name-input")
                         .PlaceholderText("Type your name").Width(Dimension.Px(240)),
+
+                    // Expandable tree item — exposes the ExpandCollapse pattern.
+                    Flex.Column(gap: 4).FlexShrink(0).Children(
+                        Box.New()
+                            .AutomationId("expander")
+                            .AccessibleRole(AccessibilityRole.TreeItem)
+                            .AccessibleName("Details")
+                            .AccessibleExpanded(DetailsExpanded)
+                            .Cursor(CursorType.Pointer)
+                            .OnClick(_ => DetailsExpanded = !DetailsExpanded)
+                            .Children(Text.New((DetailsExpanded ? "▾ " : "▸ ") + "Details").FontSize(13f)),
+                        DetailsExpanded
+                            ? Text.New("Extra details are now visible.").FontSize(12f)
+                                .TextColor(new Color(160, 160, 180))
+                            : Box.New()
+                    ),
 
                     Text.New(RowCount == 0 ? "Loading commits…" : "Commits")
                         .FontSize(15f).FontWeight(FontWeight.SemiBold),

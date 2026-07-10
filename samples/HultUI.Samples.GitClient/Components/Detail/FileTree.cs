@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
@@ -85,6 +86,9 @@ public partial class FileTree : Component
             .Padding(new Thickness(4, 8, 4, leftPad))
             .AlignItems(AlignItems.Center)
             .FlexShrink(0)
+            .AccessibleRole(AccessibilityRole.TreeItem)
+            .AccessibleName(node.Segment)
+            .AccessibleExpanded(expanded)
             .Cursor(CursorType.Pointer);
         row.Key = $"file-tree-dir-{node.FullPath}";
 
