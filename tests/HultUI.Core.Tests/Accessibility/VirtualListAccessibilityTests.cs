@@ -157,6 +157,26 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
+    public void VirtualList_PatchFrom_CarriesAccessibilitySelectionAndWiring()
+    {
+        // Simulates a declarative re-render: the mounted list is patched from a
+        // freshly built one that recomputed its selection/activation each frame.
+        var mounted = MakeList(10);
+        Assert.Equal(-1, ((IAccessibleItemSource)mounted).SelectedIndex);
+
+        var rebuilt = MakeList(10);
+        rebuilt.SelectedIndex = 7;
+        string? activated = null;
+        rebuilt.OnItemActivate = s => activated = s;
+
+        mounted.PatchFrom(rebuilt);
+
+        Assert.Equal(7, ((IAccessibleItemSource)mounted).SelectedIndex);
+        ((IAccessibleItemSource)mounted).ActivateItem(2);
+        Assert.Equal("row 2", activated);
+    }
+
+    [Fact]
     public void VirtualList_ActivateItem_InvokesHandlerWithItem()
     {
         var list = MakeList(10);

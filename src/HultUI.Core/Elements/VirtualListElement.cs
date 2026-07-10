@@ -314,6 +314,13 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             _itemTemplate = vl._itemTemplate;
             _itemHeight = vl._itemHeight;
 
+            // Accessibility state is rebuilt fresh each render in declarative UIs,
+            // so it must ride across the patch — otherwise the a11y selection and
+            // activation wiring freeze at their first-mount values.
+            SelectedIndex = vl.SelectedIndex;
+            OnItemActivate = vl.OnItemActivate;
+            AccessibleLabel = vl.AccessibleLabel;
+
             // Only update items if reference changed
             if (!ReferenceEquals(_items, vl._items))
             {
