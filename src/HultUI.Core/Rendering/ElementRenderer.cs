@@ -1,6 +1,7 @@
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
+using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Rendering;
 
@@ -11,11 +12,27 @@ public static class ElementRenderer
 {
     public static void RenderTree(Element root, IRenderContext ctx, FrameTracer? tracer = null)
     {
-        RenderElement(root, ctx, tracer);
+        // No clip region above the root, so nothing is culled at the top level
+        // (top-level content may legitimately draw outside element bounds, e.g.
+        // shadows). Culling switches on only once we descend into a clip.
+        RenderElement(root, ctx, tracer, offsetX: 0, offsetY: 0, cull: null);
     }
 
-    private static void RenderElement(Element element, IRenderContext ctx, FrameTracer? tracer)
+    // <paramref name="offsetX"/>/<paramref name="offsetY"/> are the accumulated
+    // render translation (from scroll views) so an element's on-screen rect is
+    // its AbsoluteBorderBox shifted by this offset. <paramref name="cull"/>, when
+    // set, is the visible region in screen space: an element whose on-screen rect
+    // falls entirely outside it is skipped along with its whole subtree. It is
+    // only ever set inside a clip (scroll view / overflow-hidden), where anything
+    // outside is clipped away regardless — so for normal-flow content (a box
+    // bounds its children) skipping is safe.
+    private static void RenderElement(Element element, IRenderContext ctx, FrameTracer? tracer,
+        float offsetX, float offsetY, Rect? cull)
     {
+        if (cull is Rect clip &&
+            !element.Layout.AbsoluteBorderBox.Translate(offsetX, offsetY).IntersectsWith(clip))
+            return; // fully outside the visible clip region — skip the subtree
+
         using var _trace = tracer is null
             ? default
             : tracer.Begin("Render", element.GetType().Name, element.Key ?? element.Name);
@@ -37,9 +54,17 @@ public static class ElementRenderer
             ctx.PushClip(clipRect);
             ctx.PushTranslate(-scrollView.ScrollOffsetX, -scrollView.ScrollOffsetY);
 
+            // The viewport in screen space (the clip, shifted by the transform in
+            // effect when it was pushed). Children are drawn under an extra scroll
+            // translate, so they carry the reduced offset below.
+            var viewport = clipRect.Translate(offsetX, offsetY);
+            Rect childCull = cull is Rect outer ? outer.Intersect(viewport) : viewport;
+            float childOffsetX = offsetX - scrollView.ScrollOffsetX;
+            float childOffsetY = offsetY - scrollView.ScrollOffsetY;
+
             var scrollChildren = ZOrderHelper.GetChildrenInZOrder(element);
             for (int i = 0; i < scrollChildren.Count; i++)
-                RenderElement(scrollChildren[i], ctx, tracer);
+                RenderElement(scrollChildren[i], ctx, tracer, childOffsetX, childOffsetY, childCull);
 
             ctx.Pop(); // translate
             ctx.Pop(); // clip
@@ -53,16 +78,19 @@ public static class ElementRenderer
 
         // Clip to content box if overflow is hidden
         bool needsClip = element.Box.OverflowX == Overflow.Hidden || element.Box.OverflowY == Overflow.Hidden;
+        Rect? childrenCull = cull;
         if (needsClip)
         {
             var clipRect = element.Layout.AbsoluteContentBox;
             ctx.PushClip(clipRect);
+            var clipScreen = clipRect.Translate(offsetX, offsetY);
+            childrenCull = cull is Rect outer ? outer.Intersect(clipScreen) : clipScreen;
         }
 
         // Render children in z-order
         var children = ZOrderHelper.GetChildrenInZOrder(element);
         for (int i = 0; i < children.Count; i++)
-            RenderElement(children[i], ctx, tracer);
+            RenderElement(children[i], ctx, tracer, offsetX, offsetY, childrenCull);
 
         if (needsClip)
             ctx.Pop();

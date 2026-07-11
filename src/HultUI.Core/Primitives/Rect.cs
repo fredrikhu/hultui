@@ -31,5 +31,22 @@ public readonly record struct Rect(float X, float Y, float Width, float Height)
             Width + t.Left + t.Right,
             Height + t.Top + t.Bottom);
 
+    /// <summary>Shifts the rect by (dx, dy) without changing its size.</summary>
+    public Rect Translate(float dx, float dy) => new(X + dx, Y + dy, Width, Height);
+
+    /// <summary>True when this rect and <paramref name="other"/> share any area.</summary>
+    public bool IntersectsWith(Rect other) =>
+        X < other.Right && Right > other.X && Y < other.Bottom && Bottom > other.Y;
+
+    /// <summary>The overlapping region of the two rects, or <see cref="Zero"/> if they don't overlap.</summary>
+    public Rect Intersect(Rect other)
+    {
+        float x = X > other.X ? X : other.X;
+        float y = Y > other.Y ? Y : other.Y;
+        float right = Right < other.Right ? Right : other.Right;
+        float bottom = Bottom < other.Bottom ? Bottom : other.Bottom;
+        return right > x && bottom > y ? new Rect(x, y, right - x, bottom - y) : Zero;
+    }
+
     public static Rect Zero => default;
 }
