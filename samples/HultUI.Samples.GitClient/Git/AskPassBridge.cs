@@ -7,6 +7,13 @@ namespace GitClient.Git;
 /// (and git credential prompts) are routed through the GUI instead of the
 /// terminal.
 ///
+/// <b>Platform:</b> this relies on a FIFO and a POSIX <c>/bin/sh</c> askpass
+/// script, so it is only active on Linux and macOS. On Windows git uses its
+/// native credential helpers instead — Git Credential Manager for HTTPS and
+/// ssh-agent / Windows OpenSSH for SSH — which present their own GUI prompts,
+/// so the bridge stays inert (all members become no-ops) rather than trying to
+/// run <c>mkfifo</c>, which does not exist there.
+///
 /// <b>Security:</b> the passphrase never touches the filesystem. The response
 /// channel is a FIFO (named pipe) — data is kernel-buffered and never written
 /// to disk. The prompt file contains only the non-sensitive prompt text
@@ -18,13 +25,20 @@ namespace GitClient.Git;
 /// </summary>
 public sealed class AskPassBridge : IDisposable
 {
-    private readonly string _dir;
-    private readonly string _scriptPath;
-    private readonly string _promptPath;
-    private readonly string _responseFifo;
+    private readonly bool _enabled;
+    private readonly string? _dir;
+    private readonly string? _scriptPath;
+    private readonly string? _promptPath;
+    private readonly string? _responseFifo;
 
     public AskPassBridge()
     {
+        // The FIFO + shell-script mechanism only exists on Unix. On Windows the
+        // bridge is inert and git falls back to its native credential helpers.
+        _enabled = OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
+        if (!_enabled)
+            return;
+
         var id = Guid.NewGuid().ToString("N")[..12];
 
         // Private temp directory — 0700 so only the current user can access it.
@@ -77,6 +91,9 @@ public sealed class AskPassBridge : IDisposable
     /// </summary>
     public void ConfigureProcess(ProcessStartInfo psi)
     {
+        if (!_enabled)
+            return;
+
         psi.Environment["SSH_ASKPASS"] = _scriptPath;
         psi.Environment["SSH_ASKPASS_REQUIRE"] = "force";
         psi.Environment["GIT_ASKPASS"] = _scriptPath;
@@ -93,6 +110,9 @@ public sealed class AskPassBridge : IDisposable
     /// </summary>
     public async Task MonitorAsync(Process process, Func<string, Task<string?>> handler)
     {
+        if (!_enabled)
+            return;
+
         while (!process.HasExited)
         {
             if (File.Exists(_promptPath))
@@ -110,12 +130,12 @@ public sealed class AskPassBridge : IDisposable
                 {
                     // Write to the FIFO — this unblocks the script's `cat`.
                     // The data stays in kernel buffers, never on disk.
-                    await File.WriteAllTextAsync(_responseFifo, response);
+                    await File.WriteAllTextAsync(_responseFifo!, response);
                 }
                 else
                 {
                     // User cancelled — unblock the script with empty data, then kill.
-                    await File.WriteAllTextAsync(_responseFifo, "");
+                    await File.WriteAllTextAsync(_responseFifo!, "");
                     try { process.Kill(); } catch { }
                     return;
                 }
@@ -126,7 +146,10 @@ public sealed class AskPassBridge : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        if (!_enabled)
+            return;
+
+        try { Directory.Delete(_dir!, recursive: true); } catch { }
     }
 
     private static string Escape(string path) => path.Replace("'", "'\\''");
