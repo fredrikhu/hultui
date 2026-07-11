@@ -45,14 +45,14 @@ dotnet run --project samples/HultUI.Samples.Benchmark -- --auto
 
 ```
 === HultUI benchmark: running suite ===
-  create 1,000           median   85.9 ms   min   77.2 ms   (n=5)
-  update every 10th      median   25.3 ms   min   24.9 ms   (n=5)
-  select row             median    3.0 ms   min    2.7 ms   (n=5)
-  swap rows              median   22.8 ms   min   22.5 ms   (n=5)
-  remove row             median   94.9 ms   min   34.2 ms   (n=5)
-  create 10,000          median  857.1 ms   min  833.0 ms   (n=5)
-  append 1,000 to 1,000  median  141.6 ms   min  127.8 ms   (n=5)
-  clear 1,000            median   16.6 ms   min   16.2 ms   (n=5)
+  create 1,000           median   74.3 ms   min   70.0 ms   (n=5)
+  update every 10th      median   40.2 ms   min   21.0 ms   (n=5)
+  select row             median    1.0 ms   min    0.8 ms   (n=5)
+  swap rows              median   19.7 ms   min   19.1 ms   (n=5)
+  remove row             median   86.9 ms   min   38.1 ms   (n=5)
+  create 10,000          median  768.9 ms   min  745.7 ms   (n=5)
+  append 1,000 to 1,000  median  126.1 ms   min  111.7 ms   (n=5)
+  clear 1,000            median   15.9 ms   min   15.5 ms   (n=5)
 === done ===
 ```
 
@@ -82,14 +82,14 @@ couple of warm-up iterations first, forces a GC between metrics, and reports the
 - **Apples to apples:** the table is *not* virtualized. Both HultUI and the
   browser build and lay out every row, so `create`/`clear`/`append` genuinely
   stress the layout of thousands of real elements — that's the point.
-- **One place HultUI is currently disadvantaged:** browsers cull *painting* to
-  the visible viewport, but HultUI's renderer today walks the entire scroll
-  content every paint (Skia's clip rejects the off-screen draw calls cheaply, but
-  the per-element traversal still runs). So the render portion of the large
-  `create`/`append` numbers is inflated relative to a browser. This is a real,
-  known gap — viewport paint culling is a worthwhile follow-up, and this
-  benchmark is exactly what makes it measurable. (For comparison, the
-  `VirtualList` sample *does* only materialize visible rows.)
+- **Paint is culled to the viewport; layout is not.** Like a browser, HultUI
+  skips painting rows scrolled out of view (`ElementRenderer` prunes subtrees
+  whose on-screen box falls outside the scroll clip). So an in-place op like
+  `select` re-paints only what's visible — ~1 ms regardless of how many rows
+  exist. What remains O(total rows) is *layout*: `create`/`append`/`clear` still
+  build and lay out every row — exactly as a browser reflows the whole table —
+  so those numbers are layout-bound, which makes them a fair layout-vs-layout
+  comparison rather than a paint artefact.
 - **Machine-dependent:** GPU, driver, VSync, and display scale all move these
   numbers. Only compare runs captured on the same machine.
 
