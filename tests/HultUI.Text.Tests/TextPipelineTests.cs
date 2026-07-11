@@ -1,3 +1,5 @@
+using System.Linq;
+using HultUI.Core.Layout;
 using HultUI.Core.Styling;
 using HultUI.Text;
 using Xunit;
@@ -221,6 +223,88 @@ public class TextPipelineTests
         // The last line reaches the end of the string.
         var last = layout.Lines[^1];
         Assert.Equal(15, last.Start + last.Length);
+    }
+
+    // ── Ellipsis overflow ──
+
+    private static string LineText(TextLine line) =>
+        string.Concat(line.Runs.Select(r => r.Text));
+
+    [Fact]
+    public void Ellipsis_SingleLineTooWide_TruncatesWithEllipsis()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // 19 chars × 10 = 190px natural; box is 60px. With a 10px ellipsis, only a
+        // 50px (5-char) prefix fits before it.
+        var layout = pipeline.Layout("Hello World Foo Bar", DefaultStyle, 60,
+            maxLines: 1, TextOverflow.Ellipsis);
+
+        Assert.Single(layout.Lines);
+        var text = LineText(layout.Lines[0]);
+        Assert.EndsWith("…", text);
+        Assert.Equal("Hello…", text);
+        Assert.True(layout.Lines[0].Width <= 60.5f, $"line width {layout.Lines[0].Width} exceeds box");
+    }
+
+    [Fact]
+    public void Ellipsis_UnbreakableToken_TruncatesMidWord()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // No break opportunities, so the whole token would overflow; ellipsis must
+        // clip it mid-word rather than let it spill past the box.
+        var layout = pipeline.Layout("Supercalifragilistic", DefaultStyle, 60,
+            maxLines: 1, TextOverflow.Ellipsis);
+
+        Assert.Single(layout.Lines);
+        var text = LineText(layout.Lines[0]);
+        Assert.EndsWith("…", text);
+        Assert.Equal("Super…", text);
+    }
+
+    [Fact]
+    public void Ellipsis_TextThatFits_IsUnchanged()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("Hi", DefaultStyle, 200, maxLines: 1, TextOverflow.Ellipsis);
+
+        Assert.Single(layout.Lines);
+        Assert.Equal("Hi", LineText(layout.Lines[0]));
+    }
+
+    [Fact]
+    public void Ellipsis_MultiLineClamp_EllipsizesLastVisibleLine()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // Wraps to several lines but clamped to 2; the 2nd line gets the ellipsis
+        // and earlier lines are untouched.
+        var layout = pipeline.Layout("aaa bbb ccc ddd eee", DefaultStyle, 40,
+            maxLines: 2, TextOverflow.Ellipsis);
+
+        Assert.Equal(2, layout.Lines.Count);
+        Assert.DoesNotContain("…", LineText(layout.Lines[0]));
+        Assert.EndsWith("…", LineText(layout.Lines[1]));
+    }
+
+    [Fact]
+    public void Clip_Overflow_DropsWordsWithoutEllipsis()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // The default Clip mode keeps the historical behavior: words that don't fit
+        // are simply dropped, with no ellipsis marker.
+        var layout = pipeline.Layout("Hello World Foo Bar", DefaultStyle, 60,
+            maxLines: 1, TextOverflow.Clip);
+
+        Assert.Single(layout.Lines);
+        Assert.DoesNotContain("…", LineText(layout.Lines[0]));
+    }
+
+    [Fact]
+    public void Ellipsis_AndClip_ProduceDistinctCachedLayouts()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var clip = pipeline.Layout("Hello World Foo Bar", DefaultStyle, 60, maxLines: 1, TextOverflow.Clip);
+        var ellipsis = pipeline.Layout("Hello World Foo Bar", DefaultStyle, 60, maxLines: 1, TextOverflow.Ellipsis);
+        Assert.NotSame(clip, ellipsis);
     }
 
     // ── Size ──

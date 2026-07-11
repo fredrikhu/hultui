@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 
@@ -26,7 +27,8 @@ public sealed class TextPipeline
         _shaper = shaper;
     }
 
-    public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow = TextOverflow.Clip)
     {
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
@@ -44,16 +46,21 @@ public sealed class TextPipeline
 
         // Single line that fits: the whole layout is width-independent, so the
         // shaped result is returned directly for any width that accommodates it.
+        // Nothing is truncated, so the overflow mode is irrelevant here.
         if (!shaped.HasNewline && shaped.TotalWidth <= maxWidth)
             return shaped.SingleLine!;
 
         // Explicit newlines or overflow: line breaking depends on the width, so
-        // fall back to the width-keyed cache.
-        var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight, maxWidth, maxLines ?? -1);
+        // fall back to the width-keyed cache. Overflow is part of the key because
+        // Ellipsis rewrites the truncated line, producing a different layout.
+        var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            maxWidth, maxLines ?? -1, overflow);
         if (_cache.TryGet(key, out var cached))
             return cached;
 
         var layout = ComputeWrapped(text, style, maxWidth, maxLines);
+        if (overflow == TextOverflow.Ellipsis)
+            layout = ApplyEllipsis(text, style, layout, maxWidth);
         _cache.Put(key, layout);
         return layout;
     }
@@ -97,6 +104,103 @@ public sealed class TextPipeline
         var breakPoints = LineBreaker.FindBreakOpportunities(text);
         return BreakIntoLines(text, shapedRuns, fontRuns, style, breakPoints, maxWidth, maxLines);
     }
+
+    private const string EllipsisString = "…"; // …
+
+    // Rewrites the last line of an already-broken (clipped) layout with a
+    // trailing ellipsis when content was truncated. Truncation happens either
+    // because a maxLines limit dropped trailing text, or because a single
+    // unbreakable token is wider than the available width. Only the final line
+    // is touched; earlier lines keep their exact shaping and positions.
+    private TextLayout ApplyEllipsis(string text, ResolvedInheritedStyle style, TextLayout clip, float maxWidth)
+    {
+        if (clip.Lines.Count == 0)
+            return clip;
+
+        var last = clip.Lines[^1];
+        int coveredEnd = last.Start + last.Length;
+        bool droppedTail = coveredEnd < text.Length;
+        // A greedy line never exceeds maxWidth unless it is a lone token that
+        // could not be broken — that still needs to be clipped with an ellipsis.
+        bool lineOverflows = last.Width > maxWidth + 0.5f;
+        if (!droppedTail && !lineOverflows)
+            return clip;
+
+        // The truncated line's source is everything from where the last line
+        // begins up to the next explicit newline (or the end of the string).
+        int nl = text.IndexOf('\n', last.Start);
+        int tailEnd = nl < 0 ? text.Length : nl;
+        string tail = text[last.Start..tailEnd];
+
+        var ellipsized = BuildEllipsizedLine(tail, last.Start, style, maxWidth);
+        ellipsized.OffsetY = last.OffsetY;
+
+        var lines = new List<TextLine>(clip.Lines.Count);
+        for (int i = 0; i < clip.Lines.Count - 1; i++)
+            lines.Add(clip.Lines[i]);
+        lines.Add(ellipsized);
+
+        float maxLineWidth = 0;
+        foreach (var line in lines)
+            maxLineWidth = Math.Max(maxLineWidth, line.Width);
+
+        // The replacement line uses the same font metrics, so the overall height
+        // is unchanged; only the max width can shrink.
+        return new TextLayout(lines, new Size(maxLineWidth, clip.Size.Height));
+    }
+
+    // Builds a single line holding the longest prefix of <paramref name="tail"/>
+    // that leaves room for the ellipsis within <paramref name="maxWidth"/>,
+    // followed by the ellipsis glyph.
+    private TextLine BuildEllipsizedLine(string tail, int start, ResolvedInheritedStyle style, float maxWidth)
+    {
+        float ellipsisWidth = MeasureString(EllipsisString, style);
+
+        // Binary search for the widest prefix that fits alongside the ellipsis.
+        // Width is monotonic in prefix length, so this converges in O(log n)
+        // shaping calls even for a pathologically long unbreakable token.
+        int lo = 0, hi = tail.Length, best = 0;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            float width = MeasureString(tail[..mid], style);
+            if (width + ellipsisWidth <= maxWidth)
+            {
+                best = mid;
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        // Never split a surrogate pair. Snapping down only narrows the prefix, so
+        // it still fits.
+        best = SnapPrefix(tail, best);
+
+        string content = tail[..best] + EllipsisString;
+        return ShapeLineText(content, style, start);
+    }
+
+    // Total advance width of a string, itemized and shaped the same way as a line.
+    private float MeasureString(string s, ResolvedInheritedStyle style)
+    {
+        if (s.Length == 0)
+            return 0;
+
+        var runs = FontItemizer.Itemize(s, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+        float width = 0;
+        foreach (var run in runs)
+            width += _shaper.Shape(run.Text, run.Font, style.FontSize).Width;
+        return width;
+    }
+
+    // Moves an index back off the trailing half of a surrogate pair.
+    private static int SnapPrefix(string text, int index) =>
+        index > 0 && index < text.Length && char.IsLowSurrogate(text[index]) && char.IsHighSurrogate(text[index - 1])
+            ? index - 1
+            : index;
 
     private static TextLayout BuildSingleLineLayout(List<ShapedRun> runs, float totalWidth, int textLength)
     {

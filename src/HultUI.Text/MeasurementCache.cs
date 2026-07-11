@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Styling;
 
 namespace HultUI.Text;
@@ -5,7 +6,7 @@ namespace HultUI.Text;
 /// <summary>Key for a fully laid-out, width-dependent text result.</summary>
 internal readonly record struct MeasurementKey(
     string Text, string FontFamily, float FontSize, FontWeight FontWeight,
-    float MaxWidth, int MaxLines);
+    float MaxWidth, int MaxLines, TextOverflow Overflow);
 
 /// <summary>
 /// Key for the width-independent shaping of a string. Shaping (itemization +

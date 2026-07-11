@@ -85,7 +85,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         if (string.IsNullOrEmpty(text) || _pipeline is null) return;
 
-        var layout = _pipeline.Layout(text, style, bounds.Width, maxLines);
+        var layout = _pipeline.Layout(text, style, bounds.Width, maxLines, overflow);
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(style.TextColor);
         _pooledPaint.IsAntialias = true;
