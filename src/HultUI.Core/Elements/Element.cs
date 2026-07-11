@@ -347,7 +347,14 @@ public abstract class Element
         MarkChildrenDirty();
 
         if (!wasParented)
+        {
             child.OnMounted();
+            // A freshly mounted subtree has no resolved inherited style yet, so
+            // it would measure with a zero font size (zero-height text) until
+            // some later restyle. Flag it so the next frame's style pass resolves
+            // it before layout. Structural ops otherwise mark only layout/children.
+            child.MarkStyleDirty();
+        }
     }
 
     public void InsertChild(int index, Element child)
@@ -363,7 +370,10 @@ public abstract class Element
         MarkChildrenDirty();
 
         if (!wasParented)
+        {
             child.OnMounted();
+            child.MarkStyleDirty(); // see AddChild: resolve the new subtree's style
+        }
     }
 
     public void RemoveChild(Element child)
@@ -413,7 +423,10 @@ public abstract class Element
             _children.Add(child);
 
             if (!alreadyMounted.Contains(child))
+            {
                 child.OnMounted();
+                child.MarkStyleDirty(); // see AddChild: resolve the new subtree's style
+            }
         }
         MarkLayoutDirty();
         MarkChildrenDirty();
