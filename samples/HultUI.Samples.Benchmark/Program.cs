@@ -9,51 +9,40 @@ using HultUI.Core.Styling;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HultUI implementation of the classic "js-framework-benchmark" table benchmark
-// (https://github.com/krausest/js-framework-benchmark). It builds a *real,
-// non-virtualized* table of rows — one element subtree per row, just like a
-// browser materializes one DOM subtree per <tr> — and times each standard
-// operation end-to-end: from the state mutation to the resulting frame being
-// painted on screen.
+// (https://github.com/krausest/js-framework-benchmark). It times the standard
+// row operations end-to-end — from the state mutation to the resulting frame
+// being painted — so the numbers are directly comparable to the per-operation
+// milliseconds web frameworks report.
 //
-// The measured operations mirror the web benchmark exactly, so the numbers here
-// are directly comparable to the per-operation milliseconds those frameworks
-// report (React, Vue, Svelte, vanilla JS, …):
+// Two backends, selected with --virtual:
+//   default    a real, NON-virtualized table — one element subtree per row, like
+//              a browser materializing one DOM subtree per <tr>. This is the mode
+//              that is comparable to js-framework-benchmark (it forbids
+//              virtualization). Layout is O(total rows).
+//   --virtual  the SAME operations against a VirtualListElement, which only
+//              materializes the visible rows. Not a valid js-framework-benchmark
+//              entry, but shows what a real app with a huge list would get:
+//              layout is O(visible rows).
 //
-//   create 1,000       replace the body with 1,000 freshly built rows
-//   create 10,000      replace the body with 10,000 freshly built rows
-//   append 1,000       add 1,000 rows to an already-large table
-//   update every 10th  append " !!!" to every 10th row's label
-//   select row         highlight a row (in place)
-//   swap rows          swap row 1 and row n-2
-//   remove row         delete a single row
-//   clear              remove every row
-//
-// Click a button to run one operation and see its latency, or press "Run all"
-// to run the scripted suite (warm-up + repeats, median reported) and print a
-// summary table to the console — that's the apples-to-apples number to compare
-// against a browser running the same benchmark.
+// Flags: --auto runs the scripted suite and prints medians; --profile prints a
+// per-pass breakdown of the create operations. Both close the window when done.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Pass --auto to run the scripted suite once on startup, print the summary to
-// the console, and close the window — handy for CI or capturing numbers without
-// clicking. Without it, the app is interactive.
 bool auto = args.Contains("--auto");
-// Pass --profile to decompose the create operations into their frame passes
-// (element construction, style, layout, render, present) and print the table.
 bool profile = args.Contains("--profile");
+bool virtualMode = args.Contains("--virtual");
 
 using var app = new Application("HultUI Benchmark", 1040, 760);
 app.Theme = Theme.Light;
 
 var window = app.PrimaryWindow;
-var bench = new Benchmark(window);
+var bench = new Benchmark(window, virtualMode);
 app.SetRoot(bench.Build());
 
 // Live frame HUD (FPS / frame-time breakdown) in the top-right corner.
 app.DevTools.IsEnabled = true;
 
 if (auto)
-    // Kick off after the first frame is painted, and close once the suite ends.
     window.RequestPostFrameCallback(() => bench.RunAll(onComplete: window.Close));
 else if (profile)
     window.RequestPostFrameCallback(() => bench.Profile(onComplete: window.Close));
@@ -63,41 +52,21 @@ app.Run();
 sealed class Benchmark
 {
     private readonly Window _window;
-    private readonly Random _rng = new(20260710); // fixed seed → reproducible labels
+    private readonly bool _virtual;
+    private readonly IBenchTarget _target;
 
-    // The table model and the retained element per row, kept in lock-step.
-    private readonly List<RowView> _rows = [];
-    private RowView? _selected;
-    private int _nextId = 1;
-
-    // Retained containers we mutate in place.
-    private readonly BoxElement _tableBody = Flex.Column(gap: 0).FlexShrink(0);
     private readonly BoxElement _resultsBody = Flex.Column(gap: 2);
     private readonly TextElement _rowCountLabel = Text.New("0 rows").FontSize(13f);
 
     // Last measured latency per named operation (ms), preserving insertion order.
     private readonly List<(string Name, double Ms)> _results = [];
 
-    // ── Label vocabulary (identical word lists to js-framework-benchmark) ──
-    private static readonly string[] Adjectives =
-    [
-        "pretty", "large", "big", "small", "tall", "short", "long", "handsome",
-        "plain", "quaint", "clean", "elegant", "easy", "angry", "crazy", "helpful",
-        "mushy", "odd", "unsightly", "adorable", "important", "inexpensive",
-        "cheap", "expensive", "fancy",
-    ];
-    private static readonly string[] Colours =
-    [
-        "red", "yellow", "blue", "green", "pink", "brown", "purple", "brown",
-        "white", "black", "orange",
-    ];
-    private static readonly string[] Nouns =
-    [
-        "table", "chair", "house", "bbq", "desk", "car", "pony", "cookie",
-        "sandwich", "burger", "pizza", "mouse", "keyboard",
-    ];
-
-    public Benchmark(Window window) => _window = window;
+    public Benchmark(Window window, bool virtualMode)
+    {
+        _window = window;
+        _virtual = virtualMode;
+        _target = virtualMode ? new VirtualTarget(Measure) : new TableTarget(Measure);
+    }
 
     public Element Build()
     {
@@ -106,12 +75,12 @@ sealed class Benchmark
             .Padding(new Thickness(12, 16))
             .Background(Color.FromHex("#EEF2FF"))
             .Children(
-                Btn("Create 1,000", () => Measure("create 1,000", () => Create(1_000))),
-                Btn("Create 10,000", () => Measure("create 10,000", () => Create(10_000))),
-                Btn("Append 1,000", () => Measure("append 1,000", () => Append(1_000))),
-                Btn("Update every 10th", () => Measure("update every 10th", UpdateEveryTenth)),
-                Btn("Swap rows", () => Measure("swap rows", Swap)),
-                Btn("Clear", () => Measure("clear", Clear)),
+                Btn("Create 1,000", () => Measure("create 1,000", () => _target.Create(1_000))),
+                Btn("Create 10,000", () => Measure("create 10,000", () => _target.Create(10_000))),
+                Btn("Append 1,000", () => Measure("append 1,000", () => _target.Append(1_000))),
+                Btn("Update every 10th", () => Measure("update every 10th", _target.UpdateEveryTenth)),
+                Btn("Swap rows", () => Measure("swap rows", _target.Swap)),
+                Btn("Clear", () => Measure("clear", _target.Clear)),
                 Box.New().FlexGrow(1),
                 Btn("Run all ▶", () => RunAll(), Color.FromHex("#4F46E5"))
             );
@@ -129,104 +98,26 @@ sealed class Benchmark
                 _rowCountLabel.TextColor(Color.FromHex("#64748B"))
             );
 
-        var table = ScrollView.New().FlexGrow(1).Children(_tableBody);
-
         return Flex.Column(gap: 0).Children(
             // Title bar
             Box.New().FlexShrink(0).Padding(new Thickness(14, 20))
                 .Background(Color.FromHex("#4F46E5")).TextColor(Color.White)
                 .Children(
                     Flex.Column(gap: 2).Children(
-                        Text.New("HultUI Benchmark").FontSize(20f).FontWeight(FontWeight.Bold),
-                        Text.New("js-framework-benchmark operations on a real, non-virtualized table")
+                        Text.New("HultUI Benchmark" + (_virtual ? " — virtualized" : "")).FontSize(20f).FontWeight(FontWeight.Bold),
+                        Text.New(_virtual
+                                ? "js-framework-benchmark operations on a virtualized list (only visible rows materialized)"
+                                : "js-framework-benchmark operations on a real, non-virtualized table")
                             .FontSize(12f).TextColor(Color.FromHex("#C7D2FE"))
                     )
                 ),
             controls,
-            // Body: results panel on the left, the row table on the right.
-            Flex.Row(gap: 0).FlexGrow(1).Children(results, table)
+            // Body: results panel on the left, the row list on the right.
+            Flex.Row(gap: 0).FlexGrow(1).Children(results, _target.BuildView())
         );
     }
 
-    // ── Operations ──────────────────────────────────────────────────────────
-
-    private void Create(int count)
-    {
-        _rows.Clear();
-        _selected = null;
-        var elements = new Element[count];
-        for (int i = 0; i < count; i++)
-        {
-            var view = NewRow();
-            _rows.Add(view);
-            elements[i] = view.Root;
-        }
-        _tableBody.ReplaceChildren(elements);
-    }
-
-    private void Append(int count)
-    {
-        if (_rows.Count == 0) { Create(count); return; }
-        for (int i = 0; i < count; i++)
-            _rows.Add(NewRow());
-        _tableBody.ReplaceChildren(_rows.Select(r => (Element)r.Root).ToArray());
-    }
-
-    // Append " !!!" to every 10th row's label — mutated in place (no re-parenting).
-    private void UpdateEveryTenth()
-    {
-        for (int i = 0; i < _rows.Count; i += 10)
-            _rows[i].SetLabel(_rows[i].Label + " !!!");
-    }
-
-    // Swap row 1 and row n-2 (the standard benchmark's indices), reordering the
-    // children while reusing the existing, already-mounted element subtrees.
-    private void Swap()
-    {
-        if (_rows.Count < 999) return;
-        int a = 1, b = _rows.Count - 2;
-        (_rows[a], _rows[b]) = (_rows[b], _rows[a]);
-        _tableBody.ReplaceChildren(_rows.Select(r => (Element)r.Root).ToArray());
-    }
-
-    private void Select(RowView view)
-    {
-        _selected?.SetSelected(false);
-        _selected = view;
-        view.SetSelected(true);
-    }
-
-    private void Remove(RowView view)
-    {
-        _rows.Remove(view);
-        if (_selected == view) _selected = null;
-        _tableBody.ReplaceChildren(_rows.Select(r => (Element)r.Root).ToArray());
-    }
-
-    private void Clear()
-    {
-        _rows.Clear();
-        _selected = null;
-        _tableBody.ReplaceChildren();
-    }
-
-    // ── Row construction ──────────────────────────────────────────────────────
-
-    private RowView NewRow()
-    {
-        int id = _nextId++;
-        string label = $"{Pick(Adjectives)} {Pick(Colours)} {Pick(Nouns)}";
-        var view = new RowView(id, label);
-        // Wire interactions: clicking the label selects; clicking ✕ removes.
-        view.LabelBox.OnClick(_ => Measure("select row", () => Select(view)));
-        view.RemoveBox.OnClick(_ => Measure("remove row", () => Remove(view)));
-        return view;
-    }
-
-    private string Pick(string[] words) => words[_rng.Next(words.Length)];
-
-    // A small styled clickable used for the toolbar buttons. A coloured variant
-    // (bg set) renders white text; the default is a light chip on dark text.
+    // A small styled clickable used for the toolbar buttons.
     private static Element Btn(string label, Action onClick, Color? bg = null)
         => Box.New()
             .Padding(new Thickness(8, 14))
@@ -275,7 +166,7 @@ sealed class Benchmark
         _resultsBody.ReplaceChildren(rows);
     }
 
-    private void RefreshRowCount() => _rowCountLabel.Content = $"{_rows.Count:N0} rows";
+    private void RefreshRowCount() => _rowCountLabel.Content = $"{_target.Count:N0} rows";
 
     // ── Scripted "Run all" suite ──────────────────────────────────────────────
 
@@ -284,13 +175,9 @@ sealed class Benchmark
     private readonly Queue<BenchStep> _script = new();
     private readonly List<double> _samples = [];
     private string? _currentMetric;
+    private Action? _onComplete;
 
     private record BenchStep(string? MeasureAs, Action Apply);
-
-    // Builds the scripted suite. Each measured op gets its own frame; any needed
-    // setup (e.g. clearing first, or ensuring 1,000 rows exist) runs in its own
-    // unmeasured frame beforehand so it never pollutes the measurement.
-    private Action? _onComplete;
 
     public void RunAll(Action? onComplete = null)
     {
@@ -299,22 +186,19 @@ sealed class Benchmark
         _samples.Clear();
         _currentMetric = null;
 
-        Repeat("create 1,000", setup: Clear, op: () => Create(1_000));
-        Repeat("update every 10th", setup: () => Create(1_000), op: UpdateEveryTenth);
-        Repeat("select row", setup: () => Create(1_000),
-            op: () => Select(_rows[_rng.Next(_rows.Count)]));
-        Repeat("swap rows", setup: () => Create(1_000), op: Swap);
-        Repeat("remove row", setup: () => Create(1_000),
-            op: () => Remove(_rows[_rng.Next(_rows.Count)]));
-        Repeat("create 10,000", setup: Clear, op: () => Create(10_000));
+        Repeat("create 1,000", setup: _target.Clear, op: () => _target.Create(1_000));
+        Repeat("update every 10th", setup: () => _target.Create(1_000), op: _target.UpdateEveryTenth);
+        Repeat("select row", setup: () => _target.Create(1_000), op: _target.SelectRandom);
+        Repeat("swap rows", setup: () => _target.Create(1_000), op: _target.Swap);
+        Repeat("remove row", setup: () => _target.Create(1_000), op: _target.RemoveRandom);
+        Repeat("create 10,000", setup: _target.Clear, op: () => _target.Create(10_000));
         // Match js-framework-benchmark's parameters exactly: "append rows to
-        // large table" appends 1,000 to a table of 1,000 (not 10,000), and
-        // "clear rows" clears a table of 1,000. Using the same sizes is what
-        // makes these two rows comparable to the web numbers.
-        Repeat("append 1,000 to 1,000", setup: () => Create(1_000), op: () => Append(1_000));
-        Repeat("clear 1,000", setup: () => Create(1_000), op: Clear);
+        // large table" appends 1,000 to a table of 1,000, and "clear rows" clears
+        // a table of 1,000.
+        Repeat("append 1,000 to 1,000", setup: () => _target.Create(1_000), op: () => _target.Append(1_000));
+        Repeat("clear 1,000", setup: () => _target.Create(1_000), op: _target.Clear);
 
-        Console.WriteLine("\n=== HultUI benchmark: running suite ===");
+        Console.WriteLine($"\n=== HultUI benchmark ({(_virtual ? "virtualized" : "non-virtualized")}): running suite ===");
         Pump();
     }
 
@@ -351,8 +235,6 @@ sealed class Benchmark
             if (step.MeasureAs is not null)
                 _samples.Add(sw.Elapsed.TotalMilliseconds);
             RefreshRowCount();
-            // Schedule the next step on the following loop iteration so every op
-            // is measured against a clean, dedicated frame.
             Application.InvokeOnMainThread(Pump);
         });
     }
@@ -377,10 +259,9 @@ sealed class Benchmark
 
     // ── Per-pass profiling ("--profile") ──────────────────────────────────────
     //
-    // Decomposes an operation's end-to-end cost into: build (constructing the row
-    // elements + ReplaceChildren bookkeeping, timed directly) and the frame's
-    // style / layout / render / present passes (read from PerformanceCounters).
-    // Answers "where does create 10,000 actually spend its time".
+    // Decomposes an operation's end-to-end cost into: build (constructing rows +
+    // bookkeeping, timed directly) and the frame's style / layout / render /
+    // present passes (read from PerformanceCounters).
 
     private readonly Queue<BenchStep> _profSteps = new();
     private readonly List<(double Build, double Style, double Layout, double Render, double Present)> _profSamples = [];
@@ -394,27 +275,23 @@ sealed class Benchmark
         _profSamples.Clear();
         _profMetric = null;
 
-        QueueProfile("create 1,000", () => Create(1_000));
-        QueueProfile("create 10,000", () => Create(10_000));
+        QueueProfile("create 1,000", () => _target.Create(1_000));
+        QueueProfile("create 10,000", () => _target.Create(10_000));
 
-        Console.WriteLine("\n=== profile: per-pass breakdown, median ms over 5 runs ===");
+        Console.WriteLine($"\n=== profile ({(_virtual ? "virtualized" : "non-virtualized")}): per-pass breakdown, median ms over 5 runs ===");
         Console.WriteLine($"{"operation",-16}{"build",9}{"style",9}{"layout",9}{"render",9}{"present",9}{"sum",9}");
         Pump(_profSteps, measured: PumpProfileSample, done: FinishProfile);
     }
 
     private void QueueProfile(string metric, Action op)
     {
-        // Each measured create runs in its own frame, preceded by an unmeasured
-        // Clear frame so it always builds from an empty table.
         for (int i = 0; i < Warmup + Repeats; i++)
         {
-            _profSteps.Enqueue(new BenchStep(null, Clear));
+            _profSteps.Enqueue(new BenchStep(null, _target.Clear));
             _profSteps.Enqueue(new BenchStep(i >= Warmup ? metric : null, op));
         }
     }
 
-    // Shared frame-stepping driver: applies one step per frame, times the build,
-    // and hands the measured sample to a callback after the frame is painted.
     private void Pump(Queue<BenchStep> steps, Action<string> measured, Action done)
     {
         if (steps.Count == 0) { done(); return; }
@@ -481,9 +358,241 @@ sealed class Benchmark
     }
 }
 
-// One table row: its element subtree plus the handles we mutate (label text,
-// selection background). Kept alongside the model so operations can update a
-// single row in place without rebuilding the whole table.
+// The set of operations both backends implement, so the same harness can drive a
+// real table or a virtualized list.
+interface IBenchTarget
+{
+    int Count { get; }
+    Element BuildView();           // the list/table element that fills the body
+    void Create(int n);
+    void Append(int n);
+    void UpdateEveryTenth();
+    void Swap();
+    void SelectRandom();
+    void RemoveRandom();
+    void Clear();
+}
+
+// Shared label vocabulary (identical word lists to js-framework-benchmark).
+static class Labels
+{
+    private static readonly string[] Adjectives =
+    [
+        "pretty", "large", "big", "small", "tall", "short", "long", "handsome",
+        "plain", "quaint", "clean", "elegant", "easy", "angry", "crazy", "helpful",
+        "mushy", "odd", "unsightly", "adorable", "important", "inexpensive",
+        "cheap", "expensive", "fancy",
+    ];
+    private static readonly string[] Colours =
+    [
+        "red", "yellow", "blue", "green", "pink", "brown", "purple", "brown",
+        "white", "black", "orange",
+    ];
+    private static readonly string[] Nouns =
+    [
+        "table", "chair", "house", "bbq", "desk", "car", "pony", "cookie",
+        "sandwich", "burger", "pizza", "mouse", "keyboard",
+    ];
+
+    public static string Next(Random rng)
+        => $"{Adjectives[rng.Next(Adjectives.Length)]} {Colours[rng.Next(Colours.Length)]} {Nouns[rng.Next(Nouns.Length)]}";
+}
+
+// ── Non-virtualized backend: one retained element subtree per row ─────────────
+sealed class TableTarget : IBenchTarget
+{
+    private readonly Action<string, Action> _measure;
+    private readonly Random _rng = new(20260710); // fixed seed → reproducible labels
+    private readonly BoxElement _body = Flex.Column(gap: 0).FlexShrink(0);
+    private readonly List<RowView> _rows = [];
+    private RowView? _selected;
+    private int _nextId = 1;
+
+    public TableTarget(Action<string, Action> measure) => _measure = measure;
+
+    public int Count => _rows.Count;
+    public Element BuildView() => ScrollView.New().FlexGrow(1).Children(_body);
+
+    public void Create(int count)
+    {
+        _rows.Clear();
+        _selected = null;
+        var elements = new Element[count];
+        for (int i = 0; i < count; i++)
+        {
+            var view = NewRow();
+            _rows.Add(view);
+            elements[i] = view.Root;
+        }
+        _body.ReplaceChildren(elements);
+    }
+
+    public void Append(int count)
+    {
+        if (_rows.Count == 0) { Create(count); return; }
+        for (int i = 0; i < count; i++)
+            _rows.Add(NewRow());
+        _body.ReplaceChildren(_rows.Select(r => (Element)r.Root).ToArray());
+    }
+
+    public void UpdateEveryTenth()
+    {
+        for (int i = 0; i < _rows.Count; i += 10)
+            _rows[i].SetLabel(_rows[i].Label + " !!!");
+    }
+
+    public void Swap()
+    {
+        if (_rows.Count < 999) return;
+        (_rows[1], _rows[^2]) = (_rows[^2], _rows[1]);
+        _body.ReplaceChildren(_rows.Select(r => (Element)r.Root).ToArray());
+    }
+
+    public void SelectRandom() => Select(_rows[_rng.Next(_rows.Count)]);
+    public void RemoveRandom() => Remove(_rows[_rng.Next(_rows.Count)]);
+
+    public void Clear()
+    {
+        _rows.Clear();
+        _selected = null;
+        _body.ReplaceChildren();
+    }
+
+    private void Select(RowView view)
+    {
+        _selected?.SetSelected(false);
+        _selected = view;
+        view.SetSelected(true);
+    }
+
+    private void Remove(RowView view)
+    {
+        _rows.Remove(view);
+        if (_selected == view) _selected = null;
+        _body.ReplaceChildren(_rows.Select(r => (Element)r.Root).ToArray());
+    }
+
+    private RowView NewRow()
+    {
+        var view = new RowView(_nextId++, Labels.Next(_rng));
+        view.LabelBox.OnClick(_ => _measure("select row", () => Select(view)));
+        view.RemoveBox.OnClick(_ => _measure("remove row", () => Remove(view)));
+        return view;
+    }
+}
+
+// ── Virtualized backend: only visible rows are ever materialized ──────────────
+sealed class VirtualTarget : IBenchTarget
+{
+    private readonly Action<string, Action> _measure;
+    private readonly Random _rng = new(20260710);
+    private readonly VirtualListElement<RowModel> _list;
+    private List<RowModel> _models = [];
+    private RowModel? _selected;
+    private int _nextId = 1;
+
+    public VirtualTarget(Action<string, Action> measure)
+    {
+        _measure = measure;
+        _list = VirtualListElement<RowModel>.New()
+            .ItemHeight(30)
+            .RenderWith(RenderRow)
+            .Items(_models);
+    }
+
+    public int Count => _models.Count;
+    public Element BuildView() => _list.FlexGrow(1);
+
+    public void Create(int count)
+    {
+        _models = new List<RowModel>(count);
+        _selected = null;
+        for (int i = 0; i < count; i++)
+            _models.Add(new RowModel(_nextId++, Labels.Next(_rng)));
+        Refresh();
+    }
+
+    public void Append(int count)
+    {
+        for (int i = 0; i < count; i++)
+            _models.Add(new RowModel(_nextId++, Labels.Next(_rng)));
+        Refresh();
+    }
+
+    public void UpdateEveryTenth()
+    {
+        for (int i = 0; i < _models.Count; i += 10)
+            _models[i].Label += " !!!";
+        Refresh();
+    }
+
+    public void Swap()
+    {
+        if (_models.Count < 999) return;
+        (_models[1], _models[^2]) = (_models[^2], _models[1]);
+        Refresh();
+    }
+
+    public void SelectRandom() => Select(_models[_rng.Next(_models.Count)]);
+    public void RemoveRandom() => Remove(_models[_rng.Next(_models.Count)]);
+
+    public void Clear()
+    {
+        _models = [];
+        _selected = null;
+        Refresh();
+    }
+
+    private void Select(RowModel m)
+    {
+        if (_selected is not null) _selected.Selected = false;
+        _selected = m;
+        m.Selected = true;
+        Refresh();
+    }
+
+    private void Remove(RowModel m)
+    {
+        _models.Remove(m);
+        if (_selected == m) _selected = null;
+        Refresh();
+    }
+
+    // Re-assigning Items invalidates the list, so it re-materializes just the
+    // visible rows on the next frame — the O(visible) cost the benchmark shows.
+    private void Refresh() => _list.Items = _models;
+
+    private Element RenderRow(RowModel m)
+    {
+        var label = Box.New().FlexGrow(1).Cursor(CursorType.Pointer)
+            .Children(Text.New(m.Label).FontSize(13f))
+            .OnClick(_ => _measure("select row", () => Select(m)));
+        var remove = Box.New().Width(Dimension.Px(24)).Cursor(CursorType.Pointer)
+            .Children(Text.New("✕").FontSize(13f).TextColor(Color.FromHex("#EF4444")))
+            .OnClick(_ => _measure("remove row", () => Remove(m)));
+        return Flex.Row(gap: 12).FlexShrink(0)
+            .AlignItems(AlignItems.Center)
+            .Padding(new Thickness(6, 16))
+            .Background(m.Selected ? Color.FromHex("#DBEAFE") : Color.White)
+            .Children(
+                Text.New($"{m.Id}").FontSize(13f).TextColor(Color.FromHex("#94A3B8")).Width(Dimension.Px(64)),
+                label,
+                remove);
+    }
+}
+
+// Plain data for a virtualized row — no retained element (the list builds one on
+// demand for visible rows only).
+sealed class RowModel(int id, string label)
+{
+    public int Id { get; } = id;
+    public string Label { get; set; } = label;
+    public bool Selected { get; set; }
+}
+
+// One non-virtualized row: its element subtree plus the handles operations mutate
+// (label text, selection background). Kept alongside the model so operations can
+// update a single row in place without rebuilding the whole table.
 sealed class RowView
 {
     private static readonly Color RowBackground = Color.White;
