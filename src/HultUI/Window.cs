@@ -29,6 +29,12 @@ public sealed class Window : IOverlayHost, IDisposable
     private TextElement? _textElementDragTarget;
     private bool _disposed;
 
+    // ──── Post-frame callbacks ────
+    // One-shot actions run immediately after the next frame is presented. Used to
+    // measure end-to-end update latency (mutation → painted) and to react once a
+    // frame is on screen. Registering one guarantees a frame renders.
+    private readonly List<Action> _postFrameCallbacks = [];
+
     // ──── Overlay state ────
     private readonly List<OverlayEntry> _overlays = [];
     private int _nextOverlayId = 1;
@@ -232,7 +238,19 @@ public sealed class Window : IOverlayHost, IDisposable
         _root?.MarkStyleDirty();
     }
 
+    /// <summary>
+    /// Registers an action to run exactly once, immediately after the next frame
+    /// is presented (after present + buffer swap). Runs on the UI thread. This
+    /// forces a frame to render even if nothing else is dirty, so the callback is
+    /// guaranteed to fire on the following loop iteration. Useful for measuring
+    /// how long a state change takes to reach the screen, or for reacting once
+    /// content is actually painted.
+    /// </summary>
+    public void RequestPostFrameCallback(Action callback)
+        => _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
+
     internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
+        || _postFrameCallbacks.Count > 0
         || _overlays.Count > 0
         // Render once when an assistive tech attaches, so the accessibility tree
         // gets built even if the app is otherwise idle (the build runs in the
@@ -365,6 +383,17 @@ public sealed class Window : IOverlayHost, IDisposable
             PlatformWindow.SwapBuffers();
         }
         _perf.EndPresent();
+
+        // Fire one-shot post-frame callbacks now that this frame is on screen.
+        // Swap to a local list first so a callback that registers another one
+        // schedules it for the *next* frame rather than reentering this loop.
+        if (_postFrameCallbacks.Count > 0)
+        {
+            var due = _postFrameCallbacks.ToArray();
+            _postFrameCallbacks.Clear();
+            foreach (var cb in due)
+                cb();
+        }
     }
 
     private void HandleInputEvent(InputEvent evt)
