@@ -38,6 +38,9 @@ using HultUI.Core.Styling;
 // the console, and close the window — handy for CI or capturing numbers without
 // clicking. Without it, the app is interactive.
 bool auto = args.Contains("--auto");
+// Pass --profile to decompose the create operations into their frame passes
+// (element construction, style, layout, render, present) and print the table.
+bool profile = args.Contains("--profile");
 
 using var app = new Application("HultUI Benchmark", 1040, 760);
 app.Theme = Theme.Light;
@@ -52,6 +55,8 @@ app.DevTools.IsEnabled = true;
 if (auto)
     // Kick off after the first frame is painted, and close once the suite ends.
     window.RequestPostFrameCallback(() => bench.RunAll(onComplete: window.Close));
+else if (profile)
+    window.RequestPostFrameCallback(() => bench.Profile(onComplete: window.Close));
 
 app.Run();
 
@@ -366,6 +371,111 @@ sealed class Benchmark
     private void FinishSuite()
     {
         FlushMetric();
+        Console.WriteLine("=== done ===\n");
+        _onComplete?.Invoke();
+    }
+
+    // ── Per-pass profiling ("--profile") ──────────────────────────────────────
+    //
+    // Decomposes an operation's end-to-end cost into: build (constructing the row
+    // elements + ReplaceChildren bookkeeping, timed directly) and the frame's
+    // style / layout / render / present passes (read from PerformanceCounters).
+    // Answers "where does create 10,000 actually spend its time".
+
+    private readonly Queue<BenchStep> _profSteps = new();
+    private readonly List<(double Build, double Style, double Layout, double Render, double Present)> _profSamples = [];
+    private string? _profMetric;
+    private double _profBuildMs;
+
+    public void Profile(Action onComplete)
+    {
+        _onComplete = onComplete;
+        _profSteps.Clear();
+        _profSamples.Clear();
+        _profMetric = null;
+
+        QueueProfile("create 1,000", () => Create(1_000));
+        QueueProfile("create 10,000", () => Create(10_000));
+
+        Console.WriteLine("\n=== profile: per-pass breakdown, median ms over 5 runs ===");
+        Console.WriteLine($"{"operation",-16}{"build",9}{"style",9}{"layout",9}{"render",9}{"present",9}{"sum",9}");
+        Pump(_profSteps, measured: PumpProfileSample, done: FinishProfile);
+    }
+
+    private void QueueProfile(string metric, Action op)
+    {
+        // Each measured create runs in its own frame, preceded by an unmeasured
+        // Clear frame so it always builds from an empty table.
+        for (int i = 0; i < Warmup + Repeats; i++)
+        {
+            _profSteps.Enqueue(new BenchStep(null, Clear));
+            _profSteps.Enqueue(new BenchStep(i >= Warmup ? metric : null, op));
+        }
+    }
+
+    // Shared frame-stepping driver: applies one step per frame, times the build,
+    // and hands the measured sample to a callback after the frame is painted.
+    private void Pump(Queue<BenchStep> steps, Action<string> measured, Action done)
+    {
+        if (steps.Count == 0) { done(); return; }
+
+        var step = steps.Dequeue();
+        if (step.MeasureAs is not null && step.MeasureAs != _profMetric)
+        {
+            FlushProfile();
+            _profMetric = step.MeasureAs;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
+        long allocBefore = GC.GetTotalAllocatedBytes(precise: false);
+        int gc0 = GC.CollectionCount(0), gc1 = GC.CollectionCount(1), gc2 = GC.CollectionCount(2);
+
+        var sw = Stopwatch.StartNew();
+        step.Apply();
+        _profBuildMs = sw.Elapsed.TotalMilliseconds;
+        long allocAfterBuild = GC.GetTotalAllocatedBytes(precise: false);
+        _window.RequestPostFrameCallback(() =>
+        {
+            if (step.MeasureAs is not null)
+            {
+                double buildMB = (allocAfterBuild - allocBefore) / (1024.0 * 1024.0);
+                double frameMB = (GC.GetTotalAllocatedBytes(precise: false) - allocAfterBuild) / (1024.0 * 1024.0);
+                Console.WriteLine($"  [{step.MeasureAs}] buildAlloc={buildMB:0.0}MB frameAlloc={frameMB:0.0}MB " +
+                    $"gc=({GC.CollectionCount(0) - gc0}/{GC.CollectionCount(1) - gc1}/{GC.CollectionCount(2) - gc2})");
+                measured(step.MeasureAs);
+            }
+            RefreshRowCount();
+            Application.InvokeOnMainThread(() => Pump(steps, measured, done));
+        });
+    }
+
+    private void PumpProfileSample(string _)
+    {
+        var p = _window.Performance;
+        _profSamples.Add((_profBuildMs, p.StyleTimeMs, p.LayoutTimeMs, p.RenderTimeMs, p.PresentTimeMs));
+    }
+
+    private void FlushProfile()
+    {
+        if (_profMetric is null || _profSamples.Count == 0) return;
+
+        double Median(Func<(double Build, double Style, double Layout, double Render, double Present), double> sel)
+        {
+            var xs = _profSamples.Select(sel).OrderBy(x => x).ToList();
+            return xs[xs.Count / 2];
+        }
+
+        double build = Median(s => s.Build), style = Median(s => s.Style), layout = Median(s => s.Layout),
+            render = Median(s => s.Render), present = Median(s => s.Present);
+        double sum = build + style + layout + render + present;
+        Console.WriteLine($"{_profMetric,-16}{build,9:0.0}{style,9:0.0}{layout,9:0.0}{render,9:0.0}{present,9:0.0}{sum,9:0.0}");
+        _profSamples.Clear();
+    }
+
+    private void FinishProfile()
+    {
+        FlushProfile();
         Console.WriteLine("=== done ===\n");
         _onComplete?.Invoke();
     }
