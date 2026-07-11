@@ -334,4 +334,54 @@ public class AccessibilityTreeDifferTests
         public void OnElementPropertyChanged(Element element, string propertyName)
             => Events.Add((element, propertyName));
     }
+
+    // ── Off-screen bounds are not diffed (perf: virtualized lists) ──
+
+    private static readonly ElementId RootId = ElementId.New();
+    private static readonly ElementId OnscreenId = ElementId.New();
+    private static readonly ElementId OffscreenId = ElementId.New();
+
+    private static AccessibilityNode Item(ElementId id, Rect rect, bool offscreen)
+        => new(id, AccessibilityRole.ListItem, "item", null, rect) { IsOffscreen = offscreen };
+
+    private static AccessibilityNode TreeWith(params AccessibilityNode[] items)
+    {
+        var root = new AccessibilityNode(RootId, AccessibilityRole.Application, null, null, new Rect(0, 0, 400, 400));
+        foreach (var i in items) root.AddChild(i);
+        return root;
+    }
+
+    [Fact]
+    public void Diff_OffscreenNodeBoundsChange_DoesNotEmitPropertyChange()
+    {
+        // Both items shift in X (as when a virtualized list is resized). Only the
+        // on-screen item's bounds change should be reported; the off-screen one is
+        // skipped so assistive tech isn't flooded with events it can't use.
+        var prev = TreeWith(
+            Item(OnscreenId, new Rect(0, 0, 100, 20), offscreen: false),
+            Item(OffscreenId, new Rect(0, 5000, 100, 20), offscreen: true));
+        var curr = TreeWith(
+            Item(OnscreenId, new Rect(50, 0, 100, 20), offscreen: false),
+            Item(OffscreenId, new Rect(50, 5000, 100, 20), offscreen: true));
+
+        var diff = AccessibilityTreeDiffer.Diff(prev, curr);
+
+        Assert.Contains(diff.PropertyChanged,
+            pc => pc.Node.ElementId == OnscreenId && pc.PropertyName == AccessibilityProperties.BoundingRect);
+        Assert.DoesNotContain(diff.PropertyChanged, pc => pc.Node.ElementId == OffscreenId);
+    }
+
+    [Fact]
+    public void Diff_ItemScrollsIntoView_EmitsBoundsChange()
+    {
+        // Off-screen → on-screen: the transition must still emit so the freshly
+        // visible item gets current bounds.
+        var prev = TreeWith(Item(OnscreenId, new Rect(0, 5000, 100, 20), offscreen: true));
+        var curr = TreeWith(Item(OnscreenId, new Rect(0, 10, 100, 20), offscreen: false));
+
+        var diff = AccessibilityTreeDiffer.Diff(prev, curr);
+
+        Assert.Contains(diff.PropertyChanged,
+            pc => pc.Node.ElementId == OnscreenId && pc.PropertyName == AccessibilityProperties.BoundingRect);
+    }
 }
