@@ -57,6 +57,14 @@ public sealed class Window : IOverlayHost, IDisposable
     // force the next frame to rebuild+diff the tree — that regenerates the node
     // snapshots (Name, bounds, …) and emits precise property-changed events.
     private bool _a11yPropertyDirty;
+    // Layout-only changes (resize, scroll) refresh the a11y tree's bounds, but
+    // rebuilding the whole snapshot every frame of a drag floods assistive tech
+    // and is O(total items) for a virtualized list. These changes are coalesced:
+    // rebuild on the leading edge, then at most every A11yCoalesceMs, then once on
+    // the trailing edge — the batching browsers apply to a11y location updates.
+    private bool _a11yLayoutRefreshPending;
+    private long _lastA11yRebuildMs;
+    private const long A11yCoalesceMs = 100;
     private readonly AccessibilityObserverAdapter _a11yObserver;
     private Sdl3UiaHostBridge? _uiaHost;
 
@@ -259,6 +267,11 @@ public sealed class Window : IOverlayHost, IDisposable
         // An a11y-visible property changed (e.g. a label's text) with no visual
         // change of its own; the tree refresh happens in the render pass.
         || (_a11yPropertyDirty && _accessibilityBridge.IsActive)
+        // A coalesced layout-driven a11y refresh is due — force the trailing frame
+        // so the last resize/scroll position reaches the tree once the drag stops
+        // (during the drag, layout dirty already keeps frames coming).
+        || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
+            && Environment.TickCount64 - _lastA11yRebuildMs >= A11yCoalesceMs)
         // A UIA action (invoke/toggle/set-value/focus) queued from a worker
         // thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame.
@@ -324,9 +337,18 @@ public sealed class Window : IOverlayHost, IDisposable
         // already emits BoundingRect changes). This rebuild only runs while an AT
         // is attached, so idle apps pay nothing.
         bool a11yActive = _accessibilityBridge.IsActive;
-        if (a11yActive && (!_a11yWasActive || _a11yPropertyDirty
-            || _root.DirtyFlags.HasFlag(DirtyFlags.Children)
-            || layoutWasDirty))
+        // Structural (Children), property/focus, and first-attach changes refresh
+        // immediately. Layout-only changes are coalesced (see A11yCoalesceMs): a
+        // continuous resize/scroll otherwise rebuilds the whole tree every frame.
+        bool a11yImmediate = a11yActive && (!_a11yWasActive || _a11yPropertyDirty
+            || _root.DirtyFlags.HasFlag(DirtyFlags.Children));
+        if (a11yActive && layoutWasDirty)
+            _a11yLayoutRefreshPending = true;
+        long nowMs = Environment.TickCount64;
+        bool a11yLayoutDue = a11yActive && _a11yLayoutRefreshPending
+            && nowMs - _lastA11yRebuildMs >= A11yCoalesceMs;
+
+        if (a11yImmediate || a11yLayoutDue)
         {
             using (_tracer.Begin("Phase", "A11y"))
             {
@@ -336,11 +358,14 @@ public sealed class Window : IOverlayHost, IDisposable
                     _accessibilityBridge.ApplyChanges(diff, newTree);
                 _previousA11yTree = newTree;
             }
+            _a11yLayoutRefreshPending = false;
+            _lastA11yRebuildMs = nowMs;
         }
         else if (!a11yActive && _a11yWasActive)
         {
             // Client detached — drop the snapshot so the next attach rebuilds fresh.
             _previousA11yTree = null;
+            _a11yLayoutRefreshPending = false;
         }
         _a11yPropertyDirty = false;
         _a11yWasActive = a11yActive;
