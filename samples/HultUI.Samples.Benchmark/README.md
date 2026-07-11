@@ -45,14 +45,14 @@ dotnet run --project samples/HultUI.Samples.Benchmark -- --auto
 
 ```
 === HultUI benchmark: running suite ===
-  create 1,000           median   82.3 ms   min   76.5 ms   (n=5)
-  update every 10th      median   25.9 ms   min   24.8 ms   (n=5)
-  select row             median    2.8 ms   min    2.6 ms   (n=5)
-  swap rows              median   22.6 ms   min   22.2 ms   (n=5)
-  remove row             median   92.2 ms   min   31.1 ms   (n=5)
-  create 10,000          median  806.6 ms   min  790.5 ms   (n=5)
-  append 1,000 to 1,000  median  126.8 ms   min  124.0 ms   (n=5)
-  clear 1,000            median   15.8 ms   min   15.7 ms   (n=5)
+  create 1,000           median   85.9 ms   min   77.2 ms   (n=5)
+  update every 10th      median   25.3 ms   min   24.9 ms   (n=5)
+  select row             median    3.0 ms   min    2.7 ms   (n=5)
+  swap rows              median   22.8 ms   min   22.5 ms   (n=5)
+  remove row             median   94.9 ms   min   34.2 ms   (n=5)
+  create 10,000          median  857.1 ms   min  833.0 ms   (n=5)
+  append 1,000 to 1,000  median  141.6 ms   min  127.8 ms   (n=5)
+  clear 1,000            median   16.6 ms   min   16.2 ms   (n=5)
 === done ===
 ```
 
