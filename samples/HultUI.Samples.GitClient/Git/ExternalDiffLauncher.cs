@@ -49,13 +49,13 @@ public static class ExternalDiffLauncher
 
         var psi = new ProcessStartInfo
         {
-            FileName = executable,
             WorkingDirectory = request.RepoPath,
             UseShellExecute = false,
+            CreateNoWindow = true,
         };
 
-        foreach (var arg in SplitArguments(Expand(argsTemplate, replacements)))
-            psi.ArgumentList.Add(arg);
+        var arguments = SplitArguments(Expand(argsTemplate, replacements)).ToList();
+        ConfigureExecutable(psi, executable, arguments);
 
         try
         {
@@ -82,6 +82,86 @@ public static class ExternalDiffLauncher
             return false;
         }
     }
+
+    /// <summary>
+    /// Sets <see cref="ProcessStartInfo.FileName"/> and arguments, resolving the
+    /// configured command against PATH/PATHEXT. A bare command like "code" is a
+    /// <c>code.cmd</c> shim on Windows, and Win32 CreateProcess (which .NET uses
+    /// when <see cref="ProcessStartInfo.UseShellExecute"/> is false) cannot run a
+    /// .cmd/.bat directly nor apply PATHEXT — so those are routed through cmd.exe.
+    /// </summary>
+    private static void ConfigureExecutable(ProcessStartInfo psi, string executable, List<string> arguments)
+    {
+        var resolved = ResolveOnPath(executable) ?? executable;
+
+        var isScript = OperatingSystem.IsWindows() &&
+            (resolved.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+             resolved.EndsWith(".bat", StringComparison.OrdinalIgnoreCase));
+
+        if (isScript)
+        {
+            psi.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+            // cmd /c strips the outermost pair of quotes, so wrap the whole command
+            // in an extra pair — otherwise a script path containing spaces (e.g.
+            // "...\Microsoft VS Code\bin\code.cmd") gets mangled when combined with
+            // quoted arguments.
+            var inner = string.Join(' ', new[] { resolved }.Concat(arguments).Select(QuoteArg));
+            psi.Arguments = $"/c \"{inner}\"";
+        }
+        else
+        {
+            psi.FileName = resolved;
+            foreach (var arg in arguments)
+                psi.ArgumentList.Add(arg);
+        }
+    }
+
+    /// <summary>
+    /// Mimics a shell's PATH lookup: returns the full path to <paramref name="command"/>,
+    /// trying each PATHEXT extension on Windows. Returns null if not found (the caller
+    /// falls back to the raw name so the OS can still surface a sensible error).
+    /// </summary>
+    private static string? ResolveOnPath(string command)
+    {
+        if (command.Contains(Path.DirectorySeparatorChar) || command.Contains(Path.AltDirectorySeparatorChar))
+            return File.Exists(command) ? command : null;
+
+        var pathDirs = (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var extensions = OperatingSystem.IsWindows()
+            ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [""];
+
+        foreach (var dir in pathDirs)
+        {
+            // Only match a bare (extensionless) file when the command already
+            // carries an extension. On Windows an extensionless PATH entry isn't
+            // executable via CreateProcess — VS Code ships both a `code` bash
+            // script and a runnable `code.cmd`, and we must pick the latter.
+            if (Path.HasExtension(command))
+            {
+                var direct = Path.Combine(dir, command);
+                if (File.Exists(direct))
+                    return direct;
+            }
+
+            foreach (var ext in extensions)
+            {
+                var candidate = Path.Combine(dir, command + ext);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string QuoteArg(string arg)
+        => arg.Length > 0 && !arg.Contains(' ') && !arg.Contains('"')
+            ? arg
+            : "\"" + arg.Replace("\"", "\\\"") + "\"";
 
     private static string Expand(string template, Dictionary<string, string> replacements)
     {
