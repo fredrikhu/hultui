@@ -2,37 +2,49 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Text;
 
+/// <summary>Key for a fully laid-out, width-dependent text result.</summary>
 internal readonly record struct MeasurementKey(
     string Text, string FontFamily, float FontSize, FontWeight FontWeight,
     float MaxWidth, int MaxLines);
 
-internal sealed class MeasurementCache
+/// <summary>
+/// Key for the width-independent shaping of a string. Shaping (itemization +
+/// glyph shaping) does not depend on the available width — only line breaking
+/// does — so this deliberately omits MaxWidth/MaxLines.
+/// </summary>
+internal readonly record struct ShapeKey(
+    string Text, string FontFamily, float FontSize, FontWeight FontWeight);
+
+/// <summary>Simple LRU cache used for text measurement and shaping results.</summary>
+internal sealed class LruCache<TKey, TValue> where TKey : notnull
 {
     private readonly int _capacity;
-    private readonly Dictionary<MeasurementKey, LinkedListNode<CacheEntry>> _map;
+    private readonly Dictionary<TKey, LinkedListNode<CacheEntry>> _map;
     private readonly LinkedList<CacheEntry> _order = new();
 
-    public MeasurementCache(int capacity)
+    public LruCache(int capacity)
     {
         _capacity = capacity;
-        _map = new(capacity);
+        // Grow on demand rather than pre-allocating the full capacity — a large
+        // eviction bound shouldn't cost memory in apps with few distinct strings.
+        _map = new();
     }
 
-    public bool TryGet(MeasurementKey key, out TextLayout layout)
+    public bool TryGet(TKey key, out TValue value)
     {
         if (_map.TryGetValue(key, out var node))
         {
             // Move to front (most recently used)
             _order.Remove(node);
             _order.AddFirst(node);
-            layout = node.Value.Layout;
+            value = node.Value.Value;
             return true;
         }
-        layout = null!;
+        value = default!;
         return false;
     }
 
-    public void Put(MeasurementKey key, TextLayout layout)
+    public void Put(TKey key, TValue value)
     {
         if (_map.TryGetValue(key, out var existing))
         {
@@ -48,9 +60,9 @@ internal sealed class MeasurementCache
             _map.Remove(last.Value.Key);
         }
 
-        var node = _order.AddFirst(new CacheEntry(key, layout));
+        var node = _order.AddFirst(new CacheEntry(key, value));
         _map[key] = node;
     }
 
-    private readonly record struct CacheEntry(MeasurementKey Key, TextLayout Layout);
+    private readonly record struct CacheEntry(TKey Key, TValue Value);
 }

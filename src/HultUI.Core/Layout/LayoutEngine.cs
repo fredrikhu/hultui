@@ -575,6 +575,20 @@ public sealed partial class LayoutEngine
     private Size MeasureLeafSize(Element element, float constraintW, float constraintH,
         float? forcedWidth = null, float? forcedHeight = null)
     {
+        // Memoize like MeasureSize: a leaf is measured many times per layout — once
+        // per ancestor's Phase 1 measure and again in Phase 6 arrange, across every
+        // nesting level — and for text those MeasureContent calls dominate the pass.
+        // The cache is keyed on (constraint, forced) and invalidated by
+        // MarkLayoutDirty (which clears CacheMeasureValid up the changed subtree).
+        if (element.CacheMeasureValid
+            && element.CacheMeasureConstraintW == constraintW
+            && element.CacheMeasureConstraintH == constraintH
+            && element.CacheMeasureForcedW == forcedWidth
+            && element.CacheMeasureForcedH == forcedHeight)
+        {
+            return element.CacheMeasureResult;
+        }
+
         var box = element.Box;
         var outerSpacing = box.Padding + box.BorderWidth;
         var margin = box.Margin;
@@ -594,7 +608,16 @@ public sealed partial class LayoutEngine
         finalW = ApplyMinMax(finalW, box.MinWidth, box.MaxWidth, constraintW);
         finalH = ApplyMinMax(finalH, box.MinHeight, box.MaxHeight, constraintH);
 
-        return new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+        var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
+
+        element.CacheMeasureConstraintW = constraintW;
+        element.CacheMeasureConstraintH = constraintH;
+        element.CacheMeasureForcedW = forcedWidth;
+        element.CacheMeasureForcedH = forcedHeight;
+        element.CacheMeasureResult = resultSize;
+        element.CacheMeasureValid = true;
+
+        return resultSize;
     }
 
     private static List<FlexLine> CollectLines(FlexItem[] itemsArray, int itemCount,

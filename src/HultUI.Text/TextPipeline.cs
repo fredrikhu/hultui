@@ -7,7 +7,15 @@ public sealed class TextPipeline
 {
     private readonly IFontCollection _fonts;
     private readonly ITextShaper _shaper;
-    private readonly MeasurementCache _cache = new(capacity: 2048);
+    // Fully laid-out results, keyed on width (used only when the text must wrap).
+    private readonly LruCache<MeasurementKey, TextLayout> _cache = new(capacity: 2048);
+    // Width-independent shaping, so the same string measured at different
+    // available widths is shaped once. Covers the common single-line case fully.
+    // Sized to hold the working set of a large list laid out in one frame (the
+    // measure pass touches every row, then the arrange pass touches them again),
+    // so shaping survives between the two passes instead of being evicted. Shaped
+    // entries are small and shaping is expensive, so a generous bound is worth it.
+    private readonly LruCache<ShapeKey, ShapedText> _shapeCache = new(capacity: 16384);
 
     public IFontCollection Fonts => _fonts;
     public ITextShaper Shaper => _shaper;
@@ -23,42 +31,69 @@ public sealed class TextPipeline
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
 
-        // Check cache
+        // Shape once, width-independently. The layout pass measures the same
+        // string many times per frame at different available widths (Phase 1
+        // measure vs Phase 6 arrange, plus flex-grow re-measures); without this,
+        // each distinct width re-itemized and re-shaped the text.
+        var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight);
+        if (!_shapeCache.TryGet(shapeKey, out var shaped))
+        {
+            shaped = ComputeShaping(text, style);
+            _shapeCache.Put(shapeKey, shaped);
+        }
+
+        // Single line that fits: the whole layout is width-independent, so the
+        // shaped result is returned directly for any width that accommodates it.
+        if (!shaped.HasNewline && shaped.TotalWidth <= maxWidth)
+            return shaped.SingleLine!;
+
+        // Explicit newlines or overflow: line breaking depends on the width, so
+        // fall back to the width-keyed cache.
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight, maxWidth, maxLines ?? -1);
         if (_cache.TryGet(key, out var cached))
             return cached;
 
-        var layout = ComputeLayout(text, style, maxWidth, maxLines);
+        var layout = ComputeWrapped(text, style, maxWidth, maxLines);
         _cache.Put(key, layout);
         return layout;
     }
 
-    private TextLayout ComputeLayout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    // Width-independent: itemize + shape the whole string, record its natural
+    // width, and (when there is no explicit newline) prebuild the single-line
+    // layout that any sufficiently wide measurement will reuse.
+    private ShapedText ComputeShaping(string text, ResolvedInheritedStyle style)
     {
-        // Step 1: Itemize text by font (handles fallback for emoji etc.)
         var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
         if (fontRuns.Count == 0)
-            return TextLayout.Empty;
+            return new ShapedText(0, HasNewline: false, TextLayout.Empty);
 
-        // Step 2: Shape each font run
         var shapedRuns = new List<ShapedRun>(fontRuns.Count);
+        float totalWidth = 0;
         foreach (var run in fontRuns)
         {
             var shaped = _shaper.Shape(run.Text, run.Font, style.FontSize);
             shapedRuns.Add(shaped);
+            totalWidth += shaped.Width;
         }
 
-        // Step 3: If everything fits on one line, return single-line layout
-        float totalWidth = 0;
-        foreach (var run in shapedRuns)
-            totalWidth += run.Width;
+        bool hasNewline = text.Contains('\n');
+        var singleLine = hasNewline ? null : BuildSingleLineLayout(shapedRuns, totalWidth, text.Length);
+        return new ShapedText(totalWidth, hasNewline, singleLine);
+    }
 
-        if (totalWidth <= maxWidth && !text.Contains('\n'))
-        {
-            return BuildSingleLineLayout(shapedRuns, totalWidth, text.Length);
-        }
+    // Multi-line path: the text either contains explicit newlines or is wider
+    // than the available width. BreakIntoLines re-shapes per line, so it does not
+    // reuse the cached single-line shaping.
+    private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    {
+        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+        if (fontRuns.Count == 0)
+            return TextLayout.Empty;
 
-        // Step 4: Find line break opportunities and break into lines
+        var shapedRuns = new List<ShapedRun>(fontRuns.Count);
+        foreach (var run in fontRuns)
+            shapedRuns.Add(_shaper.Shape(run.Text, run.Font, style.FontSize));
+
         var breakPoints = LineBreaker.FindBreakOpportunities(text);
         return BreakIntoLines(text, shapedRuns, fontRuns, style, breakPoints, maxWidth, maxLines);
     }
@@ -173,6 +208,11 @@ public sealed class TextPipeline
 
         return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
     }
+
+    // Cached width-independent shaping of a string. <see cref="SingleLine"/> is
+    // the prebuilt layout used whenever the text fits one line; it is null only
+    // when the text contains an explicit newline (which always needs breaking).
+    private sealed record ShapedText(float TotalWidth, bool HasNewline, TextLayout? SingleLine);
 
     private TextLine ShapeLineText(string lineText, ResolvedInheritedStyle style, int start)
     {

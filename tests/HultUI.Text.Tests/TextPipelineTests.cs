@@ -139,12 +139,27 @@ public class TextPipelineTests
     }
 
     [Fact]
-    public void DifferentMaxWidth_ReturnsNewLayout()
+    public void DifferentMaxWidth_WhenWrappingChanges_ReturnsNewLayout()
     {
-        var pipeline = CreatePipeline();
+        var pipeline = CreatePipeline(charWidth: 10);
+        // "Hello World" = 110px: one line at 200, wraps at 60. Width changes the
+        // result, so the layouts must differ.
+        var layout1 = pipeline.Layout("Hello World", DefaultStyle, 200, null);
+        var layout2 = pipeline.Layout("Hello World", DefaultStyle, 60, null);
+        Assert.NotSame(layout1, layout2);
+        Assert.Single(layout1.Lines);
+        Assert.True(layout2.Lines.Count >= 2);
+    }
+
+    [Fact]
+    public void SingleLineText_AcrossWidthsThatFit_ReturnsSameCachedLayout()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // "Text" = 40px fits both widths. Shaping is width-independent, so the same
+        // single-line layout is reused rather than re-shaped per width.
         var layout1 = pipeline.Layout("Text", DefaultStyle, 200, null);
         var layout2 = pipeline.Layout("Text", DefaultStyle, 100, null);
-        Assert.NotSame(layout1, layout2);
+        Assert.Same(layout1, layout2);
     }
 
     [Fact]
