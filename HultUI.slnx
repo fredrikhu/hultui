@@ -14,6 +14,7 @@
     <Project Path="samples/HultUI.Samples.GitClient/HultUI.Samples.GitClient.csproj" />
     <Project Path="samples/HultUI.Samples.Grid/HultUI.Samples.Grid.csproj" />
     <Project Path="samples/HultUI.Samples.Accessibility/HultUI.Samples.Accessibility.csproj" />
+    <Project Path="samples/HultUI.Samples.Benchmark/HultUI.Samples.Benchmark.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
