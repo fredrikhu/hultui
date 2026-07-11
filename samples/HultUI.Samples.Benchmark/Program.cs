@@ -302,8 +302,12 @@ sealed class Benchmark
         Repeat("remove row", setup: () => Create(1_000),
             op: () => Remove(_rows[_rng.Next(_rows.Count)]));
         Repeat("create 10,000", setup: Clear, op: () => Create(10_000));
-        Repeat("append 1,000", setup: () => Create(10_000), op: () => Append(1_000));
-        Repeat("clear 10,000", setup: () => Create(10_000), op: Clear);
+        // Match js-framework-benchmark's parameters exactly: "append rows to
+        // large table" appends 1,000 to a table of 1,000 (not 10,000), and
+        // "clear rows" clears a table of 1,000. Using the same sizes is what
+        // makes these two rows comparable to the web numbers.
+        Repeat("append 1,000 to 1,000", setup: () => Create(1_000), op: () => Append(1_000));
+        Repeat("clear 1,000", setup: () => Create(1_000), op: Clear);
 
         Console.WriteLine("\n=== HultUI benchmark: running suite ===");
         Pump();

@@ -45,16 +45,21 @@ dotnet run --project samples/HultUI.Samples.Benchmark -- --auto
 
 ```
 === HultUI benchmark: running suite ===
-  create 1,000          median    81.4 ms   min   74.8 ms   (n=5)
-  update every 10th     median    29.9 ms   min   27.2 ms   (n=5)
-  select row            median     2.5 ms   min    2.4 ms   (n=5)
-  swap rows             median    22.2 ms   min   21.9 ms   (n=5)
-  remove row            median    95.0 ms   min   33.7 ms   (n=5)
-  create 10,000         median   806.9 ms   min  797.3 ms   (n=5)
-  append 1,000          median   563.1 ms   min  559.6 ms   (n=5)
-  clear 10,000          median   158.4 ms   min  153.0 ms   (n=5)
+  create 1,000           median   82.3 ms   min   76.5 ms   (n=5)
+  update every 10th      median   25.9 ms   min   24.8 ms   (n=5)
+  select row             median    2.8 ms   min    2.6 ms   (n=5)
+  swap rows              median   22.6 ms   min   22.2 ms   (n=5)
+  remove row             median   92.2 ms   min   31.1 ms   (n=5)
+  create 10,000          median  806.6 ms   min  790.5 ms   (n=5)
+  append 1,000 to 1,000  median  126.8 ms   min  124.0 ms   (n=5)
+  clear 1,000            median   15.8 ms   min   15.7 ms   (n=5)
 === done ===
 ```
+
+The suite's operation *parameters* match js-framework-benchmark exactly — including
+that "append rows to large table" appends 1,000 to a table of **1,000** rows, and
+"clear rows" clears a table of **1,000** — so every row above lines up with a web
+benchmark entry.
 
 (Numbers above are illustrative — they depend entirely on the machine and GPU.
 Run the web benchmark on the *same machine* to get a meaningful comparison.)
@@ -87,3 +92,29 @@ couple of warm-up iterations first, forces a GC between metrics, and reports the
   `VirtualList` sample *does* only materialize visible rows.)
 - **Machine-dependent:** GPU, driver, VSync, and display scale all move these
   numbers. Only compare runs captured on the same machine.
+
+## Which web framework to compare against
+
+The web benchmark has both hand-written and framework entries, and the right
+comparison depends on how the *HultUI* side is written:
+
+- **This sample is hand-written** — it holds a `List<RowView>` and mutates the
+  element tree imperatively via `ReplaceChildren`. It does **not** go through
+  HultUI's reactive path (`Component` + `[Reactive]` state + declarative
+  `Build()`), so it never pays for component re-execution or tree
+  reconciliation. That makes its natural counterpart the **keyed `vanillajs`**
+  entry — also hand-written, no framework overhead. Compare against that.
+
+- **Idiomatic HultUI would sit higher.** A real app writes a reactive
+  `Component` whose `Build()` returns a fresh declarative tree on every state
+  change; HultUI then reconciles it against the live tree with a keyed differ
+  (`HultUI.Core/Components/TreeDiffer.cs`) — the same shape of work React's
+  virtual-DOM reconciliation does. A version of this benchmark written that way
+  would add that reconciliation cost on top of the raw layout/paint measured
+  here, and its fair counterpart is **`react`** (or somewhere between vanilla
+  and react, depending on how much the differ can patch in place vs. rebuild).
+
+So: today's numbers vs. `vanillajs` isolate HultUI's *rendering engine* cost;
+a reactive-component variant vs. `react` would isolate its *reconciler* cost.
+Having both is the most honest picture — the same reason js-framework-benchmark
+keeps vanilla and framework entries side by side.
