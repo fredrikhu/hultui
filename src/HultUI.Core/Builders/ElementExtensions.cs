@@ -54,7 +54,27 @@ public static class ElementExtensions
     public static T FontFamily<T>(this T el, string family) where T : Element { el.Inherited.FontFamily = family; return el; }
     public static T FontSize<T>(this T el, float size) where T : Element { el.Inherited.FontSize = size; return el; }
     public static T FontWeight<T>(this T el, FontWeight weight) where T : Element { el.Inherited.FontWeight = weight; return el; }
+    public static T FontStyle<T>(this T el, FontSlant slant) where T : Element { el.Inherited.FontSlant = slant; return el; }
+    public static T Italic<T>(this T el, bool italic = true) where T : Element { el.Inherited.FontSlant = italic ? FontSlant.Italic : FontSlant.Normal; return el; }
     public static T TextColor<T>(this T el, Color color) where T : Element { el.Inherited.TextColor = color; return el; }
+    public static T TextAlign<T>(this T el, TextAlign align) where T : Element { el.Inherited.TextAlign = align; return el; }
+    /// <summary>Absolute line-box height in pixels (0 = derive from font metrics).</summary>
+    public static T LineHeight<T>(this T el, float px) where T : Element { el.Inherited.LineHeight = px; return el; }
+    /// <summary>Extra spacing in pixels inserted after each glyph.</summary>
+    public static T LetterSpacing<T>(this T el, float px) where T : Element { el.Inherited.LetterSpacing = px; return el; }
+    public static T TextDecoration<T>(this T el, TextDecoration decoration) where T : Element { el.Inherited.Decoration = decoration; return el; }
+    public static T Underline<T>(this T el, bool on = true) where T : Element
+    {
+        var current = el.Inherited.Decoration ?? Styling.TextDecoration.None;
+        el.Inherited.Decoration = on ? current | Styling.TextDecoration.Underline : current & ~Styling.TextDecoration.Underline;
+        return el;
+    }
+    public static T Strikethrough<T>(this T el, bool on = true) where T : Element
+    {
+        var current = el.Inherited.Decoration ?? Styling.TextDecoration.None;
+        el.Inherited.Decoration = on ? current | Styling.TextDecoration.LineThrough : current & ~Styling.TextDecoration.LineThrough;
+        return el;
+    }
     public static T Cursor<T>(this T el, CursorType cursor) where T : Element { el.Inherited.Cursor = cursor; return el; }
 
     // ──── Text properties ────

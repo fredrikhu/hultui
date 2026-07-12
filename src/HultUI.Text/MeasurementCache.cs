@@ -5,16 +5,18 @@ namespace HultUI.Text;
 
 /// <summary>Key for a fully laid-out, width-dependent text result.</summary>
 internal readonly record struct MeasurementKey(
-    string Text, string FontFamily, float FontSize, FontWeight FontWeight,
-    float MaxWidth, int MaxLines, TextOverflow Overflow);
+    string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant,
+    float MaxWidth, int MaxLines, TextOverflow Overflow, float LineHeight, float LetterSpacing);
 
 /// <summary>
 /// Key for the width-independent shaping of a string. Shaping (itemization +
 /// glyph shaping) does not depend on the available width — only line breaking
-/// does — so this deliberately omits MaxWidth/MaxLines.
+/// does — so this deliberately omits MaxWidth/MaxLines. Slant, line height and
+/// letter spacing DO change the shaped result, so they are part of the key.
 /// </summary>
 internal readonly record struct ShapeKey(
-    string Text, string FontFamily, float FontSize, FontWeight FontWeight);
+    string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant,
+    float LineHeight, float LetterSpacing);
 
 /// <summary>Simple LRU cache used for text measurement and shaping results.</summary>
 internal sealed class LruCache<TKey, TValue> where TKey : notnull

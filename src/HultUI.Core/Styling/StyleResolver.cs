@@ -37,7 +37,12 @@ public static class StyleResolver
             FontWeight: own.FontWeight ?? parent.FontWeight,
             TextColor: own.TextColor ?? parent.TextColor,
             TextDirection: own.TextDirection ?? parent.TextDirection,
-            Cursor: own.Cursor ?? parent.Cursor);
+            Cursor: own.Cursor ?? parent.Cursor,
+            FontSlant: own.FontSlant ?? parent.FontSlant,
+            TextAlign: own.TextAlign ?? parent.TextAlign,
+            Decoration: own.Decoration ?? parent.Decoration,
+            LineHeight: own.LineHeight ?? parent.LineHeight,
+            LetterSpacing: own.LetterSpacing ?? parent.LetterSpacing);
 
         element.ResolvedInherited = resolved;
 

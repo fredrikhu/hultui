@@ -90,16 +90,53 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Color = ToSkColor(style.TextColor);
         _pooledPaint.IsAntialias = true;
 
+        float alignFactor = style.TextAlign switch
+        {
+            TextAlign.Center => 0.5f,
+            TextAlign.Right => 1f,
+            _ => 0f,
+        };
+
         foreach (var line in layout.Lines)
         {
+            // Shift the line horizontally for center/right alignment. The layout
+            // itself is width-independent (and shared from cache), so alignment is
+            // applied here at draw time against the actual box width.
+            float alignOffset = alignFactor > 0f && bounds.Width > line.Width
+                ? (bounds.Width - line.Width) * alignFactor
+                : 0f;
+            float baseX = bounds.X + alignOffset;
             float lineY = bounds.Y + line.OffsetY + line.Ascent;
 
             foreach (var run in line.Runs)
             {
                 var blob = BuildShapedBlob(run);
                 if (blob is not null)
-                    Canvas.DrawText(blob, bounds.X + run.OffsetX, lineY, _pooledPaint);
+                    Canvas.DrawText(blob, baseX + run.OffsetX, lineY, _pooledPaint);
             }
+
+            if (style.Decoration != TextDecoration.None)
+                DrawTextDecoration(style, baseX, lineY, line);
+        }
+    }
+
+    // Draws underline and/or strike-through for a line. The paint is already set
+    // to the text color; decorations reuse it as a fill for the rule rectangles.
+    private void DrawTextDecoration(ResolvedInheritedStyle style, float x, float baselineY, TextLine line)
+    {
+        float thickness = Math.Max(1f, style.FontSize * 0.07f);
+
+        if ((style.Decoration & TextDecoration.Underline) != 0)
+        {
+            float y = baselineY + Math.Max(1f, style.FontSize * 0.12f);
+            Canvas.DrawRect(SKRect.Create(x, y, line.Width, thickness), _pooledPaint);
+        }
+
+        if ((style.Decoration & TextDecoration.LineThrough) != 0)
+        {
+            // Roughly the x-height midpoint above the baseline.
+            float y = baselineY - line.Ascent * 0.33f - thickness / 2f;
+            Canvas.DrawRect(SKRect.Create(x, y, line.Width, thickness), _pooledPaint);
         }
     }
 

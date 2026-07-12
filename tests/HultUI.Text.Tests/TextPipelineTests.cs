@@ -307,6 +307,68 @@ public class TextPipelineTests
         Assert.NotSame(clip, ellipsis);
     }
 
+    // ── Letter spacing ──
+
+    [Fact]
+    public void LetterSpacing_WidensLineByAdvancePerGlyph()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // "Test" = 4 glyphs. Natural 40px; +5px after each glyph = 40 + 5*4 = 60.
+        var style = DefaultStyle with { LetterSpacing = 5f };
+        var layout = pipeline.Layout("Test", style, 500, null);
+
+        Assert.Single(layout.Lines);
+        Assert.Equal(60, layout.Lines[0].Width, 0.1f);
+    }
+
+    [Fact]
+    public void LetterSpacing_ProducesDistinctLayoutFromDefault()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var normal = pipeline.Layout("Test", DefaultStyle, 500, null);
+        var spaced = pipeline.Layout("Test", DefaultStyle with { LetterSpacing = 5f }, 500, null);
+        Assert.NotSame(normal, spaced);
+        Assert.True(spaced.Size.Width > normal.Size.Width);
+    }
+
+    // ── Line height ──
+
+    [Fact]
+    public void LineHeight_SetsLineBoxHeightAndCentersText()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // Stub metrics at 16px: ascent 12, descent 4, natural height 16. A 30px
+        // line-height adds 14px split evenly: ascent 19, height 30.
+        var layout = pipeline.Layout("Hi", DefaultStyle with { LineHeight = 30f }, 500, null);
+
+        Assert.Single(layout.Lines);
+        Assert.Equal(30, layout.Lines[0].Height, 0.1f);
+        Assert.Equal(19, layout.Lines[0].Ascent, 0.1f);
+    }
+
+    [Fact]
+    public void LineHeight_SmallerThanText_IsIgnored()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // 5px < the 16px natural height, so the natural metrics stand.
+        var layout = pipeline.Layout("Hi", DefaultStyle with { LineHeight = 5f }, 500, null);
+        Assert.Equal(16, layout.Lines[0].Height, 0.1f);
+    }
+
+    // ── Italic / slant keying ──
+
+    [Fact]
+    public void Slant_ProducesDistinctCachedLayout()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // The stub ignores slant when shaping, but slant is part of the shape key,
+        // so the italic layout must be a separately computed instance — proving the
+        // slant is threaded through to the itemizer/shaper.
+        var upright = pipeline.Layout("Test", DefaultStyle, 500, null);
+        var italic = pipeline.Layout("Test", DefaultStyle with { FontSlant = FontSlant.Italic }, 500, null);
+        Assert.NotSame(upright, italic);
+    }
+
     // ── Size ──
 
     [Fact]

@@ -37,7 +37,8 @@ public sealed class TextPipeline
         // string many times per frame at different available widths (Phase 1
         // measure vs Phase 6 arrange, plus flex-grow re-measures); without this,
         // each distinct width re-itemized and re-shaped the text.
-        var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight);
+        var shapeKey = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            style.FontSlant, style.LineHeight, style.LetterSpacing);
         if (!_shapeCache.TryGet(shapeKey, out var shaped))
         {
             shaped = ComputeShaping(text, style);
@@ -54,7 +55,7 @@ public sealed class TextPipeline
         // fall back to the width-keyed cache. Overflow is part of the key because
         // Ellipsis rewrites the truncated line, producing a different layout.
         var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
-            maxWidth, maxLines ?? -1, overflow);
+            style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight, style.LetterSpacing);
         if (_cache.TryGet(key, out var cached))
             return cached;
 
@@ -70,7 +71,7 @@ public sealed class TextPipeline
     // layout that any sufficiently wide measurement will reuse.
     private ShapedText ComputeShaping(string text, ResolvedInheritedStyle style)
     {
-        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
         if (fontRuns.Count == 0)
             return new ShapedText(0, HasNewline: false, TextLayout.Empty);
 
@@ -78,13 +79,13 @@ public sealed class TextPipeline
         float totalWidth = 0;
         foreach (var run in fontRuns)
         {
-            var shaped = _shaper.Shape(run.Text, run.Font, style.FontSize);
+            var shaped = ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing);
             shapedRuns.Add(shaped);
             totalWidth += shaped.Width;
         }
 
         bool hasNewline = text.Contains('\n');
-        var singleLine = hasNewline ? null : BuildSingleLineLayout(shapedRuns, totalWidth, text.Length);
+        var singleLine = hasNewline ? null : BuildSingleLineLayout(shapedRuns, totalWidth, text.Length, style.LineHeight);
         return new ShapedText(totalWidth, hasNewline, singleLine);
     }
 
@@ -93,13 +94,13 @@ public sealed class TextPipeline
     // reuse the cached single-line shaping.
     private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
     {
-        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
         if (fontRuns.Count == 0)
             return TextLayout.Empty;
 
         var shapedRuns = new List<ShapedRun>(fontRuns.Count);
         foreach (var run in fontRuns)
-            shapedRuns.Add(_shaper.Shape(run.Text, run.Font, style.FontSize));
+            shapedRuns.Add(ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing));
 
         var breakPoints = LineBreaker.FindBreakOpportunities(text);
         return BreakIntoLines(text, shapedRuns, fontRuns, style, breakPoints, maxWidth, maxLines);
@@ -189,11 +190,51 @@ public sealed class TextPipeline
         if (s.Length == 0)
             return 0;
 
-        var runs = FontItemizer.Itemize(s, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+        var runs = FontItemizer.Itemize(s, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
         float width = 0;
         foreach (var run in runs)
-            width += _shaper.Shape(run.Text, run.Font, style.FontSize).Width;
+            width += ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing).Width;
         return width;
+    }
+
+    // Shapes a run, then applies letter spacing by widening each glyph's advance
+    // and shifting the following glyphs. Returns the shaper's result unchanged
+    // when spacing is zero (the common case), so there is no allocation cost.
+    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing)
+    {
+        var run = _shaper.Shape(text, font, fontSize);
+        if (letterSpacing == 0f || run.Glyphs.Length == 0)
+            return run;
+
+        var glyphs = run.Glyphs;
+        var spaced = new GlyphPosition[glyphs.Length];
+        float shift = 0;
+        for (int i = 0; i < glyphs.Length; i++)
+        {
+            var g = glyphs[i];
+            spaced[i] = g with { X = g.X + shift, Advance = g.Advance + letterSpacing };
+            shift += letterSpacing;
+        }
+
+        return new ShapedRun(run.Text, run.Font, run.FontSize,
+            run.Width + letterSpacing * glyphs.Length, spaced);
+    }
+
+    // Adjusts a line's ascent/leading so its total height equals an explicit
+    // line-height, centering the text within the extra space (half above, half
+    // below). A line-height smaller than the natural text height is ignored.
+    private static (float Ascent, float Leading) ApplyLineHeight(
+        float ascent, float descent, float naturalLeading, float lineHeight)
+    {
+        if (lineHeight <= 0f)
+            return (ascent, naturalLeading);
+
+        float extra = lineHeight - (ascent + descent);
+        if (extra <= 0f)
+            return (ascent, 0f);
+
+        float half = extra / 2f;
+        return (ascent + half, half);
     }
 
     // Moves an index back off the trailing half of a surrogate pair.
@@ -202,7 +243,7 @@ public sealed class TextPipeline
             ? index - 1
             : index;
 
-    private static TextLayout BuildSingleLineLayout(List<ShapedRun> runs, float totalWidth, int textLength)
+    private static TextLayout BuildSingleLineLayout(List<ShapedRun> runs, float totalWidth, int textLength, float lineHeight)
     {
         float maxAscent = 0, maxDescent = 0, maxLeading = 0;
         float x = 0;
@@ -216,6 +257,7 @@ public sealed class TextPipeline
             maxLeading = Math.Max(maxLeading, run.Font.Leading * run.FontSize);
         }
 
+        (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, lineHeight);
         var line = new TextLine(runs, totalWidth, maxAscent, maxDescent, maxLeading) { Start = 0, Length = textLength };
         return new TextLayout([line], new Size(totalWidth, line.Height));
     }
@@ -273,10 +315,10 @@ public sealed class TextPipeline
             }
 
             // Measure segment
-            var segRuns = FontItemizer.Itemize(segment, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+            var segRuns = FontItemizer.Itemize(segment, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
             float segWidth = 0;
             foreach (var run in segRuns)
-                segWidth += _shaper.Shape(run.Text, run.Font, style.FontSize).Width;
+                segWidth += ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing).Width;
 
             if (lineWidth + segWidth > maxWidth && lineWidth > 0)
             {
@@ -322,7 +364,7 @@ public sealed class TextPipeline
     {
         // Trim trailing whitespace for width calculation but keep for shaping
         var trimmed = lineText.TrimEnd();
-        var fontRuns = FontItemizer.Itemize(trimmed, _fonts, style.FontFamily, style.FontWeight, FontSlant.Normal);
+        var fontRuns = FontItemizer.Itemize(trimmed, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
 
         var runs = new List<ShapedRun>();
         float width = 0;
@@ -330,7 +372,7 @@ public sealed class TextPipeline
 
         foreach (var fr in fontRuns)
         {
-            var shaped = _shaper.Shape(fr.Text, fr.Font, style.FontSize);
+            var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing);
             shaped.OffsetX = width;
             width += shaped.Width;
             runs.Add(shaped);
@@ -343,12 +385,13 @@ public sealed class TextPipeline
         // If no runs (empty line), use primary font metrics scaled by fontSize
         if (runs.Count == 0)
         {
-            var primaryFont = _fonts.Resolve(style.FontFamily, style.FontWeight, FontSlant.Normal);
+            var primaryFont = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
             maxAscent = Math.Abs(primaryFont.Ascent) * style.FontSize;
             maxDescent = primaryFont.Descent * style.FontSize;
             maxLeading = primaryFont.Leading * style.FontSize;
         }
 
+        (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, style.LineHeight);
         return new TextLine(runs, width, maxAscent, maxDescent, maxLeading) { Start = start, Length = lineText.Length };
     }
 }
