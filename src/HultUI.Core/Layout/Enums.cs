@@ -73,6 +73,13 @@ public enum TextOverflow : byte
     Ellipsis
 }
 
+public enum BorderStyle : byte
+{
+    Solid,
+    Dashed,
+    Dotted
+}
+
 public enum ImageFit : byte
 {
     Contain,

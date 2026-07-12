@@ -43,6 +43,15 @@ public static class ElementExtensions
     public static T BorderColor<T>(this T el, Color c) where T : BoxElement { el.BorderColor = c; return el; }
     public static T BorderWidth<T>(this T el, Thickness w) where T : BoxElement { el.Box.BorderWidth = w; return el; }
     public static T BorderWidth<T>(this T el, float uniform) where T : BoxElement { el.Box.BorderWidth = new Thickness(uniform); return el; }
+    public static T BorderStyle<T>(this T el, BorderStyle style) where T : BoxElement { el.BorderStyle = style; return el; }
+    /// <summary>Sets a single-sided border via its edge widths, e.g. a bottom rule or a left accent.</summary>
+    public static T Border<T>(this T el, Thickness widths, Color color, BorderStyle style = Layout.BorderStyle.Solid) where T : BoxElement
+    {
+        el.Box.BorderWidth = widths;
+        el.BorderColor = color;
+        el.BorderStyle = style;
+        return el;
+    }
     public static T CornerRadius<T>(this T el, CornerRadius r) where T : BoxElement { el.CornerRadius = r; return el; }
     public static T CornerRadius<T>(this T el, float uniform) where T : BoxElement { el.CornerRadius = new CornerRadius(uniform); return el; }
     public static T BoxShadow<T>(this T el, BoxShadow shadow) where T : BoxElement { (el.BoxShadows ??= new()).Add(shadow); return el; }
@@ -135,6 +144,13 @@ public static class ElementExtensions
     // ──── Visual ────
     public static T Opacity<T>(this T el, float opacity) where T : Element { el.Opacity = opacity; return el; }
     public static T ZIndex<T>(this T el, int zIndex) where T : Element { el.Position.ZIndex = zIndex; return el; }
+
+    // ──── Transform ──── (rotate/scale/translate pivot on the element's center; helpers merge)
+    public static T Transform<T>(this T el, Transform2D transform) where T : Element { el.Transform = transform; return el; }
+    public static T Rotate<T>(this T el, float degrees) where T : Element { el.Transform = (el.Transform ?? Transform2D.Identity) with { RotationDegrees = degrees }; return el; }
+    public static T Scale<T>(this T el, float scale) where T : Element { el.Transform = (el.Transform ?? Transform2D.Identity) with { ScaleX = scale, ScaleY = scale }; return el; }
+    public static T Scale<T>(this T el, float scaleX, float scaleY) where T : Element { el.Transform = (el.Transform ?? Transform2D.Identity) with { ScaleX = scaleX, ScaleY = scaleY }; return el; }
+    public static T TranslateBy<T>(this T el, float dx, float dy) where T : Element { el.Transform = (el.Transform ?? Transform2D.Identity) with { TranslateX = dx, TranslateY = dy }; return el; }
 
     // ──── Drag & Drop ────
     public static T Draggable<T>(this T el, bool draggable = true) where T : Element { el.Draggable = draggable; return el; }

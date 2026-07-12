@@ -20,6 +20,13 @@ public interface IRenderContext
     /// a no-op so non-visual render contexts need not implement it.
     /// </summary>
     void DrawGradientRect(Rect rect, CornerRadius radius, Gradient gradient) { }
+
+    /// <summary>
+    /// Draws a border with per-side widths and/or a dashed/dotted style. The simple
+    /// uniform-solid case is handled by <see cref="DrawRoundedRect"/>; this covers
+    /// the rest. Default is a no-op so non-visual render contexts need not implement it.
+    /// </summary>
+    void DrawBorder(Rect box, CornerRadius radius, Color color, Thickness widths, BorderStyle style) { }
     void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines);
     void DrawImage(IImageSource source, Rect destRect, ImageFit fit);
     void DrawLine(Point from, Point to, Color color, float strokeWidth);
@@ -43,6 +50,14 @@ public interface IRenderContext
     void PushRoundedClip(Rect clipRect, CornerRadius radius);
     void PushTranslate(float x, float y);
     void PushOpacity(float opacity);
+
+    /// <summary>
+    /// Concatenates a 2D affine transform onto the current matrix (paired with
+    /// <see cref="Pop"/>). Default is a no-op so non-visual contexts, whose Pop is
+    /// also a no-op, stay balanced.
+    /// </summary>
+    void PushTransform(System.Numerics.Matrix3x2 matrix) { }
+
     void Pop();
 
     ICanvasDrawingContext CreateCanvasContext(Rect bounds);

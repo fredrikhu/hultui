@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 
@@ -7,6 +8,7 @@ public class BoxElement : Element
 {
     public Color BackgroundColor { get; set; } = Color.Transparent;
     public Color BorderColor { get; set; } = Color.Transparent;
+    public BorderStyle BorderStyle { get; set; } = BorderStyle.Solid;
     public CornerRadius CornerRadius { get; set; }
 
     /// <summary>A gradient fill. When set it replaces <see cref="BackgroundColor"/>.</summary>
@@ -24,6 +26,7 @@ public class BoxElement : Element
         {
             BackgroundColor = box.BackgroundColor;
             BorderColor = box.BorderColor;
+            BorderStyle = box.BorderStyle;
             CornerRadius = box.CornerRadius;
             BackgroundGradient = box.BackgroundGradient;
             BoxShadows = box.BoxShadows;
@@ -42,16 +45,31 @@ public class BoxElement : Element
                 ctx.DrawBoxShadow(box, CornerRadius, shadow);
         }
 
+        var w = Box.BorderWidth;
+        bool hasBorder = BorderColor.A > 0 && (w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0);
+        bool uniformWidth = w.Top == w.Right && w.Right == w.Bottom && w.Bottom == w.Left;
+        // The simple case (uniform width, solid style) uses the combined draw call
+        // and keeps its existing centered-stroke geometry, so nothing regresses.
+        // Per-side widths or dashed/dotted styles route through DrawBorder instead.
+        bool advancedBorder = hasBorder && (BorderStyle != BorderStyle.Solid || !uniformWidth);
+
         if (BackgroundGradient is { } gradient)
         {
             ctx.DrawGradientRect(box, CornerRadius, gradient);
-            // Border is drawn as a separate stroke over the gradient fill.
-            if (BorderColor.A > 0)
-                ctx.DrawRoundedRect(box, CornerRadius, Color.Transparent, BorderColor, Box.BorderWidth);
+            if (advancedBorder)
+                ctx.DrawBorder(box, CornerRadius, BorderColor, w, BorderStyle);
+            else if (hasBorder)
+                ctx.DrawRoundedRect(box, CornerRadius, Color.Transparent, BorderColor, w);
         }
-        else if (BackgroundColor.A > 0 || BorderColor.A > 0)
+        else if (advancedBorder)
         {
-            ctx.DrawRoundedRect(box, CornerRadius, BackgroundColor, BorderColor, Box.BorderWidth);
+            if (BackgroundColor.A > 0)
+                ctx.DrawRoundedRect(box, CornerRadius, BackgroundColor, Color.Transparent, default);
+            ctx.DrawBorder(box, CornerRadius, BorderColor, w, BorderStyle);
+        }
+        else if (BackgroundColor.A > 0 || hasBorder)
+        {
+            ctx.DrawRoundedRect(box, CornerRadius, BackgroundColor, hasBorder ? BorderColor : Color.Transparent, w);
         }
     }
 }

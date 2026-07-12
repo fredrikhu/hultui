@@ -1,3 +1,4 @@
+using System.Numerics;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
 
@@ -18,9 +19,18 @@ public static class HitTester
 
     private static Element? HitTestRecursive(Element element, Point point, Rect? clipRect)
     {
-        // If we have a clip rect, check if the point is inside it
+        // If we have a clip rect, check if the point is inside it (parent space).
         if (clipRect.HasValue && !clipRect.Value.Contains(point))
             return null;
+
+        // A transform maps this element and its subtree about its centre; invert it
+        // so the point is in the element's own untransformed space for every bounds
+        // check below. The parent's axis-aligned clip no longer applies here.
+        if (element.Transform is { } t && !t.IsIdentity)
+        {
+            point = InverseTransformPoint(element, t, point);
+            clipRect = null;
+        }
 
         // Check if the element itself contains the point
         if (!element.HitTest(point))
@@ -64,6 +74,18 @@ public static class HitTester
 
         // No child was hit, this element is the target
         return element;
+    }
+
+    private static Point InverseTransformPoint(Element element, Transform2D t, Point p)
+    {
+        var b = element.Layout.AbsoluteBorderBox;
+        var m = t.ToMatrix(b.X + b.Width * 0.5f, b.Y + b.Height * 0.5f);
+        if (Matrix3x2.Invert(m, out var inv))
+        {
+            var v = Vector2.Transform(new Vector2(p.X, p.Y), inv);
+            return new Point(v.X, v.Y);
+        }
+        return p; // singular (e.g. zero scale) — leave unchanged
     }
 
     private static Rect Intersect(Rect a, Rect b)

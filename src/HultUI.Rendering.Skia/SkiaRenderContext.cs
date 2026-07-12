@@ -139,6 +139,58 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return SKShader.CreateLinearGradient(start, end, colors, positions, SKShaderTileMode.Clamp);
     }
 
+    public void DrawBorder(Rect box, CornerRadius radius, Color color, Thickness w, BorderStyle style)
+    {
+        if (color.A == 0) return;
+
+        bool uniform = w.Top == w.Right && w.Right == w.Bottom && w.Bottom == w.Left;
+        var skColor = ToSkColor(color);
+
+        if (!uniform)
+        {
+            // Per-side widths: paint each edge as a rect inside the border box, so a
+            // single-sided or asymmetric border renders exactly (no averaging).
+            _pooledPaint.Reset();
+            _pooledPaint.Color = skColor;
+            _pooledPaint.IsAntialias = true;
+            float x = box.X, y = box.Y, bw = box.Width, bh = box.Height;
+            if (w.Top > 0) Canvas.DrawRect(SKRect.Create(x, y, bw, w.Top), _pooledPaint);
+            if (w.Bottom > 0) Canvas.DrawRect(SKRect.Create(x, y + bh - w.Bottom, bw, w.Bottom), _pooledPaint);
+            if (w.Left > 0) Canvas.DrawRect(SKRect.Create(x, y, w.Left, bh), _pooledPaint);
+            if (w.Right > 0) Canvas.DrawRect(SKRect.Create(x + bw - w.Right, y, w.Right, bh), _pooledPaint);
+            return;
+        }
+
+        // Uniform width, dashed or dotted: stroke the (rounded) outline with a dash
+        // path effect, matching DrawRoundedRect's centered-stroke geometry.
+        float sw = w.Top;
+        if (sw <= 0) return;
+
+        _pooledPaint.Reset();
+        _pooledPaint.Color = skColor;
+        _pooledPaint.IsStroke = true;
+        _pooledPaint.StrokeWidth = sw;
+        _pooledPaint.IsAntialias = true;
+        if (style == BorderStyle.Dotted)
+            _pooledPaint.StrokeCap = SKStrokeCap.Round;
+
+        using var dash = style switch
+        {
+            BorderStyle.Dashed => SKPathEffect.CreateDash([sw * 3f, sw * 2f], 0f),
+            BorderStyle.Dotted => SKPathEffect.CreateDash([sw * 0.1f, sw * 2f], 0f),
+            _ => null,
+        };
+        _pooledPaint.PathEffect = dash;
+
+        var skRect = ToSkRect(box);
+        if (radius.IsZero)
+            Canvas.DrawRect(skRect, _pooledPaint);
+        else
+            Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
+
+        _pooledPaint.PathEffect = null;
+    }
+
     public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill, Color stroke, Thickness strokeWidth)
     {
         var skRect = ToSkRect(rect);
@@ -363,6 +415,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Reset();
         _pooledPaint.Color = new SKColor(255, 255, 255, (byte)(opacity * 255));
         _saveStack.Push(Canvas.SaveLayer(_pooledPaint));
+    }
+
+    public void PushTransform(System.Numerics.Matrix3x2 m)
+    {
+        _saveStack.Push(Canvas.Save());
+        // SKMatrix rows: (scaleX, skewX, transX), (skewY, scaleY, transY).
+        var sk = new SKMatrix(m.M11, m.M21, m.M31, m.M12, m.M22, m.M32, 0f, 0f, 1f);
+        Canvas.Concat(ref sk);
     }
 
     public void Pop()

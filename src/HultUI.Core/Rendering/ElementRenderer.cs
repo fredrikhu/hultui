@@ -42,6 +42,17 @@ public static class ElementRenderer
         if (hasOpacity)
             ctx.PushOpacity(element.Opacity);
 
+        // A transform rotates/scales the element and its subtree about its centre.
+        // Once transformed, the screen-axis-aligned cull rect no longer bounds the
+        // content, so culling is disabled for the subtree.
+        bool hasTransform = element.Transform is { } tf && !tf.IsIdentity;
+        if (hasTransform)
+        {
+            var b = element.Layout.AbsoluteBorderBox;
+            ctx.PushTransform(element.Transform!.Value.ToMatrix(b.X + b.Width * 0.5f, b.Y + b.Height * 0.5f));
+            cull = null;
+        }
+
         // Render self
         element.Render(ctx);
 
@@ -71,6 +82,8 @@ public static class ElementRenderer
 
             scrollView.RenderScrollbars(ctx);
 
+            if (hasTransform)
+                ctx.Pop();
             if (hasOpacity)
                 ctx.Pop();
             return;
@@ -93,6 +106,9 @@ public static class ElementRenderer
             RenderElement(children[i], ctx, tracer, offsetX, offsetY, childrenCull);
 
         if (needsClip)
+            ctx.Pop();
+
+        if (hasTransform)
             ctx.Pop();
 
         if (hasOpacity)

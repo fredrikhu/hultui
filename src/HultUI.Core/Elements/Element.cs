@@ -61,6 +61,12 @@ public abstract class Element
         }
     }
 
+    /// <summary>
+    /// A 2D transform (rotate/scale/translate) applied to this element and its
+    /// subtree at render and hit-test time. Null = identity (no cost).
+    /// </summary>
+    public Transform2D? Transform { get; set; }
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 
@@ -480,6 +486,7 @@ public abstract class Element
         TooltipText = source.TooltipText;
         ContextMenuItems = source.ContextMenuItems;
         _opacity = source._opacity;
+        Transform = source.Transform;
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;
