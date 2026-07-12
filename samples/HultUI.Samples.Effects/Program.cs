@@ -1,4 +1,5 @@
 using HultUI;
+using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
@@ -50,6 +51,28 @@ var root = ScrollView.New().Background(Color.FromHex("#EEF2F7")).Children(
                 TransformCard("Scale 1.15", Transform2D.Scale(1.15f)),
                 TransformCard("Both", new Transform2D(-6f, 1.1f, 1.1f, 0f, 0f)))),
 
+        // ── Interaction ── reactive hover/press with declarative transitions
+        Section("INTERACTION  (hover and press these)",
+            Flex.Row(gap: 22).FlexShrink(0).AlignItems(AlignItems.Center).Children(
+                // Hover fades the background.
+                Btn("Hover fade")
+                    .Background(Color.FromHex("#4F46E5"))
+                    .OnHover(b => b.Background(Color.FromHex("#4338CA")))
+                    .Transition(TransitionProperty.Background, 160f),
+                // Press springs the scale down and back on release.
+                Btn("Press me")
+                    .Background(Color.FromHex("#0EA5E9"))
+                    .OnHover(b => b.Background(Color.FromHex("#0284C7")))
+                    .OnPressed(b => b.Scale(0.93f))
+                    .Transition(TransitionProperty.Background, 140f)
+                    .Transition(TransitionProperty.Transform, 340f, Easing.Spring()),
+                // Hover lifts the button and shifts its color.
+                Btn("Lift")
+                    .Background(Color.FromHex("#8B5CF6"))
+                    .OnHover(b => b.TranslateBy(0f, -4f).Background(Color.FromHex("#7C3AED")))
+                    .Transition(TransitionProperty.Transform, 200f)
+                    .Transition(TransitionProperty.Background, 160f))),
+
         // ── Combined ── gradient + rounded + colored shadow, the "modern card"
         Section("COMPOSITED",
             Flex.Row(gap: 28).FlexShrink(0).Children(
@@ -90,6 +113,13 @@ static Element ShadowCard(string label, BoxShadow shadow, Color labelColor) =>
 static Element GradientCard(string label, Gradient gradient) =>
     Flex.Column().Width(150).Height(92).FlexShrink(0)
         .Background(gradient).CornerRadius(12f)
+        .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+        .Children(Text.New(label).FontSize(14f).FontWeight(FontWeight.Bold).TextColor(Color.White));
+
+static BoxElement Btn(string label) =>
+    Flex.Column().Width(150).Height(56).FlexShrink(0)
+        .CornerRadius(10f).BoxShadow(0, 4, 12, new Color(15, 23, 42, 55))
+        .Cursor(CursorType.Pointer)
         .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
         .Children(Text.New(label).FontSize(14f).FontWeight(FontWeight.Bold).TextColor(Color.White));
 
