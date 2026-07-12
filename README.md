@@ -19,6 +19,7 @@ A cross-platform UI framework for C#/.NET. Build desktop applications with a flu
 - **GPU-accelerated** -- SkiaSharp rendering on OpenGL via SDL3
 - **DevTools overlay** -- F12 to inspect elements, view layout bounds, and monitor performance
 - **Zero-dependency core** -- layout, reactivity, and events have no external NuGet dependencies
+- **NativeAOT-ready** -- publishes to a single self-contained native executable, no runtime install, no JIT warmup
 
 ## Quick Start
 
@@ -162,6 +163,7 @@ Press **F12** at runtime to toggle the DevTools overlay:
 - [Drag and Drop](docs/DRAG-AND-DROP.md) -- internal element drag and OS file/text drops
 - [Custom Window Chrome](docs/CUSTOM-CHROME.md) -- borderless windows with custom title bars
 - [Multi-Window](docs/MULTI-WINDOW.md) -- multiple windows with shared state
+- [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
 
 ## Samples
