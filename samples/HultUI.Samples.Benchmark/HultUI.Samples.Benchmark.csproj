@@ -5,6 +5,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- NativeAOT: only engages on `dotnet publish`; `dotnet run`/`build` are
+         unaffected. Lets scripts/aot-vs-jit-benchmark.ps1 compare AOT vs JIT. -->
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>

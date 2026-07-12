@@ -101,3 +101,40 @@ figure is dominated by SDL3 window creation, Skia GPU context init, font loading
 and the first render — not by runtime start. AOT's contribution is removing JIT
 warmup and eliminating assembly load, which matters most for the managed
 work on the first few frames.
+
+## AOT vs JIT throughput
+
+A common expectation is that "native code" means faster throughput. For a
+GC'd, managed framework that is **not** what AOT buys you — NativeAOT keeps the
+full runtime, including the **same garbage collector**. Its wins are startup,
+memory, and deployment, not steady-state CPU throughput. At steady state RyuJIT
+plus dynamic profile-guided optimization (PGO) recompiles hot paths with real
+runtime profiles and typically matches AOT, sometimes edging ahead.
+
+`scripts/aot-vs-jit-benchmark.ps1` runs the js-framework-benchmark suite
+(`HultUI.Samples.Benchmark --auto`) under both a JIT'd Release build and the
+NativeAOT binary and tabulates the median per-operation latency. A representative
+run (win-x64; single run, expect noise):
+
+| operation | JIT (ms) | AOT (ms) | AOT/JIT |
+|---|---|---|---|
+| create 1,000 | 64.23 | 30.46 | 47% |
+| update every 10th | 21.94 | 7.06 | 32% |
+| select row | 1.24 | 0.75 | 60% |
+| swap rows | 4.78 | 5.92 | 124% |
+| remove row | 5.06 | 6.64 | 131% |
+| create 10,000 | 354.96 | 406.56 | 115% |
+| append 1,000 to 1,000 | 37.27 | 46.58 | 125% |
+| clear 1,000 | 14.36 | 14.45 | 101% |
+
+Read it by **order**, not by row: the operations where AOT wins big are the
+*first* ones in the suite, before the JIT has tiered up — that gap is warmup, not
+throughput. Once the JIT is warm, the later operations are a wash or slightly
+*favor* JIT (swap/remove/append/create-10k all land at 100–130% of JIT). The
+large `create 10,000` is layout- and present-bound, so the backend barely moves
+it. Net: no consistent throughput winner; AOT's visible edge is concentrated in
+the cold path, exactly as expected.
+
+To isolate the managed slice from the GPU work, run the benchmark with
+`--profile`, which breaks each operation into build / style / layout / render /
+present — build+style+layout is the only part a backend swap can affect.
