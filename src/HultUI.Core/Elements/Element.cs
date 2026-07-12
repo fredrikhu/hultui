@@ -67,6 +67,46 @@ public abstract class Element
     /// </summary>
     public Transform2D? Transform { get; set; }
 
+    // ──── Interaction state (hover / press / focus) ────
+    private InteractionStyles? _interaction;
+    private InteractionStyles Interaction => _interaction ??= new InteractionStyles();
+
+    /// <summary>True while the pointer is over this element or a descendant.</summary>
+    public bool IsHovered => _interaction?.Hovered ?? false;
+    /// <summary>True while the pointer is pressed on this element or a descendant.</summary>
+    public bool IsPressed => _interaction?.Pressed ?? false;
+    /// <summary>True while this element holds keyboard focus.</summary>
+    public bool IsFocused => _interaction?.Focused ?? false;
+
+    internal void AddHoverStyle(Action<Element> style) => Interaction.OnHover += style;
+    internal void AddPressedStyle(Action<Element> style) => Interaction.OnPressed += style;
+    internal void AddFocusStyle(Action<Element> style) => Interaction.OnFocus += style;
+    internal void AddTransition(Animation.TransitionProperty property, float seconds, Func<float, float> easing) =>
+        Interaction.AddTransition(property, seconds, easing);
+
+    // Called by the event pipeline (PointerState / FocusManager) when interaction
+    // state changes; no-ops when the element has no interaction styling registered.
+    internal void SetInteractionHovered(bool value)
+    {
+        if (_interaction is { } s && s.Hovered != value) { s.Hovered = value; s.Recompute(this, animate: true); }
+    }
+    internal void SetInteractionPressed(bool value)
+    {
+        if (_interaction is { } s && s.Pressed != value) { s.Pressed = value; s.Recompute(this, animate: true); }
+    }
+    internal void SetInteractionFocused(bool value)
+    {
+        if (_interaction is { } s && s.Focused != value) { s.Focused = value; s.Recompute(this, animate: true); }
+    }
+
+    // Called by the reconciler after a full patch: the visual props now hold the new
+    // base, so re-snapshot it and re-apply whatever states are currently active
+    // (without animating — a rebuild shouldn't trigger transitions).
+    internal void RefreshInteractionAfterPatch()
+    {
+        if (_interaction is { } s) { s.InvalidateBase(); s.Recompute(this, animate: false); }
+    }
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 
@@ -487,6 +527,12 @@ public abstract class Element
         ContextMenuItems = source.ContextMenuItems;
         _opacity = source._opacity;
         Transform = source.Transform;
+        // Interaction overrides are pure functions of the element, so the config
+        // carries across reconciliation. Copy it here (order-independent); the base
+        // snapshot is refreshed and the active states re-applied by the reconciler
+        // in RefreshInteractionAfterPatch, once all visual props have been copied.
+        if (source._interaction is { } sourceInteraction)
+            Interaction.CopyConfigFrom(sourceInteraction);
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;

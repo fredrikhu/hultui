@@ -21,10 +21,16 @@ public sealed class FocusManager
         FocusedElement = element;
 
         if (previous is not null)
+        {
+            previous.SetInteractionFocused(false);
             EventDispatcher.DispatchDirect(new BlurEvent(), previous);
+        }
 
         if (element is not null)
+        {
+            element.SetInteractionFocused(true);
             EventDispatcher.DispatchDirect(new FocusEvent(), element);
+        }
 
         FocusChanged?.Invoke(element);
     }

@@ -43,12 +43,18 @@ public sealed class PointerState
         // Fire PointerLeave on elements that lost the pointer (old → common ancestor, exclusive)
         var leaveEvt = new PointerLeaveEvent { Position = position, Modifiers = modifiers };
         for (var el = oldHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
+        {
+            el.SetInteractionHovered(false);
             EventDispatcher.DispatchDirect(leaveEvt, el);
+        }
 
         // Fire PointerEnter on elements that gained the pointer (new → common ancestor, exclusive)
         var enterEvt = new PointerEnterEvent { Position = position, Modifiers = modifiers };
         for (var el = newHovered; el is not null && !ReferenceEquals(el, commonAncestor); el = el.Parent)
+        {
+            el.SetInteractionHovered(true);
             EventDispatcher.DispatchDirect(enterEvt, el);
+        }
     }
 
     private static Element? FindCommonAncestor(Element? a, Element? b)
@@ -75,8 +81,13 @@ public sealed class PointerState
     /// </summary>
     public PointerDownEvent HandlePointerDown(Element target, Point position, int button, KeyModifiers modifiers)
     {
+        ClearPressedChain(); // defensive: drop any stale press (e.g. a press consumed by a drag)
         _pressedElement = target;
         _pressedButton = button;
+
+        // :active-style press applies to the target and its ancestors.
+        for (var el = target; el is not null; el = el.Parent)
+            el.SetInteractionPressed(true);
 
         return new PointerDownEvent
         {
@@ -92,6 +103,8 @@ public sealed class PointerState
     public (PointerUpEvent upEvent, ClickEvent? clickEvent, DoubleClickEvent? doubleClickEvent) HandlePointerUp(
         Element target, Point position, int button, KeyModifiers modifiers)
     {
+        ClearPressedChain();
+
         var upEvent = new PointerUpEvent
         {
             Position = position,
@@ -142,6 +155,12 @@ public sealed class PointerState
 
         _pressedElement = null;
         return (upEvent, clickEvent, doubleClickEvent);
+    }
+
+    private void ClearPressedChain()
+    {
+        for (var el = _pressedElement; el is not null; el = el.Parent)
+            el.SetInteractionPressed(false);
     }
 
     private static float Distance(Point a, Point b)

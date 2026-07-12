@@ -30,6 +30,9 @@ internal static class TreeDiffer
     private static void Patch(Element existing, Element incoming)
     {
         existing.PatchFrom(incoming);
+        // After the full patch the visual props hold the new base, so let the
+        // element re-snapshot it and re-apply any active interaction states.
+        existing.RefreshInteractionAfterPatch();
         ReconcileChildren(existing, incoming);
     }
 

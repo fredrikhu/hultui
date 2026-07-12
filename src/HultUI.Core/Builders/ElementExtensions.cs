@@ -145,6 +145,17 @@ public static class ElementExtensions
     public static T Opacity<T>(this T el, float opacity) where T : Element { el.Opacity = opacity; return el; }
     public static T ZIndex<T>(this T el, int zIndex) where T : Element { el.Position.ZIndex = zIndex; return el; }
 
+    // ──── Interaction states ──── (declarative overrides re-applied on hover/press/focus)
+    public static T OnHover<T>(this T el, Action<T> style) where T : Element { el.AddHoverStyle(e => style((T)e)); return el; }
+    public static T OnPressed<T>(this T el, Action<T> style) where T : Element { el.AddPressedStyle(e => style((T)e)); return el; }
+    public static T OnFocus<T>(this T el, Action<T> style) where T : Element { el.AddFocusStyle(e => style((T)e)); return el; }
+    /// <summary>Animates changes to <paramref name="property"/> (e.g. from a hover override) over <paramref name="ms"/> milliseconds.</summary>
+    public static T Transition<T>(this T el, Animation.TransitionProperty property, float ms = 150f, Func<float, float>? easing = null) where T : Element
+    {
+        el.AddTransition(property, ms / 1000f, easing ?? Animation.Easing.EaseOutCubic);
+        return el;
+    }
+
     // ──── Transform ──── (rotate/scale/translate pivot on the element's center; helpers merge)
     public static T Transform<T>(this T el, Transform2D transform) where T : Element { el.Transform = transform; return el; }
     public static T Rotate<T>(this T el, float degrees) where T : Element { el.Transform = (el.Transform ?? Transform2D.Identity) with { RotationDegrees = degrees }; return el; }

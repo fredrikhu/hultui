@@ -31,6 +31,13 @@ public static class Lerp
         return t < 1f ? a : b;
     }
 
+    public static Transform2D Transform(Transform2D a, Transform2D b, float t) => new(
+        Float(a.RotationDegrees, b.RotationDegrees, t),
+        Float(a.ScaleX, b.ScaleX, t),
+        Float(a.ScaleY, b.ScaleY, t),
+        Float(a.TranslateX, b.TranslateX, t),
+        Float(a.TranslateY, b.TranslateY, t));
+
     public static Point Point(Point a, Point b, float t) =>
         new(Float(a.X, b.X, t), Float(a.Y, b.Y, t));
 

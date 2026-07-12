@@ -38,6 +38,36 @@ public static class Easing
     }
 
     /// <summary>
+    /// A damped-spring easing that overshoots and settles to 1 within the tween's
+    /// duration. Higher <paramref name="stiffness"/> = faster/snappier; higher
+    /// <paramref name="damping"/> = less overshoot (past ~2·√stiffness it stops
+    /// overshooting entirely).
+    /// </summary>
+    public static Func<float, float> Spring(float stiffness = 400f, float damping = 28f)
+    {
+        float omega0 = MathF.Sqrt(stiffness);
+        float zeta = damping / (2f * MathF.Sqrt(stiffness));
+
+        return (float t) =>
+        {
+            if (t <= 0f) return 0f;
+            if (t >= 1f) return 1f;
+
+            if (zeta < 1f)
+            {
+                // Under-damped: oscillates and overshoots before settling.
+                float omegaD = omega0 * MathF.Sqrt(1f - zeta * zeta);
+                float envelope = MathF.Exp(-zeta * omega0 * t);
+                return 1f - envelope * (MathF.Cos(omegaD * t) + (zeta * omega0 / omegaD) * MathF.Sin(omegaD * t));
+            }
+
+            // Critically / over-damped: approaches 1 without overshoot.
+            float e = MathF.Exp(-omega0 * t);
+            return 1f - e * (1f + omega0 * t);
+        };
+    }
+
+    /// <summary>
     /// Creates a cubic-bezier easing function matching CSS cubic-bezier() semantics.
     /// </summary>
     public static Func<float, float> CubicBezier(float x1, float y1, float x2, float y2)
