@@ -572,11 +572,15 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
                         break;
 
-                    // Don't change focus when clicking overlay elements
-                    // (e.g. context menu on TextInput should keep selection visible)
-                    if (!isOverlayHit)
+                    // Move focus to a focusable element under the pointer. For the
+                    // main tree this always runs (clicking empty space clears focus).
+                    // For overlays we only take focus when the hit is itself focusable
+                    // — a dialog's text input should focus, but a transient popup like
+                    // a context menu opened on a TextInput must keep the underlying
+                    // element's focus and selection.
+                    var focusTarget = FindFocusableAncestor(target);
+                    if (!isOverlayHit || focusTarget is not null)
                     {
-                        var focusTarget = FindFocusableAncestor(target);
                         _focusManager.SetFocus(focusTarget);
 
                         // Provide clipboard to text inputs when focused
@@ -610,8 +614,10 @@ public sealed class Window : IOverlayHost, IDisposable
                         }
                     }
 
-                    // Right-click: show context menu
-                    if (!isOverlayHit && button.Button == 2)
+                    // Right-click: show context menu. Allowed on overlay hits too so a
+                    // text input inside a dialog gets its Cut/Copy/Paste menu; the menu
+                    // is itself an overlay and stacks above the dialog.
+                    if (button.Button == 2)
                         TryShowContextMenu(target, pos);
                 }
                 else
