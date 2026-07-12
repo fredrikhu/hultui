@@ -90,6 +90,23 @@ aren't mistaken for quick wins.
   needs the Unicode BiDi algorithm before shaping. In spirit for correctness, but
   a substantial algorithmic addition. Do it before claiming i18n support.
 
+## Known follow-ups (deferred)
+
+Small, understood gaps left behind while shipping the tiers, kept here so they
+aren't forgotten.
+
+- **Dialog: drag-select past the input edge** — text drag-selection inside an
+  overlay-hosted input stops if the pointer leaves the input, because the
+  drag-capture path is gated to non-overlay hits. Click-to-caret, typing,
+  double-click word-select and right-click Cut/Copy/Paste all work. Fix needs the
+  pointer-move handler to apply the overlay's offset when capturing.
+- **Dialog: Esc-to-dismiss + focus trap** — a modal dialog should close on Esc and
+  keep Tab focus within itself. Needs the dialog to move keyboard focus into its
+  content (a bit of `FocusManager` access through the overlay host). Dismissal is
+  currently scrim-click / buttons only.
+- **Dialog: `Window` presentation** — the separate-OS-window backend (agreed:
+  overlay first, window later). Currently `DialogPresentation.Window` throws.
+
 ## Not included (out of spirit)
 
 Mirrors the master plan's exclusion list — kept out on purpose, with the reason.
