@@ -118,22 +118,29 @@ run (win-x64; single run, expect noise):
 
 | operation | JIT (ms) | AOT (ms) | AOT/JIT |
 |---|---|---|---|
-| create 1,000 | 64.23 | 30.46 | 47% |
-| update every 10th | 21.94 | 7.06 | 32% |
-| select row | 1.24 | 0.75 | 60% |
-| swap rows | 4.78 | 5.92 | 124% |
-| remove row | 5.06 | 6.64 | 131% |
-| create 10,000 | 354.96 | 406.56 | 115% |
-| append 1,000 to 1,000 | 37.27 | 46.58 | 125% |
-| clear 1,000 | 14.36 | 14.45 | 101% |
+| create 1,000 | 28.89 | 29.42 | 102% |
+| update every 10th | 5.88 | 7.54 | 128% |
+| select row | 0.78 | 0.70 | 90% |
+| swap rows | 4.62 | 6.11 | 132% |
+| remove row | 4.82 | 6.82 | 141% |
+| create 10,000 | 374.28 | 423.76 | 113% |
+| append 1,000 to 1,000 | 43.43 | 48.28 | 111% |
+| clear 1,000 | 15.07 | 15.51 | 103% |
 
-Read it by **order**, not by row: the operations where AOT wins big are the
-*first* ones in the suite, before the JIT has tiered up — that gap is warmup, not
-throughput. Once the JIT is warm, the later operations are a wash or slightly
-*favor* JIT (swap/remove/append/create-10k all land at 100–130% of JIT). The
-large `create 10,000` is layout- and present-bound, so the backend barely moves
-it. Net: no consistent throughput winner; AOT's visible edge is concentrated in
-the cold path, exactly as expected.
+Warm JIT and AOT are a **wash**, with JIT slightly *ahead* on most operations —
+dynamic PGO recompiling hot paths with real profiles is doing exactly what it is
+supposed to. There is no steady-state throughput win from AOT.
+
+**A cautionary tale about warmup.** An earlier version of this table (before the
+benchmark had a global pre-warm) looked very different: `create 1,000` showed
+JIT 64 ms vs AOT 30 ms, a seeming 2× AOT win. That was **not** throughput — it
+was JIT tier-up leaking into the first measured metric, because the HultUI
+assemblies start at Tier-0 and two per-metric warmup passes at process start were
+not enough to promote the shared style/layout/text pipeline. The fix was a global
+pre-warm in the suite (see the benchmark README); with it, `create 1,000` drops
+to ~28 ms — the AOT figure — and the "win" evaporates. The lesson: **AOT's real
+advantage is the cold path** (startup, warmup, first frames); at steady state it
+keeps the same GC and the same performance envelope as a warmed JIT.
 
 To isolate the managed slice from the GPU work, run the benchmark with
 `--profile`, which breaks each operation into build / style / layout / render /

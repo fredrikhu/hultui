@@ -50,16 +50,24 @@ dotnet run --project samples/HultUI.Samples.Benchmark -- --auto
 
 ```
 === HultUI benchmark (non-virtualized): running suite ===
-  create 1,000           median   59.1 ms   min   46.5 ms   (n=5)
-  update every 10th      median   14.4 ms   min   14.2 ms   (n=5)
-  select row             median    0.9 ms   min    0.9 ms   (n=5)
-  swap rows              median   12.1 ms   min   11.5 ms   (n=5)
-  remove row             median   83.8 ms   min   22.1 ms   (n=5)
-  create 10,000          median  528.8 ms   min  486.6 ms   (n=5)
-  append 1,000 to 1,000  median   70.1 ms   min   63.5 ms   (n=5)
-  clear 1,000            median   16.2 ms   min   15.9 ms   (n=5)
+  create 1,000           median   27.2 ms   min   22.5 ms   (n=5)
+  update every 10th      median    5.6 ms   min    5.4 ms   (n=5)
+  select row             median    0.6 ms   min    0.6 ms   (n=5)
+  swap rows              median    4.5 ms   min    4.4 ms   (n=5)
+  remove row             median    5.2 ms   min    4.8 ms   (n=5)
+  create 10,000          median  370.0 ms   min  334.6 ms   (n=5)
+  append 1,000 to 1,000  median   45.5 ms   min   34.9 ms   (n=5)
+  clear 1,000            median   15.0 ms   min   14.8 ms   (n=5)
 === done ===
 ```
+
+> **Warm-up matters.** The suite runs a global pre-warm (full pipeline on large
+> and small tables, then a few idle frames) *before* any metric, so the shared
+> framework code is JIT-tiered to steady state first. Without it the first metric
+> in the run — `create 1,000` — absorbed the JIT tier-up and read ~2× high (it
+> was 59 ms here before the pre-warm, vs 27 ms warm, essentially the NativeAOT
+> figure). A browser's V8 is warmed the same way, so this is what makes the
+> comparison fair. See [docs/NATIVE-AOT.md](../../docs/NATIVE-AOT.md#aot-vs-jit-throughput).
 
 The suite's operation *parameters* match js-framework-benchmark exactly — including
 that "append rows to large table" appends 1,000 to a table of **1,000** rows, and
@@ -87,23 +95,36 @@ Chromium — the hand-written web baseline; medians, ms):
 
 | Operation             | Browser (vanilla) | HultUI table | HultUI virtual |
 | --------------------- | ----------------: | -----------: | -------------: |
-| create 1,000          |                31 |           59 |            6.8 |
-| update every 10th     |              17.5 |           14 |            1.5 |
-| select row            |               6.3 |          0.9 |            1.1 |
-| swap rows             |              18.5 |           12 |            1.2 |
-| remove row            |              16.1 |     84 (min 22) |          1.3 |
-| create 10,000         |               325 |          529 |            1.7 |
-| append 1,000 → 1,000  |                35 |           70 |            9.9 |
-| clear 1,000           |              13.9 |           16 |            9.3 |
+| create 1,000          |                31 |           27 |            7.0 |
+| update every 10th     |              17.5 |          5.6 |            1.1 |
+| select row            |               6.3 |          0.6 |            1.2 |
+| swap rows             |              18.5 |          4.5 |            1.0 |
+| remove row            |              16.1 |          5.2 |            1.6 |
+| create 10,000         |               325 |          370 |            1.9 |
+| append 1,000 → 1,000  |                35 |           45 |            6.8 |
+| clear 1,000           |              13.9 |           15 |            5.7 |
+
+> The HultUI columns were re-measured **warm** (with the global pre-warm above)
+> on 2026-07-12; the browser column is retained from the original same-machine
+> capture with the official js-framework-benchmark. For a pristine set, re-run
+> both together. The earlier HultUI table numbers here were cold-JIT-biased (e.g.
+> `create 1,000` 59, `remove row` 84) — see the warm-up note above.
 
 Reading it:
 
 - **Browser vs HultUI table** is the apples-to-apples comparison — both build and
-  lay out every real row. HultUI is competitive on in-place ops (and faster on
-  `select`, thanks to paint culling), ~1.6× the browser on bulk `create` (layout
-  bound; see below).
+  lay out every real row. Warm, HultUI is now **on par with the vanilla browser
+  on `create 1,000`** (27 vs 31), meaningfully faster on the in-place ops
+  (`update`/`swap`/`remove`, and `select` especially — paint culling plus a
+  sub-frame present), and only modestly slower on the biggest bulk-layout op,
+  `create 10,000` (~1.1×) and `append` (~1.3×), which are layout-bound (see below).
+- **Caveat on the small ops:** HultUI's post-frame callback fires as soon as the
+  frame is presented (sub-millisecond for a cheap op), whereas the browser's
+  paint timing is coarser. So treat the in-place-op gaps as "both are fast" rather
+  than a literal 5–10× — the bulk `create`/`append`/`clear` rows are the more
+  directly comparable layout-vs-layout numbers.
 - **HultUI virtual** collapses everything to low single-digit milliseconds and,
-  crucially, **stops scaling with row count**: `create 10,000` is ~1.7 ms because
+  crucially, **stops scaling with row count**: `create 10,000` is ~1.9 ms because
   layout and paint are O(visible ≈ 20 rows), not O(10,000). The only O(n) cost
   left is building the lightweight data models (~0.7 ms + ~1 MB for 10k). That is
   what a real 10k-row screen should use.
@@ -121,9 +142,15 @@ before the mutation to just after that frame is presented, using
 span is the same "click → painted" interval the web benchmark records with
 `PerformanceObserver`.
 
-The `--auto` suite gives each measured operation its own dedicated frame, runs a
-couple of warm-up iterations first, forces a GC between metrics, and reports the
-**median** of 5 runs — matching how js-framework-benchmark isolates its runs.
+The `--auto` suite first runs a **global pre-warm** — the whole pipeline
+(build/style/layout/text/render) over large and small tables, then a dozen idle
+frames — so the shared framework code is JIT-tiered to steady state before any
+timing starts. It then gives each measured operation its own dedicated frame,
+runs a couple of per-metric warm-up iterations, forces a GC between metrics, and
+reports the **median** of 5 runs — matching how js-framework-benchmark isolates
+its runs against an already-warm V8. Under NativeAOT the pre-warm is a cheap
+no-op (there is no tiering); under JIT it is what stops the first metric from
+absorbing tier-up and reading ~2× high.
 
 ## Reading the comparison fairly
 

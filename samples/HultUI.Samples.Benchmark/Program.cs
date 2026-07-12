@@ -186,6 +186,14 @@ sealed class Benchmark
         _samples.Clear();
         _currentMetric = null;
 
+        // Global pre-warm before ANY metric is measured. Without it the first
+        // metric in the run absorbs JIT tier-up of the shared framework code
+        // (style/layout/text/reconciliation) and reads ~2x its warm cost — an
+        // unfair penalty versus a browser, whose V8 is warmed the same way. This
+        // exercises the full pipeline on large and small tables, then idles a few
+        // frames so the background Tier-1 compiler finishes promoting.
+        PreWarm(_script);
+
         Repeat("create 1,000", setup: _target.Clear, op: () => _target.Create(1_000));
         Repeat("update every 10th", setup: () => _target.Create(1_000), op: _target.UpdateEveryTenth);
         Repeat("select row", setup: () => _target.Create(1_000), op: _target.SelectRandom);
@@ -210,6 +218,28 @@ sealed class Benchmark
             bool measured = i >= Warmup;
             _script.Enqueue(new BenchStep(measured ? metric : null, op));
         }
+    }
+
+    // Runs the full pipeline (build/style/layout/text/render) on both large and
+    // small tables to drive the shared framework code past the Tier-0 → Tier-1
+    // call-count threshold, then idles a dozen frames so the background compiler
+    // has wall-clock time to finish promoting before the first measured metric.
+    // All steps are unmeasured. Under NativeAOT (no tiering) this is simply a
+    // cheap no-op warmup; under JIT it is what makes the first metric fair.
+    private void PreWarm(Queue<BenchStep> into)
+    {
+        void Q(Action op) => into.Enqueue(new BenchStep(null, op));
+        for (int pass = 0; pass < 3; pass++)
+        {
+            Q(() => _target.Create(10_000));
+            Q(_target.Clear);
+            Q(() => _target.Create(1_000));
+            Q(_target.UpdateEveryTenth);
+            Q(_target.Swap);
+            Q(_target.Clear);
+        }
+        for (int i = 0; i < 12; i++)
+            Q(static () => { });
     }
 
     private void Pump()
@@ -274,6 +304,8 @@ sealed class Benchmark
         _profSteps.Clear();
         _profSamples.Clear();
         _profMetric = null;
+
+        PreWarm(_profSteps);
 
         QueueProfile("create 1,000", () => _target.Create(1_000));
         QueueProfile("create 10,000", () => _target.Create(10_000));
