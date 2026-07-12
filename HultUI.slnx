@@ -18,6 +18,7 @@
     <Project Path="samples/HultUI.Samples.Typography/HultUI.Samples.Typography.csproj" />
     <Project Path="samples/HultUI.Samples.Effects/HultUI.Samples.Effects.csproj" />
     <Project Path="samples/HultUI.Samples.Dialogs/HultUI.Samples.Dialogs.csproj" />
+    <Project Path="samples/HultUI.Samples.Tabs/HultUI.Samples.Tabs.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />

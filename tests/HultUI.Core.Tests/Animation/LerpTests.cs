@@ -32,6 +32,20 @@ public class LerpTests
     }
 
     [Fact]
+    public void Color_FromTransparent_KeepsTargetHueAndFadesAlpha()
+    {
+        // Fading from Color.Transparent (black at 0 alpha) to an opaque colour must
+        // hold the target's RGB and only ramp alpha — no dark grey midpoint.
+        var target = new Color(240, 245, 250);
+        var mid = Lerp.Color(Color.Transparent, target, 0.5f);
+
+        Assert.Equal(target.R, mid.R);
+        Assert.Equal(target.G, mid.G);
+        Assert.Equal(target.B, mid.B);
+        Assert.Equal(127, mid.A); // ~half alpha
+    }
+
+    [Fact]
     public void Thickness_Midpoint()
     {
         var a = new Thickness(0f);

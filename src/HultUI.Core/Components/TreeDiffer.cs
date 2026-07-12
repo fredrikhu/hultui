@@ -34,6 +34,9 @@ internal static class TreeDiffer
         // element re-snapshot it and re-apply any active interaction states.
         existing.RefreshInteractionAfterPatch();
         ReconcileChildren(existing, incoming);
+        // Child reconciliation may have altered a self-managing element's
+        // internally-owned subtree (e.g. Tabs); let it re-assert its live state.
+        existing.OnReconciled();
     }
 
     private static void ReconcileChildren(Element existing, Element incoming)

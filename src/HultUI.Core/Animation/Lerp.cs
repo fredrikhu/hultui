@@ -6,11 +6,27 @@ public static class Lerp
 {
     public static float Float(float a, float b, float t) => a + (b - a) * t;
 
-    public static Color Color(Color a, Color b, float t) => new(
-        (byte)(a.R + (b.R - a.R) * t),
-        (byte)(a.G + (b.G - a.G) * t),
-        (byte)(a.B + (b.B - a.B) * t),
-        (byte)(a.A + (b.A - a.A) * t));
+    public static Color Color(Color a, Color b, float t)
+    {
+        // Interpolate in premultiplied-alpha space so fading to or from a
+        // transparent endpoint (whose RGB is black, e.g. Color.Transparent) does
+        // not pass through dark colours. For opaque endpoints this reduces to a
+        // plain per-channel lerp.
+        float aA = a.A / 255f, bA = b.A / 255f;
+        float pr = Float(a.R * aA, b.R * bA, t);
+        float pg = Float(a.G * aA, b.G * bA, t);
+        float pb = Float(a.B * aA, b.B * bA, t);
+        float pa = Float(aA, bA, t);
+
+        if (pa <= 0f)
+            return new Color(0, 0, 0, 0);
+
+        return new Color(
+            (byte)Math.Clamp(pr / pa, 0f, 255f),
+            (byte)Math.Clamp(pg / pa, 0f, 255f),
+            (byte)Math.Clamp(pb / pa, 0f, 255f),
+            (byte)Math.Clamp(pa * 255f, 0f, 255f));
+    }
 
     public static Thickness Thickness(Thickness a, Thickness b, float t) => new(
         Float(a.Top, b.Top, t),

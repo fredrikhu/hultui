@@ -107,6 +107,14 @@ public abstract class Element
         if (_interaction is { } s) { s.InvalidateBase(); s.Recompute(this, animate: false); }
     }
 
+    /// <summary>
+    /// Called by the reconciler after this element has been patched and its children
+    /// reconciled. Self-managing elements (e.g. Tabs) override this to re-assert
+    /// their internally-owned subtree, which the child reconciliation may have
+    /// altered. Default is a no-op.
+    /// </summary>
+    internal virtual void OnReconciled() { }
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 
