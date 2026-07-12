@@ -34,6 +34,22 @@ var root = ScrollView.New().Background(Color.FromHex("#EEF2F7")).Children(
                 GradientCard("45°", Gradient.Linear(45f, Color.FromHex("#06B6D4"), Color.FromHex("#2563EB"))),
                 GradientCard("Radial", Gradient.Radial(Color.FromHex("#FDE68A"), Color.FromHex("#B45309"))))),
 
+        // ── Border ── single-side widths + dashed/dotted styles
+        Section("BORDER",
+            Flex.Row(gap: 28).FlexShrink(0).Children(
+                BorderCard("Bottom", new Thickness(0, 0, 3, 0), accent, BorderStyle.Solid, 0f, textSecondary),
+                BorderCard("Left accent", new Thickness(0, 0, 0, 4), Color.FromHex("#EF4444"), BorderStyle.Solid, 0f, textSecondary),
+                BorderCard("Dashed", new Thickness(2), Color.FromHex("#94A3B8"), BorderStyle.Dashed, 10f, textSecondary),
+                BorderCard("Dotted", new Thickness(2), Color.FromHex("#94A3B8"), BorderStyle.Dotted, 10f, textSecondary))),
+
+        // ── Transform ── rotate / scale about the element center
+        Section("TRANSFORM",
+            Flex.Row(gap: 34).FlexShrink(0).AlignItems(AlignItems.Center).Children(
+                TransformCard("Rotate -8°", Transform2D.Rotate(-8f)),
+                TransformCard("Rotate 8°", Transform2D.Rotate(8f)),
+                TransformCard("Scale 1.15", Transform2D.Scale(1.15f)),
+                TransformCard("Both", new Transform2D(-6f, 1.1f, 1.1f, 0f, 0f)))),
+
         // ── Combined ── gradient + rounded + colored shadow, the "modern card"
         Section("COMPOSITED",
             Flex.Row(gap: 28).FlexShrink(0).Children(
@@ -76,3 +92,18 @@ static Element GradientCard(string label, Gradient gradient) =>
         .Background(gradient).CornerRadius(12f)
         .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
         .Children(Text.New(label).FontSize(14f).FontWeight(FontWeight.Bold).TextColor(Color.White));
+
+static Element TransformCard(string label, Transform2D transform) =>
+    Flex.Column().Width(150).Height(92).FlexShrink(0)
+        .Background(Gradient.Linear(135f, Color.FromHex("#6366F1"), Color.FromHex("#8B5CF6")))
+        .CornerRadius(12f).BoxShadow(0, 6, 18, new Color(15, 23, 42, 60))
+        .Transform(transform)
+        .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+        .Children(Text.New(label).FontSize(13f).FontWeight(FontWeight.Bold).TextColor(Color.White));
+
+static Element BorderCard(string label, Thickness widths, Color color, BorderStyle style, float radius, Color labelColor) =>
+    Flex.Column().Width(150).Height(92).FlexShrink(0)
+        .Background(Color.White).CornerRadius(radius)
+        .Border(widths, color, style)
+        .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+        .Children(Text.New(label).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(labelColor));
