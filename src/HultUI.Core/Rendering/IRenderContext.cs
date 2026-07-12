@@ -8,6 +8,18 @@ public interface IRenderContext
 {
     void DrawRect(Rect rect, Color fill);
     void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill, Color stroke, Thickness strokeWidth);
+
+    /// <summary>
+    /// Draws a drop shadow behind a (possibly rounded) box. Default is a no-op so
+    /// non-visual render contexts (test doubles) need not implement it.
+    /// </summary>
+    void DrawBoxShadow(Rect box, CornerRadius radius, BoxShadow shadow) { }
+
+    /// <summary>
+    /// Fills a (possibly rounded) rect with a linear or radial gradient. Default is
+    /// a no-op so non-visual render contexts need not implement it.
+    /// </summary>
+    void DrawGradientRect(Rect rect, CornerRadius radius, Gradient gradient) { }
     void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines);
     void DrawImage(IImageSource source, Rect destRect, ImageFit fit);
     void DrawLine(Point from, Point to, Color color, float strokeWidth);

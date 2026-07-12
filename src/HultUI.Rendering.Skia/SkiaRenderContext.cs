@@ -49,6 +49,96 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         Canvas.DrawRect(ToSkRect(rect), _pooledPaint);
     }
 
+    public void DrawBoxShadow(Rect box, CornerRadius radius, BoxShadow shadow)
+    {
+        if (shadow.Color.A == 0) return;
+
+        // Grow (or shrink) by spread, then offset. Blur is expressed as a diameter;
+        // Skia's mask filter takes a sigma, ~half the blur radius.
+        var rect = new Rect(
+            box.X - shadow.Spread + shadow.OffsetX,
+            box.Y - shadow.Spread + shadow.OffsetY,
+            box.Width + shadow.Spread * 2f,
+            box.Height + shadow.Spread * 2f);
+
+        using var blur = shadow.Blur > 0f
+            ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, shadow.Blur * 0.5f)
+            : null;
+
+        _pooledPaint.Reset();
+        _pooledPaint.Color = ToSkColor(shadow.Color);
+        _pooledPaint.IsAntialias = true;
+        _pooledPaint.MaskFilter = blur;
+
+        var skRect = ToSkRect(rect);
+        if (radius.IsZero)
+            Canvas.DrawRect(skRect, _pooledPaint);
+        else
+            Canvas.DrawRoundRect(ToSkRoundRect(skRect, InflateRadius(radius, shadow.Spread)), _pooledPaint);
+
+        // Detach the blur before it is disposed so the pooled paint never holds a
+        // freed native filter.
+        _pooledPaint.MaskFilter = null;
+    }
+
+    private static CornerRadius InflateRadius(CornerRadius r, float d) => new(
+        Math.Max(0f, r.TopLeft + d),
+        Math.Max(0f, r.TopRight + d),
+        Math.Max(0f, r.BottomRight + d),
+        Math.Max(0f, r.BottomLeft + d));
+
+    public void DrawGradientRect(Rect rect, CornerRadius radius, Gradient gradient)
+    {
+        var stops = gradient.Stops;
+        if (stops.Count == 0) return;
+
+        var colors = new SKColor[stops.Count];
+        var positions = new float[stops.Count];
+        for (int i = 0; i < stops.Count; i++)
+        {
+            colors[i] = ToSkColor(stops[i].Color);
+            positions[i] = stops[i].Offset;
+        }
+
+        var skRect = ToSkRect(rect);
+        float cx = skRect.MidX, cy = skRect.MidY;
+
+        using var shader = gradient.Kind == GradientKind.Linear
+            ? CreateLinearShader(gradient.AngleDegrees, skRect, colors, positions)
+            : SKShader.CreateRadialGradient(
+                new SKPoint(cx, cy),
+                MathF.Sqrt(skRect.Width * skRect.Width + skRect.Height * skRect.Height) * 0.5f,
+                colors, positions, SKShaderTileMode.Clamp);
+
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        _pooledPaint.Shader = shader;
+
+        if (radius.IsZero)
+            Canvas.DrawRect(skRect, _pooledPaint);
+        else
+            Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
+
+        // Detach before the shader is disposed so the pooled paint never holds a
+        // freed native shader.
+        _pooledPaint.Shader = null;
+    }
+
+    // Builds a linear-gradient shader whose axis spans the rect edge-to-edge along
+    // the given angle (0 = left→right, 90 = top→bottom, clockwise).
+    private static SKShader CreateLinearShader(float angleDegrees, SKRect rect, SKColor[] colors, float[] positions)
+    {
+        float rad = angleDegrees * (MathF.PI / 180f);
+        float dx = MathF.Cos(rad), dy = MathF.Sin(rad);
+        float cx = rect.MidX, cy = rect.MidY;
+        // Projection of the half-extents onto the axis makes the gradient reach the
+        // far edges rather than stopping at the centre.
+        float half = MathF.Abs(dx) * (rect.Width * 0.5f) + MathF.Abs(dy) * (rect.Height * 0.5f);
+        var start = new SKPoint(cx - dx * half, cy - dy * half);
+        var end = new SKPoint(cx + dx * half, cy + dy * half);
+        return SKShader.CreateLinearGradient(start, end, colors, positions, SKShaderTileMode.Clamp);
+    }
+
     public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill, Color stroke, Thickness strokeWidth)
     {
         var skRect = ToSkRect(rect);

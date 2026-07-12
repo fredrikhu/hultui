@@ -39,11 +39,15 @@ public static class ElementExtensions
 
     // ──── Box visual properties ────
     public static T Background<T>(this T el, Color c) where T : BoxElement { el.BackgroundColor = c; return el; }
+    public static T Background<T>(this T el, Gradient gradient) where T : BoxElement { el.BackgroundGradient = gradient; return el; }
     public static T BorderColor<T>(this T el, Color c) where T : BoxElement { el.BorderColor = c; return el; }
     public static T BorderWidth<T>(this T el, Thickness w) where T : BoxElement { el.Box.BorderWidth = w; return el; }
     public static T BorderWidth<T>(this T el, float uniform) where T : BoxElement { el.Box.BorderWidth = new Thickness(uniform); return el; }
     public static T CornerRadius<T>(this T el, CornerRadius r) where T : BoxElement { el.CornerRadius = r; return el; }
     public static T CornerRadius<T>(this T el, float uniform) where T : BoxElement { el.CornerRadius = new CornerRadius(uniform); return el; }
+    public static T BoxShadow<T>(this T el, BoxShadow shadow) where T : BoxElement { (el.BoxShadows ??= new()).Add(shadow); return el; }
+    public static T BoxShadow<T>(this T el, float offsetX, float offsetY, float blur, Color color) where T : BoxElement { (el.BoxShadows ??= new()).Add(new BoxShadow(offsetX, offsetY, blur, color)); return el; }
+    public static T BoxShadow<T>(this T el, float offsetX, float offsetY, float blur, float spread, Color color) where T : BoxElement { (el.BoxShadows ??= new()).Add(new BoxShadow(offsetX, offsetY, blur, spread, color)); return el; }
 
     // ──── Overflow ────
     public static T Overflow<T>(this T el, Overflow overflow) where T : Element { el.Box.OverflowX = overflow; el.Box.OverflowY = overflow; return el; }
