@@ -51,6 +51,7 @@ public partial class JunctionApp : Component, IDisposable
     // Per-repo "include in history" branch sets. Empty ⇒ all branches.
     private readonly Dictionary<string, HashSet<string>> _includeBranches = new();
     private readonly Ref<VirtualListElement<GitCommit>> _commitListRef = new();
+    private bool _pendingScrollToSelected;
 
     // Commit-details state.
     private readonly AsyncLoader<CommitDetail> _commitDetail = new(CommitDetail.Empty);
@@ -250,6 +251,13 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingPaletteFocus = false;
             _paletteRef.Current?.Focus();
+        }
+
+        if (_pendingScrollToSelected)
+        {
+            _pendingScrollToSelected = false;
+            if (View == JunctionView.History)
+                EnsureSelectedCommitVisible();
         }
     }
 

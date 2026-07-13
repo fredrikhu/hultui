@@ -54,6 +54,21 @@ public partial class JunctionApp
         return b;
     }
 
+    private const int DiffRowHeight = 22;
+
+    private enum DiffRowType : byte { Hunk, Unified, Split }
+
+    private sealed record DiffRow
+    {
+        public DiffRowType Type { get; init; }
+        public string Hunk { get; init; } = "";
+        public GitDiffLine? Line { get; init; }   // unified
+        public GitDiffLine? Left { get; init; }   // split
+        public GitDiffLine? Right { get; init; }
+    }
+
+    // Virtualized so large diffs keep constant row height and stay cheap — a
+    // plain ScrollView over a tall column compresses its rows to fit.
     private Element BuildDiffScroll(GitFileDiff? diff)
     {
         if (diff == null || diff.Hunks.Count == 0)
@@ -62,21 +77,46 @@ public partial class JunctionApp
                 .Children(Text.New(diff == null ? "Select a file" : "No textual changes")
                     .FontSize(13f).TextColor(Nocturne.On(0.45)));
 
-        var col = Flex.Column(gap: 0);
+        var rows = _diffSplit ? FlattenSplit(diff) : FlattenUnified(diff);
+        return VirtualListElement<DiffRow>.New()
+            .ItemHeight(DiffRowHeight)
+            .Items(rows)
+            .RenderWith(RenderDiffRow)
+            .FlexGrow(1)
+            .Background(Nocturne.Bg);
+    }
+
+    private static List<DiffRow> FlattenUnified(GitFileDiff diff)
+    {
+        var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
         {
-            col.AddChild(HunkHeaderRow(hunk.Header));
-            var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
-            if (!_diffSplit)
-                foreach (var line in lines)
-                    col.AddChild(UnifiedRow(line));
-            else
-                foreach (var row in SplitRows(lines))
-                    col.AddChild(row);
+            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
+            foreach (var line in hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader))
+                rows.Add(new DiffRow { Type = DiffRowType.Unified, Line = line });
         }
-
-        return ScrollView.New().FlexGrow(1).Children(col);
+        return rows;
     }
+
+    private static List<DiffRow> FlattenSplit(GitFileDiff diff)
+    {
+        var rows = new List<DiffRow>();
+        foreach (var hunk in diff.Hunks)
+        {
+            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
+            var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
+            foreach (var (left, right) in SplitPairs(lines))
+                rows.Add(new DiffRow { Type = DiffRowType.Split, Left = left, Right = right });
+        }
+        return rows;
+    }
+
+    private static Element RenderDiffRow(DiffRow r) => r.Type switch
+    {
+        DiffRowType.Hunk => HunkHeaderRow(r.Hunk),
+        DiffRowType.Split => SplitRow(r.Left, r.Right),
+        _ => UnifiedRow(r.Line!),
+    };
 
     private static Element HunkHeaderRow(string header) =>
         Box.New()
@@ -105,7 +145,7 @@ public partial class JunctionApp
                     .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
     }
 
-    private IEnumerable<Element> SplitRows(List<GitDiffLine> lines)
+    private static IEnumerable<(GitDiffLine? Left, GitDiffLine? Right)> SplitPairs(List<GitDiffLine> lines)
     {
         var i = 0;
         while (i < lines.Count)
@@ -113,7 +153,7 @@ public partial class JunctionApp
             var cur = lines[i];
             if (cur.Kind == DiffLineKind.Context)
             {
-                yield return SplitRow(cur, cur);
+                yield return (cur, cur);
                 i++;
                 continue;
             }
@@ -123,7 +163,7 @@ public partial class JunctionApp
             while (i < lines.Count && lines[i].Kind == DiffLineKind.Addition) adds.Add(lines[i++]);
             var n = Math.Max(dels.Count, adds.Count);
             for (var k = 0; k < n; k++)
-                yield return SplitRow(k < dels.Count ? dels[k] : null, k < adds.Count ? adds[k] : null);
+                yield return (k < dels.Count ? dels[k] : null, k < adds.Count ? adds[k] : null);
         }
     }
 

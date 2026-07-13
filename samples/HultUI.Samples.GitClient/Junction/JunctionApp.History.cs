@@ -83,7 +83,27 @@ public partial class JunctionApp
         if (i < 0) i = 0;
         i = Math.Clamp(i + delta, 0, commits.Count - 1);
         _selectedCommitHash = commits[i].Hash;
+        _pendingScrollToSelected = true;
         MarkDirty();
+    }
+
+    /// <summary>Scrolls the commit list so the keyboard-selected row is on screen
+    /// (the list isn't focused, so it won't auto-scroll on its own).</summary>
+    private void EnsureSelectedCommitVisible()
+    {
+        var list = _commitListRef.Current;
+        if (list == null || _selectedCommitHash == null) return;
+
+        var idx = IndexOfHash(_history.Value.Commits, _selectedCommitHash);
+        if (idx < 0) return;
+
+        var top = idx * RowHeight;
+        var bottom = top + RowHeight;
+        var viewH = list.Layout.AbsoluteContentBox.Height;
+        var cur = list.ScrollOffsetY;
+
+        if (top < cur) list.ScrollOffsetY = top;
+        else if (bottom > cur + viewH) list.ScrollOffsetY = bottom - viewH;
     }
 
     // ── Include-in-history bar ───────────────────────────────────────────
