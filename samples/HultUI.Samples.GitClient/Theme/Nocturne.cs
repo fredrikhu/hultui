@@ -122,7 +122,9 @@ public static class Nocturne
             PlaceholderColor = On(0.42),
             CursorColor = Accent,
             FontSize = 13.5f,
-            Padding = new(0),
+            // The renderer top-aligns text in the field's content box (no vertical
+            // centering), so vertical padding is what visually centres the text.
+            Padding = new(6, 0),
             CornerRadius = new(RadiusMd),
         },
         ContextMenu = new ContextMenuTheme
