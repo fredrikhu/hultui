@@ -261,7 +261,15 @@ public partial class JunctionApp : Component, IDisposable
 
     private Element BuildMainColumn()
     {
-        var col = Flex.Column(gap: 0).FlexGrow(1).Children(BuildToolbar());
+        // Key the toolbar and the view root so the two children reconcile by key.
+        // Without keys they reconcile by position, which patches one view's
+        // elements onto another's when switching views — and since event handlers
+        // aren't copied on patch, a stale handler from the previous view leaks
+        // onto the new element (e.g. History's "open commit details" footer button
+        // patched onto Commit's fullscreen button, firing SetView on click).
+        var toolbar = BuildToolbar();
+        toolbar.Key = "toolbar";
+        var col = Flex.Column(gap: 0).FlexGrow(1).Children(toolbar);
 
         Element view = View switch
         {
@@ -272,6 +280,7 @@ public partial class JunctionApp : Component, IDisposable
             JunctionView.Branches => BuildStubView("Branches", "Branch management table — coming next."),
             _ => BuildHistoryView(),
         };
+        view.Key = "view-" + View;
         col.AddChild(view);
         return col;
     }
@@ -302,8 +311,8 @@ public partial class JunctionApp : Component, IDisposable
 
     private void SetView(JunctionView v)
     {
-        _diffFull = false;   // switching views exits fullscreen (matches the design)
         if (View == v) return;
+        _diffFull = false;   // switching views exits fullscreen (matches the design)
         View = v;   // reactive → rebuild
     }
 

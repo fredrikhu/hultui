@@ -50,7 +50,7 @@ public partial class JunctionApp
         if (active) b.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
         b.AddChild(Ui.Icon(glyph, 12f, fg));
         b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg));
-        b.OnClick(_ => onClick());
+        b.OnClick(e => { e.StopPropagation = true; onClick(); });
         return b;
     }
 
@@ -91,8 +91,16 @@ public partial class JunctionApp
         return list;
     }
 
-    private static void DiffScrollKey(KeyDownEvent e, VirtualListElement<DiffRow> list)
+    private void DiffScrollKey(KeyDownEvent e, VirtualListElement<DiffRow> list)
     {
+        if (e.Key == KeyCode.Escape && _diffFull)
+        {
+            _diffFull = false;
+            MarkDirty();
+            e.StopPropagation = true;
+            return;
+        }
+
         var page = Math.Max(DiffRowHeight, list.Layout.AbsoluteContentBox.Height - DiffRowHeight);
         var handled = true;
         switch (e.Key)
