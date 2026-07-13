@@ -40,12 +40,22 @@ public partial class JunctionApp
     private BranchesData LoadBranches()
     {
         var repo = RepoFor(_activeRepoPath);
-        var local = repo.GetBranches()
-            .Where(b => !b.IsRemote)
+        var all = repo.GetBranches();
+        // Local branches first (current pinned to top, then most-recent), then the
+        // remote-tracking branches (most-recent). GetBranches already drops the
+        // origin/HEAD symbolic ref.
+        var local = all.Where(b => !b.IsRemote)
             .OrderByDescending(b => b.IsCurrent)
-            .ThenByDescending(b => b.CommitDate)
-            .ToList();
-        return new BranchesData(local);
+            .ThenByDescending(b => b.CommitDate);
+        var remote = all.Where(b => b.IsRemote)
+            .OrderByDescending(b => b.CommitDate);
+        return new BranchesData(local.Concat(remote).ToList());
+    }
+
+    private static (string Remote, string Leaf) SplitRemote(string name)
+    {
+        var i = name.IndexOf('/');
+        return i > 0 ? (name[..i], name[(i + 1)..]) : ("", name);
     }
 
     private void ClampBranchSel(BranchesData data)
@@ -160,7 +170,8 @@ public partial class JunctionApp
     private Element BranchRow(GitBranch b, int index)
     {
         var selected = index == _branchSel;
-        var pb = BranchName.Parse(b.Name);
+        var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
+        var pb = BranchName.Parse(leaf);
 
         var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
             .Height(BranchRowHeight).FlexShrink(0)
@@ -173,7 +184,7 @@ public partial class JunctionApp
         row.Key = b.Name + (selected ? "#s" : "");
         if (selected) row.Background(Nocturne.Accent900);
 
-        // Branch cell: chip + leaf title + "current" tag + version·team subtitle.
+        // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
             .FlexGrow(38).FlexBasis(Dimension.Px(0));
         var (glyph, chipBg, chipFg) = pb.ChipLabel switch
@@ -186,10 +197,12 @@ public partial class JunctionApp
 
         var titleCol = Flex.Column(gap: 1).FlexShrink(1).FlexBasis(Dimension.Px(0)).FlexGrow(1);
         var titleRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-        titleRow.AddChild(Ui.Mono(pb.Title, 12.5f, Nocturne.Text)
+        titleRow.AddChild(Ui.Mono(pb.Title, 12.5f, b.IsRemote ? Nocturne.On(0.72) : Nocturne.Text)
             .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         if (b.IsCurrent)
             titleRow.AddChild(Ui.TagOutline("current", Nocturne.Accent, 9f));
+        if (b.IsRemote)
+            titleRow.AddChild(Ui.Chip(Icons.Cloud, remoteName, Nocturne.Neutral800, Nocturne.Neutral300));
         titleCol.AddChild(titleRow);
         if (pb.HasSub)
             titleCol.AddChild(Text.New(pb.Sub).FontSize(10.5f).TextColor(Nocturne.On(0.42))
@@ -205,22 +218,28 @@ public partial class JunctionApp
             .Children(Text.New(b.CommitDate == default ? "" : RelativeTime(b.CommitDate))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));
 
-        // Ahead / behind.
+        // Ahead / behind (remote-tracking refs have no upstream of their own).
         var ab = Flex.Row(gap: 4).Width(ColAheadBehind).FlexShrink(0)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
-        ab.AddChild(Text.New($"↑{b.AheadCount}").FontSize(12f).TextColor(Nocturne.AddCount));
-        ab.AddChild(Text.New("/").FontSize(12f).TextColor(Nocturne.On(0.40)));
-        ab.AddChild(Text.New($"↓{b.BehindCount}").FontSize(12f).TextColor(Nocturne.DelCount));
+        if (b.IsRemote)
+            ab.AddChild(Text.New("—").FontSize(12f).TextColor(Nocturne.On(0.30)));
+        else
+        {
+            ab.AddChild(Text.New($"↑{b.AheadCount}").FontSize(12f).TextColor(Nocturne.AddCount));
+            ab.AddChild(Text.New("/").FontSize(12f).TextColor(Nocturne.On(0.40)));
+            ab.AddChild(Text.New($"↓{b.BehindCount}").FontSize(12f).TextColor(Nocturne.DelCount));
+        }
         row.AddChild(ab);
 
-        // In history (eye toggle).
+        // In history (eye toggle) — keyed on the full ref name, so it works for
+        // remote branches too (git log accepts origin/<branch> as a ref).
         var inHist = Flex.Row(gap: 0).Width(ColInHistory).FlexShrink(0)
             .JustifyContent(JustifyContent.Center);
         inHist.AddChild(IncludeToggle(b.Name));
         row.AddChild(inHist);
 
         // Actions.
-        row.AddChild(BranchActions(b));
+        row.AddChild(BranchActions(b, leaf));
 
         row.OnClick(_ => SelectBranch(index));
         if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
@@ -248,7 +267,7 @@ public partial class JunctionApp
         return btn;
     }
 
-    private Element BranchActions(GitBranch b)
+    private Element BranchActions(GitBranch b, string checkoutTarget)
     {
         var box = Flex.Row(gap: 5).Width(ColActions).FlexShrink(0)
             .JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
@@ -257,11 +276,16 @@ public partial class JunctionApp
             box.AddChild(DisabledSecondary("Checkout", Icons.BendDownRight, 11.5f));
         else
             box.AddChild(Ui.SecondaryButton("Checkout", Icons.BendDownRight,
-                () => CheckoutBranch(b.Name), 11.5f));
+                () => CheckoutBranch(checkoutTarget), 11.5f));
 
-        box.AddChild(SmallIconButton(Icons.ArrowUp, () => PushBranch(b), "Push (p)"));
-        box.AddChild(SmallIconButton(Icons.ArrowDown, () => PullBranch(b), "Pull (l)"));
-        box.AddChild(SmallIconButton(Icons.Trash, () => DeleteBranchAction(b), "Delete"));
+        // Push / Pull / Delete apply to local branches; a remote-tracking ref
+        // is checked out (creating a local tracking branch) but not managed here.
+        if (!b.IsRemote)
+        {
+            box.AddChild(SmallIconButton(Icons.ArrowUp, () => PushBranch(b), "Push (p)"));
+            box.AddChild(SmallIconButton(Icons.ArrowDown, () => PullBranch(b), "Pull (l)"));
+            box.AddChild(SmallIconButton(Icons.Trash, () => DeleteBranchAction(b), "Delete"));
+        }
         return box;
     }
 
@@ -379,11 +403,13 @@ public partial class JunctionApp
 
     private void CheckoutSelected()
     {
-        if (SelectedBranch() is { IsCurrent: false } b) CheckoutBranch(b.Name);
+        if (SelectedBranch() is { IsCurrent: false } b)
+            CheckoutBranch(b.IsRemote ? SplitRemote(b.Name).Leaf : b.Name);
     }
 
-    private void PushSelected() { if (SelectedBranch() is { } b) PushBranch(b); }
-    private void PullSelected() { if (SelectedBranch() is { } b) PullBranch(b); }
+    // Push / Pull only apply to local branches (remote rows silently ignore them).
+    private void PushSelected() { if (SelectedBranch() is { IsRemote: false } b) PushBranch(b); }
+    private void PullSelected() { if (SelectedBranch() is { IsRemote: false } b) PullBranch(b); }
     private void ToggleIncludeSelected() { if (SelectedBranch() is { } b) ToggleInclude(b.Name); }
 
     // ── Actions ──────────────────────────────────────────────────────────
