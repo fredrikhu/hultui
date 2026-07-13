@@ -120,7 +120,9 @@ public partial class JunctionApp
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
-        row.Key = (isStaged ? "s:" : "u:") + f.Path;
+        // Selection in the key so a selection change gives a fresh element (see
+        // FileTreeRow — the stale hover handler would otherwise clobber the highlight).
+        row.Key = (isStaged ? "s:" : "u:") + f.Path + (selected ? "#s" : "");
         if (selected) row.Background(Nocturne.Accent900);
 
         // Checkbox toggles staging without selecting the row.

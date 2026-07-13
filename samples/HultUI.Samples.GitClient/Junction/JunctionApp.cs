@@ -429,6 +429,15 @@ public partial class JunctionApp : Component, IDisposable
         };
         if (viewForKey is { } v) { SetView(v); e.StopPropagation = true; return; }
 
+        // Commit view: arrows/page/home/end move the file selection — unless the
+        // diff pane is focused, which consumes those keys to scroll (StopPropagation).
+        if (View == JunctionView.Commit)
+        {
+            if (MoveFileByKey(e))
+                e.StopPropagation = true;
+            return;
+        }
+
         if (View == JunctionView.History)
         {
             if (e.Key == KeyCode.Slash)

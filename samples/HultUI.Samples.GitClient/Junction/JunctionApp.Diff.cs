@@ -78,12 +78,34 @@ public partial class JunctionApp
                     .FontSize(13f).TextColor(Nocturne.On(0.45)));
 
         var rows = _diffSplit ? FlattenSplit(diff) : FlattenUnified(diff);
-        return VirtualListElement<DiffRow>.New()
+        var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
             .Items(rows)
             .RenderWith(RenderDiffRow)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
+        // Focusable so clicking the diff lets arrow / page / home / end scroll it.
+        list.IsFocusable = true;
+        list.TabIndex = 0;
+        list.On<KeyDownEvent>(e => DiffScrollKey(e, list));
+        return list;
+    }
+
+    private static void DiffScrollKey(KeyDownEvent e, VirtualListElement<DiffRow> list)
+    {
+        var page = Math.Max(DiffRowHeight, list.Layout.AbsoluteContentBox.Height - DiffRowHeight);
+        var handled = true;
+        switch (e.Key)
+        {
+            case KeyCode.Down: list.ScrollOffsetY += DiffRowHeight; break;
+            case KeyCode.Up: list.ScrollOffsetY -= DiffRowHeight; break;
+            case KeyCode.PageDown: list.ScrollOffsetY += page; break;
+            case KeyCode.PageUp: list.ScrollOffsetY -= page; break;
+            case KeyCode.Home: list.ScrollOffsetY = 0; break;
+            case KeyCode.End: list.ScrollOffsetY = 1_000_000f; break;   // clamped to content
+            default: handled = false; break;
+        }
+        if (handled) e.StopPropagation = true;
     }
 
     private static List<DiffRow> FlattenUnified(GitFileDiff diff)

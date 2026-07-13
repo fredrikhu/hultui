@@ -1,5 +1,6 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -131,6 +132,36 @@ public partial class JunctionApp
         return scroll;
     }
 
+    private bool MoveFileByKey(KeyDownEvent e) => e.Key switch
+    {
+        KeyCode.Down => MoveFileSelection(1),
+        KeyCode.Up => MoveFileSelection(-1),
+        KeyCode.PageDown => MoveFileSelection(8),
+        KeyCode.PageUp => MoveFileSelection(-8),
+        KeyCode.Home => MoveFileSelection(int.MinValue / 2),
+        KeyCode.End => MoveFileSelection(int.MaxValue / 2),
+        _ => false,
+    };
+
+    private bool MoveFileSelection(int delta)
+    {
+        var files = _commitDetail.Value.Files;
+        if (files.Count == 0) return true;
+        var i = _selectedFilePath == null ? 0 : IndexOfPath(files, _selectedFilePath);
+        if (i < 0) i = 0;
+        i = Math.Clamp(i + delta, 0, files.Count - 1);
+        _selectedFilePath = files[i].Path;
+        MarkDirty();
+        return true;
+    }
+
+    private static int IndexOfPath(IReadOnlyList<GitFileChange> files, string path)
+    {
+        for (var i = 0; i < files.Count; i++)
+            if (files[i].Path == path) return i;
+        return -1;
+    }
+
     private Element FileTreeRow(GitFileChange f)
     {
         var selected = f.Path == _selectedFilePath;
@@ -141,6 +172,10 @@ public partial class JunctionApp
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
+        // Include selection in the key so a selection change replaces the row with
+        // fresh handlers — otherwise the stale hover handler (handlers aren't copied
+        // on reconcile) resets the background and the highlight never appears.
+        row.Key = f.Path + (selected ? "#s" : "");
         if (selected) row.Background(Nocturne.Accent900);
 
         row.AddChild(Box.New().Width(16).FlexShrink(0)
