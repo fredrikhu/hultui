@@ -133,6 +133,7 @@ public static class Nocturne
             BorderColor = Neutral700,
             TextColor = Text,
             DisabledTextColor = On(0.40),
+            DangerTextColor = DangerText,
             HoverBackground = Neutral900,
             SeparatorColor = Divider,
             ShortcutTextColor = On(0.55),

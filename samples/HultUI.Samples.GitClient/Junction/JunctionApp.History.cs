@@ -311,6 +311,16 @@ public partial class JunctionApp
             if (commit.Hash == _selectedCommitHash) SetView(JunctionView.Commit);
             else { _selectedCommitHash = commit.Hash; MarkDirty(); }
         });
+        // Right-click selects the row first, then the framework opens the menu.
+        row.On<PointerDownEvent>(e =>
+        {
+            if (e.Button == 2 && commit.Hash != _selectedCommitHash)
+            {
+                _selectedCommitHash = commit.Hash;
+                MarkDirty();
+            }
+        });
+        row.ContextMenu(() => CommitMenuItems(commit));
         if (!selected)
             row.HoverBg(Nocturne.Neutral900, Color.Transparent);
 

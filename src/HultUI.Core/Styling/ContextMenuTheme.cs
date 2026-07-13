@@ -8,6 +8,7 @@ public sealed class ContextMenuTheme
     public Color BorderColor { get; init; } = new(226, 232, 240);       // slate-200
     public Color TextColor { get; init; } = new(15, 23, 42);            // slate-900
     public Color DisabledTextColor { get; init; } = new(148, 163, 184); // slate-400
+    public Color DangerTextColor { get; init; } = new(220, 38, 38);     // red-600
     public Color HoverBackground { get; init; } = new(241, 245, 249);   // slate-100
     public Color SeparatorColor { get; init; } = new(226, 232, 240);    // slate-200
     public Color ShortcutTextColor { get; init; } = new(148, 163, 184); // slate-400
@@ -19,4 +20,5 @@ public sealed class ContextMenuTheme
     public float MinWidth { get; init; } = 160f;
     public float SeparatorMargin { get; init; } = 4f;
     public float ShortcutGap { get; init; } = 24f;
+    public float IconGap { get; init; } = 9f;
 }

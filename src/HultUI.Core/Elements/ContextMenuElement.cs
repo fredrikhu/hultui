@@ -1,3 +1,4 @@
+using System.Linq;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -15,6 +16,7 @@ internal sealed class ContextMenuElement : Element
     private readonly IReadOnlyList<ContextMenuItem> _items;
     private readonly ContextMenuTheme _theme;
     private readonly Action _closeMenu;
+    private readonly bool _hasIcons;
     private int _hoveredIndex = -1;
 
     // Cached item layout (computed during Render, reused for hit-testing)
@@ -27,6 +29,7 @@ internal sealed class ContextMenuElement : Element
         _items = items;
         _theme = theme;
         _closeMenu = closeMenu;
+        _hasIcons = items.Any(i => i.Glyph is not null);
 
         On<PointerMoveEvent>(OnPointerMove);
         On<PointerDownEvent>(OnPointerDown);
@@ -143,8 +146,9 @@ internal sealed class ContextMenuElement : Element
         }
 
         float shortcutExtra = maxShortcutWidth > 0 ? _theme.ShortcutGap + maxShortcutWidth : 0;
+        float iconCol = _hasIcons ? _theme.FontSize + _theme.IconGap : 0;
         float width = Math.Max(_theme.MinWidth,
-            _theme.ItemPadding.Left + maxLabelWidth + shortcutExtra + _theme.ItemPadding.Right);
+            _theme.ItemPadding.Left + iconCol + maxLabelWidth + shortcutExtra + _theme.ItemPadding.Right);
 
         return new Size(width, totalHeight);
     }
@@ -155,7 +159,9 @@ internal sealed class ContextMenuElement : Element
         var style = ResolvedInherited;
         var itemStyle = style with { FontSize = _theme.FontSize, TextColor = _theme.TextColor };
         var disabledStyle = itemStyle with { TextColor = _theme.DisabledTextColor };
+        var dangerStyle = itemStyle with { TextColor = _theme.DangerTextColor };
         var shortcutStyle = style with { FontSize = _theme.ShortcutFontSize, TextColor = _theme.ShortcutTextColor };
+        float iconCol = _hasIcons ? _theme.FontSize + _theme.IconGap : 0;
 
         // Draw background + border
         ctx.DrawRoundedRect(box, new CornerRadius(_theme.CornerRadius),
@@ -205,16 +211,27 @@ internal sealed class ContextMenuElement : Element
                     _theme.HoverBackground);
             }
 
+            var labelStyle = item.IsDisabled ? disabledStyle : item.IsDanger ? dangerStyle : itemStyle;
+
+            // Leading glyph (fixed icon column, so labels stay aligned).
+            if (item.Glyph is not null)
+            {
+                var glyphRect = new Rect(
+                    box.X + _theme.ItemPadding.Left,
+                    box.Y + y + _theme.ItemPadding.Top,
+                    iconCol - _theme.IconGap,
+                    textSize.Height);
+                ctx.DrawText(item.Glyph, glyphRect, labelStyle, TextOverflow.Clip, 1);
+            }
+
             // Label
             var labelRect = new Rect(
-                box.X + _theme.ItemPadding.Left,
+                box.X + _theme.ItemPadding.Left + iconCol,
                 box.Y + y + _theme.ItemPadding.Top,
-                contentWidth - _theme.ItemPadding.Left - _theme.ItemPadding.Right,
+                contentWidth - _theme.ItemPadding.Left - iconCol - _theme.ItemPadding.Right,
                 textSize.Height);
 
-            ctx.DrawText(item.Label, labelRect,
-                item.IsDisabled ? disabledStyle : itemStyle,
-                TextOverflow.Clip, 1);
+            ctx.DrawText(item.Label, labelRect, labelStyle, TextOverflow.Clip, 1);
 
             // Shortcut hint (right-aligned)
             if (item.ShortcutHint is not null)

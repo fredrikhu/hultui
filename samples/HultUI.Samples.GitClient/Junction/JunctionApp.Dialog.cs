@@ -132,4 +132,54 @@ public partial class JunctionApp
         Flash($"Created {name}");
         RefreshAll();
     }
+
+    private void PromptCreateBranchAt(string startPoint, string startLabel) => OpenDialog(new DialogSpec(
+        "Create branch",
+        $"Creates a branch at {startLabel} and checks it out.",
+        "feature/my-branch",
+        "Create",
+        name => DoCreateBranch(name, startPoint, checkout: true),
+        Validate: NonEmptyBranch));
+
+    private void PromptCreateTagAt(string commit, string commitLabel) => OpenDialog(new DialogSpec(
+        "Create tag",
+        $"Tags {commitLabel}.",
+        "v1.0.0",
+        "Create tag",
+        name =>
+        {
+            if (ActiveRepo is not { } repo) return;
+            var res = repo.CreateTag(name, commit);
+            Flash(res.Success ? $"Tagged {name}" : FirstLine(res.Stderr, "Create tag failed"));
+            RefreshAll();
+        },
+        Validate: n => string.IsNullOrWhiteSpace(n) ? "Enter a tag name" : null));
+
+    private void PromptRenameBranch(string oldName) => OpenDialog(new DialogSpec(
+        "Rename branch",
+        $"Renames {oldName}.",
+        "new-name",
+        "Rename",
+        newName =>
+        {
+            if (ActiveRepo is not { } repo) return;
+            var res = repo.RenameBranch(oldName, newName);
+            Flash(res.Success ? $"Renamed to {newName}" : FirstLine(res.Stderr, "Rename failed"));
+            RefreshAll();
+        },
+        Validate: NonEmptyBranch), initial: oldName);
+
+    private void PromptSetUpstream(string branch) => OpenDialog(new DialogSpec(
+        "Set upstream",
+        $"Sets the upstream tracking branch for {branch}.",
+        "origin/" + branch,
+        "Set upstream",
+        upstream =>
+        {
+            if (ActiveRepo is not { } repo) return;
+            var res = repo.SetUpstream(branch, upstream);
+            Flash(res.Success ? $"Upstream set to {upstream}" : FirstLine(res.Stderr, "Set upstream failed"));
+            RefreshAll();
+        },
+        Validate: u => string.IsNullOrWhiteSpace(u) ? "Enter an upstream ref" : null));
 }

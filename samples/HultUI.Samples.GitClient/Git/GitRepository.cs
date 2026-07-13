@@ -682,6 +682,11 @@ public class GitRepository
         return GitProcess.Run(Path, "branch", force ? "-D" : "-d", name);
     }
 
+    public GitResult SetUpstream(string branch, string upstream)
+    {
+        return GitProcess.Run(Path, "branch", $"--set-upstream-to={upstream}", branch);
+    }
+
     public GitResult RenameBranch(string oldName, string newName)
     {
         return GitProcess.Run(Path, "branch", "-m", oldName, newName);

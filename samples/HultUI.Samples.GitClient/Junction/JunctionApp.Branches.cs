@@ -242,6 +242,9 @@ public partial class JunctionApp
         row.AddChild(BranchActions(b, leaf));
 
         row.OnClick(_ => SelectBranch(index));
+        // Right-click selects the row first, then the framework opens the menu.
+        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectBranch(index); });
+        row.ContextMenu(() => BranchMenuItems(b));
         if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
