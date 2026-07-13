@@ -89,6 +89,12 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<TextInputElement> _paletteRef = new();
     private bool _pendingPaletteFocus;
 
+    // Modal text-input dialog (new branch / rename / set upstream…).
+    private DialogSpec? _dialog;
+    private string _dialogValue = "";
+    private readonly Ref<TextInputElement> _dialogRef = new();
+    private bool _pendingDialogFocus;
+
     // Toast.
     private string? _toast;
     private CancellationTokenSource? _toastCts;
@@ -253,6 +259,9 @@ public partial class JunctionApp : Component, IDisposable
         if (_paletteOpen)
             root.AddChild(BuildPalette());
 
+        if (_dialog != null)
+            root.AddChild(BuildDialog(_dialog));
+
         return root;
     }
 
@@ -317,6 +326,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingBranchSearchFocus = false;
             _branchSearchRef.Current?.Focus();
+        }
+
+        if (_pendingDialogFocus)
+        {
+            _pendingDialogFocus = false;
+            _dialogRef.Current?.Focus();
         }
 
         if (_pendingScrollToSelected)
@@ -413,6 +428,14 @@ public partial class JunctionApp : Component, IDisposable
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
+
+        // A modal dialog swallows every global shortcut; only Esc (cancel) acts,
+        // and typing flows straight to the focused field.
+        if (_dialog != null)
+        {
+            if (e.Key == KeyCode.Escape) { CloseDialog(); e.StopPropagation = true; }
+            return;
+        }
 
         // ⌘K / Ctrl+K toggles the palette from anywhere.
         if (ctrl && e.Key == KeyCode.K)

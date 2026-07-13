@@ -85,7 +85,7 @@ public partial class JunctionApp
 
         bar.AddChild(Text.New("Branches").FontSize(18f).FontWeight(FontWeight.SemiBold));
         bar.AddChild(BuildBranchSearch());
-        bar.AddChild(Ui.PrimaryButton("New branch", Icons.Plus, NewBranchStub, 12.5f));
+        bar.AddChild(Ui.PrimaryButton("New branch", Icons.Plus, PromptNewBranch, 12.5f));
         return bar;
     }
 
@@ -479,9 +479,6 @@ public partial class JunctionApp
         }
         RefreshAll();
     }
-
-    private void NewBranchStub() =>
-        Flash("New-branch dialog isn't wired up yet");
 
     private static (string Remote, string RemoteBranch) UpstreamOf(GitBranch b)
     {

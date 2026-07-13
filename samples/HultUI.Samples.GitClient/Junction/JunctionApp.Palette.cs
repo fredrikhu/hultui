@@ -186,7 +186,7 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.ArrowDown, "Pull", "", () => { ClosePalette(); DoPull(); }));
         items.Add(new("action", "Action", Icons.ArrowUp, "Push", "", () => { ClosePalette(); DoPush(); }));
         items.Add(new("action", "Action", Icons.ArrowsClockwise, "Fetch all remotes", "", () => { ClosePalette(); DoFetch(); }));
-        items.Add(new("action", "Action", Icons.GitBranch, "Create new branch…", "", () => { ClosePalette(); SetView(JunctionView.Branches); }));
+        items.Add(new("action", "Action", Icons.GitBranch, "Create new branch…", "", () => { ClosePalette(); PromptNewBranch(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));
         items.Add(new("action", "Action", Icons.ArchiveTray, "Stash changes", "", () => { ClosePalette(); DoStash(); }));
 
