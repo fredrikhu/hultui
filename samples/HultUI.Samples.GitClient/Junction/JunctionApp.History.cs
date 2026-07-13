@@ -1,5 +1,6 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -35,12 +36,29 @@ public partial class JunctionApp
         var key = $"{_activeRepoPath}|{string.Join(",", includeList)}|{_historyGen}";
         _history.Load(key, () => LoadHistory(_activeRepoPath, includeList), onLoaded: PickInitialCommit);
         var data = _history.Value;
+        var filtered = FilteredCommits(data);
+
+        // Keep the selection valid within the filtered view (e.g. after a search
+        // narrows the list past the current selection).
+        if (filtered.Count > 0 && (_selectedCommitHash == null || filtered.All(c => c.Hash != _selectedCommitHash)))
+            _selectedCommitHash = filtered[0].Hash;
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
-        col.AddChild(BuildIncludeBar(includeList, data.Commits.Count));
-        col.AddChild(BuildCommitList(data));
+        col.AddChild(BuildIncludeBar(includeList, filtered.Count));
+        col.AddChild(BuildCommitList(data, filtered));
         col.AddChild(BuildHistoryFooter());
         return col;
+    }
+
+    private List<GitCommit> FilteredCommits(HistoryData data)
+    {
+        var q = _historyQuery.Trim();
+        if (q.Length == 0) return data.Commits.ToList();
+        return data.Commits.Where(c =>
+            c.Subject.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            c.AuthorName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            c.ShortHash.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            c.Hash.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
     // Runs off the UI thread.
@@ -77,7 +95,7 @@ public partial class JunctionApp
 
     private void MoveCommitSelection(int delta)
     {
-        var commits = _history.Value.Commits;
+        var commits = FilteredCommits(_history.Value);
         if (commits.Count == 0) return;
         var i = _selectedCommitHash == null ? 0 : IndexOfHash(commits, _selectedCommitHash);
         if (i < 0) i = 0;
@@ -94,7 +112,7 @@ public partial class JunctionApp
         var list = _commitListRef.Current;
         if (list == null || _selectedCommitHash == null) return;
 
-        var idx = IndexOfHash(_history.Value.Commits, _selectedCommitHash);
+        var idx = IndexOfHash(FilteredCommits(_history.Value), _selectedCommitHash);
         if (idx < 0) return;
 
         var top = idx * RowHeight;
@@ -136,8 +154,67 @@ public partial class JunctionApp
         }
 
         bar.AddChild(Box.New().FlexGrow(1));
+        bar.AddChild(BuildHistorySearch());
         bar.AddChild(Text.New($"{commitCount} commits").FontSize(11f).TextColor(Nocturne.On(0.40)));
         return bar;
+    }
+
+    private Element BuildHistorySearch()
+    {
+        var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
+            .Height(30).MaxWidth(300).FlexShrink(1)
+            .Padding(new Thickness(0, 10, 0, 10))
+            .Background(Nocturne.Bg)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd);
+        box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)).FlexShrink(0));
+
+        var input = TextInput.New(_historyQuery);
+        input.PlaceholderText("Press / to search commits…")
+            .OnTextChanged(OnHistoryQueryChanged)
+            .FontSize(12.5f)
+            .Height(Dimension.Px(28))
+            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Background(Color.Transparent)
+            .BorderColor(Color.Transparent).BorderWidth(new Thickness(0))
+            .TextColor(Nocturne.Text)
+            .WithRef(_historySearchRef);
+        input.FocusBorderColor = Color.Transparent;
+        input.PlaceholderColor = Nocturne.On(0.42);
+        input.On<KeyDownEvent>(HistorySearchKey);
+        box.AddChild(input);
+
+        if (_historyQuery.Length > 0)
+        {
+            var clear = Box.New().Width(18).Height(18).FlexShrink(0).CornerRadius(9f)
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                .Cursor(CursorType.Pointer)
+                .Children(Ui.Icon(Icons.X, 10f, Nocturne.On(0.5)));
+            clear.OnClick(_ => OnHistoryQueryChanged(""));
+            clear.HoverBg(Nocturne.Neutral800, Color.Transparent);
+            box.AddChild(clear);
+        }
+        return box;
+    }
+
+    private void OnHistoryQueryChanged(string q)
+    {
+        _historyQuery = q;
+        _pendingScrollToSelected = true;
+        MarkDirty();
+    }
+
+    private void HistorySearchKey(KeyDownEvent e)
+    {
+        if (e.Key == KeyCode.Escape)
+        {
+            _historyQuery = "";
+            MarkDirty();
+            e.StopPropagation = true;
+            return;
+        }
+        if (HandleHistoryNavKey(e))
+            e.StopPropagation = true;
     }
 
     private void ClearInclude()
@@ -149,20 +226,20 @@ public partial class JunctionApp
 
     // ── Commit list ──────────────────────────────────────────────────────
 
-    private Element BuildCommitList(HistoryData data)
+    private Element BuildCommitList(HistoryData data, List<GitCommit> commits)
     {
-        if (data.Commits.Count == 0)
+        if (commits.Count == 0)
             return Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-                .Children(Text.New("No commits yet").FontSize(14f).TextColor(Nocturne.On(0.45)));
+                .Children(Text.New(_historyQuery.Trim().Length > 0 ? "No matching commits" : "No commits yet")
+                    .FontSize(14f).TextColor(Nocturne.On(0.45)));
 
-        var commits = data.Commits;
         var selectedIndex = _selectedCommitHash == null
             ? -1
             : IndexOfHash(commits, _selectedCommitHash);
 
         return VirtualListElement<GitCommit>.New()
             .ItemHeight((int)RowHeight)
-            .Items(commits.ToList())
+            .Items(commits)
             .RenderWith(c => HistoryRow(c,
                 data.Graph.TryGetValue(c.Hash, out var g) ? g : default,
                 data.Stats.TryGetValue(c.Hash, out var s) ? s : (0, 0),

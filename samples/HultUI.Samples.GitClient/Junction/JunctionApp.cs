@@ -48,6 +48,9 @@ public partial class JunctionApp : Component, IDisposable
     private readonly AsyncLoader<HistoryData> _history = new(HistoryData.Empty);
     private int _historyGen;
     private string? _selectedCommitHash;
+    private string _historyQuery = "";
+    private readonly Ref<TextInputElement> _historySearchRef = new();
+    private bool _pendingHistorySearchFocus;
     // Per-repo "include in history" branch sets. Empty ⇒ all branches.
     private readonly Dictionary<string, HashSet<string>> _includeBranches = new();
     private readonly Ref<VirtualListElement<GitCommit>> _commitListRef = new();
@@ -65,6 +68,7 @@ public partial class JunctionApp : Component, IDisposable
     // Command palette.
     private bool _paletteOpen;
     private string _paletteQuery = "";
+    private int _paletteSel;
     private readonly Ref<TextInputElement> _paletteRef = new();
     private bool _pendingPaletteFocus;
 
@@ -253,6 +257,12 @@ public partial class JunctionApp : Component, IDisposable
             _paletteRef.Current?.Focus();
         }
 
+        if (_pendingHistorySearchFocus)
+        {
+            _pendingHistorySearchFocus = false;
+            _historySearchRef.Current?.Focus();
+        }
+
         if (_pendingScrollToSelected)
         {
             _pendingScrollToSelected = false;
@@ -386,10 +396,39 @@ public partial class JunctionApp : Component, IDisposable
 
         if (View == JunctionView.History)
         {
-            if (e.Key == KeyCode.Down) { MoveCommitSelection(1); e.StopPropagation = true; }
-            else if (e.Key == KeyCode.Up) { MoveCommitSelection(-1); e.StopPropagation = true; }
-            else if (e.Key == KeyCode.Enter) { SetView(JunctionView.Commit); e.StopPropagation = true; }
+            if (e.Key == KeyCode.Slash)
+            {
+                _pendingHistorySearchFocus = true;
+                MarkDirty();
+                e.StopPropagation = true;
+                return;
+            }
+            if (HandleHistoryNavKey(e))
+                e.StopPropagation = true;
         }
+    }
+
+    /// <summary>Commit-list navigation shared by the global handler and the history
+    /// search box (so arrows/PageUp-Down/Enter work while typing a query too).</summary>
+    private bool HandleHistoryNavKey(KeyDownEvent e)
+    {
+        switch (e.Key)
+        {
+            case KeyCode.Down: MoveCommitSelection(1); return true;
+            case KeyCode.Up: MoveCommitSelection(-1); return true;
+            case KeyCode.PageDown: MoveCommitSelection(HistoryPageSize()); return true;
+            case KeyCode.PageUp: MoveCommitSelection(-HistoryPageSize()); return true;
+            case KeyCode.Home: MoveCommitSelection(int.MinValue / 2); return true;
+            case KeyCode.End: MoveCommitSelection(int.MaxValue / 2); return true;
+            case KeyCode.Enter: SetView(JunctionView.Commit); return true;
+            default: return false;
+        }
+    }
+
+    private int HistoryPageSize()
+    {
+        var viewH = _commitListRef.Current?.Layout.AbsoluteContentBox.Height ?? (10 * RowHeight);
+        return Math.Max(1, (int)(viewH / RowHeight) - 1);
     }
 
     public void Dispose()

@@ -17,8 +17,37 @@ public partial class JunctionApp
     {
         _paletteOpen = !_paletteOpen;
         _paletteQuery = "";
+        _paletteSel = 0;
         if (_paletteOpen) _pendingPaletteFocus = true;
         MarkDirty();
+    }
+
+    private void PaletteMove(int delta)
+    {
+        var items = FilteredPaletteItems();
+        if (items.Count == 0) return;
+        _paletteSel = Math.Clamp(_paletteSel + delta, 0, items.Count - 1);
+        MarkDirty();
+    }
+
+    private void PaletteRun()
+    {
+        var items = FilteredPaletteItems();
+        if (_paletteSel >= 0 && _paletteSel < items.Count)
+            items[_paletteSel].Run();
+    }
+
+    private void PaletteKey(KeyDownEvent e)
+    {
+        switch (e.Key)
+        {
+            case KeyCode.Down: PaletteMove(1); e.StopPropagation = true; break;
+            case KeyCode.Up: PaletteMove(-1); e.StopPropagation = true; break;
+            case KeyCode.PageDown: PaletteMove(6); e.StopPropagation = true; break;
+            case KeyCode.PageUp: PaletteMove(-6); e.StopPropagation = true; break;
+            case KeyCode.Enter: PaletteRun(); e.StopPropagation = true; break;
+            case KeyCode.Escape: ClosePalette(); e.StopPropagation = true; break;
+        }
     }
 
     private void ClosePalette()
@@ -60,7 +89,7 @@ public partial class JunctionApp
         // grows as you type, squeezing the Esc hint instead of filling the bar.
         var input = TextInput.New(_paletteQuery);
         input.PlaceholderText("Jump to a repo or branch, or run a command…")
-            .OnTextChanged(q => { _paletteQuery = q; MarkDirty(); })
+            .OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; MarkDirty(); })
             .FontSize(15f)
             // Explicit height so the 15px line fits — the field otherwise collapses
             // shorter than the text and clips it (the input centres text in its box).
@@ -73,12 +102,14 @@ public partial class JunctionApp
             .WithRef(_paletteRef);
         input.FocusBorderColor = Color.Transparent;
         input.PlaceholderColor = Nocturne.On(0.42);
+        input.On<KeyDownEvent>(PaletteKey);
         header.AddChild(input);
         header.AddChild(Kbd("Esc").FlexShrink(0));
         card.AddChild(header);
 
         // Results.
         var items = FilteredPaletteItems();
+        _paletteSel = Math.Clamp(_paletteSel, 0, Math.Max(0, items.Count - 1));
         var list = ScrollView.New().FlexGrow(1).Padding(new Thickness(6));
         if (items.Count == 0)
         {
@@ -88,8 +119,8 @@ public partial class JunctionApp
         }
         else
         {
-            foreach (var it in items)
-                list.AddChild(PaletteRow(it));
+            for (var i = 0; i < items.Count; i++)
+                list.AddChild(PaletteRow(items[i], i == _paletteSel));
         }
         card.AddChild(list);
 
@@ -107,12 +138,17 @@ public partial class JunctionApp
         return backdrop;
     }
 
-    private Element PaletteRow(PaletteItem it)
+    private Element PaletteRow(PaletteItem it, bool selected)
     {
         var (bg, fg) = PaletteTint(it.Kind);
+        var normalBg = selected ? Nocturne.Alpha(Nocturne.Accent, 0.14) : Color.Transparent;
         var row = Flex.Row(gap: 11).AlignItems(AlignItems.Center)
             .Padding(new Thickness(8, 10, 8, 10)).CornerRadius(Nocturne.RadiusMd)
+            .Background(normalBg)
             .Cursor(CursorType.Pointer);
+        // Stable key so reconciliation matches rows by identity, not position —
+        // otherwise a filtered list keeps the previous row's (wrong) click handler.
+        row.Key = $"{it.Kind}|{it.Label}";
 
         row.AddChild(Box.New().Width(26).Height(26).FlexShrink(0).CornerRadius(Nocturne.RadiusRow)
             .Background(bg).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -129,7 +165,7 @@ public partial class JunctionApp
         row.AddChild(Ui.Tag(it.KindLabel, Nocturne.Neutral800, Nocturne.Neutral100, 9f));
 
         row.OnClick(_ => it.Run());
-        row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        row.HoverBg(Nocturne.Neutral900, normalBg);
         return row;
     }
 
