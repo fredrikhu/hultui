@@ -7,6 +7,14 @@ public sealed class GitClientSettingsData
 {
     public List<string> RepositoryPaths { get; set; } = [];
     public int ActiveRepositoryIndex { get; set; }
+
+    // Junction: repositories are grouped into user-defined workspaces that are
+    // opened together. RepositoryPaths is retained as the flat set of every
+    // known repo (and for back-compat migration into a default workspace).
+    public List<WorkspaceData> Workspaces { get; set; } = [];
+    public string? ActiveWorkspaceId { get; set; }
+    public string? ActiveRepoPath { get; set; }
+
     public GeneralOptions General { get; set; } = new();
     public GitOptions Git { get; set; } = new();
     public ExternalToolOptions ExternalTools { get; set; } = new();
@@ -15,21 +23,83 @@ public sealed class GitClientSettingsData
     public void Normalize()
     {
         RepositoryPaths ??= [];
+        Workspaces ??= [];
         General ??= new GeneralOptions();
         Git ??= new GitOptions();
         ExternalTools ??= new ExternalToolOptions();
         Appearance ??= new AppearanceOptions();
         General.AutoFetchIntervalMinutes = Math.Clamp(General.AutoFetchIntervalMinutes, 1, 120);
+
+        foreach (var ws in Workspaces)
+            ws.Normalize();
+
+        // Migrate a pre-workspaces config: fold every known repo into one
+        // default workspace so the sidebar has something to show.
+        if (Workspaces.Count == 0 && RepositoryPaths.Count > 0)
+        {
+            Workspaces.Add(new WorkspaceData
+            {
+                Id = "default",
+                Name = "My repositories",
+                Icon = "stack",
+                RepoPaths = [.. RepositoryPaths],
+            });
+        }
+
+        // Keep the flat RepositoryPaths in sync as the union of all workspaces.
+        var union = Workspaces.SelectMany(w => w.RepoPaths).Distinct().ToList();
+        foreach (var p in union)
+            if (!RepositoryPaths.Contains(p))
+                RepositoryPaths.Add(p);
+
+        // Clamp the active-workspace / active-repo pointers to something valid.
+        if (Workspaces.Count > 0)
+        {
+            var active = Workspaces.FirstOrDefault(w => w.Id == ActiveWorkspaceId) ?? Workspaces[0];
+            ActiveWorkspaceId = active.Id;
+            if (ActiveRepoPath == null || !active.RepoPaths.Contains(ActiveRepoPath))
+                ActiveRepoPath = active.RepoPaths.FirstOrDefault();
+        }
     }
 
     public GitClientSettingsData Clone() => new()
     {
         RepositoryPaths = [.. RepositoryPaths],
         ActiveRepositoryIndex = ActiveRepositoryIndex,
+        Workspaces = Workspaces.Select(w => w.Clone()).ToList(),
+        ActiveWorkspaceId = ActiveWorkspaceId,
+        ActiveRepoPath = ActiveRepoPath,
         General = General.Clone(),
         Git = Git.Clone(),
         ExternalTools = ExternalTools.Clone(),
         Appearance = Appearance.Clone(),
+    };
+}
+
+/// <summary>A named group of repositories opened together.</summary>
+public sealed class WorkspaceData
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    /// <summary>A logical icon key (e.g. "stack", "browsers", "shapes"); the UI maps it to a glyph.</summary>
+    public string Icon { get; set; } = "stack";
+    public List<string> RepoPaths { get; set; } = [];
+
+    public void Normalize()
+    {
+        RepoPaths ??= [];
+        if (string.IsNullOrWhiteSpace(Id))
+            Id = Guid.NewGuid().ToString("N")[..8];
+        if (string.IsNullOrWhiteSpace(Icon))
+            Icon = "stack";
+    }
+
+    public WorkspaceData Clone() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Icon = Icon,
+        RepoPaths = [.. RepoPaths],
     };
 }
 
@@ -178,4 +248,5 @@ public static class GitClientSettings
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(GitClientSettingsData))]
+[JsonSerializable(typeof(WorkspaceData))]
 internal partial class GitClientSettingsJsonContext : JsonSerializerContext;

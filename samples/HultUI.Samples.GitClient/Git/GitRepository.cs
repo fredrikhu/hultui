@@ -104,7 +104,7 @@ public class GitRepository
 
     public List<GitCommit> GetLog(int maxCount = 500, string? author = null,
         string? path = null, DateTimeOffset? after = null, DateTimeOffset? before = null,
-        bool followPath = false)
+        bool followPath = false, IReadOnlyList<string>? includeRefs = null)
     {
         var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
 
@@ -119,6 +119,10 @@ public class GitRepository
         // and is incompatible with --all; use a linear, branch-scoped history instead.
         if (followPath && !string.IsNullOrWhiteSpace(path))
             args.Add("--follow");
+        else if (includeRefs is { Count: > 0 })
+            // "Include in history" — scope the graph to the reachable set of the
+            // selected branches instead of every ref.
+            args.AddRange(includeRefs);
         else
             args.Add("--all");
 
@@ -173,6 +177,58 @@ public class GitRepository
         }
 
         return commits;
+    }
+
+    /// <summary>
+    /// Per-commit added/deleted line totals for the log, gathered in a single
+    /// <c>git log --numstat</c> pass so the History rows can show +adds / −dels
+    /// without a subprocess per commit. Binary files (numstat "-") count as 0.
+    /// </summary>
+    public Dictionary<string, (int Added, int Deleted)> GetLogStats(
+        int maxCount = 500, IReadOnlyList<string>? refs = null)
+    {
+        var args = new List<string>
+        {
+            "log",
+            $"--max-count={maxCount}",
+            "--numstat",
+            "--format=%x1e%H",   // record-separator (RS) + hash on its own line
+        };
+        if (refs is { Count: > 0 })
+            args.AddRange(refs);
+        else
+            args.Add("--all");
+
+        var result = GitProcess.Run(Path, args.ToArray());
+        var stats = new Dictionary<string, (int, int)>();
+        if (!result.Success) return stats;
+
+        string? hash = null;
+        int add = 0, del = 0;
+        foreach (var raw in result.Stdout.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length == 0) continue;
+
+            if (line[0] == '\u001e')
+            {
+                if (hash != null) stats[hash] = (add, del);
+                hash = line[1..].Trim();
+                add = 0;
+                del = 0;
+                continue;
+            }
+
+            var cols = line.Split('\t');
+            if (cols.Length >= 2)
+            {
+                if (int.TryParse(cols[0], out var a)) add += a;
+                if (int.TryParse(cols[1], out var d)) del += d;
+            }
+        }
+        if (hash != null) stats[hash] = (add, del);
+
+        return stats;
     }
 
     // ── Status (working tree) ──

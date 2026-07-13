@@ -2,7 +2,7 @@ using HultUI;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using GitClient;
-using GitClient.Components.Layout;
+using GitClient.Junction;
 using GitClient.Theme;
 
 var settings = GitClientSettings.Load();
@@ -25,15 +25,19 @@ if (repoPaths.Count == 0)
 var activeIndex = args.Length > 0 ? 0 : settings.ActiveRepositoryIndex;
 settings.RepositoryPaths = repoPaths;
 settings.ActiveRepositoryIndex = activeIndex;
-GitClientColors.Use(settings.Appearance.ThemeMode);
+if (args.Length > 0)
+    settings.ActiveRepoPath = repoPaths[0];
+settings.Normalize();
 
-Console.WriteLine($"Opening {repoPaths.Count} repository tab(s):");
+Console.WriteLine($"Opening {repoPaths.Count} repository/repositories:");
 foreach (var path in repoPaths)
     Console.WriteLine($"  {path}");
 
-using var app = new Application("HultGit", 1200, 800, WindowStyle.Borderless);
-app.Theme = GitClientColors.ToHultTheme();
+using var app = new Application("Junction", 1440, 900, WindowStyle.Borderless);
+app.Theme = Nocturne.ToHultTheme();
 
 var window = app.PrimaryWindow;
-app.SetRoot(new TabbedApp(app, window, settings).Mount());
+var junction = new JunctionApp(app, window, settings);
+window.Closed += junction.Dispose;
+app.SetRoot(junction.Mount());
 app.Run();
