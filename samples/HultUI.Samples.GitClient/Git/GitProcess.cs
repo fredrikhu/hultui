@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace GitClient.Git;
 
@@ -7,6 +8,11 @@ namespace GitClient.Git;
 /// </summary>
 public static class GitProcess
 {
+    // git emits UTF-8; without this .NET decodes stdout/stderr with the console's
+    // ANSI code page, mangling any non-ASCII (accented names, box-drawing chars,
+    // CJK) in diffs, logs, and status. No BOM so stdin patches stay byte-clean.
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     public static Task<GitResult> RunAsync(string workingDirectory, params string[] args)
         => RunAsync(workingDirectory, null, args);
 
@@ -27,6 +33,8 @@ public static class GitProcess
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
@@ -72,6 +80,8 @@ public static class GitProcess
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
@@ -100,6 +110,9 @@ public static class GitProcess
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
+            StandardInputEncoding = Utf8NoBom,
             UseShellExecute = false,
             CreateNoWindow = true,
         };

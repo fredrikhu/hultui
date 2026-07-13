@@ -52,8 +52,14 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Dictionary<string, HashSet<string>> _includeBranches = new();
     private readonly Ref<VirtualListElement<GitCommit>> _commitListRef = new();
 
+    // Commit-details state.
+    private readonly AsyncLoader<CommitDetail> _commitDetail = new(CommitDetail.Empty);
+    private string? _detailHash;          // commit the loaded detail belongs to
+    private string? _selectedFilePath;    // file selected in the Commit view
+
     // Diff mode is a single app-level toggle shared by all diff panes.
     private bool _diffSplit;
+    private bool _diffFull;
 
     // Command palette.
     private bool _paletteOpen;
@@ -79,6 +85,14 @@ public partial class JunctionApp : Component, IDisposable
         HashSet<string> Remotes)
     {
         public static readonly HistoryData Empty = new([], new(), new(), new());
+    }
+
+    private readonly record struct CommitDetail(
+        GitCommit? Commit,
+        IReadOnlyList<GitFileChange> Files,
+        Dictionary<string, GitFileDiff> DiffByPath)
+    {
+        public static readonly CommitDetail Empty = new(null, [], new());
     }
 
     public JunctionApp(Application app, Window window, GitClientSettingsData settings)
@@ -193,6 +207,9 @@ public partial class JunctionApp : Component, IDisposable
                 BuildBody()
             );
 
+        if (_diffFull)
+            root.AddChild(BuildFullscreenDiff());
+
         if (_toast != null)
             root.AddChild(BuildToast(_toast));
 
@@ -218,7 +235,7 @@ public partial class JunctionApp : Component, IDisposable
         {
             JunctionView.History => BuildHistoryView(),
             JunctionView.Overview => BuildStubView("Overview", "Workspace dashboard — coming next."),
-            JunctionView.Commit => BuildStubView("Commit", "Commit details (file tree + diff) — coming next."),
+            JunctionView.Commit => BuildCommitView(),
             JunctionView.Changes => BuildStubView("Changes", "Staging + commit composer — coming next."),
             JunctionView.Branches => BuildStubView("Branches", "Branch management table — coming next."),
             _ => BuildHistoryView(),
@@ -240,6 +257,7 @@ public partial class JunctionApp : Component, IDisposable
 
     private void SetView(JunctionView v)
     {
+        _diffFull = false;   // switching views exits fullscreen (matches the design)
         if (View == v) return;
         View = v;   // reactive → rebuild
     }
@@ -333,6 +351,14 @@ public partial class JunctionApp : Component, IDisposable
         if (_paletteOpen)
         {
             if (e.Key == KeyCode.Escape) { ClosePalette(); e.StopPropagation = true; }
+            return;
+        }
+
+        if (e.Key == KeyCode.Escape && _diffFull)
+        {
+            _diffFull = false;
+            MarkDirty();
+            e.StopPropagation = true;
             return;
         }
 
