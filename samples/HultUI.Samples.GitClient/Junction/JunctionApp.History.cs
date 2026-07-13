@@ -169,18 +169,14 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusMd);
         box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)).FlexShrink(0));
 
+        // Borderless field (theme.TextInput); this wrapper box supplies the border.
         var input = TextInput.New(_historyQuery);
         input.PlaceholderText("Press / to search commits…")
             .OnTextChanged(OnHistoryQueryChanged)
-            .FontSize(12.5f)
             .Height(Dimension.Px(28))
             .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
-            .Background(Color.Transparent)
-            .BorderColor(Color.Transparent).BorderWidth(new Thickness(0))
             .TextColor(Nocturne.Text)
             .WithRef(_historySearchRef);
-        input.FocusBorderColor = Color.Transparent;
-        input.PlaceholderColor = Nocturne.On(0.42);
         input.On<KeyDownEvent>(HistorySearchKey);
         box.AddChild(input);
 

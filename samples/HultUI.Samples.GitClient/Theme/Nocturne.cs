@@ -110,6 +110,21 @@ public static class Nocturne
         Surface = Surface,
         Primary = Accent,
         Secondary = On(0.60),
+        // Text fields are flush and borderless by default — StyleResolver re-applies
+        // this every pass, so per-element border overrides don't stick. Views that
+        // want a bordered field wrap the input in a bordered box instead.
+        TextInput = new TextInputTheme
+        {
+            BorderWidth = new(0),
+            BorderColor = Color.Transparent,
+            FocusBorderColor = Color.Transparent,
+            Background = Color.Transparent,
+            PlaceholderColor = On(0.42),
+            CursorColor = Accent,
+            FontSize = 13.5f,
+            Padding = new(0),
+            CornerRadius = new(RadiusMd),
+        },
         ContextMenu = new ContextMenuTheme
         {
             Background = Surface,

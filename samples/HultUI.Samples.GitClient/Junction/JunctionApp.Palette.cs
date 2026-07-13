@@ -83,25 +83,16 @@ public partial class JunctionApp
             .Padding(new Thickness(0, 16, 0, 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         header.AddChild(Ui.Icon(Icons.MagnifyingGlass, 16f, Nocturne.On(0.50)).FlexShrink(0));
-        // Flush, borderless field (design: border:0; background:transparent).
-        // FlexBasis(0) makes it fill the remaining width regardless of its
-        // content — with the default auto basis the field sizes to its text and
-        // grows as you type, squeezing the Esc hint instead of filling the bar.
+        // Fields are flush/borderless via the Nocturne theme (theme.TextInput).
+        // FlexBasis(0) makes it fill the remaining width regardless of content;
+        // the explicit height keeps the row from collapsing to the empty field.
         var input = TextInput.New(_paletteQuery);
         input.PlaceholderText("Jump to a repo or branch, or run a command…")
             .OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; MarkDirty(); })
-            .FontSize(15f)
-            // Explicit height so the 15px line fits — the field otherwise collapses
-            // shorter than the text and clips it (the input centres text in its box).
             .Height(Dimension.Px(30))
             .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
-            .Background(Color.Transparent)
-            .BorderColor(Color.Transparent)
-            .BorderWidth(new Thickness(0))   // the box border is drawn from BorderWidth, not just colour
             .TextColor(Nocturne.Text)
             .WithRef(_paletteRef);
-        input.FocusBorderColor = Color.Transparent;
-        input.PlaceholderColor = Nocturne.On(0.42);
         input.On<KeyDownEvent>(PaletteKey);
         header.AddChild(input);
         header.AddChild(Kbd("Esc").FlexShrink(0));
