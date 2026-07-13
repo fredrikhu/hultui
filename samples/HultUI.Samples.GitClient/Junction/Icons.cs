@@ -66,6 +66,11 @@ public static class Icons
     public const string EyeSlash = "⊘";       // ⊘
     public const string Trash = "⌫";          // ⌫
 
+    // Window controls (Windows/Linux style)
+    public const string WinMinimize = "—";    // —
+    public const string WinMaximize = "▢";    // ▢
+    public const string WinClose = "✕";       // ✕
+
     // Context-menu verbs
     public const string BendDownRight = "↳";  // ↳  checkout detached
     public const string Cherries = "◈";       // ◈  cherry-pick

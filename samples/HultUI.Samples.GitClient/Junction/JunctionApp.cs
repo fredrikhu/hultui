@@ -245,8 +245,17 @@ public partial class JunctionApp : Component, IDisposable
     private Element BuildBody()
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        body.AddChild(BuildSidebar());
-        body.AddChild(BuildMainColumn());
+        // Key the sidebar by collapsed-state so toggling replaces the subtree
+        // instead of patching the expanded layout into the rail (which would
+        // otherwise reuse a handler-less element as the expand button — the
+        // framework doesn't copy event handlers on reconcile). Key the main
+        // column too so the two body children reconcile by key, not position.
+        var sidebar = BuildSidebar();
+        sidebar.Key = _sidebarCollapsed ? "sidebar-rail" : "sidebar-expanded";
+        var main = BuildMainColumn();
+        main.Key = "main-column";
+        body.AddChild(sidebar);
+        body.AddChild(main);
         return body;
     }
 
@@ -399,6 +408,14 @@ public partial class JunctionApp : Component, IDisposable
         }
 
         if (typing) return;
+
+        // Backtick (the key left of 1) toggles the sidebar.
+        if (e.Key == KeyCode.Backtick)
+        {
+            ToggleSidebar();
+            e.StopPropagation = true;
+            return;
+        }
 
         // Number keys switch views.
         var viewForKey = e.Key switch

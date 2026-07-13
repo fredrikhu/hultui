@@ -22,23 +22,17 @@ public partial class JunctionApp
         var repoName = HasActiveRepo ? System.IO.Path.GetFileName(_activeRepoPath.TrimEnd('/', '\\')) : "—";
         var wsName = ActiveWorkspace?.Name ?? "";
 
-        var bar = Flex.Row(gap: 14)
+        var bar = Flex.Row(gap: 0)
             .Height(40).FlexShrink(0)
-            .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, 14, 0, 14))
+            .AlignItems(AlignItems.Stretch)
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        // Traffic-light window controls.
-        bar.AddChild(Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
-            Dot(Nocturne.Neutral700, "Close", () => _window.Close()),
-            Dot(Nocturne.Neutral800, "Minimize", () => _window.Minimize()),
-            Dot(Nocturne.Neutral800, "Maximize", () => _window.ToggleMaximize())
-        ));
+        // Left drag region (balances the right group so the breadcrumb centres).
+        bar.AddChild(Flex.Row(gap: 0).FlexGrow(1).Padding(new Thickness(0, 0, 0, 14)).WindowDrag());
 
         // Centred breadcrumb (draggable — no handlers on these children).
-        var crumb = Flex.Row(gap: 8).FlexGrow(1)
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
+        var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center);
         crumb.AddChild(Text.New(Brand).FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.70)));
         crumb.AddChild(Sep());
         crumb.AddChild(Ui.Icon(Icons.GitRepository, 13f, Nocturne.Accent300));
@@ -54,7 +48,10 @@ public partial class JunctionApp
         crumb.WindowDrag();
         bar.AddChild(crumb);
 
-        // Search / command button.
+        // Right group: search button + Windows-style window controls (flush right).
+        var right = Flex.Row(gap: 0).FlexGrow(1)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.FlexEnd);
+
         var search = Flex.Row(gap: 8)
             .Height(26).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 8, 0, 10))
@@ -67,19 +64,30 @@ public partial class JunctionApp
         search.AddChild(Kbd("Ctrl K"));
         search.OnClick(_ => TogglePalette());
         search.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.08), Nocturne.Bg);
-        bar.AddChild(search);
+        right.AddChild(search);
 
+        right.AddChild(Box.New().Width(10));
+
+        var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
+        controls.AddChild(WinButton(Icons.WinMinimize, "Minimize", () => _window.Minimize(), Nocturne.Neutral800));
+        controls.AddChild(WinButton(Icons.WinMaximize, "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800));
+        controls.AddChild(WinButton(Icons.WinClose, "Close", () => _window.Close(), new Color(232, 17, 35)));
+        right.AddChild(controls);
+
+        bar.AddChild(right);
         return bar;
     }
 
     private static Element Sep() => Text.New("·").FontSize(13f).TextColor(Nocturne.On(0.35));
 
-    private BoxElement Dot(Color color, string tooltip, Action onClick)
+    private BoxElement WinButton(string glyph, string tooltip, Action onClick, Color hoverBg)
     {
-        var d = Box.New().Width(12).Height(12).CornerRadius(6f).Background(color)
+        var b = Flex.Row(gap: 0).Width(46).Height(40)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Cursor(CursorType.Pointer).Tooltip(tooltip);
-        d.OnClick(_ => onClick());
-        return d;
+        b.AddChild(Ui.Icon(glyph, 11f, Nocturne.On(0.75)));
+        b.OnClick(_ => onClick());
+        return b.HoverBg(hoverBg, Color.Transparent);
     }
 
     private static BoxElement Kbd(string text) =>
