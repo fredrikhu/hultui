@@ -8,5 +8,7 @@ public record GitBranch(
     string? TrackingBranch,
     int AheadCount,
     int BehindCount,
-    string Hash
+    string Hash,
+    string Subject = "",
+    DateTimeOffset CommitDate = default
 );

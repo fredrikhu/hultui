@@ -23,7 +23,7 @@ public class GitRepository
     {
         var result = GitProcess.Run(Path,
             "for-each-ref",
-            "--format", $"%(refname:short){FieldSep}%(refname){FieldSep}%(HEAD){FieldSep}%(upstream:short){FieldSep}%(upstream:track,nobracket){FieldSep}%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)",
+            "--format", $"%(refname:short){FieldSep}%(refname){FieldSep}%(HEAD){FieldSep}%(upstream:short){FieldSep}%(upstream:track,nobracket){FieldSep}%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end){FieldSep}%(contents:subject){FieldSep}%(committerdate:iso-strict)",
             "refs/heads/", "refs/remotes/");
 
         if (!result.Success) return [];
@@ -32,7 +32,7 @@ public class GitRepository
         foreach (var line in result.Lines)
         {
             var parts = line.Split(FieldSep);
-            if (parts.Length < 5) continue;
+            if (parts.Length < 6) continue;
 
             var name = parts[0];
             var fullName = parts[1];
@@ -45,10 +45,15 @@ public class GitRepository
             var trackingBranch = string.IsNullOrEmpty(parts[3]) ? null : parts[3];
 
             var (ahead, behind) = ParseAheadBehind(parts[4]);
-            
-            var hash = parts[5];
 
-            branches.Add(new GitBranch(name, fullName, isCurrent, isRemote, trackingBranch, ahead, behind, hash));
+            var hash = parts[5];
+            var subject = parts.Length > 6 ? parts[6] : "";
+            DateTimeOffset commitDate = default;
+            if (parts.Length > 7)
+                DateTimeOffset.TryParse(parts[7], System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out commitDate);
+
+            branches.Add(new GitBranch(name, fullName, isCurrent, isRemote, trackingBranch, ahead, behind, hash, subject, commitDate));
         }
 
         return branches;
@@ -600,6 +605,14 @@ public class GitRepository
         args.Add(branch);
         return GitProcess.RunAsync(Path, askPass, args.ToArray());
     }
+
+    /// <summary>Fast-forwards a *non-current* local branch to its upstream without
+    /// checking it out: <c>git fetch &lt;remote&gt; &lt;remoteBranch&gt;:&lt;localBranch&gt;</c>.
+    /// Git rejects the update (non-zero exit) if it isn't a fast-forward, so this is
+    /// safe. Use <see cref="PullAsync"/> for the checked-out branch instead.</summary>
+    public Task<GitResult> FastForwardBranchAsync(string remote, string remoteBranch, string localBranch,
+        Func<string, Task<string?>>? askPass = null)
+        => GitProcess.RunAsync(Path, askPass, "fetch", remote, $"{remoteBranch}:{localBranch}");
 
     private static List<string> BuildPullArgs(PullOptions? options)
     {

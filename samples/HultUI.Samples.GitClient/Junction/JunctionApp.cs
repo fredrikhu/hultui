@@ -70,6 +70,14 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<TextInputElement> _summaryRef = new();
     private readonly Ref<TextAreaElement> _descRef = new();
 
+    // Branches (management) state.
+    private readonly AsyncLoader<BranchesData> _branches = new(BranchesData.Empty);
+    private string _branchQuery = "";
+    private int _branchSel;
+    private readonly Ref<TextInputElement> _branchSearchRef = new();
+    private readonly Ref<ScrollViewElement> _branchScrollRef = new();
+    private bool _pendingBranchSearchFocus;
+
     // Diff mode is a single app-level toggle shared by all diff panes.
     private bool _diffSplit;
     private bool _diffFull;
@@ -116,6 +124,11 @@ public partial class JunctionApp : Component, IDisposable
         Dictionary<string, GitFileDiff> UnstagedDiffs)
     {
         public static readonly ChangesData Empty = new([], [], new(), new());
+    }
+
+    private readonly record struct BranchesData(IReadOnlyList<GitBranch> Local)
+    {
+        public static readonly BranchesData Empty = new([]);
     }
 
     public JunctionApp(Application app, Window window, GitClientSettingsData settings)
@@ -277,7 +290,7 @@ public partial class JunctionApp : Component, IDisposable
             JunctionView.Overview => BuildStubView("Overview", "Workspace dashboard — coming next."),
             JunctionView.Commit => BuildCommitView(),
             JunctionView.Changes => BuildChangesView(),
-            JunctionView.Branches => BuildStubView("Branches", "Branch management table — coming next."),
+            JunctionView.Branches => BuildBranchesView(),
             _ => BuildHistoryView(),
         };
         view.Key = "view-" + View;
@@ -297,6 +310,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingHistorySearchFocus = false;
             _historySearchRef.Current?.Focus();
+        }
+
+        if (_pendingBranchSearchFocus)
+        {
+            _pendingBranchSearchFocus = false;
+            _branchSearchRef.Current?.Focus();
         }
 
         if (_pendingScrollToSelected)
@@ -457,6 +476,19 @@ public partial class JunctionApp : Component, IDisposable
                 return;
             }
             if (HandleHistoryNavKey(e))
+                e.StopPropagation = true;
+        }
+
+        if (View == JunctionView.Branches)
+        {
+            if (e.Key == KeyCode.Slash)
+            {
+                _pendingBranchSearchFocus = true;
+                MarkDirty();
+                e.StopPropagation = true;
+                return;
+            }
+            if (HandleBranchKey(e))
                 e.StopPropagation = true;
         }
     }
