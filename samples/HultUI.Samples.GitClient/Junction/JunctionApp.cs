@@ -95,7 +95,7 @@ public partial class JunctionApp : Component, IDisposable
 
     private bool _remoteOpRunning;
 
-    private readonly record struct RepoSummary(string Branch, int Ahead, int Behind, int Dirty)
+    private readonly record struct RepoSummary(string Branch, int Ahead, int Behind, int Dirty, string Version = "")
     {
         public static readonly RepoSummary Pending = new("…", 0, 0, 0);
     }
@@ -190,7 +190,8 @@ public partial class JunctionApp : Component, IDisposable
         var branches = repo.GetBranches();
         var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == branch);
         var dirty = repo.GetStatus().Count;
-        return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, dirty);
+        var version = repo.GetDescribeVersion();
+        return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, dirty, version);
     }
 
     private HashSet<string> IncludeSet(string path)
@@ -287,7 +288,7 @@ public partial class JunctionApp : Component, IDisposable
         Element view = View switch
         {
             JunctionView.History => BuildHistoryView(),
-            JunctionView.Overview => BuildStubView("Overview", "Workspace dashboard — coming next."),
+            JunctionView.Overview => BuildOverviewView(),
             JunctionView.Commit => BuildCommitView(),
             JunctionView.Changes => BuildChangesView(),
             JunctionView.Branches => BuildBranchesView(),

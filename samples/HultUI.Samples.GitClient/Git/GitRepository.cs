@@ -65,6 +65,16 @@ public class GitRepository
         return result.Success ? result.Stdout.Trim() : "HEAD";
     }
 
+    /// <summary>A short "version" label for at-a-glance display: the most recent
+    /// reachable tag, or the short HEAD sha when the repo has no tags.</summary>
+    public string GetDescribeVersion()
+    {
+        var tag = GitProcess.Run(Path, "describe", "--tags", "--abbrev=0");
+        if (tag.Success && tag.Stdout.Trim().Length > 0) return tag.Stdout.Trim();
+        var sha = GitProcess.Run(Path, "rev-parse", "--short", "HEAD");
+        return sha.Success ? sha.Stdout.Trim() : "";
+    }
+
     /// <summary>
     /// Resolves any commit-ish (hash, branch, tag, stash ref) into a <see cref="GitCommit"/>.
     /// Used to view stash entries through the same CommitDetail panel as regular commits —
