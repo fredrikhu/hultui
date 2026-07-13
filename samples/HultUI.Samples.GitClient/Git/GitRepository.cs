@@ -409,6 +409,91 @@ public class GitRepository
         return files;
     }
 
+    /// <summary>Staged files (index vs HEAD) with per-file added/deleted counts.</summary>
+    public List<GitFileChange> GetStagedChanges() => GetChangeList(cached: true, includeUntracked: false);
+
+    /// <summary>Unstaged files (working tree vs index) with counts, plus untracked files.</summary>
+    public List<GitFileChange> GetUnstagedChanges() => GetChangeList(cached: false, includeUntracked: true);
+
+    private List<GitFileChange> GetChangeList(bool cached, bool includeUntracked)
+    {
+        string[] statusArgs = cached
+            ? ["diff", "--cached", "--name-status", "-M"]
+            : ["diff", "--name-status", "-M"];
+        string[] numArgs = cached
+            ? ["diff", "--cached", "--numstat", "-M"]
+            : ["diff", "--numstat", "-M"];
+
+        var counts = new Dictionary<string, (int Add, int Del)>(StringComparer.Ordinal);
+        foreach (var line in GitProcess.Run(Path, numArgs).Lines)
+        {
+            var parts = line.Split('\t');
+            if (parts.Length < 3) continue;
+            int.TryParse(parts[0], out var a);
+            int.TryParse(parts[1], out var d);
+            counts[NormalizeRenamePath(parts[2])] = (a, d);
+        }
+
+        var list = new List<GitFileChange>();
+        foreach (var line in GitProcess.Run(Path, statusArgs).Lines)
+        {
+            var parts = line.Split('\t');
+            if (parts.Length < 2) continue;
+
+            var code = parts[0];
+            string path;
+            string? oldPath = null;
+            FileChangeKind kind;
+            if (code.StartsWith('R') || code.StartsWith('C'))
+            {
+                kind = code[0] == 'R' ? FileChangeKind.Renamed : FileChangeKind.Copied;
+                oldPath = parts[1];
+                path = parts.Length >= 3 ? parts[2] : parts[1];
+            }
+            else
+            {
+                path = parts[1];
+                kind = code[0] switch
+                {
+                    'A' => FileChangeKind.Added,
+                    'M' => FileChangeKind.Modified,
+                    'D' => FileChangeKind.Deleted,
+                    _ => FileChangeKind.Modified,
+                };
+            }
+
+            var (add, del) = counts.TryGetValue(path, out var c) ? c : (0, 0);
+            list.Add(new GitFileChange(path, oldPath, kind, add, del));
+        }
+
+        if (includeUntracked)
+        {
+            foreach (var line in GitProcess.Run(Path, "status", "--porcelain=v1", "-uall").Lines)
+                if (line.Length >= 4 && line[0] == '?' && line[1] == '?')
+                    list.Add(new GitFileChange(line[3..], null, FileChangeKind.Untracked, 0, 0));
+        }
+
+        return list;
+    }
+
+    // numstat renders renames as "old => new" or "pre/{old => new}/post"; reduce
+    // to the new path so counts key the same way name-status does.
+    private static string NormalizeRenamePath(string p)
+    {
+        if (!p.Contains(" => ", StringComparison.Ordinal)) return p;
+        var open = p.IndexOf('{');
+        var close = p.IndexOf('}');
+        if (open >= 0 && close > open)
+        {
+            var inner = p[(open + 1)..close];
+            var arrow = inner.IndexOf(" => ", StringComparison.Ordinal);
+            var newInner = arrow >= 0 ? inner[(arrow + 4)..] : inner;
+            return p[..open] + newInner + p[(close + 1)..];
+        }
+        var idx = p.IndexOf(" => ", StringComparison.Ordinal);
+        return p[(idx + 4)..];
+    }
+
     // ── Staging ──
 
     public bool Stage(string filePath)

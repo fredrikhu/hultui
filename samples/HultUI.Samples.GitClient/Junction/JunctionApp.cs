@@ -61,6 +61,15 @@ public partial class JunctionApp : Component, IDisposable
     private string? _detailHash;          // commit the loaded detail belongs to
     private string? _selectedFilePath;    // file selected in the Commit view
 
+    // Changes (staging) state.
+    private readonly AsyncLoader<ChangesData> _changes = new(ChangesData.Empty);
+    private string? _changeSelPath;
+    private bool _changeSelStaged;
+    private string _commitSummary = "";
+    private string _commitDescription = "";
+    private readonly Ref<TextInputElement> _summaryRef = new();
+    private readonly Ref<TextAreaElement> _descRef = new();
+
     // Diff mode is a single app-level toggle shared by all diff panes.
     private bool _diffSplit;
     private bool _diffFull;
@@ -98,6 +107,15 @@ public partial class JunctionApp : Component, IDisposable
         Dictionary<string, GitFileDiff> DiffByPath)
     {
         public static readonly CommitDetail Empty = new(null, [], new());
+    }
+
+    private readonly record struct ChangesData(
+        IReadOnlyList<GitFileChange> Staged,
+        IReadOnlyList<GitFileChange> Unstaged,
+        Dictionary<string, GitFileDiff> StagedDiffs,
+        Dictionary<string, GitFileDiff> UnstagedDiffs)
+    {
+        public static readonly ChangesData Empty = new([], [], new(), new());
     }
 
     public JunctionApp(Application app, Window window, GitClientSettingsData settings)
@@ -241,7 +259,7 @@ public partial class JunctionApp : Component, IDisposable
             JunctionView.History => BuildHistoryView(),
             JunctionView.Overview => BuildStubView("Overview", "Workspace dashboard — coming next."),
             JunctionView.Commit => BuildCommitView(),
-            JunctionView.Changes => BuildStubView("Changes", "Staging + commit composer — coming next."),
+            JunctionView.Changes => BuildChangesView(),
             JunctionView.Branches => BuildStubView("Branches", "Branch management table — coming next."),
             _ => BuildHistoryView(),
         };

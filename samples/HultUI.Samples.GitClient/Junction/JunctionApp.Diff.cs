@@ -241,6 +241,12 @@ public partial class JunctionApp
             _commitDetail.Value.DiffByPath.TryGetValue(_selectedFilePath, out var d);
             return (_selectedFilePath, d);
         }
+        if (View == JunctionView.Changes && _changeSelPath != null)
+        {
+            var dict = _changeSelStaged ? _changes.Value.StagedDiffs : _changes.Value.UnstagedDiffs;
+            dict.TryGetValue(_changeSelPath, out var d);
+            return (_changeSelPath, d);
+        }
         return (_selectedFilePath ?? "", null);
     }
 }
