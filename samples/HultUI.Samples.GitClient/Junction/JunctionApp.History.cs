@@ -162,7 +162,7 @@ public partial class JunctionApp
     private Element BuildHistorySearch()
     {
         var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
-            .Height(30).MaxWidth(300).FlexShrink(1)
+            .Height(34).MaxWidth(300).FlexShrink(1)
             .Padding(new Thickness(0, 10, 0, 10))
             .Background(Nocturne.Bg)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
@@ -170,10 +170,11 @@ public partial class JunctionApp
         box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)).FlexShrink(0));
 
         // Borderless field (theme.TextInput); this wrapper box supplies the border.
+        // Same height as the palette field so one theme padding centres both.
         var input = TextInput.New(_historyQuery);
         input.PlaceholderText("Press / to search commits…")
             .OnTextChanged(OnHistoryQueryChanged)
-            .Height(Dimension.Px(28))
+            .Height(Dimension.Px(30))
             .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
             .TextColor(Nocturne.Text)
             .WithRef(_historySearchRef);
