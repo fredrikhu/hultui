@@ -71,6 +71,14 @@ public static class Icons
     public const string WinMaximize = "▢";    // ▢
     public const string WinClose = "✕";       // ✕
 
+    // Interactive rebase actions
+    public const string Check = "✓";                  // ✓  pick
+    public const string Wrench = "⚙";                 // ⚙  edit
+    public const string ArrowsInLineVertical = "⇵";   // ⇵  squash (meld into previous)
+    public const string ArrowLineUp = "⤒";            // ⤒  fixup
+    public const string Play = "▶";                   // ▶  start rebase
+    public const string DotsSixVertical = "⠿";        // ⠿  drag handle
+
     // Context-menu verbs
     public const string BendDownRight = "↳";  // ↳  checkout detached
     public const string Cherries = "◈";       // ◈  cherry-pick

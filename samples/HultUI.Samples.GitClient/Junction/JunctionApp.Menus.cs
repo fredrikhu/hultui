@@ -38,6 +38,7 @@ public partial class JunctionApp
             ContextMenuItem.Separator(),
             Item(Icons.Cherries, $"Cherry-pick onto {cur}", () => DoCherryPick(c.Hash)),
             Item(Icons.ArrowsDownUp, $"Rebase {cur} onto this", () => DoRebase(c.Hash)),
+            Item(Icons.ListChecks, "Interactive rebase from here…", () => OpenRebase(c)),
             Item(Icons.CounterClockwise, "Revert commit", () => DoRevert(c.Hash)),
             ContextMenuItem.Separator(),
             Item(Icons.LineLeft, $"Reset {cur} soft", () => DoReset(c.Hash, ResetMode.Soft)),

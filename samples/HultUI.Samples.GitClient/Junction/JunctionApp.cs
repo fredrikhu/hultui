@@ -96,6 +96,14 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<TextInputElement> _dialogRef = new();
     private bool _pendingDialogFocus;
 
+    // Interactive rebase dialog (newest-first todo editor + reword sub-dialog).
+    private RebaseState? _rebase;
+    private int _rbSel;
+    private int? _rbRewordIndex;          // row whose message the sub-dialog edits
+    private string _rbRewordText = "";
+    private readonly Ref<TextAreaElement> _rbRewordRef = new();
+    private bool _pendingRewordFocus;
+
     // Toast.
     private string? _toast;
     private CancellationTokenSource? _toastCts;
@@ -263,6 +271,9 @@ public partial class JunctionApp : Component, IDisposable
         if (_dialog != null)
             root.AddChild(BuildDialog(_dialog));
 
+        if (_rebase != null)
+            root.AddChild(BuildRebaseDialog(_rebase));
+
         return root;
     }
 
@@ -333,6 +344,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingDialogFocus = false;
             _dialogRef.Current?.Focus();
+        }
+
+        if (_pendingRewordFocus)
+        {
+            _pendingRewordFocus = false;
+            _rbRewordRef.Current?.Focus();
         }
 
         if (_pendingScrollToSelected)
@@ -429,6 +446,19 @@ public partial class JunctionApp : Component, IDisposable
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
+
+        // The interactive-rebase modal owns the keyboard while open. Its reword
+        // sub-dialog (a textarea) only reacts to Esc; everything else types.
+        if (_rebase != null)
+        {
+            if (_rbRewordIndex != null)
+            {
+                if (e.Key == KeyCode.Escape) { CloseReword(); e.StopPropagation = true; }
+                return;
+            }
+            if (HandleRebaseKey(e)) e.StopPropagation = true;
+            return;
+        }
 
         // A modal dialog swallows every global shortcut; only Esc (cancel) acts,
         // and typing flows straight to the focused field.
