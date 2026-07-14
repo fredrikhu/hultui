@@ -25,13 +25,35 @@ public partial class JunctionApp
             () => LoadDetail(hash), onLoaded: PickInitialFile);
         var detail = _commitDetail.Value;
 
-        var commit = detail.Commit
-            ?? _history.Value.Commits.FirstOrDefault(c => c.Hash == hash);
+        // While a newer commit's detail is still loading, _commitDetail.Value (and
+        // _selectedFilePath) still describe the PREVIOUS commit. Rendering that would
+        // flash the wrong commit's files/diff for a frame, so only show the loaded
+        // body once its hash matches; until then keep the header (sourced from the
+        // history list) correct and show a neutral loading pane.
+        var ready = detail.Commit != null && detail.Commit.Hash == hash;
+        var commit = ready
+            ? detail.Commit
+            : _history.Value.Commits.FirstOrDefault(c => c.Hash == hash);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildCommitHeader(commit, hash));
-        col.AddChild(BuildCommitBody(detail));
+        col.AddChild(ready ? BuildCommitBody(detail) : BuildCommitBodyLoading());
         return col;
+    }
+
+    /// <summary>Placeholder body shown while a newly selected commit's detail loads,
+    /// so the previous commit's files/diff never flash. Keeps the two-column shell so
+    /// the layout doesn't jump when the real content lands.</summary>
+    private Element BuildCommitBodyLoading()
+    {
+        var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
+        row.AddChild(ScrollView.New().Width(238).FlexShrink(0)
+            .Padding(new Thickness(8, 6, 8, 6))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0)));
+        row.AddChild(Flex.Column(gap: 0).FlexGrow(1)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .Children(Text.New("Loading…").FontSize(12f).TextColor(Nocturne.On(0.40))));
+        return row;
     }
 
     // Runs off the UI thread.
