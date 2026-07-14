@@ -72,8 +72,14 @@ public partial class JunctionApp
         var col = Flex.Column(gap: 15).Padding(new Thickness(16, 18, 16, 18));
 
         if (f.Kind == ModalKind.AddRepo)
-            col.AddChild(ModalField("Repository folder",
-                ModalInputWithBrowse(f, f.Path, "~/code/my-repo", v => f.Path = v, _modalNameRef, mono: true)));
+        {
+            EnsureRepoPathChecked(f);
+            var fieldCol = Flex.Column(gap: 6);
+            fieldCol.AddChild(Text.New("Repository folder").FontSize(11f).TextColor(Nocturne.On(0.55)));
+            fieldCol.AddChild(ModalInputWithBrowse(f, f.Path, "~/code/my-repo", v => f.Path = v, _modalNameRef, mono: true));
+            if (RepoPathHint(f) is { } hint) fieldCol.AddChild(hint);
+            col.AddChild(fieldCol);
+        }
         if (f.Kind == ModalKind.CloneRepo)
         {
             col.AddChild(ModalField("Remote URL",
@@ -133,6 +139,26 @@ public partial class JunctionApp
     }
 
     // ── Field building blocks ────────────────────────────────────────────
+
+    /// <summary>Inline validity line under the add-repo folder field: a muted
+    /// "checking", a rose warning for a missing folder / non-repo, or a green
+    /// confirmation once the path is a real git repository. Null when nothing
+    /// is entered yet (the disabled button already signals "not ready").</summary>
+    private static Element? RepoPathHint(ModalForm f)
+    {
+        (string Icon, string Text, Color Color)? h = f.PathStatus switch
+        {
+            RepoPathStatus.Checking => (Icons.MagnifyingGlass, "Checking…", Nocturne.On(0.45)),
+            RepoPathStatus.NotFound => (Icons.Warning, "Folder not found", Nocturne.DangerText),
+            RepoPathStatus.NotRepo => (Icons.Warning, "Not a git repository (no .git here)", Nocturne.DangerText),
+            RepoPathStatus.Ok => (Icons.CheckCircle, "Git repository found", Nocturne.Accent300),
+            _ => null,
+        };
+        if (h is not { } hint) return null;
+        return Flex.Row(gap: 6).AlignItems(AlignItems.Center).Children(
+            Ui.Icon(hint.Icon, 12f, hint.Color),
+            Text.New(hint.Text).FontSize(11f).TextColor(hint.Color));
+    }
 
     private static Element ModalField(string label, Element control)
     {

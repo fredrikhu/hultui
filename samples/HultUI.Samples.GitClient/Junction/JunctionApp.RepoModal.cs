@@ -1,4 +1,5 @@
 using System.Linq;
+using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -38,6 +39,10 @@ public partial class JunctionApp
 
     private enum ModalKind { AddRepo, CloneRepo, NewWorkspace, EditWorkspace, EditRepo }
 
+    /// <summary>Live validation state for the add-repo folder, resolved off the UI
+    /// thread (see <see cref="EnsureRepoPathChecked"/>) so Build() never spawns git.</summary>
+    private enum RepoPathStatus { Empty, Checking, NotFound, NotRepo, Ok }
+
     private sealed class ModalForm
     {
         public required ModalKind Kind;
@@ -50,6 +55,10 @@ public partial class JunctionApp
         public HashSet<string> RepoPaths = new();   // workspace modes: member repos
         public HashSet<string> WorkspaceIds = new(); // repo modes: joined workspaces
         public string? EditId;   // workspace id (workspace modes) or repo path (editRepo)
+
+        // AddRepo folder validation: the expanded path we last checked and its result.
+        public string CheckedPath = "";
+        public RepoPathStatus PathStatus = RepoPathStatus.Empty;
 
         public bool IsWorkspace => Kind is ModalKind.NewWorkspace or ModalKind.EditWorkspace;
     }
@@ -132,7 +141,7 @@ public partial class JunctionApp
 
     private static bool ModalValid(ModalForm f) => f.Kind switch
     {
-        ModalKind.AddRepo => f.Path.Trim().Length > 0,
+        ModalKind.AddRepo => f.PathStatus == RepoPathStatus.Ok,
         ModalKind.CloneRepo => f.Url.Trim().Length > 0,
         ModalKind.NewWorkspace or ModalKind.EditWorkspace => f.Name.Trim().Length > 0,
         ModalKind.EditRepo => true,
@@ -154,19 +163,39 @@ public partial class JunctionApp
 
     private void SubmitAddRepo(ModalForm f)
     {
+        // The primary button is only enabled once the inline check reports Ok, so
+        // by here the path is a validated repo; register it directly.
         var path = ExpandPath(f.Path.Trim());
-        if (!System.IO.Directory.Exists(path))
-        {
-            Flash("Not a folder: " + path);
-            return;
-        }
-        if (!IsGitRepo(path))
-        {
-            Flash("Not a git repository: " + path);
-            return;
-        }
         RegisterRepo(path, f);
         Flash($"Added {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}");
+    }
+
+    /// <summary>Keeps <see cref="ModalForm.PathStatus"/> current for the add-repo
+    /// folder. When the entered path changes, the (process-spawning) git check runs
+    /// off the UI thread and marks dirty on completion, so Build() stays cheap and
+    /// the dialog reflects validity inline instead of failing on submit.</summary>
+    private void EnsureRepoPathChecked(ModalForm f)
+    {
+        var expanded = ExpandPath(f.Path.Trim());
+        if (expanded.Length == 0) { f.CheckedPath = ""; f.PathStatus = RepoPathStatus.Empty; return; }
+        if (f.CheckedPath == expanded) return;   // already checked / in flight for this path
+
+        f.CheckedPath = expanded;
+        f.PathStatus = RepoPathStatus.Checking;
+        var target = expanded;
+        _ = Task.Run(() =>
+        {
+            RepoPathStatus status =
+                !System.IO.Directory.Exists(target) ? RepoPathStatus.NotFound
+                : !IsGitRepo(target) ? RepoPathStatus.NotRepo
+                : RepoPathStatus.Ok;
+            Application.InvokeOnMainThread(() =>
+            {
+                if (_modal != f || f.CheckedPath != target) return;   // superseded
+                f.PathStatus = status;
+                MarkDirty();
+            });
+        });
     }
 
     /// <summary>True when <paramref name="path"/> is a git working-tree root: it has
