@@ -49,8 +49,12 @@ public partial class JunctionApp
         bar.AddChild(crumb);
 
         // Right group: search button + Windows-style window controls (flush right).
-        var right = Flex.Row(gap: 0).FlexGrow(1)
-            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.FlexEnd);
+        var right = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Center);
+
+        // Leading draggable filler so the gap between the breadcrumb and the search
+        // box drags the window too (a plain FlexEnd spacer here has no WindowDrag
+        // ancestor, so hits on it fall through as non-draggable).
+        right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
 
         var search = Flex.Row(gap: 8)
             .Height(26).AlignItems(AlignItems.Center)
