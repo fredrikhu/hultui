@@ -532,6 +532,13 @@ public sealed unsafe class SDL3Window : IDisposable
         // Must be set before text input starts.
         SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
 
+        // Deliver the click that focuses a background window to the app, instead of
+        // eating it. SDL's default swallows the activating click, so a click into an
+        // inactive window only raises it and the control under the cursor never fires
+        // — the user has to click a second time. With click-through the same click
+        // both focuses the window and hits the control, as users expect.
+        SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
     }
