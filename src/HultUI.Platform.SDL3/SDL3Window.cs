@@ -105,6 +105,18 @@ public sealed unsafe class SDL3Window : IDisposable
     /// </summary>
     internal Func<int, int, bool>? IsWindowDragPoint { get; set; }
 
+    /// <summary>
+    /// Returns true when the given layout-unit point is over the window's
+    /// maximize/restore button. Lets the native frame report <c>HTMAXBUTTON</c>
+    /// so Windows 11 shows its Snap Layouts flyout on hover. Set by Window.cs.
+    /// </summary>
+    internal Func<int, int, bool>? IsWindowMaximizePoint { get; set; }
+
+    /// <summary>Called (true) when the pointer enters the maximize button in the
+    /// non-client area and (false) when it leaves, so the app can drive the
+    /// button's hover highlight itself (Windows won't). Set by Window.cs.</summary>
+    internal Action<bool>? OnMaximizeButtonHover { get; set; }
+
     public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
     {
         Style = style;

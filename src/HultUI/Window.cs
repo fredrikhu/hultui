@@ -144,9 +144,14 @@ public sealed class Window : IOverlayHost, IDisposable
             platformWindow.ResizableEdges = _resizableEdges;
 
             if (platformWindow.UsesWindowsNativeFrame)
+            {
                 // Native Windows frame: Windows resizes/moves the window itself
-                // via WM_NCHITTEST; it only needs to know the drag regions.
+                // via WM_NCHITTEST; it only needs to know the drag regions and the
+                // maximize button (so it can show the Snap Layouts flyout).
                 platformWindow.IsWindowDragPoint = IsWindowDragRegion;
+                platformWindow.IsWindowMaximizePoint = IsWindowMaximizeRegion;
+                platformWindow.OnMaximizeButtonHover = SetMaximizeButtonHover;
+            }
             else
                 platformWindow.HitTestHandler = HandleWindowHitTest;
         }
@@ -1298,6 +1303,55 @@ public sealed class Window : IOverlayHost, IDisposable
         if (_root is null) return false;
         var hit = HitTester.HitTest(_root, new Point(x, y));
         return hit is not null && !hit.HasAnyEventHandlers && HasWindowDragAncestor(hit);
+    }
+
+    /// <summary>True when the layout-unit point falls on the element flagged as the
+    /// window maximize button. The native frame reports HTMAXBUTTON there so Windows
+    /// shows its Snap Layouts flyout on hover.</summary>
+    private bool IsWindowMaximizeRegion(int x, int y) => HitMaximizeButton(x, y) is not null;
+
+    private Element? HitMaximizeButton(int x, int y)
+    {
+        if (_root is null) return null;
+        var hit = HitTester.HitTest(_root, new Point(x, y));
+        for (var el = hit; el is not null; el = el.Parent)
+            if (el.IsWindowMaximizeButton) return el;
+        return null;
+    }
+
+    private Element? FindMaximizeButton() => _root is null ? null : FindMaximizeButton(_root);
+
+    private static Element? FindMaximizeButton(Element e)
+    {
+        if (e.IsWindowMaximizeButton) return e;
+        foreach (var child in e.Children)
+            if (FindMaximizeButton(child) is { } found) return found;
+        return null;
+    }
+
+    // The maximize button lives in the non-client area (it returns HTMAXBUTTON), so
+    // Windows sends WM_NCMOUSEMOVE there instead of client moves — the normal hover
+    // pipeline never sees it. Drive the button's hover highlight from the frame's NC
+    // tracking by feeding the pointer state directly, so HoverBg still lights up.
+    private Element? _maxButtonHovered;
+
+    private void SetMaximizeButtonHover(bool hovered)
+    {
+        if (hovered)
+        {
+            var btn = FindMaximizeButton();
+            if (btn is null || ReferenceEquals(btn, _maxButtonHovered)) return;
+            _maxButtonHovered = btn;
+            var box = btn.Layout.AbsoluteBorderBox;
+            _pointerState.UpdateHover(btn, new Point(box.X + box.Width / 2f, box.Y + box.Height / 2f), KeyModifiers.None);
+        }
+        else
+        {
+            if (_maxButtonHovered is null) return;
+            _maxButtonHovered = null;
+            _pointerState.UpdateHover(null, default, KeyModifiers.None);
+        }
+        _root?.MarkPaintDirty();
     }
 
     private static bool HasWindowDragAncestor(Element element)

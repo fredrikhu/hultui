@@ -121,6 +121,11 @@ public abstract class Element
     // ──── Window Chrome ────
     public bool IsWindowDragRegion { get; set; }
 
+    /// <summary>Marks the element as the window's maximize/restore button. On
+    /// Windows this lets the custom frame report <c>HTMAXBUTTON</c> for the
+    /// element's region so Windows 11 shows its Snap Layouts flyout on hover.</summary>
+    public bool IsWindowMaximizeButton { get; set; }
+
     // ──── Overlay ────
     public IOverlayHost? OverlayHost { get; internal set; }
 
@@ -531,6 +536,7 @@ public abstract class Element
         TabIndex = source.TabIndex;
         Draggable = source.Draggable;
         IsWindowDragRegion = source.IsWindowDragRegion;
+        IsWindowMaximizeButton = source.IsWindowMaximizeButton;
         TooltipText = source.TooltipText;
         ContextMenuItems = source.ContextMenuItems;
         _opacity = source._opacity;

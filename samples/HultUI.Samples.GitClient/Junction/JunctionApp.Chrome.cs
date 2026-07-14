@@ -74,7 +74,10 @@ public partial class JunctionApp
 
         var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
         controls.AddChild(WinButton(Icons.WinMinimize, "Minimize", () => _window.Minimize(), Nocturne.Neutral800));
-        controls.AddChild(WinButton(Icons.WinMaximize, "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800));
+        // Flag the maximize button so the Windows custom frame reports HTMAXBUTTON
+        // there and Windows 11 shows its Snap Layouts flyout on hover.
+        controls.AddChild(WinButton(Icons.WinMaximize, "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800)
+            .WindowMaximizeButton());
         controls.AddChild(WinButton(Icons.WinClose, "Close", () => _window.Close(), new Color(232, 17, 35)));
         right.AddChild(controls);
 

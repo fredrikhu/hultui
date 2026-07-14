@@ -166,6 +166,11 @@ public static class ElementExtensions
     // ──── Drag & Drop ────
     public static T Draggable<T>(this T el, bool draggable = true) where T : Element { el.Draggable = draggable; return el; }
     public static T WindowDrag<T>(this T el, bool isDragRegion = true) where T : Element { el.IsWindowDragRegion = isDragRegion; return el; }
+
+    /// <summary>Marks this element as the window's maximize/restore button so the
+    /// Windows custom frame reports HTMAXBUTTON there — enabling the Windows 11
+    /// Snap Layouts flyout on hover. No effect off Windows.</summary>
+    public static T WindowMaximizeButton<T>(this T el, bool isMaximizeButton = true) where T : Element { el.IsWindowMaximizeButton = isMaximizeButton; return el; }
     public static T OnDragStart<T>(this T el, Action<DragStartEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragEnter<T>(this T el, Action<DragEnterEvent> handler) where T : Element { el.On(handler); return el; }
     public static T OnDragLeave<T>(this T el, Action<DragLeaveEvent> handler) where T : Element { el.On(handler); return el; }

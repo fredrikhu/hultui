@@ -27,13 +27,26 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 {
     // ── Win32 constants ──
     private const int GWLP_WNDPROC = -4;
+    private const int GWL_STYLE = -16;
+    private const int WS_MINIMIZEBOX = 0x00020000;
+    private const int WS_MAXIMIZEBOX = 0x00010000;
 
     private const uint WM_NCCALCSIZE = 0x0083;
     private const uint WM_NCHITTEST = 0x0084;
+    private const uint WM_MOUSEMOVE = 0x0200;
+    private const uint WM_NCMOUSEMOVE = 0x00A0;
+    private const uint WM_NCLBUTTONDOWN = 0x00A1;
+    private const uint WM_NCLBUTTONUP = 0x00A2;
+    private const uint WM_NCMOUSELEAVE = 0x02A2;
+    private const uint WM_SYSCOMMAND = 0x0112;
     private const uint WM_DWMCOMPOSITIONCHANGED = 0x031E;
+
+    private const int SC_MAXIMIZE = 0xF030;
+    private const int SC_RESTORE = 0xF120;
 
     private const int HTCLIENT = 1;
     private const int HTCAPTION = 2;
+    private const int HTMAXBUTTON = 9;
     private const int HTLEFT = 10;
     private const int HTRIGHT = 11;
     private const int HTTOP = 12;
@@ -53,6 +66,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const uint SWP_NOOWNERZORDER = 0x0200;
     private const uint SWP_FRAMECHANGED = 0x0020;
 
+    private const uint TME_LEAVE = 0x0002;
+    private const uint TME_NONCLIENT = 0x0010;
+
     // Extending the frame by a single pixel is enough to make DWM composite the
     // window as framed again — that is what re-enables the shadow and the
     // Windows 11 accent border. Our opaque GL content draws over the strip.
@@ -64,6 +80,8 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private readonly IntPtr _hwnd;
     private IntPtr _originalProc;
     private bool _disposed;
+    private bool _maxPressed;      // a left-press landed on the maximize button
+    private bool _maxLeaveTracked; // WM_NCMOUSELEAVE is armed for the current NC hover
 
     private WindowsCustomFrame(SDL3Window window, IntPtr hwnd)
     {
@@ -85,6 +103,12 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
         delegate* unmanaged[Stdcall]<IntPtr, uint, UIntPtr, IntPtr, IntPtr> proc = &WndProc;
         frame._originalProc = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (IntPtr)proc);
+
+        // Windows 11 only offers the Snap Layouts flyout for windows that advertise
+        // a maximize box. SDL's borderless window omits WS_MAXIMIZEBOX/MINIMIZEBOX,
+        // so add them back (they have no visual effect without an OS title bar).
+        long style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
+        SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style | WS_MAXIMIZEBOX | WS_MINIMIZEBOX));
 
         frame.ExtendFrame();
 
@@ -118,7 +142,37 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
                     return IntPtr.Zero;
 
                 case WM_NCHITTEST:
-                    return frame.HandleNcHitTest(hwnd, lParam);
+                    return (IntPtr)frame.HandleNcHitTest(hwnd, lParam);
+
+                // The maximize button lives in the non-client area (we report it as
+                // HTMAXBUTTON so Windows shows Snap Layouts), so its hover and click
+                // arrive as NC messages. Drive the app's button highlight from them
+                // and handle the click ourselves as maximize/restore.
+                case WM_NCMOUSEMOVE:
+                    frame.HandleNcMouseMove(hwnd, wParam);
+                    break;
+
+                case WM_NCMOUSELEAVE:
+                    frame._maxLeaveTracked = false;
+                    frame._window.OnMaximizeButtonHover?.Invoke(false);
+                    break;
+
+                case WM_MOUSEMOVE:
+                    // The pointer is back in the client area — clear any NC hover.
+                    frame._window.OnMaximizeButtonHover?.Invoke(false);
+                    break;
+
+                case WM_NCLBUTTONDOWN when (int)wParam.ToUInt64() == HTMAXBUTTON:
+                    frame._maxPressed = true;
+                    return IntPtr.Zero; // swallow: don't let DefWindowProc open a menu / start a move
+
+                case WM_NCLBUTTONUP when (int)wParam.ToUInt64() == HTMAXBUTTON:
+                    if (frame._maxPressed)
+                    {
+                        frame._maxPressed = false;
+                        frame.ToggleMaximizeNative();
+                    }
+                    return IntPtr.Zero;
 
                 case WM_DWMCOMPOSITIONCHANGED:
                     frame.ExtendFrame();
@@ -206,15 +260,55 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
             if (bottom) return HTBOTTOM;
         }
 
-        // Not a resize edge: ask the app whether this is a drag region so Windows
-        // can move (and snap) the window natively. Coordinates are converted from
-        // physical client pixels to layout units for the element hit test.
+        // Not a resize edge: convert physical client pixels to layout units for the
+        // element hit tests below.
         int dipX = (int)(pt.X / scale);
         int dipY = (int)(pt.Y / scale);
+
+        // The maximize button reports HTMAXBUTTON so Windows 11 shows its Snap
+        // Layouts flyout when the pointer hovers it. We drive the button's own
+        // highlight and click from the NC messages (see WndProc).
+        if (_window.IsWindowMaximizePoint?.Invoke(dipX, dipY) == true)
+            return HTMAXBUTTON;
+
+        // Ask the app whether this is a drag region so Windows can move (and snap)
+        // the window natively.
         if (_window.IsWindowDragPoint?.Invoke(dipX, dipY) == true)
             return HTCAPTION;
 
         return HTCLIENT;
+    }
+
+    /// <summary>Maximizes or restores the window natively via WM_SYSCOMMAND — the
+    /// same path the caption double-click uses. Posted (not sent) so it runs after
+    /// the current NC message returns. SDL's maximize (SDL_MaximizeWindow) only flips
+    /// SDL's flag on this custom-frame window without resizing it, so we don't use it
+    /// here; the resulting WM_SIZE still keeps SDL's state in sync.</summary>
+    private void ToggleMaximizeNative()
+    {
+        uint sc = IsZoomed(_hwnd) ? (uint)SC_RESTORE : (uint)SC_MAXIMIZE;
+        PostMessageW(_hwnd, WM_SYSCOMMAND, (UIntPtr)sc, IntPtr.Zero);
+    }
+
+    private void HandleNcMouseMove(IntPtr hwnd, UIntPtr wParam)
+    {
+        bool onMax = (int)wParam.ToUInt64() == HTMAXBUTTON;
+        _window.OnMaximizeButtonHover?.Invoke(onMax);
+
+        // Arm a WM_NCMOUSELEAVE so the highlight clears when the pointer leaves the
+        // button straight off the window (a move into the client clears via WM_MOUSEMOVE).
+        if (onMax && !_maxLeaveTracked)
+        {
+            var tme = new TRACKMOUSEEVENT
+            {
+                cbSize = (uint)sizeof(TRACKMOUSEEVENT),
+                dwFlags = TME_LEAVE | TME_NONCLIENT,
+                hwndTrack = hwnd,
+                dwHoverTime = 0,
+            };
+            if (TrackMouseEvent(ref tme))
+                _maxLeaveTracked = true;
+        }
     }
 
     public void Dispose()
@@ -238,6 +332,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct MARGINS { public int CxLeftWidth, CxRightWidth, CyTopHeight, CyBottomHeight; }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TRACKMOUSEEVENT { public uint cbSize; public uint dwFlags; public IntPtr hwndTrack; public uint dwHoverTime; }
+
     // Only the first rectangle (the proposed client area) is written; the rest
     // of NCCALCSIZE_PARAMS is left in place and reached through the pointer.
     [StructLayout(LayoutKind.Sequential)]
@@ -245,6 +342,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [DllImport("user32", EntryPoint = "SetWindowLongPtrW")]
     private static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtrW(IntPtr hWnd, int nIndex);
 
     [DllImport("user32", EntryPoint = "CallWindowProcW")]
     private static extern IntPtr CallWindowProcW(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
@@ -257,6 +357,12 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [DllImport("user32")]
     private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32")]
+    private static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT lpEventTrack);
+
+    [DllImport("user32", EntryPoint = "PostMessageW")]
+    private static extern bool PostMessageW(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
 
     [DllImport("user32")]
     private static extern int GetSystemMetrics(int nIndex);
