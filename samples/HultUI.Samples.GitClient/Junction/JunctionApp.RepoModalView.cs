@@ -73,13 +73,13 @@ public partial class JunctionApp
 
         if (f.Kind == ModalKind.AddRepo)
             col.AddChild(ModalField("Repository folder",
-                ModalInputWithBrowse(f.Path, "~/code/my-repo", v => f.Path = v, _modalNameRef, mono: true)));
+                ModalInputWithBrowse(f, f.Path, "~/code/my-repo", v => f.Path = v, _modalNameRef, mono: true)));
         if (f.Kind == ModalKind.CloneRepo)
         {
             col.AddChild(ModalField("Remote URL",
                 ModalInput(f.Url, "https://github.com/acme/service.git", v => f.Url = v, _modalNameRef, mono: true)));
             col.AddChild(ModalField("Clone to",
-                ModalInputWithBrowse(f.Dest, "~/code", v => f.Dest = v, null, mono: true)));
+                ModalInputWithBrowse(f, f.Dest, "~/code", v => f.Dest = v, null, mono: true)));
         }
         if (f.IsWorkspace)
             col.AddChild(ModalField("Workspace name",
@@ -160,16 +160,36 @@ public partial class JunctionApp
         return boxEl;
     }
 
-    private Element ModalInputWithBrowse(string value, string placeholder, Action<string> onChange,
+    private Element ModalInputWithBrowse(ModalForm f, string value, string placeholder, Action<string> onChange,
         Ref<TextInputElement>? refEl, bool mono)
     {
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
         var input = ModalInput(value, placeholder, onChange, refEl, mono);
         input.FlexGrow(1).FlexShrink(1);
         row.AddChild(input);
-        row.AddChild(Ui.SecondaryButton("Browse", Icons.FolderOpen, () => Flash("Paste or type the folder path"), 12f)
+        row.AddChild(Ui.SecondaryButton("Browse", Icons.FolderOpen, () => BrowseForFolder(f, value, onChange), 12f)
             .FlexShrink(0));
         return row;
+    }
+
+    /// <summary>Opens the OS folder picker and drops the chosen path into the field.
+    /// Runs off the UI thread; guards against the modal changing while it's open.</summary>
+    private async void BrowseForFolder(ModalForm f, string current, Action<string> apply)
+    {
+        if (!_folderPicker.IsAvailable) { Flash("No folder picker available — paste the path"); return; }
+
+        var initial = string.IsNullOrWhiteSpace(current)
+            ? (HasActiveRepo ? System.IO.Path.GetDirectoryName(_activeRepoPath.TrimEnd('/', '\\')) : null)
+            : ExpandPath(current);
+
+        string? picked;
+        try { picked = await _folderPicker.PickFolderAsync(initial); }
+        catch (OperationCanceledException) { return; }
+        catch { Flash("Couldn't open the folder picker — paste the path"); return; }
+
+        if (string.IsNullOrEmpty(picked) || _modal != f) return;   // cancelled, or modal changed
+        apply(picked);
+        MarkDirty();
     }
 
     private Element BuildIconPicker(ModalForm f)

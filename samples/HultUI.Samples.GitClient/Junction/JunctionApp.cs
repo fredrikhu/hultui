@@ -8,6 +8,7 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using HultUI.Core.Reactivity;
 using GitClient.Git;
+using GitClient.Platform;
 using GitClient.Theme;
 
 namespace GitClient.Junction;
@@ -29,6 +30,7 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Application _app;
     private readonly Window _window;
     private readonly GitClientSettingsData _settings;
+    private readonly IFolderPicker _folderPicker;
 
     // One GitRepository per path, plus a background summary loader per path so
     // the sidebar's branch / ahead-behind / dirty badges never block Build().
@@ -153,11 +155,13 @@ public partial class JunctionApp : Component, IDisposable
         public static readonly BranchesData Empty = new([]);
     }
 
-    public JunctionApp(Application app, Window window, GitClientSettingsData settings)
+    public JunctionApp(Application app, Window window, GitClientSettingsData settings,
+        IFolderPicker? folderPicker = null)
     {
         _app = app;
         _window = window;
         _settings = settings;
+        _folderPicker = folderPicker ?? new NativeFolderPicker();
         _settings.Normalize();
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
