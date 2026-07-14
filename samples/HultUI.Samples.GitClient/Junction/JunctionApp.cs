@@ -92,6 +92,7 @@ public partial class JunctionApp : Component, IDisposable
     // Modal text-input dialog (new branch / rename / set upstream…).
     private DialogSpec? _dialog;
     private string _dialogValue = "";
+    private bool _dialogChecked;
     private readonly Ref<TextInputElement> _dialogRef = new();
     private bool _pendingDialogFocus;
 

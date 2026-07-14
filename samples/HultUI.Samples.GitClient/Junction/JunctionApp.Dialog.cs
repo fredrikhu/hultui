@@ -10,20 +10,25 @@ namespace GitClient.Junction;
 
 public partial class JunctionApp
 {
-    /// <summary>A one-field modal prompt. <see cref="Validate"/> returns an error
-    /// message to reject the value (kept open), or null to accept.</summary>
+    /// <summary>A one-field modal prompt, optionally with a checkbox.
+    /// <see cref="Validate"/> returns an error message to reject the value (kept
+    /// open), or null to accept. <see cref="OnConfirm"/> receives the field value
+    /// and the checkbox state (false when the prompt has no checkbox).</summary>
     private sealed record DialogSpec(
         string Title,
         string? Body,
         string Placeholder,
         string ConfirmLabel,
-        Action<string> OnConfirm,
-        Func<string, string?>? Validate = null);
+        Action<string, bool> OnConfirm,
+        Func<string, string?>? Validate = null,
+        string? CheckboxLabel = null,
+        bool CheckboxInitial = true);
 
     private void OpenDialog(DialogSpec spec, string initial = "")
     {
         _dialog = spec;
         _dialogValue = initial;
+        _dialogChecked = spec.CheckboxInitial;
         _pendingDialogFocus = true;
         MarkDirty();
     }
@@ -41,8 +46,9 @@ public partial class JunctionApp
         var value = _dialogValue.Trim();
         if (spec.Validate?.Invoke(value) is { } error) { Flash(error); return; }
         var onConfirm = spec.OnConfirm;
+        var checkbox = _dialogChecked;
         CloseDialog();
-        onConfirm(value);
+        onConfirm(value, checkbox);
     }
 
     private void DialogKey(KeyDownEvent e)
@@ -96,6 +102,16 @@ public partial class JunctionApp
         inputBox.AddChild(input);
         card.AddChild(inputBox);
 
+        // Optional checkbox.
+        if (spec.CheckboxLabel is { } checkLabel)
+        {
+            var check = Checkbox.New(_dialogChecked, checkLabel)
+                .OnCheckedChanged(v => { _dialogChecked = v; MarkDirty(); });
+            check.LabelGap = 9f;
+            check.TextColor(Nocturne.On(0.82)).FontSize(13f);
+            card.AddChild(check);
+        }
+
         // Actions.
         var actions = Flex.Row(gap: 8).JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
         actions.AddChild(Ui.SecondaryButton("Cancel", null, CloseDialog, 12.5f));
@@ -110,11 +126,12 @@ public partial class JunctionApp
 
     private void PromptNewBranch() => OpenDialog(new DialogSpec(
         "New branch",
-        "Creates a branch at the current HEAD and checks it out.",
+        "Creates a branch at the current HEAD.",
         "feature/my-branch",
         "Create",
-        name => DoCreateBranch(name, startPoint: null, checkout: true),
-        Validate: NonEmptyBranch));
+        (name, checkout) => DoCreateBranch(name, startPoint: null, checkout: checkout),
+        Validate: NonEmptyBranch,
+        CheckboxLabel: "Check out after creating"));
 
     private static string? NonEmptyBranch(string name) =>
         string.IsNullOrWhiteSpace(name) ? "Enter a branch name" : null;
@@ -135,18 +152,19 @@ public partial class JunctionApp
 
     private void PromptCreateBranchAt(string startPoint, string startLabel) => OpenDialog(new DialogSpec(
         "Create branch",
-        $"Creates a branch at {startLabel} and checks it out.",
+        $"Creates a branch at {startLabel}.",
         "feature/my-branch",
         "Create",
-        name => DoCreateBranch(name, startPoint, checkout: true),
-        Validate: NonEmptyBranch));
+        (name, checkout) => DoCreateBranch(name, startPoint, checkout: checkout),
+        Validate: NonEmptyBranch,
+        CheckboxLabel: "Check out after creating"));
 
     private void PromptCreateTagAt(string commit, string commitLabel) => OpenDialog(new DialogSpec(
         "Create tag",
         $"Tags {commitLabel}.",
         "v1.0.0",
         "Create tag",
-        name =>
+        (name, _) =>
         {
             if (ActiveRepo is not { } repo) return;
             var res = repo.CreateTag(name, commit);
@@ -160,7 +178,7 @@ public partial class JunctionApp
         $"Renames {oldName}.",
         "new-name",
         "Rename",
-        newName =>
+        (newName, _) =>
         {
             if (ActiveRepo is not { } repo) return;
             var res = repo.RenameBranch(oldName, newName);
@@ -174,7 +192,7 @@ public partial class JunctionApp
         $"Sets the upstream tracking branch for {branch}.",
         "origin/" + branch,
         "Set upstream",
-        upstream =>
+        (upstream, _) =>
         {
             if (ActiveRepo is not { } repo) return;
             var res = repo.SetUpstream(branch, upstream);

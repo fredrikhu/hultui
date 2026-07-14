@@ -138,6 +138,16 @@ public static class Nocturne
             SeparatorColor = Divider,
             ShortcutTextColor = On(0.55),
         },
+        // CheckboxElement.ApplyTheme re-applies these every style pass, so per-element
+        // colour overrides don't stick — style through the theme instead.
+        Checkbox = new CheckboxTheme
+        {
+            Size = 16f,
+            CornerRadius = new(RadiusSm),
+            BorderColor = On(0.42),
+            CheckedBackground = Accent,
+            CheckMarkColor = Accent100,
+        },
     };
 
     private static Color Hex(string hex) => Color.FromHex(hex);
