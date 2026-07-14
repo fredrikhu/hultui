@@ -32,10 +32,12 @@ public partial class JunctionApp
     {
         var meta = MetaFor(f.Kind);
 
+        // Column backdrop: JustifyContent = vertical (top-anchored via padding),
+        // AlignItems = horizontal (centered).
         var backdrop = Box.New()
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
             .Background(new Color(0, 0, 0, 140))
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.FlexStart)
+            .JustifyContent(JustifyContent.FlexStart).AlignItems(AlignItems.Center)
             .Padding(new Thickness(64, 24, 24, 24))
             .ZIndex(70);
         backdrop.Position.Type = PositionType.Absolute;
@@ -64,9 +66,10 @@ public partial class JunctionApp
         header.AddChild(Ui.IconButton(Icons.X, CloseModal, "Close", 28f));
         card.AddChild(header);
 
-        // Body (scrolling).
-        var body = ScrollView.New().FlexGrow(1).FlexShrink(1).Padding(new Thickness(16, 18, 16, 18));
-        var col = Flex.Column(gap: 15);
+        // Body (scrolling). Pad the inner column, not the ScrollView, so bordered
+        // fields aren't clipped against the scroll's content-box edge.
+        var body = ScrollView.New().FlexGrow(1).FlexShrink(1);
+        var col = Flex.Column(gap: 15).Padding(new Thickness(16, 18, 16, 18));
 
         if (f.Kind == ModalKind.AddRepo)
             col.AddChild(ModalField("Repository folder",

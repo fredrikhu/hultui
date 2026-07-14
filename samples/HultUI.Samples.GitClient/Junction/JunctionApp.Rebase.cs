@@ -267,10 +267,12 @@ public partial class JunctionApp
 
     private Element BuildRebaseDialog(RebaseState rb)
     {
+        // Backdrop is a column: JustifyContent is the vertical axis (top-anchored
+        // via padding), AlignItems the horizontal axis (centered).
         var backdrop = Box.New()
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
             .Background(new Color(0, 0, 0, 140))
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.FlexStart)
+            .JustifyContent(JustifyContent.FlexStart).AlignItems(AlignItems.Center)
             .Padding(new Thickness(52, 24, 24, 24))
             .ZIndex(72);
         backdrop.Position.Type = PositionType.Absolute;
@@ -346,9 +348,10 @@ public partial class JunctionApp
 
     private Element BuildRebaseRows(RebaseState rb)
     {
-        var scroll = ScrollView.New().FlexGrow(1).FlexShrink(1)
-            .Padding(new Thickness(14, 18, 14, 18));
-        var col = Flex.Column(gap: 8);
+        // Pad the inner column, not the ScrollView: the scroll clips at its content
+        // box, so a bordered child flush against that edge loses its top/left border.
+        var scroll = ScrollView.New().FlexGrow(1).FlexShrink(1);
+        var col = Flex.Column(gap: 8).Padding(new Thickness(14, 18, 14, 18));
         for (var i = 0; i < rb.Rows.Count; i++)
             col.AddChild(BuildRebaseRow(rb, rb.Rows[i], i));
         scroll.AddChild(col);
