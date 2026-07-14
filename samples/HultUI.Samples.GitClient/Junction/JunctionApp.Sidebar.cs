@@ -1,7 +1,9 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using GitClient.Theme;
 
@@ -33,13 +35,15 @@ public partial class JunctionApp
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(6, 10, 16, 10));
 
         // Workspaces.
-        scroll.AddChild(SectionLabel(Icons.Stack, "Workspaces", null));
+        scroll.AddChild(SectionLabel(Icons.Stack, "Workspaces", null,
+            SectionPlus(Icons.Plus, "New workspace", OpenNewWorkspace)));
         foreach (var ws in _settings.Workspaces)
             scroll.AddChild(WorkspaceRow(ws));
 
         // Repositories.
         var repos = ActiveWorkspaceRepos;
-        scroll.AddChild(SectionLabel(Icons.Folders, "Repositories", repos.Count.ToString()));
+        scroll.AddChild(SectionLabel(Icons.Folders, "Repositories", repos.Count.ToString(),
+            SectionPlus(Icons.Plus, "Add or clone repository", OpenRepoAddPopover)));
         foreach (var path in repos)
             scroll.AddChild(RepoRow(path));
 
@@ -52,7 +56,7 @@ public partial class JunctionApp
         return aside;
     }
 
-    private Element SectionLabel(string glyph, string text, string? count)
+    private Element SectionLabel(string glyph, string text, string? count, Element? action = null)
     {
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
             .Padding(new Thickness(12, 6, 6, 6));
@@ -60,7 +64,37 @@ public partial class JunctionApp
         row.AddChild(Text.New(text.ToUpperInvariant()).FontSize(10f).TextColor(Nocturne.On(0.42)).FlexGrow(1));
         if (count != null)
             row.AddChild(Text.New(count).FontSize(11f).TextColor(Nocturne.On(0.45)));
+        if (action != null)
+            row.AddChild(action);
         return row;
+    }
+
+    /// <summary>A small borderless "+" affordance for a section header. The click
+    /// handler receives the button's on-screen box so popovers can anchor to it.</summary>
+    private Element SectionPlus(string glyph, string tooltip, Action onClick)
+    {
+        var b = Box.New()
+            .Width(22).Height(22).FlexShrink(0).CornerRadius(Nocturne.RadiusSm)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .Cursor(CursorType.Pointer).Tooltip(tooltip)
+            .Children(Ui.Icon(glyph, 14f, Nocturne.On(0.6)));
+        b.On<ClickEvent>(e =>
+        {
+            e.StopPropagation = true;
+            // Read the (already-laid-out) button box so popovers anchor under it.
+            var box = b.Layout.AbsoluteBorderBox;
+            _popoverX = box.X;
+            _popoverY = box.Y + box.Height + 4;
+            onClick();
+        });
+        b.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        return b;
+    }
+
+    private void OpenRepoAddPopover()
+    {
+        _popover = RepoAddMenuItems();
+        MarkDirty();
     }
 
     private Element WorkspaceRow(WorkspaceData ws)
@@ -78,6 +112,8 @@ public partial class JunctionApp
         row.AddChild(Text.New(ws.RepoPaths.Count.ToString()).FontSize(11f).TextColor(Nocturne.On(0.45)));
 
         row.OnClick(_ => SelectWorkspace(ws.Id));
+        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectWorkspace(ws.Id); });
+        row.ContextMenu(() => WorkspaceMenuItems(ws));
         if (!active) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
@@ -87,7 +123,7 @@ public partial class JunctionApp
         var active = PathEquals(path, _activeRepoPath);
         var name = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
         var sum = SummaryFor(path);
-        var (tileBg, tileFg) = Ui.RepoTileColors(path);
+        var (tileBg, tileFg) = RepoTile(path);
 
         var row = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
             .Padding(new Thickness(7, 8, 7, 8)).CornerRadius(Nocturne.RadiusMd)
@@ -112,6 +148,8 @@ public partial class JunctionApp
         row.AddChild(status);
 
         row.OnClick(_ => SelectRepo(path));
+        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectRepo(path); });
+        row.ContextMenu(() => RepoMenuItems(path));
         if (!active) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
@@ -147,7 +185,7 @@ public partial class JunctionApp
         foreach (var path in suggestions)
         {
             var name = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
-            var (bg, fg) = Ui.RepoTileColors(path);
+            var (bg, fg) = RepoTile(path);
             var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(5, 6, 5, 6)).CornerRadius(Nocturne.RadiusRow)
                 .Cursor(CursorType.Pointer).Tooltip($"Add {name} to this workspace");
@@ -180,7 +218,7 @@ public partial class JunctionApp
         {
             var active = PathEquals(path, _activeRepoPath);
             var name = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
-            var (bg, fg) = Ui.RepoTileColors(path);
+            var (bg, fg) = RepoTile(path);
             var tile = Box.New()
                 .Width(34).Height(34).FlexShrink(0).CornerRadius(Nocturne.RadiusMd)
                 .Background(active ? Nocturne.Accent800 : Nocturne.Neutral900)
@@ -216,10 +254,23 @@ public partial class JunctionApp
         return string.IsNullOrEmpty(dir) ? path : dir;
     }
 
-    private static string WorkspaceGlyph(string icon) => icon switch
+    internal static string WorkspaceGlyph(string icon) => icon switch
     {
         "browsers" => Icons.Browsers,
         "shapes" => Icons.Shapes,
+        "rocket-launch" => Icons.RocketLaunch,
+        "package" => Icons.Package,
+        "cube" => Icons.Cube,
+        "database" => Icons.Database,
+        "cloud" => Icons.Cloud,
+        "flask" => Icons.Flask,
+        "tree-structure" => Icons.TreeStructure,
+        "git-fork" => Icons.GitFork,
+        "lightning" => Icons.Lightning,
+        "palette" => Icons.Palette,
+        "wrench" => Icons.Wrench,
+        "bug" => Icons.Bug,
+        "squares-four" => Icons.SquaresFour,
         "stack" => Icons.Stack,
         _ => Icons.Stack,
     };

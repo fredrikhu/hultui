@@ -482,7 +482,11 @@ public partial class JunctionApp
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton("Cancel", null, CloseRebase, 12.5f));
-        bar.AddChild(bad ? DisabledStartButton() : Ui.PrimaryButton("Start rebase", Icons.Play, RunRebase, 12.5f));
+        // Key by state — the enabled/disabled variants are different elements and the
+        // framework doesn't copy handlers on patch (see the modal primary button).
+        var start = bad ? DisabledStartButton() : Ui.PrimaryButton("Start rebase", Icons.Play, RunRebase, 12.5f);
+        start.Key = "rebase-start-" + (bad ? "off" : "on");
+        bar.AddChild(start);
         return bar;
     }
 

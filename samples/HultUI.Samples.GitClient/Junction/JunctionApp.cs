@@ -96,6 +96,13 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<TextInputElement> _dialogRef = new();
     private bool _pendingDialogFocus;
 
+    // Repository / workspace management modal + the Repositories "+" popover.
+    private ModalForm? _modal;
+    private readonly Ref<TextInputElement> _modalNameRef = new();
+    private bool _pendingModalFocus;
+    private IReadOnlyList<ContextMenuItem>? _popover;
+    private float _popoverX, _popoverY;
+
     // Interactive rebase dialog (newest-first todo editor + reword sub-dialog).
     private RebaseState? _rebase;
     private int _rbSel;
@@ -249,30 +256,31 @@ public partial class JunctionApp : Component, IDisposable
 
     public override Element Build()
     {
+        // Key every child. The overlays below are added conditionally, so without
+        // keys they reconcile by position — and when one overlay disappears while
+        // another appears at the same index, the framework patches one subtree onto
+        // the other and (since it doesn't copy handlers) leaks a stale handler onto
+        // the new element. Distinct keys make each overlay reconcile only against
+        // its own kind. (Bit us as the "+" popover's Clone handler leaking onto the
+        // add-repo modal.)
+        var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
+        var body = BuildBody(); body.Key = "body";
         var root = Flex.Column(gap: 0)
             .FlexGrow(1)
             .Background(Nocturne.Bg)
             .TextColor(Nocturne.Text)
             .FontSize(13f)
-            .Children(
-                BuildTitleBar(),
-                BuildBody()
-            );
+            .Children(titleBar, body);
 
-        if (_diffFull)
-            root.AddChild(BuildFullscreenDiff());
+        void Overlay(string key, Element el) { el.Key = key; root.AddChild(el); }
 
-        if (_toast != null)
-            root.AddChild(BuildToast(_toast));
-
-        if (_paletteOpen)
-            root.AddChild(BuildPalette());
-
-        if (_dialog != null)
-            root.AddChild(BuildDialog(_dialog));
-
-        if (_rebase != null)
-            root.AddChild(BuildRebaseDialog(_rebase));
+        if (_diffFull) Overlay("fullscreen-diff", BuildFullscreenDiff());
+        if (_toast != null) Overlay("toast", BuildToast(_toast));
+        if (_paletteOpen) Overlay("palette", BuildPalette());
+        if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
+        if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
+        if (_popover != null) Overlay("popover", BuildPopover(_popover));
+        if (_modal != null) Overlay("modal", BuildModal(_modal));
 
         return root;
     }
@@ -350,6 +358,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingRewordFocus = false;
             _rbRewordRef.Current?.Focus();
+        }
+
+        if (_pendingModalFocus)
+        {
+            _pendingModalFocus = false;
+            _modalNameRef.Current?.Focus();
         }
 
         if (_pendingScrollToSelected)
@@ -446,6 +460,19 @@ public partial class JunctionApp : Component, IDisposable
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
+
+        // The repo/workspace popover and modal are lightweight; Esc dismisses them,
+        // and (for the modal) typing flows to the focused field.
+        if (_popover != null)
+        {
+            if (e.Key == KeyCode.Escape) { _popover = null; MarkDirty(); e.StopPropagation = true; }
+            return;
+        }
+        if (_modal != null)
+        {
+            if (e.Key == KeyCode.Escape) { CloseModal(); e.StopPropagation = true; }
+            return;
+        }
 
         // The interactive-rebase modal owns the keyboard while open. Its reword
         // sub-dialog (a textarea) only reacts to Esc; everything else types.

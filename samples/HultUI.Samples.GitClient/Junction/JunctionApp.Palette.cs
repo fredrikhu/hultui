@@ -189,6 +189,9 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.GitBranch, "Create new branch…", "", () => { ClosePalette(); PromptNewBranch(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));
         items.Add(new("action", "Action", Icons.ArchiveTray, "Stash changes", "", () => { ClosePalette(); DoStash(); }));
+        items.Add(new("action", "Action", Icons.FolderPlus, "Add existing repository…", "", () => { ClosePalette(); OpenAddRepo(); }));
+        items.Add(new("action", "Action", Icons.DownloadSimple, "Clone repository…", "", () => { ClosePalette(); OpenCloneRepo(); }));
+        items.Add(new("action", "Action", Icons.StackPlus, "New workspace…", "", () => { ClosePalette(); OpenNewWorkspace(); }));
 
         // Go to view.
         void GoTo(string label, string glyph, JunctionView v) =>

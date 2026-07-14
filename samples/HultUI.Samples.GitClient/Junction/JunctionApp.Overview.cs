@@ -63,7 +63,7 @@ public partial class JunctionApp
     {
         var name = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
         var sum = SummaryFor(path);
-        var (tileBg, tileFg) = Ui.RepoTileColors(path);
+        var (tileBg, tileFg) = RepoTile(path);
         var pb = BranchName.Parse(sum.Branch);
 
         var card = Flex.Column(gap: 12).FlexGrow(1).FlexBasis(Dimension.Px(0))

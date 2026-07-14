@@ -79,6 +79,35 @@ public static class Icons
     public const string Play = "▶";                   // ▶  start rebase
     public const string DotsSixVertical = "⠿";        // ⠿  drag handle
 
+    // Repo / workspace management
+    public const string FolderPlus = "▤";       // ▤  add existing repo
+    public const string DownloadSimple = "⤓";   // ⤓  clone repo
+    public const string StackPlus = "⊞";        // ⊞  new workspace
+    public const string Swatches = "▧";          // ▧  repo settings
+    public const string PlusCircle = "⊕";        // ⊕  add to workspace
+    public const string MinusCircle = "⊖";       // ⊖  remove from workspace
+    public const string FolderOpen = "▤";        // ▤  browse
+    public const string CheckBold = "✓";         // ✓  selected swatch
+
+    // Workspace icon picker glyphs (Phosphor stand-ins; keyed by name)
+    public const string RocketLaunch = "➶";      // ➶  rocket-launch
+    public const string Package = "▧";           // ▧  package
+    public const string Cube = "⬡";              // ⬡  cube
+    public const string Database = "⛁";          // ⛁  database
+    public const string TreeStructure = "⑂";     // ⑂  tree-structure
+    public const string Lightning = "⚡";         // ⚡  lightning
+    public const string Palette = "❖";           // ❖  palette
+    public const string Bug = "☣";               // ☣  bug
+
+    /// <summary>The 16 workspace icon keys (order = picker order), as stored in
+    /// <c>WorkspaceData.Icon</c>. Map a key to its glyph via <c>WorkspaceGlyph</c>.</summary>
+    public static readonly string[] WorkspaceKeys =
+    [
+        "stack", "browsers", "shapes", "rocket-launch", "package", "cube",
+        "database", "cloud", "flask", "tree-structure", "git-fork", "lightning",
+        "palette", "wrench", "bug", "squares-four",
+    ];
+
     // Context-menu verbs
     public const string BendDownRight = "↳";  // ↳  checkout detached
     public const string Cherries = "◈";       // ◈  cherry-pick

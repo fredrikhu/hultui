@@ -15,6 +15,10 @@ public sealed class GitClientSettingsData
     public string? ActiveWorkspaceId { get; set; }
     public string? ActiveRepoPath { get; set; }
 
+    // Junction: per-repo badge swatch id (path → swatch id), driving the repo's
+    // initial tile everywhere. Missing entries fall back to a deterministic seed.
+    public Dictionary<string, string> RepoBadges { get; set; } = new();
+
     public GeneralOptions General { get; set; } = new();
     public GitOptions Git { get; set; } = new();
     public ExternalToolOptions ExternalTools { get; set; } = new();
@@ -24,6 +28,7 @@ public sealed class GitClientSettingsData
     {
         RepositoryPaths ??= [];
         Workspaces ??= [];
+        RepoBadges ??= new();
         General ??= new GeneralOptions();
         Git ??= new GitOptions();
         ExternalTools ??= new ExternalToolOptions();
@@ -69,6 +74,7 @@ public sealed class GitClientSettingsData
         Workspaces = Workspaces.Select(w => w.Clone()).ToList(),
         ActiveWorkspaceId = ActiveWorkspaceId,
         ActiveRepoPath = ActiveRepoPath,
+        RepoBadges = new(RepoBadges),
         General = General.Clone(),
         Git = Git.Clone(),
         ExternalTools = ExternalTools.Clone(),
@@ -83,6 +89,8 @@ public sealed class WorkspaceData
     public string Name { get; set; } = "";
     /// <summary>A logical icon key (e.g. "stack", "browsers", "shapes"); the UI maps it to a glyph.</summary>
     public string Icon { get; set; } = "stack";
+    /// <summary>The workspace's icon-colour swatch id (see Swatches).</summary>
+    public string Color { get; set; } = "blurple";
     public List<string> RepoPaths { get; set; } = [];
 
     public void Normalize()
@@ -92,6 +100,8 @@ public sealed class WorkspaceData
             Id = Guid.NewGuid().ToString("N")[..8];
         if (string.IsNullOrWhiteSpace(Icon))
             Icon = "stack";
+        if (string.IsNullOrWhiteSpace(Color))
+            Color = "blurple";
     }
 
     public WorkspaceData Clone() => new()
@@ -99,6 +109,7 @@ public sealed class WorkspaceData
         Id = Id,
         Name = Name,
         Icon = Icon,
+        Color = Color,
         RepoPaths = [.. RepoPaths],
     };
 }
