@@ -155,19 +155,31 @@ public partial class JunctionApp
     private void SubmitAddRepo(ModalForm f)
     {
         var path = ExpandPath(f.Path.Trim());
-        if (!System.IO.Directory.Exists(System.IO.Path.Combine(path, ".git")) &&
-            !System.IO.Directory.Exists(path))
+        if (!System.IO.Directory.Exists(path))
         {
             Flash("Not a folder: " + path);
             return;
         }
-        if (!System.IO.Directory.Exists(System.IO.Path.Combine(path, ".git")))
+        if (!IsGitRepo(path))
         {
-            Flash("Not a git repository (no .git): " + path);
+            Flash("Not a git repository: " + path);
             return;
         }
         RegisterRepo(path, f);
         Flash($"Added {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}");
+    }
+
+    /// <summary>True when <paramref name="path"/> is a git working-tree root: it has
+    /// a <c>.git</c> entry (a directory for a normal clone, or a file for a worktree /
+    /// submodule) that git actually recognises. Rejects plain folders and empty or
+    /// broken <c>.git</c> directories that the directory check alone would accept.</summary>
+    private static bool IsGitRepo(string path)
+    {
+        var dotGit = System.IO.Path.Combine(path, ".git");
+        if (!System.IO.Directory.Exists(dotGit) && !System.IO.File.Exists(dotGit))
+            return false;
+        var res = GitProcess.Run(path, "rev-parse", "--is-inside-work-tree");
+        return res.Success && res.Stdout.Trim() == "true";
     }
 
     private async void SubmitCloneRepo(ModalForm f)
