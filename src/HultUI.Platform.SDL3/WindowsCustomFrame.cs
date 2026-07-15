@@ -30,19 +30,36 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const int GWL_STYLE = -16;
     private const int WS_MINIMIZEBOX = 0x00020000;
     private const int WS_MAXIMIZEBOX = 0x00010000;
+    private const int WS_SYSMENU = 0x00080000;
 
+    private const uint WM_SIZE = 0x0005;
     private const uint WM_NCCALCSIZE = 0x0083;
     private const uint WM_NCHITTEST = 0x0084;
     private const uint WM_MOUSEMOVE = 0x0200;
     private const uint WM_NCMOUSEMOVE = 0x00A0;
     private const uint WM_NCLBUTTONDOWN = 0x00A1;
     private const uint WM_NCLBUTTONUP = 0x00A2;
+    private const uint WM_NCRBUTTONUP = 0x00A5;
     private const uint WM_NCMOUSELEAVE = 0x02A2;
+    private const uint WM_SYSKEYDOWN = 0x0104;
+    private const uint WM_SYSCHAR = 0x0106;
     private const uint WM_SYSCOMMAND = 0x0112;
     private const uint WM_DWMCOMPOSITIONCHANGED = 0x031E;
+    private const uint WM_GETTITLEBARINFOEX = 0x033F;
 
+    private const int VK_SPACE = 0x20;
+
+    private const int SC_SIZE = 0xF000;
+    private const int SC_MOVE = 0xF010;
+    private const int SC_MINIMIZE = 0xF020;
     private const int SC_MAXIMIZE = 0xF030;
+    private const int SC_CLOSE = 0xF060;
     private const int SC_RESTORE = 0xF120;
+
+    private const uint MF_BYCOMMAND = 0x0000;
+    private const uint MF_ENABLED = 0x0000;
+    private const uint MF_GRAYED = 0x0001;
+    private const uint TPM_RETURNCMD = 0x0100;
 
     private const int HTCLIENT = 1;
     private const int HTCAPTION = 2;
@@ -83,6 +100,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private int _captionHeightPx = 1;
     private bool _maxPressed;      // a left-press landed on the maximize button
     private bool _maxLeaveTracked; // WM_NCMOUSELEAVE is armed for the current NC hover
+    private bool _wasZoomed;       // maximized state at the last WM_SIZE (see ExtendFrame)
 
     private WindowsCustomFrame(SDL3Window window, IntPtr hwnd)
     {
@@ -106,10 +124,19 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         frame._originalProc = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (IntPtr)proc);
 
         // Windows 11 only offers the Snap Layouts flyout for windows that advertise
-        // a maximize box. SDL's borderless window omits WS_MAXIMIZEBOX/MINIMIZEBOX,
-        // so add them back (they have no visual effect without an OS title bar).
+        // a maximize box, so add WS_MAXIMIZEBOX/MINIMIZEBOX back (no visual effect
+        // without an OS title bar). WS_SYSMENU must go: with it, Windows assumes the
+        // window has *standard* caption buttons and only honours HTMAXBUTTON inside
+        // the standard caption band (SM_CYFRAME + SM_CXPADDEDBORDER + SM_CYCAPTION
+        // from the top — 45px at 150% DPI), which is shorter than our title bar; a
+        // hover that enters the button below that band never shows the flyout.
+        // Without WS_SYSMENU there is no standard geometry to validate against and
+        // HTMAXBUTTON is honoured across the full button (this is why Electron apps
+        // get full-height flyouts — they drop WS_SYSMENU too). Costs the Alt+Space
+        // system menu, which a custom-chrome window doesn't surface anyway.
         long style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
-        SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style | WS_MAXIMIZEBOX | WS_MINIMIZEBOX));
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+            (IntPtr)((style | WS_MAXIMIZEBOX | WS_MINIMIZEBOX) & ~(long)WS_SYSMENU));
 
         frame.ExtendFrame();
 
@@ -122,7 +149,16 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     private void ExtendFrame()
     {
-        var margins = new MARGINS { CyTopHeight = _captionHeightPx };
+        // The margin is measured from the window-rect top. Maximized, the rect
+        // (and with it the frame's first SM_CYFRAME + SM_CXPADDEDBORDER px) sits
+        // off-screen, which would leave the bottom of the maximize button outside
+        // the caption region — and Windows only honours HTMAXBUTTON for the Snap
+        // Layouts flyout inside that region — so grow the margin by the clipped
+        // frame. Re-applied on maximize/restore transitions (see WM_SIZE).
+        int px = _captionHeightPx;
+        if (IsZoomed(_hwnd))
+            px += GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+        var margins = new MARGINS { CyTopHeight = px };
         DwmExtendFrameIntoClientArea(_hwnd, ref margins);
     }
 
@@ -190,6 +226,44 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
                 case WM_DWMCOMPOSITIONCHANGED:
                     frame.ExtendFrame();
                     break;
+
+                // The shell (when showing the Snap Layouts flyout) and assistive
+                // tech query the caption geometry through this; without WS_SYSMENU
+                // DefWindowProc reports a zeroed, invisible maximize button, so fill
+                // in our custom chrome's real rects.
+                case WM_GETTITLEBARINFOEX:
+                {
+                    IntPtr res = CallWindowProcW(frame._originalProc, hwnd, msg, wParam, lParam);
+                    frame.FillTitleBarInfo(hwnd, lParam);
+                    return res;
+                }
+
+                // Without WS_SYSMENU DefWindowProc no longer opens the window menu;
+                // provide it ourselves the way Chromium does (Alt+Space and
+                // right-click on the caption).
+                case WM_SYSKEYDOWN when (int)wParam.ToUInt64() == VK_SPACE:
+                    frame.ShowSystemMenu(hwnd, atCursor: false);
+                    return IntPtr.Zero;
+
+                case WM_SYSCHAR when (int)wParam.ToUInt64() == VK_SPACE:
+                    return IntPtr.Zero; // handled at WM_SYSKEYDOWN; swallow the beep
+
+                case WM_NCRBUTTONUP when (int)wParam.ToUInt64() == HTCAPTION:
+                    frame.ShowSystemMenu(hwnd, atCursor: true);
+                    return IntPtr.Zero;
+
+                // The DWM caption margin depends on the maximized state (see
+                // ExtendFrame); re-apply it when that state flips.
+                case WM_SIZE:
+                {
+                    bool zoomed = IsZoomed(hwnd);
+                    if (zoomed != frame._wasZoomed)
+                    {
+                        frame._wasZoomed = zoomed;
+                        frame.ExtendFrame();
+                    }
+                    break;
+                }
             }
 
             return CallWindowProcW(frame._originalProc, hwnd, msg, wParam, lParam);
@@ -251,7 +325,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // border, and returning HTTOP there hides the flyout (Windows probes the
         // button's top). The button is never at a resize corner, so claiming its
         // whole rect costs no real resize target. We drive the button's own
-        // highlight and click from the NC messages (see WndProc).
+        // highlight and click from the NC messages (see WndProc). The flyout
+        // works over the button's full height only because Install() strips
+        // WS_SYSMENU — see the comment there.
         if (_window.IsWindowMaximizePoint?.Invoke(dipX, dipY) == true)
             return HTMAXBUTTON;
 
@@ -294,15 +370,112 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         return HTCLIENT;
     }
 
-    /// <summary>Maximizes or restores the window natively via WM_SYSCOMMAND — the
+    /// <summary>Fills the caller's TITLEBARINFOEX with our custom chrome's title
+    /// bar and maximize-button rects (screen px). Index 3 of rgstate/rgrect is the
+    /// maximize button; state 0 means visible and enabled. The shell reads this to
+    /// position the Snap Layouts flyout.</summary>
+    private void FillTitleBarInfo(IntPtr hwnd, IntPtr lParam)
+    {
+        if (lParam == IntPtr.Zero) return;
+        var p = (byte*)lParam;
+        // DWORD cbSize; RECT rcTitleBar; DWORD rgstate[6]; RECT rgrect[6]
+        if (*(uint*)p < 4u + 16u + 6 * 4u + 6 * 16u) return;
+        if (_window.GetWindowMaximizeButtonBounds?.Invoke() is not { } b) return;
+
+        float scale = _window.DisplayScale <= 0f ? 1f : _window.DisplayScale;
+        var origin = new POINT();
+        ClientToScreen(hwnd, ref origin);
+        var btn = new RECT
+        {
+            Left = origin.X + (int)(b.X * scale),
+            Top = origin.Y + (int)(b.Y * scale),
+            Right = origin.X + (int)((b.X + b.Width) * scale),
+            Bottom = origin.Y + (int)((b.Y + b.Height) * scale),
+        };
+
+        var rcTitle = (RECT*)(p + 4);
+        var states = (uint*)(p + 4 + sizeof(RECT));
+        var rects = (RECT*)(p + 4 + sizeof(RECT) + 6 * sizeof(uint));
+        GetWindowRect(hwnd, out RECT wr);
+        *rcTitle = new RECT { Left = wr.Left, Top = btn.Top, Right = wr.Right, Bottom = btn.Bottom };
+        states[3] = 0;
+        rects[3] = btn;
+    }
+
+    /// <summary>Shows the native window (system) menu and executes the picked
+    /// command. Without WS_SYSMENU DefWindowProc won't do this itself, so Alt+Space
+    /// and caption right-click are wired to this — the same approach Chromium uses.
+    /// GetSystemMenu still returns the default menu for WS_SYSMENU-less windows;
+    /// enable/disable items to match the window state like the native menu does.</summary>
+    private void ShowSystemMenu(IntPtr hwnd, bool atCursor)
+    {
+        // GetSystemMenu is gated on the CURRENT window style, and Install strips
+        // WS_SYSMENU (required for full-height Snap Layouts on the maximize
+        // button). Flip it on for the duration of the menu; the flyout only
+        // consults the style while hovering the button, so the transient flip —
+        // under a modal menu loop — is unobservable.
+        long style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
+        SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style | WS_SYSMENU));
+        try
+        {
+            IntPtr menu = GetSystemMenu(hwnd, false);
+            if (menu == IntPtr.Zero) return;
+            ShowSystemMenuCore(hwnd, menu, atCursor);
+        }
+        finally
+        {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, (IntPtr)(style & ~(long)WS_SYSMENU));
+        }
+    }
+
+    private void ShowSystemMenuCore(IntPtr hwnd, IntPtr menu, bool atCursor)
+    {
+
+        bool zoomed = IsZoomed(_hwnd);
+        EnableMenuItem(menu, SC_RESTORE, MF_BYCOMMAND | (zoomed ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, SC_MOVE, MF_BYCOMMAND | (zoomed ? MF_GRAYED : MF_ENABLED));
+        EnableMenuItem(menu, SC_SIZE, MF_BYCOMMAND | (zoomed ? MF_GRAYED : MF_ENABLED));
+        EnableMenuItem(menu, SC_MINIMIZE, MF_BYCOMMAND | MF_ENABLED);
+        EnableMenuItem(menu, SC_MAXIMIZE, MF_BYCOMMAND | (zoomed ? MF_GRAYED : MF_ENABLED));
+        EnableMenuItem(menu, SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+        SetMenuDefaultItem(menu, (uint)(zoomed ? SC_RESTORE : SC_MAXIMIZE), 0);
+
+        int x, y;
+        if (atCursor && GetCursorPos(out POINT cur))
+        {
+            x = cur.X; y = cur.Y;
+        }
+        else
+        {
+            // Alt+Space: below the top-left corner of the visible caption,
+            // like the native menu.
+            GetWindowRect(hwnd, out RECT wr);
+            int inset = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            x = wr.Left + (zoomed ? inset : 0);
+            y = wr.Top + (zoomed ? inset : 0) + _captionHeightPx;
+        }
+
+        // TPM_RETURNCMD runs the menu loop and hands the choice back instead of
+        // sending WM_COMMAND; post it as the system command it stands for.
+        uint cmd = (uint)TrackPopupMenu(menu, TPM_RETURNCMD, x, y, 0, hwnd, IntPtr.Zero);
+        if (cmd != 0)
+            PostMessageW(hwnd, WM_SYSCOMMAND, (UIntPtr)cmd, IntPtr.Zero);
+    }
+
+    /// <summary>Maximizes/restores the window natively via WM_SYSCOMMAND — the
     /// same path the caption double-click uses. Posted (not sent) so it runs after
-    /// the current NC message returns. SDL's maximize (SDL_MaximizeWindow) only flips
-    /// SDL's flag on this custom-frame window without resizing it, so we don't use it
-    /// here; the resulting WM_SIZE still keeps SDL's state in sync.</summary>
+    /// the message being handled returns. SDL's maximize (SDL_MaximizeWindow) only
+    /// flips SDL's flag on this custom-frame window without resizing it, so it must
+    /// not be used; the WM_SIZE these produce still keeps SDL's state in sync.</summary>
+    public void Maximize() => PostMessageW(_hwnd, WM_SYSCOMMAND, (UIntPtr)SC_MAXIMIZE, IntPtr.Zero);
+
+    /// <inheritdoc cref="Maximize"/>
+    public void Restore() => PostMessageW(_hwnd, WM_SYSCOMMAND, (UIntPtr)SC_RESTORE, IntPtr.Zero);
+
     private void ToggleMaximizeNative()
     {
-        uint sc = IsZoomed(_hwnd) ? (uint)SC_RESTORE : (uint)SC_MAXIMIZE;
-        PostMessageW(_hwnd, WM_SYSCOMMAND, (UIntPtr)sc, IntPtr.Zero);
+        if (IsZoomed(_hwnd)) Restore();
+        else Maximize();
     }
 
     private void HandleNcMouseMove(IntPtr hwnd, UIntPtr wParam)
@@ -384,6 +557,27 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [DllImport("user32")]
     private static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32")]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32")]
+    private static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+
+    [DllImport("user32")]
+    private static extern bool EnableMenuItem(IntPtr hMenu, int uIDEnableItem, uint uEnable);
+
+    [DllImport("user32")]
+    private static extern bool SetMenuDefaultItem(IntPtr hMenu, uint uItem, uint fByPos);
+
+    [DllImport("user32")]
+    private static extern int TrackPopupMenu(IntPtr hMenu, uint uFlags, int x, int y, int nReserved, IntPtr hWnd, IntPtr prcRect);
 
     [DllImport("user32")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);

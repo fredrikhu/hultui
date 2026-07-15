@@ -112,6 +112,12 @@ public sealed unsafe class SDL3Window : IDisposable
     /// </summary>
     internal Func<int, int, bool>? IsWindowMaximizePoint { get; set; }
 
+    /// <summary>Returns the maximize/restore button's bounds in layout units
+    /// (client-relative), or null when there is none. The Windows custom frame
+    /// reports it via WM_GETTITLEBARINFOEX so the shell can anchor the Snap
+    /// Layouts flyout to the button. Set by Window.cs.</summary>
+    internal Func<Rect?>? GetWindowMaximizeButtonBounds { get; set; }
+
     /// <summary>Called (true) when the pointer enters the maximize button in the
     /// non-client area and (false) when it leaves, so the app can drive the
     /// button's hover highlight itself (Windows won't). Set by Window.cs.</summary>
@@ -334,8 +340,21 @@ public sealed unsafe class SDL3Window : IDisposable
     // ──── Window management (for custom chrome) ────
 
     public void Minimize() => SDL_MinimizeWindow(_window);
-    public void Maximize() => SDL_MaximizeWindow(_window);
-    public void Restore() => SDL_RestoreWindow(_window);
+
+    // With the Windows custom frame installed, SDL_MaximizeWindow/SDL_RestoreWindow
+    // only flip SDL's maximized flag without resizing the window, so route through
+    // the frame's native WM_SYSCOMMAND path instead.
+    public void Maximize()
+    {
+        if (OperatingSystem.IsWindows() && _customFrame is { } frame) frame.Maximize();
+        else SDL_MaximizeWindow(_window);
+    }
+
+    public void Restore()
+    {
+        if (OperatingSystem.IsWindows() && _customFrame is { } frame) frame.Restore();
+        else SDL_RestoreWindow(_window);
+    }
 
     public bool IsMaximized =>
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;

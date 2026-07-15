@@ -150,6 +150,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 // maximize button (so it can show the Snap Layouts flyout).
                 platformWindow.IsWindowDragPoint = IsWindowDragRegion;
                 platformWindow.IsWindowMaximizePoint = IsWindowMaximizeRegion;
+                platformWindow.GetWindowMaximizeButtonBounds = () => FindMaximizeButton()?.Layout.AbsoluteBorderBox;
                 platformWindow.OnMaximizeButtonHover = SetMaximizeButtonHover;
             }
             else
