@@ -725,6 +725,38 @@ public class GitRepository
     }
 
     /// <summary>
+    /// Finalises an in-progress merge once every conflict is resolved (staged),
+    /// creating the merge commit from the prepared MERGE_MSG. Fails if any path is
+    /// still unmerged — callers should only offer this when there are no conflicts
+    /// left.
+    /// </summary>
+    public GitResult MergeContinue()
+    {
+        return GitProcess.Run(Path, "commit", "--no-edit");
+    }
+
+    /// <summary>
+    /// The name of the branch being merged in ("theirs"), parsed from the prepared
+    /// MERGE_MSG (e.g. <c>Merge branch 'feature'</c>). Returns null when the merge
+    /// isn't of a named branch (e.g. a raw commit) or MERGE_MSG is absent.
+    /// </summary>
+    public string? GetMergingBranchName()
+    {
+        var msgPath = System.IO.Path.Combine(Path, ".git", "MERGE_MSG");
+        if (!File.Exists(msgPath)) return null;
+        string first;
+        try { first = File.ReadLines(msgPath).FirstOrDefault() ?? ""; }
+        catch (IOException) { return null; }
+
+        // "Merge branch 'x'", "Merge remote-tracking branch 'origin/x'",
+        // "Merge branches 'x' and 'y'" — take the first quoted name.
+        int open = first.IndexOf('\'');
+        if (open < 0) return null;
+        int close = first.IndexOf('\'', open + 1);
+        return close > open ? first[(open + 1)..close] : null;
+    }
+
+    /// <summary>
     /// Returns true if the repository is in a conflicted merge state
     /// (MERGE_HEAD exists).
     /// </summary>

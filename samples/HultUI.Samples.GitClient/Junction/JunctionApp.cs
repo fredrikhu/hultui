@@ -107,6 +107,9 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Dictionary<string, AsyncLoader<ChangesData>> _changesLoaders = new(PathComparer);
     private string? _changeSelPath;
     private bool _changeSelStaged;
+    // True when the selected file is a merge conflict; the right pane then shows the
+    // ours/theirs resolution UI instead of a diff.
+    private bool _changeSelConflicted;
     private string _commitSummary = "";
     private string _commitDescription = "";
     private readonly Ref<TextInputElement> _summaryRef = new();
@@ -185,10 +188,19 @@ public partial class JunctionApp : Component, IDisposable
         IReadOnlyList<GitFileChange> Staged,
         IReadOnlyList<GitFileChange> Unstaged,
         Dictionary<string, GitFileDiff> StagedDiffs,
-        Dictionary<string, GitFileDiff> UnstagedDiffs)
+        Dictionary<string, GitFileDiff> UnstagedDiffs,
+        bool IsMerging,
+        IReadOnlyList<GitFileChange> Conflicted,
+        MergeSides? Merge)
     {
-        public static readonly ChangesData Empty = new([], [], new(), new());
+        public static readonly ChangesData Empty = new([], [], new(), new(), false, [], null);
     }
+
+    // Identity of the two sides of an in-progress merge: "ours" = HEAD (the branch
+    // being merged into), "theirs" = MERGE_HEAD (the branch being merged in).
+    private readonly record struct MergeSides(
+        string OursBranch, GitCommit? Ours,
+        string? TheirsBranch, GitCommit? Theirs);
 
     private readonly record struct BranchesData(IReadOnlyList<GitBranch> Local)
     {

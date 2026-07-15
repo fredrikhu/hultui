@@ -19,20 +19,32 @@ public partial class JunctionApp
         _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadChanges, onLoaded: PickInitialChange);
         var data = _changes.Value;
 
+        // During a merge the right pane is always shown — it hosts the per-file
+        // conflict resolution — even on narrow windows where diffs normally hide.
+        bool showPane = !_hideDiff || data.IsMerging;
+
+        var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
+        row.AddChild(BuildChangesColumn(data, fill: !showPane));
+        if (showPane)
+            row.AddChild(BuildChangesRightPane(data));
+        return row;
+    }
+
+    // The right pane: a conflicted file shows the ours/theirs resolution UI; any
+    // other selection shows the normal diff (open in VS Code with Ctrl+D).
+    private Element BuildChangesRightPane(ChangesData data)
+    {
+        if (data.IsMerging && _changeSelConflicted && _changeSelPath != null
+            && data.Conflicted.Any(f => f.Path == _changeSelPath))
+            return BuildConflictResolutionPane(_changeSelPath, data.Merge);
+
         GitFileDiff? diff = null;
-        if (_changeSelPath != null)
+        if (_changeSelPath != null && !_changeSelConflicted)
         {
             var dict = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
             dict.TryGetValue(_changeSelPath, out diff);
         }
-
-        var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        // Narrow windows hide the diff pane; the file list + composer fill instead
-        // (open the diff in VS Code with Ctrl+D — see OpenSelectedDiffExternally).
-        row.AddChild(BuildChangesColumn(data, fill: _hideDiff));
-        if (!_hideDiff)
-            row.AddChild(BuildDiffPane(_changeSelPath ?? "", diff));
-        return row;
+        return BuildDiffPane(_changeSelPath ?? "", diff);
     }
 
     // Runs off the UI thread.
@@ -41,6 +53,22 @@ public partial class JunctionApp
         var repo = RepoFor(_activeRepoPath);
         var staged = repo.GetStagedChanges();
         var unstaged = repo.GetUnstagedChanges();
+
+        // Conflict state. Unmerged files leak into `git diff` as plain "Modified",
+        // so pull them from status (GetConflictedFiles) and remove them from the
+        // ordinary lists — they get their own resolution panel instead.
+        bool merging = repo.IsMerging();
+        IReadOnlyList<GitFileChange> conflicted = merging ? repo.GetConflictedFiles() : [];
+        MergeSides? merge = null;
+        if (merging)
+        {
+            var conflictPaths = conflicted.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+            unstaged = unstaged.Where(f => !conflictPaths.Contains(f.Path)).ToList();
+            staged = staged.Where(f => !conflictPaths.Contains(f.Path)).ToList();
+            merge = new MergeSides(
+                repo.GetCurrentBranch(), repo.GetCommit("HEAD"),
+                repo.GetMergingBranchName(), repo.GetCommit("MERGE_HEAD"));
+        }
 
         var stagedDiffs = repo.GetWorkingDiff(staged: true)
             .GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
@@ -55,18 +83,24 @@ public partial class JunctionApp
             if (ud != null) unstagedDiffs[f.Path] = ud;
         }
 
-        return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs);
+        return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, merging, conflicted, merge);
     }
 
     private void PickInitialChange(ChangesData data)
     {
-        var exists = _changeSelPath != null && (_changeSelStaged
-            ? data.Staged.Any(f => f.Path == _changeSelPath)
+        var exists = _changeSelPath != null && (
+            _changeSelConflicted ? data.Conflicted.Any(f => f.Path == _changeSelPath)
+            : _changeSelStaged ? data.Staged.Any(f => f.Path == _changeSelPath)
             : data.Unstaged.Any(f => f.Path == _changeSelPath));
         if (exists) return;
 
-        if (data.Staged.Count > 0) { _changeSelPath = data.Staged[0].Path; _changeSelStaged = true; }
-        else if (data.Unstaged.Count > 0) { _changeSelPath = data.Unstaged[0].Path; _changeSelStaged = false; }
+        // Prefer an unresolved conflict so its resolution pane shows straight away.
+        if (data.Conflicted.Count > 0)
+        { _changeSelPath = data.Conflicted[0].Path; _changeSelConflicted = true; _changeSelStaged = false; }
+        else if (data.Staged.Count > 0)
+        { _changeSelPath = data.Staged[0].Path; _changeSelConflicted = false; _changeSelStaged = true; }
+        else if (data.Unstaged.Count > 0)
+        { _changeSelPath = data.Unstaged[0].Path; _changeSelConflicted = false; _changeSelStaged = false; }
         else _changeSelPath = null;
     }
 
@@ -81,18 +115,31 @@ public partial class JunctionApp
         if (fill) col.FlexGrow(1);
         else col.Width(330).FlexShrink(0);
 
+        // Merge state gets a pinned banner (status + Abort / Continue) above the list.
+        if (data.IsMerging)
+            col.AddChild(BuildMergeBanner(data));
+
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(8, 8, 4, 8));
+
+        // Conflicts first — selecting one opens its resolution pane on the right.
+        if (data.Conflicted.Count > 0)
+        {
+            scroll.AddChild(SectionHeader($"Conflicts · {data.Conflicted.Count}", Nocturne.DangerText, "", null));
+            foreach (var f in data.Conflicted)
+                scroll.AddChild(ConflictListRow(f));
+        }
 
         if (data.Staged.Count == 0 && data.Unstaged.Count == 0)
         {
-            scroll.AddChild(Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
-                .AlignItems(AlignItems.Center)
-                .Children(Text.New("No changes").FontSize(13f).TextColor(Nocturne.On(0.45))));
+            if (!data.IsMerging && data.Conflicted.Count == 0)
+                scroll.AddChild(Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
+                    .AlignItems(AlignItems.Center)
+                    .Children(Text.New("No changes").FontSize(13f).TextColor(Nocturne.On(0.45))));
         }
         else
         {
             scroll.AddChild(SectionHeader($"Staged · {data.Staged.Count}", Nocturne.Accent300,
-                "Unstage all", data.Staged.Count > 0 ? UnstageAll : null));
+                "Unstage all", data.Staged.Count > 0 ? UnstageAll : null, topGap: data.Conflicted.Count > 0));
             foreach (var f in data.Staged)
                 scroll.AddChild(ChangeRow(f, isStaged: true));
 
@@ -263,6 +310,15 @@ public partial class JunctionApp
     {
         _changeSelPath = path;
         _changeSelStaged = staged;
+        _changeSelConflicted = false;
+        MarkDirty();
+    }
+
+    private void SelectConflict(string path)
+    {
+        _changeSelPath = path;
+        _changeSelConflicted = true;
+        _changeSelStaged = false;
         MarkDirty();
     }
 

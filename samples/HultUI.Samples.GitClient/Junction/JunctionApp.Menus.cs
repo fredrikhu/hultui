@@ -145,7 +145,16 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
         var res = repo.Merge(branch);
-        Flash(res.Success ? $"Merged {branch}" : FirstLine(res.Stderr, "Merge failed"));
+        if (res.Success)
+            Flash($"Merged {branch}");
+        else if (repo.IsMerging())
+        {
+            // Conflicts — drop the user into the Changes view to resolve them.
+            Flash($"Merge conflicts in {branch} — resolve below");
+            SetView(JunctionView.Changes);
+        }
+        else
+            Flash(FirstLine(res.Stderr, "Merge failed"));
         RefreshAll();
     }
 

@@ -84,6 +84,50 @@ public static class ExternalDiffLauncher
     }
 
     /// <summary>
+    /// Launches an editor/tool with the given arguments and no temp files — used to
+    /// open a real file in place (e.g. a conflicted working-tree file in VS Code's
+    /// inline merge editor). Resolves the executable against PATH/PATHEXT the same
+    /// way as <see cref="TryLaunch"/> (so a bare "code" finds code.cmd on Windows).
+    /// </summary>
+    public static bool TryOpen(string workingDirectory, string executable,
+        IReadOnlyList<string> arguments, out string error)
+    {
+        error = "";
+        var exe = executable.Trim();
+        if (string.IsNullOrWhiteSpace(exe))
+        {
+            error = "No editor configured.";
+            return false;
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        ConfigureExecutable(psi, exe, arguments.ToList());
+
+        try
+        {
+            var process = Process.Start(psi);
+            if (process == null)
+            {
+                error = "Could not start the editor.";
+                return false;
+            }
+            process.EnableRaisingEvents = true;
+            process.Exited += (_, _) => process.Dispose();
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or System.ComponentModel.Win32Exception)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Sets <see cref="ProcessStartInfo.FileName"/> and arguments, resolving the
     /// configured command against PATH/PATHEXT. A bare command like "code" is a
     /// <c>code.cmd</c> shim on Windows, and Win32 CreateProcess (which .NET uses
