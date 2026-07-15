@@ -229,6 +229,19 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         var edges = _window.ResizableEdges;
         int border = Math.Max(1, (int)MathF.Round(_window.ResizeBorderDip * scale));
 
+        int dipX = (int)(pt.X / scale);
+        int dipY = (int)(pt.Y / scale);
+
+        // The maximize button reports HTMAXBUTTON so Windows 11 shows its Snap
+        // Layouts flyout when the pointer hovers it. Check it BEFORE the resize
+        // edges: when not maximized the button's top overlaps the top resize
+        // border, and returning HTTOP there hides the flyout (Windows probes the
+        // button's top). The button is never at a resize corner, so claiming its
+        // whole rect costs no real resize target. We drive the button's own
+        // highlight and click from the NC messages (see WndProc).
+        if (_window.IsWindowMaximizePoint?.Invoke(dipX, dipY) == true)
+            return HTMAXBUTTON;
+
         // Resize borders only apply when the window can actually resize.
         if (!IsZoomed(hwnd))
         {
@@ -259,17 +272,6 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
             if (top) return HTTOP;
             if (bottom) return HTBOTTOM;
         }
-
-        // Not a resize edge: convert physical client pixels to layout units for the
-        // element hit tests below.
-        int dipX = (int)(pt.X / scale);
-        int dipY = (int)(pt.Y / scale);
-
-        // The maximize button reports HTMAXBUTTON so Windows 11 shows its Snap
-        // Layouts flyout when the pointer hovers it. We drive the button's own
-        // highlight and click from the NC messages (see WndProc).
-        if (_window.IsWindowMaximizePoint?.Invoke(dipX, dipY) == true)
-            return HTMAXBUTTON;
 
         // Ask the app whether this is a drag region so Windows can move (and snap)
         // the window natively.

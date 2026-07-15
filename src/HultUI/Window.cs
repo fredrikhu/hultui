@@ -377,6 +377,9 @@ public sealed class Window : IOverlayHost, IDisposable
         // Note: the Children flag is cleared with everything else by
         // ClearAllFlags at the end of the frame, below.
 
+        // Keep the maximize button's non-client hover highlight alive across rebuilds.
+        ReassertMaximizeButtonHover();
+
         // Render (user content only — DevTools excluded from timing)
         var ctx = PlatformWindow.Surface.RenderContext;
         ctx.BeginFrame(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, PlatformWindow.DisplayScale, theme.Background);
@@ -1334,24 +1337,47 @@ public sealed class Window : IOverlayHost, IDisposable
     // pipeline never sees it. Drive the button's hover highlight from the frame's NC
     // tracking by feeding the pointer state directly, so HoverBg still lights up.
     private Element? _maxButtonHovered;
+    private Color? _maxButtonHoverBg;   // the hover background the app applied, re-asserted each frame
 
     private void SetMaximizeButtonHover(bool hovered)
     {
         if (hovered)
         {
             var btn = FindMaximizeButton();
-            if (btn is null || ReferenceEquals(btn, _maxButtonHovered)) return;
-            _maxButtonHovered = btn;
-            var box = btn.Layout.AbsoluteBorderBox;
-            _pointerState.UpdateHover(btn, new Point(box.X + box.Width / 2f, box.Y + box.Height / 2f), KeyModifiers.None);
+            if (btn is null) return;
+            if (!ReferenceEquals(btn, _maxButtonHovered))
+            {
+                _maxButtonHovered = btn;
+                var box = btn.Layout.AbsoluteBorderBox;
+                _pointerState.UpdateHover(btn, new Point(box.X + box.Width / 2f, box.Y + box.Height / 2f), KeyModifiers.None);
+                // Capture the colour the app's hover styling just applied so we can
+                // re-assert it after rebuilds (see ReassertMaximizeButtonHover).
+                _maxButtonHoverBg = (btn as BoxElement)?.BackgroundColor;
+            }
         }
         else
         {
             if (_maxButtonHovered is null) return;
             _maxButtonHovered = null;
+            _maxButtonHoverBg = null;
             _pointerState.UpdateHover(null, default, KeyModifiers.None);
         }
         _root?.MarkPaintDirty();
+    }
+
+    /// <summary>Re-applies the maximize button's hover background each rendered frame
+    /// while it's hovered in the non-client area. A rebuild's PatchFrom resets the
+    /// button's background to its built (transparent) value, and — with the pointer
+    /// held still over the button to summon Snap Layouts — no further NC mouse-move
+    /// arrives to restore it, so the highlight would blink off. Called before paint.</summary>
+    private void ReassertMaximizeButtonHover()
+    {
+        if (_maxButtonHovered is null || _maxButtonHoverBg is not Color bg) return;
+        if (FindMaximizeButton() is BoxElement btn && btn.BackgroundColor != bg)
+        {
+            btn.BackgroundColor = bg;
+            btn.MarkPaintDirty();
+        }
     }
 
     private static bool HasWindowDragAncestor(Element element)
