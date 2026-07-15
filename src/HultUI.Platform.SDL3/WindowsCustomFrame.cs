@@ -69,17 +69,18 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const uint TME_LEAVE = 0x0002;
     private const uint TME_NONCLIENT = 0x0010;
 
-    // Extending the frame by a single pixel is enough to make DWM composite the
-    // window as framed again — that is what re-enables the shadow and the
-    // Windows 11 accent border. Our opaque GL content draws over the strip.
-    private static readonly MARGINS ShadowMargins = new() { CyTopHeight = 1 };
-
     private static readonly Dictionary<IntPtr, WindowsCustomFrame> _frames = new();
 
     private readonly SDL3Window _window;
     private readonly IntPtr _hwnd;
     private IntPtr _originalProc;
     private bool _disposed;
+    // Height (physical px) of the DWM caption region extended into the client.
+    // A single pixel is enough to re-enable the drop shadow and accent border
+    // (our opaque GL content draws over the strip), but Windows 11 only offers the
+    // Snap Layouts flyout for a maximize button that sits *within* the caption
+    // region — so once we know the button's bounds we grow this to cover it.
+    private int _captionHeightPx = 1;
     private bool _maxPressed;      // a left-press landed on the maximize button
     private bool _maxLeaveTracked; // WM_NCMOUSELEAVE is armed for the current NC hover
 
@@ -121,8 +122,20 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     private void ExtendFrame()
     {
-        var margins = ShadowMargins;
+        var margins = new MARGINS { CyTopHeight = _captionHeightPx };
         DwmExtendFrameIntoClientArea(_hwnd, ref margins);
+    }
+
+    /// <summary>Sets the DWM caption height (physical px) so the maximize button
+    /// falls inside the caption region — required for the Snap Layouts flyout when
+    /// the window isn't maximized. Visually harmless: the region is composited as
+    /// frame but our opaque content draws over it. No-op if unchanged.</summary>
+    public void SetCaptionHeight(int px)
+    {
+        px = Math.Max(1, px);
+        if (px == _captionHeightPx) return;
+        _captionHeightPx = px;
+        ExtendFrame();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]

@@ -117,6 +117,12 @@ public sealed unsafe class SDL3Window : IDisposable
     /// button's hover highlight itself (Windows won't). Set by Window.cs.</summary>
     internal Action<bool>? OnMaximizeButtonHover { get; set; }
 
+    /// <summary>Extends the Windows custom frame's DWM caption region to
+    /// <paramref name="px"/> physical pixels so the maximize button sits inside it
+    /// (needed for the Snap Layouts flyout when not maximized). No-op off Windows
+    /// or when unchanged. Called by Window.cs once the button's layout is known.</summary>
+    internal void SetCaptionHeightPx(int px) => _customFrame?.SetCaptionHeight(px);
+
     public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
     {
         Style = style;

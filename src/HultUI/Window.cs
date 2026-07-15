@@ -331,6 +331,10 @@ public sealed class Window : IOverlayHost, IDisposable
         }
         _perf.EndLayout();
 
+        // The maximize button's laid-out position is now known; keep the Windows
+        // caption region tall enough to contain it (for Snap Layouts when restored).
+        UpdateCaptionHeight();
+
         // Accessibility: rebuild + diff when the tree changed and something is
         // actually listening. The Null bridge's IsActive is false, so this is a
         // single boolean read for apps with no AT attached. The first frame after
@@ -487,6 +491,9 @@ public sealed class Window : IOverlayHost, IDisposable
                 // Check overlays first (topmost layer), then main tree
                 var (overlayMoveTarget, overlayMoveOffset) = HitTestOverlays(pos);
                 var target = overlayMoveTarget ?? HitTester.HitTest(_root, pos);
+                // The Windows custom frame owns the maximize button as non-client
+                // (HTMAXBUTTON); keep the client pipeline out of it.
+                if (overlayMoveTarget is null && IsNonClientMaximizeButton(target)) target = null;
                 var effectivePos = overlayMoveTarget is not null
                     ? new Point(pos.X - overlayMoveOffset.X, pos.Y - overlayMoveOffset.Y)
                     : pos;
@@ -1339,30 +1346,55 @@ public sealed class Window : IOverlayHost, IDisposable
     private Element? _maxButtonHovered;
     private Color? _maxButtonHoverBg;   // the hover background the app applied, re-asserted each frame
 
+    // Drive the maximize button's hover directly (enter/leave dispatched to the
+    // button), NOT through _pointerState. The button is non-client, so the shared
+    // pointer-hover state belongs to the client pipeline; mixing the two made the
+    // client's hover updates fire leave on the button (blanking the highlight while
+    // _maxButtonHovered stayed set) and popped the app tooltip.
     private void SetMaximizeButtonHover(bool hovered)
     {
         if (hovered)
         {
-            var btn = FindMaximizeButton();
-            if (btn is null) return;
-            if (!ReferenceEquals(btn, _maxButtonHovered))
-            {
-                _maxButtonHovered = btn;
-                var box = btn.Layout.AbsoluteBorderBox;
-                _pointerState.UpdateHover(btn, new Point(box.X + box.Width / 2f, box.Y + box.Height / 2f), KeyModifiers.None);
-                // Capture the colour the app's hover styling just applied so we can
-                // re-assert it after rebuilds (see ReassertMaximizeButtonHover).
-                _maxButtonHoverBg = (btn as BoxElement)?.BackgroundColor;
-            }
+            if (FindMaximizeButton() is not BoxElement btn || ReferenceEquals(btn, _maxButtonHovered)) return;
+            _maxButtonHovered = btn;
+            EventDispatcher.DispatchDirect(new PointerEnterEvent { Position = default, Modifiers = KeyModifiers.None }, btn);
+            // Capture the colour the app's hover styling just applied so we can
+            // re-assert it after rebuilds (see ReassertMaximizeButtonHover).
+            _maxButtonHoverBg = btn.BackgroundColor;
         }
         else
         {
-            if (_maxButtonHovered is null) return;
+            if (_maxButtonHovered is not { } old) return;
             _maxButtonHovered = null;
             _maxButtonHoverBg = null;
-            _pointerState.UpdateHover(null, default, KeyModifiers.None);
+            EventDispatcher.DispatchDirect(new PointerLeaveEvent { Position = default, Modifiers = KeyModifiers.None }, old);
         }
         _root?.MarkPaintDirty();
+    }
+
+    /// <summary>True when the element is (or is inside) the maximize button while the
+    /// Windows custom frame owns it as non-client. The client pointer pipeline skips
+    /// it so it doesn't double-drive the hover or pop the app tooltip over the flyout.</summary>
+    private bool IsNonClientMaximizeButton(Element? el)
+    {
+        if (!PlatformWindow.UsesWindowsNativeFrame) return false;
+        for (var e = el; e is not null; e = e.Parent)
+            if (e.IsWindowMaximizeButton) return true;
+        return false;
+    }
+
+    // Keeps the Windows custom frame's caption region tall enough to contain the
+    // maximize button, so Windows offers Snap Layouts when the window isn't
+    // maximized. Recomputed from the button's laid-out bounds; the platform side
+    // no-ops when the value is unchanged or the frame isn't the Windows one.
+    private void UpdateCaptionHeight()
+    {
+        if (!PlatformWindow.UsesWindowsNativeFrame) return;
+        if (FindMaximizeButton() is not { } btn) return;
+        var bottomDip = btn.Layout.AbsoluteBorderBox.Bottom;
+        if (bottomDip <= 0) return;
+        int px = (int)MathF.Ceiling(bottomDip * PlatformWindow.DisplayScale) + 1;
+        PlatformWindow.SetCaptionHeightPx(px);
     }
 
     /// <summary>Re-applies the maximize button's hover background each rendered frame
