@@ -21,8 +21,7 @@ public partial class JunctionApp
             return BuildStubView("Commit", "Select a commit in History to inspect it.");
 
         _detailHash = hash;
-        _commitDetail.Load($"{_activeRepoPath}|{hash}|{_historyGen}",
-            () => LoadDetail(hash), onLoaded: PickInitialFile);
+        PrefetchCommitDetail(hash);   // usually already loaded from the History selection
         var detail = _commitDetail.Value;
 
         // While a newer commit's detail is still loading, _commitDetail.Value (and
@@ -54,6 +53,18 @@ public partial class JunctionApp
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
             .Children(Text.New("Loading…").FontSize(12f).TextColor(Nocturne.On(0.40))));
         return row;
+    }
+
+    private string CommitDetailKey(string hash) => $"{_activeRepoPath}|{hash}|{DataGen(_activeRepoPath)}";
+
+    /// <summary>Eagerly loads a commit's files+diff into <see cref="_commitDetail"/>.
+    /// Called both when a commit is selected in History (prefetch) and when the
+    /// Commit view builds; the shared key makes the second call a cache hit.</summary>
+    private void PrefetchCommitDetail(string? hash)
+    {
+        if (string.IsNullOrEmpty(hash) || !HasActiveRepo) return;
+        var h = hash;
+        _commitDetail.Load(CommitDetailKey(h), () => LoadDetail(h), onLoaded: PickInitialFile);
     }
 
     // Runs off the UI thread.

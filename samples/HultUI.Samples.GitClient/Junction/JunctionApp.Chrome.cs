@@ -150,7 +150,7 @@ public partial class JunctionApp
             push.AddChild(Text.New(sum.Ahead.ToString()).FontSize(13f).TextColor(Nocturne.Accent));
         actions.AddChild(push);
 
-        actions.AddChild(Ui.IconButton(Icons.ArchiveTray, DoStash, "Stash"));
+        actions.AddChild(StashButton());
         bar.AddChild(actions);
 
         return bar;
@@ -233,11 +233,42 @@ public partial class JunctionApp
         RefreshAll();
     }
 
-    private void DoStash()
+    // Stash affordance: a toolbar button that opens a small popover offering
+    // "stash" and "stash including untracked". Anchors the popover under itself,
+    // right-aligned so the 230px menu doesn't run off the window edge.
+    private Element StashButton()
+    {
+        var b = Flex.Row(gap: 0).Width(34).Height(34)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .CornerRadius(Nocturne.RadiusMd)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer).Tooltip("Stash…");
+        b.AddChild(Ui.Icon(Icons.ArchiveTray, 15f, Nocturne.Text));
+        b.On<ClickEvent>(e =>
+        {
+            e.StopPropagation = true;
+            var box = b.Layout.AbsoluteBorderBox;
+            _popoverX = Math.Max(8f, box.X + box.Width - 230f);
+            _popoverY = box.Y + box.Height + 4f;
+            _popover = StashMenuItems();
+            MarkDirty();
+        });
+        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+    }
+
+    private IReadOnlyList<ContextMenuItem> StashMenuItems() =>
+    [
+        Item(Icons.ArchiveTray, "Stash changes", () => DoStash(includeUntracked: false)),
+        Item(Icons.Stack, "Stash including untracked", () => DoStash(includeUntracked: true)),
+    ];
+
+    private void DoStash(bool includeUntracked)
     {
         if (ActiveRepo is not { } repo) return;
-        var result = repo.StashCreate(null);
-        Flash(result.Success ? "Changes stashed" : FirstLine(result.Stderr, "Nothing to stash"));
+        var result = repo.StashCreate(null, includeUntracked);
+        Flash(result.Success
+            ? (includeUntracked ? "Stashed changes and untracked files" : "Stashed changes")
+            : FirstLine(result.Stderr, "Nothing to stash"));
         RefreshAll();
     }
 

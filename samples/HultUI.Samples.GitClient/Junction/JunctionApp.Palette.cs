@@ -188,7 +188,8 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.ArrowsClockwise, "Fetch all remotes", "", () => { ClosePalette(); DoFetch(); }));
         items.Add(new("action", "Action", Icons.GitBranch, "Create new branch…", "", () => { ClosePalette(); PromptNewBranch(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));
-        items.Add(new("action", "Action", Icons.ArchiveTray, "Stash changes", "", () => { ClosePalette(); DoStash(); }));
+        items.Add(new("action", "Action", Icons.ArchiveTray, "Stash changes", "", () => { ClosePalette(); DoStash(includeUntracked: false); }));
+        items.Add(new("action", "Action", Icons.Stack, "Stash including untracked", "", () => { ClosePalette(); DoStash(includeUntracked: true); }));
         items.Add(new("action", "Action", Icons.FolderPlus, "Add existing repository…", "", () => { ClosePalette(); OpenAddRepo(); }));
         items.Add(new("action", "Action", Icons.DownloadSimple, "Clone repository…", "", () => { ClosePalette(); OpenCloneRepo(); }));
         items.Add(new("action", "Action", Icons.StackPlus, "New workspace…", "", () => { ClosePalette(); OpenNewWorkspace(); }));

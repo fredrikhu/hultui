@@ -16,7 +16,7 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Changes", "Open a repository first.");
 
-        _changes.Load($"{_activeRepoPath}|{_summaryGen}", LoadChanges, onLoaded: PickInitialChange);
+        _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadChanges, onLoaded: PickInitialChange);
         var data = _changes.Value;
 
         GitFileDiff? diff = null;

@@ -33,7 +33,7 @@ public partial class JunctionApp
 
         var include = IncludeSet(_activeRepoPath);
         var includeList = include.OrderBy(x => x, StringComparer.Ordinal).ToList();
-        var key = $"{_activeRepoPath}|{string.Join(",", includeList)}|{_historyGen}";
+        var key = $"{_activeRepoPath}|{string.Join(",", includeList)}|{DataGen(_activeRepoPath)}";
         _history.Load(key, () => LoadHistory(_activeRepoPath, includeList), onLoaded: PickInitialCommit);
         var data = _history.Value;
         var filtered = FilteredCommits(data);
@@ -42,6 +42,11 @@ public partial class JunctionApp
         // narrows the list past the current selection).
         if (filtered.Count > 0 && (_selectedCommitHash == null || filtered.All(c => c.Hash != _selectedCommitHash)))
             _selectedCommitHash = filtered[0].Hash;
+
+        // Eagerly load the selected commit's detail so opening the Commit view is
+        // instant. Any selection change rebuilds History, so this covers keyboard,
+        // click and auto-select alike; a repeat with the same key is a cache hit.
+        PrefetchCommitDetail(_selectedCommitHash);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildIncludeBar(includeList, filtered.Count));
@@ -219,7 +224,7 @@ public partial class JunctionApp
     private void ClearInclude()
     {
         IncludeSet(_activeRepoPath).Clear();
-        _historyGen++;
+        BumpDataGen(_activeRepoPath);
         MarkDirty();
     }
 

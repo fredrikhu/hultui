@@ -36,7 +36,17 @@ public partial class JunctionApp : Component, IDisposable
     // the sidebar's branch / ahead-behind / dirty badges never block Build().
     private readonly Dictionary<string, GitRepository> _repos = new();
     private readonly Dictionary<string, AsyncLoader<RepoSummary>> _summaryLoaders = new();
-    private int _summaryGen;
+
+    // Per-repo data generation. Every cached loader keys on it, so a repo's
+    // views/summary reload only when *that* repo's data actually changed (a git
+    // action here, or an external change the watcher reports). Unrelated repos
+    // keep their cached values, which is what makes switching between them fast.
+    private readonly Dictionary<string, int> _dataGen = new();
+
+    // One filesystem watcher per repo in the active workspace, so commits, pushes
+    // and edits made by other git clients are noticed and the affected repo's
+    // cache is invalidated.
+    private readonly Dictionary<string, GitWatcher> _watchers = new(PathComparer);
 
     // Active pointers.
     private string _activeWorkspaceId;
@@ -46,9 +56,16 @@ public partial class JunctionApp : Component, IDisposable
     [Reactive] public partial JunctionView View { get; set; }
     private bool _sidebarCollapsed;
 
-    // History state.
-    private readonly AsyncLoader<HistoryData> _history = new(HistoryData.Empty);
-    private int _historyGen;
+    // Bumped to force a *reactive* rebuild (via the build Effect) rather than the
+    // untracked MarkDirty/ForceRebuild path. Switching the active repo activates a
+    // different per-repo loader, and only a tracked rebuild re-subscribes the
+    // Effect to that loader's signals — otherwise its async load completes unseen
+    // and the view stays on stale/empty data until the next tracked rebuild.
+    private readonly Signal<int> _revision = new(0);
+
+    // History state. Per-repo loaders (kept in a dictionary) retain each repo's
+    // last-loaded value so returning to a repo is instant; see LoaderFor.
+    private readonly Dictionary<string, AsyncLoader<HistoryData>> _historyLoaders = new(PathComparer);
     private string? _selectedCommitHash;
     private string _historyQuery = "";
     private readonly Ref<TextInputElement> _historySearchRef = new();
@@ -64,7 +81,7 @@ public partial class JunctionApp : Component, IDisposable
     private string? _selectedFilePath;    // file selected in the Commit view
 
     // Changes (staging) state.
-    private readonly AsyncLoader<ChangesData> _changes = new(ChangesData.Empty);
+    private readonly Dictionary<string, AsyncLoader<ChangesData>> _changesLoaders = new(PathComparer);
     private string? _changeSelPath;
     private bool _changeSelStaged;
     private string _commitSummary = "";
@@ -73,7 +90,7 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<TextAreaElement> _descRef = new();
 
     // Branches (management) state.
-    private readonly AsyncLoader<BranchesData> _branches = new(BranchesData.Empty);
+    private readonly Dictionary<string, AsyncLoader<BranchesData>> _branchesLoaders = new(PathComparer);
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
@@ -185,14 +202,23 @@ public partial class JunctionApp : Component, IDisposable
 
     private bool HasActiveRepo => !string.IsNullOrEmpty(_activeRepoPath);
 
+    // RepoFor is called from background load threads (LoadHistory/LoadChanges/…)
+    // as well as the UI thread, so the cache dictionary must be guarded — a plain
+    // Dictionary corrupts (and throws) under concurrent structural writes, which
+    // AsyncLoader would then cache as a permanently-empty "loaded" result.
+    private readonly object _reposLock = new();
+
     private GitRepository RepoFor(string path)
     {
-        if (!_repos.TryGetValue(path, out var repo))
+        lock (_reposLock)
         {
-            repo = new GitRepository(path);
-            _repos[path] = repo;
+            if (!_repos.TryGetValue(path, out var repo))
+            {
+                repo = new GitRepository(path);
+                _repos[path] = repo;
+            }
+            return repo;
         }
-        return repo;
     }
 
     private GitRepository? ActiveRepo => HasActiveRepo ? RepoFor(_activeRepoPath) : null;
@@ -204,8 +230,67 @@ public partial class JunctionApp : Component, IDisposable
             loader = new AsyncLoader<RepoSummary>(RepoSummary.Pending);
             _summaryLoaders[path] = loader;
         }
-        loader.Load($"{path}#{_summaryGen}", () => LoadSummary(path));
+        loader.Load($"{path}#{DataGen(path)}", () => LoadSummary(path));
         return loader.Value;
+    }
+
+    // ── Per-repo caching + change detection ──────────────────────────────
+
+    private static readonly StringComparer PathComparer =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private int DataGen(string path) => _dataGen.GetValueOrDefault(path);
+
+    /// <summary>Invalidate a repo's cached data (views + summary) so it reloads
+    /// on next display. Called by our own git actions and by the change watcher.</summary>
+    private void BumpDataGen(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        _dataGen[path] = DataGen(path) + 1;
+    }
+
+    private static AsyncLoader<T> LoaderFor<T>(Dictionary<string, AsyncLoader<T>> map, string path, T empty)
+    {
+        if (!map.TryGetValue(path, out var loader))
+        {
+            loader = new AsyncLoader<T>(empty);
+            map[path] = loader;
+        }
+        return loader;
+    }
+
+    // The active repo's loaders. Each repo has its own, so its last-loaded value
+    // survives while another repo is on screen — switching back is a cache hit.
+    private AsyncLoader<HistoryData> _history => LoaderFor(_historyLoaders, _activeRepoPath, HistoryData.Empty);
+    private AsyncLoader<ChangesData> _changes => LoaderFor(_changesLoaders, _activeRepoPath, ChangesData.Empty);
+    private AsyncLoader<BranchesData> _branches => LoaderFor(_branchesLoaders, _activeRepoPath, BranchesData.Empty);
+
+    /// <summary>Reconcile the watcher set with the repos in the active workspace
+    /// (plus the active repo). Cheap to call every Build — it only diffs the sets.</summary>
+    private void EnsureWatchers()
+    {
+        var desired = new HashSet<string>(ActiveWorkspaceRepos, PathComparer);
+        if (HasActiveRepo) desired.Add(_activeRepoPath);
+
+        foreach (var path in _watchers.Keys.ToList())
+            if (!desired.Contains(path)) { _watchers[path].Dispose(); _watchers.Remove(path); }
+
+        foreach (var path in desired)
+        {
+            if (_watchers.ContainsKey(path)) continue;
+            try { _watchers[path] = new GitWatcher(path, () => OnExternalChange(path)); }
+            catch { /* not a plain git dir (missing/submodule/worktree) — skip watching it */ }
+        }
+    }
+
+    /// <summary>A watched repo changed on disk (another git client committed,
+    /// pushed, staged, switched branch, or an editor saved a file). Invalidate its
+    /// cache; if it's the one on screen, the rebuild reloads it. Runs on the UI
+    /// thread (GitWatcher marshals the callback).</summary>
+    private void OnExternalChange(string path)
+    {
+        BumpDataGen(path);
+        MarkDirty();
     }
 
     // Runs off the UI thread — no UI / reactive access.
@@ -260,6 +345,15 @@ public partial class JunctionApp : Component, IDisposable
 
     public override Element Build()
     {
+        // Track the revision signal so a Rerender() re-runs Build through the
+        // Effect (re-subscribing to the active repo's loaders — see _revision).
+        _ = _revision.Value;
+
+        // Keep a filesystem watcher on every repo in the workspace so external
+        // git activity (commits, pushes, staging, edits) invalidates the right
+        // cache. Cheap: only diffs the desired vs. current watcher set.
+        EnsureWatchers();
+
         // Key every child. The overlays below are added conditionally, so without
         // keys they reconcile by position — and when one overlay disappears while
         // another appears at the same index, the framework patches one subtree onto
@@ -387,6 +481,10 @@ public partial class JunctionApp : Component, IDisposable
         View = v;   // reactive → rebuild
     }
 
+    /// <summary>Force a rebuild through the reactive Effect (not the untracked
+    /// MarkDirty path), so a newly-activated per-repo loader gets subscribed.</summary>
+    private void Rerender() => _revision.Value++;
+
     private void SelectRepo(string path)
     {
         if (PathEquals(path, _activeRepoPath)) return;
@@ -394,7 +492,7 @@ public partial class JunctionApp : Component, IDisposable
         _selectedCommitHash = null;   // reset selection; History reloads and picks first
         _settings.ActiveRepoPath = path;
         Persist();
-        MarkDirty();
+        Rerender();
     }
 
     private void SelectWorkspace(string id)
@@ -411,7 +509,7 @@ public partial class JunctionApp : Component, IDisposable
             _settings.ActiveRepoPath = _activeRepoPath;
         }
         Persist();
-        MarkDirty();
+        Rerender();
     }
 
     // ── Keyboard navigation across repos / workspaces ────────────────────
@@ -473,9 +571,11 @@ public partial class JunctionApp : Component, IDisposable
 
     private void RefreshAll()
     {
-        _summaryGen++;
-        _historyGen++;
-        MarkDirty();
+        BumpDataGen(_activeRepoPath);
+        // Rerender (reactive) rather than MarkDirty: some callers (repo/workspace
+        // mutations) have just changed the active repo, so the rebuild must
+        // re-subscribe the Effect to the newly-active repo's loaders.
+        Rerender();
     }
 
     private void Persist()
@@ -681,5 +781,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         _toastCts?.Cancel();
         _toastCts?.Dispose();
+        foreach (var w in _watchers.Values) w.Dispose();
+        _watchers.Clear();
     }
 }

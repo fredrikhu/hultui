@@ -1107,11 +1107,12 @@ public class GitRepository
         return stashes;
     }
 
-    public GitResult StashCreate(string? message = null)
+    public GitResult StashCreate(string? message = null, bool includeUntracked = true)
     {
-        return string.IsNullOrWhiteSpace(message)
-            ? GitProcess.Run(Path, "stash", "push", "--include-untracked")
-            : GitProcess.Run(Path, "stash", "push", "--include-untracked", "-m", message);
+        var args = new List<string> { "stash", "push" };
+        if (includeUntracked) args.Add("--include-untracked");
+        if (!string.IsNullOrWhiteSpace(message)) { args.Add("-m"); args.Add(message); }
+        return GitProcess.Run(Path, args.ToArray());
     }
 
     public GitResult StashApply(string stashRef)

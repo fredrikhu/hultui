@@ -24,7 +24,7 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Branches", "Open a repository first.");
 
-        _branches.Load($"{_activeRepoPath}|{_summaryGen}", LoadBranches, onLoaded: ClampBranchSel);
+        _branches.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadBranches, onLoaded: ClampBranchSel);
         var list = FilterBranches(_branches.Value.Local);
         if (_branchSel >= list.Count) _branchSel = Math.Max(0, list.Count - 1);
 
@@ -423,7 +423,7 @@ public partial class JunctionApp
     {
         var set = IncludeSet(_activeRepoPath);
         if (!set.Remove(name)) set.Add(name);
-        _historyGen++;   // History reloads with the new include set
+        BumpDataGen(_activeRepoPath);   // History reloads with the new include set
         MarkDirty();
     }
 
