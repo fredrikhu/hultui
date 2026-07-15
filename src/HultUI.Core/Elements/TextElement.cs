@@ -34,6 +34,36 @@ public class TextElement : Element
     public TextOverflow Overflow { get; set; } = TextOverflow.Clip;
     public int? MaxLines { get; set; }
 
+    private IReadOnlyList<TextSpan>? _spans;
+
+    /// <summary>
+    /// Optional per-range text colors (syntax highlighting and similar). Spans are
+    /// character ranges into <see cref="Content"/>, sorted and non-overlapping;
+    /// uncovered characters use the element's text color. Purely a paint concern —
+    /// layout and measurement are unaffected.
+    /// </summary>
+    public IReadOnlyList<TextSpan>? Spans
+    {
+        get => _spans;
+        set
+        {
+            // Value-compare so reconciliation (which rebuilds span lists each
+            // frame) doesn't mark paint dirty when the highlighting is unchanged.
+            if (ReferenceEquals(_spans, value) || SpansEqual(_spans, value)) return;
+            _spans = value;
+            MarkPaintDirty();
+        }
+    }
+
+    private static bool SpansEqual(IReadOnlyList<TextSpan>? a, IReadOnlyList<TextSpan>? b)
+    {
+        if (a is null || b is null) return false;   // both-null is caught by ReferenceEquals
+        if (a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++)
+            if (a[i] != b[i]) return false;
+        return true;
+    }
+
     public static TextElement New(string content) => new() { _content = content };
 
     // ──── Text selection (opt-in) ────
@@ -242,6 +272,7 @@ public class TextElement : Element
             Content = text.Content;
             Overflow = text.Overflow;
             MaxLines = text.MaxLines;
+            Spans = text.Spans;
             // Carry the opt-in flag from the freshly built element, but keep our
             // own live selection (the incoming element has none). Content's setter
             // already clamped the offsets to the new text.
@@ -273,7 +304,10 @@ public class TextElement : Element
                 DrawSelection(ctx, style);
         }
 
-        ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);
+        if (_spans is { Count: > 0 } spans)
+            ctx.DrawText(Content, contentBox, style, Overflow, MaxLines, spans);
+        else
+            ctx.DrawText(Content, contentBox, style, Overflow, MaxLines);
     }
 
     private void DrawSelection(IRenderContext ctx, ResolvedInheritedStyle style)

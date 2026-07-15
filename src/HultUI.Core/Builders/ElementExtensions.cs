@@ -98,6 +98,9 @@ public static class ElementExtensions
     /// (drag to select, double/triple-click, Ctrl+C, right-click Copy).</summary>
     public static T Selectable<T>(this T el, bool value = true) where T : TextElement { el.Selectable = value; return el; }
 
+    /// <summary>Per-range text colors (syntax highlighting); see <see cref="TextElement.Spans"/>.</summary>
+    public static T Spans<T>(this T el, IReadOnlyList<Rendering.TextSpan>? spans) where T : TextElement { el.Spans = spans; return el; }
+
     // ──── Image properties ────
     public static T ImageFit<T>(this T el, ImageFit fit) where T : ImageElement { el.Fit = fit; return el; }
     public static T ImageSource<T>(this T el, IImageSource source) where T : ImageElement { el.Source = source; return el; }

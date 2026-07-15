@@ -71,6 +71,10 @@ public partial class JunctionApp
         public GitDiffLine? Line { get; init; }   // unified
         public GitDiffLine? Left { get; init; }   // split
         public GitDiffLine? Right { get; init; }
+        // Syntax-highlight spans for the code cell(s), line-relative offsets.
+        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? Spans { get; init; }        // unified
+        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? LeftSpans { get; init; }    // split
+        public IReadOnlyList<HultUI.Core.Rendering.TextSpan>? RightSpans { get; init; }
     }
 
     // Virtualized so large diffs keep constant row height and stay cheap — a
@@ -83,7 +87,8 @@ public partial class JunctionApp
                 .Children(Text.New(diff == null ? "Select a file" : "No textual changes")
                     .FontSize(13f).TextColor(Nocturne.On(0.45)));
 
-        var rows = _diffSplit ? FlattenSplit(diff) : FlattenUnified(diff);
+        var hl = HighlightForCurrent(diff.Path);
+        var rows = _diffSplit ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
             .Items(rows)
@@ -122,19 +127,19 @@ public partial class JunctionApp
         if (handled) e.StopPropagation = true;
     }
 
-    private static List<DiffRow> FlattenUnified(GitFileDiff diff)
+    private static List<DiffRow> FlattenUnified(GitFileDiff diff, FileHighlight? hl)
     {
         var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
         {
             rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
             foreach (var line in hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader))
-                rows.Add(new DiffRow { Type = DiffRowType.Unified, Line = line });
+                rows.Add(new DiffRow { Type = DiffRowType.Unified, Line = line, Spans = SpansFor(hl, line) });
         }
         return rows;
     }
 
-    private static List<DiffRow> FlattenSplit(GitFileDiff diff)
+    private static List<DiffRow> FlattenSplit(GitFileDiff diff, FileHighlight? hl)
     {
         var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
@@ -142,7 +147,12 @@ public partial class JunctionApp
             rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
             var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
             foreach (var (left, right) in SplitPairs(lines))
-                rows.Add(new DiffRow { Type = DiffRowType.Split, Left = left, Right = right });
+                rows.Add(new DiffRow
+                {
+                    Type = DiffRowType.Split, Left = left, Right = right,
+                    LeftSpans = left == null ? null : SpansFor(hl, left),
+                    RightSpans = right == null ? null : SpansFor(hl, right),
+                });
         }
         return rows;
     }
@@ -150,8 +160,8 @@ public partial class JunctionApp
     private static Element RenderDiffRow(DiffRow r) => r.Type switch
     {
         DiffRowType.Hunk => HunkHeaderRow(r.Hunk),
-        DiffRowType.Split => SplitRow(r.Left, r.Right),
-        _ => UnifiedRow(r.Line!),
+        DiffRowType.Split => SplitRow(r.Left, r.Right, r.LeftSpans, r.RightSpans),
+        _ => UnifiedRow(r.Line!, r.Spans),
     };
 
     private static Element HunkHeaderRow(string header) =>
@@ -161,7 +171,7 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0))
             .Children(Ui.Mono(header, 11.5f, Nocturne.Accent300).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
 
-    private static Element UnifiedRow(GitDiffLine line)
+    private static Element UnifiedRow(GitDiffLine line, IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans)
     {
         var (bg, code, sign, signColor) = line.Kind switch
         {
@@ -177,6 +187,7 @@ public partial class JunctionApp
                 Box.New().Width(16).JustifyContent(JustifyContent.Center)
                     .Children(Ui.Mono(sign, 12f, signColor)),
                 Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
+                    .Spans(spans)
                     .FlexGrow(1).Padding(new Thickness(2, 14, 2, 0))
                     .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
     }
@@ -203,13 +214,16 @@ public partial class JunctionApp
         }
     }
 
-    private static Element SplitRow(GitDiffLine? left, GitDiffLine? right) =>
+    private static Element SplitRow(GitDiffLine? left, GitDiffLine? right,
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? leftSpans,
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? rightSpans) =>
         Flex.Row(gap: 0).AlignItems(AlignItems.Stretch)
             .Children(
-                SplitHalf(left, isLeft: true),
-                SplitHalf(right, isLeft: false));
+                SplitHalf(left, isLeft: true, leftSpans),
+                SplitHalf(right, isLeft: false, rightSpans));
 
-    private static Element SplitHalf(GitDiffLine? line, bool isLeft)
+    private static Element SplitHalf(GitDiffLine? line, bool isLeft,
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans)
     {
         var (bg, code) = line?.Kind switch
         {
@@ -225,7 +239,7 @@ public partial class JunctionApp
             .Background(bg);
         if (isLeft) half.BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         half.AddChild(NumCell(num, 44f));
-        half.AddChild(Ui.Mono(text, 12f, code).FlexGrow(1).FlexShrink(1)
+        half.AddChild(Ui.Mono(text, 12f, code).Spans(spans).FlexGrow(1).FlexShrink(1)
             .Padding(new Thickness(2, 10, 2, 0)).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
         return half;
     }

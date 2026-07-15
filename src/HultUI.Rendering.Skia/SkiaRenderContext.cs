@@ -262,6 +262,121 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         }
     }
 
+    public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
+        int? maxLines, IReadOnlyList<TextSpan> spans)
+    {
+        if (spans.Count == 0)
+        {
+            DrawText(text, bounds, style, overflow, maxLines);
+            return;
+        }
+        if (string.IsNullOrEmpty(text) || _pipeline is null) return;
+
+        var layout = _pipeline.Layout(text, style, bounds.Width, maxLines, overflow);
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+
+        float alignFactor = style.TextAlign switch
+        {
+            TextAlign.Center => 0.5f,
+            TextAlign.Right => 1f,
+            _ => 0f,
+        };
+
+        foreach (var line in layout.Lines)
+        {
+            float alignOffset = alignFactor > 0f && bounds.Width > line.Width
+                ? (bounds.Width - line.Width) * alignFactor
+                : 0f;
+            float baseX = bounds.X + alignOffset;
+            float lineY = bounds.Y + line.OffsetY + line.Ascent;
+
+            DrawSpannedLine(line, spans, style, baseX, lineY, bounds.Y + line.OffsetY);
+
+            if (style.Decoration != TextDecoration.None)
+            {
+                _pooledPaint.Color = ToSkColor(style.TextColor);
+                DrawTextDecoration(style, baseX, lineY, line);
+            }
+        }
+    }
+
+    // Draws one laid-out line as constant-color segments split at span boundaries.
+    // Glyphs are never re-shaped or moved: each segment clips to its x-range and
+    // draws the same cached blobs, so kerning and ligatures render exactly as the
+    // plain path does (a boundary inside a ligature splits its color mid-glyph).
+    private void DrawSpannedLine(TextLine line, IReadOnlyList<TextSpan> spans, ResolvedInheritedStyle style,
+        float baseX, float baselineY, float lineTop)
+    {
+        // The drawn text is the concatenation of the line's runs (trailing
+        // whitespace is trimmed at shaping; an ellipsized line ends in "…").
+        // Drawn char i corresponds to source index line.Start + i.
+        int drawnLength = 0;
+        foreach (var run in line.Runs)
+            drawnLength += run.Text.Length;
+        if (drawnLength == 0) return;
+
+        int cursor = 0;
+        foreach (var span in spans)
+        {
+            int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
+            int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
+            if (e <= cursor) continue;
+            if (s > cursor)
+                DrawLineSegment(line, cursor, s, style.TextColor, style, baseX, baselineY, lineTop);
+            DrawLineSegment(line, Math.Max(s, cursor), e, span.Color, style, baseX, baselineY, lineTop);
+            cursor = e;
+            if (cursor >= drawnLength) break;
+        }
+        if (cursor < drawnLength)
+            DrawLineSegment(line, cursor, drawnLength, style.TextColor, style, baseX, baselineY, lineTop);
+    }
+
+    private void DrawLineSegment(TextLine line, int startChar, int endChar, Color color,
+        ResolvedInheritedStyle style, float baseX, float baselineY, float lineTop)
+    {
+        if (color.A == 0) return;
+        float x0 = LineXAt(line, startChar, style);
+        float x1 = endChar >= startChar ? LineXAt(line, endChar, style) : x0;
+        if (x1 <= x0) return;
+
+        _pooledPaint.Color = ToSkColor(color);
+        int save = Canvas.Save();
+        // Hard-edged (non-AA) clip so adjacent segments tile without seams; a glyph
+        // crossing the boundary is drawn by both segments, each contributing its half.
+        Canvas.ClipRect(SKRect.Create(baseX + x0, lineTop, x1 - x0, line.Height));
+        foreach (var run in line.Runs)
+        {
+            if (run.OffsetX >= x1 || run.OffsetX + run.Width <= x0) continue;
+            var blob = BuildShapedBlob(run);
+            if (blob is not null)
+                Canvas.DrawText(blob, baseX + run.OffsetX, baselineY, _pooledPaint);
+        }
+        Canvas.RestoreToCount(save);
+    }
+
+    // X position (line-relative) of the boundary before drawn character charIdx.
+    // Glyph origins give the exact position when glyphs map 1:1 to characters (the
+    // usual case for code and Latin text); runs where shaping merged clusters
+    // (ligatures, marks) fall back to measuring the prefix, which may sit a hair
+    // off inside a ligature but never moves any glyph.
+    private float LineXAt(TextLine line, int charIdx, ResolvedInheritedStyle style)
+    {
+        int offset = 0;
+        foreach (var run in line.Runs)
+        {
+            int len = run.Text.Length;
+            int rel = charIdx - offset;
+            if (rel <= 0) return run.OffsetX;
+            if (rel < len)
+                return run.Glyphs.Length == len
+                    ? run.OffsetX + run.Glyphs[rel].X
+                    : run.OffsetX + MeasureText(run.Text[..rel], style).Width;
+            offset += len;
+        }
+        return line.Width;
+    }
+
     // Draws underline and/or strike-through for a line. The paint is already set
     // to the text color; decorations reuse it as a fill for the rule rectangles.
     private void DrawTextDecoration(ResolvedInheritedStyle style, float x, float baselineY, TextLine line)
