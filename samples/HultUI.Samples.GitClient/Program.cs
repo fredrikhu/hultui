@@ -37,6 +37,10 @@ using var app = new Application("Junction", 1440, 900, WindowStyle.Borderless);
 app.Theme = Nocturne.ToHultTheme();
 
 var window = app.PrimaryWindow;
+// Floor the window size so the chrome never collapses. Below the compact-chrome
+// breakpoint (~930 dip) JunctionApp switches the toolbar/breadcrumb to icon-only,
+// which stays legible down to this minimum.
+window.SetMinimumSize(760, 540);
 var junction = new JunctionApp(app, window, settings);
 window.Closed += junction.Dispose;
 app.SetRoot(junction.Mount());

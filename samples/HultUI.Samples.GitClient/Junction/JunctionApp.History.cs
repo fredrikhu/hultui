@@ -282,10 +282,13 @@ public partial class JunctionApp
         var body = Flex.Column(gap: 3).FlexGrow(1).JustifyContent(JustifyContent.Center)
             .Padding(new Thickness(0, 8, 0, 0));
 
-        // Line 1: ref chips + message.
+        // Line 1: ref chips + message. Narrow windows drop the chips (HEAD / branch
+        // / remote markers) so they don't wrap or crowd the subject; FlexShrink(0)
+        // keeps a shown chip from compressing and wrapping its own label.
         var line1 = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-        foreach (var chip in RefChips(commit.Refs, remotes))
-            line1.AddChild(chip);
+        if (!_compactChrome)
+            foreach (var chip in RefChips(commit.Refs, remotes))
+                line1.AddChild(chip.FlexShrink(0));
         line1.AddChild(Text.New(commit.Subject).FontSize(13f).TextColor(Nocturne.Text)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         body.AddChild(line1);

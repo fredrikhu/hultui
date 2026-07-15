@@ -144,18 +144,27 @@ public partial class JunctionApp
     private Element BuildCommitBody(CommitDetail detail)
     {
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        row.AddChild(BuildFileTree(detail.Files));
+        // Narrow windows hide the diff pane; the file tree fills instead (open the
+        // diff in VS Code with Ctrl+D — see OpenSelectedDiffExternally).
+        row.AddChild(BuildFileTree(detail.Files, fill: _hideDiff));
 
-        detail.DiffByPath.TryGetValue(_selectedFilePath ?? "", out var diff);
-        row.AddChild(BuildDiffPane(_selectedFilePath ?? "", diff));
+        if (!_hideDiff)
+        {
+            detail.DiffByPath.TryGetValue(_selectedFilePath ?? "", out var diff);
+            row.AddChild(BuildDiffPane(_selectedFilePath ?? "", diff));
+        }
         return row;
     }
 
-    private Element BuildFileTree(IReadOnlyList<GitFileChange> files)
+    private Element BuildFileTree(IReadOnlyList<GitFileChange> files, bool fill = false)
     {
-        var scroll = ScrollView.New().Width(238).FlexShrink(0)
+        // When the diff pane is hidden the tree fills the view; otherwise it's a
+        // fixed-width sidebar next to the diff.
+        var scroll = ScrollView.New()
             .Padding(new Thickness(8, 6, 8, 6))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
+        if (fill) scroll.FlexGrow(1);
+        else scroll.Width(238).FlexShrink(0);
 
         scroll.AddChild(Text.New($"{files.Count} FILES CHANGED").FontSize(10f)
             .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8)));

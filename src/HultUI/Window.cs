@@ -101,6 +101,28 @@ public sealed class Window : IOverlayHost, IDisposable
     public void Restore() => PlatformWindow.Restore();
     public void ToggleMaximize() { if (IsMaximized) Restore(); else Maximize(); }
 
+    /// <summary>Current viewport width in density-independent (layout) units.</summary>
+    public float LayoutWidth => PlatformWindow.LayoutWidth;
+
+    /// <summary>Current viewport height in density-independent (layout) units.</summary>
+    public float LayoutHeight => PlatformWindow.LayoutHeight;
+
+    /// <summary>
+    /// Raised after the window's size changes (during and after an interactive
+    /// resize). Fires on the UI thread; handlers see the updated
+    /// <see cref="LayoutWidth"/>/<see cref="LayoutHeight"/>. Used by apps whose
+    /// layout depends on the viewport size (e.g. responsive chrome) — the reactive
+    /// build doesn't re-run on resize on its own.
+    /// </summary>
+    public event Action? Resized;
+
+    /// <summary>
+    /// Sets the smallest size the user may resize the window to, in
+    /// density-independent (layout) units. Pass 0 for a dimension to leave it
+    /// unconstrained.
+    /// </summary>
+    public void SetMinimumSize(int width, int height) => PlatformWindow.SetMinimumSize(width, height);
+
     /// <summary>Thickness (in density-independent units) of the invisible resize border for borderless windows.</summary>
     public int ResizeBorderWidth
     {
@@ -288,6 +310,7 @@ public sealed class Window : IOverlayHost, IDisposable
         if (_root is null) return;
         _root.MarkLayoutDirty();
         _root.MarkPaintDirty();
+        Resized?.Invoke();
     }
 
     internal void RenderFrame()

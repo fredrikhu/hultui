@@ -23,7 +23,8 @@ public partial class JunctionApp
         header.AddChild(Ui.Mono(path.Length > 0 ? path : "—", 12f, Nocturne.Text)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         header.AddChild(DiffModeToggle());
-        header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff"));
+        header.AddChild(Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)").FlexShrink(0));
+        header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
         col.AddChild(header);
 
         col.AddChild(BuildDiffScroll(diff));
@@ -32,7 +33,10 @@ public partial class JunctionApp
 
     private Element DiffModeToggle()
     {
-        var seg = Flex.Row(gap: 2).AlignItems(AlignItems.Center)
+        // FlexShrink(0) so the toggle keeps its size as the diff pane narrows (the
+        // header path ellipsizes to absorb the shrink instead of the buttons
+        // overlapping); compact windows drop the labels to icon-only.
+        var seg = Flex.Row(gap: 2).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(2))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
@@ -45,11 +49,13 @@ public partial class JunctionApp
     private Element DiffModeButton(string label, string glyph, bool active, Action onClick)
     {
         var fg = active ? Nocturne.Accent : Nocturne.On(0.58);
-        var b = Flex.Row(gap: 5).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer);
+        var b = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
+            .Tooltip(label);
         if (active) b.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
         b.AddChild(Ui.Icon(glyph, 12f, fg));
-        b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg));
+        if (!_compactChrome)
+            b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg));
         b.OnClick(e => { e.StopPropagation = true; onClick(); });
         return b;
     }
@@ -278,5 +284,84 @@ public partial class JunctionApp
             return (_changeSelPath, d);
         }
         return (_selectedFilePath ?? "", null);
+    }
+
+    private enum ExternalDiffMode { Commit, Staged, Unstaged }
+
+    // Ctrl+D in the Commit / Changes views: open the selected file's diff in VS Code
+    // (`code --wait --diff <left> <right>`). Reuses ExternalDiffLauncher's PATH/.cmd
+    // resolution and its temp-file plumbing; --wait keeps the launched process alive
+    // until the diff tab closes so its temp files survive, then are cleaned on exit.
+    private async void OpenSelectedDiffExternally()
+    {
+        if (ActiveRepo is not { } repo) return;
+
+        string path;
+        ExternalDiffMode mode;
+        string? commitHash = null;
+        if (View == JunctionView.Commit && !string.IsNullOrEmpty(_selectedFilePath) && _detailHash is { } h)
+        {
+            path = _selectedFilePath!;
+            mode = ExternalDiffMode.Commit;
+            commitHash = h;
+        }
+        else if (View == JunctionView.Changes && !string.IsNullOrEmpty(_changeSelPath))
+        {
+            path = _changeSelPath!;
+            mode = _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged;
+        }
+        else
+        {
+            Flash("Select a file to diff first");
+            return;
+        }
+
+        Flash("Opening diff in VS Code…");
+        var (ok, err) = await Task.Run(() => LaunchVsCodeDiff(repo, path, mode, commitHash));
+        if (!ok) Flash(string.IsNullOrEmpty(err) ? "Could not open VS Code" : err);
+    }
+
+    // Runs off the UI thread (git show + temp-file writes + process start).
+    private static (bool ok, string err) LaunchVsCodeDiff(
+        GitRepository repo, string path, ExternalDiffMode mode, string? commitHash)
+    {
+        string leftLabel, rightLabel, left, right;
+        switch (mode)
+        {
+            case ExternalDiffMode.Commit:
+                var hash = commitHash!;
+                leftLabel = "parent";
+                rightLabel = hash.Length >= 7 ? hash[..7] : hash;
+                left = repo.GetFileText(hash + "^", path) ?? "";   // "" for an added file / root commit
+                right = repo.GetFileText(hash, path) ?? "";
+                break;
+            case ExternalDiffMode.Staged:
+                leftLabel = "HEAD"; rightLabel = "index";
+                left = repo.GetFileText("HEAD", path) ?? "";
+                right = repo.GetIndexFileText(path) ?? "";
+                break;
+            default: // Unstaged
+                leftLabel = "index"; rightLabel = "working";
+                left = repo.GetIndexFileText(path) ?? repo.GetFileText("HEAD", path) ?? "";
+                right = repo.GetWorkingFileText(path) ?? "";
+                break;
+        }
+
+        var request = new ExternalDiffRequest
+        {
+            RepoPath = repo.Path,
+            RelativePath = path,
+            LeftLabel = leftLabel,
+            LeftContent = left,
+            RightLabel = rightLabel,
+            RightContent = right,
+        };
+        var opts = new ExternalToolOptions
+        {
+            ExternalDiffToolPath = "code",
+            ExternalDiffToolArgs = "--wait --diff {left} {right}",
+        };
+        bool ok = ExternalDiffLauncher.TryLaunch(opts, request, out var err);
+        return (ok, err);
     }
 }

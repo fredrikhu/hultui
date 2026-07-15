@@ -359,6 +359,23 @@ public sealed unsafe class SDL3Window : IDisposable
     public bool IsMaximized =>
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
 
+    /// <summary>
+    /// Constrains how small the user can resize the window, in density-independent
+    /// (layout) units. SDL takes the limit in window coordinates, so convert via
+    /// <see cref="InputScale"/> (layout = windowCoord · InputScale) exactly as the
+    /// DPI-preserving resize above does. Pass 0 for a dimension to leave it
+    /// unconstrained.
+    /// </summary>
+    public void SetMinimumSize(int layoutWidth, int layoutHeight)
+    {
+        if (_window == null) return;
+        float scale = InputScale;
+        if (scale <= 0f) scale = 1f;
+        SDL_SetWindowMinimumSize(_window,
+            layoutWidth <= 0 ? 0 : (int)MathF.Round(layoutWidth / scale),
+            layoutHeight <= 0 ? 0 : (int)MathF.Round(layoutHeight / scale));
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static SDL_HitTestResult HitTestNativeCallback(SDL_Window* window, SDL_Point* area, IntPtr data)
     {

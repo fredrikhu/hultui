@@ -27,8 +27,11 @@ public partial class JunctionApp
         }
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        row.AddChild(BuildChangesColumn(data));
-        row.AddChild(BuildDiffPane(_changeSelPath ?? "", diff));
+        // Narrow windows hide the diff pane; the file list + composer fill instead
+        // (open the diff in VS Code with Ctrl+D — see OpenSelectedDiffExternally).
+        row.AddChild(BuildChangesColumn(data, fill: _hideDiff));
+        if (!_hideDiff)
+            row.AddChild(BuildDiffPane(_changeSelPath ?? "", diff));
         return row;
     }
 
@@ -69,10 +72,14 @@ public partial class JunctionApp
 
     // ── Left column: file lists + composer ───────────────────────────────
 
-    private Element BuildChangesColumn(ChangesData data)
+    private Element BuildChangesColumn(ChangesData data, bool fill = false)
     {
-        var col = Flex.Column(gap: 0).Width(330).FlexShrink(0)
+        // When the diff pane is hidden the column fills the view; otherwise it's a
+        // fixed-width sidebar next to the diff.
+        var col = Flex.Column(gap: 0)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
+        if (fill) col.FlexGrow(1);
+        else col.Width(330).FlexShrink(0);
 
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(8, 8, 4, 8));
 
@@ -175,6 +182,11 @@ public partial class JunctionApp
             items.Add(Item(Icons.CheckSquare, "Stage all", StageAll));
         }
         items.Add(ContextMenuItem.Separator());
+        items.Add(Item(Icons.FileCode, "Open diff in VS Code", () =>
+        {
+            SelectChange(f.Path, isStaged);
+            OpenSelectedDiffExternally();
+        }));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(f.Path)));
         // Discard only from the worktree (unstaged) list, where `git restore`
         // / `git clean` are well-defined; staged rows should be unstaged first.

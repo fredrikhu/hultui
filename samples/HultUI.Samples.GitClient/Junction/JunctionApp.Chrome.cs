@@ -40,13 +40,18 @@ public partial class JunctionApp
         crumb.AddChild(Sep());
         crumb.AddChild(Ui.Icon(Icons.GitRepository, 13f, Nocturne.Accent300));
         crumb.AddChild(Text.New(repoName).FontSize(13f).TextColor(Nocturne.On(0.70)));
-        crumb.AddChild(Sep());
-        crumb.AddChild(Ui.Icon(Icons.GitBranch, 12f, Nocturne.Accent300));
-        crumb.AddChild(Ui.Mono(pb.Title, 12f, Nocturne.On(0.70)));
-        if (wsName.Length > 0)
+        // Narrow windows drop the branch + workspace segments so the breadcrumb
+        // doesn't run into the search box; they're still visible in the sidebar.
+        if (!_compactChrome)
         {
             crumb.AddChild(Sep());
-            crumb.AddChild(Text.New(wsName).FontSize(13f).TextColor(Nocturne.On(0.75)));
+            crumb.AddChild(Ui.Icon(Icons.GitBranch, 12f, Nocturne.Accent300));
+            crumb.AddChild(Ui.Mono(pb.Title, 12f, Nocturne.On(0.70)));
+            if (wsName.Length > 0)
+            {
+                crumb.AddChild(Sep());
+                crumb.AddChild(Text.New(wsName).FontSize(13f).TextColor(Nocturne.On(0.75)));
+            }
         }
         crumb.WindowDrag();
         bar.AddChild(crumb);
@@ -61,14 +66,19 @@ public partial class JunctionApp
 
         var search = Flex.Row(gap: 8)
             .Height(26).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, 8, 0, 10))
+            .Padding(_compactChrome ? new Thickness(0, 7, 0, 7) : new Thickness(0, 8, 0, 10))
             .Background(Nocturne.Bg)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusMd)
-            .Cursor(CursorType.Pointer);
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Search & commands (Ctrl K)");
         search.AddChild(Ui.Icon(Icons.MagnifyingGlass, 13f, Nocturne.On(0.55)));
-        search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
-        search.AddChild(Kbd("Ctrl K"));
+        // Narrow windows collapse the search box to just its icon.
+        if (!_compactChrome)
+        {
+            search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
+            search.AddChild(Kbd("Ctrl K"));
+        }
         search.OnClick(_ => TogglePalette());
         search.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.08), Nocturne.Bg);
         right.AddChild(search);
@@ -114,14 +124,17 @@ public partial class JunctionApp
     {
         var sum = HasActiveRepo ? SummaryFor(_activeRepoPath) : RepoSummary.Pending;
 
-        var bar = Flex.Row(gap: 14)
+        bool compact = _compactChrome;
+        var bar = Flex.Row(gap: compact ? 8 : 14)
             .Height(52).FlexShrink(0)
             .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, 16, 0, 16))
+            .Padding(new Thickness(0, compact ? 10 : 16, 0, compact ? 10 : 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        // Segmented view tabs.
-        var seg = Flex.Row(gap: 2)
+        // Segmented view tabs. FlexShrink(0) so the row never compresses the tabs
+        // (which would let each tab's shortcut-number badge creep into its label);
+        // the compact breakpoint switches them to icon-only before they'd overflow.
+        var seg = Flex.Row(gap: 2).FlexShrink(0)
             .Padding(new Thickness(3))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
@@ -136,16 +149,17 @@ public partial class JunctionApp
 
         bar.AddChild(Box.New().FlexGrow(1));
 
-        // Git actions.
-        var actions = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-        actions.AddChild(Ui.SecondaryButton("Fetch", Icons.ArrowsClockwise, DoFetch));
+        // Git actions. Narrow windows drop the button labels (keeping the
+        // ahead/behind counts) so Fetch/Pull/Push don't crowd the view tabs.
+        var actions = Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center);
+        actions.AddChild(ActionButton("Fetch", Icons.ArrowsClockwise, DoFetch, primary: false, compact));
 
-        var pull = Ui.SecondaryButton("Pull", Icons.ArrowDown, DoPull);
+        var pull = ActionButton("Pull", Icons.ArrowDown, DoPull, primary: false, compact);
         if (sum.Behind > 0)
             pull.AddChild(Text.New(sum.Behind.ToString()).FontSize(13f).TextColor(Nocturne.Accent300));
         actions.AddChild(pull);
 
-        var push = Ui.PrimaryButton("Push", Icons.ArrowUp, DoPush);
+        var push = ActionButton("Push", Icons.ArrowUp, DoPush, primary: true, compact);
         if (sum.Ahead > 0)
             push.AddChild(Text.New(sum.Ahead.ToString()).FontSize(13f).TextColor(Nocturne.Accent));
         actions.AddChild(push);
@@ -156,14 +170,37 @@ public partial class JunctionApp
         return bar;
     }
 
+    // A toolbar git action. Full width shows an icon + label; compact drops the
+    // label to an icon-only button (with the label as its tooltip) but keeps room
+    // for a trailing ahead/behind count the caller may append.
+    private static BoxElement ActionButton(string label, string glyph, Action onClick, bool primary, bool compact)
+    {
+        if (!compact)
+            return primary
+                ? Ui.PrimaryButton(label, glyph, onClick)
+                : Ui.SecondaryButton(label, glyph, onClick);
+
+        var fg = primary ? Nocturne.Accent : Nocturne.Text;
+        var b = Flex.Row(gap: 5).Height(34).MinWidth(34)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Padding(new Thickness(0, 9, 0, 9))
+            .CornerRadius(Nocturne.RadiusMd)
+            .BorderColor(primary ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer).Tooltip(label);
+        b.AddChild(Ui.Icon(glyph, 15f, fg));
+        b.OnClick(_ => onClick());
+        return b.HoverBg(Nocturne.Alpha(fg, primary ? 0.12 : 0.07), Color.Transparent);
+    }
+
     private Element ViewTab(JunctionView view, string label, string glyph, string num, int badge)
     {
         var active = View == view;
         var fg = active ? Nocturne.Accent : Nocturne.On(0.60);
+        bool compact = _compactChrome;
 
-        var tab = Flex.Row(gap: 6)
+        var tab = Flex.Row(gap: 6).FlexShrink(0)
             .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(5, 10, 5, 10))
+            .Padding(compact ? new Thickness(5, 8, 5, 8) : new Thickness(5, 10, 5, 10))
             .CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer)
             .Tooltip($"{label} ({num})");
@@ -171,11 +208,16 @@ public partial class JunctionApp
             tab.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
 
         tab.AddChild(Ui.Icon(glyph, 13f, fg));
-        tab.AddChild(Text.New(label).FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(fg));
-        tab.AddChild(
-            Box.New().Padding(new Thickness(1, 4, 1, 4)).CornerRadius(3f)
-                .BorderColor(Nocturne.Divider).BorderWidth(1f)
-                .Children(Ui.Mono(num, 9f, Nocturne.On(active ? 0.8 : 0.5))));
+        // Narrow windows show icon-only tabs (the shortcut number and label move to
+        // the tooltip) so all five fit without overlapping the git actions.
+        if (!compact)
+        {
+            tab.AddChild(Text.New(label).FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(fg));
+            tab.AddChild(
+                Box.New().Padding(new Thickness(1, 4, 1, 4)).CornerRadius(3f)
+                    .BorderColor(Nocturne.Divider).BorderWidth(1f)
+                    .Children(Ui.Mono(num, 9f, Nocturne.On(active ? 0.8 : 0.5))));
+        }
 
         if (badge > 0)
             tab.AddChild(

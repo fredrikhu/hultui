@@ -56,6 +56,29 @@ public partial class JunctionApp : Component, IDisposable
     [Reactive] public partial JunctionView View { get; set; }
     private bool _sidebarCollapsed;
 
+    // Responsive breakpoints, measured against the *content* width (viewport minus
+    // the sidebar) since the toolbar and the views live to the right of it — so
+    // collapsing the sidebar frees room and re-evaluates the breakpoints too. Both
+    // flags are flipped from the window's Resized event (and ToggleSidebar); the
+    // reactive build doesn't re-run on resize on its own, so RecomputeResponsive
+    // bumps _revision only when a breakpoint actually crosses.
+    //
+    // CompactChromeContentWidth: below it the title-bar breadcrumb + toolbar
+    // collapse to icon-only and the commit-row ref chips hide. The full-label
+    // toolbar needs ~890 dip of content to lay out without clipping the stash
+    // button (the tabs are FlexShrink(0), so they no longer compress to fit).
+    private const float CompactChromeContentWidth = 910f;
+    // HideDiffContentWidth: below it the Commit/Changes views drop the diff pane
+    // and let the file list fill (the 3-pane split gets unusable when narrow).
+    private const float HideDiffContentWidth = 620f;
+    private const float SidebarExpandedWidth = 266f;
+    private const float SidebarRailWidth = 58f;
+    private bool _compactChrome;
+    private bool _hideDiff;
+
+    private float ContentWidth =>
+        _window.LayoutWidth - (_sidebarCollapsed ? SidebarRailWidth : SidebarExpandedWidth);
+
     // Bumped to force a *reactive* rebuild (via the build Effect) rather than the
     // untracked MarkDirty/ForceRebuild path. Switching the active repo activates a
     // different per-repo loader, and only a tracked rebuild re-subscribes the
@@ -186,9 +209,35 @@ public partial class JunctionApp : Component, IDisposable
 
         View = JunctionView.History;
 
+        _compactChrome = ContentWidth < CompactChromeContentWidth;
+        _hideDiff = ContentWidth < HideDiffContentWidth;
+        _window.Resized += OnWindowResize;
+
         // Global keys land on the host when nothing is focused (see App.cs for
         // the same rationale). Materialise the host so the handler is wired.
         Mount().On<KeyDownEvent>(HandleKeyDown);
+    }
+
+    // Toggle compact chrome as the window crosses the breakpoint. Only rerender on
+    // an actual crossing so ordinary resizes above/below the threshold don't churn
+    // the build every frame of a drag.
+    private void OnWindowResize()
+    {
+        if (RecomputeResponsive()) Rerender();
+    }
+
+    // Recompute the responsive flags from the current content width; returns true
+    // if either flipped. Called on resize and when the sidebar collapses/expands
+    // (which changes the content width available to the toolbar and views).
+    private bool RecomputeResponsive()
+    {
+        float content = ContentWidth;
+        bool compact = content < CompactChromeContentWidth;
+        bool hideDiff = content < HideDiffContentWidth;
+        if (compact == _compactChrome && hideDiff == _hideDiff) return false;
+        _compactChrome = compact;
+        _hideDiff = hideDiff;
+        return true;
     }
 
     // ── Model access ─────────────────────────────────────────────────────
@@ -566,6 +615,9 @@ public partial class JunctionApp : Component, IDisposable
     private void ToggleSidebar()
     {
         _sidebarCollapsed = !_sidebarCollapsed;
+        // Collapsing/expanding changes the content width, which may cross a
+        // responsive breakpoint (e.g. reveal the full toolbar); recompute first.
+        RecomputeResponsive();
         MarkDirty();
     }
 
@@ -655,6 +707,16 @@ public partial class JunctionApp : Component, IDisposable
         if (ctrl && e.Key == KeyCode.K)
         {
             TogglePalette();
+            e.StopPropagation = true;
+            return;
+        }
+
+        // ⌘D / Ctrl+D opens the selected file's diff in VS Code (Commit/Changes
+        // views) — the primary way to inspect a diff when the pane is hidden on
+        // narrow windows, but available at any size.
+        if (ctrl && e.Key == KeyCode.D && View is JunctionView.Commit or JunctionView.Changes)
+        {
+            OpenSelectedDiffExternally();
             e.StopPropagation = true;
             return;
         }
@@ -779,6 +841,7 @@ public partial class JunctionApp : Component, IDisposable
 
     public void Dispose()
     {
+        _window.Resized -= OnWindowResize;
         _toastCts?.Cancel();
         _toastCts?.Dispose();
         foreach (var w in _watchers.Values) w.Dispose();
