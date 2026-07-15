@@ -28,11 +28,14 @@ public partial class JunctionApp
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        // Left drag region (balances the right group so the breadcrumb centres).
-        bar.AddChild(Flex.Row(gap: 0).FlexGrow(1).Padding(new Thickness(0, 0, 0, 14)).WindowDrag());
-
-        // Centred breadcrumb (draggable — no handlers on these children).
-        var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center);
+        // Breadcrumb pinned to the left with a fixed inset (draggable — no handlers
+        // on these children). A grow-based spacer here would size from the leftover
+        // space, which rounds differently as the active repo's name/branch width
+        // changes and jitters "Junction" by ~1px; a fixed left inset keeps its left
+        // edge constant. The right group's own grow filler pushes the controls flush
+        // right.
+        var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, 0, 0, 14));
         crumb.AddChild(Text.New(Brand).FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.70)));
         crumb.AddChild(Sep());
         crumb.AddChild(Ui.Icon(Icons.GitRepository, 13f, Nocturne.Accent300));
