@@ -153,8 +153,45 @@ public partial class JunctionApp
                 Text.New($"−{f.Deletions}").FontSize(10f).TextColor(Nocturne.DelCount)));
 
         row.OnClick(_ => SelectChange(f.Path, isStaged));
+        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectChange(f.Path, isStaged); });
+        row.ContextMenu(() => ChangeFileMenuItems(f, isStaged));
         if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
+    }
+
+    // ── File context menu ────────────────────────────────────────────────
+
+    private IReadOnlyList<ContextMenuItem> ChangeFileMenuItems(GitFileChange f, bool isStaged)
+    {
+        var items = new List<ContextMenuItem>();
+        if (isStaged)
+        {
+            items.Add(Item(Icons.MinusCircle, "Unstage", () => Unstage(f.Path)));
+            items.Add(Item(Icons.Square, "Unstage all", UnstageAll));
+        }
+        else
+        {
+            items.Add(Item(Icons.PlusCircle, "Stage", () => Stage(f.Path)));
+            items.Add(Item(Icons.CheckSquare, "Stage all", StageAll));
+        }
+        items.Add(ContextMenuItem.Separator());
+        items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(f.Path)));
+        // Discard only from the worktree (unstaged) list, where `git restore`
+        // / `git clean` are well-defined; staged rows should be unstaged first.
+        if (!isStaged)
+        {
+            items.Add(ContextMenuItem.Separator());
+            items.Add(Danger(Icons.CounterClockwise, "Discard changes", () => DiscardChange(f)));
+        }
+        return items;
+    }
+
+    private void DiscardChange(GitFileChange f)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var ok = repo.DiscardChanges(f);
+        Flash(ok ? $"Discarded {System.IO.Path.GetFileName(f.Path)}" : "Discard failed");
+        RefreshAll();
     }
 
     // ── Composer ─────────────────────────────────────────────────────────
@@ -164,6 +201,20 @@ public partial class JunctionApp
         var box = Flex.Column(gap: 8).FlexShrink(0)
             .Padding(new Thickness(12))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
+
+        // Ctrl/Cmd+Enter commits from either the summary or description field.
+        // Handled in the capture phase (on the composer, an ancestor of both
+        // fields) so it fires before the text area's own Enter handler inserts
+        // a newline.
+        box.On<KeyDownEvent>(EventPhase.Capture, e =>
+        {
+            var mod = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+            if (mod && e.Key == KeyCode.Enter)
+            {
+                e.StopPropagation = true;
+                DoCommit();
+            }
+        });
 
         // Summary
         var sumBox = Flex.Row(gap: 0).AlignItems(AlignItems.Center)

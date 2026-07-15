@@ -359,6 +359,8 @@ public partial class JunctionApp
 
     private void BranchSearchKey(KeyDownEvent e)
     {
+        // Let Alt/Ctrl-modified keys bubble to the global repo/workspace shortcuts.
+        if (e.Modifiers.HasFlag(KeyModifiers.Alt) || e.Modifiers.HasFlag(KeyModifiers.Ctrl)) return;
         if (e.Key == KeyCode.Escape)
         {
             _branchQuery = "";

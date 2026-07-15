@@ -414,6 +414,57 @@ public partial class JunctionApp : Component, IDisposable
         MarkDirty();
     }
 
+    // ── Keyboard navigation across repos / workspaces ────────────────────
+
+    /// <summary>Step the active repo within the current workspace's ordered list.
+    /// With no active repo, lands on the first (delta &gt; 0) or last entry.</summary>
+    private void NavigateRepo(int delta)
+    {
+        var repos = ActiveWorkspaceRepos;
+        if (repos.Count == 0) return;
+        var idx = IndexOfPath(repos, _activeRepoPath);
+        var next = idx < 0
+            ? (delta > 0 ? 0 : repos.Count - 1)
+            : Math.Clamp(idx + delta, 0, repos.Count - 1);
+        SelectRepo(repos[next]);
+    }
+
+    private void SelectRepoByIndex(int index)
+    {
+        var repos = ActiveWorkspaceRepos;
+        if (index < 0 || index >= repos.Count) return;
+        SelectRepo(repos[index]);
+    }
+
+    /// <summary>Step the active workspace within the settings' ordered list.</summary>
+    private void NavigateWorkspace(int delta)
+    {
+        var list = _settings.Workspaces;
+        if (list.Count == 0) return;
+        var idx = -1;
+        for (var i = 0; i < list.Count; i++)
+            if (list[i].Id == _activeWorkspaceId) { idx = i; break; }
+        var next = idx < 0
+            ? (delta > 0 ? 0 : list.Count - 1)
+            : Math.Clamp(idx + delta, 0, list.Count - 1);
+        SelectWorkspace(list[next].Id);
+    }
+
+    private void SelectWorkspaceByIndex(int index)
+    {
+        var list = _settings.Workspaces;
+        if (index < 0 || index >= list.Count) return;
+        SelectWorkspace(list[index].Id);
+    }
+
+    private static int IndexOfPath(IReadOnlyList<string> paths, string target)
+    {
+        if (string.IsNullOrEmpty(target)) return -1;
+        for (var i = 0; i < paths.Count; i++)
+            if (PathEquals(paths[i], target)) return i;
+        return -1;
+    }
+
     private void ToggleSidebar()
     {
         _sidebarCollapsed = !_sidebarCollapsed;
@@ -463,6 +514,7 @@ public partial class JunctionApp : Component, IDisposable
     private void HandleKeyDown(KeyDownEvent e)
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
         var typing = e.Target is TextInputElement or TextAreaElement;
 
         // The repo/workspace popover and modal are lightweight; Esc dismisses them,
@@ -519,6 +571,29 @@ public partial class JunctionApp : Component, IDisposable
             MarkDirty();
             e.StopPropagation = true;
             return;
+        }
+
+        // Global repo / workspace navigation. Alt = repositories, Ctrl/Cmd =
+        // workspaces. Handled before the typing guard so they act like true
+        // global shortcuts even while a field is focused (only modal overlays,
+        // handled above, take precedence). Alt+↑/↓ or Ctrl+↑/↓ step through the
+        // list; Alt+N / Ctrl+N jump to the Nth entry (1-based).
+        if (alt || ctrl)
+        {
+            if (e.Key is >= KeyCode.Digit1 and <= KeyCode.Digit9)
+            {
+                var index = e.Key - KeyCode.Digit1;
+                if (alt) SelectRepoByIndex(index); else SelectWorkspaceByIndex(index);
+                e.StopPropagation = true;
+                return;
+            }
+            if (e.Key is KeyCode.Up or KeyCode.Down)
+            {
+                var delta = e.Key == KeyCode.Down ? 1 : -1;
+                if (alt) NavigateRepo(delta); else NavigateWorkspace(delta);
+                e.StopPropagation = true;
+                return;
+            }
         }
 
         if (typing) return;
