@@ -100,7 +100,7 @@ public partial class JunctionApp
             SetCommitSelection(data.Commits[0].Hash);
     }
 
-    private void MoveCommitSelection(int delta, bool extend = false)
+    private void MoveCommitSelection(int delta, bool extend = false, bool focusOnly = false, bool additive = false)
     {
         var commits = FilteredCommits(_history.Value);
         if (commits.Count == 0) return;
@@ -109,18 +109,34 @@ public partial class JunctionApp
         i = Math.Clamp(i + delta, 0, commits.Count - 1);
         if (extend)
         {
-            // Shift+arrows: selection becomes the contiguous anchor→focus range.
+            // Shift+arrows: selection becomes the contiguous anchor→focus range
+            // (Ctrl+Shift keeps the rest of the selection and adds the range).
             var anchor = _selectionAnchorHash ?? _selectedCommitHash ?? commits[i].Hash;
-            _selectedCommitHashes.Clear();
+            if (!additive) _selectedCommitHashes.Clear();
             AddRangeToSelection(commits, anchor, commits[i].Hash);
             _selectedCommitHash = commits[i].Hash;
             _selectionAnchorHash = anchor;
+        }
+        else if (focusOnly)
+        {
+            // Ctrl+arrows: move the focus caret only; selection and anchor stay.
+            _selectedCommitHash = commits[i].Hash;
         }
         else
         {
             SetCommitSelection(commits[i].Hash);
         }
         _pendingScrollToSelected = true;
+        MarkDirty();
+    }
+
+    /// <summary>Ctrl+Space: toggles the focused commit in/out of the selection
+    /// (may empty it entirely, like a Windows list).</summary>
+    private void ToggleFocusedCommitSelection()
+    {
+        if (_selectedCommitHash is not { } hash) return;
+        if (!_selectedCommitHashes.Add(hash)) _selectedCommitHashes.Remove(hash);
+        _selectionAnchorHash = hash;
         MarkDirty();
     }
 
@@ -157,27 +173,18 @@ public partial class JunctionApp
         }
         if (ctrl)
         {
-            if (!_selectedCommitHashes.Add(commit.Hash))
-            {
-                // Toggle off — but never let the selection go empty.
-                if (_selectedCommitHashes.Count > 1)
-                {
-                    _selectedCommitHashes.Remove(commit.Hash);
-                    if (_selectedCommitHash == commit.Hash)
-                        _selectedCommitHash = FilteredCommits(_history.Value)
-                            .FirstOrDefault(c => _selectedCommitHashes.Contains(c.Hash))?.Hash;
-                }
-            }
-            else
-            {
-                _selectedCommitHash = commit.Hash;
-            }
+            // Toggle; focus follows the click either way (selection may go empty).
+            if (!_selectedCommitHashes.Add(commit.Hash)) _selectedCommitHashes.Remove(commit.Hash);
+            _selectedCommitHash = commit.Hash;
             _selectionAnchorHash = commit.Hash;
             MarkDirty();
             return;
         }
 
-        if (commit.Hash == _selectedCommitHash && _selectedCommitHashes.Count <= 1)
+        // Re-clicking the commit that is already the single selection opens it;
+        // any other plain click collapses the selection to the clicked commit.
+        if (commit.Hash == _selectedCommitHash
+            && _selectedCommitHashes.Count == 1 && _selectedCommitHashes.Contains(commit.Hash))
         {
             SetView(JunctionView.Commit);
         }
@@ -286,8 +293,14 @@ public partial class JunctionApp
 
     private void HistorySearchKey(KeyDownEvent e)
     {
-        // Let Alt/Ctrl-modified keys bubble to the global repo/workspace shortcuts.
-        if (e.Modifiers.HasFlag(KeyModifiers.Alt) || e.Modifiers.HasFlag(KeyModifiers.Ctrl)) return;
+        // Let Alt-modified keys bubble to the global repo/workspace shortcuts.
+        // Ctrl bubbles too, except the Windows-list keys (Ctrl+↑/↓ moves the
+        // focus caret, Ctrl+Space toggles) which the list handles even while
+        // the search box is focused.
+        if (e.Modifiers.HasFlag(KeyModifiers.Alt)) return;
+        if (e.Modifiers.HasFlag(KeyModifiers.Ctrl)
+            && e.Key is not (KeyCode.Up or KeyCode.Down or KeyCode.PageUp or KeyCode.PageDown or KeyCode.Space))
+            return;
         if (e.Key == KeyCode.Escape)
         {
             _historyQuery = "";
@@ -350,10 +363,16 @@ public partial class JunctionApp
     private Element HistoryRow(GitCommit commit, GitGraphRow graph, (int Added, int Deleted) stat,
         HashSet<string> remotes, bool selected)
     {
+        // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
+        // hover-strength tint so keyboard navigation stays visible.
+        var focused = commit.Hash == _selectedCommitHash;
+        var bg = selected ? Nocturne.Accent900
+            : focused ? Nocturne.Neutral900
+            : Color.Transparent;
         var row = Flex.Row(gap: 0)
             .AlignItems(AlignItems.Stretch)
             .Height(RowHeight)
-            .Background(selected ? Nocturne.Accent900 : Color.Transparent)
+            .Background(bg)
             .BorderColor(Nocturne.On(0.05)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
 
@@ -392,8 +411,9 @@ public partial class JunctionApp
 
         row.AddChild(body);
 
-        // Selected affordance on the focused row; a multi-selection compares instead.
-        if (selected && commit.Hash == _selectedCommitHash)
+        // Affordance follows the focus caret; it names what Enter will do
+        // (a multi-selection compares, otherwise the focused commit opens).
+        if (focused)
             row.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).FlexShrink(0)
                 .Padding(new Thickness(0, 12, 0, 8))
                 .Children(
@@ -414,7 +434,7 @@ public partial class JunctionApp
         });
         row.ContextMenu(() => CommitMenuItems(commit));
         if (!selected)
-            row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+            row.HoverBg(Nocturne.Neutral900, bg);   // restore the focus tint on leave
 
         return row;
     }
@@ -486,7 +506,8 @@ public partial class JunctionApp
 
         var comparing = SelectedRange() != null;
         bar.AddChild(Hint("↑ ↓", "select commit"));
-        bar.AddChild(Hint("Ctrl/Shift+click", "select commits to compare"));
+        bar.AddChild(Hint("Ctrl/Shift + click/↑↓", "select commits to compare"));
+        bar.AddChild(Hint("Ctrl+Space", "toggle commit"));
         bar.AddChild(Hint("↵", comparing ? "compare selected" : "open commit details"));
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton(

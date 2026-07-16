@@ -564,8 +564,10 @@ public partial class JunctionApp : Component, IDisposable
         if (hash != null) _selectedCommitHashes.Add(hash);
     }
 
-    private bool SelectionContains(string hash) =>
-        _selectedCommitHashes.Count > 0 ? _selectedCommitHashes.Contains(hash) : hash == _selectedCommitHash;
+    // Selection and focus are separate, like a Windows list: _selectedCommitHash
+    // is the focus caret and may sit outside (or alongside an empty) selection
+    // after Ctrl+arrows / Ctrl+Space / Ctrl+click toggles.
+    private bool SelectionContains(string hash) => _selectedCommitHashes.Contains(hash);
 
     /// <summary>Base (oldest) and head (newest) of the multi-selection compare, or
     /// null when fewer than two selected commits exist in the loaded history.</summary>
@@ -629,20 +631,6 @@ public partial class JunctionApp : Component, IDisposable
         var repos = ActiveWorkspaceRepos;
         if (index < 0 || index >= repos.Count) return;
         SelectRepo(repos[index]);
-    }
-
-    /// <summary>Step the active workspace within the settings' ordered list.</summary>
-    private void NavigateWorkspace(int delta)
-    {
-        var list = _settings.Workspaces;
-        if (list.Count == 0) return;
-        var idx = -1;
-        for (var i = 0; i < list.Count; i++)
-            if (list[i].Id == _activeWorkspaceId) { idx = i; break; }
-        var next = idx < 0
-            ? (delta > 0 ? 0 : list.Count - 1)
-            : Math.Clamp(idx + delta, 0, list.Count - 1);
-        SelectWorkspace(list[next].Id);
     }
 
     private void SelectWorkspaceByIndex(int index)
@@ -786,8 +774,9 @@ public partial class JunctionApp : Component, IDisposable
         // Global repo / workspace navigation. Alt = repositories, Ctrl/Cmd =
         // workspaces. Handled before the typing guard so they act like true
         // global shortcuts even while a field is focused (only modal overlays,
-        // handled above, take precedence). Alt+↑/↓ or Ctrl+↑/↓ step through the
-        // list; Alt+N / Ctrl+N jump to the Nth entry (1-based).
+        // handled above, take precedence). Alt+↑/↓ steps through the repos;
+        // Alt+N / Ctrl+N jump to the Nth entry (1-based). Ctrl+↑/↓ belongs to
+        // the History list (focus caret) — workspaces switch via Ctrl+N only.
         if (alt || ctrl)
         {
             if (e.Key is >= KeyCode.Digit1 and <= KeyCode.Digit9)
@@ -797,10 +786,9 @@ public partial class JunctionApp : Component, IDisposable
                 e.StopPropagation = true;
                 return;
             }
-            if (e.Key is KeyCode.Up or KeyCode.Down)
+            if (alt && e.Key is KeyCode.Up or KeyCode.Down)
             {
-                var delta = e.Key == KeyCode.Down ? 1 : -1;
-                if (alt) NavigateRepo(delta); else NavigateWorkspace(delta);
+                NavigateRepo(e.Key == KeyCode.Down ? 1 : -1);
                 e.StopPropagation = true;
                 return;
             }
@@ -868,16 +856,21 @@ public partial class JunctionApp : Component, IDisposable
     /// search box (so arrows/PageUp-Down/Enter work while typing a query too).</summary>
     private bool HandleHistoryNavKey(KeyDownEvent e)
     {
-        // Shift extends the selection from the anchor, like any Windows list.
-        var extend = e.Modifiers.HasFlag(KeyModifiers.Shift);
+        // Windows-list modifiers: Shift extends the selection from the anchor,
+        // Ctrl moves only the focus caret (Ctrl+Shift adds the range instead of
+        // replacing the selection), Ctrl+Space toggles the focused commit.
+        var shift = e.Modifiers.HasFlag(KeyModifiers.Shift);
+        var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl);
+        var focusOnly = ctrl && !shift;
         switch (e.Key)
         {
-            case KeyCode.Down: MoveCommitSelection(1, extend); return true;
-            case KeyCode.Up: MoveCommitSelection(-1, extend); return true;
-            case KeyCode.PageDown: MoveCommitSelection(HistoryPageSize(), extend); return true;
-            case KeyCode.PageUp: MoveCommitSelection(-HistoryPageSize(), extend); return true;
-            case KeyCode.Home: MoveCommitSelection(int.MinValue / 2, extend); return true;
-            case KeyCode.End: MoveCommitSelection(int.MaxValue / 2, extend); return true;
+            case KeyCode.Down: MoveCommitSelection(1, shift, focusOnly, ctrl); return true;
+            case KeyCode.Up: MoveCommitSelection(-1, shift, focusOnly, ctrl); return true;
+            case KeyCode.PageDown: MoveCommitSelection(HistoryPageSize(), shift, focusOnly, ctrl); return true;
+            case KeyCode.PageUp: MoveCommitSelection(-HistoryPageSize(), shift, focusOnly, ctrl); return true;
+            case KeyCode.Home: MoveCommitSelection(int.MinValue / 2, shift, focusOnly, ctrl); return true;
+            case KeyCode.End: MoveCommitSelection(int.MaxValue / 2, shift, focusOnly, ctrl); return true;
+            case KeyCode.Space when ctrl: ToggleFocusedCommitSelection(); return true;
             case KeyCode.Enter: SetView(JunctionView.Commit); return true;
             default: return false;
         }
