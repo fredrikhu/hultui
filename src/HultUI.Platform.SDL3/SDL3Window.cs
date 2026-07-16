@@ -376,6 +376,31 @@ public sealed unsafe class SDL3Window : IDisposable
             layoutHeight <= 0 ? 0 : (int)MathF.Round(layoutHeight / scale));
     }
 
+    /// <summary>
+    /// Sets the window/taskbar icon from decoded image pixels. SDL copies the
+    /// surface, so the pixel buffer only needs to live for the call. On Windows
+    /// the exe's embedded .ico usually already covers this; on Linux this is the
+    /// only way the window manager gets an icon.
+    /// </summary>
+    public void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels)
+    {
+        if (_window == null || width <= 0 || height <= 0 || rgbaPixels.Length < width * height * 4)
+            return;
+        // The binding lacks the byte-order RGBA32 alias, so pick the packed
+        // format that reads R,G,B,A in memory for this endianness.
+        var format = BitConverter.IsLittleEndian
+            ? SDL_PixelFormat.SDL_PIXELFORMAT_ABGR8888
+            : SDL_PixelFormat.SDL_PIXELFORMAT_RGBA8888;
+        fixed (byte* pixels = rgbaPixels)
+        {
+            var surface = SDL_CreateSurfaceFrom(width, height,
+                format, (IntPtr)pixels, width * 4);
+            if (surface == null) return;
+            SDL_SetWindowIcon(_window, surface);
+            SDL_DestroySurface(surface);
+        }
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static SDL_HitTestResult HitTestNativeCallback(SDL_Window* window, SDL_Point* area, IntPtr data)
     {

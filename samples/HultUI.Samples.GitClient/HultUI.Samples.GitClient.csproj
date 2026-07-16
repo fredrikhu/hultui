@@ -11,6 +11,10 @@
     <IsAotCompatible>true</IsAotCompatible>
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- Embedded in the exe: Explorer, shortcuts and the Windows taskbar read
+         this. The runtime window icon (Linux WMs, alt-tab) is set from
+         Assets\junction.png in Program.cs. -->
+    <ApplicationIcon>Assets\junction.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

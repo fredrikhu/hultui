@@ -126,6 +126,32 @@ public sealed class Window : IOverlayHost, IDisposable
     /// </summary>
     public void SetMinimumSize(int width, int height) => PlatformWindow.SetMinimumSize(width, height);
 
+    /// <summary>
+    /// Sets the window/taskbar icon from an image file (PNG etc.). On Windows
+    /// the exe's embedded .ico usually already covers the taskbar; on Linux this
+    /// is how the window manager gets an icon. No-op when the file is missing or
+    /// can't be decoded — a broken icon shouldn't stop the app from starting.
+    /// </summary>
+    public void SetIcon(string path)
+    {
+        if (!File.Exists(path)) return;
+        using var bitmap = SkiaSharp.SKBitmap.Decode(path);
+        if (bitmap is null) return;
+
+        // SKColor is unpremultiplied; repack to the byte-order RGBA SDL expects.
+        var colors = bitmap.Pixels;
+        var rgba = new byte[colors.Length * 4];
+        for (int i = 0; i < colors.Length; i++)
+        {
+            var c = colors[i];
+            rgba[i * 4 + 0] = c.Red;
+            rgba[i * 4 + 1] = c.Green;
+            rgba[i * 4 + 2] = c.Blue;
+            rgba[i * 4 + 3] = c.Alpha;
+        }
+        PlatformWindow.SetIcon(bitmap.Width, bitmap.Height, rgba);
+    }
+
     /// <summary>Thickness (in density-independent units) of the invisible resize border for borderless windows.</summary>
     public int ResizeBorderWidth
     {

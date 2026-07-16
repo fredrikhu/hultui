@@ -41,6 +41,7 @@ var window = app.PrimaryWindow;
 // breakpoint (~930 dip) JunctionApp switches the toolbar/breadcrumb to icon-only,
 // which stays legible down to this minimum.
 window.SetMinimumSize(760, 540);
+window.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "junction.png"));
 var junction = new JunctionApp(app, window, settings);
 window.Closed += junction.Dispose;
 app.SetRoot(junction.Mount());
