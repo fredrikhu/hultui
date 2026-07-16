@@ -6,16 +6,64 @@ namespace HultUI.Core.Elements;
 
 public class BoxElement : Element
 {
-    public Color BackgroundColor { get; set; } = Color.Transparent;
-    public Color BorderColor { get; set; } = Color.Transparent;
-    public BorderStyle BorderStyle { get; set; } = BorderStyle.Solid;
-    public CornerRadius CornerRadius { get; set; }
+    // Visual properties are self-marking: assigning a new value marks the
+    // element paint-dirty, so imperative mutations from any code path (event
+    // handlers, await continuations, timers) become visible without an
+    // explicit MarkPaintDirty. Equality checks keep no-op writes free — in
+    // particular ApplyTheme and the reconciler re-assign these every pass.
+    private Color _backgroundColor = Color.Transparent;
+    public Color BackgroundColor
+    {
+        get => _backgroundColor;
+        set { if (_backgroundColor == value) return; _backgroundColor = value; MarkPaintDirty(); }
+    }
+
+    private Color _borderColor = Color.Transparent;
+    public Color BorderColor
+    {
+        get => _borderColor;
+        set { if (_borderColor == value) return; _borderColor = value; MarkPaintDirty(); }
+    }
+
+    private BorderStyle _borderStyle = BorderStyle.Solid;
+    public BorderStyle BorderStyle
+    {
+        get => _borderStyle;
+        set { if (_borderStyle == value) return; _borderStyle = value; MarkPaintDirty(); }
+    }
+
+    private CornerRadius _cornerRadius;
+    public CornerRadius CornerRadius
+    {
+        get => _cornerRadius;
+        set { if (_cornerRadius == value) return; _cornerRadius = value; MarkPaintDirty(); }
+    }
 
     /// <summary>A gradient fill. When set it replaces <see cref="BackgroundColor"/>.</summary>
-    public Gradient? BackgroundGradient { get; set; }
+    private Gradient? _backgroundGradient;
+    public Gradient? BackgroundGradient
+    {
+        get => _backgroundGradient;
+        set { if (ReferenceEquals(_backgroundGradient, value)) return; _backgroundGradient = value; MarkPaintDirty(); }
+    }
 
-    /// <summary>Drop shadows drawn behind the box, back-to-front. Null = none.</summary>
-    public List<BoxShadow>? BoxShadows { get; set; }
+    /// <summary>
+    /// Drop shadows drawn behind the box, back-to-front. Null = none. The
+    /// getter exposes a <see cref="DirtyList{T}"/>, so in-place mutations
+    /// (<c>Add</c>, <c>RemoveAt</c>, …) repaint automatically; the setter
+    /// wraps whatever list is assigned (by reference, no copy).
+    /// </summary>
+    private DirtyList<BoxShadow>? _boxShadows;
+    public IList<BoxShadow>? BoxShadows
+    {
+        get => _boxShadows;
+        set
+        {
+            if (ReferenceEquals(_boxShadows, value)) return;
+            _boxShadows = value is null ? null : new DirtyList<BoxShadow>(this, value);
+            MarkPaintDirty();
+        }
+    }
 
     public static BoxElement New() => new();
 
@@ -38,8 +86,10 @@ public class BoxElement : Element
         var box = Layout.AbsoluteBorderBox;
 
         // Shadows sit behind the box; draw them first so the background paints over
-        // the portion beneath the box.
-        if (BoxShadows is { Count: > 0 } shadows)
+        // the portion beneath the box. Enumerate the field directly — DirtyList
+        // exposes List<T>'s struct enumerator, the IList interface would box one
+        // per frame.
+        if (_boxShadows is { Count: > 0 } shadows)
         {
             foreach (var shadow in shadows)
                 ctx.DrawBoxShadow(box, CornerRadius, shadow);

@@ -58,7 +58,11 @@ public class BoxVisualTests
 
         live.PatchFrom(incoming);
 
-        Assert.Same(incoming.BoxShadows, live.BoxShadows);
+        // Each element wraps shadows in its own DirtyList (so mutations mark the
+        // right owner), but the backing storage carries across without copying.
+        Assert.Same(
+            ((DirtyList<BoxShadow>)incoming.BoxShadows!).Inner,
+            ((DirtyList<BoxShadow>)live.BoxShadows!).Inner);
         Assert.Same(incoming.BackgroundGradient, live.BackgroundGradient);
     }
 

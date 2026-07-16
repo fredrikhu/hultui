@@ -54,9 +54,12 @@ public static class ElementExtensions
     }
     public static T CornerRadius<T>(this T el, CornerRadius r) where T : BoxElement { el.CornerRadius = r; return el; }
     public static T CornerRadius<T>(this T el, float uniform) where T : BoxElement { el.CornerRadius = new CornerRadius(uniform); return el; }
-    public static T BoxShadow<T>(this T el, BoxShadow shadow) where T : BoxElement { (el.BoxShadows ??= new()).Add(shadow); return el; }
-    public static T BoxShadow<T>(this T el, float offsetX, float offsetY, float blur, Color color) where T : BoxElement { (el.BoxShadows ??= new()).Add(new BoxShadow(offsetX, offsetY, blur, color)); return el; }
-    public static T BoxShadow<T>(this T el, float offsetX, float offsetY, float blur, float spread, Color color) where T : BoxElement { (el.BoxShadows ??= new()).Add(new BoxShadow(offsetX, offsetY, blur, spread, color)); return el; }
+    // Re-read el.BoxShadows after the null-init so Add goes through the
+    // DirtyList the getter exposes (a compound `??=` would hand back the raw
+    // right-hand list instead).
+    public static T BoxShadow<T>(this T el, BoxShadow shadow) where T : BoxElement { if (el.BoxShadows is null) el.BoxShadows = new List<BoxShadow>(); el.BoxShadows!.Add(shadow); return el; }
+    public static T BoxShadow<T>(this T el, float offsetX, float offsetY, float blur, Color color) where T : BoxElement => el.BoxShadow(new BoxShadow(offsetX, offsetY, blur, color));
+    public static T BoxShadow<T>(this T el, float offsetX, float offsetY, float blur, float spread, Color color) where T : BoxElement => el.BoxShadow(new BoxShadow(offsetX, offsetY, blur, spread, color));
 
     // ──── Overflow ────
     public static T Overflow<T>(this T el, Overflow overflow) where T : Element { el.Box.OverflowX = overflow; el.Box.OverflowY = overflow; return el; }

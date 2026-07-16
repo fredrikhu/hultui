@@ -21,6 +21,7 @@ public partial class ScrollViewElement : BoxElement
             float clamped = ClampX(value);
             if (clamped == _scrollOffsetX) return;
             _scrollOffsetX = clamped;
+            MarkPaintDirty();
             // Children's on-screen positions shifted, so every descendant node's
             // accessibility bounds changed — refresh the a11y tree.
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
@@ -35,6 +36,7 @@ public partial class ScrollViewElement : BoxElement
             float clamped = ClampY(value);
             if (clamped == _scrollOffsetY) return;
             _scrollOffsetY = clamped;
+            MarkPaintDirty();
             NotifyAccessibilityPropertyChanged(AccessibilityProperties.BoundingRect);
         }
     }

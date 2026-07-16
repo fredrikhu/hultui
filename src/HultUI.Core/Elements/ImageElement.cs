@@ -6,8 +6,27 @@ namespace HultUI.Core.Elements;
 
 public class ImageElement : Element
 {
-    public IImageSource? Source { get; set; }
-    public ImageFit Fit { get; set; } = ImageFit.Contain;
+    // Self-marking: swapping the source at runtime (an async load completing)
+    // changes the intrinsic size, so it invalidates layout as well as paint.
+    private IImageSource? _source;
+    public IImageSource? Source
+    {
+        get => _source;
+        set
+        {
+            if (ReferenceEquals(_source, value)) return;
+            _source = value;
+            MarkLayoutDirty();
+            MarkPaintDirty();
+        }
+    }
+
+    private ImageFit _fit = ImageFit.Contain;
+    public ImageFit Fit
+    {
+        get => _fit;
+        set { if (_fit == value) return; _fit = value; MarkPaintDirty(); }
+    }
 
     public static ImageElement New(IImageSource? source = null) => new() { Source = source };
 

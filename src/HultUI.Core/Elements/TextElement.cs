@@ -106,7 +106,12 @@ public class TextElement : Element
     }
 
     /// <summary>Highlight colour for the selected range.</summary>
-    public Color SelectionColor { get; set; } = new(66, 135, 245, 80);
+    private Color _selectionColor = new(66, 135, 245, 80);
+    public Color SelectionColor
+    {
+        get => _selectionColor;
+        set { if (_selectionColor == value) return; _selectionColor = value; MarkPaintDirty(); }
+    }
 
     /// <summary>Clipboard reference — set by the window when this label is focused.</summary>
     public IClipboard? Clipboard { get; set; }

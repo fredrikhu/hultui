@@ -88,7 +88,12 @@ public abstract class Element
     /// A 2D transform (rotate/scale/translate) applied to this element and its
     /// subtree at render and hit-test time. Null = identity (no cost).
     /// </summary>
-    public Transform2D? Transform { get; set; }
+    private Transform2D? _transform;
+    public Transform2D? Transform
+    {
+        get => _transform;
+        set { if (Nullable.Equals(_transform, value)) return; _transform = value; MarkPaintDirty(); }
+    }
 
     // ──── Interaction state (hover / press / focus) ────
     private InteractionStyles? _interaction;
