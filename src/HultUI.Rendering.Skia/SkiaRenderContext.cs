@@ -16,6 +16,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Pooled Skia objects to avoid per-draw-call allocations
     private readonly SKPaint _pooledPaint = new();
     private readonly SKFont _pooledFont = new() { Subpixel = true };
+    private readonly SKRoundRect _pooledRoundRect = new();
+    private readonly SKPoint[] _pooledRadii = new SKPoint[4];
     private bool _disposed;
 
     // Cached positioned-blob per ShapedRun instance. Shaping itself is cached by
@@ -515,8 +517,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void PushRoundedClip(Rect clipRect, CornerRadius radius)
     {
         _saveStack.Push(Canvas.Save());
-        using var rrect = ToSkRoundRect(ToSkRect(clipRect), radius);
-        Canvas.ClipRoundRect(rrect);
+        Canvas.ClipRoundRect(ToSkRoundRect(ToSkRect(clipRect), radius));
     }
 
     public void PushTranslate(float x, float y)
@@ -598,17 +599,18 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     private static SKRect ToSkRect(Rect r) => new(r.X, r.Y, r.X + r.Width, r.Y + r.Height);
 
-    private static SKRoundRect ToSkRoundRect(SKRect rect, CornerRadius r)
+    // Returns the shared pooled SKRoundRect configured for the given rect/radii.
+    // Valid until the next call — callers must not hold on to (or dispose) it.
+    // Draw calls copy the geometry into the native command stream immediately,
+    // so sequential reuse within a frame is safe.
+    private SKRoundRect ToSkRoundRect(SKRect rect, CornerRadius r)
     {
-        var rrect = new SKRoundRect();
-        rrect.SetRectRadii(rect,
-        [
-            new SKPoint(r.TopLeft, r.TopLeft),
-            new SKPoint(r.TopRight, r.TopRight),
-            new SKPoint(r.BottomRight, r.BottomRight),
-            new SKPoint(r.BottomLeft, r.BottomLeft)
-        ]);
-        return rrect;
+        _pooledRadii[0] = new SKPoint(r.TopLeft, r.TopLeft);
+        _pooledRadii[1] = new SKPoint(r.TopRight, r.TopRight);
+        _pooledRadii[2] = new SKPoint(r.BottomRight, r.BottomRight);
+        _pooledRadii[3] = new SKPoint(r.BottomLeft, r.BottomLeft);
+        _pooledRoundRect.SetRectRadii(rect, _pooledRadii);
+        return _pooledRoundRect;
     }
 
     private static SKFontStyleWeight ToSkFontWeight(FontWeight weight) => weight switch
@@ -631,5 +633,6 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         ClearRunBlobCache();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
+        _pooledRoundRect.Dispose();
     }
 }

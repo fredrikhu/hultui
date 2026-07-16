@@ -45,7 +45,7 @@ public class BoxElement : Element
                 ctx.DrawBoxShadow(box, CornerRadius, shadow);
         }
 
-        var w = Box.BorderWidth;
+        var w = BoxRead.BorderWidth;
         bool hasBorder = BorderColor.A > 0 && (w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0);
         bool uniformWidth = w.Top == w.Right && w.Right == w.Bottom && w.Bottom == w.Left;
         // The simple case (uniform width, solid style) uses the combined draw call

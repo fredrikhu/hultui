@@ -4,6 +4,10 @@ namespace HultUI.Core.Styling;
 
 public sealed class InheritedStyle
 {
+    /// <summary>Shared all-defaults instance for elements that never set inherited
+    /// text properties. Read-only by contract — never mutate.</summary>
+    internal static readonly InheritedStyle Default = new();
+
     public string? FontFamily { get; set; }
     public float? FontSize { get; set; }
     public FontWeight? FontWeight { get; set; }

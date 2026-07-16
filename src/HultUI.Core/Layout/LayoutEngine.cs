@@ -22,8 +22,8 @@ public sealed partial class LayoutEngine
         var constraint = new LayoutConstraint(availableWidth, availableHeight);
         // Only force size for auto-dimensioned roots when filling (e.g. window root).
         // Overlays should size to content instead.
-        float? fw = forceRootFill && root.Box.Width.IsAuto ? availableWidth : null;
-        float? fh = forceRootFill && root.Box.Height.IsAuto ? availableHeight : null;
+        float? fw = forceRootFill && root.BoxRead.Width.IsAuto ? availableWidth : null;
+        float? fh = forceRootFill && root.BoxRead.Height.IsAuto ? availableHeight : null;
         ComputeLayout(root, constraint, absoluteX: 0, absoluteY: 0, forcedWidth: fw, forcedHeight: fh);
         ClearLayoutDirty(root);
     }
@@ -51,7 +51,7 @@ public sealed partial class LayoutEngine
             return element.CacheResultSize;
         }
 
-        var box = element.Box;
+        var box = element.BoxRead;
         var padding = box.Padding;
         var border = box.BorderWidth;
         var margin = box.Margin;
@@ -73,7 +73,7 @@ public sealed partial class LayoutEngine
         bool hasAbsolute = false;
         for (int i = 0; i < children.Count; i++)
         {
-            if (children[i].Position.Type == PositionType.Absolute)
+            if (children[i].PositionRead.Type == PositionType.Absolute)
                 hasAbsolute = true;
             else
                 hasFlow = true;
@@ -88,7 +88,7 @@ public sealed partial class LayoutEngine
         {
             contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
         }
-        else if (element.Grid.HasTemplate)
+        else if (element.GridRead.HasTemplate)
         {
             contentSize = LayoutGridChildren(element, children, contentAvailW, contentAvailH,
                 contentAbsX: absoluteX + outerSpacing.Left + margin.Left,
@@ -98,7 +98,7 @@ public sealed partial class LayoutEngine
         {
             // Pass whether cross dimension is definite so single-line
             // containers with auto cross use natural content sizes
-            bool hasDefiniteCross = (element.Flex.Direction is FlexDirection.Row or FlexDirection.RowReverse)
+            bool hasDefiniteCross = (element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse)
                 ? resolvedHeight != null
                 : resolvedWidth != null;
 
@@ -126,7 +126,7 @@ public sealed partial class LayoutEngine
             var contentBox = element.Layout.AbsoluteContentBox;
             for (int i = 0; i < children.Count; i++)
             {
-                if (children[i].Position.Type == PositionType.Absolute)
+                if (children[i].PositionRead.Type == PositionType.Absolute)
                     LayoutAbsoluteChild(children[i], contentBox);
             }
         }
@@ -169,7 +169,7 @@ public sealed partial class LayoutEngine
         float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY,
         bool hasDefiniteCross = true)
     {
-        var flex = container.Flex;
+        var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
         bool isReverse = flex.Direction is FlexDirection.RowReverse or FlexDirection.ColumnReverse;
         bool isWrap = flex.Wrap is not FlexWrap.NoWrap;
@@ -183,8 +183,8 @@ public sealed partial class LayoutEngine
         // Scroll containers: unlimited main axis for flex distribution,
         // but keep original values as child constraints to avoid NaN overflow
         bool scrollOnMain = isRow
-            ? container.Box.OverflowX == Overflow.Scroll
-            : container.Box.OverflowY == Overflow.Scroll;
+            ? container.BoxRead.OverflowX == Overflow.Scroll
+            : container.BoxRead.OverflowY == Overflow.Scroll;
         float mainDistribute = scrollOnMain ? float.MaxValue / 2 : mainAvailable;
 
         // ── Phase 1: Measure all children to get hypothetical sizes ──
@@ -240,7 +240,7 @@ public sealed partial class LayoutEngine
                     var item = line.Items[idx];
                     var child = item.Element;
 
-                    var alignSelf = ResolveAlignSelf(child.Flex.AlignSelf, container.Flex.AlignItems);
+                    var alignSelf = ResolveAlignSelf(child.FlexRead.AlignSelf, container.FlexRead.AlignItems);
 
                     // Use container's content dimensions as constraint so percentage
                     // dimensions resolve against the container, not the flex-resolved size
@@ -251,17 +251,17 @@ public sealed partial class LayoutEngine
                     // item.MainSize and line.CrossSize are outer (margin-box) sizes,
                     // but ComputeLayout's forcedWidth/forcedHeight are border-box —
                     // subtract the child's margins to convert.
-                    var childMargin = child.Box.Margin;
+                    var childMargin = child.BoxRead.Margin;
                     float? forcedW, forcedH;
                     if (isRow)
                     {
                         forcedW = item.MainSize - childMargin.Horizontal;
-                        forcedH = (alignSelf == AlignItems.Stretch && child.Box.Height.IsAuto)
+                        forcedH = (alignSelf == AlignItems.Stretch && child.BoxRead.Height.IsAuto)
                             ? (float?)(line.CrossSize - childMargin.Vertical) : null;
                     }
                     else
                     {
-                        forcedW = (alignSelf == AlignItems.Stretch && child.Box.Width.IsAuto)
+                        forcedW = (alignSelf == AlignItems.Stretch && child.BoxRead.Width.IsAuto)
                             ? (float?)(line.CrossSize - childMargin.Horizontal) : null;
                         forcedH = item.MainSize - childMargin.Vertical;
                     }
@@ -352,13 +352,13 @@ public sealed partial class LayoutEngine
         for (int i = 0; i < children.Count; i++)
         {
             var child = children[i];
-            if (child.Position.Type == PositionType.Absolute)
+            if (child.PositionRead.Type == PositionType.Absolute)
                 continue;
-            var childBox = child.Box;
+            var childBox = child.BoxRead;
 
-            float basisOrSize = child.Flex.FlexBasis.IsAuto
+            float basisOrSize = child.FlexRead.FlexBasis.IsAuto
                 ? (isRow ? childBox.Width.ResolveOr(mainAvailable, -1f) : childBox.Height.ResolveOr(mainAvailable, -1f))
-                : child.Flex.FlexBasis.ResolveOr(mainAvailable, -1f);
+                : child.FlexRead.FlexBasis.ResolveOr(mainAvailable, -1f);
             bool hasBasisOrSize = basisOrSize >= 0f;
 
             float hypotheticalMain;
@@ -445,7 +445,7 @@ public sealed partial class LayoutEngine
             ? default
             : _tracer.Begin("Measure", element.GetType().Name, element.Key ?? element.Name);
 
-        var box = element.Box;
+        var box = element.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;
         var margin = box.Margin;
 
@@ -461,7 +461,7 @@ public sealed partial class LayoutEngine
         bool hasFlow = false;
         for (int i = 0; i < children.Count; i++)
         {
-            if (children[i].Position.Type != PositionType.Absolute)
+            if (children[i].PositionRead.Type != PositionType.Absolute)
             {
                 hasFlow = true;
                 break;
@@ -473,13 +473,13 @@ public sealed partial class LayoutEngine
         {
             contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
         }
-        else if (element.Grid.HasTemplate)
+        else if (element.GridRead.HasTemplate)
         {
             contentSize = MeasureGridChildrenSize(element, children, contentAvailW, contentAvailH);
         }
         else
         {
-            bool hasDefiniteCross = (element.Flex.Direction is FlexDirection.Row or FlexDirection.RowReverse)
+            bool hasDefiniteCross = (element.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse)
                 ? resolvedH != null
                 : resolvedW != null;
             contentSize = MeasureFlexChildrenSize(element, children, contentAvailW, contentAvailH, hasDefiniteCross);
@@ -516,7 +516,7 @@ public sealed partial class LayoutEngine
     private Size MeasureFlexChildrenSize(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH, bool hasDefiniteCross)
     {
-        var flex = container.Flex;
+        var flex = container.FlexRead;
         bool isRow = flex.Direction is FlexDirection.Row or FlexDirection.RowReverse;
         bool isWrap = flex.Wrap is not FlexWrap.NoWrap;
 
@@ -526,8 +526,8 @@ public sealed partial class LayoutEngine
         float crossGap = isRow ? flex.ResolvedRowGap : flex.ResolvedColumnGap;
 
         bool scrollOnMain = isRow
-            ? container.Box.OverflowX == Overflow.Scroll
-            : container.Box.OverflowY == Overflow.Scroll;
+            ? container.BoxRead.OverflowX == Overflow.Scroll
+            : container.BoxRead.OverflowY == Overflow.Scroll;
         float mainDistribute = scrollOnMain ? float.MaxValue / 2 : mainAvailable;
 
         var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
@@ -589,7 +589,7 @@ public sealed partial class LayoutEngine
             return element.CacheMeasureResult;
         }
 
-        var box = element.Box;
+        var box = element.BoxRead;
         var outerSpacing = box.Padding + box.BorderWidth;
         var margin = box.Margin;
 
@@ -678,14 +678,14 @@ public sealed partial class LayoutEngine
         {
             float totalGrow = 0;
             foreach (var item in items)
-                totalGrow += item.Element.Flex.FlexGrow;
+                totalGrow += item.Element.FlexRead.FlexGrow;
 
             if (totalGrow > 0)
             {
                 for (int i = 0; i < items.Count; i++)
                 {
                     var item = items[i];
-                    float grow = item.Element.Flex.FlexGrow;
+                    float grow = item.Element.FlexRead.FlexGrow;
                     if (grow > 0)
                     {
                         float extra = remainingSpace * (grow / totalGrow);
@@ -698,14 +698,14 @@ public sealed partial class LayoutEngine
         {
             float totalShrink = 0;
             foreach (var item in items)
-                totalShrink += item.Element.Flex.FlexShrink * item.MainSize;
+                totalShrink += item.Element.FlexRead.FlexShrink * item.MainSize;
 
             if (totalShrink > 0)
             {
                 for (int i = 0; i < items.Count; i++)
                 {
                     var item = items[i];
-                    float shrinkFactor = item.Element.Flex.FlexShrink * item.MainSize;
+                    float shrinkFactor = item.Element.FlexRead.FlexShrink * item.MainSize;
                     if (shrinkFactor > 0)
                     {
                         float reduction = -remainingSpace * (shrinkFactor / totalShrink);
@@ -758,7 +758,7 @@ public sealed partial class LayoutEngine
 
     private void LayoutAbsoluteChild(Element child, Rect containerContentBox)
     {
-        var pos = child.Position;
+        var pos = child.PositionRead;
         var constraint = new LayoutConstraint(containerContentBox.Width, containerContentBox.Height);
         ComputeLayout(child, constraint, 0, 0);
 
@@ -887,6 +887,10 @@ public sealed partial class LayoutEngine
 
     private static void ClearLayoutDirty(Element element)
     {
+        // Layout dirt propagates upward (MarkLayoutDirty walks to the root), so a
+        // clean element cannot have a layout-dirty descendant — prune there. This
+        // final sweep is a safety net; ComputeLayout already clears visited nodes.
+        if ((element.DirtyFlags & DirtyFlags.Layout) == 0) return;
         element.DirtyFlags &= ~DirtyFlags.Layout;
         foreach (var child in element.Children)
             ClearLayoutDirty(child);

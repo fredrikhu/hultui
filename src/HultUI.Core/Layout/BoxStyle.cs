@@ -4,6 +4,10 @@ namespace HultUI.Core.Layout;
 
 public sealed class BoxStyle
 {
+    /// <summary>Shared all-defaults instance for elements that never set box
+    /// properties. Read-only by contract — never mutate.</summary>
+    internal static readonly BoxStyle Default = new();
+
     public Dimension Width { get; set; } = Dimension.Auto;
     public Dimension Height { get; set; } = Dimension.Auto;
     public Dimension MinWidth { get; set; } = Dimension.None;

@@ -57,7 +57,7 @@ public static class HitTester
                 point.X + scrollView.ScrollOffsetX,
                 point.Y + scrollView.ScrollOffsetY);
         }
-        else if (element.Box.OverflowX == Layout.Overflow.Hidden || element.Box.OverflowY == Layout.Overflow.Hidden)
+        else if (element.BoxRead.OverflowX == Layout.Overflow.Hidden || element.BoxRead.OverflowY == Layout.Overflow.Hidden)
         {
             var contentBox = element.Layout.AbsoluteContentBox;
             childClip = clipRect.HasValue ? Intersect(clipRect.Value, contentBox) : contentBox;

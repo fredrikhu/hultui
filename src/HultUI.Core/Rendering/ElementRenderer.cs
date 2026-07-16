@@ -90,7 +90,7 @@ public static class ElementRenderer
         }
 
         // Clip to content box if overflow is hidden
-        bool needsClip = element.Box.OverflowX == Overflow.Hidden || element.Box.OverflowY == Overflow.Hidden;
+        bool needsClip = element.BoxRead.OverflowX == Overflow.Hidden || element.BoxRead.OverflowY == Overflow.Hidden;
         Rect? childrenCull = cull;
         if (needsClip)
         {

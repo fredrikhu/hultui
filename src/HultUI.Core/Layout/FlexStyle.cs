@@ -4,6 +4,10 @@ namespace HultUI.Core.Layout;
 
 public sealed class FlexStyle
 {
+    /// <summary>Shared all-defaults instance for elements that never set flex
+    /// properties. Read-only by contract — never mutate.</summary>
+    internal static readonly FlexStyle Default = new();
+
     public FlexDirection Direction { get; set; } = FlexDirection.Column;
     public FlexWrap Wrap { get; set; } = FlexWrap.NoWrap;
     public AlignItems AlignItems { get; set; } = AlignItems.Stretch;

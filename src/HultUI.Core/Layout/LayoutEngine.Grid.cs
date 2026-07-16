@@ -16,7 +16,7 @@ public sealed partial class LayoutEngine
     private Size LayoutGridChildren(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH, float contentAbsX, float contentAbsY)
     {
-        var grid = container.Grid;
+        var grid = container.GridRead;
 
         // ── Determine track counts (declared + implicit from cell positions) ──
         int maxRow = -1, maxCol = -1;
@@ -24,10 +24,10 @@ public sealed partial class LayoutEngine
         for (int i = 0; i < children.Count; i++)
         {
             var c = children[i];
-            if (c.Position.Type == PositionType.Absolute) continue;
+            if (c.PositionRead.Type == PositionType.Absolute) continue;
             flowCount++;
-            if (c.GridItem.Row > maxRow) maxRow = c.GridItem.Row;
-            if (c.GridItem.Column > maxCol) maxCol = c.GridItem.Column;
+            if (c.GridItemRead.Row > maxRow) maxRow = c.GridItemRead.Row;
+            if (c.GridItemRead.Column > maxCol) maxCol = c.GridItemRead.Column;
         }
 
         int colCount = Math.Max(grid.ColumnTemplate.Length, maxCol + 1);
@@ -56,26 +56,26 @@ public sealed partial class LayoutEngine
             for (int i = 0; i < children.Count; i++)
             {
                 var child = children[i];
-                if (child.Position.Type == PositionType.Absolute) continue;
+                if (child.PositionRead.Type == PositionType.Absolute) continue;
 
-                int col = Math.Clamp(child.GridItem.Column, 0, colCount - 1);
-                int row = Math.Clamp(child.GridItem.Row, 0, rowCount - 1);
+                int col = Math.Clamp(child.GridItemRead.Column, 0, colCount - 1);
+                int row = Math.Clamp(child.GridItemRead.Row, 0, rowCount - 1);
 
                 float cellX = contentAbsX + TrackOrigin(colSizes, col, grid.ColumnGap);
                 float cellY = contentAbsY + TrackOrigin(rowSizes, row, grid.RowGap);
                 float cellW = colSizes[col];
                 float cellH = rowSizes[row];
 
-                var justifySelf = ResolveJustifySelf(child.GridItem.JustifySelf, grid.JustifyItems);
-                var alignSelf = ResolveAlignSelfFromGrid(child.GridItem.AlignSelf, grid.AlignItems);
+                var justifySelf = ResolveJustifySelf(child.GridItemRead.JustifySelf, grid.JustifyItems);
+                var alignSelf = ResolveAlignSelfFromGrid(child.GridItemRead.AlignSelf, grid.AlignItems);
 
-                var childMargin = child.Box.Margin;
+                var childMargin = child.BoxRead.Margin;
 
                 // Stretch = force border-box to (cell - margins). Otherwise pass null
                 // so ComputeLayout uses the child's own size, then we offset to align.
-                float? forcedW = (justifySelf == JustifyItems.Stretch && child.Box.Width.IsAuto)
+                float? forcedW = (justifySelf == JustifyItems.Stretch && child.BoxRead.Width.IsAuto)
                     ? cellW - childMargin.Horizontal : null;
-                float? forcedH = (alignSelf == AlignItems.Stretch && child.Box.Height.IsAuto)
+                float? forcedH = (alignSelf == AlignItems.Stretch && child.BoxRead.Height.IsAuto)
                     ? cellH - childMargin.Vertical : null;
 
                 // Constraint = container content area, so percentages on the child
@@ -142,17 +142,17 @@ public sealed partial class LayoutEngine
     private Size MeasureGridChildrenSize(Element container, IReadOnlyList<Element> children,
         float contentAvailW, float contentAvailH)
     {
-        var grid = container.Grid;
+        var grid = container.GridRead;
 
         int maxRow = -1, maxCol = -1;
         int flowCount = 0;
         for (int i = 0; i < children.Count; i++)
         {
             var c = children[i];
-            if (c.Position.Type == PositionType.Absolute) continue;
+            if (c.PositionRead.Type == PositionType.Absolute) continue;
             flowCount++;
-            if (c.GridItem.Row > maxRow) maxRow = c.GridItem.Row;
-            if (c.GridItem.Column > maxCol) maxCol = c.GridItem.Column;
+            if (c.GridItemRead.Row > maxRow) maxRow = c.GridItemRead.Row;
+            if (c.GridItemRead.Column > maxCol) maxCol = c.GridItemRead.Column;
         }
 
         int colCount = Math.Max(grid.ColumnTemplate.Length, maxCol + 1);
@@ -220,8 +220,8 @@ public sealed partial class LayoutEngine
             for (int i = 0; i < children.Count; i++)
             {
                 var child = children[i];
-                if (child.Position.Type == PositionType.Absolute) continue;
-                if (child.GridItem.Column != col) continue;
+                if (child.PositionRead.Type == PositionType.Absolute) continue;
+                if (child.GridItemRead.Column != col) continue;
 
                 // Measure unconstrained on the column axis so we get the cell's
                 // intrinsic width. Cross axis uses the container's available.
@@ -260,16 +260,16 @@ public sealed partial class LayoutEngine
             for (int i = 0; i < children.Count; i++)
             {
                 var child = children[i];
-                if (child.Position.Type == PositionType.Absolute) continue;
-                if (child.GridItem.Row != row) continue;
+                if (child.PositionRead.Type == PositionType.Absolute) continue;
+                if (child.GridItemRead.Row != row) continue;
 
-                int col = Math.Clamp(child.GridItem.Column, 0, colCount - 1);
+                int col = Math.Clamp(child.GridItemRead.Column, 0, colCount - 1);
                 float colW = colSizes[col];
 
                 // Force the child's border-box width to the column width minus
                 // its margins so text wrapping happens against the actual cell
                 // size — that's what determines the row height.
-                float childMargin = child.Box.Margin.Horizontal;
+                float childMargin = child.BoxRead.Margin.Horizontal;
                 float? forcedW = colW - childMargin;
                 if (forcedW < 0f) forcedW = 0f;
 

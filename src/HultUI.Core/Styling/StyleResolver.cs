@@ -30,7 +30,7 @@ public static class StyleResolver
 
     private static void ResolveRecursive(Element element, ResolvedInheritedStyle parent, Theme? theme)
     {
-        var own = element.Inherited;
+        var own = element.InheritedRead;
         var resolved = new ResolvedInheritedStyle(
             FontFamily: own.FontFamily ?? parent.FontFamily,
             FontSize: own.FontSize ?? parent.FontSize,

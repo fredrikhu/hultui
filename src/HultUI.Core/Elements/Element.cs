@@ -24,21 +24,44 @@ public abstract class Element
 
     // ──── Tree structure ────
     public Element? Parent { get; internal set; }
-    private readonly List<Element> _children = [];
-    public IReadOnlyList<Element> Children => _children;
+    // Allocated on first child: roughly half of a real tree is leaves (text,
+    // icons), and an empty List per leaf adds up at 10k+ elements.
+    private List<Element>? _children;
+    public IReadOnlyList<Element> Children => (IReadOnlyList<Element>?)_children ?? [];
 
     // ──── Layout input ────
-    public FlexStyle Flex { get; } = new();
-    public BoxStyle Box { get; } = new();
-    public PositionStyle Position { get; } = new();
-    public GridStyle Grid { get; } = new();
-    public GridItemStyle GridItem { get; } = new();
+    // Style objects are allocated on first write. Most elements never touch
+    // Grid/GridItem/Position (and leaves often never touch Flex/Box), so eager
+    // allocation dominated element-construction cost and GC churn in large
+    // trees. Public getters keep the fluent API unchanged; hot read paths
+    // (layout, render, hit test, style resolution) go through the *Read
+    // accessors below, which fall back to a shared immutable default instead
+    // of allocating. The defaults must never be mutated — reads only.
+    private FlexStyle? _flex;
+    private BoxStyle? _box;
+    private PositionStyle? _position;
+    private GridStyle? _grid;
+    private GridItemStyle? _gridItem;
+
+    public FlexStyle Flex => _flex ??= new();
+    public BoxStyle Box => _box ??= new();
+    public PositionStyle Position => _position ??= new();
+    public GridStyle Grid => _grid ??= new();
+    public GridItemStyle GridItem => _gridItem ??= new();
+
+    internal FlexStyle FlexRead => _flex ?? FlexStyle.Default;
+    internal BoxStyle BoxRead => _box ?? BoxStyle.Default;
+    internal PositionStyle PositionRead => _position ?? PositionStyle.Default;
+    internal GridStyle GridRead => _grid ?? GridStyle.Default;
+    internal GridItemStyle GridItemRead => _gridItem ?? GridItemStyle.Default;
 
     // ──── Layout output ────
     public LayoutResult Layout { get; internal set; }
 
     // ──── Style / Inheritance ────
-    public InheritedStyle Inherited { get; } = new();
+    private InheritedStyle? _inherited;
+    public InheritedStyle Inherited => _inherited ??= new();
+    internal InheritedStyle InheritedRead => _inherited ?? InheritedStyle.Default;
     public ResolvedInheritedStyle ResolvedInherited { get; internal set; }
 
     /// <summary>
@@ -265,6 +288,7 @@ public abstract class Element
         {
             if (entry.Phase == phase || phase == EventPhase.Target)
             {
+                EventDispatcher.HandlerInvocationCount++;
                 entry.Handler(evt);
                 if (evt.StopPropagation) break;
             }
@@ -373,6 +397,7 @@ public abstract class Element
     private void MarkStyleDirtyDown()
     {
         DirtyFlags |= DirtyFlags.Style;
+        if (_children is null) return;
         foreach (var child in _children)
             child.MarkStyleDirtyDown();
     }
@@ -401,7 +426,7 @@ public abstract class Element
             DetachSilently(child);
 
         child.Parent = this;
-        _children.Add(child);
+        (_children ??= []).Add(child);
         MarkLayoutDirty();
         MarkChildrenDirty();
 
@@ -424,7 +449,7 @@ public abstract class Element
             DetachSilently(child);
 
         child.Parent = this;
-        _children.Insert(index, child);
+        (_children ??= []).Insert(index, child);
         MarkLayoutDirty();
         MarkChildrenDirty();
 
@@ -437,7 +462,7 @@ public abstract class Element
 
     public void RemoveChild(Element child)
     {
-        if (_children.Remove(child))
+        if (_children?.Remove(child) == true)
         {
             ClearFocusIfRemoved(child);
             child.OnUnmounted();
@@ -461,25 +486,29 @@ public abstract class Element
         // Remove old children. Only fire OnUnmounted for elements that are
         // genuinely leaving — not those that reappear in the new list.
         var newSet = new HashSet<Element>(children);
-        foreach (var old in _children)
+        if (_children is not null)
         {
-            if (!newSet.Contains(old))
+            foreach (var old in _children)
             {
-                ClearFocusIfRemoved(old);
-                old.OnUnmounted();
+                if (!newSet.Contains(old))
+                {
+                    ClearFocusIfRemoved(old);
+                    old.OnUnmounted();
+                }
+                old.Parent = null;
             }
-            old.Parent = null;
+            _children.Clear();
         }
-        _children.Clear();
 
         // Add new children.
+        var list = _children ??= new List<Element>(children.Length);
         foreach (var child in children)
         {
             if (child.Parent is not null)
                 DetachSilently(child);
 
             child.Parent = this;
-            _children.Add(child);
+            list.Add(child);
 
             if (!alreadyMounted.Contains(child))
             {
@@ -498,7 +527,7 @@ public abstract class Element
     /// </summary>
     private static void DetachSilently(Element child)
     {
-        child.Parent?._children.Remove(child);
+        child.Parent?._children?.Remove(child);
         child.Parent?.MarkLayoutDirty();
         child.Parent?.MarkChildrenDirty();
         child.Parent = null;
@@ -526,12 +555,22 @@ public abstract class Element
     {
         Key = source.Key;
         Name = source.Name;
-        Flex.CopyFrom(source.Flex);
-        Box.CopyFrom(source.Box);
-        Position.CopyFrom(source.Position);
-        Grid.CopyFrom(source.Grid);
-        GridItem.CopyFrom(source.GridItem);
-        Inherited.CopyFrom(source.Inherited);
+        // Copy styles without forcing allocation on either side: when the source
+        // never touched a style and the target did, reset the target to defaults
+        // (copying from the shared immutable default); when neither side has one,
+        // there is nothing to do.
+        if (source._flex is not null) Flex.CopyFrom(source._flex);
+        else _flex?.CopyFrom(FlexStyle.Default);
+        if (source._box is not null) Box.CopyFrom(source._box);
+        else _box?.CopyFrom(BoxStyle.Default);
+        if (source._position is not null) Position.CopyFrom(source._position);
+        else _position?.CopyFrom(PositionStyle.Default);
+        if (source._grid is not null) Grid.CopyFrom(source._grid);
+        else _grid?.CopyFrom(GridStyle.Default);
+        if (source._gridItem is not null) GridItem.CopyFrom(source._gridItem);
+        else _gridItem?.CopyFrom(GridItemStyle.Default);
+        if (source._inherited is not null) Inherited.CopyFrom(source._inherited);
+        else _inherited?.CopyFrom(InheritedStyle.Default);
         IsFocusable = source.IsFocusable;
         TabIndex = source.TabIndex;
         Draggable = source.Draggable;

@@ -152,10 +152,20 @@ public sealed class Window : IOverlayHost, IDisposable
 
     public event Action? Closed;
 
+    // ──── Env-driven tracing (HULTUI_TRACE=<path>) ────
+    // When set, recording starts at window creation and the trace is written to
+    // the given path when the window is disposed. Lets benchmarks and automation
+    // capture a full-session trace without needing the F11 hotkey (which requires
+    // keyboard focus). F11 still works and takes precedence: pressing it stops
+    // the env-driven recording and saves to the default path.
+    private readonly string? _envTracePath = Environment.GetEnvironmentVariable("HULTUI_TRACE");
+
     internal Window(Application application, SDL3Window platformWindow)
     {
         Application = application;
         PlatformWindow = platformWindow;
+        if (!string.IsNullOrEmpty(_envTracePath))
+            _tracer.StartRecording();
         _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext, _tracer);
         Clipboard = new SDL3Clipboard(platformWindow);
         TextInputHost = new SDL3TextInputHost(platformWindow);
@@ -264,6 +274,7 @@ public sealed class Window : IOverlayHost, IDisposable
     public void SetRoot(Element root)
     {
         _root = root;
+        _maxButtonCache = null;
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
         root.AccessibilityObserver = _a11yObserver;
@@ -428,11 +439,19 @@ public sealed class Window : IOverlayHost, IDisposable
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
 
-        // DevTools overlay (second pass, not timed)
-        _perf.ElementCount = PerformanceCounters.CountElements(_root);
+        // DevTools overlay (second pass, not timed). The element count is a full
+        // tree walk — only pay for it while the HUD actually displays it.
+        if (_devTools.IsEnabled)
+            _perf.ElementCount = PerformanceCounters.CountElements(_root);
         _devTools.Render(ctx, _root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
 
-        ctx.EndFrame();
+        // Flush the recorded draw commands to the GPU. Under GPU contention
+        // (another 3D app, compositor pressure) this call can stall for tens of
+        // milliseconds — trace it as its own phase so frame-time analysis can
+        // attribute (and exclude) GPU-bound waits instead of leaving them as
+        // unaccounted time inside the Frame scope.
+        using (_tracer.Begin("Phase", "Flush"))
+            ctx.EndFrame();
 
         // Clear remaining dirty flags after full render
         ClearAllFlags(_root);
@@ -463,6 +482,13 @@ public sealed class Window : IOverlayHost, IDisposable
     private void HandleInputEvent(InputEvent evt)
     {
         if (_root is null) return;
+
+        // Snapshot state that decides whether a mouse move needs a frame (see
+        // the tail of this method). Everything a move can visually change marks
+        // itself dirty (interaction styles, scrollbar/text-selection capture
+        // drags, tooltip overlays) — these are the remaining signals.
+        long handlersBefore = EventDispatcher.HandlerInvocationCount;
+        var hoveredBefore = _lastHoveredElement;
 
         switch (evt)
         {
@@ -844,9 +870,26 @@ public sealed class Window : IOverlayHost, IDisposable
             }
         }
 
-        // Any input event may have triggered visual changes via handlers,
-        // so ensure the render pipeline runs this frame.
-        _root.MarkPaintDirty();
+        // Any input event may have triggered visual changes via handlers, so as
+        // a safety net force a render — except for mouse moves, the one
+        // high-frequency event. A move over static content (no handler ran, no
+        // hover change, no active drag) changes nothing visual: interaction
+        // styles, capture drags, and overlays all mark dirty themselves, and a
+        // handler that did run is caught by the invocation counter (handlers may
+        // mutate without marking, per the imperative-mutation convention's
+        // safety net). This turns pointer motion over an idle window from a
+        // full frame per event into no work at all.
+        // Note: DevTools needs no clause of its own — its element inspector
+        // renders from the hovered element only (not the raw pointer position),
+        // so the hover-changed condition already covers it. Forcing a render per
+        // move while the overlay is open just spins the FPS counter.
+        if (evt is not InputEvent.MouseMoveInput
+            || EventDispatcher.HandlerInvocationCount != handlersBefore // a handler ran — may have mutated silently
+            || !ReferenceEquals(_lastHoveredElement, hoveredBefore)     // hover chain changed (enter/leave side effects)
+            || _isDragging)                                             // drag ghost follows the cursor
+        {
+            _root.MarkPaintDirty();
+        }
     }
 
     /// <summary>
@@ -1048,8 +1091,13 @@ public sealed class Window : IOverlayHost, IDisposable
         _dragAccepted = false;
     }
 
+    // Dirty flags always propagate upward (Mark*Dirty walks to the root, and
+    // MarkStyleDirtyDown flags the node it starts from too), so a clean element
+    // can never have a dirty descendant. Both clears prune on that invariant,
+    // making the per-frame cost O(dirty subtree) instead of O(whole tree).
     private static void ClearFlags(Element element, DirtyFlags flags)
     {
+        if ((element.DirtyFlags & flags) == 0) return;
         element.DirtyFlags &= ~flags;
         foreach (var child in element.Children)
             ClearFlags(child, flags);
@@ -1057,6 +1105,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
     private static void ClearAllFlags(Element element)
     {
+        if (element.DirtyFlags == DirtyFlags.None) return;
         element.DirtyFlags = DirtyFlags.None;
         foreach (var child in element.Children)
             ClearAllFlags(child);
@@ -1426,7 +1475,28 @@ public sealed class Window : IOverlayHost, IDisposable
         return null;
     }
 
-    private Element? FindMaximizeButton() => _root is null ? null : FindMaximizeButton(_root);
+    // Cached result of the last full-tree search. The button is looked up every
+    // frame (caption height) and from non-client callbacks, so an O(n) walk per
+    // call adds up in large trees. The cache is trusted only while the element
+    // still carries the flag and is still attached under the current root —
+    // reconciliation can detach or repurpose it at any time.
+    private Element? _maxButtonCache;
+
+    private Element? FindMaximizeButton()
+    {
+        if (_root is null) return null;
+        if (_maxButtonCache is { IsWindowMaximizeButton: true } cached && IsAttachedToRoot(cached))
+            return cached;
+        _maxButtonCache = FindMaximizeButton(_root);
+        return _maxButtonCache;
+    }
+
+    private bool IsAttachedToRoot(Element e)
+    {
+        for (Element? cur = e; cur is not null; cur = cur.Parent)
+            if (ReferenceEquals(cur, _root)) return true;
+        return false;
+    }
 
     private static Element? FindMaximizeButton(Element e)
     {
@@ -1530,6 +1600,8 @@ public sealed class Window : IOverlayHost, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
+            _tracer.StopRecording(_envTracePath);
         PlatformWindow.EventTranslator.OnInputEvent -= HandleInputEvent;
         (_accessibilityBridge as IDisposable)?.Dispose();
         PlatformWindow.Dispose();

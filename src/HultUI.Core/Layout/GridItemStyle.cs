@@ -2,6 +2,10 @@ namespace HultUI.Core.Layout;
 
 public sealed class GridItemStyle
 {
+    /// <summary>Shared all-defaults instance for elements that never set grid-item
+    /// properties. Read-only by contract — never mutate.</summary>
+    internal static readonly GridItemStyle Default = new();
+
     public int Row { get; set; }
     public int Column { get; set; }
 

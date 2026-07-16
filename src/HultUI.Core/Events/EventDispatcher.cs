@@ -6,6 +6,15 @@ namespace HultUI.Core.Events;
 public static class EventDispatcher
 {
     /// <summary>
+    /// Monotonic count of user event-handler invocations, bumped by
+    /// <see cref="Element.InvokeHandlers"/> each time a handler actually runs.
+    /// The input pipeline compares it across a dispatch to know whether any
+    /// handler executed (a handler may mutate visuals without marking dirty,
+    /// so the window renders a frame whenever one ran). UI-thread only.
+    /// </summary>
+    internal static long HandlerInvocationCount;
+
+    /// <summary>
     /// Dispatches an event through the capture → target → bubble phases.
     /// </summary>
     /// <remarks>

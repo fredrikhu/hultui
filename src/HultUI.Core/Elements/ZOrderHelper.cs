@@ -20,7 +20,7 @@ internal static class ZOrderHelper
         bool hasZIndex = false;
         for (int i = 0; i < children.Count; i++)
         {
-            if (children[i].Position.ZIndex != 0)
+            if (children[i].PositionRead.ZIndex != 0)
             {
                 hasZIndex = true;
                 break;
@@ -32,7 +32,7 @@ internal static class ZOrderHelper
 
         // Sort by ZIndex ascending (stable: preserve insertion order for equal ZIndex)
         var sorted = new List<Element>(children);
-        sorted.Sort((a, b) => a.Position.ZIndex.CompareTo(b.Position.ZIndex));
+        sorted.Sort((a, b) => a.PositionRead.ZIndex.CompareTo(b.PositionRead.ZIndex));
         return sorted;
     }
 }
