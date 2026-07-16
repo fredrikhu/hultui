@@ -283,46 +283,9 @@ public class GitRepository
         // -m --first-parent: for merge commits (and stashes, which are merges
         // of HEAD/index/untracked), diff against the first parent instead of
         // suppressing output entirely.
-        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", commitHash);
-        return result.Success ? ParseNumstat(result.Lines) : [];
-    }
-
-    private static List<GitFileChange> ParseNumstat(IEnumerable<string> lines)
-    {
-        var changes = new List<GitFileChange>();
-        foreach (var line in lines)
-        {
-            var parts = line.Split('\t');
-            if (parts.Length < 3) continue;
-
-            int.TryParse(parts[0], out var additions);
-            int.TryParse(parts[1], out var deletions);
-
-            var path = parts[2];
-            string? oldPath = null;
-            var kind = FileChangeKind.Modified;
-
-            if (path.Contains(" => "))
-            {
-                // Handle renames like "old => new" or "{old => new}/path"
-                kind = FileChangeKind.Renamed;
-                var renameParts = path.Split(" => ", 2);
-                oldPath = renameParts[0];
-                path = renameParts[1];
-            }
-            else if (additions > 0 && deletions == 0)
-            {
-                kind = FileChangeKind.Added;
-            }
-            else if (additions == 0 && deletions > 0)
-            {
-                kind = FileChangeKind.Deleted;
-            }
-
-            changes.Add(new GitFileChange(path, oldPath, kind, additions, deletions));
-        }
-
-        return changes;
+        return QueryFileChanges(
+            ["diff-tree", "--no-commit-id", "-r", "--name-status", "-M", "-m", "--first-parent", commitHash],
+            ["diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", commitHash]);
     }
 
     public List<GitFileDiff> GetCommitDiff(string commitHash)
@@ -335,8 +298,9 @@ public class GitRepository
     /// (Fork-style multi-select compare: base = oldest, head = newest).</summary>
     public List<GitFileChange> GetRangeFiles(string baseHash, string headHash)
     {
-        var result = GitProcess.Run(Path, "diff", "--numstat", "-M", baseHash, headHash);
-        return result.Success ? ParseNumstat(result.Lines) : [];
+        return QueryFileChanges(
+            ["diff", "--name-status", "-M", baseHash, headHash],
+            ["diff", "--numstat", "-M", baseHash, headHash]);
     }
 
     /// <summary>Patch of the tree diff between two arbitrary commits.</summary>
@@ -457,8 +421,28 @@ public class GitRepository
             ? ["diff", "--cached", "--numstat", "-M"]
             : ["diff", "--numstat", "-M"];
 
+        var list = QueryFileChanges(statusArgs, numArgs);
+
+        if (includeUntracked)
+        {
+            foreach (var line in GitProcess.Run(Path, "status", "--porcelain=v1", "-uall").Lines)
+                if (line.Length >= 4 && line[0] == '?' && line[1] == '?')
+                    list.Add(new GitFileChange(line[3..], null, FileChangeKind.Untracked, 0, 0));
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Builds a file-change list by joining <c>--name-status</c> letters (the
+    /// authoritative change kind) with <c>--numstat</c> counts, keyed by new path.
+    /// Numstat alone can't distinguish a purely-additive modification of an
+    /// existing file from a newly added one.
+    /// </summary>
+    private List<GitFileChange> QueryFileChanges(string[] statusArgs, string[] numstatArgs)
+    {
         var counts = new Dictionary<string, (int Add, int Del)>(StringComparer.Ordinal);
-        foreach (var line in GitProcess.Run(Path, numArgs).Lines)
+        foreach (var line in GitProcess.Run(Path, numstatArgs).Lines)
         {
             var parts = line.Split('\t');
             if (parts.Length < 3) continue;
@@ -498,14 +482,6 @@ public class GitRepository
             var (add, del) = counts.TryGetValue(path, out var c) ? c : (0, 0);
             list.Add(new GitFileChange(path, oldPath, kind, add, del));
         }
-
-        if (includeUntracked)
-        {
-            foreach (var line in GitProcess.Run(Path, "status", "--porcelain=v1", "-uall").Lines)
-                if (line.Length >= 4 && line[0] == '?' && line[1] == '?')
-                    list.Add(new GitFileChange(line[3..], null, FileChangeKind.Untracked, 0, 0));
-        }
-
         return list;
     }
 
