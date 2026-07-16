@@ -300,6 +300,9 @@ public sealed class Window : IOverlayHost, IDisposable
         => _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
 
     internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
+        // DevTools continuous-redraw mode (F12 second press): render every
+        // iteration so the HUD shows raw render throughput.
+        || _devTools.ContinuousRedraw
         // Overlay trees are separate roots, so their dirty flags don't propagate
         // to _root. Show/close/move already mark _root dirty; this catches
         // mutations inside an open overlay (hover highlights in a context menu).
@@ -726,13 +729,24 @@ public sealed class Window : IOverlayHost, IDisposable
 
             case InputEvent.KeyInput key:
             {
-                // F12 toggles DevTools
+                // F12 cycles DevTools: enabled → enabled + continuous redraw → disabled
                 if (key.IsDown && key.KeyCode == KeyCode.F12)
                 {
-                    _devTools.IsEnabled = !_devTools.IsEnabled;
-                    _devTools.ShowBoundingBoxes = _devTools.IsEnabled;
                     if (!_devTools.IsEnabled)
+                    {
+                        _devTools.IsEnabled = true;
+                    }
+                    else if (!_devTools.ContinuousRedraw)
+                    {
+                        _devTools.ContinuousRedraw = true;
+                    }
+                    else
+                    {
+                        _devTools.IsEnabled = false;
+                        _devTools.ContinuousRedraw = false;
                         _devTools.HoveredElement = null;
+                    }
+                    _devTools.ShowBoundingBoxes = _devTools.IsEnabled;
                     break;
                 }
 

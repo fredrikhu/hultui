@@ -17,6 +17,14 @@ public sealed class DevToolsOverlay
 
     public bool IsEnabled { get; set; }
     public bool ShowBoundingBoxes { get; set; }
+
+    /// <summary>
+    /// When true the window renders every loop iteration regardless of dirty
+    /// state, so the HUD's FPS number reflects raw render throughput instead of
+    /// sitting idle between changes. Only meaningful while <see cref="IsEnabled"/>.
+    /// </summary>
+    public bool ContinuousRedraw { get; set; }
+
     public Element? HoveredElement { get; set; }
 
     private readonly PerformanceCounters _perf;
@@ -147,7 +155,7 @@ public sealed class DevToolsOverlay
     private void RenderPerformanceHud(IRenderContext ctx, float viewportWidth)
     {
         float hudW = 260;
-        float hudH = 110;
+        float hudH = ContinuousRedraw ? 124 : 110;
         float hudX = viewportWidth - hudW - 8;
         float hudY = 8;
 
@@ -172,5 +180,7 @@ public sealed class DevToolsOverlay
         Line($"Render:  {_perf.RenderTimeMs,6:F2} ms  (peak {_perf.RenderTimePeakMs:F2})");
         Line($"Present: {_perf.PresentTimeMs,6:F2} ms  (peak {_perf.PresentTimePeakMs:F2})");
         Line($"Elements: {_perf.ElementCount}");
+        if (ContinuousRedraw)
+            Line("Redraw: continuous");
     }
 }
