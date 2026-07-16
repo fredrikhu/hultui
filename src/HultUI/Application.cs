@@ -174,7 +174,11 @@ public sealed class Application : IDisposable
                 anyRendered = true;
             }
 
-            if (!anyRendered && !AnimationManager.HasActiveAnimations)
+            // Animations that changed something visible marked it dirty in Tick
+            // above and rendered this iteration (anyRendered). One that didn't
+            // (a pure delay, e.g. the tooltip show timer) only needs ~60Hz ticks,
+            // so wait instead of busy-spinning until it fires.
+            if (!anyRendered)
                 IdleWait(16);
 
             // Clean up closed windows

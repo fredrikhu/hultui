@@ -300,8 +300,12 @@ public sealed class Window : IOverlayHost, IDisposable
         => _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
 
     internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
+        // Overlay trees are separate roots, so their dirty flags don't propagate
+        // to _root. Show/close/move already mark _root dirty; this catches
+        // mutations inside an open overlay (hover highlights in a context menu).
+        // A static overlay (a tooltip) costs nothing once painted.
+        || AnyOverlayContentDirty()
         || _postFrameCallbacks.Count > 0
-        || _overlays.Count > 0
         // Render once when an assistive tech attaches, so the accessibility tree
         // gets built even if the app is otherwise idle (the build runs in the
         // render pass). After that frame _a11yWasActive is set and this clears.
@@ -318,6 +322,13 @@ public sealed class Window : IOverlayHost, IDisposable
         // thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame.
         || (_uiaHost?.HasPendingActions ?? false);
+
+    private bool AnyOverlayContentDirty()
+    {
+        for (int i = 0; i < _overlays.Count; i++)
+            if (_overlays[i].Content.DirtyFlags != DirtyFlags.None) return true;
+        return false;
+    }
 
     internal void OnWindowResized()
     {
