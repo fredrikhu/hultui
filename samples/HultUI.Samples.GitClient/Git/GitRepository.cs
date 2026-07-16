@@ -284,10 +284,13 @@ public class GitRepository
         // of HEAD/index/untracked), diff against the first parent instead of
         // suppressing output entirely.
         var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", commitHash);
-        if (!result.Success) return [];
+        return result.Success ? ParseNumstat(result.Lines) : [];
+    }
 
+    private static List<GitFileChange> ParseNumstat(IEnumerable<string> lines)
+    {
         var changes = new List<GitFileChange>();
-        foreach (var line in result.Lines)
+        foreach (var line in lines)
         {
             var parts = line.Split('\t');
             if (parts.Length < 3) continue;
@@ -325,6 +328,21 @@ public class GitRepository
     public List<GitFileDiff> GetCommitDiff(string commitHash)
     {
         var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", commitHash);
+        return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+    }
+
+    /// <summary>File list of the tree diff between two arbitrary commits
+    /// (Fork-style multi-select compare: base = oldest, head = newest).</summary>
+    public List<GitFileChange> GetRangeFiles(string baseHash, string headHash)
+    {
+        var result = GitProcess.Run(Path, "diff", "--numstat", "-M", baseHash, headHash);
+        return result.Success ? ParseNumstat(result.Lines) : [];
+    }
+
+    /// <summary>Patch of the tree diff between two arbitrary commits.</summary>
+    public List<GitFileDiff> GetRangeDiff(string baseHash, string headHash)
+    {
+        var result = GitProcess.Run(Path, "diff", "-M", baseHash, headHash);
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 

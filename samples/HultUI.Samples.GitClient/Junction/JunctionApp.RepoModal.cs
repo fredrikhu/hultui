@@ -246,7 +246,7 @@ public partial class JunctionApp
         var home = f.WorkspaceIds.FirstOrDefault(id => _settings.Workspaces.Any(w => w.Id == id));
         if (home != null) _activeWorkspaceId = home;
         _activeRepoPath = path;
-        _selectedCommitHash = null;
+        SetCommitSelection(null);
         Persist();
         _modal = null;
         SetView(JunctionView.Overview);
@@ -374,7 +374,7 @@ public partial class JunctionApp
             var ws = ActiveWorkspace;
             _activeRepoPath = ws?.RepoPaths.FirstOrDefault()
                 ?? _settings.RepositoryPaths.FirstOrDefault() ?? "";
-            _selectedCommitHash = null;
+            SetCommitSelection(null);
         }
         Persist();
         Flash("Removed repository");

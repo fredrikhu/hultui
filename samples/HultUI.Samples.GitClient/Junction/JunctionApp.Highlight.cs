@@ -32,22 +32,31 @@ public partial class JunctionApp
     private FileHighlight? HighlightForCurrent(string path)
     {
         if (path.Length == 0) return null;
-        if (View == JunctionView.Commit && _detailHash is { } hash)
-            return HighlightFor(path, ExternalDiffMode.Commit, hash);
+        if (View == JunctionView.Commit)
+        {
+            // Multi-select compare: old side is the file at the oldest selected
+            // commit, new side at the newest (matches GetRangeDiff's line numbers).
+            if (_detailRange is { } r)
+                return HighlightFor(path, ExternalDiffMode.Commit, r.HeadHash, r.BaseHash);
+            if (_detailHash is { } hash)
+                return HighlightFor(path, ExternalDiffMode.Commit, hash);
+        }
         if (View == JunctionView.Changes)
             return HighlightFor(path, _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged, null);
         return null;
     }
 
-    private FileHighlight? HighlightFor(string path, ExternalDiffMode mode, string? commitHash)
+    private FileHighlight? HighlightFor(string path, ExternalDiffMode mode, string? commitHash,
+        string? baseHash = null)
     {
         if (ActiveRepo is not { } repo) return null;
 
-        // Commit content is immutable → content-addressed key. Working/index
-        // content changes with the repo's data generation, exactly like the
-        // Changes loader, so stale highlights die with the gen bump.
+        // Commit content is immutable → content-addressed key (old ref explicit so
+        // a single-commit view and a range compare ending at the same commit don't
+        // collide). Working/index content changes with the repo's data generation,
+        // exactly like the Changes loader, so stale highlights die with the gen bump.
         string key = mode == ExternalDiffMode.Commit
-            ? $"{repo.Path}|{commitHash}|{path}"
+            ? $"{repo.Path}|{baseHash ?? commitHash + "^"}..{commitHash}|{path}"
             : $"{repo.Path}|{DataGen(_activeRepoPath)}|{mode}|{path}";
 
         if (_highlights.TryGetValue(key, out var hit)) return hit;
@@ -61,7 +70,7 @@ public partial class JunctionApp
                 var (oldText, newText) = mode switch
                 {
                     ExternalDiffMode.Commit => (
-                        repo.GetFileText(commitHash + "^", path),
+                        repo.GetFileText(baseHash ?? commitHash + "^", path),
                         repo.GetFileText(commitHash!, path)),
                     ExternalDiffMode.Staged => (
                         repo.GetFileText("HEAD", path),

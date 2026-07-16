@@ -41,12 +41,14 @@ public partial class JunctionApp
         // Keep the selection valid within the filtered view (e.g. after a search
         // narrows the list past the current selection).
         if (filtered.Count > 0 && (_selectedCommitHash == null || filtered.All(c => c.Hash != _selectedCommitHash)))
-            _selectedCommitHash = filtered[0].Hash;
+            SetCommitSelection(filtered[0].Hash);
 
-        // Eagerly load the selected commit's detail so opening the Commit view is
-        // instant. Any selection change rebuilds History, so this covers keyboard,
-        // click and auto-select alike; a repeat with the same key is a cache hit.
-        PrefetchCommitDetail(_selectedCommitHash);
+        // Eagerly load the selected commit's (or multi-select compare's) detail so
+        // opening the Commit view is instant. Any selection change rebuilds History,
+        // so this covers keyboard, click and auto-select alike; a repeat with the
+        // same key is a cache hit.
+        if (SelectedRange() is { } range) PrefetchRangeDetail(range);
+        else PrefetchCommitDetail(_selectedCommitHash);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildIncludeBar(includeList, filtered.Count));
@@ -93,21 +95,97 @@ public partial class JunctionApp
 
     private void PickInitialCommit(HistoryData data)
     {
-        if (data.Commits.Count == 0) { _selectedCommitHash = null; return; }
+        if (data.Commits.Count == 0) { SetCommitSelection(null); return; }
         if (_selectedCommitHash == null || data.Commits.All(c => c.Hash != _selectedCommitHash))
-            _selectedCommitHash = data.Commits[0].Hash;
+            SetCommitSelection(data.Commits[0].Hash);
     }
 
-    private void MoveCommitSelection(int delta)
+    private void MoveCommitSelection(int delta, bool extend = false)
     {
         var commits = FilteredCommits(_history.Value);
         if (commits.Count == 0) return;
         var i = _selectedCommitHash == null ? 0 : IndexOfHash(commits, _selectedCommitHash);
         if (i < 0) i = 0;
         i = Math.Clamp(i + delta, 0, commits.Count - 1);
-        _selectedCommitHash = commits[i].Hash;
+        if (extend)
+        {
+            // Shift+arrows: selection becomes the contiguous anchor→focus range.
+            var anchor = _selectionAnchorHash ?? _selectedCommitHash ?? commits[i].Hash;
+            _selectedCommitHashes.Clear();
+            AddRangeToSelection(commits, anchor, commits[i].Hash);
+            _selectedCommitHash = commits[i].Hash;
+            _selectionAnchorHash = anchor;
+        }
+        else
+        {
+            SetCommitSelection(commits[i].Hash);
+        }
         _pendingScrollToSelected = true;
         MarkDirty();
+    }
+
+    /// <summary>Adds the contiguous run of commits between two hashes (inclusive,
+    /// either order) to the selection set.</summary>
+    private void AddRangeToSelection(List<GitCommit> commits, string aHash, string bHash)
+    {
+        var i = IndexOfHash(commits, aHash);
+        var j = IndexOfHash(commits, bHash);
+        if (i < 0 || j < 0) { _selectedCommitHashes.Add(bHash); return; }
+        if (i > j) (i, j) = (j, i);
+        for (var k = i; k <= j; k++)
+            _selectedCommitHashes.Add(commits[k].Hash);
+    }
+
+    /// <summary>Commit-row click with Windows list semantics: plain click selects
+    /// (and opens details when already the single selection), Ctrl toggles,
+    /// Shift selects the anchor→clicked range, Ctrl+Shift adds that range.</summary>
+    private void OnCommitRowClick(GitCommit commit, KeyModifiers mods)
+    {
+        var ctrl = mods.HasFlag(KeyModifiers.Ctrl);
+        var shift = mods.HasFlag(KeyModifiers.Shift);
+
+        if (shift)
+        {
+            var commits = FilteredCommits(_history.Value);
+            var anchor = _selectionAnchorHash ?? _selectedCommitHash ?? commit.Hash;
+            if (!ctrl) _selectedCommitHashes.Clear();
+            AddRangeToSelection(commits, anchor, commit.Hash);
+            _selectedCommitHash = commit.Hash;
+            _selectionAnchorHash = anchor;
+            MarkDirty();
+            return;
+        }
+        if (ctrl)
+        {
+            if (!_selectedCommitHashes.Add(commit.Hash))
+            {
+                // Toggle off — but never let the selection go empty.
+                if (_selectedCommitHashes.Count > 1)
+                {
+                    _selectedCommitHashes.Remove(commit.Hash);
+                    if (_selectedCommitHash == commit.Hash)
+                        _selectedCommitHash = FilteredCommits(_history.Value)
+                            .FirstOrDefault(c => _selectedCommitHashes.Contains(c.Hash))?.Hash;
+                }
+            }
+            else
+            {
+                _selectedCommitHash = commit.Hash;
+            }
+            _selectionAnchorHash = commit.Hash;
+            MarkDirty();
+            return;
+        }
+
+        if (commit.Hash == _selectedCommitHash && _selectedCommitHashes.Count <= 1)
+        {
+            SetView(JunctionView.Commit);
+        }
+        else
+        {
+            SetCommitSelection(commit.Hash);
+            MarkDirty();
+        }
     }
 
     /// <summary>Scrolls the commit list so the keyboard-selected row is on screen
@@ -248,9 +326,15 @@ public partial class JunctionApp
                 data.Graph.TryGetValue(c.Hash, out var g) ? g : default,
                 data.Stats.TryGetValue(c.Hash, out var s) ? s : (0, 0),
                 data.Remotes,
-                c.Hash == _selectedCommitHash))
+                SelectionContains(c.Hash)))
             .AccessibleItemLabel(c => $"{c.Subject}, {c.AuthorName}, {c.ShortHash}")
-            .OnActivateItem(c => { _selectedCommitHash = c.Hash; SetView(JunctionView.Commit); })
+            .OnActivateItem(c =>
+            {
+                // Activating a commit inside the multi-selection opens the compare;
+                // activating an unselected one collapses the selection to it first.
+                if (!SelectionContains(c.Hash)) SetCommitSelection(c.Hash);
+                SetView(JunctionView.Commit);
+            })
             .SelectedIndex(selectedIndex)
             .FlexGrow(1)
             .WithRef(_commitListRef);
@@ -308,25 +392,23 @@ public partial class JunctionApp
 
         row.AddChild(body);
 
-        // Selected affordance.
-        if (selected)
+        // Selected affordance on the focused row; a multi-selection compares instead.
+        if (selected && commit.Hash == _selectedCommitHash)
             row.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).FlexShrink(0)
                 .Padding(new Thickness(0, 12, 0, 8))
                 .Children(
-                    Text.New("Details").FontSize(11f).TextColor(Nocturne.Accent300),
+                    Text.New(_selectedCommitHashes.Count > 1 ? "Compare" : "Details")
+                        .FontSize(11f).TextColor(Nocturne.Accent300),
                     Ui.Icon(Icons.ArrowRight, 12f, Nocturne.Accent300)));
 
-        row.OnClick(_ =>
-        {
-            if (commit.Hash == _selectedCommitHash) SetView(JunctionView.Commit);
-            else { _selectedCommitHash = commit.Hash; MarkDirty(); }
-        });
-        // Right-click selects the row first, then the framework opens the menu.
+        row.OnClick(e => OnCommitRowClick(commit, e.Modifiers));
+        // Right-click outside the selection collapses to that row first, then the
+        // framework opens the menu; inside it the selection is left alone.
         row.On<PointerDownEvent>(e =>
         {
-            if (e.Button == 2 && commit.Hash != _selectedCommitHash)
+            if (e.Button == 2 && !SelectionContains(commit.Hash))
             {
-                _selectedCommitHash = commit.Hash;
+                SetCommitSelection(commit.Hash);
                 MarkDirty();
             }
         });
@@ -402,11 +484,14 @@ public partial class JunctionApp
             .Padding(new Thickness(8, 16, 8, 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
 
+        var comparing = SelectedRange() != null;
         bar.AddChild(Hint("↑ ↓", "select commit"));
-        bar.AddChild(Hint("↵", "open commit details"));
+        bar.AddChild(Hint("Ctrl/Shift+click", "select commits to compare"));
+        bar.AddChild(Hint("↵", comparing ? "compare selected" : "open commit details"));
         bar.AddChild(Box.New().FlexGrow(1));
-        bar.AddChild(Ui.SecondaryButton("Open commit details", Icons.ArrowRight,
-            () => SetView(JunctionView.Commit), 11.5f));
+        bar.AddChild(Ui.SecondaryButton(
+            comparing ? $"Compare {_selectedCommitHashes.Count} commits" : "Open commit details",
+            Icons.ArrowRight, () => SetView(JunctionView.Commit), 11.5f));
         return bar;
     }
 

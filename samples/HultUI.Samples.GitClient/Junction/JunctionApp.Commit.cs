@@ -16,6 +16,12 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Commit", "Open a repository first.");
 
+        // Two or more commits selected in History → Fork-style compare between
+        // the oldest and newest of the selection.
+        if (SelectedRange() is { } range)
+            return BuildRangeCompareView(range);
+        _detailRange = null;
+
         var hash = _selectedCommitHash ?? _history.Value.Commits.FirstOrDefault()?.Hash;
         if (hash == null)
             return BuildStubView("Commit", "Select a commit in History to inspect it.");
@@ -29,7 +35,7 @@ public partial class JunctionApp
         // flash the wrong commit's files/diff for a frame, so only show the loaded
         // body once its hash matches; until then keep the header (sourced from the
         // history list) correct and show a neutral loading pane.
-        var ready = detail.Commit != null && detail.Commit.Hash == hash;
+        var ready = detail.Commit != null && detail.Commit.Hash == hash && detail.RangeBaseHash == null;
         var commit = ready
             ? detail.Commit
             : _history.Value.Commits.FirstOrDefault(c => c.Hash == hash);
@@ -39,6 +45,77 @@ public partial class JunctionApp
         col.AddChild(ready ? BuildCommitBody(detail) : BuildCommitBodyLoading());
         return col;
     }
+
+    // ── Multi-select compare (oldest…newest of the History selection) ────
+
+    private Element BuildRangeCompareView((string BaseHash, string HeadHash) range)
+    {
+        _detailHash = null;
+        _detailRange = range;
+        PrefetchRangeDetail(range);
+        var detail = _commitDetail.Value;
+        var ready = detail.Commit != null && detail.Commit.Hash == range.HeadHash
+            && detail.RangeBaseHash == range.BaseHash;
+
+        var col = Flex.Column(gap: 0).FlexGrow(1);
+        col.AddChild(BuildRangeHeader(range));
+        col.AddChild(ready ? BuildCommitBody(detail) : BuildCommitBodyLoading());
+        return col;
+    }
+
+    private string RangeDetailKey((string BaseHash, string HeadHash) range) =>
+        $"{_activeRepoPath}|{range.BaseHash}..{range.HeadHash}|{DataGen(_activeRepoPath)}";
+
+    private void PrefetchRangeDetail((string BaseHash, string HeadHash) range)
+    {
+        if (!HasActiveRepo) return;
+        var r = range;
+        _commitDetail.Load(RangeDetailKey(r), () => LoadRangeDetail(r), onLoaded: PickInitialFile);
+    }
+
+    // Runs off the UI thread.
+    private CommitDetail LoadRangeDetail((string BaseHash, string HeadHash) range)
+    {
+        var repo = RepoFor(_activeRepoPath);
+        var commit = repo.GetCommit(range.HeadHash);
+        var files = repo.GetRangeFiles(range.BaseHash, range.HeadHash);
+        var diffs = repo.GetRangeDiff(range.BaseHash, range.HeadHash);
+        var byPath = diffs
+            .GroupBy(d => d.Path)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        return new CommitDetail(commit, files, byPath, range.BaseHash);
+    }
+
+    private Element BuildRangeHeader((string BaseHash, string HeadHash) range)
+    {
+        var commits = _history.Value.Commits;
+        var baseCommit = commits.FirstOrDefault(c => c.Hash == range.BaseHash);
+        var headCommit = commits.FirstOrDefault(c => c.Hash == range.HeadHash);
+
+        var box = Flex.Column(gap: 8).FlexShrink(0)
+            .Padding(new Thickness(12, 16, 12, 16))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
+
+        var row1 = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
+        row1.AddChild(Ui.GhostButton("History", Icons.ArrowLeft, () => SetView(JunctionView.History)));
+        row1.AddChild(Text.New($"Comparing {_selectedCommitHashes.Count} selected commits")
+            .FontSize(15f).FontWeight(FontWeight.Medium)
+            .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        box.AddChild(row1);
+
+        var row2 = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
+        row2.AddChild(Ui.Mono($"{Short7(range.BaseHash)} → {Short7(range.HeadHash)}", 11.5f, Nocturne.On(0.55))
+            .FlexShrink(0));
+        if (baseCommit != null && headCommit != null)
+            row2.AddChild(Text.New($"{baseCommit.Subject}  →  {headCommit.Subject}")
+                .FontSize(11.5f).TextColor(Nocturne.On(0.55))
+                .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        box.AddChild(row2);
+
+        return box;
+    }
+
+    private static string Short7(string hash) => hash.Length >= 7 ? hash[..7] : hash;
 
     /// <summary>Placeholder body shown while a newly selected commit's detail loads,
     /// so the previous commit's files/diff never flash. Keeps the two-column shell so

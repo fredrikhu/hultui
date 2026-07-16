@@ -89,7 +89,12 @@ public partial class JunctionApp : Component, IDisposable
     // History state. Per-repo loaders (kept in a dictionary) retain each repo's
     // last-loaded value so returning to a repo is instant; see LoaderFor.
     private readonly Dictionary<string, AsyncLoader<HistoryData>> _historyLoaders = new(PathComparer);
+    // Multi-selection à la Windows lists: _selectedCommitHash is the focused/lead
+    // commit (keyboard nav, context menus), _selectedCommitHashes the full selection
+    // (always contains the focused one), _selectionAnchorHash the Shift-range anchor.
     private string? _selectedCommitHash;
+    private readonly HashSet<string> _selectedCommitHashes = new(StringComparer.Ordinal);
+    private string? _selectionAnchorHash;
     private string _historyQuery = "";
     private readonly Ref<TextInputElement> _historySearchRef = new();
     private bool _pendingHistorySearchFocus;
@@ -101,6 +106,9 @@ public partial class JunctionApp : Component, IDisposable
     // Commit-details state.
     private readonly AsyncLoader<CommitDetail> _commitDetail = new(CommitDetail.Empty);
     private string? _detailHash;          // commit the loaded detail belongs to
+    // Multi-select compare shown instead: diff between the oldest and newest
+    // selected commits (Base = oldest, Head = newest). Null in single-commit mode.
+    private (string BaseHash, string HeadHash)? _detailRange;
     private string? _selectedFilePath;    // file selected in the Commit view
 
     // Changes (staging) state.
@@ -179,7 +187,8 @@ public partial class JunctionApp : Component, IDisposable
     private readonly record struct CommitDetail(
         GitCommit? Commit,
         IReadOnlyList<GitFileChange> Files,
-        Dictionary<string, GitFileDiff> DiffByPath)
+        Dictionary<string, GitFileDiff> DiffByPath,
+        string? RangeBaseHash = null)   // non-null: a multi-select compare against this base
     {
         public static readonly CommitDetail Empty = new(null, [], new());
     }
@@ -546,11 +555,38 @@ public partial class JunctionApp : Component, IDisposable
     /// MarkDirty path), so a newly-activated per-repo loader gets subscribed.</summary>
     private void Rerender() => _revision.Value++;
 
+    /// <summary>Collapses the commit selection to a single commit (or none).</summary>
+    private void SetCommitSelection(string? hash)
+    {
+        _selectedCommitHash = hash;
+        _selectionAnchorHash = hash;
+        _selectedCommitHashes.Clear();
+        if (hash != null) _selectedCommitHashes.Add(hash);
+    }
+
+    private bool SelectionContains(string hash) =>
+        _selectedCommitHashes.Count > 0 ? _selectedCommitHashes.Contains(hash) : hash == _selectedCommitHash;
+
+    /// <summary>Base (oldest) and head (newest) of the multi-selection compare, or
+    /// null when fewer than two selected commits exist in the loaded history.</summary>
+    private (string BaseHash, string HeadHash)? SelectedRange()
+    {
+        if (_selectedCommitHashes.Count < 2) return null;
+        string? head = null, baseHash = null;
+        foreach (var c in _history.Value.Commits)   // newest-first
+        {
+            if (!_selectedCommitHashes.Contains(c.Hash)) continue;
+            head ??= c.Hash;
+            baseHash = c.Hash;
+        }
+        return head != null && baseHash != null && head != baseHash ? (baseHash, head) : null;
+    }
+
     private void SelectRepo(string path)
     {
         if (PathEquals(path, _activeRepoPath)) return;
         _activeRepoPath = path;
-        _selectedCommitHash = null;   // reset selection; History reloads and picks first
+        SetCommitSelection(null);   // reset selection; History reloads and picks first
         _settings.ActiveRepoPath = path;
         Persist();
         Rerender();
@@ -566,7 +602,7 @@ public partial class JunctionApp : Component, IDisposable
         if (!ws.RepoPaths.Any(p => PathEquals(p, _activeRepoPath)))
         {
             _activeRepoPath = ws.RepoPaths.FirstOrDefault() ?? "";
-            _selectedCommitHash = null;
+            SetCommitSelection(null);
             _settings.ActiveRepoPath = _activeRepoPath;
         }
         Persist();
@@ -832,14 +868,16 @@ public partial class JunctionApp : Component, IDisposable
     /// search box (so arrows/PageUp-Down/Enter work while typing a query too).</summary>
     private bool HandleHistoryNavKey(KeyDownEvent e)
     {
+        // Shift extends the selection from the anchor, like any Windows list.
+        var extend = e.Modifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
-            case KeyCode.Down: MoveCommitSelection(1); return true;
-            case KeyCode.Up: MoveCommitSelection(-1); return true;
-            case KeyCode.PageDown: MoveCommitSelection(HistoryPageSize()); return true;
-            case KeyCode.PageUp: MoveCommitSelection(-HistoryPageSize()); return true;
-            case KeyCode.Home: MoveCommitSelection(int.MinValue / 2); return true;
-            case KeyCode.End: MoveCommitSelection(int.MaxValue / 2); return true;
+            case KeyCode.Down: MoveCommitSelection(1, extend); return true;
+            case KeyCode.Up: MoveCommitSelection(-1, extend); return true;
+            case KeyCode.PageDown: MoveCommitSelection(HistoryPageSize(), extend); return true;
+            case KeyCode.PageUp: MoveCommitSelection(-HistoryPageSize(), extend); return true;
+            case KeyCode.Home: MoveCommitSelection(int.MinValue / 2, extend); return true;
+            case KeyCode.End: MoveCommitSelection(int.MaxValue / 2, extend); return true;
             case KeyCode.Enter: SetView(JunctionView.Commit); return true;
             default: return false;
         }

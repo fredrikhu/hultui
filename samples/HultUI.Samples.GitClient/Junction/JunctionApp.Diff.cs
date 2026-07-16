@@ -313,7 +313,15 @@ public partial class JunctionApp
         string path;
         ExternalDiffMode mode;
         string? commitHash = null;
-        if (View == JunctionView.Commit && !string.IsNullOrEmpty(_selectedFilePath) && _detailHash is { } h)
+        string? baseHash = null;
+        if (View == JunctionView.Commit && !string.IsNullOrEmpty(_selectedFilePath) && _detailRange is { } r)
+        {
+            path = _selectedFilePath!;
+            mode = ExternalDiffMode.Commit;
+            commitHash = r.HeadHash;
+            baseHash = r.BaseHash;
+        }
+        else if (View == JunctionView.Commit && !string.IsNullOrEmpty(_selectedFilePath) && _detailHash is { } h)
         {
             path = _selectedFilePath!;
             mode = ExternalDiffMode.Commit;
@@ -331,22 +339,22 @@ public partial class JunctionApp
         }
 
         Flash("Opening diff in VS Code…");
-        var (ok, err) = await Task.Run(() => LaunchVsCodeDiff(repo, path, mode, commitHash));
+        var (ok, err) = await Task.Run(() => LaunchVsCodeDiff(repo, path, mode, commitHash, baseHash));
         if (!ok) Flash(string.IsNullOrEmpty(err) ? "Could not open VS Code" : err);
     }
 
     // Runs off the UI thread (git show + temp-file writes + process start).
     private static (bool ok, string err) LaunchVsCodeDiff(
-        GitRepository repo, string path, ExternalDiffMode mode, string? commitHash)
+        GitRepository repo, string path, ExternalDiffMode mode, string? commitHash, string? baseHash = null)
     {
         string leftLabel, rightLabel, left, right;
         switch (mode)
         {
             case ExternalDiffMode.Commit:
                 var hash = commitHash!;
-                leftLabel = "parent";
-                rightLabel = hash.Length >= 7 ? hash[..7] : hash;
-                left = repo.GetFileText(hash + "^", path) ?? "";   // "" for an added file / root commit
+                leftLabel = baseHash == null ? "parent" : Short7(baseHash);   // range compare: oldest selected
+                rightLabel = Short7(hash);
+                left = repo.GetFileText(baseHash ?? hash + "^", path) ?? "";   // "" for an added file / root commit
                 right = repo.GetFileText(hash, path) ?? "";
                 break;
             case ExternalDiffMode.Staged:
