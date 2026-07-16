@@ -1,0 +1,96 @@
+# Builds the Junction (GitClient sample) Windows installer.
+#
+# Every push to main produces a CI-versioned installer as a workflow artifact.
+# Pushing a tag like `junction-v1.2.0` additionally publishes a GitHub Release
+# with the installer attached.
+
+name: Junction installer
+
+on:
+  push:
+    branches: [main]
+    tags: ['junction-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: junction-installer-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build solution
+        run: dotnet build HultUI.slnx -c Release
+
+      # The UI-automation tests (FlaUI) launch real sample windows; hosted
+      # Windows runners provide an interactive desktop, so they run here too.
+      - name: Run tests
+        run: dotnet test HultUI.slnx -c Release --no-build
+
+  installer:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write # for the release step on tag builds
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Tag junction-v1.2.0 -> 1.2.0; other builds get a CI prerelease version.
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/junction-v*') {
+            $version = $env:GITHUB_REF_NAME.Substring('junction-v'.Length)
+          } else {
+            $version = "0.1.0-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer version: $version"
+
+      # Native AOT publish (PublishAot is set in the csproj); the runner image
+      # includes the required MSVC toolchain.
+      - name: Publish Junction (win-x64, AOT)
+        run: dotnet publish samples/HultUI.Samples.GitClient/HultUI.Samples.GitClient.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" samples\HultUI.Samples.GitClient\Installer\junction.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Junction-Setup-${{ steps.version.outputs.version }}
+          path: samples/HultUI.Samples.GitClient/Installer/Output/*.exe
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/junction-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem samples\HultUI.Samples.GitClient\Installer\Output\*.exe | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $exe.FullName `
+            --title "Junction ${{ steps.version.outputs.version }}" `
+            --generate-notes
