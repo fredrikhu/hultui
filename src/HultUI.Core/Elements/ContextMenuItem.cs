@@ -17,5 +17,12 @@ public sealed class ContextMenuItem
     /// danger colour.</summary>
     public bool IsDanger { get; init; }
 
+    /// <summary>Nested items: the item opens a flyout submenu (hover, click,
+    /// Enter or →) instead of running <see cref="Action"/>. One level of
+    /// nesting is supported.</summary>
+    public IReadOnlyList<ContextMenuItem>? Children { get; init; }
+
+    public bool HasChildren => Children is { Count: > 0 };
+
     public static ContextMenuItem Separator() => new() { IsSeparator = true };
 }

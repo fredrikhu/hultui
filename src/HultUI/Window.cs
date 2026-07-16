@@ -47,6 +47,9 @@ public sealed class Window : IOverlayHost, IDisposable
     // ──── Context menu state ────
     private OverlayHandle _contextMenuOverlay;
     private ContextMenuElement? _contextMenuElement;
+    // One level of nesting: the flyout for a root item with Children.
+    private OverlayHandle _contextSubmenuOverlay;
+    private ContextMenuElement? _contextSubmenuElement;
 
     // ──── Accessibility state ────
     private IAccessibilityBridge _accessibilityBridge = NullAccessibilityBridge.Instance;
@@ -704,22 +707,42 @@ public sealed class Window : IOverlayHost, IDisposable
                         Tracer.StopRecording("/tmp/hultui-trace.json");
                 }
 
-                // Context menu keyboard navigation
+                // Context menu keyboard navigation. An open flyout captures
+                // Up/Down/Enter; → opens a flyout, ← / Escape close one level.
                 if (key.IsDown && _contextMenuElement is not null)
                 {
+                    var activeMenu = _contextSubmenuElement ?? _contextMenuElement;
                     switch (key.KeyCode)
                     {
                         case KeyCode.Up:
-                            _contextMenuElement.MoveSelection(-1);
+                            activeMenu.MoveSelection(-1);
                             break;
                         case KeyCode.Down:
-                            _contextMenuElement.MoveSelection(1);
+                            activeMenu.MoveSelection(1);
+                            break;
+                        case KeyCode.Right:
+                            if (_contextSubmenuElement is null
+                                && _contextMenuElement.ItemAt(_contextMenuElement.HoveredIndex) is { HasChildren: true })
+                            {
+                                OnContextMenuHover(_contextMenuElement, _contextMenuElement.HoveredIndex);
+                                _contextSubmenuElement?.MoveSelection(1);
+                            }
+                            break;
+                        case KeyCode.Left:
+                            CloseContextSubmenu();
                             break;
                         case KeyCode.Enter:
-                            _contextMenuElement.ActivateSelected();
+                        {
+                            var hadSubmenu = _contextSubmenuElement is not null;
+                            activeMenu.ActivateSelected();
+                            // Enter on a parent item opened its flyout — land on its first entry.
+                            if (!hadSubmenu && _contextSubmenuElement is not null)
+                                _contextSubmenuElement.MoveSelection(1);
                             break;
+                        }
                         case KeyCode.Escape:
-                            CloseContextMenu();
+                            if (_contextSubmenuElement is not null) CloseContextSubmenu();
+                            else CloseContextMenu();
                             break;
                         default:
                             goto normalKeyHandling;
@@ -1166,6 +1189,11 @@ public sealed class Window : IOverlayHost, IDisposable
                     _contextMenuOverlay = default;
                     _contextMenuElement = null;
                 }
+                if (_overlays[i].Id == _contextSubmenuOverlay.Id)
+                {
+                    _contextSubmenuOverlay = default;
+                    _contextSubmenuElement = null;
+                }
                 _overlays.RemoveAt(i);
                 _root?.MarkPaintDirty();
             }
@@ -1267,12 +1295,57 @@ public sealed class Window : IOverlayHost, IDisposable
 
         var theme = Application.Theme;
         var menuElement = new ContextMenuElement(items, theme.ContextMenu, CloseContextMenu);
+        menuElement.HoverChanged = index => OnContextMenuHover(menuElement, index);
         _contextMenuElement = menuElement;
         _contextMenuOverlay = ShowOverlay(menuElement, pos.X, pos.Y, dismissOnOutsideClick: true, hitTestable: true);
     }
 
+    /// <summary>Hover moved to a new root-menu item: open its flyout when it has
+    /// children (anchored next to the item), close any open flyout otherwise.</summary>
+    private void OnContextMenuHover(ContextMenuElement menu, int index)
+    {
+        if (!ReferenceEquals(menu, _contextMenuElement)) return;
+
+        var item = menu.ItemAt(index);
+        if (item is not { HasChildren: true })
+        {
+            CloseContextSubmenu();
+            return;
+        }
+        if (menu.PinnedIndex == index) return;   // this item's flyout is already open
+
+        CloseContextSubmenu();
+        var theme = Application.Theme;
+        var sub = new ContextMenuElement(item.Children!, theme.ContextMenu, CloseContextMenu);
+        _contextSubmenuElement = sub;
+        menu.PinnedIndex = index;
+
+        float rootX = 0, rootY = 0;
+        foreach (var o in _overlays)
+            if (o.Id == _contextMenuOverlay.Id) { rootX = o.X; rootY = o.Y; break; }
+        // Slight overlap keeps the pointer inside a menu while crossing over;
+        // the first child row lines up with the parent item.
+        _contextSubmenuOverlay = ShowOverlay(sub,
+            rootX + menu.Layout.Width - 4,
+            rootY + menu.ItemTop(index) - theme.ContextMenu.Padding.Top,
+            dismissOnOutsideClick: true, hitTestable: true);
+    }
+
+    private void CloseContextSubmenu()
+    {
+        if (_contextSubmenuOverlay.IsValid)
+        {
+            CloseOverlay(_contextSubmenuOverlay);
+            _contextSubmenuOverlay = default;
+        }
+        _contextSubmenuElement = null;
+        if (_contextMenuElement is not null)
+            _contextMenuElement.PinnedIndex = -1;
+    }
+
     private void CloseContextMenu()
     {
+        CloseContextSubmenu();
         if (_contextMenuOverlay.IsValid)
         {
             CloseOverlay(_contextMenuOverlay);

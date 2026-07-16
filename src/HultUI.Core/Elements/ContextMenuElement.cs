@@ -13,6 +13,8 @@ namespace HultUI.Core.Elements;
 /// </summary>
 internal sealed class ContextMenuElement : Element
 {
+    private const string SubmenuArrow = "▸";
+
     private readonly IReadOnlyList<ContextMenuItem> _items;
     private readonly ContextMenuTheme _theme;
     private readonly Action _closeMenu;
@@ -38,6 +40,23 @@ internal sealed class ContextMenuElement : Element
 
     public int HoveredIndex => _hoveredIndex;
 
+    /// <summary>Raised when the hovered item changes (index, or −1 for none).
+    /// The menu host uses it to open/close the flyout for items with
+    /// <see cref="ContextMenuItem.Children"/>.</summary>
+    internal Action<int>? HoverChanged;
+
+    /// <summary>Parent item of the currently open submenu; rendered highlighted
+    /// even while the pointer is inside the flyout.</summary>
+    internal int PinnedIndex { get; set; } = -1;
+
+    internal ContextMenuItem? ItemAt(int index) =>
+        index >= 0 && index < _items.Count ? _items[index] : null;
+
+    /// <summary>Top edge (element-local) of an item row, for anchoring its
+    /// flyout. Falls back to 0 before the first render pass.</summary>
+    internal float ItemTop(int index) =>
+        index >= 0 && index < _itemYOffsets.Length ? _itemYOffsets[index] : 0f;
+
     /// <summary>Move keyboard selection up or down, skipping separators and disabled items.</summary>
     public void MoveSelection(int direction)
     {
@@ -60,12 +79,19 @@ internal sealed class ContextMenuElement : Element
         }
     }
 
-    /// <summary>Activate the currently selected item. Returns true if an action was invoked.</summary>
+    /// <summary>Activate the currently selected item. Returns true if an action was invoked.
+    /// Items with children open their submenu (via <see cref="HoverChanged"/>) instead.</summary>
     public bool ActivateSelected()
     {
         if (_hoveredIndex < 0 || _hoveredIndex >= _items.Count) return false;
         var item = _items[_hoveredIndex];
         if (item.IsSeparator || item.IsDisabled) return false;
+
+        if (item.HasChildren)
+        {
+            HoverChanged?.Invoke(_hoveredIndex);
+            return true;
+        }
 
         _closeMenu();
         item.Action?.Invoke();
@@ -79,6 +105,8 @@ internal sealed class ContextMenuElement : Element
         {
             _hoveredIndex = index;
             MarkPaintDirty();
+            if (index >= 0)   // gaps/separators don't close an open flyout
+                HoverChanged?.Invoke(index);
         }
     }
 
@@ -91,6 +119,12 @@ internal sealed class ContextMenuElement : Element
 
         var item = _items[index];
         if (item.IsSeparator || item.IsDisabled) return;
+
+        if (item.HasChildren)
+        {
+            HoverChanged?.Invoke(index);
+            return;
+        }
 
         _closeMenu();
         item.Action?.Invoke();
@@ -140,6 +174,11 @@ internal sealed class ContextMenuElement : Element
             {
                 var hintSize = ctx.MeasureText(item.ShortcutHint, shortcutStyle, float.MaxValue, 1);
                 maxShortcutWidth = Math.Max(maxShortcutWidth, hintSize.Width);
+            }
+            if (item.HasChildren)
+            {
+                var arrowSize = ctx.MeasureText(SubmenuArrow, itemStyle, float.MaxValue, 1);
+                maxShortcutWidth = Math.Max(maxShortcutWidth, arrowSize.Width);
             }
 
             totalHeight += _theme.ItemPadding.Top + labelSize.Height + _theme.ItemPadding.Bottom;
@@ -202,8 +241,8 @@ internal sealed class ContextMenuElement : Element
             float itemHeight = _theme.ItemPadding.Top + textSize.Height + _theme.ItemPadding.Bottom;
             _itemHeights[i] = itemHeight;
 
-            // Hover highlight
-            if (i == _hoveredIndex && !item.IsDisabled)
+            // Hover highlight (the open submenu's parent stays highlighted).
+            if ((i == _hoveredIndex || i == PinnedIndex) && !item.IsDisabled)
             {
                 ctx.DrawRect(
                     new Rect(box.X + _theme.Padding.Left, box.Y + y,
@@ -233,18 +272,20 @@ internal sealed class ContextMenuElement : Element
 
             ctx.DrawText(item.Label, labelRect, labelStyle, TextOverflow.Clip, 1);
 
-            // Shortcut hint (right-aligned)
-            if (item.ShortcutHint is not null)
+            // Shortcut hint or submenu arrow (right-aligned)
+            var trailing = item.HasChildren ? SubmenuArrow : item.ShortcutHint;
+            if (trailing is not null)
             {
-                var hintSize = ctx.MeasureText(item.ShortcutHint, shortcutStyle);
+                var trailingStyle = item.IsDisabled ? disabledStyle
+                    : item.HasChildren ? labelStyle
+                    : shortcutStyle;
+                var hintSize = ctx.MeasureText(trailing, trailingStyle);
                 var hintRect = new Rect(
                     box.X + contentWidth - _theme.ItemPadding.Right - hintSize.Width,
                     box.Y + y + _theme.ItemPadding.Top + (textSize.Height - hintSize.Height) / 2,
                     hintSize.Width,
                     hintSize.Height);
-                ctx.DrawText(item.ShortcutHint, hintRect,
-                    item.IsDisabled ? disabledStyle : shortcutStyle,
-                    TextOverflow.Clip, 1);
+                ctx.DrawText(trailing, hintRect, trailingStyle, TextOverflow.Clip, 1);
             }
 
             y += itemHeight;

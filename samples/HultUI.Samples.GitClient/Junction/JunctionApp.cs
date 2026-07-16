@@ -31,6 +31,7 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Window _window;
     private readonly GitClientSettingsData _settings;
     private readonly IFolderPicker _folderPicker;
+    private readonly ISaveFilePicker _saveFilePicker;
 
     // One GitRepository per path, plus a background summary loader per path so
     // the sidebar's branch / ahead-behind / dirty badges never block Build().
@@ -217,12 +218,13 @@ public partial class JunctionApp : Component, IDisposable
     }
 
     public JunctionApp(Application app, Window window, GitClientSettingsData settings,
-        IFolderPicker? folderPicker = null)
+        IFolderPicker? folderPicker = null, ISaveFilePicker? saveFilePicker = null)
     {
         _app = app;
         _window = window;
         _settings = settings;
         _folderPicker = folderPicker ?? new NativeFolderPicker();
+        _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
         _settings.Normalize();
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";

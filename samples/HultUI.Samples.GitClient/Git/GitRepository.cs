@@ -951,9 +951,28 @@ public class GitRepository
 
     // ── Cherry-pick ──
 
-    public GitResult CherryPick(string commitHash)
+    /// <summary>Cherry-picks one or more commits; pass them oldest first so
+    /// they apply in history order.</summary>
+    public GitResult CherryPick(params string[] commitHashes)
     {
-        return GitProcess.Run(Path, "cherry-pick", commitHash);
+        return GitProcess.Run(Path, ["cherry-pick", .. commitHashes]);
+    }
+
+    // ── Patch export ──
+
+    /// <summary>
+    /// Am-compatible patch text (git format-patch: full authorship + message per
+    /// commit). Null <paramref name="baseExclusive"/> → just <paramref name="head"/>'s
+    /// own patch; otherwise every commit after <paramref name="baseExclusive"/> up to
+    /// and including <paramref name="head"/>. Returns null on failure (e.g. an
+    /// unreachable range). Merge commits in the span are skipped by git.
+    /// </summary>
+    public string? FormatPatch(string? baseExclusive, string head)
+    {
+        var result = baseExclusive == null
+            ? GitProcess.Run(Path, "format-patch", "-1", "--stdout", head)
+            : GitProcess.Run(Path, "format-patch", "--stdout", $"{baseExclusive}..{head}");
+        return result.Success ? result.Stdout : null;
     }
 
     // ── Revert ──

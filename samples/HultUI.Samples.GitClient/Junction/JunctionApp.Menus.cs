@@ -13,6 +13,9 @@ public partial class JunctionApp
     private static ContextMenuItem Danger(string glyph, string label, Action run) =>
         new() { Glyph = glyph, Label = label, Action = run, IsDanger = true };
 
+    private static ContextMenuItem SubMenu(string glyph, string label, IReadOnlyList<ContextMenuItem> children) =>
+        new() { Glyph = glyph, Label = label, Children = children };
+
     private ContextMenuItem IncludeItem(string name)
     {
         var set = IncludeSet(_activeRepoPath);
@@ -30,14 +33,36 @@ public partial class JunctionApp
     private IReadOnlyList<ContextMenuItem> CommitMenuItems(GitCommit c)
     {
         var cur = CurrentBranchTitle();
+
+        // Right-clicking inside a multi-selection targets the whole selection
+        // for the operations that generalize (cherry-pick, drop, patch);
+        // everything else acts on the clicked commit.
+        var sel = SelectionContains(c.Hash) && _selectedCommitHashes.Count > 1
+            ? SelectedHashesOldestFirst()
+            : [c.Hash];
+        var n = sel.Count;
+        var multi = n > 1;
+
+        // Quick rebase: scripted history edits that need no further input.
+        var quick = new List<ContextMenuItem>();
+        if (!multi)
+        {
+            quick.Add(Item(Icons.ArrowsInLineVertical, "Squash into parent", () => DoQuickMeld(c, RebaseOp.Squash)));
+            quick.Add(Item(Icons.ArrowLineUp, "Fixup into parent (discard message)", () => DoQuickMeld(c, RebaseOp.Fixup)));
+            quick.Add(ContextMenuItem.Separator());
+        }
+        quick.Add(Danger(Icons.Trash, multi ? $"Drop {n} commits" : "Drop commit", () => DoQuickDrop(sel)));
+
         return
         [
             Item(Icons.BendDownRight, "Checkout this commit (detached)", () => DoCheckoutDetached(c.Hash)),
             Item(Icons.GitBranch, "Create branch here…", () => PromptCreateBranchAt(c.Hash, c.ShortHash)),
             Item(Icons.Tag, "Create tag here…", () => PromptCreateTagAt(c.Hash, c.ShortHash)),
             ContextMenuItem.Separator(),
-            Item(Icons.Cherries, $"Cherry-pick onto {cur}", () => DoCherryPick(c.Hash)),
+            Item(Icons.Cherries, multi ? $"Cherry-pick {n} commits onto {cur}" : $"Cherry-pick onto {cur}",
+                () => DoCherryPick(sel)),
             Item(Icons.ArrowsDownUp, $"Rebase {cur} onto this", () => DoRebase(c.Hash)),
+            SubMenu(Icons.Lightning, "Quick rebase", quick),
             Item(Icons.ListChecks, "Interactive rebase from here…", () => OpenRebase(c)),
             Item(Icons.CounterClockwise, "Revert commit", () => DoRevert(c.Hash)),
             ContextMenuItem.Separator(),
@@ -45,8 +70,22 @@ public partial class JunctionApp
             Item(Icons.LineLeft, "Reset mixed", () => DoReset(c.Hash, ResetMode.Mixed)),
             Danger(Icons.Warning, "Reset hard", () => DoReset(c.Hash, ResetMode.Hard)),
             ContextMenuItem.Separator(),
+            Item(Icons.FileArrowDown, multi ? $"Save {n} commits as patch…" : "Save as patch…",
+                () => SavePatch(sel)),
             Item(Icons.Copy, "Copy commit SHA", () => CopyToClipboard(c.Hash)),
         ];
+    }
+
+    /// <summary>Selected commit hashes ordered oldest→newest (the history list
+    /// is newest-first).</summary>
+    private List<string> SelectedHashesOldestFirst()
+    {
+        var list = new List<string>();
+        foreach (var c in _history.Value.Commits)
+            if (_selectedCommitHashes.Contains(c.Hash))
+                list.Add(c.Hash);
+        list.Reverse();
+        return list;
     }
 
     // ── Branch menu (adapts to current / remote) ─────────────────────────
@@ -108,11 +147,108 @@ public partial class JunctionApp
         RefreshAll();
     }
 
-    private void DoCherryPick(string hash)
+    private void DoCherryPick(IReadOnlyList<string> hashesOldestFirst)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.CherryPick(hash);
-        Flash(res.Success ? $"Cherry-picked {Short(hash)}" : FirstLine(res.Stderr, "Cherry-pick failed"));
+        var res = repo.CherryPick([.. hashesOldestFirst]);
+        Flash(res.Success
+            ? hashesOldestFirst.Count > 1
+                ? $"Cherry-picked {hashesOldestFirst.Count} commits"
+                : $"Cherry-picked {Short(hashesOldestFirst[0])}"
+            : FirstLine(res.Stderr, "Cherry-pick failed"));
+        RefreshAll();
+    }
+
+    // ── Patch export ─────────────────────────────────────────────────────
+
+    /// <summary>"Save as patch…": an am-compatible <c>git format-patch</c> series.
+    /// A multi-selection spans oldest→newest inclusive — the same span the
+    /// compare view shows, with each commit as its own patch section.</summary>
+    private async void SavePatch(IReadOnlyList<string> selOldestFirst)
+    {
+        if (ActiveRepo is not { } repo) return;
+        if (!_saveFilePicker.IsAvailable) { Flash("No native save dialog available"); return; }
+
+        var oldest = selOldestFirst[0];
+        var newest = selOldestFirst[^1];
+        var single = selOldestFirst.Count == 1;
+        var slug = Slug(_history.Value.Commits.FirstOrDefault(x => x.Hash == newest)?.Subject ?? "");
+        var name = single
+            ? slug.Length > 0 ? $"{Short(newest)}-{slug}.patch" : $"{Short(newest)}.patch"
+            : $"{Short(oldest)}..{Short(newest)}.patch";
+
+        var path = await _saveFilePicker.PickSaveFileAsync(name, repo.Path, "Patch files", "patch");
+        if (path == null) return;
+
+        var error = await Task.Run(() =>
+        {
+            var text = repo.FormatPatch(single ? null : oldest + "^", newest);
+            if (text == null) return "git format-patch failed";
+            try { File.WriteAllText(path, text); return null; }
+            catch (Exception ex) { return ex.Message; }
+        });
+        Flash(error ?? $"Saved patch to {System.IO.Path.GetFileName(path)}");
+    }
+
+    // ── Quick rebase (scripted history edits, no dialog) ─────────────────
+
+    /// <summary>Drops the given commits from the current branch via a scripted
+    /// interactive rebase from the oldest one's parent.</summary>
+    private async void DoQuickDrop(IReadOnlyList<string> hashesOldestFirst)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var set = new HashSet<string>(hashesOldestFirst, StringComparer.Ordinal);
+        var baseRef = hashesOldestFirst[0] + "^";
+        var n = set.Count;
+
+        var msg = await Task.Run(() =>
+        {
+            var range = repo.GetRebaseRange(baseRef);
+            if (range.Count == 0)
+                return "Cannot drop — commit has no parent or is not on the current branch";
+            if (hashesOldestFirst.Any(h => range.All(x => x.Hash != h)))
+                return "Cannot drop — selected commits are not all on the current branch";
+
+            var plan = range.Select(x => new RebaseEntry
+            {
+                Hash = x.Hash, ShortHash = x.ShortHash, Subject = x.Subject,
+                Op = set.Contains(x.Hash) ? RebaseOp.Drop : RebaseOp.Pick,
+            }).ToList();
+            var res = repo.InteractiveRebase(baseRef, plan);
+            return res.Success
+                ? n == 1 ? $"Dropped {Short(hashesOldestFirst[0])}" : $"Dropped {n} commits"
+                : FirstLine(res.Stderr, "Rebase stopped — resolve conflicts or abort");
+        });
+        Flash(msg);
+        RefreshAll();
+    }
+
+    /// <summary>Squash/fixup a commit into its parent without opening the rebase
+    /// dialog. Squash keeps both messages; fixup keeps only the parent's.</summary>
+    private async void DoQuickMeld(GitCommit c, RebaseOp op)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var baseRef = c.Hash + "~2";   // rebase from the grandparent: parent stays, c melds into it
+
+        var msg = await Task.Run(() =>
+        {
+            var range = repo.GetRebaseRange(baseRef);
+            if (range.Count < 2 || range.All(x => x.Hash != c.Hash))
+                return "Cannot squash — commit needs a parent on the current branch";
+
+            var plan = range.Select(x => new RebaseEntry
+            {
+                Hash = x.Hash, ShortHash = x.ShortHash, Subject = x.Subject,
+                Op = x.Hash == c.Hash ? op : RebaseOp.Pick,
+            }).ToList();
+            var res = repo.InteractiveRebase(baseRef, plan);
+            return res.Success
+                ? op == RebaseOp.Squash
+                    ? $"Squashed {c.ShortHash} into its parent"
+                    : $"Fixed up {c.ShortHash} into its parent"
+                : FirstLine(res.Stderr, "Rebase stopped — resolve conflicts or abort");
+        });
+        Flash(msg);
         RefreshAll();
     }
 

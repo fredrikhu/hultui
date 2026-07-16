@@ -109,6 +109,7 @@ public static class Icons
     ];
 
     // Context-menu verbs
+    public const string FileArrowDown = "⤓";  // ⤓  save patch
     public const string BendDownRight = "↳";  // ↳  checkout detached
     public const string Cherries = "◈";       // ◈  cherry-pick
     public const string ArrowsDownUp = "↕";   // ↕  rebase
