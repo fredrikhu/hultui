@@ -95,6 +95,19 @@ public sealed class Window : IOverlayHost, IDisposable
 
     public IClipboard Clipboard { get; }
     public ITextInputHost TextInputHost { get; }
+    /// <summary>The element with keyboard focus, or null. Keyboard events route here.</summary>
+    public Element? FocusedElement => _focusManager.FocusedElement;
+
+    /// <summary>Open overlay content roots (tooltips, context menus, dialogs), in z-order. For test harnesses.</summary>
+    internal IEnumerable<Element> OverlayContents
+    {
+        get
+        {
+            foreach (var overlay in _overlays)
+                yield return overlay.Content;
+        }
+    }
+
     public PerformanceCounters Performance => _perf;
     public FrameTracer Tracer => _tracer;
     public DevToolsOverlay DevTools => _devTools;

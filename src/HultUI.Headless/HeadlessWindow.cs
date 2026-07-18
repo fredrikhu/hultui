@@ -33,6 +33,9 @@ public sealed partial class HeadlessWindow
     /// <summary>The last cursor the framework requested (e.g. the text I-beam over an input).</summary>
     public CursorType LastCursor => _platform.LastCursor;
 
+    /// <summary>Snapshot of the open overlay content roots (tooltips, context menus, dialogs), in z-order.</summary>
+    public IReadOnlyList<Element> OverlayContents => Window.OverlayContents.ToList();
+
     public void SetRoot(Element root) => Window.SetRoot(root);
 
     /// <summary>
