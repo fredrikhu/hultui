@@ -21,6 +21,20 @@ public static class AnimationManager
         tween.Cancel();
     }
 
+    /// <summary>
+    /// Cancels and drops every active and pending tween. Animation state is
+    /// process-global; headless test sessions call this on teardown so tweens
+    /// started in one test can never tick into the next.
+    /// </summary>
+    internal static void Reset()
+    {
+        foreach (var tween in _active) tween.Cancel();
+        foreach (var tween in _pendingAdd) tween.Cancel();
+        _active.Clear();
+        _pendingAdd.Clear();
+        _ticking = false;
+    }
+
     public static void Tick(float deltaSeconds)
     {
         if (_active.Count == 0 && _pendingAdd.Count == 0)

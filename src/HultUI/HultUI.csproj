@@ -14,6 +14,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Headless" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
     <ProjectReference Include="..\HultUI.Text\HultUI.Text.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />

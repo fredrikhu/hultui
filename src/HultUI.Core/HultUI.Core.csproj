@@ -11,6 +11,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Core.Tests" />
     <InternalsVisibleTo Include="HultUI" />
+    <InternalsVisibleTo Include="HultUI.Headless" />
   </ItemGroup>
 
 </Project>

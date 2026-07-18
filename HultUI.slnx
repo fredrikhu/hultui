@@ -29,6 +29,7 @@
     <Project Path="src/HultUI.SourceGenerators/HultUI.SourceGenerators.csproj" />
     <Project Path="src/HultUI.Text/HultUI.Text.csproj" />
     <Project Path="src/HultUI/HultUI.csproj" />
+    <Project Path="src/HultUI.Headless/HultUI.Headless.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj" />
@@ -37,5 +38,6 @@
     <Project Path="tests/HultUI.SourceGenerators.Tests/HultUI.SourceGenerators.Tests.csproj" />
     <Project Path="tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj" />
     <Project Path="tests/HultUI.UiTests/HultUI.UiTests.csproj" />
+    <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
   </Folder>
 </Solution>
