@@ -249,6 +249,25 @@ public sealed class Window : IOverlayHost, IDisposable
     internal void SetUiaHostBridge(Sdl3UiaHostBridge host) => _uiaHost = host;
 
     /// <summary>
+    /// Builds a fresh accessibility-tree snapshot of the current content, or
+    /// null when no root is set. This is the same tree assistive technologies
+    /// see; the headless query API reads it on demand, independent of the
+    /// per-frame build that only runs while a bridge is active.
+    /// </summary>
+    internal AccessibilityNode? BuildAccessibilityTree()
+        => _root is null ? null : AccessibilityTreeBuilder.Build(_root, _focusManager);
+
+    /// <summary>
+    /// Replaces the platform accessibility bridge. Used by headless sessions to
+    /// install a capturing bridge that exercises the per-frame build/diff path.
+    /// </summary>
+    internal void SetAccessibilityBridge(IAccessibilityBridge bridge)
+        => _accessibilityBridge = bridge;
+
+    /// <summary>Moves keyboard focus programmatically (same path as click/Tab focus).</summary>
+    internal void SetFocus(Element? element) => _focusManager.SetFocus(element);
+
+    /// <summary>
     /// Walks the element tree looking for an element with the given
     /// <see cref="ElementId"/>. Used by the accessibility host bridge to
     /// route UIA actions back to the originating element. Returns null if

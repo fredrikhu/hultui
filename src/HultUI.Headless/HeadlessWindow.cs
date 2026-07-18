@@ -36,6 +36,19 @@ public sealed partial class HeadlessWindow
     /// <summary>Snapshot of the open overlay content roots (tooltips, context menus, dialogs), in z-order.</summary>
     public IReadOnlyList<Element> OverlayContents => Window.OverlayContents.ToList();
 
+    /// <summary>
+    /// Installs a recording accessibility bridge, turning on the window's real
+    /// per-frame a11y build/diff path (normally gated on an assistive
+    /// technology being attached). Pump a frame afterwards to get the initial
+    /// full-tree diff.
+    /// </summary>
+    public HeadlessAccessibilityBridge InstallAccessibilityBridge()
+    {
+        var bridge = new HeadlessAccessibilityBridge();
+        Window.SetAccessibilityBridge(bridge);
+        return bridge;
+    }
+
     public void SetRoot(Element root) => Window.SetRoot(root);
 
     /// <summary>
