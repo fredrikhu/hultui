@@ -109,6 +109,44 @@ session.PumpFrame();               // property change arrives as a diff
 Assert.NotEmpty(bridge.Diffs);
 ```
 
+## Display-List Snapshots
+
+Recording captures the drawing calls a frame issues, as text — a snapshot baseline you can actually read:
+
+```csharp
+using var session = HeadlessSession.Create(300, 160,
+    options: HeadlessOptions.DeterministicRecording());
+session.Window.SetRoot(BuildCard());
+session.PumpFrame();
+
+Assert.Equal(expected, session.Window.RenderLog.ToString().TrimEnd('\n'));
+```
+
+```
+BeginFrame 300x160 scale=1 clear=#FFFFFF
+  DrawText "Title" (20,20 260x24) size=20 font=sans-serif weight=Bold color=#000000
+  DrawRoundedRect (20,60 260x43.2) r=8 fill=#4F46E5
+  DrawText "Click me" (32,72 236x19.2) size=16 font=sans-serif weight=Bold color=#FFFFFF
+EndFrame
+```
+
+This covers the regressions semantic assertions miss — layout shifts, draw order, colors, clipping — while a failing diff says *what* changed instead of handing you two images. Text baselines also delta-compress in git, unlike PNGs. Clips and transforms bracket their children via indentation, so nesting is visible.
+
+Recording decorates the real render context rather than replacing it: the frame still renders, so `CapturePixels()` keeps working alongside it. Cost is about 2.4× the frame time, paid only when enabled.
+
+Beyond whole-log comparison, the log is queryable:
+
+```csharp
+window.RenderLog.Named("DrawText");           // ops by name
+window.RenderLog.Contains("#4F46E5");         // substring across ops
+window.RenderLog.Clear();                     // scope the log to the next frame
+window.RenderLog.Ops;                         // RenderOp { Name, Args, Depth }
+```
+
+**Determinism.** `DeterministicRecording()` also swaps in `FixedMetricsMeasureContext`, which derives text geometry from font size alone (0.5× width, 1.2× height) instead of real font data. Baselines then match across operating systems — at the cost of positions no longer reflecting real rendering. Use it for layout/paint regression baselines committed to a repo that CI runs on another OS. Use plain `new HeadlessOptions { RecordDrawCalls = true }` to keep real metrics when a test is pinned to one platform.
+
+**Element attribution is not implemented** — ops carry no element identity, so "what did *this* element draw?" means matching on coordinates or text.
+
 ## Pixels
 
 ```csharp
