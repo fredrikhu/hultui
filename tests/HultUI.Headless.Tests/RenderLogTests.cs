@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
+using HultUI.Headless.Recording;
 using Xunit;
 
 namespace HultUI.Headless.Tests;
@@ -37,8 +38,20 @@ public class RenderLogTests
             EndFrame
             """;
 
-        Assert.Equal(expected, session.Window.RenderLog.ToString().TrimEnd('\n'));
+        AssertBaseline(expected, session.Window.RenderLog);
     }
+
+    /// <summary>
+    /// Compares a log against an inline baseline.
+    /// </summary>
+    /// <remarks>
+    /// The baseline is normalised because a raw string literal carries the
+    /// *source file's* line endings: with git's autocrlf the same file is LF on
+    /// Linux and CRLF on Windows, so an un-normalised literal passes on one and
+    /// fails on the other. <see cref="RenderLog.ToString"/> always emits \n.
+    /// </remarks>
+    private static void AssertBaseline(string expected, RenderLog log)
+        => Assert.Equal(expected.ReplaceLineEndings("\n"), log.ToString().TrimEnd('\n'));
 
     [Fact]
     public void LayoutRegression_ShowsAsADiff()

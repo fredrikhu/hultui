@@ -93,7 +93,9 @@ public sealed partial class HeadlessWindow
         if (node.IsToggled is { } t) sb.Append(t ? " [checked]" : " [unchecked]");
         if (node.IsFocused) sb.Append(" [focused]");
         if (node.IsVirtualItemContainer) sb.Append(" [virtualized]");
-        sb.AppendLine();
+        // '\n' rather than AppendLine's Environment.NewLine, so a dump compares
+        // equal whatever platform produced it — same contract as RenderLog.
+        sb.Append('\n');
         foreach (var child in node.Children)
             Dump(child, depth + 1, sb);
     }
