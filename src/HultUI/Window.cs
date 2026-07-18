@@ -16,7 +16,7 @@ public sealed class Window : IOverlayHost, IDisposable
 {
     private readonly LayoutEngine _layoutEngine;
     private readonly FocusManager _focusManager = new();
-    private readonly PointerState _pointerState = new();
+    private readonly PointerState _pointerState;
     private readonly PerformanceCounters _perf = new();
     private readonly FrameTracer _tracer = new();
     private readonly DevToolsOverlay _devTools;
@@ -195,6 +195,7 @@ public sealed class Window : IOverlayHost, IDisposable
         Application = application;
         PlatformWindow = platformWindow;
         _chrome = platformWindow as IWindowChrome;
+        _pointerState = new PointerState(application.Platform.TimeProvider);
         if (!string.IsNullOrEmpty(_envTracePath))
             _tracer.StartRecording();
         _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext, _tracer);

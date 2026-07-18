@@ -14,11 +14,15 @@ public sealed class Application : IDisposable
 {
     private static Application? _current;
 
+    private readonly IWindowingPlatform _platform;
     private readonly List<Window> _windows = [];
     private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
     private Theme _theme = Theme.Light;
     private bool _disposed;
     private bool _quitRequested;
+
+    /// <summary>The windowing platform this application runs on.</summary>
+    internal IWindowingPlatform Platform => _platform;
 
     /// <summary>
     /// The most recently created Application instance. Used by hot reload to find the running app.
@@ -62,11 +66,24 @@ public sealed class Application : IDisposable
     public IClipboard Clipboard => PrimaryWindow.Clipboard;
 
     /// <summary>
-    /// Creates an application with a primary window.
+    /// Creates an application with a primary window on the default (SDL3)
+    /// windowing platform.
     /// </summary>
     public Application(string title = "HultUI Application", int width = 800, int height = 600,
         WindowStyle style = WindowStyle.Default)
+        : this(new SdlWindowingPlatform(), title, width, height, style)
     {
+    }
+
+    /// <summary>
+    /// Creates an application with a primary window on the given windowing
+    /// platform. Used by HultUI.Headless to run apps without a display; apps
+    /// normally use the default constructor.
+    /// </summary>
+    public Application(IWindowingPlatform platform, string title = "HultUI Application",
+        int width = 800, int height = 600, WindowStyle style = WindowStyle.Default)
+    {
+        _platform = platform ?? throw new ArgumentNullException(nameof(platform));
         _current = this;
         CreateWindow(title, width, height, style);
     }
@@ -82,9 +99,9 @@ public sealed class Application : IDisposable
     public Window CreateWindow(string title, int width = 800, int height = 600,
         WindowStyle style = WindowStyle.Default)
     {
-        var sdlWindow = new SDL3Window(title, width, height, style);
-        var window = new Window(this, sdlWindow);
-        sdlWindow.LiveResizeFrame = () => RenderLiveResizeFrame(window);
+        var platformWindow = _platform.CreateWindow(title, width, height, style);
+        var window = new Window(this, platformWindow);
+        platformWindow.LiveResizeFrame = () => RenderLiveResizeFrame(window);
         _windows.Add(window);
         return window;
     }
@@ -111,12 +128,7 @@ public sealed class Application : IDisposable
         if (_windows.Count == 0)
             throw new InvalidOperationException("No windows created.");
 
-        // Bind async/await continuations on this thread to the UI thread.
-        // Any `await` reached from UI-thread code resumes via _mainThreadQueue
-        // on the next frame, so user code no longer needs InvokeOnMainThread
-        // after awaits. Library I/O can opt out with ConfigureAwait(false).
-        SynchronizationContext.SetSynchronizationContext(
-            new UIThreadSynchronizationContext(_mainThreadQueue));
+        InstallSynchronizationContext();
 
         var frameStopwatch = Stopwatch.StartNew();
 
@@ -126,93 +138,111 @@ public sealed class Application : IDisposable
             float deltaSeconds = (float)frameStopwatch.Elapsed.TotalSeconds;
             frameStopwatch.Restart();
 
-            // Poll and route all SDL events
-            bool alive = SDL3Window.PollAllEvents(onWindowClose: w => OnWindowCloseRequested(w));
+            // Poll and route all native events
+            bool alive = _platform.PumpEvents(onWindowClose: w => OnWindowCloseRequested(w));
 
             if (!alive)
             {
                 _quitRequested = true;
                 break;
             }
-            
-            foreach (var window in _windows)
-            {
-                if (window.PlatformWindow.ResizePending)
-                {
-                    long now = Environment.TickCount64;
-                    // Only relayout when the resize throttle interval has passed.
-                    if (now - window.PlatformWindow.LastResizeRenderTick >= window.ResizeThrottleMs)
-                    {
-                        window.OnWindowResized();
-                        window.PlatformWindow.LastResizeRenderTick = now;
-                        window.PlatformWindow.ResizePending = false; 
-                    }
-                    window.Root?.MarkPaintDirty();
-                }
-            }
+
+            ProcessPendingResizes();
 
             // Drain actions posted from background threads
-            while (_mainThreadQueue.TryDequeue(out var action))
-                action();
+            DrainMainThreadQueue();
 
             // Tick animations (marks elements dirty as needed)
             AnimationManager.Tick(deltaSeconds);
 
             // Render any dirty windows
-            bool anyRendered = false;
-            foreach (var window in _windows)
-            {
-                if (!window.IsOpen || !window.NeedsRender) continue;
-                window.PlatformWindow.MakeCurrent();
-                window.Performance.BeginFrame();
-                window.RenderFrame();
-                window.Performance.EndFrame();
-                // The window is created hidden; reveal it only now that its first
-                // frame has been presented, so the OS never composites the blank
-                // GL surface. No-op after the first frame.
-                window.PlatformWindow.EnsureShown();
-                anyRendered = true;
-            }
+            bool anyRendered = RenderDirtyWindows(force: false);
 
             // Animations that changed something visible marked it dirty in Tick
             // above and rendered this iteration (anyRendered). One that didn't
             // (a pure delay, e.g. the tooltip show timer) only needs ~60Hz ticks,
             // so wait instead of busy-spinning until it fires.
             if (!anyRendered)
-                IdleWait(16);
+                _platform.WaitForEvents(16);
 
             // Clean up closed windows
             CleanupClosedWindows();
         }
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern uint MsgWaitForMultipleObjectsEx(uint nCount, IntPtr pHandles, uint dwMilliseconds, uint dwWakeMask, uint dwFlags);
-
     /// <summary>
-    /// Idle-frame wait. A plain <see cref="Thread.Sleep(int)"/> does not process
-    /// Win32 <em>sent</em> messages, so a UIA query that reaches the window as a
-    /// sent message (e.g. via the accessibility host provider / MSAA bridge) would
-    /// stall for the whole interval — making assistive technologies very slow to
-    /// walk the tree. On Windows, wait in a message-aware way so an incoming
-    /// message wakes us immediately while a truly idle app still parks the CPU.
+    /// Binds async/await continuations on this thread to the UI thread.
+    /// Any `await` reached from UI-thread code resumes via _mainThreadQueue
+    /// on the next frame, so user code no longer needs InvokeOnMainThread
+    /// after awaits. Library I/O can opt out with ConfigureAwait(false).
+    /// Returns the previously installed context so callers that don't own the
+    /// thread for good (the headless pump) can restore it on teardown.
     /// </summary>
-    private static void IdleWait(int milliseconds)
+    internal SynchronizationContext? InstallSynchronizationContext()
     {
-        if (OperatingSystem.IsWindows())
-            MsgWaitForMultipleObjectsEx(0, IntPtr.Zero, (uint)milliseconds,
-                0x04FF /* QS_ALLINPUT */, 0x0004 /* MWMO_INPUTAVAILABLE */);
-        else
-            Thread.Sleep(milliseconds);
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(
+            new UIThreadSynchronizationContext(_mainThreadQueue));
+        return previous;
     }
 
-    private void OnWindowCloseRequested(SDL3Window platformWindow)
+    /// <summary>Relayouts windows whose platform reported a resize, honoring the throttle.</summary>
+    internal void ProcessPendingResizes()
+    {
+        foreach (var window in _windows)
+        {
+            if (window.PlatformWindow.ResizePending)
+            {
+                long now = Environment.TickCount64;
+                // Only relayout when the resize throttle interval has passed.
+                if (now - window.PlatformWindow.LastResizeRenderTick >= window.ResizeThrottleMs)
+                {
+                    window.OnWindowResized();
+                    window.PlatformWindow.LastResizeRenderTick = now;
+                    window.PlatformWindow.ResizePending = false;
+                }
+                window.Root?.MarkPaintDirty();
+            }
+        }
+    }
+
+    /// <summary>Runs actions posted from background threads and await continuations.</summary>
+    internal void DrainMainThreadQueue()
+    {
+        while (_mainThreadQueue.TryDequeue(out var action))
+            action();
+    }
+
+    /// <summary>
+    /// Renders every open window that needs a frame (or all open windows when
+    /// <paramref name="force"/> is set). Returns true when any frame was rendered.
+    /// </summary>
+    internal bool RenderDirtyWindows(bool force)
+    {
+        bool anyRendered = false;
+        foreach (var window in _windows)
+        {
+            if (!window.IsOpen || (!force && !window.NeedsRender)) continue;
+            window.PlatformWindow.MakeCurrent();
+            window.Performance.BeginFrame();
+            window.RenderFrame();
+            window.Performance.EndFrame();
+            // The window is created hidden; reveal it only now that its first
+            // frame has been presented, so the OS never composites the blank
+            // GL surface. No-op after the first frame.
+            window.PlatformWindow.EnsureShown();
+            anyRendered = true;
+        }
+        return anyRendered;
+    }
+
+    private void OnWindowCloseRequested(IPlatformWindow platformWindow)
     {
         var window = _windows.FirstOrDefault(w => w.PlatformWindow == platformWindow);
         window?.NotifyClosed();
     }
 
-    private void CleanupClosedWindows()
+    internal void CleanupClosedWindows()
     {
         for (int i = _windows.Count - 1; i >= 0; i--)
         {
@@ -262,7 +292,7 @@ public sealed class Application : IDisposable
             window.Dispose();
         _windows.Clear();
 
-        SDL3Window.ShutdownSDL();
+        _platform.Dispose();
     }
 }
 

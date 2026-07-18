@@ -6,8 +6,13 @@ namespace HultUI.Core.Events;
 /// <summary>
 /// Tracks pointer state for enter/leave detection and click synthesis.
 /// </summary>
-public sealed class PointerState
+/// <param name="timeProvider">
+/// Clock used for double-click timing. Defaults to the system clock; headless
+/// testing injects a manually advanced provider so click timing is deterministic.
+/// </param>
+public sealed class PointerState(TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private Element? _hoveredElement;
     private Element? _pressedElement;
     private int _pressedButton;
@@ -118,7 +123,7 @@ public sealed class PointerState
         // Synthesize click if released on the same element that was pressed
         if (button == _pressedButton && ReferenceEquals(target, _pressedElement))
         {
-            var now = DateTime.UtcNow;
+            var now = _time.GetUtcNow().UtcDateTime;
             var timeSinceLastClick = (now - _lastClickTime).TotalMilliseconds;
             var distFromLastClick = Distance(position, _lastClickPosition);
 
