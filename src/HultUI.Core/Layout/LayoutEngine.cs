@@ -180,16 +180,22 @@ public sealed partial class LayoutEngine
         float mainGap = isRow ? flex.ResolvedColumnGap : flex.ResolvedRowGap;
         float crossGap = isRow ? flex.ResolvedRowGap : flex.ResolvedColumnGap;
 
-        // Scroll containers: unlimited main axis for flex distribution,
-        // but keep original values as child constraints to avoid NaN overflow
-        bool scrollOnMain = isRow
-            ? container.BoxRead.OverflowX == Overflow.Scroll
-            : container.BoxRead.OverflowY == Overflow.Scroll;
-        float mainDistribute = scrollOnMain ? float.MaxValue / 2 : mainAvailable;
+        // Scroll containers, and anything already inside one's scrolling axis,
+        // distribute against an indefinite main size: content overflows and
+        // scrolls rather than being compressed to the viewport.
+        bool scrollOnMain = (isRow
+                ? container.BoxRead.OverflowX == Overflow.Scroll
+                : container.BoxRead.OverflowY == Overflow.Scroll)
+            || LayoutSpace.IsUnbounded(mainAvailable);
+        float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
         // ── Phase 1: Measure all children to get hypothetical sizes ──
-        // Use original mainAvailable (not unlimited) so children get proper constraints
-        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
+        // Children are measured against the distribution size, so the indefinite
+        // main axis reaches nested containers too — otherwise a plain Flex.Column
+        // inside a ScrollView would resolve itself against the viewport and shrink
+        // its own children to fit. Percentages against it resolve to auto (see
+        // Dimension.Resolve), so no absurd sizes leak out.
+        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable);
         try
         {
             // ── Phase 2: Collect items into lines ──
@@ -243,8 +249,16 @@ public sealed partial class LayoutEngine
                     var alignSelf = ResolveAlignSelf(child.FlexRead.AlignSelf, container.FlexRead.AlignItems);
 
                     // Use container's content dimensions as constraint so percentage
-                    // dimensions resolve against the container, not the flex-resolved size
-                    var childConstraint = new LayoutConstraint(contentAvailW, contentAvailH);
+                    // dimensions resolve against the container, not the flex-resolved size.
+                    // The main axis must use the same value Phase 1 measured against
+                    // (mainDistribute, which is indefinite inside a scroll container):
+                    // both ComputeLayout's and MeasureSize's caches are keyed on the
+                    // constraint, so a mismatch here misses every cache entry Phase 1
+                    // populated and lays the whole subtree out twice — the cascade the
+                    // comments in Phase 1 and ComputeLayout warn about.
+                    var childConstraint = isRow
+                        ? new LayoutConstraint(mainDistribute, contentAvailH)
+                        : new LayoutConstraint(contentAvailW, mainDistribute);
 
                     // Main axis: always force to flex-resolved size.
                     // Cross axis: only force stretch for auto-sized dimensions.
@@ -408,6 +422,14 @@ public sealed partial class LayoutEngine
             hypotheticalMain = isRow ? measured.Width : measured.Height;
             hypotheticalCross = isRow ? measured.Height : measured.Width;
 
+            // NOTE: CSS's automatic minimum size for flex items (min-height:auto,
+            // which stops an item being compressed below its content) is not
+            // implemented — see FlexShrinkTests for the case it would fix.
+            // Approximating it with this hypothetical measurement is unsound: for
+            // a container the measurement is its full content extent, not its
+            // min-content size, so an ancestor row wrapping a scroll view would be
+            // pinned to the entire scrollable height and defeat the viewport.
+            // Implementing it properly needs a real min-content measurement pass.
             array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross);
         }
 
@@ -525,12 +547,14 @@ public sealed partial class LayoutEngine
         float mainGap = isRow ? flex.ResolvedColumnGap : flex.ResolvedRowGap;
         float crossGap = isRow ? flex.ResolvedRowGap : flex.ResolvedColumnGap;
 
-        bool scrollOnMain = isRow
-            ? container.BoxRead.OverflowX == Overflow.Scroll
-            : container.BoxRead.OverflowY == Overflow.Scroll;
-        float mainDistribute = scrollOnMain ? float.MaxValue / 2 : mainAvailable;
+        // Mirrors LayoutFlexChildren — see the commentary there.
+        bool scrollOnMain = (isRow
+                ? container.BoxRead.OverflowX == Overflow.Scroll
+                : container.BoxRead.OverflowY == Overflow.Scroll)
+            || LayoutSpace.IsUnbounded(mainAvailable);
+        float mainDistribute = scrollOnMain ? LayoutSpace.Unbounded : mainAvailable;
 
-        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainAvailable, crossAvailable);
+        var (itemsArray, itemCount) = MeasureFlexItems(children, isRow, mainDistribute, crossAvailable);
         try
         {
             var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);

@@ -25,19 +25,30 @@ public readonly record struct Dimension
     /// Resolve this dimension against a reference size (the parent's available size).
     /// Returns null if Auto or None.
     /// </summary>
+    /// <remarks>
+    /// A percentage against an <see cref="LayoutSpace.IsUnbounded">indefinite</see>
+    /// reference is unresolvable and behaves as auto — the CSS rule for a
+    /// percentage size against an indefinite containing block. Without this, a
+    /// percentage inside a scroll container's scrolling axis would resolve
+    /// against the sentinel and produce an absurd size.
+    /// </remarks>
     public float? Resolve(float referenceSize) => Unit switch
     {
         // TODO: The other units need to be able to be resolved?
         DimensionUnit.Pixels => Value,
-        DimensionUnit.Percent => _valueAsPercentage * referenceSize,
+        DimensionUnit.Percent => LayoutSpace.IsUnbounded(referenceSize)
+            ? null
+            : _valueAsPercentage * referenceSize,
         _ => null
     };
-    
+
    public float ResolveOr(float referenceSize, float defaultValue) => Unit switch
     {
         // TODO: The other units need to be able to be resolved?
         DimensionUnit.Pixels => Value,
-        DimensionUnit.Percent => _valueAsPercentage * referenceSize,
+        DimensionUnit.Percent => LayoutSpace.IsUnbounded(referenceSize)
+            ? defaultValue
+            : _valueAsPercentage * referenceSize,
         _ => defaultValue
     };
 
