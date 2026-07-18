@@ -52,10 +52,15 @@ public sealed class HeadlessSession : IDisposable
 
     /// <summary>Creates a session with a primary window of the given layout-unit size.</summary>
     public static HeadlessSession Create(int width = 800, int height = 600, float scale = 1f,
-        string title = "Headless", WindowStyle style = WindowStyle.Default)
+        string title = "Headless", WindowStyle style = WindowStyle.Default,
+        HeadlessOptions? options = null)
     {
         var time = new HeadlessTimeProvider();
-        var platform = new HeadlessWindowingPlatform(time) { NextWindowScale = scale };
+        var platform = new HeadlessWindowingPlatform(time)
+        {
+            NextWindowScale = scale,
+            Options = options,
+        };
         var application = new Application(platform, title, width, height, style);
         return new HeadlessSession(time, platform, application);
     }

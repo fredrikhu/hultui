@@ -21,10 +21,13 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
     /// <summary>Scale applied to windows created through the Application (which has no scale parameter).</summary>
     public float NextWindowScale { get; set; } = 1f;
 
+    /// <summary>Options applied to windows this platform creates.</summary>
+    public HeadlessOptions? Options { get; set; }
+
     public TimeProvider TimeProvider => _time;
 
     public IPlatformWindow CreateWindow(string title, int width, int height, WindowStyle style)
-        => new HeadlessPlatformWindow(title, width, height, NextWindowScale, style);
+        => new HeadlessPlatformWindow(title, width, height, NextWindowScale, style, Options);
 
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose) => true;
 

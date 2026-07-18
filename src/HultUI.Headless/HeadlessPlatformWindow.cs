@@ -2,6 +2,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Platform;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Headless.Recording;
 using HultUI.Rendering.Skia;
 
 namespace HultUI.Headless;
@@ -14,13 +15,15 @@ namespace HultUI.Headless;
 /// </summary>
 internal sealed class HeadlessPlatformWindow : IPlatformWindow
 {
-    private readonly SkiaRasterRenderSurface _surface;
+    private readonly SkiaRasterRenderSurface _raster;
+    private readonly IRenderSurface _surface;
     private float _layoutWidth;
     private float _layoutHeight;
     private float _scale;
     private bool _disposed;
 
-    public HeadlessPlatformWindow(string title, int width, int height, float scale, WindowStyle style)
+    public HeadlessPlatformWindow(string title, int width, int height, float scale, WindowStyle style,
+        HeadlessOptions? options = null)
     {
         if (scale <= 0f) throw new ArgumentOutOfRangeException(nameof(scale));
         Title = title;
@@ -28,10 +31,27 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
         _layoutWidth = width;
         _layoutHeight = height;
         _scale = scale;
-        _surface = new SkiaRasterRenderSurface();
+        _raster = new SkiaRasterRenderSurface();
+
+        // Recording wraps the raster surface rather than replacing it, so the
+        // frame still renders and pixel capture keeps working.
+        if (options?.RecordDrawCalls == true)
+        {
+            var recording = new RecordingRenderSurface(_raster, options.MeasureContextOverride);
+            RenderLog = recording.Log;
+            _surface = recording;
+        }
+        else
+        {
+            _surface = _raster;
+        }
+
         _surface.Resize(PixelWidth, PixelHeight, scale);
         IsOpen = true;
     }
+
+    /// <summary>The captured display list, or null when recording is off.</summary>
+    public RenderLog? RenderLog { get; }
 
     public string Title { get; }
     public WindowStyle Style { get; }
@@ -47,7 +67,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public IRenderSurface Surface => _surface;
 
     /// <summary>The raster surface, typed — for pixel readback.</summary>
-    internal SkiaRasterRenderSurface RasterSurface => _surface;
+    internal SkiaRasterRenderSurface RasterSurface => _raster;
 
     public float LayoutWidth => _layoutWidth;
     public float LayoutHeight => _layoutHeight;

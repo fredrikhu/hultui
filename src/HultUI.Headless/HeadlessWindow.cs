@@ -1,5 +1,6 @@
 using HultUI.Core.Elements;
 using HultUI.Core.Styling;
+using HultUI.Headless.Recording;
 using SkiaSharp;
 
 namespace HultUI.Headless;
@@ -32,6 +33,16 @@ public sealed partial class HeadlessWindow
 
     /// <summary>The last cursor the framework requested (e.g. the text I-beam over an input).</summary>
     public CursorType LastCursor => _platform.LastCursor;
+
+    /// <summary>
+    /// The captured display list, when the session was created with
+    /// <c>RecordDrawCalls</c>. Compare <c>RenderLog.ToString()</c> against a
+    /// checked-in baseline for snapshot testing.
+    /// </summary>
+    public RenderLog RenderLog => _platform.RenderLog
+        ?? throw new InvalidOperationException(
+            "Draw-call recording is off. Create the session with " +
+            "HeadlessOptions.DeterministicRecording() or { RecordDrawCalls = true }.");
 
     /// <summary>Snapshot of the open overlay content roots (tooltips, context menus, dialogs), in z-order.</summary>
     public IReadOnlyList<Element> OverlayContents => Window.OverlayContents.ToList();
