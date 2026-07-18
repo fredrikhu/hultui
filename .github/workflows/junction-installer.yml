@@ -38,8 +38,30 @@ jobs:
       - name: Run tests
         run: dotnet test HultUI.slnx -c Release --no-build --filter "FullyQualifiedName!~HultUI.UiTests"
 
+  # Proves the framework is display-free on Linux: the headless tests run full
+  # app scenarios (render, input, accessibility queries) with no X11/Wayland
+  # and no GPU. Test projects are listed individually rather than via the
+  # solution because HultUI.UiTests targets net10.0-windows.
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run tests
+        run: |
+          dotnet test tests/HultUI.Core.Tests -c Release
+          dotnet test tests/HultUI.Text.Tests -c Release
+          dotnet test tests/HultUI.Rendering.Skia.Tests -c Release
+          dotnet test tests/HultUI.SourceGenerators.Tests -c Release
+          dotnet test tests/HultUI.Samples.TodoList.Tests -c Release
+          dotnet test tests/HultUI.Headless.Tests -c Release
+
   installer:
-    needs: test
+    needs: [test, test-linux]
     runs-on: windows-latest
     permissions:
       contents: write # for the release step on tag builds
