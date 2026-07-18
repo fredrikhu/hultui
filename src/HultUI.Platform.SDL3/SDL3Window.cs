@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using HultUI.Core.Events;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -8,7 +10,7 @@ using static SDL.SDL3;
 
 namespace HultUI.Platform.SDL3;
 
-public sealed unsafe class SDL3Window : IDisposable
+public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
 {
     private static bool _sdlInitialized;
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
@@ -21,15 +23,18 @@ public sealed unsafe class SDL3Window : IDisposable
     private CursorType _currentCursor = CursorType.Default;
     private GCHandle _gcHandle;
     private bool _textInputActive;
-    internal bool ResizePending;
-    internal long LastResizeRenderTick;
+    private SDL3Clipboard? _clipboard;
+    private SDL3TextInputHost? _textInputHost;
+
+    public bool ResizePending { get; set; }
+    public long LastResizeRenderTick { get; set; }
 
     /// <summary>
     /// Invoked from the event watcher during a Win32 modal resize loop,
     /// when <see cref="SDL_PollEvent"/> is blocked and the main loop cannot
     /// drive frames itself. Implementers are expected to throttle.
     /// </summary>
-    internal Action? LiveResizeFrame { get; set; }
+    public Action? LiveResizeFrame { get; set; }
 
     public SDL_WindowID WindowId { get; private set; }
 
@@ -73,7 +78,18 @@ public sealed unsafe class SDL3Window : IDisposable
 
     public EventTranslator EventTranslator { get; } = new();
 
+    /// <summary>
+    /// Layout-unit input events, forwarded from <see cref="EventTranslator"/>.
+    /// The framework Window subscribes here rather than to the translator so
+    /// the input path is identical across platform backends.
+    /// </summary>
+    public event Action<InputEvent>? InputReceived;
+
     public WindowStyle Style { get; }
+
+    public IClipboard Clipboard => _clipboard ??= new SDL3Clipboard(this);
+
+    public ITextInputHost TextInputHost => _textInputHost ??= new SDL3TextInputHost(this);
 
     /// <summary>
     /// Delegate called by the SDL hit test callback. Receives logical (x, y) and
@@ -93,45 +109,46 @@ public sealed unsafe class SDL3Window : IDisposable
     public bool UsesWindowsNativeFrame => _customFrame is not null;
 
     /// <summary>Which edges the native frame allows resizing from. Set by Window.cs.</summary>
-    internal ResizeEdges ResizableEdges { get; set; } = ResizeEdges.All;
+    public ResizeEdges ResizableEdges { get; set; } = ResizeEdges.All;
 
     /// <summary>Resize-border grab thickness in density-independent units. Set by Window.cs.</summary>
-    internal int ResizeBorderDip { get; set; } = 8;
+    public int ResizeBorderDip { get; set; } = 8;
 
     /// <summary>
     /// Returns true when the given layout-unit point is a window drag region
     /// (and not over an interactive element). Used by the native frame's
     /// <c>WM_NCHITTEST</c> to report the caption area. Set by Window.cs.
     /// </summary>
-    internal Func<int, int, bool>? IsWindowDragPoint { get; set; }
+    public Func<int, int, bool>? IsWindowDragPoint { get; set; }
 
     /// <summary>
     /// Returns true when the given layout-unit point is over the window's
     /// maximize/restore button. Lets the native frame report <c>HTMAXBUTTON</c>
     /// so Windows 11 shows its Snap Layouts flyout on hover. Set by Window.cs.
     /// </summary>
-    internal Func<int, int, bool>? IsWindowMaximizePoint { get; set; }
+    public Func<int, int, bool>? IsWindowMaximizePoint { get; set; }
 
     /// <summary>Returns the maximize/restore button's bounds in layout units
     /// (client-relative), or null when there is none. The Windows custom frame
     /// reports it via WM_GETTITLEBARINFOEX so the shell can anchor the Snap
     /// Layouts flyout to the button. Set by Window.cs.</summary>
-    internal Func<Rect?>? GetWindowMaximizeButtonBounds { get; set; }
+    public Func<Rect?>? GetWindowMaximizeButtonBounds { get; set; }
 
     /// <summary>Called (true) when the pointer enters the maximize button in the
     /// non-client area and (false) when it leaves, so the app can drive the
     /// button's hover highlight itself (Windows won't). Set by Window.cs.</summary>
-    internal Action<bool>? OnMaximizeButtonHover { get; set; }
+    public Action<bool>? OnMaximizeButtonHover { get; set; }
 
     /// <summary>Extends the Windows custom frame's DWM caption region to
     /// <paramref name="px"/> physical pixels so the maximize button sits inside it
     /// (needed for the Snap Layouts flyout when not maximized). No-op off Windows
     /// or when unchanged. Called by Window.cs once the button's layout is known.</summary>
-    internal void SetCaptionHeightPx(int px) => _customFrame?.SetCaptionHeight(px);
+    public void SetCaptionHeightPx(int px) => _customFrame?.SetCaptionHeight(px);
 
     public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
     {
         Style = style;
+        EventTranslator.OnInputEvent += evt => InputReceived?.Invoke(evt);
         EnsureSDLInitialized();
 
         // Set OpenGL attributes for SkiaSharp compatibility

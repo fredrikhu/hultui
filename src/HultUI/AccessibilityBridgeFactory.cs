@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Platform.Accessibility.Linux;
 using HultUI.Platform.Accessibility.Windows;
+using HultUI.Platform.SDL3;
 
 namespace HultUI;
 
@@ -16,6 +17,13 @@ internal static class AccessibilityBridgeFactory
 {
     public static IAccessibilityBridge Create(Window window)
     {
+        // Only real OS windows have an accessibility surface to bridge to.
+        // Headless platform windows stay on the Null bridge everywhere — on
+        // Linux this also avoids probing the AT-SPI D-Bus session, which a
+        // display-less CI environment doesn't have.
+        if (window.PlatformWindow is not SDL3Window)
+            return NullAccessibilityBridge.Instance;
+
         if (OperatingSystem.IsWindows())
             return CreateWindows(window);
 
@@ -28,7 +36,7 @@ internal static class AccessibilityBridgeFactory
     [SupportedOSPlatform("windows")]
     private static IAccessibilityBridge CreateWindows(Window window)
     {
-        var hwnd = window.PlatformWindow.GetWin32Hwnd();
+        var hwnd = ((SDL3Window)window.PlatformWindow).GetWin32Hwnd();
         if (hwnd == IntPtr.Zero) return NullAccessibilityBridge.Instance;
 
         var host = new Sdl3UiaHostBridge(window);

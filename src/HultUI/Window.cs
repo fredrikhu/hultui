@@ -9,7 +9,6 @@ using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
-using HultUI.Platform.SDL3;
 
 namespace HultUI;
 
@@ -85,7 +84,12 @@ public sealed class Window : IOverlayHost, IDisposable
     private bool _dragAccepted;
     private bool _isExternalDrag;
 
-    internal SDL3Window PlatformWindow { get; }
+    internal IPlatformWindow PlatformWindow { get; }
+
+    // Custom-chrome capability of the platform window (resize borders, drag
+    // regions, native-frame caption). Null when the platform has no chrome
+    // (headless) — all chrome wiring is skipped in that case.
+    private readonly IWindowChrome? _chrome;
     public long ResizeThrottleMs { get; set; } = 16;
     internal Application Application { get; }
 
@@ -156,7 +160,7 @@ public sealed class Window : IOverlayHost, IDisposable
     public int ResizeBorderWidth
     {
         get => _resizeBorderWidth;
-        set { _resizeBorderWidth = value; PlatformWindow.ResizeBorderDip = value; }
+        set { _resizeBorderWidth = value; if (_chrome is not null) _chrome.ResizeBorderDip = value; }
     }
     private int _resizeBorderWidth = 6;
 
@@ -170,7 +174,7 @@ public sealed class Window : IOverlayHost, IDisposable
     public ResizeEdges ResizableEdges
     {
         get => _resizableEdges;
-        set { _resizableEdges = value; PlatformWindow.ResizableEdges = value; }
+        set { _resizableEdges = value; if (_chrome is not null) _chrome.ResizableEdges = value; }
     }
     private ResizeEdges _resizableEdges = ResizeEdges.All;
 
@@ -186,36 +190,37 @@ public sealed class Window : IOverlayHost, IDisposable
     // the env-driven recording and saves to the default path.
     private readonly string? _envTracePath = Environment.GetEnvironmentVariable("HULTUI_TRACE");
 
-    internal Window(Application application, SDL3Window platformWindow)
+    internal Window(Application application, IPlatformWindow platformWindow)
     {
         Application = application;
         PlatformWindow = platformWindow;
+        _chrome = platformWindow as IWindowChrome;
         if (!string.IsNullOrEmpty(_envTracePath))
             _tracer.StartRecording();
         _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext, _tracer);
-        Clipboard = new SDL3Clipboard(platformWindow);
-        TextInputHost = new SDL3TextInputHost(platformWindow);
+        Clipboard = platformWindow.Clipboard;
+        TextInputHost = platformWindow.TextInputHost;
         _devTools = new DevToolsOverlay(_perf);
         _a11yObserver = new AccessibilityObserverAdapter(this);
-        PlatformWindow.EventTranslator.OnInputEvent += HandleInputEvent;
+        PlatformWindow.InputReceived += HandleInputEvent;
 
-        if (platformWindow.Style == WindowStyle.Borderless)
+        if (platformWindow.Style == WindowStyle.Borderless && _chrome is { } chrome)
         {
-            platformWindow.ResizeBorderDip = _resizeBorderWidth;
-            platformWindow.ResizableEdges = _resizableEdges;
+            chrome.ResizeBorderDip = _resizeBorderWidth;
+            chrome.ResizableEdges = _resizableEdges;
 
-            if (platformWindow.UsesWindowsNativeFrame)
+            if (chrome.UsesWindowsNativeFrame)
             {
                 // Native Windows frame: Windows resizes/moves the window itself
                 // via WM_NCHITTEST; it only needs to know the drag regions and the
                 // maximize button (so it can show the Snap Layouts flyout).
-                platformWindow.IsWindowDragPoint = IsWindowDragRegion;
-                platformWindow.IsWindowMaximizePoint = IsWindowMaximizeRegion;
-                platformWindow.GetWindowMaximizeButtonBounds = () => FindMaximizeButton()?.Layout.AbsoluteBorderBox;
-                platformWindow.OnMaximizeButtonHover = SetMaximizeButtonHover;
+                chrome.IsWindowDragPoint = IsWindowDragRegion;
+                chrome.IsWindowMaximizePoint = IsWindowMaximizeRegion;
+                chrome.GetWindowMaximizeButtonBounds = () => FindMaximizeButton()?.Layout.AbsoluteBorderBox;
+                chrome.OnMaximizeButtonHover = SetMaximizeButtonHover;
             }
             else
-                platformWindow.HitTestHandler = HandleWindowHitTest;
+                chrome.HitTestHandler = HandleWindowHitTest;
         }
 
         _focusManager.FocusChanged += OnFocusChanged;
@@ -1595,7 +1600,7 @@ public sealed class Window : IOverlayHost, IDisposable
     /// it so it doesn't double-drive the hover or pop the app tooltip over the flyout.</summary>
     private bool IsNonClientMaximizeButton(Element? el)
     {
-        if (!PlatformWindow.UsesWindowsNativeFrame) return false;
+        if (_chrome is not { UsesWindowsNativeFrame: true }) return false;
         for (var e = el; e is not null; e = e.Parent)
             if (e.IsWindowMaximizeButton) return true;
         return false;
@@ -1607,12 +1612,12 @@ public sealed class Window : IOverlayHost, IDisposable
     // no-ops when the value is unchanged or the frame isn't the Windows one.
     private void UpdateCaptionHeight()
     {
-        if (!PlatformWindow.UsesWindowsNativeFrame) return;
+        if (_chrome is not { UsesWindowsNativeFrame: true } chrome) return;
         if (FindMaximizeButton() is not { } btn) return;
         var bottomDip = btn.Layout.AbsoluteBorderBox.Bottom;
         if (bottomDip <= 0) return;
         int px = (int)MathF.Ceiling(bottomDip * PlatformWindow.DisplayScale) + 1;
-        PlatformWindow.SetCaptionHeightPx(px);
+        chrome.SetCaptionHeightPx(px);
     }
 
     /// <summary>Re-applies the maximize button's hover background each rendered frame
@@ -1653,7 +1658,7 @@ public sealed class Window : IOverlayHost, IDisposable
         _disposed = true;
         if (_tracer.IsRecording && !string.IsNullOrEmpty(_envTracePath))
             _tracer.StopRecording(_envTracePath);
-        PlatformWindow.EventTranslator.OnInputEvent -= HandleInputEvent;
+        PlatformWindow.InputReceived -= HandleInputEvent;
         (_accessibilityBridge as IDisposable)?.Dispose();
         PlatformWindow.Dispose();
     }
