@@ -110,33 +110,38 @@ Chromium — the hand-written web baseline; medians, ms):
 > both together. The earlier HultUI table numbers here were cold-JIT-biased (e.g.
 > `create 1,000` 59, `remove row` 84) — see the warm-up note above.
 
-### Linux capture (2026-07-19, current commit)
+### Linux capture (2026-07-20, current commit)
 
 The **same machine** as the Windows/browser columns above, rebooted into Linux
 (Fedora 44, Wayland, NVIDIA proprietary driver), on the current commit. Release
-build, warm, medians of n=5; two table runs agreed within run-to-run noise.
+build, warm, medians of n=5; two table runs (mins used where a single median was
+GC/scheduling-jittery).
 
 | Operation             | HultUI table (Linux) | HultUI virtual (Linux) |
 | --------------------- | -------------------: | ---------------------: |
-| create 1,000          |                 10.3 |                    5.2 |
-| update every 10th     |                  4.5 |                    1.2 |
-| select row            |                  1.3 |                    3.2 |
-| swap rows             |                  4.2 |                    4.5 |
-| remove row            |                  5.1 |                    3.3 |
-| create 10,000         |                  216 |                    2.6 |
-| append 1,000 → 1,000  |                 24.8 |                    5.6 |
-| clear 1,000           |                 11.3 |                   18.8 |
+| create 1,000          |                 17.3 |                    7.8 |
+| update every 10th     |                  3.4 |                    0.6 |
+| select row            |                  0.4 |                    0.6 |
+| swap rows             |                  3.6 |                    0.7 |
+| remove row            |                  4.4 |                    1.3 |
+| create 10,000         |                  258 |                    1.6 |
+| append 1,000 → 1,000  |                   22 |                    8.5 |
+| clear 1,000           |                  8.4 |                   20.7 |
 
-> **Not an apples-to-apples OS comparison with the Windows column above.** Those
-> numbers were captured on 2026-07-12; the layout engine changed materially
-> afterwards (the flex-shrink / phase-1↔phase-6 fix, which cites benchmark wins
-> in `TODO.md`), so the table-op deltas conflate *Linux vs Windows* with *newer
-> vs older code*. On the bulk layout-bound ops Linux currently reads ~1.4–2.2×
-> faster (`create 1,000` ~10 vs 27, `create 10,000` ~216 vs 370, `append` ~25 vs
-> 45), but most of that is likely the code change, not the OS. The small
-> in-place ops (`select`/`swap`/`remove`/`update`) are within the "both are fast"
-> noise the section above warns about. For a clean comparison, reboot into
-> Windows on **this** commit and run `--auto` again — same binary, same GPU.
+> Captured after a `dnf upgrade` that healed the GPU present path (the earlier
+> run logged `libEGL: failed to create dri2 screen` and fell back). The effect is
+> stark on **present-bound in-place ops**: table `select` dropped 1.3 → 0.4 ms,
+> and virtual `select`/`swap` collapsed from ~3–4.5 ms to ~0.6 ms — the
+> "mutation → painted" latency the harness measures is now dominated by real GPU
+> present, not a broken fallback. The **CPU-bound bulk `create`** ops moved the
+> other way (`create 1,000` ~10 → ~17, `create 10,000` ~216 → ~258); that path
+> touches no GPU, so the shift is kernel/scheduler/thermal, not the driver.
+>
+> **Still not an apples-to-apples OS comparison with the Windows column above** —
+> those numbers are from 2026-07-12 and the layout engine changed materially
+> afterwards, so table-op deltas conflate *Linux vs Windows* with *newer vs older
+> code*. For a clean comparison, reboot into Windows on **this** commit and run
+> `--auto` again — same binary, same GPU.
 
 Reading it:
 
