@@ -282,15 +282,18 @@ public class GitRepository
     {
         // -m --first-parent: for merge commits (and stashes, which are merges
         // of HEAD/index/untracked), diff against the first parent instead of
-        // suppressing output entirely.
+        // suppressing output entirely. --root: the initial commit has no parent,
+        // so without it diff-tree emits nothing — show it as a diff against the
+        // empty tree (every file added). It's a no-op for non-root commits.
         return QueryFileChanges(
-            ["diff-tree", "--no-commit-id", "-r", "--name-status", "-M", "-m", "--first-parent", commitHash],
-            ["diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", commitHash]);
+            ["diff-tree", "--no-commit-id", "-r", "--name-status", "-M", "-m", "--first-parent", "--root", commitHash],
+            ["diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", "--root", commitHash]);
     }
 
     public List<GitFileDiff> GetCommitDiff(string commitHash)
     {
-        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", commitHash);
+        // --root so the initial (parentless) commit diffs against the empty tree.
+        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", "--root", commitHash);
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 
