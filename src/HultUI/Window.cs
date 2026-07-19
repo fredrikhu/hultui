@@ -388,7 +388,9 @@ public sealed class Window : IOverlayHost, IDisposable
         // A UIA action (invoke/toggle/set-value/focus) queued from a worker
         // thread must run even when the app is idle; draining happens in the
         // render pass, so a pending action forces a frame.
-        || (_uiaHost?.HasPendingActions ?? false);
+        // The IsWindows() check is implied by _uiaHost being non-null (it is only
+        // created by the Windows bridge); it is here for the platform analyzer.
+        || (OperatingSystem.IsWindows() && (_uiaHost?.HasPendingActions ?? false));
 
     private bool AnyOverlayContentDirty()
     {

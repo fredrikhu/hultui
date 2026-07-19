@@ -143,7 +143,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     /// <paramref name="px"/> physical pixels so the maximize button sits inside it
     /// (needed for the Snap Layouts flyout when not maximized). No-op off Windows
     /// or when unchanged. Called by Window.cs once the button's layout is known.</summary>
-    public void SetCaptionHeightPx(int px) => _customFrame?.SetCaptionHeight(px);
+    public void SetCaptionHeightPx(int px)
+    {
+        // The redundant IsWindows() check (implied by _customFrame being non-null)
+        // satisfies the platform-compatibility analyzer, as at the other custom
+        // frame call sites.
+        if (OperatingSystem.IsWindows() && _customFrame is { } frame)
+            frame.SetCaptionHeight(px);
+    }
 
     public SDL3Window(string title, int width, int height, WindowStyle style = WindowStyle.Default)
     {
