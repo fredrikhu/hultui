@@ -9,7 +9,10 @@ using Text = HultUI.Core.Builders.Text;
 // with the AT-SPI2 bridge swapped in, so the accessible tree is exported to the
 // live a11y bus for inspection with pyatspi / accerciser / orca.
 
-using var session = HeadlessSession.Create(width: 400, height: 300);
+// ATSPI_SCALE lets us verify device-pixel extents (default 1×).
+float scale = float.TryParse(Environment.GetEnvironmentVariable("ATSPI_SCALE"), out var s) ? s : 1f;
+using var session = HeadlessSession.Create(width: 400, height: 300, scale: scale);
+Console.WriteLine($"[harness] display scale = {scale}");
 
 int count = 0;
 var counter = Text.New("Count: 0");

@@ -81,13 +81,16 @@ internal sealed class AtSpiAccessible
     public static string PathFor(AccessibilityNode node, bool isRoot) =>
         isRoot ? AtSpiConstants.RootPath : AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
 
-    public static AtSpiAccessible From(AccessibilityNode node, bool isRoot, string parentPath, int indexInParent)
+    public static AtSpiAccessible From(
+        AccessibilityNode node, bool isRoot, string parentPath, int indexInParent, float scale)
     {
         uint role = isRoot ? AtSpiConstants.RoleApplication : AtSpiConstants.MapRole(node.Role);
         var childPaths = new List<string>(node.Children.Count);
         foreach (var child in node.Children)
             childPaths.Add(PathFor(child, isRoot: false));
 
+        // Bounds are in layout units; AT-SPI reports device pixels.
+        var rect = node.BoundingRect;
         return new AtSpiAccessible
         {
             ElementId = node.ElementId,
@@ -97,10 +100,10 @@ internal sealed class AtSpiAccessible
             Name = node.Name ?? "",
             Description = node.Description ?? "",
             Value = node.Value,
-            X = (int)MathF.Round(node.BoundingRect.X),
-            Y = (int)MathF.Round(node.BoundingRect.Y),
-            Width = (int)MathF.Round(node.BoundingRect.Width),
-            Height = (int)MathF.Round(node.BoundingRect.Height),
+            X = (int)MathF.Round(rect.X * scale),
+            Y = (int)MathF.Round(rect.Y * scale),
+            Width = (int)MathF.Round(rect.Width * scale),
+            Height = (int)MathF.Round(rect.Height * scale),
             Focusable = node.IsFocusable,
             Focused = node.IsFocused,
             Enabled = node.IsEnabled,

@@ -19,12 +19,15 @@ namespace HultUI;
 /// through <see cref="IAccessibilityActionHost"/> without duplicating the
 /// element-lookup, dispatch, and marshalling code.
 /// </remarks>
-internal sealed class AccessibilityActionRouter : IAccessibilityActionHost
+internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAccessibilityGeometryHost
 {
     private readonly Window _window;
     private readonly ConcurrentQueue<Action> _pendingActions = new();
 
     public AccessibilityActionRouter(Window window) => _window = window;
+
+    /// <summary>Device pixels per layout unit — bridges scale element bounds by this.</summary>
+    public float Scale => _window.PlatformWindow.DisplayScale;
 
     /// <summary>True when an action is queued but not yet run — folded into NeedsRender so an idle app wakes to drain it.</summary>
     public bool HasPendingActions => !_pendingActions.IsEmpty;

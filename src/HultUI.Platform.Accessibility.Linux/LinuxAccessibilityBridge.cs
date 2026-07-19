@@ -33,6 +33,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
     private readonly AtSpiBus? _bus;
     private readonly IAccessibilityActionHost? _actionHost;
+    private readonly IAccessibilityGeometryHost? _geometryHost;
     private readonly bool _registered;
     private volatile Snapshot _snapshot = Snapshot.Empty;
     private bool _hasBuilt;
@@ -47,6 +48,8 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     public LinuxAccessibilityBridge(IAccessibilityActionHost? actionHost = null)
     {
         _actionHost = actionHost;
+        // The windowing layer's host implements both capabilities on one object.
+        _geometryHost = actionHost as IAccessibilityGeometryHost;
         // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
         // "is anyone listening" contract the null bridge expresses everywhere.
         _bus = AtSpiBus.Open();
@@ -117,7 +120,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!_registered || _bus is null) return;
         DebugApplyChangesCalls++;
 
-        _snapshot = Build(root);
+        _snapshot = Build(root, _geometryHost?.Scale ?? 1f);
 
         // Populate the client's cache for every added node (the first build's
         // diff carries the whole tree). This is what keeps libatspi from
@@ -207,21 +210,21 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         }
     }
 
-    private static Snapshot Build(AccessibilityNode root)
+    private static Snapshot Build(AccessibilityNode root, float scale)
     {
         var byPath = new Dictionary<string, AtSpiAccessible>();
-        var rootAcc = Walk(root, isRoot: true, parentPath: AtSpiConstants.NullPath, index: -1, byPath);
+        var rootAcc = Walk(root, isRoot: true, parentPath: AtSpiConstants.NullPath, index: -1, scale, byPath);
         return new Snapshot { ByPath = byPath, Root = rootAcc };
     }
 
     private static AtSpiAccessible Walk(
-        AccessibilityNode node, bool isRoot, string parentPath, int index,
+        AccessibilityNode node, bool isRoot, string parentPath, int index, float scale,
         Dictionary<string, AtSpiAccessible> byPath)
     {
-        var acc = AtSpiAccessible.From(node, isRoot, parentPath, index);
+        var acc = AtSpiAccessible.From(node, isRoot, parentPath, index, scale);
         byPath[acc.Path] = acc;
         for (int i = 0; i < node.Children.Count; i++)
-            Walk(node.Children[i], isRoot: false, acc.Path, i, byPath);
+            Walk(node.Children[i], isRoot: false, acc.Path, i, scale, byPath);
         return acc;
     }
 

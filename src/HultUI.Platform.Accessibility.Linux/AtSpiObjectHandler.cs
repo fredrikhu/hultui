@@ -269,6 +269,10 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
 
     private void HandleComponent(MethodContext context, string member, AtSpiAccessible node)
     {
+        // Bounds are stored in device pixels (layout × display scale). The
+        // coordType arg (SCREEN vs WINDOW) is ignored: under Wayland a client has
+        // no reliable window screen origin, so both resolve to window-relative
+        // pixels. On X11 the screen offset could be added when it lands.
         switch (member)
         {
             case "GetExtents":
