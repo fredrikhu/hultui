@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
@@ -22,88 +21,24 @@ namespace HultUI;
 internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 {
     private readonly Window _window;
-    private readonly ConcurrentQueue<Action> _pendingActions = new();
+    private readonly AccessibilityActionRouter _router;
 
-    public Sdl3UiaHostBridge(Window window)
+    public Sdl3UiaHostBridge(Window window, AccessibilityActionRouter router)
     {
         _window = window;
+        _router = router;
     }
 
     public float ContentScale => _window.PlatformWindow.DisplayScale;
 
-    /// <summary>
-    /// True when a UIA action is queued but not yet run. The render loop folds
-    /// this into <c>NeedsRender</c> so an action posted from a UIA worker thread
-    /// wakes an otherwise-idle app to drain it (see <see cref="DrainPendingActions"/>).
-    /// </summary>
-    public bool HasPendingActions => !_pendingActions.IsEmpty;
+    // ──── Actions — delegate to the shared router (which owns the UI-thread
+    //      queue drained by the Window each frame).
 
-    /// <summary>Called by <see cref="Window"/> once per frame to run queued actions on the UI thread.</summary>
-    public void DrainPendingActions()
-    {
-        while (_pendingActions.TryDequeue(out var action))
-        {
-            try { action(); }
-            catch { /* never let AT clients crash the UI loop */ }
-        }
-    }
-
-    // ──── Actions — enqueue for UI-thread drain
-
-    public void InvokeElement(ElementId id) => _pendingActions.Enqueue(() =>
-    {
-        // A virtualized-list item has no element of its own; route its activation
-        // back to the owning list by index (works even for off-screen items).
-        if (VirtualItemId.TryDecode(id, out var listId, out var index))
-        {
-            if (GetElementOrNull(listId) is IAccessibleItemSource source)
-                source.ActivateItem(index);
-            return;
-        }
-        EventDispatcher.DispatchDirect(new ClickEvent { Position = default }, GetElementOrNull(id) ?? Throw());
-    });
-
-    public void ToggleElement(ElementId id) => _pendingActions.Enqueue(() =>
-    {
-        if (GetElementOrNull(id) is CheckboxElement cb)
-        {
-            cb.IsChecked = !cb.IsChecked;
-            cb.OnChanged?.Invoke(cb.IsChecked);
-        }
-    });
-
-    public void SelectElement(ElementId id) => _pendingActions.Enqueue(() =>
-    {
-        // Selecting a virtualized-list item is its activation (single-select).
-        if (VirtualItemId.TryDecode(id, out var listId, out var index))
-        {
-            if (GetElementOrNull(listId) is IAccessibleItemSource source)
-                source.ActivateItem(index);
-            return;
-        }
-        if (GetElementOrNull(id) is RadioButtonElement rb)
-        {
-            if (!rb.IsChecked)
-            {
-                rb.IsChecked = true;
-                rb.OnChanged?.Invoke(true);
-            }
-        }
-    });
-
-    public void SetValue(ElementId id, string value) => _pendingActions.Enqueue(() =>
-    {
-        switch (GetElementOrNull(id))
-        {
-            case TextInputElement input: input.Text = value; input.TextChanged?.Invoke(value); break;
-            case TextAreaElement area: area.Text = value; area.TextChanged?.Invoke(value); break;
-        }
-    });
-
-    public void RequestFocus(ElementId id) => _pendingActions.Enqueue(() =>
-    {
-        GetElementOrNull(id)?.Focus();
-    });
+    public void InvokeElement(ElementId id) => _router.InvokeElement(id);
+    public void ToggleElement(ElementId id) => _router.ToggleElement(id);
+    public void SelectElement(ElementId id) => _router.SelectElement(id);
+    public void SetValue(ElementId id, string value) => _router.SetValue(id, value);
+    public void RequestFocus(ElementId id) => _router.RequestFocus(id);
 
     // ──── Reads — safe to run on the calling thread since we only touch
     //      simple CLR properties that don't mutate collections.
@@ -158,12 +93,12 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         catch { return []; }
     }
 
-    public void SelectItemOnly(ElementId listId, int index) => _pendingActions.Enqueue(() =>
+    public void SelectItemOnly(ElementId listId, int index) => _router.Enqueue(() =>
     {
         if (GetElementOrNull(listId) is IAccessibleItemSource s) s.SelectOnly(index);
     });
 
-    public void SetItemSelected(ElementId listId, int index, bool selected) => _pendingActions.Enqueue(() =>
+    public void SetItemSelected(ElementId listId, int index, bool selected) => _router.Enqueue(() =>
     {
         if (GetElementOrNull(listId) is IAccessibleItemSource s) s.SetItemSelected(index, selected);
     });
@@ -212,7 +147,7 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
     private const double UiaNoScroll = -1.0;
 
     public void SetScrollPercent(ElementId id, double horizontalPercent, double verticalPercent) =>
-        _pendingActions.Enqueue(() =>
+        _router.Enqueue(() =>
         {
             if (GetElementOrNull(id) is not ScrollViewElement sv) return;
             var vp = sv.Layout.AbsoluteContentBox;
@@ -224,7 +159,7 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         });
 
     public void ScrollByAmount(ElementId id, int horizontalAmount, int verticalAmount) =>
-        _pendingActions.Enqueue(() =>
+        _router.Enqueue(() =>
         {
             if (GetElementOrNull(id) is not ScrollViewElement sv) return;
             var vp = sv.Layout.AbsoluteContentBox;
@@ -255,7 +190,7 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
         catch { return false; }
     }
 
-    public void SetRangeValue(ElementId id, double value) => _pendingActions.Enqueue(() =>
+    public void SetRangeValue(ElementId id, double value) => _router.Enqueue(() =>
     {
         if (GetElementOrNull(id) is IRangeValueElement r && !r.IsReadOnly)
             r.SetAccessibleValue(value);
@@ -288,10 +223,5 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
 
     private Element? GetElementOrNull(ElementId id) => _window.FindElement(id);
 
-    private static Element Throw() => throw new InvalidOperationException("Element id no longer in tree");
-
-    public void Dispose()
-    {
-        _pendingActions.Clear();
-    }
+    public void Dispose() { }
 }

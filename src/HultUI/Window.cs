@@ -69,6 +69,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private const long A11yCoalesceMs = 100;
     private readonly AccessibilityObserverAdapter _a11yObserver;
     private Sdl3UiaHostBridge? _uiaHost;
+    private AccessibilityActionRouter? _actionRouter;
 
     // ──── Drag & Drop state ────
     private const float DragThreshold = 5f;
@@ -249,6 +250,13 @@ public sealed class Window : IOverlayHost, IDisposable
     internal void SetUiaHostBridge(Sdl3UiaHostBridge host) => _uiaHost = host;
 
     /// <summary>
+    /// Registers the platform-neutral action router whose queued invoke/toggle/
+    /// select/set-value actions are drained on the UI thread each frame. Set by
+    /// the accessibility factory on every platform that has an active bridge.
+    /// </summary>
+    internal void SetActionRouter(AccessibilityActionRouter router) => _actionRouter = router;
+
+    /// <summary>
     /// Builds a fresh accessibility-tree snapshot of the current content, or
     /// null when no root is set. This is the same tree assistive technologies
     /// see; the headless query API reads it on demand, independent of the
@@ -385,12 +393,11 @@ public sealed class Window : IOverlayHost, IDisposable
         // (during the drag, layout dirty already keeps frames coming).
         || (_a11yLayoutRefreshPending && _accessibilityBridge.IsActive
             && Environment.TickCount64 - _lastA11yRebuildMs >= A11yCoalesceMs)
-        // A UIA action (invoke/toggle/set-value/focus) queued from a worker
-        // thread must run even when the app is idle; draining happens in the
-        // render pass, so a pending action forces a frame.
-        // The IsWindows() check is implied by _uiaHost being non-null (it is only
-        // created by the Windows bridge); it is here for the platform analyzer.
-        || (OperatingSystem.IsWindows() && (_uiaHost?.HasPendingActions ?? false));
+        // An accessibility action (invoke/toggle/set-value/focus) queued from an
+        // AT thread must run even when the app is idle; draining happens in the
+        // render pass, so a pending action forces a frame. Platform-neutral: the
+        // router is set on any platform with an active bridge.
+        || (_actionRouter?.HasPendingActions ?? false);
 
     private bool AnyOverlayContentDirty()
     {
@@ -411,11 +418,10 @@ public sealed class Window : IOverlayHost, IDisposable
     {
         if (_root is null) return;
 
-        // Drain queued UI-thread actions from the accessibility host bridge.
-        // UIA callbacks run on worker threads and enqueue here; this is where
-        // they get executed against the element tree.
-        if (OperatingSystem.IsWindows())
-            _uiaHost?.DrainPendingActions();
+        // Drain queued UI-thread actions from the accessibility action router.
+        // AT callbacks (UIA worker threads, the AT-SPI D-Bus receive thread) run
+        // off-thread and enqueue here; this is where they run against the tree.
+        _actionRouter?.DrainPendingActions();
 
         _tracer.MarkFrame();
         using var _frameTrace = _tracer.Begin("Frame", "Frame");

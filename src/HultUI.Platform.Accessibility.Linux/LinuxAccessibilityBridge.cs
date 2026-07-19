@@ -32,6 +32,7 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     }
 
     private readonly AtSpiBus? _bus;
+    private readonly IAccessibilityActionHost? _actionHost;
     private readonly bool _registered;
     private volatile Snapshot _snapshot = Snapshot.Empty;
     private bool _hasBuilt;
@@ -39,8 +40,13 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     private int _applicationId;
     private bool _disposed;
 
-    public LinuxAccessibilityBridge()
+    /// <param name="actionHost">
+    /// Routes AT-triggered actions (button click, checkbox toggle) back onto the
+    /// live element on the UI thread. When null, <c>DoAction</c> is a no-op.
+    /// </param>
+    public LinuxAccessibilityBridge(IAccessibilityActionHost? actionHost = null)
     {
+        _actionHost = actionHost;
         // Eager connect. If no AT-SPI bus answers we stay inactive, matching the
         // "is anyone listening" contract the null bridge expresses everywhere.
         _bus = AtSpiBus.Open();
@@ -88,6 +94,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
     {
         get => _applicationId;
         set => _applicationId = value;
+    }
+
+    bool IAtSpiTree.DoAction(AtSpiAccessible node)
+    {
+        if (_actionHost is null || node.Action is null) return false;
+        // Runs on the bus receive thread; the host enqueues and the Window drains
+        // it on the UI thread, so this only needs to be enqueue-safe (it is).
+        switch (node.Action)
+        {
+            case AtSpiActionKind.Click: _actionHost.InvokeElement(node.ElementId); return true;
+            case AtSpiActionKind.Toggle: _actionHost.ToggleElement(node.ElementId); return true;
+            case AtSpiActionKind.Select: _actionHost.SelectElement(node.ElementId); return true;
+            default: return false;
+        }
     }
 
     // ─────────────────────────────────────────────────── IAccessibilityBridge

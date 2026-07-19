@@ -16,7 +16,16 @@
 
 ## Up Next (in order)
 - Windows UIA bridge on-device verification — run a sample, open Accessibility Insights / `Inspect.exe`, confirm tree, name, role, bounding-rect, and pattern actions round-trip.
-- AT-SPI refinements (export landed; these are polish): (1) a `state-changed:defunct` still shows up in a *mid-stream* event monitor on first contact with each node — but that's a client cold-start artifact: the monitor connects after our startup `Cache.AddAccessible` burst and only subscribes to `object:` events, so it never warms its cache. A client (Orca) running from app launch receives the cache signals. Not fixable app-side for a cold listener; our app provably emits only the intended signals. (2) `Action.DoAction` is a no-op — the served snapshot has no live-element handle, so invoking a control from an AT does nothing yet; needs an "invoke by ElementId" hook marshalled to the UI thread. (3) `Component` extents are window-relative only (no screen offset available to the bridge). (4) end-to-end Orca *speech* pass.
+- **AT-SPI `Action.DoAction`** — an AT can now activate controls. The neutral
+  invoke/toggle/select logic was lifted out of the Windows-only `Sdl3UiaHostBridge`
+  into a shared `AccessibilityActionRouter` (`src/HultUI/`, implementing
+  `HultUI.Core.Accessibility.IAccessibilityActionHost`); both the Windows UIA host
+  and the Linux AT-SPI bridge route through it, and `Window` drains its UI-thread
+  action queue each frame on every platform. Verified live with pyatspi:
+  `do_action(0)` on the button dispatches a real click (counter 0→3 over three
+  calls) and on the checkbox toggles it. **The Windows UIA path was refactored to
+  run through the router and still needs a Windows FlaUI re-verification.**
+- AT-SPI refinements (remaining polish): (1) a `state-changed:defunct` still shows up in a *mid-stream* event monitor on first contact with each node — but that's a client cold-start artifact: the monitor connects after our startup `Cache.AddAccessible` burst and only subscribes to `object:` events, so it never warms its cache. A client (Orca) running from app launch receives the cache signals. Not fixable app-side for a cold listener; our app provably emits only the intended signals. (2) `Component` extents are window-relative only (no screen offset available to the bridge). (3) end-to-end Orca *speech* pass.
 
 ## Deferred
 - **Automatic minimum size for flex items** (CSS `min-height:auto`) — content can still be crushed below its own size inside a bounded container. Needs a real recursive min-content pass in which scroll containers contribute zero; approximating it from the flex Phase 1 measurement was tried and reverted, because for a container that measurement is its full content extent, so an ancestor wrapping a scroll view gets pinned to the whole scrollable height (14,640px tall, 1007 draw calls instead of 47). `FlexShrinkTests` carries a skipped case. Add a shrink-heavy benchmark first — the current suite barely exercises the shrink path, so it would not catch the cost.

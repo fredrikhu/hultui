@@ -25,7 +25,8 @@ session.Window.SetRoot(Flex.Column(gap: 8).Padding(12).Children(
     checkbox,
     counter));
 
-var bridge = session.Window.InstallAccessibilityBridge(new LinuxAccessibilityBridge());
+var actionHost = session.Window.InstallActionRouter();
+var bridge = session.Window.InstallAccessibilityBridge(new LinuxAccessibilityBridge(actionHost));
 session.PumpFrame();
 
 Console.WriteLine($"[harness] bridge.IsActive = {bridge.IsActive}");
@@ -44,18 +45,27 @@ Console.WriteLine("[harness] Running. Ctrl+C to stop. Emitting a state change ev
 // was first pumped on, so a synchronous loop avoids a cross-thread deadlock.
 bool toggled = false;
 bool stop = false;
+int tick = 0;
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop = true; };
 
 while (!stop)
 {
-    Thread.Sleep(2000);
+    Thread.Sleep(300);
     if (stop) break;
 
-    toggled = !toggled;
-    checkbox.IsChecked = toggled;          // state-change (checked) on the checkbox
-    counter.Content = $"Count: {++count}"; // name property-change on the label
+    // Pump each iteration so an AT-triggered DoAction the client queued gets
+    // drained (and its click dispatched) promptly. The counter is driven ONLY
+    // by button clicks, so its value == how many times an AT invoked the button.
     session.PumpFrame();
-    Console.WriteLine($"[harness] applyChanges={bridge.DebugApplyChangesCalls} signals={bridge.DebugSignalsEmitted}");
+
+    if (++tick % 10 == 0)
+    {
+        toggled = !toggled;
+        checkbox.IsChecked = toggled; // periodic state-change for signal testing
+        session.PumpFrame();
+        Console.WriteLine($"[harness] button-invokes={count} checkbox={toggled} " +
+            $"applyChanges={bridge.DebugApplyChangesCalls}");
+    }
 }
 
 Console.WriteLine("[harness] Stopped.");

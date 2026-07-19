@@ -45,11 +45,20 @@ internal sealed class AtSpiAccessible
     public int IndexInParent { get; init; } = -1;
     public IReadOnlyList<string> ChildPaths { get; init; } = [];
 
-    /// <summary>The action name this object exposes, or null if it has no action.</summary>
-    public string? ActionName { get; init; }
+    /// <summary>The action this object exposes to assistive tech, or null if none.</summary>
+    public AtSpiActionKind? Action { get; init; }
 
     public int ChildCount => ChildPaths.Count;
-    public bool HasAction => ActionName is not null;
+    public bool HasAction => Action is not null;
+
+    /// <summary>The AT-SPI action name reported via the Action interface.</summary>
+    public string ActionName => Action switch
+    {
+        AtSpiActionKind.Click => "click",
+        AtSpiActionKind.Toggle => "toggle",
+        AtSpiActionKind.Select => "select",
+        _ => "",
+    };
 
     /// <summary>The AT-SPI interface names this object advertises via GetInterfaces.</summary>
     public string[] Interfaces
@@ -104,15 +113,28 @@ internal sealed class AtSpiAccessible
             ParentPath = parentPath,
             IndexInParent = indexInParent,
             ChildPaths = childPaths,
-            ActionName = ActionFor(node.Role),
+            Action = ActionFor(node.Role),
         };
     }
 
-    private static string? ActionFor(AccessibilityRole role) => role switch
+    private static AtSpiActionKind? ActionFor(AccessibilityRole role) => role switch
     {
-        AccessibilityRole.Button or AccessibilityRole.Link => "click",
-        AccessibilityRole.Checkbox or AccessibilityRole.Switch or AccessibilityRole.RadioButton => "toggle",
-        AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem => "activate",
+        AccessibilityRole.Button or AccessibilityRole.Link => AtSpiActionKind.Click,
+        AccessibilityRole.Checkbox or AccessibilityRole.Switch => AtSpiActionKind.Toggle,
+        AccessibilityRole.RadioButton => AtSpiActionKind.Select,
+        AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem => AtSpiActionKind.Click,
         _ => null,
     };
+}
+
+/// <summary>The kind of activation an accessible exposes through the Action interface.</summary>
+[SupportedOSPlatform("linux")]
+internal enum AtSpiActionKind
+{
+    /// <summary>Dispatch a click (buttons, links, list items).</summary>
+    Click,
+    /// <summary>Flip a checkbox / switch.</summary>
+    Toggle,
+    /// <summary>Select a radio button.</summary>
+    Select,
 }

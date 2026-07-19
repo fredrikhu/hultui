@@ -72,6 +72,20 @@ public sealed partial class HeadlessWindow
         return bridge;
     }
 
+    /// <summary>
+    /// Installs the platform-neutral accessibility action router and registers it
+    /// with the window (so its queued invoke/toggle/select actions are drained on
+    /// the pump thread each frame). Returns the router as an
+    /// <see cref="IAccessibilityActionHost"/> for injecting into a platform bridge
+    /// — lets a bridge's action path be driven under headless with no real window.
+    /// </summary>
+    public IAccessibilityActionHost InstallActionRouter()
+    {
+        var router = new AccessibilityActionRouter(Window);
+        Window.SetActionRouter(router);
+        return router;
+    }
+
     public void SetRoot(Element root) => Window.SetRoot(root);
 
     /// <summary>

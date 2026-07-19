@@ -146,7 +146,7 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
                 case "Id": w.WriteVariantInt32(_tree.ApplicationId); return;
             }
         }
-        else if (iface == AtSpiConstants.ActionInterface && prop == "NbActions")
+        else if (iface == AtSpiConstants.ActionInterface && prop is "NActions" or "NbActions")
         {
             w.WriteVariantInt32(node.HasAction ? 1 : 0);
             return;
@@ -349,9 +349,9 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
 
     // ─────────────────────────────────────────────── org.a11y.atspi.Action
 
-    private static void HandleAction(MethodContext context, string member, AtSpiAccessible node)
+    private void HandleAction(MethodContext context, string member, AtSpiAccessible node)
     {
-        string action = node.ActionName ?? "";
+        string action = node.ActionName;
         switch (member)
         {
             case "GetName":
@@ -377,9 +377,8 @@ internal sealed class AtSpiObjectHandler : IPathMethodHandler
                 });
                 break;
             case "DoAction":
-                // TODO: route back to the live element to actually invoke it.
-                // The snapshot has no element handle, so this is a no-op for now.
-                Reply(context, "b", static (ref MessageWriter w) => w.WriteBool(false));
+                bool performed = _tree.DoAction(node);
+                Reply(context, "b", (ref MessageWriter w) => w.WriteBool(performed));
                 break;
             default:
                 context.ReplyUnknownMethodError();

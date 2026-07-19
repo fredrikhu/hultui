@@ -24,27 +24,35 @@ internal static class AccessibilityBridgeFactory
         if (window.PlatformWindow is not SDL3Window)
             return NullAccessibilityBridge.Instance;
 
+        // Shared across platforms: it marshals AT-triggered actions onto the UI
+        // thread's per-frame drain. The active bridge triggers actions through it.
+        var router = new AccessibilityActionRouter(window);
+
         if (OperatingSystem.IsWindows())
-            return CreateWindows(window);
+            return CreateWindows(window, router);
 
         if (OperatingSystem.IsLinux())
-            return CreateLinux();
+            return CreateLinux(window, router);
 
         return NullAccessibilityBridge.Instance;
     }
 
     [SupportedOSPlatform("windows")]
-    private static IAccessibilityBridge CreateWindows(Window window)
+    private static IAccessibilityBridge CreateWindows(Window window, AccessibilityActionRouter router)
     {
         var hwnd = ((SDL3Window)window.PlatformWindow).GetWin32Hwnd();
         if (hwnd == IntPtr.Zero) return NullAccessibilityBridge.Instance;
 
-        var host = new Sdl3UiaHostBridge(window);
+        var host = new Sdl3UiaHostBridge(window, router);
         window.SetUiaHostBridge(host);
+        window.SetActionRouter(router);
         return new WindowsAccessibilityBridge(hwnd, host);
     }
 
     [SupportedOSPlatform("linux")]
-    private static IAccessibilityBridge CreateLinux() =>
-        new LinuxAccessibilityBridge();
+    private static IAccessibilityBridge CreateLinux(Window window, AccessibilityActionRouter router)
+    {
+        window.SetActionRouter(router);
+        return new LinuxAccessibilityBridge(router);
+    }
 }

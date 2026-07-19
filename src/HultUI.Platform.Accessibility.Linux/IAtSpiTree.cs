@@ -27,4 +27,11 @@ internal interface IAtSpiTree
 
     /// <summary>The application id the registry assigns via Properties.Set.</summary>
     int ApplicationId { get; set; }
+
+    /// <summary>
+    /// Performs the node's default action (click / toggle / select) by routing to
+    /// the action host on the UI thread. Returns false when no action host is
+    /// wired or the node exposes no action.
+    /// </summary>
+    bool DoAction(AtSpiAccessible node);
 }
