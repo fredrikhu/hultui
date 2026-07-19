@@ -110,6 +110,34 @@ Chromium — the hand-written web baseline; medians, ms):
 > both together. The earlier HultUI table numbers here were cold-JIT-biased (e.g.
 > `create 1,000` 59, `remove row` 84) — see the warm-up note above.
 
+### Linux capture (2026-07-19, current commit)
+
+The **same machine** as the Windows/browser columns above, rebooted into Linux
+(Fedora 44, Wayland, NVIDIA proprietary driver), on the current commit. Release
+build, warm, medians of n=5; two table runs agreed within run-to-run noise.
+
+| Operation             | HultUI table (Linux) | HultUI virtual (Linux) |
+| --------------------- | -------------------: | ---------------------: |
+| create 1,000          |                 10.3 |                    5.2 |
+| update every 10th     |                  4.5 |                    1.2 |
+| select row            |                  1.3 |                    3.2 |
+| swap rows             |                  4.2 |                    4.5 |
+| remove row            |                  5.1 |                    3.3 |
+| create 10,000         |                  216 |                    2.6 |
+| append 1,000 → 1,000  |                 24.8 |                    5.6 |
+| clear 1,000           |                 11.3 |                   18.8 |
+
+> **Not an apples-to-apples OS comparison with the Windows column above.** Those
+> numbers were captured on 2026-07-12; the layout engine changed materially
+> afterwards (the flex-shrink / phase-1↔phase-6 fix, which cites benchmark wins
+> in `TODO.md`), so the table-op deltas conflate *Linux vs Windows* with *newer
+> vs older code*. On the bulk layout-bound ops Linux currently reads ~1.4–2.2×
+> faster (`create 1,000` ~10 vs 27, `create 10,000` ~216 vs 370, `append` ~25 vs
+> 45), but most of that is likely the code change, not the OS. The small
+> in-place ops (`select`/`swap`/`remove`/`update`) are within the "both are fast"
+> noise the section above warns about. For a clean comparison, reboot into
+> Windows on **this** commit and run `--auto` again — same binary, same GPU.
+
 Reading it:
 
 - **Browser vs HultUI table** is the apples-to-apples comparison — both build and
