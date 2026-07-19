@@ -45,8 +45,9 @@ public static class Ui
         return box;
     }
 
-    /// <summary>An icon+label ref chip (feature / wip / remote / tag / HEAD).</summary>
-    public static BoxElement Chip(string glyph, string label, Color bg, Color fg, bool outline = false)
+    /// <summary>A label chip with an optional leading icon (feature / wip / remote /
+    /// tag / HEAD). Pass a null/empty glyph for a text-only chip (local branches).</summary>
+    public static BoxElement Chip(string? glyph, string label, Color bg, Color fg, bool outline = false)
     {
         var box = Flex.Row(gap: 3)
             .AlignItems(AlignItems.Center)
@@ -54,7 +55,7 @@ public static class Ui
             .CornerRadius(Nocturne.RadiusMd * 0.75f);
         if (outline) box.BorderColor(fg).BorderWidth(1f);
         else box.Background(bg);
-        box.AddChild(Icon(glyph, 9f, fg));
+        if (!string.IsNullOrEmpty(glyph)) box.AddChild(Icon(glyph, 9f, fg));
         box.AddChild(Text.New(label).FontSize(9.5f).TextColor(fg));
         return box;
     }

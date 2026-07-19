@@ -449,73 +449,86 @@ public partial class JunctionApp
 
     private static IEnumerable<Element> RefChips(string[] refs, HashSet<string> remotes)
     {
-        // Git emits decorations local-branch-last — e.g. for the checked-out tip
-        // of two coincident branches: "HEAD -> main, origin/main,
-        // origin/feature, origin/HEAD, feature". Rendering in that raw order and
-        // truncating drops exactly the local branch the user is looking at. So
-        // classify every ref and order it HEAD → local → tag → remote, so the
-        // refs that matter most survive the MaxRefChips cap. OrderBy is stable,
-        // preserving git's order within each band.
-        var classified = new List<(int Priority, Element Chip)>();
+        // Parse the decorations into their kinds so we can collapse the noise:
+        //  - local branches carry no icon (a bare name reads as "local");
+        //  - a remote-tracking branch gets the cloud icon, and its remote prefix is
+        //    dropped when there's only one remote (origin/main → main);
+        //  - a local branch that also sits on the remote here merges into ONE cloud
+        //    chip (main + origin/main → ☁ main) instead of two.
+        string? head = null;                     // branch HEAD points at ("HEAD -> X")
+        var detached = false;                    // bare "HEAD"
+        var locals = new List<string>();
+        var remoteRefs = new List<(string Remote, string Leaf)>();
+        var tags = new List<string>();
+
         foreach (var raw in refs)
         {
             var d = raw.Trim();
             if (d.Length == 0) continue;
-
-            // "HEAD -> main": a HEAD marker plus the branch it points at.
-            if (d.StartsWith("HEAD -> ", StringComparison.Ordinal))
+            if (d.StartsWith("HEAD -> ", StringComparison.Ordinal)) { head = d["HEAD -> ".Length..]; locals.Add(head); continue; }
+            if (d == "HEAD") { detached = true; continue; }
+            if (d.StartsWith("tag: ", StringComparison.Ordinal)) { tags.Add(d[5..]); continue; }
+            var seg = d.Split('/', 2);
+            if (seg.Length == 2 && remotes.Contains(seg[0]))
             {
-                classified.Add((0, Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true)));
-                classified.Add((1, LocalBranchChip(d["HEAD -> ".Length..])));
+                if (d.EndsWith("/HEAD", StringComparison.Ordinal)) continue;  // symbolic origin/HEAD
+                remoteRefs.Add((seg[0], seg[1]));
                 continue;
             }
-            if (d == "HEAD")
-            {
-                classified.Add((0, Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true)));
-                continue;
-            }
-            if (d.StartsWith("tag: ", StringComparison.Ordinal))
-            {
-                classified.Add((2, Ui.Chip(Icons.Tag, d[5..], Nocturne.Neutral800, Nocturne.Neutral100)));
-                continue;
-            }
-
-            // Remote-tracking ref ("origin/main"): cloud chip, keep the prefix.
-            var firstSeg = d.Split('/', 2)[0];
-            if (remotes.Contains(firstSeg))
-            {
-                if (d.EndsWith("/HEAD", StringComparison.Ordinal)) continue;  // symbolic origin/HEAD — skip
-                classified.Add((3, Ui.Chip(Icons.Cloud, d, Nocturne.Neutral800, Nocturne.Neutral100)));
-                continue;
-            }
-
-            classified.Add((1, LocalBranchChip(d)));
+            locals.Add(d);
         }
 
-        var ordered = classified.OrderBy(c => c.Priority).Select(c => c.Chip).ToList();
+        var singleRemote = remotes.Count <= 1;
+        var consumed = new bool[remoteRefs.Count];
+        var chips = new List<Element>();
 
-        if (ordered.Count <= MaxRefChips)
+        if (head != null || detached)
+            chips.Add(Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true));
+
+        // Local branches first; merge a matching remote-tracking ref on this commit.
+        foreach (var name in locals)
         {
-            foreach (var chip in ordered) yield return chip;
+            var paired = false;
+            for (var i = 0; i < remoteRefs.Count; i++)
+                if (!consumed[i] && remoteRefs[i].Leaf == name) { consumed[i] = true; paired = true; }
+            chips.Add(BranchChip(name, onRemote: paired));
+        }
+
+        // Remote-only branches: cloud + name (with the remote prefix only if ambiguous).
+        for (var i = 0; i < remoteRefs.Count; i++)
+        {
+            if (consumed[i]) continue;
+            var (remote, leaf) = remoteRefs[i];
+            chips.Add(Ui.Chip(Icons.Cloud, singleRemote ? leaf : $"{remote}/{leaf}",
+                Nocturne.Neutral800, Nocturne.Neutral100));
+        }
+
+        foreach (var t in tags)
+            chips.Add(Ui.Chip(Icons.Tag, t, Nocturne.Neutral800, Nocturne.Neutral100));
+
+        if (chips.Count <= MaxRefChips)
+        {
+            foreach (var chip in chips) yield return chip;
             yield break;
         }
-
         // Reserve the last slot for the overflow count so nothing vanishes silently.
-        for (var i = 0; i < MaxRefChips - 1; i++) yield return ordered[i];
-        yield return Ui.Chip(Icons.GitBranch, $"+{ordered.Count - (MaxRefChips - 1)}",
+        for (var i = 0; i < MaxRefChips - 1; i++) yield return chips[i];
+        yield return Ui.Chip(Icons.GitBranch, $"+{chips.Count - (MaxRefChips - 1)}",
             Nocturne.Neutral800, Nocturne.Neutral100);
     }
 
-    private static Element LocalBranchChip(string name)
+    /// <summary>A branch chip: local branches are text-only (no icon); a branch that
+    /// also lives on the remote here gets the cloud icon (local + remote, in one chip).</summary>
+    private static Element BranchChip(string name, bool onRemote)
     {
         var pb = BranchName.Parse(name);
-        var (glyph, bg, fg) = pb.ChipLabel switch
+        var (bg, fg) = pb.ChipLabel switch
         {
-            "FEAT" => (Icons.GitBranch, Nocturne.Accent800, Nocturne.Accent100),
-            "WIP" => (Icons.Flask, Nocturne.Accent2_800, Nocturne.Accent2_100),
-            _ => (Icons.GitBranch, Nocturne.Neutral800, Nocturne.Neutral100),
+            "FEAT" => (Nocturne.Accent800, Nocturne.Accent100),
+            "WIP" => (Nocturne.Accent2_800, Nocturne.Accent2_100),
+            _ => (Nocturne.Neutral800, Nocturne.Neutral100),
         };
-        return Ui.Chip(glyph, pb.Title, bg, fg);
+        return Ui.Chip(onRemote ? Icons.Cloud : null, pb.Title, bg, fg);
     }
 
     // ── Footer ───────────────────────────────────────────────────────────
