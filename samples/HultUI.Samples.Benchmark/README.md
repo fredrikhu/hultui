@@ -91,24 +91,28 @@ Run the web benchmark on the *same machine* to get a meaningful comparison.)
 ## Non-virtualized vs virtualized vs browser
 
 Same operations, three ways, all on one machine (browser = keyed `vanillajs` in
-Chromium — the hand-written web baseline; medians, ms):
+Brave (Chromium 150) — the hand-written web baseline; medians, ms):
 
 | Operation             | Browser (vanilla) | HultUI table | HultUI virtual |
 | --------------------- | ----------------: | -----------: | -------------: |
-| create 1,000          |                31 |           27 |            7.0 |
-| update every 10th     |              17.5 |          5.6 |            1.1 |
-| select row            |               6.3 |          0.6 |            1.2 |
-| swap rows             |              18.5 |          4.5 |            1.0 |
-| remove row            |              16.1 |          5.2 |            1.6 |
-| create 10,000         |               325 |          370 |            1.9 |
-| append 1,000 → 1,000  |                35 |           45 |            6.8 |
-| clear 1,000           |              13.9 |           15 |            5.7 |
+| create 1,000          |              31.5 |           23 |            6.0 |
+| update every 10th     |              18.8 |          5.5 |            1.0 |
+| select row            |               6.9 |          0.6 |            1.0 |
+| swap rows             |              18.7 |          4.2 |            1.1 |
+| remove row            |              16.1 |          4.2 |            1.4 |
+| create 10,000         |               330 |          305 |            1.9 |
+| append 1,000 → 1,000  |              35.3 |           34 |            5.9 |
+| clear 1,000           |              14.5 |           12 |            5.0 |
 
-> The HultUI columns were re-measured **warm** (with the global pre-warm above)
-> on 2026-07-12; the browser column is retained from the original same-machine
-> capture with the official js-framework-benchmark. For a pristine set, re-run
-> both together. The earlier HultUI table numbers here were cold-JIT-biased (e.g.
-> `create 1,000` 59, `remove row` 84) — see the warm-up note above.
+> All three columns are now a **fresh same-session capture** on 2026-07-19, on the
+> `linux-atspi-export` commit. The HultUI columns were measured **warm** (with the
+> global pre-warm above); the browser column was re-captured with the official
+> js-framework-benchmark webdriver suite (`npm run bench -- --framework
+> keyed/vanillajs`) driving **Brave** on the same machine (medians of the runner's
+> per-op repeats). The two OS HultUI columns share this commit, so they and the
+> Linux capture below are directly comparable. The earlier HultUI table numbers
+> here were cold-JIT-biased (e.g. `create 1,000` 59, `remove row` 84) — see the
+> warm-up note above.
 
 ### Linux capture (2026-07-20, current commit)
 
@@ -137,20 +141,24 @@ GC/scheduling-jittery).
 > other way (`create 1,000` ~10 → ~17, `create 10,000` ~216 → ~258); that path
 > touches no GPU, so the shift is kernel/scheduler/thermal, not the driver.
 >
-> **Still not an apples-to-apples OS comparison with the Windows column above** —
-> those numbers are from 2026-07-12 and the layout engine changed materially
-> afterwards, so table-op deltas conflate *Linux vs Windows* with *newer vs older
-> code*. For a clean comparison, reboot into Windows on **this** commit and run
-> `--auto` again — same binary, same GPU.
+> **Now an apples-to-apples OS comparison with the Windows column above** — that
+> column was re-captured on 2026-07-19 on **this same commit** (same binary, same
+> GPU, machine rebooted between the two). On the non-virtualized table Linux is
+> faster on every op except `remove row` (a tie): the gap is widest on the
+> present-bound in-place ops (`update` 3.4 vs 5.5, `select` 0.4 vs 0.6, `append`
+> 22 vs 34), consistent with the healed GPU present path. The virtual columns are
+> roughly even; ignore the Linux virtual `clear 1,000` = 20.7, a single
+> GC/scheduling-jittery median (the Windows 5.0 is the trustworthy figure there).
 
 Reading it:
 
 - **Browser vs HultUI table** is the apples-to-apples comparison — both build and
-  lay out every real row. Warm, HultUI is now **on par with the vanilla browser
-  on `create 1,000`** (27 vs 31), meaningfully faster on the in-place ops
+  lay out every real row. Warm, HultUI is now **faster than the vanilla browser
+  on `create 1,000`** (23 vs 31.5), meaningfully faster on the in-place ops
   (`update`/`swap`/`remove`, and `select` especially — paint culling plus a
-  sub-frame present), and only modestly slower on the biggest bulk-layout op,
-  `create 10,000` (~1.1×) and `append` (~1.3×), which are layout-bound (see below).
+  sub-frame present), and roughly **on par on the biggest bulk-layout ops**,
+  `create 10,000` (305 vs 330) and `append` (34 vs 35), which are layout-bound
+  (see below).
 - **Caveat on the small ops:** HultUI's post-frame callback fires as soon as the
   frame is presented (sub-millisecond for a cheap op), whereas the browser's
   paint timing is coarser. So treat the in-place-op gaps as "both are fast" rather
