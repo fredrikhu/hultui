@@ -157,6 +157,14 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
             }
         }
 
+        // diff.Reordered (same children, new order) needs no signal: every
+        // Accessible/Cache query is served from the freshly rebuilt snapshot, so
+        // GetChildren / GetChildAtIndex already return the new order. Verified —
+        // a persistent pyatspi client observes each reorder with no reorder signal
+        // emitted at all. A high-level AT that caches child order and only
+        // refreshes on events (Orca) would want an object:children-changed here;
+        // add it when an Orca test shows it's needed and confirms the exact form.
+
         if (!firstBuild)
             foreach (var change in diff.PropertyChanged)
                 if (EmitPropertyChange(change)) DebugSignalsEmitted++;

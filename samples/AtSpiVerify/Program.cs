@@ -22,11 +22,12 @@ var checkbox = Checkbox.New(false, "Enable feature");
 // click handler is what makes this export as a "push button".
 button.OnClick(_ => counter.Content = $"Count: {++count}");
 
-session.Window.SetRoot(Flex.Column(gap: 8).Padding(12).Children(
+var column = Flex.Column(gap: 8).Padding(12).Children(
     Text.New("HultUI AT-SPI Verify"),
     button,
     checkbox,
-    counter));
+    counter);
+session.Window.SetRoot(column);
 
 var actionHost = session.Window.InstallActionRouter();
 var bridge = session.Window.InstallAccessibilityBridge(new LinuxAccessibilityBridge(actionHost));
@@ -65,9 +66,14 @@ while (!stop)
     {
         toggled = !toggled;
         checkbox.IsChecked = toggled; // periodic state-change for signal testing
+
+        // Reorder: move the button to the end, then back — a same-set, new-order
+        // change that produces a TreeDiff.Reordered.
+        column.RemoveChild(button);
+        if (toggled) column.AddChild(button); else column.InsertChild(1, button);
         session.PumpFrame();
         Console.WriteLine($"[harness] button-invokes={count} checkbox={toggled} " +
-            $"applyChanges={bridge.DebugApplyChangesCalls}");
+            $"button-at={(toggled ? "end" : "index1")} applyChanges={bridge.DebugApplyChangesCalls}");
     }
 }
 
