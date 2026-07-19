@@ -274,7 +274,8 @@ public partial class JunctionApp
         // fixed-width sidebar next to the diff.
         var scroll = ScrollView.New()
             .Padding(new Thickness(8, 6, 8, 6))
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0))
+            .WithRef(_fileScrollRef);
         if (fill) scroll.FlexGrow(1);
         else scroll.Width(238).FlexShrink(0);
 
@@ -282,7 +283,11 @@ public partial class JunctionApp
             .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8)));
 
         foreach (var f in files)
-            scroll.AddChild(FileTreeRow(f));
+        {
+            var rowEl = FileTreeRow(f);
+            if (f.Path == _selectedFilePath) rowEl.WithRef(_fileSelRef);
+            scroll.AddChild(rowEl);
+        }
         return scroll;
     }
 
@@ -305,6 +310,7 @@ public partial class JunctionApp
         if (i < 0) i = 0;
         i = Math.Clamp(i + delta, 0, files.Count - 1);
         _selectedFilePath = files[i].Path;
+        _pendingScrollToSelected = true;
         MarkDirty();
         return true;
     }

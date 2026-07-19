@@ -152,12 +152,18 @@ public partial class JunctionApp : Component, IDisposable
     private bool _diffSplit;
     private bool _diffFull;
 
+    // Commit-view file list: scroll the keyboard-selected file into view.
+    private readonly Ref<ScrollViewElement> _fileScrollRef = new();
+    private readonly Ref<Element> _fileSelRef = new();
+
     // Command palette.
     private bool _paletteOpen;
     private string _paletteQuery = "";
     private int _paletteSel;
     private readonly Ref<TextInputElement> _paletteRef = new();
     private bool _pendingPaletteFocus;
+    private readonly Ref<ScrollViewElement> _paletteScrollRef = new();
+    private readonly Ref<Element> _paletteSelRef = new();
 
     // Modal text-input dialog (new branch / rename / set upstream…).
     private DialogSpec? _dialog;
@@ -555,9 +561,36 @@ public partial class JunctionApp : Component, IDisposable
         if (_pendingScrollToSelected)
         {
             _pendingScrollToSelected = false;
-            if (View == JunctionView.History)
+            if (View == JunctionView.History && !_paletteOpen)
+            {
+                // Fixed row height, so index math needs no per-row layout.
                 EnsureSelectedCommitVisible();
+            }
+            else if (_paletteOpen || View == JunctionView.Commit)
+            {
+                // The palette / file rows are keyed by selection, so the selected row
+                // is a *fresh* element with no layout yet in OnAfterBuild (it runs
+                // before the layout pass). Read its box after the frame is laid out.
+                var scrollRef = _paletteOpen ? _paletteScrollRef : _fileScrollRef;
+                var rowRef = _paletteOpen ? _paletteSelRef : _fileSelRef;
+                _window.RequestPostFrameCallback(() => ScrollRowIntoView(scrollRef, rowRef));
+            }
         }
+    }
+
+    /// <summary>Scrolls a list so its keyboard-selected row is fully visible. Reads the
+    /// actual laid-out row box (not a fixed row height), so it works with the
+    /// variable-height palette and file rows. Call after the layout pass.</summary>
+    private static void ScrollRowIntoView(Ref<ScrollViewElement> scrollRef, Ref<Element> rowRef)
+    {
+        if (scrollRef.Current is not { } scroll || rowRef.Current is not { } row) return;
+        var view = scroll.Layout.AbsoluteContentBox;
+        var box = row.Layout.AbsoluteBorderBox;
+        var cur = scroll.ScrollOffsetY;
+        var top = box.Y - view.Y + cur;        // row top in the scroll's content space
+        var bottom = top + box.Height;
+        if (top < cur) scroll.ScrollOffsetY = top;
+        else if (bottom > cur + view.Height) scroll.ScrollOffsetY = bottom - view.Height;
     }
 
     // ── View / selection actions ─────────────────────────────────────────

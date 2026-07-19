@@ -95,6 +95,9 @@ public partial class JunctionApp
             .RenderWith(RenderDiffRow)
             .FlexGrow(1)
             .Background(Nocturne.Bg);
+        // Key by file so each file gets its own scroll position instead of one shared
+        // offset — switching files reconciles to a fresh list that starts at the top.
+        list.Key = "diff:" + diff.Path;
         // Focusable so clicking the diff lets arrow / page / home / end scroll it.
         list.IsFocusable = true;
         list.TabIndex = 0;

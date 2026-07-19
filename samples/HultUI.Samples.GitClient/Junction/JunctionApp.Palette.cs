@@ -27,6 +27,7 @@ public partial class JunctionApp
         var items = FilteredPaletteItems();
         if (items.Count == 0) return;
         _paletteSel = Math.Clamp(_paletteSel + delta, 0, items.Count - 1);
+        _pendingScrollToSelected = true;
         MarkDirty();
     }
 
@@ -101,7 +102,7 @@ public partial class JunctionApp
         // Results.
         var items = FilteredPaletteItems();
         _paletteSel = Math.Clamp(_paletteSel, 0, Math.Max(0, items.Count - 1));
-        var list = ScrollView.New().FlexGrow(1).Padding(new Thickness(6));
+        var list = ScrollView.New().FlexGrow(1).Padding(new Thickness(6)).WithRef(_paletteScrollRef);
         if (items.Count == 0)
         {
             list.AddChild(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center)
@@ -111,7 +112,11 @@ public partial class JunctionApp
         else
         {
             for (var i = 0; i < items.Count; i++)
-                list.AddChild(PaletteRow(items[i], i == _paletteSel));
+            {
+                var rowEl = PaletteRow(items[i], i == _paletteSel);
+                if (i == _paletteSel) rowEl.WithRef(_paletteSelRef);
+                list.AddChild(rowEl);
+            }
         }
         card.AddChild(list);
 
