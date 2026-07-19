@@ -96,9 +96,20 @@ public partial class JunctionApp
             .Padding(new Thickness(12, 16, 12, 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
+        // A branch-tab compare shows branch names and returns to Branches; a
+        // History multi-select compare shows commit subjects and returns to History.
+        var branchCmp = BranchCompareActive()
+            && _branchCompare!.Value.BaseHash == range.BaseHash
+            && _branchCompare!.Value.HeadHash == range.HeadHash
+            ? _branchCompare : null;
+
         var row1 = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
-        row1.AddChild(Ui.GhostButton("History", Icons.ArrowLeft, () => SetView(JunctionView.History)));
-        row1.AddChild(Text.New($"Comparing {_selectedCommitHashes.Count} selected commits")
+        row1.AddChild(branchCmp != null
+            ? Ui.GhostButton("Branches", Icons.ArrowLeft, () => SetView(JunctionView.Branches))
+            : Ui.GhostButton("History", Icons.ArrowLeft, () => SetView(JunctionView.History)));
+        row1.AddChild(Text.New(branchCmp != null
+                ? "Comparing 2 branches"
+                : $"Comparing {_selectedCommitHashes.Count} selected commits")
             .FontSize(15f).FontWeight(FontWeight.Medium)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         box.AddChild(row1);
@@ -106,7 +117,11 @@ public partial class JunctionApp
         var row2 = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
         row2.AddChild(Ui.Mono($"{Short7(range.BaseHash)} → {Short7(range.HeadHash)}", 11.5f, Nocturne.On(0.55))
             .FlexShrink(0));
-        if (baseCommit != null && headCommit != null)
+        if (branchCmp is { } bc)
+            row2.AddChild(Text.New($"{bc.BaseLabel}  →  {bc.HeadLabel}")
+                .FontSize(11.5f).TextColor(Nocturne.On(0.55))
+                .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        else if (baseCommit != null && headCommit != null)
             row2.AddChild(Text.New($"{baseCommit.Subject}  →  {headCommit.Subject}")
                 .FontSize(11.5f).TextColor(Nocturne.On(0.55))
                 .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));

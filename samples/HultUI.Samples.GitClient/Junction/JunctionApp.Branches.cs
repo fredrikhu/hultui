@@ -30,6 +30,8 @@ public partial class JunctionApp
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildBranchesHeader());
+        if (BranchCompareActive())
+            col.AddChild(BuildBranchCompareBar(_branchCompare!.Value));
         col.AddChild(BuildBranchTableHeader());
         col.AddChild(BuildBranchScroll(list));
         col.AddChild(BuildBranchesFooter());
@@ -86,6 +88,26 @@ public partial class JunctionApp
         bar.AddChild(Text.New("Branches").FontSize(18f).FontWeight(FontWeight.SemiBold));
         bar.AddChild(BuildBranchSearch());
         bar.AddChild(Ui.PrimaryButton("New branch", Icons.Plus, PromptNewBranch, 12.5f));
+        return bar;
+    }
+
+    // ── Two-branch compare bar (shown while two tips are picked) ──────────
+
+    private Element BuildBranchCompareBar(BranchCompare bc)
+    {
+        var bar = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(8, 26, 8, 26))
+            .Background(Nocturne.Alpha(Nocturne.Accent, 0.10))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
+
+        bar.AddChild(Ui.Icon(Icons.GitDiff, 14f, Nocturne.Accent300).FlexShrink(0));
+        bar.AddChild(Text.New("Comparing").FontSize(12.5f).TextColor(Nocturne.On(0.62)).FlexShrink(0));
+        bar.AddChild(Ui.Chip(Icons.GitBranch, bc.BaseLabel, Nocturne.Neutral800, Nocturne.Neutral100).FlexShrink(0));
+        bar.AddChild(Ui.Icon(Icons.ArrowRight, 12f, Nocturne.On(0.5)).FlexShrink(0));
+        bar.AddChild(Ui.Chip(Icons.GitBranch, bc.HeadLabel, Nocturne.Accent800, Nocturne.Accent100).FlexShrink(0));
+        bar.AddChild(Box.New().FlexGrow(1));
+        bar.AddChild(Ui.PrimaryButton("View diff", Icons.ArrowRight, () => SetView(JunctionView.Commit), 12f).FlexShrink(0));
+        bar.AddChild(Ui.GhostButton("Clear", Icons.X, ClearBranchCompare, 12f).FlexShrink(0));
         return bar;
     }
 
@@ -170,6 +192,11 @@ public partial class JunctionApp
     private Element BranchRow(GitBranch b, int index)
     {
         var selected = index == _branchSel;
+        // Picked as one of the two tips of an active branch compare (base/head).
+        var comparePick = BranchCompareActive() && SelectionContains(b.Hash);
+        var compareRole = comparePick
+            ? (b.Hash == _branchCompare!.Value.HeadHash ? "head" : "base")
+            : null;
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
         var pb = BranchName.Parse(leaf);
 
@@ -179,10 +206,12 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow)
             .BorderColor(Nocturne.On(0.06)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
-        // Selection in the key so the highlight refreshes (handlers aren't copied
-        // on patch — a stale hover handler would otherwise clobber the background).
-        row.Key = b.Name + (selected ? "#s" : "");
+        // Selection + compare-pick in the key so the highlight/handlers refresh
+        // (handlers aren't copied on patch — a stale hover handler would otherwise
+        // clobber the background).
+        row.Key = b.Name + (selected ? "#s" : "") + (comparePick ? "#c" + compareRole : "");
         if (selected) row.Background(Nocturne.Accent900);
+        if (comparePick) row.Background(Nocturne.Alpha(Nocturne.Accent, 0.14));
 
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
@@ -199,6 +228,8 @@ public partial class JunctionApp
         var titleRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         titleRow.AddChild(Ui.Mono(pb.Title, 12.5f, b.IsRemote ? Nocturne.On(0.72) : Nocturne.Text)
             .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        if (compareRole != null)
+            titleRow.AddChild(Ui.TagOutline(compareRole, Nocturne.Accent, 9f).FlexShrink(0));
         if (b.IsCurrent)
             titleRow.AddChild(Ui.TagOutline("current", Nocturne.Accent, 9f));
         if (b.IsRemote)
@@ -241,11 +272,11 @@ public partial class JunctionApp
         // Actions.
         row.AddChild(BranchActions(b, leaf));
 
-        row.OnClick(_ => SelectBranch(index));
+        row.OnClick(e => OnBranchRowClick(b, index, e.Modifiers));
         // Right-click selects the row first, then the framework opens the menu.
         row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectBranch(index); });
         row.ContextMenu(() => BranchMenuItems(b));
-        if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        if (!selected && !comparePick) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
 
@@ -376,6 +407,44 @@ public partial class JunctionApp
     private void SelectBranch(int index)
     {
         _branchSel = index;
+        MarkDirty();
+    }
+
+    /// <summary>Click on a branch row. Plain click selects the branch (for actions)
+    /// and its tip commit; Ctrl/Cmd-click adds a second branch's tip and forms a
+    /// two-branch compare (base = older, head = newer) that the Commit view diffs —
+    /// all without leaving the Branches tab.</summary>
+    private void OnBranchRowClick(GitBranch b, int index, KeyModifiers mods)
+    {
+        var additive = mods.HasFlag(KeyModifiers.Ctrl) || mods.HasFlag(KeyModifiers.Super);
+        if (additive && _compareAnchorBranch is { } a && a.Hash != b.Hash)
+        {
+            // Second (or replacement) pick → form the pair, ordered by commit date to
+            // match History's compare direction. The anchor stays put so re-picking a
+            // partner just swaps the other endpoint.
+            var (baseBr, headBr) = a.CommitDate <= b.CommitDate ? (a, b) : (b, a);
+            _selectedCommitHashes.Clear();
+            _selectedCommitHashes.Add(a.Hash);
+            _selectedCommitHashes.Add(b.Hash);
+            _selectedCommitHash = b.Hash;
+            _selectionAnchorHash = b.Hash;
+            _branchCompare = new BranchCompare(baseBr.Hash, headBr.Hash, baseBr.Name, headBr.Name);
+        }
+        else
+        {
+            // Plain pick (or Ctrl without a live anchor): single tip; becomes the anchor.
+            // SetCommitSelection clears any prior compare, so set the anchor after it.
+            _branchSel = index;
+            SetCommitSelection(b.Hash);
+            _compareAnchorBranch = b;
+        }
+        MarkDirty();
+    }
+
+    /// <summary>Ends a branch compare, collapsing to the currently-highlighted branch's tip.</summary>
+    private void ClearBranchCompare()
+    {
+        SetCommitSelection(SelectedBranch()?.Hash);
         MarkDirty();
     }
 
