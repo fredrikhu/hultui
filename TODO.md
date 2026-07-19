@@ -38,3 +38,40 @@
 - macOS `NSAccessibility` bridge.
 - LiveRegion / alert announcements.
 - Accessibility for overlays, tooltips, context menus.
+
+## Traps & decisions (durable)
+
+Engineering notes that aren't obvious from the code, carried over from the AT-SPI
+and benchmark work.
+
+- **Do not change the `FlexShrink = 1` default.** Fixed-height items shrinking in a
+  bounded, overflowing column is correct CSS; the real bug was narrower (a scroll
+  container's indefinite main axis not propagating into nested flex containers), and
+  it is fixed. (The `min-height:auto` clamp is a separate, still-deferred item above.)
+- **A/B every layout-engine change with the benchmark** — `--auto` and
+  `--auto --virtual`, in one session, with `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0` so the
+  window doesn't steal focus. Unit tests passed straight through a viewport-collapsing
+  regression that only the benchmark caught. Compare within a single session only;
+  cross-session numbers are noise.
+- **Snapshot baselines in raw string literals carry the source file's line endings**
+  (CRLF on Windows, LF on Linux under autocrlf), so a baseline can pass one CI leg and
+  fail the other. Normalise with `ReplaceLineEndings("\n")`.
+- **Inside `HultUI.*`, bare `Text` binds to the `HultUI.Text` namespace**, not the
+  builder — alias `using Text = HultUI.Core.Builders.Text;` inside the namespace.
+- **`grep "warning CS"` does not match `warning CA1416`** — platform-analyzer warnings
+  hide from that filter, so a clean-looking `warning CS` grep can still be masking
+  CA1416. The Linux a11y test project carries a scoped `<NoWarn>CA1416</NoWarn>`
+  because its pure role-mapping tests call `[SupportedOSPlatform("linux")]` helpers on
+  every CI leg (Windows included).
+- **AT-SPI wire-level gotchas:** `Tmds.DBus.Protocol`'s `MessageWriter`/`Reader` are
+  ref structs — they can't be a `using` variable and passed by `ref` at once (dispose
+  by hand). Never guess AT-SPI role numbers — introspect a live GTK app with `busctl`.
+  The registry probes the app root *during* the `Embed` round-trip on the receive
+  thread, so seed the root into the snapshot **before** `Embed` or that probe answers
+  `UnknownObject` (visible only on the raw bus, not through pyatspi). Verify with two
+  lenses: pyatspi for tree/semantics, `busctl monitor` for wire-format and timing —
+  each catches bugs the other misses.
+- **Re-verifying the AT-SPI bridge** needs a running `at-spi2-registryd`.
+  `samples/AtSpiVerify` drives the bridge headlessly
+  (`HeadlessWindow.InstallAccessibilityBridge` / `InstallActionRouter`), and
+  `atspi_inspect.py` / `atspi_action.py` / `atspi_reorder.py` read it back with pyatspi.
