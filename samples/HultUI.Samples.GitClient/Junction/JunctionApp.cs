@@ -97,17 +97,21 @@ public partial class JunctionApp : Component, IDisposable
     private readonly HashSet<string> _selectedCommitHashes = new(StringComparer.Ordinal);
     private string? _selectionAnchorHash;
 
-    // Branch-tab compare: picking a branch in the Branches tab selects its tip
-    // commit here, and Ctrl/Cmd-picking a second forms a two-branch diff. The pair
-    // (base = older, head = newer) plus branch labels for the compare header;
-    // _compareAnchorBranch is the first-picked branch awaiting its partner. Honoured
-    // by SelectedRange only while the live selection is still exactly these two tips
-    // (any History edit changes the set and supersedes it), and resolved directly so
-    // the diff works even when a tip is filtered out of the loaded History list.
+    // Branch-tab compare: the Branches list is a Windows-style multi-select (plain
+    // click/nav single-selects, Ctrl toggles, Ctrl+arrows move the caret only,
+    // Ctrl+Space toggles the focused row). Selection is tracked by branch identity
+    // (full ref name) in _selectedBranches, so two branches at the SAME commit are
+    // both representable (→ a "no differences" compare), which a tip-hash set could
+    // not. When ≥2 are selected, _branchCompare caches the oldest→newest tip pair
+    // (base = older, head = newer) plus labels; SelectedRange returns it directly, so
+    // the diff resolves even when a tip is filtered out of the loaded History list.
+    // A History selection edit clears it (see EndBranchCompare / SetCommitSelection).
     private readonly record struct BranchCompare(
-        string BaseHash, string HeadHash, string BaseLabel, string HeadLabel);
+        string BaseFull, string HeadFull,
+        string BaseHash, string HeadHash,
+        string BaseLabel, string HeadLabel);
     private BranchCompare? _branchCompare;
-    private GitBranch? _compareAnchorBranch;
+    private readonly HashSet<string> _selectedBranches = new(StringComparer.Ordinal);
     private string _historyQuery = "";
     private readonly Ref<TextInputElement> _historySearchRef = new();
     private bool _pendingHistorySearchFocus;
@@ -576,19 +580,19 @@ public partial class JunctionApp : Component, IDisposable
         _selectionAnchorHash = hash;
         _selectedCommitHashes.Clear();
         if (hash != null) _selectedCommitHashes.Add(hash);
-        // Any collapse (History click, repo switch) ends a branch compare.
-        _branchCompare = null;
-        _compareAnchorBranch = null;
+        EndBranchCompare();   // any collapse (History click, repo switch) ends a branch compare
     }
 
-    /// <summary>True while the live selection is exactly the two branch tips of an
-    /// active branch-tab compare — the guard that lets the branch pair supersede the
-    /// history-order range and self-invalidate the moment the selection is edited.</summary>
-    private bool BranchCompareActive() =>
-        _branchCompare is { } bc
-        && _selectedCommitHashes.Count == 2
-        && _selectedCommitHashes.Contains(bc.BaseHash)
-        && _selectedCommitHashes.Contains(bc.HeadHash);
+    /// <summary>Clears the Branches-tab compare selection. Called when a History
+    /// selection edit takes over so the two range sources never both drive the diff.</summary>
+    private void EndBranchCompare()
+    {
+        _selectedBranches.Clear();
+        _branchCompare = null;
+    }
+
+    /// <summary>True while a two-(or-more-)branch compare is selected in the Branches tab.</summary>
+    private bool BranchCompareActive() => _branchCompare is not null;
 
     // Selection and focus are separate, like a Windows list: _selectedCommitHash
     // is the focus caret and may sit outside (or alongside an empty) selection

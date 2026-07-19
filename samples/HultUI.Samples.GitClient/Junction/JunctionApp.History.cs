@@ -102,6 +102,7 @@ public partial class JunctionApp
 
     private void MoveCommitSelection(int delta, bool extend = false, bool focusOnly = false, bool additive = false)
     {
+        EndBranchCompare();   // a History selection edit takes over the compare range
         var commits = FilteredCommits(_history.Value);
         if (commits.Count == 0) return;
         var i = _selectedCommitHash == null ? 0 : IndexOfHash(commits, _selectedCommitHash);
@@ -134,6 +135,7 @@ public partial class JunctionApp
     /// (may empty it entirely, like a Windows list).</summary>
     private void ToggleFocusedCommitSelection()
     {
+        EndBranchCompare();
         if (_selectedCommitHash is not { } hash) return;
         if (!_selectedCommitHashes.Add(hash)) _selectedCommitHashes.Remove(hash);
         _selectionAnchorHash = hash;
@@ -157,6 +159,7 @@ public partial class JunctionApp
     /// Shift selects the anchor→clicked range, Ctrl+Shift adds that range.</summary>
     private void OnCommitRowClick(GitCommit commit, KeyModifiers mods)
     {
+        EndBranchCompare();
         var ctrl = mods.HasFlag(KeyModifiers.Ctrl);
         var shift = mods.HasFlag(KeyModifiers.Shift);
 

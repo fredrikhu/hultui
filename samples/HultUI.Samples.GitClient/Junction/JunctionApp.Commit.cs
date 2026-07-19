@@ -52,14 +52,34 @@ public partial class JunctionApp
     {
         _detailHash = null;
         _detailRange = range;
+
+        var col = Flex.Column(gap: 0).FlexGrow(1);
+        col.AddChild(BuildRangeHeader(range));
+
+        // Two branches on the same commit: nothing to diff.
+        if (range.BaseHash == range.HeadHash)
+        {
+            col.AddChild(BuildNoDiffPane(range.BaseHash));
+            return col;
+        }
+
         PrefetchRangeDetail(range);
         var detail = _commitDetail.Value;
         var ready = detail.Commit != null && detail.Commit.Hash == range.HeadHash
             && detail.RangeBaseHash == range.BaseHash;
-
-        var col = Flex.Column(gap: 0).FlexGrow(1);
-        col.AddChild(BuildRangeHeader(range));
         col.AddChild(ready ? BuildCommitBody(detail) : BuildCommitBodyLoading());
+        return col;
+    }
+
+    private Element BuildNoDiffPane(string hash)
+    {
+        var col = Flex.Column(gap: 6).FlexGrow(1)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
+        col.AddChild(Ui.Icon(Icons.Check, 26f, Nocturne.On(0.35)));
+        col.AddChild(Text.New("No differences").FontSize(14f).FontWeight(FontWeight.Medium)
+            .TextColor(Nocturne.On(0.7)));
+        col.AddChild(Text.New($"Both branches point to the same commit ({Short7(hash)}).")
+            .FontSize(12f).TextColor(Nocturne.On(0.45)));
         return col;
     }
 

@@ -192,10 +192,10 @@ public partial class JunctionApp
     private Element BranchRow(GitBranch b, int index)
     {
         var selected = index == _branchSel;
-        // Picked as one of the two tips of an active branch compare (base/head).
-        var comparePick = BranchCompareActive() && SelectionContains(b.Hash);
-        var compareRole = comparePick
-            ? (b.Hash == _branchCompare!.Value.HeadHash ? "head" : "base")
+        // Rows in the compare selection are highlighted; the base/head extremes tagged.
+        var comparePick = _selectedBranches.Contains(b.FullName);
+        var compareRole = _branchCompare is { } bc0
+            ? (b.FullName == bc0.BaseFull ? "base" : b.FullName == bc0.HeadFull ? "head" : null)
             : null;
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
         var pb = BranchName.Parse(leaf);
@@ -375,14 +375,18 @@ public partial class JunctionApp
     // Nav subset that also drives the list from inside the search box.
     private bool HandleBranchNavKey(KeyDownEvent e)
     {
+        // Windows-list modifiers: plain nav single-selects, Ctrl moves the focus
+        // caret only, Ctrl+Space toggles the focused branch in the compare selection.
+        var focusOnly = e.Modifiers.HasFlag(KeyModifiers.Ctrl);
         switch (e.Key)
         {
-            case KeyCode.Down: MoveBranchSel(1); return true;
-            case KeyCode.Up: MoveBranchSel(-1); return true;
-            case KeyCode.PageDown: MoveBranchSel(6); return true;
-            case KeyCode.PageUp: MoveBranchSel(-6); return true;
-            case KeyCode.Home: MoveBranchSel(int.MinValue / 2); return true;
-            case KeyCode.End: MoveBranchSel(int.MaxValue / 2); return true;
+            case KeyCode.Down: MoveBranchSel(1, focusOnly); return true;
+            case KeyCode.Up: MoveBranchSel(-1, focusOnly); return true;
+            case KeyCode.PageDown: MoveBranchSel(6, focusOnly); return true;
+            case KeyCode.PageUp: MoveBranchSel(-6, focusOnly); return true;
+            case KeyCode.Home: MoveBranchSel(int.MinValue / 2, focusOnly); return true;
+            case KeyCode.End: MoveBranchSel(int.MaxValue / 2, focusOnly); return true;
+            case KeyCode.Space when focusOnly: ToggleFocusedBranch(); return true;
             case KeyCode.Enter: CheckoutSelected(); return true;
             default: return false;
         }
@@ -410,49 +414,77 @@ public partial class JunctionApp
         MarkDirty();
     }
 
-    /// <summary>Click on a branch row. Plain click selects the branch (for actions)
-    /// and its tip commit; Ctrl/Cmd-click adds a second branch's tip and forms a
-    /// two-branch compare (base = older, head = newer) that the Commit view diffs —
-    /// all without leaving the Branches tab.</summary>
+    /// <summary>Click on a branch row. Plain click single-selects the branch (its tip
+    /// commit); Ctrl/Cmd-click toggles it in the compare selection. Two (or more)
+    /// selected branches diff between the oldest and newest tip — all without leaving
+    /// the Branches tab.</summary>
     private void OnBranchRowClick(GitBranch b, int index, KeyModifiers mods)
     {
-        var additive = mods.HasFlag(KeyModifiers.Ctrl) || mods.HasFlag(KeyModifiers.Super);
-        if (additive && _compareAnchorBranch is { } a && a.Hash != b.Hash)
-        {
-            // Second (or replacement) pick → form the pair, ordered by commit date to
-            // match History's compare direction. The anchor stays put so re-picking a
-            // partner just swaps the other endpoint.
-            var (baseBr, headBr) = a.CommitDate <= b.CommitDate ? (a, b) : (b, a);
-            _selectedCommitHashes.Clear();
-            _selectedCommitHashes.Add(a.Hash);
-            _selectedCommitHashes.Add(b.Hash);
-            _selectedCommitHash = b.Hash;
-            _selectionAnchorHash = b.Hash;
-            _branchCompare = new BranchCompare(baseBr.Hash, headBr.Hash, baseBr.Name, headBr.Name);
-        }
+        _branchSel = index;
+        if (mods.HasFlag(KeyModifiers.Ctrl) || mods.HasFlag(KeyModifiers.Super))
+            BranchToggle(b);
         else
-        {
-            // Plain pick (or Ctrl without a live anchor): single tip; becomes the anchor.
-            // SetCommitSelection clears any prior compare, so set the anchor after it.
-            _branchSel = index;
-            SetCommitSelection(b.Hash);
-            _compareAnchorBranch = b;
-        }
+            BranchSelectSingle(b);
         MarkDirty();
     }
 
-    /// <summary>Ends a branch compare, collapsing to the currently-highlighted branch's tip.</summary>
+    private void BranchSelectSingle(GitBranch b)
+    {
+        _selectedBranches.Clear();
+        _selectedBranches.Add(b.FullName);
+        OnBranchSelectionChanged(b);
+    }
+
+    private void BranchToggle(GitBranch b)
+    {
+        if (!_selectedBranches.Add(b.FullName)) _selectedBranches.Remove(b.FullName);
+        OnBranchSelectionChanged(b);
+    }
+
+    private void ToggleFocusedBranch()
+    {
+        if (SelectedBranch() is { } b) { BranchToggle(b); MarkDirty(); }
+    }
+
+    /// <summary>After a selection change: recompute the pair and keep the commit
+    /// selection coherent — the focused branch's tip drives the single-commit view,
+    /// and the History multi-select is cleared so no stale range lingers under a
+    /// single-branch (no-compare) selection.</summary>
+    private void OnBranchSelectionChanged(GitBranch focus)
+    {
+        RecomputeBranchCompare();
+        _selectedCommitHash = focus.Hash;
+        _selectedCommitHashes.Clear();
+    }
+
+    /// <summary>Caches the oldest→newest tip pair (base = older, head = newer) when ≥2
+    /// branches are selected, else clears it. Ordered by identity, so two branches at
+    /// the same commit still resolve to a (base, head) pair the compare renders as a
+    /// "no differences" state.</summary>
+    private void RecomputeBranchCompare()
+    {
+        var sel = _branches.Value.Local
+            .Where(b => _selectedBranches.Contains(b.FullName))
+            .OrderBy(b => b.CommitDate).ToList();
+        if (sel.Count < 2) { _branchCompare = null; return; }
+        var lo = sel[0]; var hi = sel[^1];
+        _branchCompare = new BranchCompare(lo.FullName, hi.FullName, lo.Hash, hi.Hash, lo.Name, hi.Name);
+    }
+
+    /// <summary>Ends the compare, clearing the picked branches.</summary>
     private void ClearBranchCompare()
     {
-        SetCommitSelection(SelectedBranch()?.Hash);
+        EndBranchCompare();
+        _selectedCommitHashes.Clear();
         MarkDirty();
     }
 
-    private void MoveBranchSel(int delta)
+    private void MoveBranchSel(int delta, bool focusOnly = false)
     {
         var list = FilteredBranches();
         if (list.Count == 0) return;
         _branchSel = Math.Clamp(_branchSel + delta, 0, list.Count - 1);
+        if (!focusOnly) BranchSelectSingle(list[_branchSel]);   // plain nav single-selects
         EnsureBranchVisible();
         MarkDirty();
     }
