@@ -139,6 +139,40 @@ internal sealed class AtSpiBus : IDisposable
         EmitEvent("StateChanged", path, state, active ? 1 : 0, 0,
             static (ref MessageWriter w) => w.WriteVariantInt32(0));
 
+    // ──── Cache signals. Keep AT clients' object caches warm so libatspi does
+    // not treat every node we later signal as transient (and mark it defunct).
+
+    public void EmitCacheAdd(IAtSpiTree tree, AtSpiAccessible node) =>
+        EmitCacheSignal("AddAccessible", "((so)(so)(so)iiassusau)",
+            (ref MessageWriter w) => AtSpiMarshal.WriteCacheItem(ref w, tree, node));
+
+    public void EmitCacheRemove(string path) =>
+        EmitCacheSignal("RemoveAccessible", "(so)",
+            (ref MessageWriter w) => AtSpiMarshal.WriteObjectRef(ref w, BusName, path));
+
+    private void EmitCacheSignal(string member, string signature, WriteAnyData writeBody)
+    {
+        try
+        {
+            var writer = _a11y.GetMessageWriter();
+            writer.WriteSignalHeader(
+                destination: null!,
+                path: AtSpiConstants.CachePath,
+                @interface: AtSpiConstants.CacheInterface,
+                member: member,
+                signature: signature);
+            writeBody(ref writer);
+            var message = writer.CreateMessage();
+            writer.Dispose();
+            _a11y.TrySendMessage(message);
+        }
+        catch
+        {
+            // A dropped cache signal only means the client falls back to
+            // GetItems / per-object queries — never fatal.
+        }
+    }
+
     private delegate void WriteAnyData(ref MessageWriter writer);
 
     private void EmitEvent(string member, string sourcePath, string detail, int detail1, int detail2, WriteAnyData writeAnyData)

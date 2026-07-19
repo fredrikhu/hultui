@@ -48,8 +48,26 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
         _bus.AddMethodHandler(new AtSpiObjectHandler(this));
         _bus.AddMethodHandler(new AtSpiCacheHandler(this));
+
+        // Seed a minimal application root *before* Embed: the registry probes
+        // our root during the Embed round-trip — on the bus receive thread,
+        // while this ctor thread is still blocked in the call — so the seed has
+        // to be visible first, or that probe answers UnknownObject. The first
+        // ApplyChanges swaps in the real tree.
+        _snapshot = new Snapshot { ByPath = new() { [SeedRoot.Path] = SeedRoot }, Root = SeedRoot };
+
         _registered = _bus.RegisterApplication();
     }
+
+    /// <summary>A childless application root, valid from Embed until the first build.</summary>
+    private static readonly AtSpiAccessible SeedRoot = new()
+    {
+        ElementId = default,
+        Path = AtSpiConstants.RootPath,
+        IsRoot = true,
+        Role = AtSpiConstants.RoleApplication,
+        IndexInParent = -1,
+    };
 
     public bool IsActive => _registered;
 
@@ -81,18 +99,22 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
         _snapshot = Build(root);
 
-        // The very first build hands the whole tree to the client via GetItems;
-        // per-node children-changed on top of that is just noise. Emit deltas
-        // only for subsequent structural changes.
+        // Populate the client's cache for every added node (the first build's
+        // diff carries the whole tree). This is what keeps libatspi from
+        // treating a later-signalled node as transient and marking it defunct.
+        // The structural children-changed / property-change *deltas* are only
+        // meaningful after the first build — before that the client has nothing
+        // to diff against, so cache-add alone conveys the initial tree.
         bool firstBuild = !_hasBuilt;
         _hasBuilt = true;
-        if (firstBuild) return;
 
         foreach (var added in diff.Added)
         {
-            if (added.Parent is null) continue; // root — no parent to notify
             string childPath = PathOf(added.Node);
-            if (_snapshot.ByPath.TryGetValue(childPath, out var acc))
+            if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
+            _bus.EmitCacheAdd(this, acc);
+            DebugSignalsEmitted++;
+            if (!firstBuild && added.Parent is not null)
             {
                 _bus.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
                 DebugSignalsEmitted++;
@@ -101,15 +123,20 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
         foreach (var removed in diff.Removed)
         {
-            if (removed.Parent is null) continue;
-            string parentPath = PathOf(removed.Parent);
-            int index = IndexOf(removed.Parent, removed.Node);
-            _bus.EmitChildrenChanged(parentPath, PathOf(removed.Node), index, isAdd: false);
+            string childPath = PathOf(removed.Node);
+            _bus.EmitCacheRemove(childPath);
             DebugSignalsEmitted++;
+            if (!firstBuild && removed.Parent is not null)
+            {
+                int index = IndexOf(removed.Parent, removed.Node);
+                _bus.EmitChildrenChanged(PathOf(removed.Parent), childPath, index, isAdd: false);
+                DebugSignalsEmitted++;
+            }
         }
 
-        foreach (var change in diff.PropertyChanged)
-            if (EmitPropertyChange(change)) DebugSignalsEmitted++;
+        if (!firstBuild)
+            foreach (var change in diff.PropertyChanged)
+                if (EmitPropertyChange(change)) DebugSignalsEmitted++;
     }
 
     public void NotifyFocusChanged(AccessibilityNode? focused)

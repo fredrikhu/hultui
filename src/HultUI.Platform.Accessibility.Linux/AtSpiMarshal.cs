@@ -65,6 +65,30 @@ internal static class AtSpiMarshal
     }
 
     /// <summary>
+    /// Writes one AT-SPI cache item — the <c>((so)(so)(so)iiassusau)</c> struct
+    /// of self-ref, app-ref, parent-ref, index-in-parent, child-count,
+    /// interfaces, name, role, description, and state set. Shared by
+    /// <c>Cache.GetItems</c> and the <c>Cache.AddAccessible</c> signal.
+    /// </summary>
+    public static void WriteCacheItem(ref MessageWriter writer, IAtSpiTree tree, AtSpiAccessible node)
+    {
+        writer.WriteStructureStart();
+        WriteObjectRef(ref writer, tree.BusName, node.Path);
+        WriteObjectRef(ref writer, tree.BusName, AtSpiConstants.RootPath);
+        if (node.IsRoot)
+            WriteObjectRef(ref writer, tree.Desktop.BusName, tree.Desktop.Path);
+        else
+            WriteObjectRef(ref writer, tree.BusName, node.ParentPath);
+        writer.WriteInt32(node.IndexInParent);
+        writer.WriteInt32(node.ChildCount);
+        writer.WriteArray(node.Interfaces);
+        writer.WriteString(node.Name);
+        writer.WriteUInt32(node.Role);
+        writer.WriteString(node.Description);
+        WriteStateSet(ref writer, node);
+    }
+
+    /// <summary>
     /// Writes an accessible's state set as the AT-SPI <c>au</c> value: two
     /// uint32 words holding the 64-bit <c>AtspiStateType</c> bitfield.
     /// </summary>

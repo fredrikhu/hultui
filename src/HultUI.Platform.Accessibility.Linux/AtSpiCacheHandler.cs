@@ -48,27 +48,7 @@ internal sealed class AtSpiCacheHandler : IPathMethodHandler
     {
         var array = writer.WriteArrayStart(DBusType.Struct);
         foreach (var node in _tree.All)
-        {
-            writer.WriteStructureStart();
-
-            // self
-            AtSpiMarshal.WriteObjectRef(ref writer, _tree.BusName, node.Path);
-            // application
-            AtSpiMarshal.WriteObjectRef(ref writer, _tree.BusName, AtSpiConstants.RootPath);
-            // parent
-            if (node.IsRoot)
-                AtSpiMarshal.WriteObjectRef(ref writer, _tree.Desktop.BusName, _tree.Desktop.Path);
-            else
-                AtSpiMarshal.WriteObjectRef(ref writer, _tree.BusName, node.ParentPath);
-
-            writer.WriteInt32(node.IndexInParent);
-            writer.WriteInt32(node.ChildCount);
-            writer.WriteArray(node.Interfaces);
-            writer.WriteString(node.Name);
-            writer.WriteUInt32(node.Role);
-            writer.WriteString(node.Description);
-            AtSpiMarshal.WriteStateSet(ref writer, node);
-        }
+            AtSpiMarshal.WriteCacheItem(ref writer, _tree, node);
         writer.WriteArrayEnd(array);
     }
 }
