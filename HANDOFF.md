@@ -45,8 +45,10 @@ Local verification on Fedora: **626 tests green** (`dotnet test HultUI.CrossPlat
    in the Linux test project (its unguarded calls to `[SupportedOSPlatform("linux")]`
    role-mapping APIs are flagged on a non-Linux host). They are warnings only — there
    is no `Directory.Build.props`/`TreatWarningsAsErrors`, so the pipeline stays green —
-   but the analysis is *not* host-independent. Tidy-up option: `<NoWarn>CA1416` in the
-   test csproj, or relax the platform attribute on the pure role-mapping helpers.
+   but the analysis is *not* host-independent. **Fixed** (`3fec92a`): scoped
+   `<NoWarn>CA1416</NoWarn>` in the test csproj (the helpers are pure switch
+   expressions that touch no OS API, so production's platform contract is untouched);
+   the Windows build is now warning-clean apart from the pre-existing CS9191.
 
 3. **Windows benchmark rerun. DONE.** Re-ran `--auto` and `--auto --virtual` on this
    commit; the browser baseline was also re-captured in Brave. All three columns in
