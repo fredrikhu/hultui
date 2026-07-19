@@ -6,6 +6,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- These tests pin the Linux bridge's ABI role/property tables, which are
+         pure host-agnostic switch expressions, and run on every CI leg (Windows
+         included) to lock those values down. The helpers live on the
+         [SupportedOSPlatform("linux")] AtSpiConstants class, so calling them from
+         this host-neutral test assembly trips CA1416 even though the calls touch
+         no OS API. Suppress it here rather than weaken production's platform
+         contract. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
