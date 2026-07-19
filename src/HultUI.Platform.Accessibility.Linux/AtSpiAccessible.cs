@@ -5,63 +5,114 @@ using HultUI.Core.Elements;
 namespace HultUI.Platform.Accessibility.Linux;
 
 /// <summary>
-/// Represents a single AT-SPI accessible object exported on the a11y bus. One
-/// is created per <see cref="AccessibilityNode"/>; the instance stays alive
-/// (and retains the same D-Bus path) as long as the node's
-/// <see cref="ElementId"/> is present across tree rebuilds.
+/// An immutable snapshot of one accessible object as it is exposed on the a11y
+/// bus. One is built per <see cref="AccessibilityNode"/> on each structural
+/// rebuild; the object <see cref="Path"/> is derived from the stable
+/// <see cref="ElementId"/> so a node keeps its D-Bus identity across rebuilds.
 /// </summary>
 /// <remarks>
-/// The D-Bus method implementations (GetName, GetRole, GetChildAtIndex, etc.)
-/// are stubbed out until on-desktop verification. This class currently just
-/// holds the snapshotted state and computes the object path.
+/// The snapshot carries everything the D-Bus method handlers need to answer a
+/// query without touching the live element tree — which matters because those
+/// handlers run on the bus receive thread, not the UI thread.
 /// </remarks>
 [SupportedOSPlatform("linux")]
-internal sealed class AtSpiAccessible : IDisposable
+internal sealed class AtSpiAccessible
 {
-    private readonly AtSpiBus _bus;
+    public required ElementId ElementId { get; init; }
+    public required string Path { get; init; }
+    public required bool IsRoot { get; init; }
 
-    public ElementId ElementId { get; }
-    public string ObjectPath { get; }
+    public uint Role { get; init; }
+    public string Name { get; init; } = "";
+    public string Description { get; init; } = "";
+    public string? Value { get; init; }
 
-    private string? _name;
-    private string? _description;
-    private string? _value;
-    private AccessibilityRole _role;
-    private bool _isFocusable;
-    private bool _isFocused;
-    private bool _isEnabled;
-    private bool? _isToggled;
+    // Bounding box in window-relative layout coordinates.
+    public int X { get; init; }
+    public int Y { get; init; }
+    public int Width { get; init; }
+    public int Height { get; init; }
 
-    public AtSpiAccessible(AtSpiBus bus, AccessibilityNode node)
+    public bool Focusable { get; init; }
+    public bool Focused { get; init; }
+    public bool Enabled { get; init; } = true;
+    public bool Offscreen { get; init; }
+    public bool Selectable { get; init; }
+    public bool Selected { get; init; }
+    public bool? Toggled { get; init; }
+
+    public string ParentPath { get; init; } = AtSpiConstants.NullPath;
+    public int IndexInParent { get; init; } = -1;
+    public IReadOnlyList<string> ChildPaths { get; init; } = [];
+
+    /// <summary>The action name this object exposes, or null if it has no action.</summary>
+    public string? ActionName { get; init; }
+
+    public int ChildCount => ChildPaths.Count;
+    public bool HasAction => ActionName is not null;
+
+    /// <summary>The AT-SPI interface names this object advertises via GetInterfaces.</summary>
+    public string[] Interfaces
     {
-        _bus = bus;
-        ElementId = node.ElementId;
-        ObjectPath = AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
-        UpdateFrom(node);
+        get
+        {
+            var list = new List<string>(5)
+            {
+                AtSpiConstants.AccessibleInterface,
+                AtSpiConstants.ComponentInterface,
+            };
+            if (IsRoot) list.Add(AtSpiConstants.ApplicationInterface);
+            if (HasAction) list.Add(AtSpiConstants.ActionInterface);
+            if (Value is not null) list.Add(AtSpiConstants.ValueInterface);
+            return [.. list];
+        }
     }
 
-    public void UpdateFrom(AccessibilityNode node)
+    /// <summary>Builds the object path for a node from its element id (root is well-known).</summary>
+    public static string PathFor(AccessibilityNode node, bool isRoot) =>
+        isRoot ? AtSpiConstants.RootPath : AtSpiConstants.AccessiblePathPrefix + node.ElementId.Value;
+
+    public static AtSpiAccessible From(AccessibilityNode node, bool isRoot, string parentPath, int indexInParent)
     {
-        _name = node.Name;
-        _description = node.Description;
-        _value = node.Value;
-        _role = node.Role;
-        _isFocusable = node.IsFocusable;
-        _isFocused = node.IsFocused;
-        _isEnabled = node.IsEnabled;
-        _isToggled = node.IsToggled;
+        uint role = isRoot ? AtSpiConstants.RoleApplication : AtSpiConstants.MapRole(node.Role);
+        var childPaths = new List<string>(node.Children.Count);
+        foreach (var child in node.Children)
+            childPaths.Add(PathFor(child, isRoot: false));
+
+        return new AtSpiAccessible
+        {
+            ElementId = node.ElementId,
+            Path = PathFor(node, isRoot),
+            IsRoot = isRoot,
+            Role = role,
+            Name = node.Name ?? "",
+            Description = node.Description ?? "",
+            Value = node.Value,
+            X = (int)MathF.Round(node.BoundingRect.X),
+            Y = (int)MathF.Round(node.BoundingRect.Y),
+            Width = (int)MathF.Round(node.BoundingRect.Width),
+            Height = (int)MathF.Round(node.BoundingRect.Height),
+            Focusable = node.IsFocusable,
+            Focused = node.IsFocused,
+            Enabled = node.IsEnabled,
+            Offscreen = node.IsOffscreen,
+            Selectable = node.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab
+                or AccessibilityRole.ListItem or AccessibilityRole.TreeItem,
+            Selected = node.IsToggled == true &&
+                node.Role is AccessibilityRole.RadioButton or AccessibilityRole.Tab,
+            Toggled = node.IsToggled,
+            ParentPath = parentPath,
+            IndexInParent = indexInParent,
+            ChildPaths = childPaths,
+            ActionName = ActionFor(node.Role),
+        };
     }
 
-    public string Name => _name ?? "";
-    public string Description => _description ?? "";
-    public string Value => _value ?? "";
-    public uint AtSpiRole => AtSpiConstants.MapRole(_role);
-    public bool IsFocused => _isFocused;
-    public bool IsEnabled => _isEnabled;
-    public bool? IsToggled => _isToggled;
-
-    public void Dispose()
+    private static string? ActionFor(AccessibilityRole role) => role switch
     {
-        // TODO: unregister from bus when per-object export is wired.
-    }
+        AccessibilityRole.Button or AccessibilityRole.Link => "click",
+        AccessibilityRole.Checkbox or AccessibilityRole.Switch or AccessibilityRole.RadioButton => "toggle",
+        AccessibilityRole.Tab or AccessibilityRole.ListItem or AccessibilityRole.TreeItem => "activate",
+        _ => null,
+    };
 }

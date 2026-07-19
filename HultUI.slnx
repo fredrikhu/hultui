@@ -39,5 +39,6 @@
     <Project Path="tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj" />
     <Project Path="tests/HultUI.UiTests/HultUI.UiTests.csproj" />
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
+    <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
   </Folder>
 </Solution>

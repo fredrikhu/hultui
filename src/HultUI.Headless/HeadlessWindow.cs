@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Styling;
 using HultUI.Headless.Recording;
@@ -56,6 +57,17 @@ public sealed partial class HeadlessWindow
     public HeadlessAccessibilityBridge InstallAccessibilityBridge()
     {
         var bridge = new HeadlessAccessibilityBridge();
+        Window.SetAccessibilityBridge(bridge);
+        return bridge;
+    }
+
+    /// <summary>
+    /// Installs a specific <see cref="IAccessibilityBridge"/> — for driving a
+    /// real platform bridge (UIA / AT-SPI) through the window's true per-frame
+    /// build/diff path with no display attached. Returns the bridge for chaining.
+    /// </summary>
+    public T InstallAccessibilityBridge<T>(T bridge) where T : IAccessibilityBridge
+    {
         Window.SetAccessibilityBridge(bridge);
         return bridge;
     }
