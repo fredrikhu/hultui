@@ -191,12 +191,14 @@ public partial class JunctionApp
 
     private Element BranchRow(GitBranch b, int index)
     {
-        var selected = index == _branchSel;
         // Rows in the compare selection are highlighted; the base/head extremes tagged.
         var comparePick = _selectedBranches.Contains(b.FullName);
         var compareRole = _branchCompare is { } bc0
             ? (b.FullName == bc0.BaseFull ? "base" : b.FullName == bc0.HeadFull ? "head" : null)
             : null;
+        // The focus caret (Ctrl+arrows) can sit outside the selection. Same colours
+        // as the History list: the selection is accent, the caret a neutral tint.
+        var focused = index == _branchSel;
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
         var pb = BranchName.Parse(leaf);
 
@@ -206,12 +208,12 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow)
             .BorderColor(Nocturne.On(0.06)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
-        // Selection + compare-pick in the key so the highlight/handlers refresh
-        // (handlers aren't copied on patch — a stale hover handler would otherwise
-        // clobber the background).
-        row.Key = b.Name + (selected ? "#s" : "") + (comparePick ? "#c" + compareRole : "");
-        if (selected) row.Background(Nocturne.Accent900);
-        if (comparePick) row.Background(Nocturne.Alpha(Nocturne.Accent, 0.14));
+        // Focus + compare-pick in the key so the highlight/handlers refresh (handlers
+        // aren't copied on patch — a stale one would otherwise clobber the background).
+        row.Key = b.Name + (focused ? "#f" : "") + (comparePick ? "#c" + compareRole : "");
+        row.Background(comparePick ? Nocturne.Accent900
+            : focused ? Nocturne.Neutral900
+            : Color.Transparent);
 
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
@@ -276,7 +278,6 @@ public partial class JunctionApp
         // Right-click selects the row first, then the framework opens the menu.
         row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectBranch(index); });
         row.ContextMenu(() => BranchMenuItems(b));
-        if (!selected && !comparePick) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
 
