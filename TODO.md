@@ -23,8 +23,10 @@
   and the Linux AT-SPI bridge route through it, and `Window` drains its UI-thread
   action queue each frame on every platform. Verified live with pyatspi:
   `do_action(0)` on the button dispatches a real click (counter 0→3 over three
-  calls) and on the checkbox toggles it. **The Windows UIA path was refactored to
-  run through the router and still needs a Windows FlaUI re-verification.**
+  calls) and on the checkbox toggles it. The Windows UIA path was refactored to
+  run through the router and **re-verified on Windows (2026-07-19): the FlaUI
+  suite `tests/HultUI.UiTests` is 14/14 green** — invoke/toggle/select/set-value
+  all still round-trip through the shared router.
 - AT-SPI refinements (remaining polish): (1) a `state-changed:defunct` still shows up in a *mid-stream* event monitor on first contact with each node — but that's a client cold-start artifact: the monitor connects after our startup `Cache.AddAccessible` burst and only subscribes to `object:` events, so it never warms its cache. A client (Orca) running from app launch receives the cache signals. Not fixable app-side for a cold listener; our app provably emits only the intended signals. (2) `Component` extents are now device-pixel-correct (bounds × display scale, via `IAccessibilityGeometryHost` — verified: at 2× the button reads `[24,84 752x76]` vs `[12,42 376x38]` at 1×). The remaining gap is *absolute screen* coordinates: under Wayland a client has no reliable window screen origin, so SCREEN and WINDOW coordType both resolve to window-relative pixels; Wayland is the only target, so this is not planned. (3) `TreeDiff.Reordered` (same children, new order) needs **no** signal — every query is served from the freshly rebuilt snapshot, so `GetChildren`/`GetChildAtIndex` already return the new order. Verified: a persistent pyatspi client observes each reorder with the reorder signal entirely disabled. A high-level AT that caches child order and only refreshes on events (Orca) would want an `object:children-changed` nudge; add it when an Orca test shows it's needed and confirms the form (`samples/AtSpiVerify/atspi_reorder.py` reproduces reorders). (4) end-to-end Orca *speech* pass (largely covered by the pyatspi verification, since Orca reads through the same API; the gap is Orca-specific event handling and actually listening).
 
 ## Deferred

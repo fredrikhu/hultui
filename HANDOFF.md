@@ -20,35 +20,40 @@ b061154 AT-SPI: emit Cache add/remove signals and fix the startup root race
 Local verification on Fedora: **626 tests green** (`dotnet test HultUI.CrossPlatform.slnf -c Release`; 496 Core + 1 skipped, 42 Headless, 31 Text, 24 Linux-a11y, 20 Skia, 7 TodoList, 6 SourceGen). Build clean apart from the pre-existing `CS9191`.
 **The Windows-only FlaUI suite has NOT been run against this branch** — see below.
 
-## Check this first (Windows session)
+## Check this first (Windows session) — ALL VERIFIED 2026-07-19
 
-1. **FlaUI re-verification — the important one.** `cc64c46` refactored the Windows
-   UIA *action* path: the invoke/toggle/select/set-value/focus logic + the pending-
-   action queue + per-frame drain were lifted out of the Windows-only
+1. **FlaUI re-verification — the important one. DONE, green.** `cc64c46` refactored
+   the Windows UIA *action* path: the invoke/toggle/select/set-value/focus logic +
+   the pending-action queue + per-frame drain were lifted out of the Windows-only
    `Sdl3UiaHostBridge` into a shared `AccessibilityActionRouter` (`src/HultUI/`),
-   which both the Windows UIA host and the Linux AT-SPI bridge now use. It is
-   behavior-preserving by construction (pure delegation, same queue semantics), and
-   `Window` now drains that router each frame on **all** platforms (was Windows-
-   gated) — identical behavior on Windows. But only FlaUI proves it. Run
-   `dotnet test tests/HultUI.UiTests` (net10.0-windows, real SDL windows) and
-   confirm UIA invoke/toggle/value/focus still round-trip. `7aead0f` also added
-   `IAccessibilityGeometryHost` (router implements it) — Linux-only consumer, no
-   Windows behavior change.
+   which both the Windows UIA host and the Linux AT-SPI bridge now use. `Window` now
+   drains that router each frame on **all** platforms (was Windows-gated).
+   `dotnet test tests/HultUI.UiTests` (net10.0-windows, real SDL windows) is
+   **14/14 green** — invoke (`InvokingButton_UpdatesCountText`), toggle
+   (`TogglingCheckbox_FlipsToggleState`), select (`ListItem_ReportsAndUpdatesSelection`,
+   `MultiSelectList_…`), and set-value (`Slider_…SetValueWorks`,
+   `SettingTextInputValue_TakesEffect`) all still round-trip through the router.
+   `7aead0f`'s `IAccessibilityGeometryHost` is a Linux-only consumer, no Windows change.
 
-2. **Windows CI / pipelines.** `junction-installer.yml` builds `HultUI.slnx` on
-   windows-latest and runs `dotnet test HultUI.slnx --filter !~HultUI.UiTests`.
-   This branch adds a test project (`HultUI.Platform.Accessibility.Linux.Tests`) to
-   `HultUI.slnx` **and** `HultUI.CrossPlatform.slnf`, plus a new
-   `HultUI.Core.Accessibility` interface and the router. All compile cross-platform
-   (`CA1416` verified 0 warnings on Linux; that analysis is host-independent). The
-   24 new pure role-mapping tests will also run on the Windows leg. Confirm green.
+2. **Windows CI / pipelines. DONE, green.** `junction-installer.yml` builds
+   `HultUI.slnx` on windows-latest and runs `dotnet test HultUI.slnx --filter
+   !~HultUI.UiTests`. Replicated locally: `dotnet build HultUI.slnx -c Release`
+   succeeds (0 errors) and the test step is **626 passed / 1 skipped** — including
+   the 24 new role-mapping tests (`HultUI.Platform.Accessibility.Linux.Tests`), which
+   run and pass on the Windows leg. **Correction to the earlier claim** that CA1416
+   is "0 warnings, host-independent": on Windows the build emits **8 CA1416 warnings**
+   in the Linux test project (its unguarded calls to `[SupportedOSPlatform("linux")]`
+   role-mapping APIs are flagged on a non-Linux host). They are warnings only — there
+   is no `Directory.Build.props`/`TreatWarningsAsErrors`, so the pipeline stays green —
+   but the analysis is *not* host-independent. Tidy-up option: `<NoWarn>CA1416` in the
+   test csproj, or relax the platform attribute on the pure role-mapping helpers.
 
-3. **Windows benchmark rerun.** Re-run
-   `dotnet run -c Release --project samples/HultUI.Samples.Benchmark -- --auto`
-   (and `--auto --virtual`) on Windows, **on this same commit**, for a clean
-   Windows-vs-Linux comparison — see the benchmark note below.
+3. **Windows benchmark rerun. DONE.** Re-ran `--auto` and `--auto --virtual` on this
+   commit; the browser baseline was also re-captured in Brave. All three columns in
+   `samples/HultUI.Samples.Benchmark/README.md` are now one fresh same-commit,
+   same-session capture (committed `4ab8684`). See the benchmark note below.
 
-4. **Linux CI leg**: confirmed green locally (the `.slnf` resolves on a case-
+4. **Linux CI leg. DONE.** Confirmed green locally (the `.slnf` resolves on a case-
    sensitive FS, CRLF-baseline fix holds under LF).
 
 ## What was done on Linux (AT-SPI2 export)
@@ -130,11 +135,12 @@ did not catch a viewport-collapsing regression.
 
 ## Open follow-ups (in TODO.md)
 
-1. **FlaUI re-verification** of the shared-router refactor (Windows-only; item 1
-   above). This is the one real risk from the Linux work.
-2. **Orca speech pass** — largely covered since Orca reads via the same pyatspi API
+~~FlaUI re-verification of the shared-router refactor~~ — **done 2026-07-19, 14/14
+green** (item 1 above); the one real risk from the Linux work is cleared. Remaining:
+
+1. **Orca speech pass** — largely covered since Orca reads via the same pyatspi API
    already verified; the gap is Orca-specific event handling and actually listening.
-3. The `state-changed:defunct` a cold-start event monitor shows is a client caching
+2. The `state-changed:defunct` a cold-start event monitor shows is a client caching
    artifact, not app-fixable. Reorder `children-changed` only if an Orca test proves
    a child-order-caching client needs it (`atspi_reorder.py` reproduces reorders).
 
