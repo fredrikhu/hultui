@@ -967,14 +967,20 @@ public class GitRepository
     /// Am-compatible patch text (git format-patch: full authorship + message per
     /// commit). Null <paramref name="baseExclusive"/> → just <paramref name="head"/>'s
     /// own patch; otherwise every commit after <paramref name="baseExclusive"/> up to
-    /// and including <paramref name="head"/>. Returns null on failure (e.g. an
-    /// unreachable range). Merge commits in the span are skipped by git.
+    /// and including <paramref name="head"/>. Set <paramref name="fromRoot"/> when the
+    /// span starts at the parentless initial commit — <c>root^</c> doesn't exist, so
+    /// git needs <c>--root</c> to emit patches all the way back to the first commit.
+    /// Returns null on failure (e.g. an unreachable range). Merge commits are skipped.
     /// </summary>
-    public string? FormatPatch(string? baseExclusive, string head)
+    public string? FormatPatch(string? baseExclusive, string head, bool fromRoot = false)
     {
-        var result = baseExclusive == null
-            ? GitProcess.Run(Path, "format-patch", "-1", "--stdout", head)
-            : GitProcess.Run(Path, "format-patch", "--stdout", $"{baseExclusive}..{head}");
+        GitResult result;
+        if (fromRoot)
+            result = GitProcess.Run(Path, "format-patch", "--root", "--stdout", head);
+        else if (baseExclusive == null)
+            result = GitProcess.Run(Path, "format-patch", "-1", "--stdout", head);
+        else
+            result = GitProcess.Run(Path, "format-patch", "--stdout", $"{baseExclusive}..{head}");
         return result.Success ? result.Stdout : null;
     }
 

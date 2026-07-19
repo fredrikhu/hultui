@@ -172,6 +172,9 @@ public partial class JunctionApp
         var oldest = selOldestFirst[0];
         var newest = selOldestFirst[^1];
         var single = selOldestFirst.Count == 1;
+        // If the span starts at the initial commit there is no oldest^ to diff from,
+        // so ask format-patch to run --root (patches back to the first commit).
+        var oldestIsRoot = _history.Value.Commits.FirstOrDefault(x => x.Hash == oldest) is { ParentHashes.Length: 0 };
         var slug = Slug(_history.Value.Commits.FirstOrDefault(x => x.Hash == newest)?.Subject ?? "");
         var name = single
             ? slug.Length > 0 ? $"{Short(newest)}-{slug}.patch" : $"{Short(newest)}.patch"
@@ -182,7 +185,7 @@ public partial class JunctionApp
 
         var error = await Task.Run(() =>
         {
-            var text = repo.FormatPatch(single ? null : oldest + "^", newest);
+            var text = repo.FormatPatch(single ? null : oldest + "^", newest, fromRoot: oldestIsRoot);
             if (text == null) return "git format-patch failed";
             try { File.WriteAllText(path, text); return null; }
             catch (Exception ex) { return ex.Message; }
