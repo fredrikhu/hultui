@@ -69,7 +69,7 @@ stay app-level for now — they compose from primitives and vary per app.
 | 11 | **Dialog / Modal** primitive on the overlay host | Every GitClient dialog is bespoke; one primitive replaces them all. | M | High |
 | 12 | **Dropdown / Select / ComboBox** | Builds on the existing overlay + ContextMenu machinery. Ubiquitous, currently absent. | M | High |
 | 13 | **ProgressBar + Spinner** | Small, self-contained; determinate + indeterminate. | S | Med |
-| 14 | **Tabs / TabView** | `TabbedApp` is hand-built; a primitive generalizes it. | M | Med |
+| 14 | **Tabs / TabView** | Tabbed / multi-pane UIs are hand-built today; a primitive generalizes them. | M | Med |
 
 ### Tier E — Layout primitives (small-medium)
 
