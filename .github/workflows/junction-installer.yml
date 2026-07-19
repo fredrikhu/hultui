@@ -40,8 +40,9 @@ jobs:
 
   # Proves the framework is display-free on Linux: the headless tests run full
   # app scenarios (render, input, accessibility queries) with no X11/Wayland
-  # and no GPU. Test projects are listed individually rather than via the
-  # solution because HultUI.UiTests targets net10.0-windows.
+  # and no GPU. Uses the solution filter, which excludes the Windows-only
+  # HultUI.UiTests — testing each project separately instead would rebuild the
+  # shared graph once per project.
   test-linux:
     runs-on: ubuntu-latest
     steps:
@@ -52,13 +53,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Run tests
-        run: |
-          dotnet test tests/HultUI.Core.Tests -c Release
-          dotnet test tests/HultUI.Text.Tests -c Release
-          dotnet test tests/HultUI.Rendering.Skia.Tests -c Release
-          dotnet test tests/HultUI.SourceGenerators.Tests -c Release
-          dotnet test tests/HultUI.Samples.TodoList.Tests -c Release
-          dotnet test tests/HultUI.Headless.Tests -c Release
+        run: dotnet test HultUI.CrossPlatform.slnf -c Release
 
   installer:
     needs: [test, test-linux]

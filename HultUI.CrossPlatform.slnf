@@ -1,0 +1,13 @@
+{
+  "solution": {
+    "path": "HultUI.slnx",
+    "projects": [
+      "tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj",
+      "tests/HultUI.Text.Tests/HultUI.Text.Tests.csproj",
+      "tests/HultUI.Rendering.Skia.Tests/HultUI.Rendering.Skia.Tests.csproj",
+      "tests/HultUI.SourceGenerators.Tests/HultUI.SourceGenerators.Tests.csproj",
+      "tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj",
+      "tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj"
+    ]
+  }
+}
