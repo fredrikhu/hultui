@@ -439,33 +439,41 @@ public partial class JunctionApp
         return row;
     }
 
+    // How many ref chips a commit row shows before collapsing the rest into a
+    // "+N" overflow chip. A branch tip can carry many refs (local + its remote,
+    // plus origin/HEAD); this keeps the row from pushing the subject off-screen.
+    private const int MaxRefChips = 4;
+
     private static IEnumerable<Element> RefChips(string[] refs, HashSet<string> remotes)
     {
-        var emitted = 0;
+        // Git emits decorations local-branch-last — e.g. for the checked-out tip
+        // of two coincident branches: "HEAD -> main, origin/main,
+        // origin/feature, origin/HEAD, feature". Rendering in that raw order and
+        // truncating drops exactly the local branch the user is looking at. So
+        // classify every ref and order it HEAD → local → tag → remote, so the
+        // refs that matter most survive the MaxRefChips cap. OrderBy is stable,
+        // preserving git's order within each band.
+        var classified = new List<(int Priority, Element Chip)>();
         foreach (var raw in refs)
         {
-            if (emitted >= 3) yield break;
             var d = raw.Trim();
             if (d.Length == 0) continue;
 
             // "HEAD -> main": a HEAD marker plus the branch it points at.
             if (d.StartsWith("HEAD -> ", StringComparison.Ordinal))
             {
-                yield return Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true);
-                if (++emitted >= 3) yield break;
-                foreach (var e in LocalBranchChip(d["HEAD -> ".Length..])) { yield return e; emitted++; }
+                classified.Add((0, Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true)));
+                classified.Add((1, LocalBranchChip(d["HEAD -> ".Length..])));
                 continue;
             }
             if (d == "HEAD")
             {
-                yield return Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true);
-                emitted++;
+                classified.Add((0, Ui.Chip(Icons.ArrowFatRight, "HEAD", Color.Transparent, Nocturne.Accent, outline: true)));
                 continue;
             }
             if (d.StartsWith("tag: ", StringComparison.Ordinal))
             {
-                yield return Ui.Chip(Icons.Tag, d[5..], Nocturne.Neutral800, Nocturne.Neutral100);
-                emitted++;
+                classified.Add((2, Ui.Chip(Icons.Tag, d[5..], Nocturne.Neutral800, Nocturne.Neutral100)));
                 continue;
             }
 
@@ -474,16 +482,28 @@ public partial class JunctionApp
             if (remotes.Contains(firstSeg))
             {
                 if (d.EndsWith("/HEAD", StringComparison.Ordinal)) continue;  // symbolic origin/HEAD — skip
-                yield return Ui.Chip(Icons.Cloud, d, Nocturne.Neutral800, Nocturne.Neutral100);
-                emitted++;
+                classified.Add((3, Ui.Chip(Icons.Cloud, d, Nocturne.Neutral800, Nocturne.Neutral100)));
                 continue;
             }
 
-            foreach (var e in LocalBranchChip(d)) { yield return e; emitted++; }
+            classified.Add((1, LocalBranchChip(d)));
         }
+
+        var ordered = classified.OrderBy(c => c.Priority).Select(c => c.Chip).ToList();
+
+        if (ordered.Count <= MaxRefChips)
+        {
+            foreach (var chip in ordered) yield return chip;
+            yield break;
+        }
+
+        // Reserve the last slot for the overflow count so nothing vanishes silently.
+        for (var i = 0; i < MaxRefChips - 1; i++) yield return ordered[i];
+        yield return Ui.Chip(Icons.GitBranch, $"+{ordered.Count - (MaxRefChips - 1)}",
+            Nocturne.Neutral800, Nocturne.Neutral100);
     }
 
-    private static IEnumerable<Element> LocalBranchChip(string name)
+    private static Element LocalBranchChip(string name)
     {
         var pb = BranchName.Parse(name);
         var (glyph, bg, fg) = pb.ChipLabel switch
@@ -492,7 +512,7 @@ public partial class JunctionApp
             "WIP" => (Icons.Flask, Nocturne.Accent2_800, Nocturne.Accent2_100),
             _ => (Icons.GitBranch, Nocturne.Neutral800, Nocturne.Neutral100),
         };
-        yield return Ui.Chip(glyph, pb.Title, bg, fg);
+        return Ui.Chip(glyph, pb.Title, bg, fg);
     }
 
     // ── Footer ───────────────────────────────────────────────────────────
