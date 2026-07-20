@@ -110,6 +110,42 @@ public partial class ScrollViewElement : BoxElement
         return Math.Clamp(value, 0, maxScroll);
     }
 
+    // ──── Scroll into view ────
+
+    /// <summary>
+    /// Scrolls the minimum distance needed to bring the vertical band
+    /// <c>[top, top + height]</c> fully into the viewport, and no further. A no-op
+    /// when the band is already visible. Coordinates are in this scroll's own
+    /// content space — the unscrolled space layout positions live in, where 0 is
+    /// the top of the content — so callers with a fixed row height can pass
+    /// <c>index * rowHeight</c> without materialising the row element.
+    /// </summary>
+    public void ScrollRangeIntoView(float top, float height)
+    {
+        var viewportHeight = Layout.AbsoluteContentBox.Height;
+        float cur = _scrollOffsetY;
+        float bottom = top + height;
+        // Layout is unscrolled, so the band's coordinates don't move as we scroll;
+        // only the [cur, cur + viewportHeight] window does. Reveal the nearer edge.
+        // (The setter clamps, so an over-shoot near the ends is corrected.)
+        if (top < cur) ScrollOffsetY = top;
+        else if (bottom > cur + viewportHeight) ScrollOffsetY = bottom - viewportHeight;
+    }
+
+    /// <summary>
+    /// Scrolls <paramref name="child"/> — a descendant laid out inside this view —
+    /// fully into vertical view. Reads the child's laid-out box, so it handles
+    /// variable-height rows; call it after the frame the child was laid out in.
+    /// </summary>
+    public void ScrollIntoView(Element child)
+    {
+        // Layout positions are unscrolled (the renderer applies ScrollOffsetY as a
+        // render-time translation), so the child's gap from the viewport top is
+        // already its offset in content space — no ScrollOffsetY term is added.
+        var box = child.Layout.AbsoluteBorderBox;
+        ScrollRangeIntoView(box.Y - Layout.AbsoluteContentBox.Y, box.Height);
+    }
+
     public override void Render(IRenderContext ctx)
     {
         base.Render(ctx);

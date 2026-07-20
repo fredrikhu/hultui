@@ -583,18 +583,8 @@ public partial class JunctionApp : Component, IDisposable
     /// variable-height palette and file rows. Call after the layout pass.</summary>
     private static void ScrollRowIntoView(Ref<ScrollViewElement> scrollRef, Ref<Element> rowRef)
     {
-        if (scrollRef.Current is not { } scroll || rowRef.Current is not { } row) return;
-        var view = scroll.Layout.AbsoluteContentBox;
-        var box = row.Layout.AbsoluteBorderBox;
-        var cur = scroll.ScrollOffsetY;
-        // Layout positions are unscrolled — the renderer applies ScrollOffsetY — so
-        // the row's gap from the viewport top already is its offset in content space.
-        // (Adding cur here would double-count the scroll: the up-scroll test would
-        // reduce to "top < 0", which never fires, so arrow-up never scrolled back.)
-        var top = box.Y - view.Y;              // row top in the scroll's content space
-        var bottom = top + box.Height;
-        if (top < cur) scroll.ScrollOffsetY = top;
-        else if (bottom > cur + view.Height) scroll.ScrollOffsetY = bottom - view.Height;
+        if (scrollRef.Current is { } scroll && rowRef.Current is { } row)
+            scroll.ScrollIntoView(row);
     }
 
     // ── View / selection actions ─────────────────────────────────────────
