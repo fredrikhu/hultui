@@ -50,6 +50,7 @@ public static class Icons
     public const string ArrowFatRight = "➤";  // ➤  HEAD
     public const string Flask = "⚗";          // ⚗  wip
     public const string Cloud = "☁";          // ☁  remote
+    public const string Handshake = "🤝";     // 🤝  local + remote in sync
     public const string Tag = "◇";            // ◇
 
     // Diff pane

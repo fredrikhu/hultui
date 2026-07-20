@@ -451,10 +451,11 @@ public partial class JunctionApp
     {
         // Parse the decorations into their kinds so we can collapse the noise:
         //  - local branches carry no icon (a bare name reads as "local");
-        //  - a remote-tracking branch gets the cloud icon, and its remote prefix is
-        //    dropped when there's only one remote (origin/main → main);
-        //  - a local branch that also sits on the remote here merges into ONE cloud
-        //    chip (main + origin/main → ☁ main) instead of two.
+        //  - a remote-only branch (not checked out here) gets the cloud icon, and its
+        //    remote prefix is dropped when there's only one remote (origin/main → main);
+        //  - a local branch that also sits on the remote here merges into ONE chip with
+        //    a small green ✓ sync badge (main + origin/main → main ✓) — so the cloud
+        //    always means "remote-only", never "in sync".
         string? head = null;                     // branch HEAD points at ("HEAD -> X")
         var detached = false;                    // bare "HEAD"
         var locals = new List<string>();
@@ -517,8 +518,9 @@ public partial class JunctionApp
             Nocturne.Neutral800, Nocturne.Neutral100);
     }
 
-    /// <summary>A branch chip: local branches are text-only (no icon); a branch that
-    /// also lives on the remote here gets the cloud icon (local + remote, in one chip).</summary>
+    /// <summary>A branch chip: local branches are text-only (no icon); a local branch
+    /// that's also in sync with its remote here gets a leading 🤝 badge (🤝 main).
+    /// The cloud icon is reserved for remote-only refs.</summary>
     private static Element BranchChip(string name, bool onRemote)
     {
         var pb = BranchName.Parse(name);
@@ -528,7 +530,9 @@ public partial class JunctionApp
             "WIP" => (Nocturne.Accent2_800, Nocturne.Accent2_100),
             _ => (Nocturne.Neutral800, Nocturne.Neutral100),
         };
-        return Ui.Chip(onRemote ? Icons.Cloud : null, pb.Title, bg, fg);
+        var chip = Ui.Chip(onRemote ? Icons.Handshake : null, pb.Title, bg, fg);
+        if (onRemote) chip.Tooltip("Local and remote in sync");
+        return chip;
     }
 
     // ── Footer ───────────────────────────────────────────────────────────
