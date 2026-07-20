@@ -302,7 +302,7 @@ public partial class JunctionApp
         // the search box is focused.
         if (e.Modifiers.HasFlag(KeyModifiers.Alt)) return;
         if (e.Modifiers.HasFlag(KeyModifiers.Ctrl)
-            && e.Key is not (KeyCode.Up or KeyCode.Down or KeyCode.PageUp or KeyCode.PageDown or KeyCode.Space))
+            && e.Key is not (KeyCode.Up or KeyCode.Down or KeyCode.Space))
             return;
         if (e.Key == KeyCode.Escape)
         {
@@ -311,6 +311,9 @@ public partial class JunctionApp
             e.StopPropagation = true;
             return;
         }
+        // Home/End (± Shift) and Shift+PageUp/Down belong to the text box — they move
+        // the caret or select within the query. Plain PageUp/Down page the list.
+        if (IsFieldEditKey(e)) return;
         if (HandleHistoryNavKey(e))
             e.StopPropagation = true;
     }

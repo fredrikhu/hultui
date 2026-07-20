@@ -613,7 +613,24 @@ public class TextInputElement : BoxElement
             FocusBorderColor = input.FocusBorderColor;
             CursorWidth = input.CursorWidth;
             TextChanged = input.TextChanged;
-            Text = input.Text;
+
+            // Preserve the caret and selection across a reconcile patch. The Text
+            // setter resets both to an end-collapsed default, which would wipe a
+            // live selection (or jump the caret) whenever a MarkDirty() rebuilds
+            // the tree while the user is editing — e.g. a Shift+Home selection
+            // vanishing because an unrelated signal fired. When the incoming text
+            // is the same string the user is already editing (the common
+            // rebuild-on-keystroke case), restore the caret/anchor they placed.
+            int caret = _cursorPos;
+            int anchor = _selectionStart;
+            var newText = input.Text ?? "";
+            bool sameText = _text == newText;
+            Text = newText;
+            if (sameText)
+            {
+                _cursorPos = SnapToBoundary(Math.Clamp(caret, 0, _text.Length));
+                _selectionStart = SnapToBoundary(Math.Clamp(anchor, 0, _text.Length));
+            }
         }
     }
 }

@@ -587,7 +587,11 @@ public partial class JunctionApp : Component, IDisposable
         var view = scroll.Layout.AbsoluteContentBox;
         var box = row.Layout.AbsoluteBorderBox;
         var cur = scroll.ScrollOffsetY;
-        var top = box.Y - view.Y + cur;        // row top in the scroll's content space
+        // Layout positions are unscrolled — the renderer applies ScrollOffsetY — so
+        // the row's gap from the viewport top already is its offset in content space.
+        // (Adding cur here would double-count the scroll: the up-scroll test would
+        // reduce to "top < 0", which never fires, so arrow-up never scrolled back.)
+        var top = box.Y - view.Y;              // row top in the scroll's content space
         var bottom = top + box.Height;
         if (top < cur) scroll.ScrollOffsetY = top;
         else if (bottom > cur + view.Height) scroll.ScrollOffsetY = bottom - view.Height;
@@ -949,6 +953,16 @@ public partial class JunctionApp : Component, IDisposable
         var viewH = _commitListRef.Current?.Layout.AbsoluteContentBox.Height ?? (10 * RowHeight);
         return Math.Max(1, (int)(viewH / RowHeight) - 1);
     }
+
+    /// <summary>True when a key event should stay with a focused single-line search
+    /// field instead of driving its results list. Home/End (± Shift) move the caret
+    /// or select within the query, so they always belong to the field. Plain
+    /// PageUp/PageDown carry no single-line text meaning and page the list, but with
+    /// Shift held they're kept out of the list too (no accidental range-extend while
+    /// typing). ↑/↓, plain PageUp/PageDown, and Enter fall through to the list.</summary>
+    private static bool IsFieldEditKey(KeyDownEvent e) =>
+        e.Key is KeyCode.Home or KeyCode.End
+        || (e.Key is KeyCode.PageUp or KeyCode.PageDown && e.Modifiers.HasFlag(KeyModifiers.Shift));
 
     public void Dispose()
     {

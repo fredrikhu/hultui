@@ -395,8 +395,15 @@ public partial class JunctionApp
 
     private void BranchSearchKey(KeyDownEvent e)
     {
-        // Let Alt/Ctrl-modified keys bubble to the global repo/workspace shortcuts.
-        if (e.Modifiers.HasFlag(KeyModifiers.Alt) || e.Modifiers.HasFlag(KeyModifiers.Ctrl)) return;
+        // Let Alt-modified keys bubble to the global repo/workspace shortcuts. Ctrl
+        // bubbles too, except the Windows-list keys (Ctrl+↑/↓ moves the focus caret,
+        // Ctrl+Space toggles the branch in the compare selection) which the list
+        // handles even while the search box is focused — so a comparison can be
+        // built keyboard-only from here.
+        if (e.Modifiers.HasFlag(KeyModifiers.Alt)) return;
+        if (e.Modifiers.HasFlag(KeyModifiers.Ctrl)
+            && e.Key is not (KeyCode.Up or KeyCode.Down or KeyCode.Space))
+            return;
         if (e.Key == KeyCode.Escape)
         {
             _branchQuery = "";
@@ -405,6 +412,9 @@ public partial class JunctionApp
             e.StopPropagation = true;
             return;
         }
+        // Home/End (± Shift) and Shift+PageUp/Down belong to the text box — they move
+        // the caret or select within the query. Plain PageUp/Down page the list.
+        if (IsFieldEditKey(e)) return;
         if (HandleBranchNavKey(e))
             e.StopPropagation = true;
     }
