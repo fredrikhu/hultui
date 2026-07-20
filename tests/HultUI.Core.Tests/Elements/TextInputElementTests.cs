@@ -171,6 +171,43 @@ public class TextInputElementTests
     }
 
     [Fact]
+    public void PatchFrom_PreservesSelectionWhenSourceHasSameText()
+    {
+        var input = CreateInput("Hello World");
+        // Select "Hello" (Home, then Shift+End would be whole line; select first word).
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Home }, input);
+        for (int i = 0; i < 5; i++)
+            EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Right, Modifiers = KeyModifiers.Shift }, input);
+        Assert.True(input.HasSelection);
+        Assert.Equal("Hello", input.SelectedText);
+
+        // A rebuild patches in a fresh element carrying the same text — the live
+        // selection must survive.
+        input.PatchFrom(TextInputElement.New("Hello World"));
+
+        Assert.True(input.HasSelection);
+        Assert.Equal("Hello", input.SelectedText);
+        Assert.Equal(0, input.SelectionStart);
+        Assert.Equal(5, input.SelectionEnd);
+    }
+
+    [Fact]
+    public void PatchFrom_CollapsesSelectionWhenTextChanges()
+    {
+        var input = CreateInput("Hello World");
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Home }, input);
+        for (int i = 0; i < 5; i++)
+            EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Right, Modifiers = KeyModifiers.Shift }, input);
+        Assert.True(input.HasSelection);
+
+        // A genuinely different incoming string resets to the end-collapsed default.
+        input.PatchFrom(TextInputElement.New("Goodbye"));
+
+        Assert.Equal("Goodbye", input.Text);
+        Assert.False(input.HasSelection);
+    }
+
+    [Fact]
     public void CursorPosition_ClampedToTextLength()
     {
         var input = TextInputElement.New("Hi");

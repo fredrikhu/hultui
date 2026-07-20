@@ -950,6 +950,16 @@ public partial class JunctionApp : Component, IDisposable
         return Math.Max(1, (int)(viewH / RowHeight) - 1);
     }
 
+    /// <summary>True when a key event should stay with a focused single-line search
+    /// field instead of driving its results list. Home/End (± Shift) move the caret
+    /// or select within the query, so they always belong to the field. Plain
+    /// PageUp/PageDown carry no single-line text meaning and page the list, but with
+    /// Shift held they're kept out of the list too (no accidental range-extend while
+    /// typing). ↑/↓, plain PageUp/PageDown, and Enter fall through to the list.</summary>
+    private static bool IsFieldEditKey(KeyDownEvent e) =>
+        e.Key is KeyCode.Home or KeyCode.End
+        || (e.Key is KeyCode.PageUp or KeyCode.PageDown && e.Modifiers.HasFlag(KeyModifiers.Shift));
+
     public void Dispose()
     {
         _window.Resized -= OnWindowResize;
