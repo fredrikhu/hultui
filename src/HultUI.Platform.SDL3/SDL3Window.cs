@@ -451,6 +451,55 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     }
 
     /// <summary>
+    /// Describes the GL configuration this window actually got (not what was
+    /// requested): renderer/vendor/version strings, SDL video driver, achieved
+    /// swap interval, default-framebuffer MSAA samples, and the drawable
+    /// geometry. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
+    /// </summary>
+    public string? DescribeGraphics()
+    {
+        if (_window == null || _glContext == null) return null;
+        SDL_GL_MakeCurrent(_window, _glContext);
+
+        // glGetString/glGetIntegerv via SDL's proc resolver — the binding has no
+        // GL wrapper, and these two calls aren't worth pulling one in for.
+        string vendor = "?", renderer = "?", version = "?";
+        var getString = (delegate* unmanaged<uint, byte*>)GetGLProcAddress("glGetString");
+        if (getString != null)
+        {
+            renderer = Utf8OrFallback(getString(0x1F01)); // GL_RENDERER
+            vendor = Utf8OrFallback(getString(0x1F00));   // GL_VENDOR
+            version = Utf8OrFallback(getString(0x1F02));  // GL_VERSION
+        }
+
+        int samples = 0;
+        var getIntegerv = (delegate* unmanaged<uint, int*, void>)GetGLProcAddress("glGetIntegerv");
+        if (getIntegerv != null)
+            getIntegerv(0x80A9, &samples); // GL_SAMPLES
+
+        // The achieved interval, not the requested one — SDL_GL_SetSwapInterval(0)
+        // can fail silently (Wayland/EGL), leaving the app vsync'd without knowing.
+        int swapInterval = 0;
+        bool haveInterval = SDL_GL_GetSwapInterval(&swapInterval);
+
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(_window, &ww, &wh);
+
+        string driver = SDL_GetCurrentVideoDriver() ?? "?";
+
+        // Invariant culture: this line gets diffed across machines with
+        // different locales — "scale=1,5" vs "scale=1.5" is a fake difference.
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"video={driver} renderer=\"{renderer}\" vendor=\"{vendor}\" gl=\"{version}\""
+            + $" swapInterval={(haveInterval ? swapInterval.ToString() : "?")} samples={samples}"
+            + $" drawable={PixelWidth}x{PixelHeight}px window={ww}x{wh}"
+            + $" density={PixelDensity} scale={DisplayScale}");
+    }
+
+    private static string Utf8OrFallback(byte* s)
+        => s == null ? "?" : Marshal.PtrToStringUTF8((IntPtr)s) ?? "?";
+
+    /// <summary>
     /// Reveals the window (created hidden). Call once, right after the first
     /// frame has been rendered and swapped, so the window's first visible
     /// composite shows real content instead of the uninitialized GL surface.

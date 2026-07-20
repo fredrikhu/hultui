@@ -56,6 +56,19 @@ public sealed class FrameTracer
         _frameCounter++;
     }
 
+    /// <summary>
+    /// Records a zero-duration metadata event (category "Meta") carrying
+    /// <paramref name="detail"/> in its args. Used to stamp environment facts —
+    /// e.g. the achieved GL configuration — into the trace so a saved file is
+    /// self-describing when compared across machines or operating systems.
+    /// </summary>
+    public void Annotate(string name, string detail)
+    {
+        if (!IsRecording) return;
+        long ts = Stopwatch.GetTimestamp();
+        Record("Meta", name, detail, ts, ts);
+    }
+
     private void Record(string category, string name, string? detail, long startTs, long endTs)
     {
         long tsMicros = ToMicros(startTs - _recordingStart);

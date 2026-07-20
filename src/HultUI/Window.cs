@@ -245,6 +245,19 @@ public sealed class Window : IOverlayHost, IDisposable
         // it attempts a connection to the AT-SPI bus. Either way it falls
         // back to NullAccessibilityBridge if the platform can't be reached.
         _accessibilityBridge = AccessibilityBridgeFactory.Create(this);
+
+        // One-line graphics diagnostic: the renderer/driver/vsync config the
+        // platform *actually* gave us. Cross-OS perf comparisons are meaningless
+        // without it — a llvmpipe fallback, an unrequested MSAA framebuffer, or
+        // a silently vsync'd swap all read as "slow rendering" in a trace.
+        // Stamped into env-driven traces for the same reason (null headless).
+        if (platformWindow.DescribeGraphics() is { } gfx)
+        {
+            string osDesc = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
+            Console.WriteLine($"[HultUI] gfx: {gfx} os=\"{osDesc}\"");
+            if (_tracer.IsRecording)
+                _tracer.Annotate("Graphics", $"{gfx} os=\"{osDesc}\"");
+        }
     }
 
     internal void SetUiaHostBridge(Sdl3UiaHostBridge host) => _uiaHost = host;
@@ -825,7 +838,12 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (key.IsDown && key.KeyCode == KeyCode.F11)
                 {
                     if (!Tracer.IsRecording)
+                    {
                         Tracer.StartRecording();
+                        // Same graphics stamp the env-driven path gets at startup.
+                        if (PlatformWindow.DescribeGraphics() is { } gfx)
+                            Tracer.Annotate("Graphics", gfx);
+                    }
                     else
                         Tracer.StopRecording("/tmp/hultui-trace.json");
                 }

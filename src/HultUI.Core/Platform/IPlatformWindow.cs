@@ -73,4 +73,15 @@ public interface IPlatformWindow : IDisposable
     void SetMinimumSize(int layoutWidth, int layoutHeight);
     void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels);
     void SetCursor(CursorType cursor);
+
+    /// <summary>
+    /// One-line description of the *achieved* graphics configuration — renderer,
+    /// video driver, swap interval, MSAA samples, drawable size — or null when
+    /// the backend has nothing meaningful to report (headless). Logged once at
+    /// window creation and stamped into frame traces, so cross-OS performance
+    /// comparisons carry the config they ran under (a llvmpipe fallback, an
+    /// unrequested MSAA framebuffer, or a vsync'd swap all masquerade as "slow
+    /// rendering" otherwise). Diagnostic only — not a stable format, do not parse.
+    /// </summary>
+    string? DescribeGraphics() => null;
 }
