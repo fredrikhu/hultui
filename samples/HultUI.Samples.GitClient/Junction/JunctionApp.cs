@@ -568,9 +568,10 @@ public partial class JunctionApp : Component, IDisposable
             }
             else if (_paletteOpen || View == JunctionView.Commit)
             {
-                // The palette / file rows are keyed by selection, so the selected row
-                // is a *fresh* element with no layout yet in OnAfterBuild (it runs
-                // before the layout pass). Read its box after the frame is laid out.
+                // OnAfterBuild runs before the layout pass, so the selected row's box
+                // for this frame isn't available yet (and the file row, re-keyed on
+                // selection, is a fresh element with no prior layout at all). Read it
+                // in a post-frame callback, once the frame has been laid out.
                 var scrollRef = _paletteOpen ? _paletteScrollRef : _fileScrollRef;
                 var rowRef = _paletteOpen ? _paletteSelRef : _fileSelRef;
                 _window.RequestPostFrameCallback(() => ScrollRowIntoView(scrollRef, rowRef));
