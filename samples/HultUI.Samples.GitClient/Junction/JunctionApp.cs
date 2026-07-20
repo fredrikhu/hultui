@@ -587,7 +587,11 @@ public partial class JunctionApp : Component, IDisposable
         var view = scroll.Layout.AbsoluteContentBox;
         var box = row.Layout.AbsoluteBorderBox;
         var cur = scroll.ScrollOffsetY;
-        var top = box.Y - view.Y + cur;        // row top in the scroll's content space
+        // Layout positions are unscrolled — the renderer applies ScrollOffsetY — so
+        // the row's gap from the viewport top already is its offset in content space.
+        // (Adding cur here would double-count the scroll: the up-scroll test would
+        // reduce to "top < 0", which never fires, so arrow-up never scrolled back.)
+        var top = box.Y - view.Y;              // row top in the scroll's content space
         var bottom = top + box.Height;
         if (top < cur) scroll.ScrollOffsetY = top;
         else if (bottom > cur + view.Height) scroll.ScrollOffsetY = bottom - view.Height;

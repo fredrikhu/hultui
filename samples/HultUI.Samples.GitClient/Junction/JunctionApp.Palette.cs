@@ -89,7 +89,9 @@ public partial class JunctionApp
         // the explicit height keeps the row from collapsing to the empty field.
         var input = TextInput.New(_paletteQuery);
         input.PlaceholderText("Jump to a repo or branch, or run a command…")
-            .OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; MarkDirty(); })
+            // Refining the query resets to the first match; scroll it back into view
+            // so a list left scrolled down doesn't hide the new selection.
+            .OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; _pendingScrollToSelected = true; MarkDirty(); })
             .Height(Dimension.Px(30))
             .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
             .TextColor(Nocturne.Text)
