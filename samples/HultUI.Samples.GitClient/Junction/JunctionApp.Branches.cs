@@ -502,14 +502,9 @@ public partial class JunctionApp
 
     private void EnsureBranchVisible()
     {
-        var scroll = _branchScrollRef.Current;
-        if (scroll == null) return;
-        var top = _branchSel * BranchRowHeight;
-        var bottom = top + BranchRowHeight;
-        var viewH = scroll.Layout.AbsoluteContentBox.Height;
-        var cur = scroll.ScrollOffsetY;
-        if (top < cur) scroll.ScrollOffsetY = top;
-        else if (bottom > cur + viewH) scroll.ScrollOffsetY = bottom - viewH;
+        // Fixed row height, so the selected row's content-space band needs no
+        // per-row element — index * height locates it directly.
+        _branchScrollRef.Current?.ScrollRangeIntoView(_branchSel * BranchRowHeight, BranchRowHeight);
     }
 
     private GitBranch? SelectedBranch()

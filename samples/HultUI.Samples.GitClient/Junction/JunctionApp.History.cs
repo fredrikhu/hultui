@@ -208,13 +208,9 @@ public partial class JunctionApp
         var idx = IndexOfHash(FilteredCommits(_history.Value), _selectedCommitHash);
         if (idx < 0) return;
 
-        var top = idx * RowHeight;
-        var bottom = top + RowHeight;
-        var viewH = list.Layout.AbsoluteContentBox.Height;
-        var cur = list.ScrollOffsetY;
-
-        if (top < cur) list.ScrollOffsetY = top;
-        else if (bottom > cur + viewH) list.ScrollOffsetY = bottom - viewH;
+        // Virtualised list with a fixed row height: the selected row may not be
+        // materialised, so locate its band by index rather than element bounds.
+        list.ScrollRangeIntoView(idx * RowHeight, RowHeight);
     }
 
     // ── Include-in-history bar ───────────────────────────────────────────
