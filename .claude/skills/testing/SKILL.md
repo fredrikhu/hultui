@@ -41,7 +41,7 @@ dotnet test tests/HultUI.Core.Tests --filter "FullyQualifiedName~PatchFrom_Prese
 - **Anything needing a laid-out frame, focus, input funnel, scrolling, animations, or a11y queries** → HultUI.Headless. Full guide: `docs/HEADLESS.md`. Runs on any CI runner, no display.
 - **Sample-app behavior** → host the whole app headlessly (below), or tree-walk like TodoList tests if no layout is needed.
 - **"Does a real screen reader / UIA client see it?"** → HultUI.UiTests with FlaUI. Windows only, launches real windows — run locally, never in CI.
-- **Perf/GL** → real window with tracing (`HULTUI_TRACE=<path>`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`), or `samples/HultUI.Samples.Benchmark --auto|--profile`. Never use the real window for *correctness* checks.
+- **Perf/GL** → real window with tracing (`HULTUI_TRACE=<path>`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`), or `samples/HultUI.Samples.Benchmark --auto|--profile`, or the live **F12 HUD** (below). Never use the real window for *correctness* checks.
 
 ## Headless quick reference
 
@@ -76,6 +76,28 @@ session.PumpFrame();
 // Assert on live elements: el.Layout.AbsoluteBorderBox, scroll.ScrollOffsetY, …
 // Private Ref<T> fields the app doesn't expose: read via reflection.
 ```
+
+## Reading the F12 perf HUD
+
+**F12** on any running sample cycles the HUD: enabled → enabled + continuous redraw (forces a frame every loop, so FPS reflects raw throughput) → off. It splits each rendered frame into timed spans plus a residual; all seven time rows sum to the frame total.
+
+| Row | Wraps | Notes |
+|---|---|---|
+| Style | `StyleResolver.Resolve` | only runs when style-dirty |
+| Layout | `LayoutEngine.PerformLayout` | only runs when layout-dirty |
+| Render | `BeginFrame` clear + `ElementRenderer.RenderTree` | **command recording only** — no pixels yet |
+| Flush | `Canvas.Flush()` (`ctx.EndFrame`) | GPU rasterizes/submits the recorded display list; usually the bulk of the frame |
+| Present | `Surface.Present` + `SwapBuffers` | near-free with vsync off |
+| Overlay | element-count walk + the HUD's own draw | **observer tax** — nonzero only while the HUD is open |
+| Other | `Frame − Σ(above)` | residual: `ClearAllFlags` tree walks, caption-height, action-router drain |
+| Elements | full-tree count | HUD-only walk |
+
+Each row shows the last frame's value plus a rolling 5s peak. Reading them:
+
+- **Render ≠ GPU work.** Render is Skia *recording* draw commands; the actual rasterization is **Flush**. A frame that looks cheap in Render can be Flush-bound under GPU contention — don't conflate them.
+- **The HUD measures itself.** `Overlay` can be your biggest row, and it vanishes in production. The app's real per-frame cost is `Render + Flush + Present + Other`; subtract Overlay before quoting a number.
+- **One-frame lag on the tail rows.** Flush/Present/Overlay/Other close *after* the HUD draws, so they display the *previous* frame's value — inherent (a span can't show its own result), and consistent across those four.
+- Counters live in `src/HultUI.Core/DevTools/PerformanceCounters.cs`; HUD layout in `DevToolsOverlay.RenderPerformanceHud`. A new row = a `Begin/End` span pair (or a computed residual) + a rolling peak + one `Line(...)`, and bump `hudH`.
 
 ## Gotchas (each of these has burned a session)
 
