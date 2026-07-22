@@ -155,7 +155,7 @@ public sealed class DevToolsOverlay
     private void RenderPerformanceHud(IRenderContext ctx, float viewportWidth)
     {
         float hudW = 260;
-        float hudH = ContinuousRedraw ? 124 : 110;
+        float hudH = ContinuousRedraw ? 166 : 152;
         float hudX = viewportWidth - hudW - 8;
         float hudY = 8;
 
@@ -178,7 +178,10 @@ public sealed class DevToolsOverlay
         Line($"Style:   {_perf.StyleTimeMs,6:F2} ms  (peak {_perf.StyleTimePeakMs:F2})");
         Line($"Layout:  {_perf.LayoutTimeMs,6:F2} ms  (peak {_perf.LayoutTimePeakMs:F2})");
         Line($"Render:  {_perf.RenderTimeMs,6:F2} ms  (peak {_perf.RenderTimePeakMs:F2})");
+        Line($"Flush:   {_perf.FlushTimeMs,6:F2} ms  (peak {_perf.FlushTimePeakMs:F2})");
         Line($"Present: {_perf.PresentTimeMs,6:F2} ms  (peak {_perf.PresentTimePeakMs:F2})");
+        Line($"Overlay: {_perf.OverlayTimeMs,6:F2} ms  (peak {_perf.OverlayTimePeakMs:F2})");
+        Line($"Other:   {_perf.OtherTimeMs,6:F2} ms  (peak {_perf.OtherTimePeakMs:F2})");
         Line($"Elements: {_perf.ElementCount}");
         if (ContinuousRedraw)
             Line("Redraw: continuous");

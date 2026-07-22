@@ -521,12 +521,15 @@ public sealed class Window : IOverlayHost, IDisposable
         // Keep the maximize button's non-client hover highlight alive across rebuilds.
         ReassertMaximizeButtonHover();
 
-        // Render (user content only — DevTools excluded from timing)
+        // Render (user content only — DevTools excluded from timing). The Render
+        // span includes BeginFrame's full-surface clear: that clear is part of
+        // producing this frame's pixels, not a separate phase, so folding it in
+        // keeps the ledger honest without inventing a row for it.
         var ctx = PlatformWindow.Surface.RenderContext;
-        ctx.BeginFrame(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, PlatformWindow.DisplayScale, theme.Background);
         _perf.BeginRender();
         using (_tracer.Begin("Phase", "Render"))
         {
+            ctx.BeginFrame(PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight, PlatformWindow.DisplayScale, theme.Background);
             ElementRenderer.RenderTree(_root, ctx, _tracer);
         }
         _perf.EndRender();
@@ -538,19 +541,27 @@ public sealed class Window : IOverlayHost, IDisposable
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
 
-        // DevTools overlay (second pass, not timed). The element count is a full
-        // tree walk — only pay for it while the HUD actually displays it.
+        // DevTools overlay (second pass). This is pure observer tax — the element
+        // count is a full tree walk and the HUD records its own draw commands —
+        // so time it as "Overlay" to quantify how much the measurement perturbs
+        // the frame. Non-zero only while the HUD is up (see PerformanceCounters).
+        _perf.BeginOverlay();
         if (_devTools.IsEnabled)
             _perf.ElementCount = PerformanceCounters.CountElements(_root);
         _devTools.Render(ctx, _root, PlatformWindow.LayoutWidth, PlatformWindow.LayoutHeight);
+        _perf.EndOverlay();
 
         // Flush the recorded draw commands to the GPU. Under GPU contention
         // (another 3D app, compositor pressure) this call can stall for tens of
-        // milliseconds — trace it as its own phase so frame-time analysis can
+        // milliseconds — time it as its own phase so frame-time analysis can
         // attribute (and exclude) GPU-bound waits instead of leaving them as
-        // unaccounted time inside the Frame scope.
+        // unaccounted time inside the Frame scope. This is where the display list
+        // recorded during Render actually rasterizes, so it is usually the bulk
+        // of the gap between Render and the total frame time.
+        _perf.BeginFlush();
         using (_tracer.Begin("Phase", "Flush"))
             ctx.EndFrame();
+        _perf.EndFlush();
 
         // Clear remaining dirty flags after full render
         ClearAllFlags(_root);
