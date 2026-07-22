@@ -198,14 +198,19 @@ public partial class JunctionApp
         var fg = active ? Nocturne.Accent : Nocturne.On(0.60);
         bool compact = _compactChrome;
 
+        // Every tab reserves a 1px border always; only the active one colors it.
+        // Layout sizes the border box from BorderWidth regardless of color, so a
+        // transparent border on inactive tabs keeps all five fixed in place —
+        // otherwise selecting a tab would grow its box 2px and nudge its siblings.
         var tab = Flex.Row(gap: 6).FlexShrink(0)
             .AlignItems(AlignItems.Center)
             .Padding(compact ? new Thickness(5, 8, 5, 8) : new Thickness(5, 10, 5, 10))
             .CornerRadius(Nocturne.RadiusRow)
+            .BorderColor(active ? Nocturne.Accent : Color.Transparent).BorderWidth(1f)
             .Cursor(CursorType.Pointer)
             .Tooltip($"{label} ({num})");
         if (active)
-            tab.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
+            tab.Background(Nocturne.Bg);
 
         tab.AddChild(Ui.Icon(glyph, 13f, fg));
         // Narrow windows show icon-only tabs (the shortcut number and label move to
