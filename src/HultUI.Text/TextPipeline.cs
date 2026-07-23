@@ -18,6 +18,19 @@ public sealed class TextPipeline
     // entries are small and shaping is expensive, so a generous bound is worth it.
     private readonly LruCache<ShapeKey, ShapedText> _shapeCache = new(capacity: 16384);
 
+    // Word-level shape cache. Raw shaping results keyed by space-delimited
+    // segment + font instance + size, so distinct strings built from a
+    // recurring vocabulary shape each word once instead of missing the
+    // whole-string cache every time. Font instances are cache-stable in
+    // IFontCollection implementations, so reference keys hold.
+    // Known fidelity tradeoff (the same one browser word caches accept):
+    // kerning across a segment boundary is lost — a font that kerns
+    // letter↔space pairs would measure differently. UI fonts essentially
+    // never do, and WordShapeCacheTests verifies equivalence on this system.
+    private readonly LruCache<WordShapeKey, ShapedRun> _wordShapeCache = new(capacity: 8192);
+
+    private readonly record struct WordShapeKey(string Segment, IResolvedFont Font, float FontSize);
+
     public IFontCollection Fonts => _fonts;
     public ITextShaper Shaper => _shaper;
 
@@ -202,7 +215,7 @@ public sealed class TextPipeline
     // when spacing is zero (the common case), so there is no allocation cost.
     private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing)
     {
-        var run = _shaper.Shape(text, font, fontSize);
+        var run = ShapeByWords(text, font, fontSize);
         if (letterSpacing == 0f || run.Glyphs.Length == 0)
             return run;
 
@@ -218,6 +231,47 @@ public sealed class TextPipeline
 
         return new ShapedRun(run.Text, run.Font, run.FontSize,
             run.Width + letterSpacing * glyphs.Length, spaced);
+    }
+
+    // Shapes a font run by splitting it into maximal space / non-space
+    // segments, shaping each through the word cache, and concatenating. Single
+    // segments (no space) go straight through the cache.
+    private ShapedRun ShapeByWords(string text, IResolvedFont font, float fontSize)
+    {
+        if (text.IndexOf(' ') < 0)
+        {
+            var run = GetOrShapeSegment(text, font, fontSize);
+            // Fresh ShapedRun per call site: OffsetX is mutated by layout, so the
+            // cached instance must never be handed out. The glyph array is
+            // read-only in practice and safe to share.
+            return new ShapedRun(text, font, fontSize, run.Width, run.Glyphs);
+        }
+
+        var glyphs = new List<GlyphPosition>(text.Length);
+        float x = 0;
+        int i = 0;
+        while (i < text.Length)
+        {
+            bool isSpace = text[i] == ' ';
+            int start = i;
+            while (i < text.Length && (text[i] == ' ') == isSpace) i++;
+            var seg = GetOrShapeSegment(text[start..i], font, fontSize);
+            foreach (var g in seg.Glyphs)
+                glyphs.Add(g with { X = g.X + x });
+            x += seg.Width;
+        }
+        return new ShapedRun(text, font, fontSize, x, glyphs.ToArray());
+    }
+
+    private ShapedRun GetOrShapeSegment(string segment, IResolvedFont font, float fontSize)
+    {
+        var key = new WordShapeKey(segment, font, fontSize);
+        if (_wordShapeCache.TryGet(key, out var cached))
+            return cached;
+
+        var run = _shaper.Shape(segment, font, fontSize);
+        _wordShapeCache.Put(key, run);
+        return run;
     }
 
     // Adjusts a line's ascent/leading so its total height equals an explicit
