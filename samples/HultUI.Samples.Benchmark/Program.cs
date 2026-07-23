@@ -39,8 +39,12 @@ var window = app.PrimaryWindow;
 var bench = new Benchmark(window, virtualMode);
 app.SetRoot(bench.Build());
 
-// Live frame HUD (FPS / frame-time breakdown) in the top-right corner.
-app.DevTools.IsEnabled = true;
+// Live frame HUD (FPS / frame-time breakdown) in the top-right corner — only
+// for interactive use. The HUD is an observer tax (a full element-count tree
+// walk per frame plus its own draw), so the scripted --auto/--profile runs
+// keep it off: their numbers feed cross-framework and cross-OS comparisons
+// and must measure the app, not the instrument.
+app.DevTools.IsEnabled = !auto && !profile;
 
 if (auto)
     window.RequestPostFrameCallback(() => bench.RunAll(onComplete: window.Close));

@@ -104,7 +104,12 @@ driver is a known cost with no great env-var fix.
   `/testing` skill (`.claude/skills/testing/SKILL.md`) has the full map.
 - Benchmark: `samples/HultUI.Samples.Benchmark --auto` (scripted, closes
   itself), `--profile` prints per-phase + GC stats. Use it for the CPU-side
-  sanity check on the same machine/session.
+  sanity check on the same machine/session. Pull latest before capturing:
+  as of 2026-07-23 the scripted runs disable the F12 HUD (historical numbers
+  on both OSes had it on; measured impact was within noise for these
+  single-frame op latencies, but keep configurations identical), and the
+  text pipeline gained a word-level shape cache that changes absolute
+  create-row numbers vs older recordings.
 - F11 toggles tracing with keyboard focus (saves to `/tmp/hultui-trace.json`);
   the env var records from startup and needs no focus.
 - Vsync is intentionally off in code: `SDL_GL_SetSwapInterval(0)` in
