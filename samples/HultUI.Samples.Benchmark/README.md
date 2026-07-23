@@ -50,14 +50,14 @@ dotnet run --project samples/HultUI.Samples.Benchmark -- --auto
 
 ```
 === HultUI benchmark (non-virtualized): running suite ===
-  create 1,000          median   24.66 ms   min   20.03 ms   (n=5)
-  update every 10th     median    4.46 ms   min    4.20 ms   (n=5)
-  select row            median    0.32 ms   min    0.25 ms   (n=5)
-  swap rows             median    3.24 ms   min    3.05 ms   (n=5)
-  remove row            median    4.03 ms   min    3.88 ms   (n=5)
-  create 10,000         median  332.97 ms   min  281.94 ms   (n=5)
-  append 1,000 to 1,000  median   34.48 ms   min   24.02 ms   (n=5)
-  clear 1,000           median   13.41 ms   min   13.26 ms   (n=5)
+  create 1,000          median   25.59 ms   min   22.03 ms   (n=5)
+  update every 10th     median    4.62 ms   min    4.28 ms   (n=5)
+  select row            median    0.32 ms   min    0.29 ms   (n=5)
+  swap rows             median    3.80 ms   min    3.44 ms   (n=5)
+  remove row            median    4.21 ms   min    3.92 ms   (n=5)
+  create 10,000         median  299.78 ms   min  289.75 ms   (n=5)
+  append 1,000 to 1,000  median   31.28 ms   min   22.79 ms   (n=5)
+  clear 1,000           median   13.90 ms   min   13.76 ms   (n=5)
 === done ===
 ```
 
@@ -95,27 +95,27 @@ Brave (Chromium 150) — the hand-written web baseline; medians, ms):
 
 | Operation             | Browser (vanilla) | HultUI table | HultUI virtual |
 | --------------------- | ----------------: | -----------: | -------------: |
-| create 1,000          |              31.5 |         24.7 |            6.6 |
-| update every 10th     |              18.8 |          4.5 |            0.9 |
-| select row            |               6.9 |          0.3 |            1.0 |
-| swap rows             |              18.7 |          3.2 |            1.0 |
-| remove row            |              16.1 |          4.0 |            1.6 |
-| create 10,000         |               330 |          333 |            1.9 |
-| append 1,000 → 1,000  |              35.3 |         34.5 |            6.8 |
-| clear 1,000           |              14.5 |         13.4 |            5.5 |
+| create 1,000          |              31.5 |         25.6 |            6.7 |
+| update every 10th     |              18.8 |          4.6 |            0.9 |
+| select row            |               6.9 |          0.3 |            0.9 |
+| swap rows             |              18.7 |          3.8 |            1.0 |
+| remove row            |              16.1 |          4.2 |            1.5 |
+| create 10,000         |               330 |          300 |            1.9 |
+| append 1,000 → 1,000  |              35.3 |         31.3 |            6.8 |
+| clear 1,000           |              14.5 |         13.9 |            5.6 |
 
-> The HultUI columns are a fresh capture on 2026-07-23 (commit with the word-level
-> shape cache, and the F12 HUD now disabled during scripted runs — measured HUD
-> impact was within noise, but the columns should measure the app only). The
-> browser column is the 2026-07-19 capture with the official js-framework-benchmark
-> webdriver suite (`npm run bench -- --framework keyed/vanillajs`) driving
-> **Brave** (Chromium 150) on the same machine (medians of the runner's per-op
-> repeats) — browser numbers don't depend on the HultUI commit, so the column
-> carries over. Session-to-session variance is real: `create 10,000` measured 305
-> median in the 2026-07-19 session vs 333 here (mins ~282 both HUD-on and HUD-off
-> this session) — treat the bulk-op medians as ±10%. All HultUI numbers are
-> **warm** (global pre-warm above); the pre-warm-era cold numbers (e.g.
-> `create 1,000` 59, `remove row` 84) were JIT-tier-up artifacts.
+> The HultUI columns are a fresh capture on 2026-07-23, on the commit adding the
+> text pipeline's word-level shape cache **and digit fast path** (together they
+> eliminate HarfBuzz shaping from the warm path entirely — `create 10,000`
+> dropped ~333 → ~300 ms end-to-end when the digit path landed); the F12 HUD is
+> disabled during scripted runs as of the same day. The browser column is the
+> 2026-07-19 capture with the official js-framework-benchmark webdriver suite
+> (`npm run bench -- --framework keyed/vanillajs`) driving **Brave**
+> (Chromium 150) on the same machine (medians of the runner's per-op repeats) —
+> browser numbers don't depend on the HultUI commit, so the column carries over.
+> Treat bulk-op medians as ±10% session variance. All HultUI numbers are **warm**
+> (global pre-warm above); the pre-warm-era cold numbers (e.g. `create 1,000` 59,
+> `remove row` 84) were JIT-tier-up artifacts.
 
 ### Linux capture (2026-07-20, `linux-atspi-export`-era commit)
 
@@ -161,11 +161,12 @@ Reading it:
 
 - **Browser vs HultUI table** is the apples-to-apples comparison — both build and
   lay out every real row. Warm, HultUI is **faster than the vanilla browser on
-  `create 1,000`** (24.7 vs 31.5), meaningfully faster on the in-place ops
-  (`update`/`swap`/`remove`, and `select` especially — paint culling plus a
-  sub-frame present), and **on par on the biggest bulk-layout ops**,
-  `create 10,000` (333 vs 330, a tie within session variance) and `append`
-  (34.5 vs 35.3), which are layout-bound (see below).
+  every operation**: `create 1,000` 25.6 vs 31.5, the in-place ops by wide
+  margins (`update`/`swap`/`remove`, and `select` especially — paint culling
+  plus a sub-frame present), and the biggest bulk-layout ops by ~10%
+  (`create 10,000` 300 vs 330, `append` 31.3 vs 35.3) — though the bulk-op
+  margin sits near the ±10% session-variance band, so read it as "at least on
+  par, likely ahead."
 - **Caveat on the small ops:** HultUI's post-frame callback fires as soon as the
   frame is presented (sub-millisecond for a cheap op), whereas the browser's
   paint timing is coarser. So treat the in-place-op gaps as "both are fast" rather

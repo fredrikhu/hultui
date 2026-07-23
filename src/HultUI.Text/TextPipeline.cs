@@ -31,6 +31,25 @@ public sealed class TextPipeline
 
     private readonly record struct WordShapeKey(string Segment, IResolvedFont Font, float FontSize);
 
+    // Digit fast path. All-digit segments (row ids, counters) are each unique,
+    // so they miss every string-level cache forever and pay a full shaper call.
+    // For fonts that provably shape digits context-free, compose them from a
+    // per-(font,size) advance table instead — and skip the word cache entirely,
+    // so unique ids stop churning its LRU.
+    // Prove-then-enable: at first use the font+size shapes every digit and all
+    // 100 digit pairs once; any multi-glyph result, nonzero Y, kerning
+    // adjustment, or contextual substitution disqualifies it (entry = null) and
+    // digits take the normal shaper path. Never enabled on assumption.
+    private readonly Dictionary<DigitKey, DigitTable?> _digitTables = new();
+
+    private readonly record struct DigitKey(IResolvedFont Font, float FontSize);
+
+    private sealed class DigitTable
+    {
+        public readonly uint[] GlyphIds = new uint[10];
+        public readonly float[] Advances = new float[10];
+    }
+
     public IFontCollection Fonts => _fonts;
     public ITextShaper Shaper => _shaper;
 
@@ -265,6 +284,9 @@ public sealed class TextPipeline
 
     private ShapedRun GetOrShapeSegment(string segment, IResolvedFont font, float fontSize)
     {
+        if (TryShapeDigits(segment, font, fontSize) is { } digits)
+            return digits;
+
         var key = new WordShapeKey(segment, font, fontSize);
         if (_wordShapeCache.TryGet(key, out var cached))
             return cached;
@@ -272,6 +294,80 @@ public sealed class TextPipeline
         var run = _shaper.Shape(segment, font, fontSize);
         _wordShapeCache.Put(key, run);
         return run;
+    }
+
+    // Composes an all-digit segment from the proven advance table, or returns
+    // null when the segment isn't pure digits / the font+size failed the proof.
+    private ShapedRun? TryShapeDigits(string segment, IResolvedFont font, float fontSize)
+    {
+        if (segment.Length == 0)
+            return null;
+        foreach (char c in segment)
+            if (c is < '0' or > '9')
+                return null;
+
+        var key = new DigitKey(font, fontSize);
+        if (!_digitTables.TryGetValue(key, out var table))
+        {
+            table = ProveDigitsContextFree(font, fontSize);
+            _digitTables[key] = table;
+        }
+        if (table is null)
+            return null;
+
+        var glyphs = new GlyphPosition[segment.Length];
+        float x = 0;
+        for (int i = 0; i < segment.Length; i++)
+        {
+            int d = segment[i] - '0';
+            glyphs[i] = new GlyphPosition(table.GlyphIds[d], x, 0, table.Advances[d]);
+            x += table.Advances[d];
+        }
+        return new ShapedRun(segment, font, fontSize, x, glyphs);
+    }
+
+    // One-time proof per font+size (110 shaper calls): every digit must shape
+    // to exactly one zero-offset glyph, and every digit pair must shape to the
+    // two glyphs at exactly the summed nominal advances. Passing means digit
+    // strings of any length compose identically to real shaping (pair-local
+    // kerning is all a GPOS table can apply to a digit run).
+    private DigitTable? ProveDigitsContextFree(IResolvedFont font, float fontSize)
+    {
+        const float Tol = 0.01f;
+        var table = new DigitTable();
+
+        for (int d = 0; d < 10; d++)
+        {
+            var run = _shaper.Shape(((char)('0' + d)).ToString(), font, fontSize);
+            if (run.Glyphs.Length != 1)
+                return null;
+            var g = run.Glyphs[0];
+            if (Math.Abs(g.X) > Tol || Math.Abs(g.Y) > Tol)
+                return null;
+            table.GlyphIds[d] = g.GlyphId;
+            table.Advances[d] = run.Width;
+        }
+
+        for (int a = 0; a < 10; a++)
+        {
+            for (int b = 0; b < 10; b++)
+            {
+                var run = _shaper.Shape($"{(char)('0' + a)}{(char)('0' + b)}", font, fontSize);
+                if (run.Glyphs.Length != 2
+                    || run.Glyphs[0].GlyphId != table.GlyphIds[a]
+                    || run.Glyphs[1].GlyphId != table.GlyphIds[b]
+                    || Math.Abs(run.Glyphs[0].X) > Tol
+                    || Math.Abs(run.Glyphs[0].Y) > Tol
+                    || Math.Abs(run.Glyphs[1].Y) > Tol
+                    || Math.Abs(run.Glyphs[1].X - table.Advances[a]) > Tol
+                    || Math.Abs(run.Width - (table.Advances[a] + table.Advances[b])) > Tol)
+                {
+                    return null;
+                }
+            }
+        }
+
+        return table;
     }
 
     // Adjusts a line's ascent/leading so its total height equals an explicit

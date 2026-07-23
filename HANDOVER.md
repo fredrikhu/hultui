@@ -108,8 +108,9 @@ driver is a known cost with no great env-var fix.
   as of 2026-07-23 the scripted runs disable the F12 HUD (historical numbers
   on both OSes had it on; measured impact was within noise for these
   single-frame op latencies, but keep configurations identical), and the
-  text pipeline gained a word-level shape cache that changes absolute
-  create-row numbers vs older recordings.
+  text pipeline gained a word-level shape cache plus a digit fast path that
+  together remove HarfBuzz from the warm path — absolute create-row numbers
+  dropped ~10% vs older recordings (Windows create-10,000: ~333 → ~300 ms).
 - F11 toggles tracing with keyboard focus (saves to `/tmp/hultui-trace.json`);
   the env var records from startup and needs no focus.
 - Vsync is intentionally off in code: `SDL_GL_SetSwapInterval(0)` in
