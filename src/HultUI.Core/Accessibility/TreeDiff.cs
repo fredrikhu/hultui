@@ -70,6 +70,48 @@ public sealed class TreeDiff
         }
         return result;
     }
+
+    /// <summary>
+    /// The added nodes that sit at the boundary of a changed subtree — i.e. whose
+    /// parent is <em>not</em> itself newly added. Interior nodes (parent also added)
+    /// are dropped: a client learns about them by walking their freshly-added
+    /// parent, so a per-interior-node structural signal is pure redundancy.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="CoalescedAddedParents"/>, which yields distinct <em>parents</em>
+    /// for a parent-level structure hint (UIA), this keeps each boundary <em>entry</em>
+    /// so a protocol whose child signal names the specific child and index (AT-SPI's
+    /// <c>object:children-changed</c>) can emit one accurate signal per boundary child.
+    /// A bulk insert of a container plus its N children collapses to the single
+    /// entry for the container.
+    /// </remarks>
+    public List<AddedNode> BoundaryAdded() =>
+        Boundary(Added, static a => a.Node.ElementId, static a => a.Parent?.ElementId);
+
+    /// <summary>
+    /// The removed nodes at the boundary of a changed subtree — those whose parent
+    /// was not itself removed. The AT-SPI counterpart to <see cref="BoundaryAdded"/>.
+    /// </summary>
+    public List<RemovedNode> BoundaryRemoved() =>
+        Boundary(Removed, static r => r.Node.ElementId, static r => r.Parent?.ElementId);
+
+    private static List<T> Boundary<T>(
+        List<T> entries, Func<T, ElementId> id, Func<T, ElementId?> parentId)
+    {
+        var changed = new HashSet<ElementId>(entries.Count);
+        foreach (var entry in entries)
+            changed.Add(id(entry));
+
+        var result = new List<T>();
+        foreach (var entry in entries)
+        {
+            var parent = parentId(entry);
+            if (parent is { } pid && changed.Contains(pid))
+                continue; // interior of a changed subtree — its parent's walk covers it
+            result.Add(entry);
+        }
+        return result;
+    }
 }
 
 /// <summary>

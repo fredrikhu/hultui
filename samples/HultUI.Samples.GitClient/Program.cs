@@ -61,4 +61,24 @@ foreach (var path in repoPaths)
 var junction = new JunctionApp(app, window, settings);
 window.Closed += junction.Dispose;
 app.SetRoot(junction.Mount());
+
+// Trace-capture hook: with HULTUI_TRACE_MS set, drive continuous frames for that
+// long, then close the window so the normal shutdown flushes HULTUI_TRACE. The
+// window is otherwise dirty-driven (an idle repo view renders a handful of cold
+// startup frames and then stops), which is useless for steady-state GL numbers;
+// a self-re-registering post-frame callback keeps NeedsRender true so Render /
+// Flush / Present are exercised every frame. This is how automation grabs a
+// steady-state GL trace without interaction (SDL3/Wayland doesn't turn
+// SIGINT/SIGTERM into a clean quit, so a signal can't do the flush).
+if (int.TryParse(Environment.GetEnvironmentVariable("HULTUI_TRACE_MS"), out var traceMs) && traceMs > 0)
+{
+    var deadline = Environment.TickCount64 + traceMs;
+    void KeepRendering()
+    {
+        if (Environment.TickCount64 >= deadline) { window.Close(); return; }
+        window.RequestPostFrameCallback(KeepRendering);
+    }
+    window.RequestPostFrameCallback(KeepRendering);
+}
+
 app.Run();

@@ -122,39 +122,49 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
 
         _snapshot = Build(root, _geometryHost?.Scale ?? 1f);
 
-        // Populate the client's cache for every added node (the first build's
-        // diff carries the whole tree). This is what keeps libatspi from
-        // treating a later-signalled node as transient and marking it defunct.
-        // The structural children-changed / property-change *deltas* are only
-        // meaningful after the first build — before that the client has nothing
-        // to diff against, so cache-add alone conveys the initial tree.
         bool firstBuild = !_hasBuilt;
         _hasBuilt = true;
 
+        // Cache-add is genuinely per-node: it populates the AT client's object
+        // cache (the first build's diff carries the whole tree) so navigation is
+        // instant and libatspi never treats a later-signalled node as transient
+        // and marks it defunct. AT-SPI's Cache interface adds one item at a time —
+        // unlike UIA, which the client pulls on demand — so every added node is
+        // cached. That work stays; only the redundant structural signals below go.
         foreach (var added in diff.Added)
         {
             string childPath = PathOf(added.Node);
             if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
             _bus.EmitCacheAdd(this, acc);
             DebugSignalsEmitted++;
-            if (!firstBuild && added.Parent is not null)
-            {
-                _bus.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
-                DebugSignalsEmitted++;
-            }
         }
 
         foreach (var removed in diff.Removed)
         {
-            string childPath = PathOf(removed.Node);
-            _bus.EmitCacheRemove(childPath);
+            _bus.EmitCacheRemove(PathOf(removed.Node));
             DebugSignalsEmitted++;
-            if (!firstBuild && removed.Parent is not null)
-            {
-                int index = IndexOf(removed.Parent, removed.Node);
-                _bus.EmitChildrenChanged(PathOf(removed.Parent), childPath, index, isAdd: false);
-                DebugSignalsEmitted++;
-            }
+        }
+
+        // children-changed is a structural re-query hint on a *parent*, not a
+        // per-child record: the per-node Cache.Add/RemoveAccessible signals above
+        // already carry the exact node set to the client's cache, so one nudge per
+        // affected parent is enough — the client re-reads that parent's children
+        // (served lock-free from the fresh snapshot; verified with a live pyatspi
+        // client, which even observes reorders with no signal at all). So we
+        // coalesce two ways:
+        //   • interior nodes (parent is itself in the diff) carry no information —
+        //     the client discovers them by walking their freshly added/removed
+        //     parent — so BoundaryAdded/Removed drops them; and
+        //   • the remaining boundary children under one surviving parent collapse
+        //     to a single signal on that parent (naming the first affected child).
+        // Together these turn a bulk insert/clear of N rows under one container
+        // from N children-changed signals into one. (Skipped on the first build:
+        // the client has no prior tree to diff, and the cache-add burst conveys
+        // the whole initial tree.)
+        if (!firstBuild)
+        {
+            EmitAddedChildNudges(diff.BoundaryAdded());
+            EmitRemovedChildNudges(diff.BoundaryRemoved());
         }
 
         // diff.Reordered (same children, new order) needs no signal: every
@@ -168,6 +178,40 @@ public sealed class LinuxAccessibilityBridge : IAccessibilityBridge, IAtSpiTree,
         if (!firstBuild)
             foreach (var change in diff.PropertyChanged)
                 if (EmitPropertyChange(change)) DebugSignalsEmitted++;
+    }
+
+    // One children-changed:add per surviving parent. The boundary list has already
+    // dropped interior nodes; here we keep only the first added child under each
+    // distinct parent, since the signal is a re-query nudge and the per-node
+    // cache-adds already conveyed the full set.
+    private void EmitAddedChildNudges(List<AddedNode> boundary)
+    {
+        var seenParents = new HashSet<string>();
+        foreach (var added in boundary)
+        {
+            if (added.Parent is null) continue;
+            string childPath = PathOf(added.Node);
+            if (!_snapshot.ByPath.TryGetValue(childPath, out var acc)) continue;
+            if (!seenParents.Add(acc.ParentPath)) continue;
+            _bus!.EmitChildrenChanged(acc.ParentPath, childPath, acc.IndexInParent, isAdd: true);
+            DebugSignalsEmitted++;
+        }
+    }
+
+    // One children-changed:remove per surviving parent. Removed nodes are gone from
+    // the new snapshot, so parent/index come from the previous tree the diff carries.
+    private void EmitRemovedChildNudges(List<RemovedNode> boundary)
+    {
+        var seenParents = new HashSet<string>();
+        foreach (var removed in boundary)
+        {
+            if (removed.Parent is null) continue;
+            string parentPath = PathOf(removed.Parent);
+            if (!seenParents.Add(parentPath)) continue;
+            int index = IndexOf(removed.Parent, removed.Node);
+            _bus!.EmitChildrenChanged(parentPath, PathOf(removed.Node), index, isAdd: false);
+            DebugSignalsEmitted++;
+        }
     }
 
     public void NotifyFocusChanged(AccessibilityNode? focused)

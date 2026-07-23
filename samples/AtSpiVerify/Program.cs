@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Headless;
@@ -22,11 +23,16 @@ var checkbox = Checkbox.New(false, "Enable feature");
 // click handler is what makes this export as a "push button".
 button.OnClick(_ => counter.Content = $"Count: {++count}");
 
+// A named List container so a client can find it by role+name and count its
+// children across bulk add/remove cycles (used by ATSPI_BULK verification).
+var list = Flex.Column(gap: 2).AccessibleRole(AccessibilityRole.List).AccessibleName("bulk-list");
+
 var column = Flex.Column(gap: 8).Padding(12).Children(
     Text.New("HultUI AT-SPI Verify"),
     button,
     checkbox,
-    counter);
+    counter,
+    list);
 session.Window.SetRoot(column);
 
 var actionHost = session.Window.InstallActionRouter();
@@ -41,6 +47,41 @@ if (!bridge.IsActive)
 }
 
 Console.WriteLine("[harness] Exported to the a11y bus. Toolkit name = 'HultUI'.");
+
+// ── Bulk mode (ATSPI_BULK=1): cycle the named List through empty → N children →
+//    empty so a *live* pyatspi client (see atspi_bulk_verify.py) can confirm it
+//    observes the correct child count after the coalesced children-changed
+//    signals. This is the real-client check for the event-coalescing change:
+//    per-node cache add/remove + one children-changed nudge per parent must keep
+//    a caching client's view of the container correct.
+if (Environment.GetEnvironmentVariable("ATSPI_BULK") == "1")
+{
+    int n = int.TryParse(Environment.GetEnvironmentVariable("ATSPI_BULK_N"), out var pn) ? pn : 200;
+    Console.WriteLine($"[harness] BULK mode: cycling '{list.AccessibleName}' 0 ⇄ {n} children every 3s. Ctrl+C to stop.");
+    bool bstop = false;
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; bstop = true; };
+    int cycle = 0;
+    while (!bstop)
+    {
+        // Fill.
+        for (int i = 0; i < n; i++)
+            list.AddChild(Box.New().AccessibleRole(AccessibilityRole.ListItem)
+                .AccessibleName($"item {i}").Children(Text.New($"item {i}")));
+        session.PumpFrame();
+        Console.WriteLine($"[harness] cycle {cycle} FILLED  → EXPECT list children={n} (applyChanges={bridge.DebugApplyChangesCalls})");
+        for (int t = 0; t < 10 && !bstop; t++) { Thread.Sleep(300); session.PumpFrame(); }
+
+        // Empty.
+        while (list.Children.Count > 0) list.RemoveChild(list.Children[^1]);
+        session.PumpFrame();
+        Console.WriteLine($"[harness] cycle {cycle} EMPTIED → EXPECT list children=0 (applyChanges={bridge.DebugApplyChangesCalls})");
+        for (int t = 0; t < 10 && !bstop; t++) { Thread.Sleep(300); session.PumpFrame(); }
+        cycle++;
+    }
+    Console.WriteLine("[harness] Stopped.");
+    return;
+}
+
 Console.WriteLine("[harness] Running. Ctrl+C to stop. Emitting a state change every 2s.");
 
 // Keep the process alive and generate periodic change signals so an AT client

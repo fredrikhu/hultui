@@ -133,4 +133,94 @@ public class TreeDiffCoalescingTests
         Assert.Empty(diff.CoalescedAddedParents());
         Assert.Empty(diff.CoalescedRemovedParents());
     }
+
+    // ── BoundaryAdded / BoundaryRemoved: the AT-SPI variant. Unlike the parent
+    //    coalescing above, these keep the boundary *entry* (child + parent), so
+    //    the Linux bridge can emit one children-changed naming the specific child
+    //    that a pre-existing parent gained/lost, and drop the interior storm.
+
+    [Fact]
+    public void BoundaryAdded_KeepsOnlyTheContainer_NotItsInteriorChildren()
+    {
+        var root = AppRoot();
+        var before = Build(root);
+
+        for (int i = 0; i < 20; i++)
+            root.AddChild(Row($"row {i}"));
+        var after = Build(root);
+
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+        Assert.Equal(60, diff.Added.Count); // 20 rows × (row + 2 labels)
+
+        // Each row is a boundary child of the surviving app root; its two labels
+        // are interior (their parent, the row, is itself added) and drop out.
+        var boundary = diff.BoundaryAdded();
+        Assert.Equal(20, boundary.Count);
+        Assert.All(boundary, e => Assert.Equal(after.ElementId, e.Parent!.ElementId));
+    }
+
+    [Fact]
+    public void BoundaryRemoved_KeepsOnlyTheContainer_NotItsInteriorChildren()
+    {
+        var root = AppRoot();
+        for (int i = 0; i < 20; i++)
+            root.AddChild(Row($"row {i}"));
+        var before = Build(root);
+
+        while (root.Children.Count > 0)
+            root.RemoveChild(root.Children[^1]);
+        var after = Build(root);
+
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+        Assert.Equal(60, diff.Removed.Count);
+
+        var boundary = diff.BoundaryRemoved();
+        Assert.Equal(20, boundary.Count);
+        Assert.All(boundary, e => Assert.Equal(before.ElementId, e.Parent!.ElementId));
+    }
+
+    [Fact]
+    public void BoundaryAdded_OnFirstBuild_KeepsTheRootEntryWithNoParent()
+    {
+        var root = AppRoot();
+        root.AddChild(Row("row"));
+        var tree = Build(root);
+
+        var diff = AccessibilityTreeDiffer.Diff(null, tree);
+
+        // The root is the only boundary (null parent); everything else is interior.
+        var only = Assert.Single(diff.BoundaryAdded());
+        Assert.Null(only.Parent);
+        Assert.Equal(tree.ElementId, only.Node.ElementId);
+    }
+
+    [Fact]
+    public void BoundaryAdded_UnderDistinctSurvivingParents_KeepsBoth()
+    {
+        var root = AppRoot();
+        var left = Row("left");
+        var right = Row("right");
+        root.AddChild(left);
+        root.AddChild(right);
+        var before = Build(root);
+
+        left.AddChild(TextElement.New("new in left"));
+        right.AddChild(TextElement.New("new in right"));
+        var after = Build(root);
+
+        var diff = AccessibilityTreeDiffer.Diff(before, after);
+        var boundary = diff.BoundaryAdded();
+
+        Assert.Equal(2, boundary.Count);
+        Assert.All(boundary, e => Assert.NotNull(e.Parent));
+        Assert.NotEqual(boundary[0].Parent!.ElementId, boundary[1].Parent!.ElementId);
+    }
+
+    [Fact]
+    public void BoundaryHelpers_EmptyDiff_YieldNothing()
+    {
+        var diff = new TreeDiff();
+        Assert.Empty(diff.BoundaryAdded());
+        Assert.Empty(diff.BoundaryRemoved());
+    }
 }

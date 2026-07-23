@@ -122,45 +122,65 @@ Brave (Chromium 150) — the hand-written web baseline; medians, ms):
 > pre-warm-era cold numbers (e.g. `create 1,000` 59, `remove row` 84) were
 > JIT-tier-up artifacts.
 
-### Linux capture (2026-07-20, `linux-atspi-export`-era commit)
+### Linux capture (2026-07-23, same commit as the Windows column + AT-SPI coalescing)
 
 The **same machine** as the Windows/browser columns above, rebooted into Linux
-(Fedora 44, Wayland, NVIDIA proprietary driver). Release build, warm, medians of
-n=5; two table runs (mins used where a single median was GC/scheduling-jittery).
-**Predates the word-shape cache, digit fast path, UIA event coalescing, and
-the HUD-off scripted runs** — a same-commit re-capture is queued for the next
-Linux session (see the repo-root `HANDOVER.md`), so compare it against the
-2026-07-19 Windows capture it shared a commit with (table: 23 / 5.5 / 0.6 /
-4.2 / 4.2 / 305 / 34 / 12), not the 2026-07-23 column above.
+(Fedora 44, **KDE Plasma / Wayland**, NVIDIA proprietary 610.43.03, RTX 4080).
+Release build, warm, medians of n=5. This is the same-commit re-capture the old
+2026-07-20 section was waiting for — and it settled the "why is the Linux
+benchmark slower?" question the repo-root `HANDOVER.md` was opened to chase.
 
-| Operation             | HultUI table (Linux) | HultUI virtual (Linux) |
-| --------------------- | -------------------: | ---------------------: |
-| create 1,000          |                 17.3 |                    7.8 |
-| update every 10th     |                  3.4 |                    0.6 |
-| select row            |                  0.4 |                    0.6 |
-| swap rows             |                  3.6 |                    0.7 |
-| remove row            |                  4.4 |                    1.3 |
-| create 10,000         |                  258 |                    1.6 |
-| append 1,000 → 1,000  |                   22 |                    8.5 |
-| clear 1,000           |                  8.4 |                   20.7 |
+**The whole gap was the accessibility bridge, not the framework or the GPU.** On
+any live desktop the AT-SPI bus is reachable, so HultUI's Linux a11y bridge
+eager-connects and does per-frame work during the benchmark — whereas a headless
+CI box (no bus) benches a11y-free. The Windows column likewise runs with an
+active (background-UIA) bridge. So the honest comparison needs the a11y state
+pinned; the new **`HULTUI_A11Y=0`** master switch (works on every platform) does
+that. Three columns, one machine:
 
-> Captured after a `dnf upgrade` that healed the GPU present path (the earlier
-> run logged `libEGL: failed to create dri2 screen` and fell back). The effect is
-> stark on **present-bound in-place ops**: table `select` dropped 1.3 → 0.4 ms,
-> and virtual `select`/`swap` collapsed from ~3–4.5 ms to ~0.6 ms — the
-> "mutation → painted" latency the harness measures is now dominated by real GPU
-> present, not a broken fallback. The **CPU-bound bulk `create`** ops moved the
-> other way (`create 1,000` ~10 → ~17, `create 10,000` ~216 → ~258); that path
-> touches no GPU, so the shift is kernel/scheduler/thermal, not the driver.
+| Operation             | Linux, a11y active (coalesced) | Linux, `HULTUI_A11Y=0` (framework floor) | Windows, a11y active (coalesced) |
+| --------------------- | -----------------------------: | ---------------------------------------: | -------------------------------: |
+| create 1,000          |                           17.9 |                                      5.3 |                             12.3 |
+| update every 10th     |                            3.9 |                                      2.2 |                              4.8 |
+| select row            |                           0.38 |                                     0.21 |                              0.5 |
+| swap rows             |                            3.4 |                                      2.0 |                              3.7 |
+| remove row            |                            4.4 |                                      3.0 |                              4.4 |
+| create 10,000         |                     218 (min 204) |                            126 (min 110) |                              165 |
+| append 1,000 → 1,000  |                             24 |                                     13.5 |                             18.0 |
+| clear 1,000           |                           2.85 |                                     0.15 |                              0.5 |
+
+> **Framework CPU: Linux is faster than Windows.** Compare the floors — Linux
+> `HULTUI_A11Y=0` create-10,000 is **110–126 ms** vs the Windows bridge-off floor
+> of **146 ms** (see the coalescing commit) — so the `.NET` + framework path is
+> genuinely quicker on Linux, confirming the handover's premise. The in-place ops
+> agree (Linux floors sit at/under Windows).
 >
-> **An apples-to-apples OS comparison against the 2026-07-19 Windows capture**
-> (values in the section intro above) — same commit, same binary, same GPU,
-> machine rebooted between the two. On the non-virtualized table Linux is
-> faster on every op except `remove row` (a tie): the gap is widest on the
-> present-bound in-place ops (`update` 3.4 vs 5.5, `select` 0.4 vs 0.6, `append`
-> 22 vs 34), consistent with the healed GPU present path. The virtual columns are
-> roughly even; ignore the Linux virtual `clear 1,000` = 20.7, a single
-> GC/scheduling-jittery median (the Windows 5.0 is the trustworthy figure there).
+> **With a11y active, Linux `create`/`append` cost more, and that's a protocol
+> difference, not a regression.** AT-SPI is *push*-based: every added node is sent
+> to the client's cache via one `Cache.AddAccessible` signal (real work that makes
+> screen-reader navigation instant), whereas UIA is *pulled* on demand, so Windows
+> pays nothing per node on a create. Even after the coalescing below, Linux
+> create-10,000 keeps that ~60 ms cache-push cost. It is the right cost to keep.
+>
+> **The event coalescing this capture includes.** The Linux bridge used to emit
+> one `object:children-changed` per added/removed node too — pure redundancy on a
+> bulk change (the per-node cache signals already carry the node set, and a client
+> re-reads a parent's children from the fresh snapshot). It now coalesces to **one
+> children-changed per affected parent**, verified against a live `pyatspi` client
+> (Orca's stack) that tracked a 0⇄200 cycle exactly while receiving one signal per
+> bulk op. Effect: table `clear 1,000` **9.3 → 2.85 ms**, `create 10,000` shed its
+> ~27 ms children-changed storm (down to the cache-push floor), and the old
+> virtual `clear` jitter (20.7 ms) is gone (now 3.4 ms).
+>
+> **GL / present: the ~2× gap the handover chased no longer reproduces.** A 5 s
+> continuous-frame GitClient trace (~15 k frames, `HULTUI_TRACE_MS`) gives
+> steady-state **Render 0.18 ms** (median; the handover measured 1–1.5 ms),
+> **Flush 0.09 ms**, **Present 0.02 ms** — Present nowhere near a 16.6/8.3 ms
+> vsync wait, so `swapInterval=0` genuinely holds, and Render now matches the
+> Windows reference (0.2–0.3 ms). ~2,990 fps uncapped. The earlier gap was the
+> broken `dri2`/EGL fallback the old note mentioned; a driver/stack update healed
+> it. gfx line: `video=wayland renderer="NVIDIA GeForce RTX 4080…" gl="3.3.0
+> NVIDIA 610.43.03" swapInterval=0 samples=0`.
 
 Reading it:
 

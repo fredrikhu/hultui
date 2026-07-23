@@ -1,134 +1,83 @@
-# Handover: Linux vs Windows GL performance investigation
+# RESOLVED: Linux vs Windows GL / benchmark performance investigation
 
-*Written 2026-07-20 on the Windows machine, for a Claude Code session on the
-Fedora side. Self-contained — the Windows session's memory is not available on
-Linux. Delete this file when the investigation concludes.*
+*Opened 2026-07-20 on Windows; concluded 2026-07-23 on the Fedora side. Both
+questions it raised are answered below. **Windows session: once you've read this,
+this file can be deleted** — the durable numbers now live in
+`samples/HultUI.Samples.Benchmark/README.md` (the "Linux capture (2026-07-23)"
+section).*
 
-## The observation
+## What was asked
 
-- The **benchmark suite** (`samples/HultUI.Samples.Benchmark --auto` / `--profile`,
-  CPU-side phases) has **Linux slightly ahead** — .NET + framework code are fine.
-- The **Junction Git app** (`samples/HultUI.Samples.GitClient`, Release) gets
-  **~2x the fps on Windows**. The gap is in the GL path:
-  - **Present** is the primary difference (exact numbers not recorded — measure).
-  - **Render** phase: **0.2–0.3 ms Windows vs 1–1.5 ms Linux**.
+1. The **benchmark suite** had Linux looking slightly *ahead* on an old capture,
+   but a same-commit re-capture was queued to confirm after the 2026-07-23
+   optimizations.
+2. The **Junction GitClient** got ~2× the fps on Windows; the gap was in the GL
+   path (Present, and Render 0.2–0.3 ms Windows vs 1–1.5 ms Linux).
 
-So: CPU-side framework ✅, GL submit + swap ❌. Driver/compositor territory.
+## Finding 1 — the benchmark gap was the accessibility bridge
 
-**Unresolved variable:** confirm with Fredrik whether the Fedora setup is the
-same machine dual-booting or different hardware. Different GPUs would reframe
-everything below.
+Machine confirmed to be the **same box dual-booting** (RTX 4080 both sides), so
+it's a clean OS comparison.
 
-## New tooling (commit adding this file)
+The naive same-machine benchmark showed Linux *slower* on bulk ops (create/append
+/clear). Root cause: on any live desktop the **AT-SPI bus is reachable, so the
+Linux a11y bridge eager-connects and does per-frame work** during the benchmark.
+A headless CI box has no bus and benches a11y-free; the Windows column runs with
+an active background-UIA bridge. Apples-to-oranges until the a11y state is pinned.
 
-Every real window now prints one line at creation and stamps it into traces:
+Pinned via the new **`HULTUI_A11Y=0`** master switch:
 
-```
-[HultUI] gfx: video=windows renderer="NVIDIA GeForce RTX 4080/PCIe/SSE2"
-  vendor="NVIDIA Corporation" gl="3.3.0 NVIDIA 610.62" swapInterval=0 samples=0
-  drawable=2160x1395px window=2160x1395 density=1 scale=1.5
-  os="Microsoft Windows 10.0.26200"
-```
+- **Framework CPU (a11y off, both OSes): Linux is faster.** create-10,000 floor
+  110–126 ms on Linux vs the Windows bridge-off floor of 146 ms. The handover's
+  premise ("`.NET` + framework fine on Linux") holds — Linux is ahead.
+- **`--profile` proved the a11y cost is *outside* every rendered pass**: with the
+  bridge on vs off, build/style/layout/render/present are identical (~120 ms for
+  create-10k both ways); the ~110 ms difference was pure D-Bus emission, showing
+  up only as +~130 MB frame alloc and 2–3× the GC.
 
-↑ That is the actual **Windows reference line** (Debug run, 2026-07-20; config
-doesn't differ Debug/Release). Note: `swapInterval=0` *achieved*, no MSAA,
-display scale 1.5, drawable 2160×1395.
+### Fix shipped: AT-SPI event coalescing (mirrors the Windows UIA change)
 
-Implementation, if it needs touching: `SDL3Window.DescribeGraphics()`
-(`src/HultUI.Platform.SDL3/SDL3Window.cs`), default-null member on
-`IPlatformWindow`, logged/stamped in `src/HultUI/Window.cs` (ctor + F11 path),
-`FrameTracer.Annotate` records it as a `cat="Meta"`, `name="Graphics"` event.
+The Linux bridge emitted **one `object:children-changed` per added/removed node**
+— redundant on a bulk change, since the per-node `Cache.Add/RemoveAccessible`
+signals already carry the node set and a client re-reads a parent's children from
+the fresh snapshot. It now emits **one children-changed per affected parent**
+(`TreeDiff.BoundaryAdded/BoundaryRemoved` + dedupe by parent in
+`LinuxAccessibilityBridge`). **Verified on a live `pyatspi` client** (Orca's
+stack): it tracked a 0⇄200 child cycle exactly while receiving one signal per bulk
+op (`samples/AtSpiVerify` bulk mode + `atspi_bulk_verify.py`).
 
-## Step 1: capture the Linux gfx line
+Effect (a11y active): `clear 1,000` 9.3 → 2.85 ms; `create 10,000` shed its
+~27 ms children-changed storm. The **per-node cache-add is deliberately kept** —
+AT-SPI is push-based and that ~60 ms on create-10k is real cache-warming that
+makes screen-reader navigation instant (UIA, being pull-on-demand, simply never
+pays it). So Linux `create`/`append` stay above Windows *with a11y on*; that's a
+protocol difference, not a regression.
 
-```bash
-dotnet build HultUI.slnx -c Release
-HULTUI_TRACE=/tmp/junction-linux.json \
-  dotnet run --project samples/HultUI.Samples.GitClient -c Release --no-build
-```
+> Note: the old suggestion to equalize with `HULTUI_UIA_EVENTS=0` on Linux was
+> wrong — that var is Windows-only. Use `HULTUI_A11Y=0` (new, all platforms).
 
-Compare field-by-field against the Windows line above. Each field is a
-hypothesis-killer:
+## Finding 2 — the GL / present gap no longer reproduces
 
-| Field | If it differs from Windows… |
-|---|---|
-| `renderer="llvmpipe…"` / `"softpipe"` | **software rendering** — case closed, fix GL context creation/driver install |
-| `swapInterval=1` (or `?`) | swap is vsync'd — the fps gap is a cap, not a cost. `SDL_GL_SetSwapInterval(0)` failed silently (common on Wayland/EGL) |
-| `samples=4/8/16` | unrequested MSAA framebuffer — Mesa config pick; explains slower Render+Present |
-| `drawable=` much larger | HiDPI scale mismatch — comparing different pixel counts |
-| `video=wayland` vs `x11` | present semantics differ entirely between the two — test both (below) |
+Steady-state GitClient trace (~15 k continuous frames via the new
+`HULTUI_TRACE_MS` capture hook): **Render 0.18 ms median, Flush 0.09 ms,
+Present 0.02 ms**, ~2,990 fps uncapped. Present is nowhere near a 16.6/8.3 ms
+vsync wait (so `swapInterval=0` genuinely holds), and Render now matches the
+Windows reference (0.2–0.3 ms), not the 1–1.5 ms measured on 2026-07-20. The old
+gap was the broken `dri2`/EGL fallback the README's 07-20 note mentioned; a
+driver/stack update (now NVIDIA 610.43.03) healed it. gfx line:
+`video=wayland renderer="NVIDIA GeForce RTX 4080/PCIe/SSE2" gl="3.3.0 NVIDIA
+610.43.03" swapInterval=0 samples=0`.
 
-## Step 2: trace, and split waiting from working
+## Code changes in this branch
 
-The trace (`HULTUI_TRACE=<path>`; saved on window close) is Chrome-trace JSON —
-load in ui.perfetto.dev. Phases are `cat="Phase"`: Style/Layout/A11y/Render/
-Flush/Present. The `Graphics` meta event is at t≈0.
+- `src/HultUI.Core/Accessibility/TreeDiff.cs` — `BoundaryAdded()`/
+  `BoundaryRemoved()` (+ tests in `TreeDiffCoalescingTests`).
+- `src/HultUI.Platform.Accessibility.Linux/LinuxAccessibilityBridge.cs` —
+  coalesced children-changed; per-node cache add/remove kept.
+- `src/HultUI/AccessibilityBridgeFactory.cs` — `HULTUI_A11Y=0` master off switch.
+- `samples/AtSpiVerify/` — bulk-cycle mode + `atspi_bulk_verify.py` (live-client
+  verification of the coalescing).
+- `samples/HultUI.Samples.GitClient/Program.cs` — `HULTUI_TRACE_MS` continuous-
+  frame trace-capture hook (SDL3/Wayland won't turn a signal into a clean quit).
 
-- **Present ≈ (frame budget − everything else)** → it's a vsync/compositor
-  *wait*, not overhead. Fix is configuration.
-- **Present large and variable, uncorrelated with 16.6/8.3 ms** → real
-  compositor/driver cost.
-- GPU stalls show up in **Flush**; subtract Flush+Present for CPU-side
-  comparisons with the Windows numbers.
-
-## Step 3: experiment matrix
-
-One variable per run; keep the gfx line + a trace per run. Suggested order:
-
-```bash
-# A. Kill any vsync at the driver level
-vblank_mode=0 dotnet run ...          # Mesa (AMD/Intel)
-__GL_SYNC_TO_VBLANK=0 dotnet run ...  # NVIDIA proprietary
-
-# B. Backend comparison — SDL3 picks per distro; force each explicitly
-SDL_VIDEODRIVER=x11 dotnet run ...
-SDL_VIDEODRIVER=wayland dotnet run ...
-
-# C. Mesa threaded dispatch — often a big win for many-small-GL-calls
-#    profiles like Skia/Ganesh; directly targets the 1–1.5 ms Render phase
-mesa_glthread=true dotnet run ...
-
-# D. Minor, try last
-MESA_NO_ERROR=1 dotnet run ...
-```
-
-Expected outcomes: A or the gfx line resolves the fps gap (throttling); C is
-the most likely lever on the Render-phase delta if the renderer string shows
-Mesa. If NVIDIA proprietary on Linux, per-call dispatch overhead vs the Windows
-driver is a known cost with no great env-var fix.
-
-## Repo facts you'd otherwise rediscover
-
-- Build/test: `dotnet build HultUI.slnx`; `dotnet test HultUI.CrossPlatform.slnf`
-  is the Linux-suitable test set (skips Windows-only FlaUI UiTests). The
-  `/testing` skill (`.claude/skills/testing/SKILL.md`) has the full map.
-- Benchmark: `samples/HultUI.Samples.Benchmark --auto` (scripted, closes
-  itself), `--profile` prints per-phase + GC stats. Use it for the CPU-side
-  sanity check on the same machine/session. Pull latest before capturing:
-  as of 2026-07-23 the scripted runs disable the F12 HUD (historical numbers
-  on both OSes had it on; measured impact was within noise for these
-  single-frame op latencies, but keep configurations identical), the text
-  pipeline gained a word-level shape cache plus a digit fast path (HarfBuzz
-  removed from the warm path), and the Windows UIA bridge coalesces
-  structure-changed events to topmost parents (was one cross-process event
-  per added a11y node — half the create cost). Windows create-10,000 went
-  ~333 → ~165 ms across these; don't compare against older recordings.
-- Accessibility parity check before comparing OSes: this Windows machine has
-  a background UIA client, so its bridge (tree build + diff each frame) is
-  ACTIVE during benchmarks. On Fedora the AT-SPI bridge only activates if a
-  registry/bus is reachable — if no AT runs, Linux benches a11y-free. Either
-  verify both sides match or set `HULTUI_UIA_EVENTS=0` / stop the listener
-  to equalize.
-- F11 toggles tracing with keyboard focus (saves to `/tmp/hultui-trace.json`);
-  the env var records from startup and needs no focus.
-- Vsync is intentionally off in code: `SDL_GL_SetSwapInterval(0)` in
-  `SDL3Window` ctor — but verify the *achieved* value via the gfx line.
-- Skia targets the default framebuffer, `GL 3.3 core` requested, stencil 8
-  (`SkiaGLRenderSurface.cs`); Present = Skia flush + `SDL_GL_SwapWindow`.
-
-## Report back
-
-Record findings (gfx lines, per-phase numbers, which experiment moved what) in
-this file or a follow-up doc, commit, and push — the Windows-side session picks
-it up from git. If a code change falls out (e.g. EGL preference, swap-interval
-retry, glthread hint), normal PR flow.
+Tests green: Core 508, Headless 46, Accessibility.Linux 24, TreeDiffCoalescing 10.

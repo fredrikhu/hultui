@@ -17,6 +17,16 @@ internal static class AccessibilityBridgeFactory
 {
     public static IAccessibilityBridge Create(Window window)
     {
+        // Master opt-out, honored on every platform: skip the accessibility
+        // bridge entirely. Lets a benchmark equalize against a machine with no
+        // assistive tech attached (on Linux the AT-SPI bridge otherwise
+        // eager-connects whenever an a11y bus is reachable — e.g. any live
+        // desktop session), and is an escape hatch if a bridge misbehaves.
+        // Windows also has the finer HULTUI_UIA_EVENTS=0, which keeps the tree
+        // exported but suppresses only the live event notifications.
+        if (Environment.GetEnvironmentVariable("HULTUI_A11Y") == "0")
+            return NullAccessibilityBridge.Instance;
+
         // Only real OS windows have an accessibility surface to bridge to.
         // Headless platform windows stay on the Null bridge everywhere — on
         // Linux this also avoids probing the AT-SPI D-Bus session, which a
