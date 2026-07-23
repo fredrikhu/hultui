@@ -1,3 +1,5 @@
+using HultUI.Core.Elements;
+
 namespace HultUI.Core.Accessibility;
 
 /// <summary>
@@ -26,6 +28,48 @@ public sealed class TreeDiff
     public bool IsEmpty =>
         Added.Count == 0 && Removed.Count == 0 &&
         Reordered.Count == 0 && PropertyChanged.Count == 0;
+
+    /// <summary>
+    /// The distinct parents that actually gained children in this diff,
+    /// excluding parents that are themselves newly added. A structure-changed
+    /// notification is a re-query hint on a parent, not a per-child record —
+    /// so a freshly added parent needs no announcement of its own children
+    /// (announcing the topmost added ancestor's pre-existing parent covers the
+    /// whole subtree, and clients discover the rest by walking it). A bulk
+    /// insert of N subtrees under one container thus coalesces from N×subtree
+    /// events to one. Null in the result means the root itself was added.
+    /// </summary>
+    public List<ElementId?> CoalescedAddedParents() =>
+        CoalesceParents(Added, static a => (a.Node.ElementId, a.Parent?.ElementId));
+
+    /// <summary>
+    /// The distinct parents that survive this diff and lost children —
+    /// parents that were themselves removed are skipped for the same
+    /// topmost-boundary reason as <see cref="CoalescedAddedParents"/>.
+    /// Null in the result means the root itself was removed.
+    /// </summary>
+    public List<ElementId?> CoalescedRemovedParents() =>
+        CoalesceParents(Removed, static r => (r.Node.ElementId, r.Parent?.ElementId));
+
+    private static List<ElementId?> CoalesceParents<T>(
+        List<T> entries, Func<T, (ElementId Node, ElementId? Parent)> ids)
+    {
+        var changed = new HashSet<ElementId>(entries.Count);
+        foreach (var entry in entries)
+            changed.Add(ids(entry).Node);
+
+        var seen = new HashSet<ElementId?>();
+        var result = new List<ElementId?>();
+        foreach (var entry in entries)
+        {
+            var parent = ids(entry).Parent;
+            if (parent is { } pid && changed.Contains(pid))
+                continue; // interior of a changed subtree — covered by its topmost boundary
+            if (seen.Add(parent))
+                result.Add(parent);
+        }
+        return result;
+    }
 }
 
 /// <summary>

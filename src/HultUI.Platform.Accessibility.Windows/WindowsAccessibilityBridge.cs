@@ -391,16 +391,23 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
 
         // 4) Now that every wrapper exists (adds) or is gone (removes), refresh
         //    each affected parent from the new tree so its child list is current,
-        //    and raise the matching UIA events.
-        foreach (var added in diff.Added)
+        //    and raise the matching UIA events — once per topmost changed parent.
+        //    A parent that is itself part of the diff needs neither: its wrapper
+        //    was already created from (or dropped with) the current snapshot,
+        //    and UIA structure events are re-query hints on a parent, so the
+        //    topmost boundary's single event covers the whole subtree. Without
+        //    this, a bulk insert of N rows raised N identical events on the
+        //    container plus one per grandchild — ~70k cross-process calls for a
+        //    10k-row create, which profiled as half the operation.
+        foreach (var parentId in diff.CoalescedAddedParents())
         {
-            RefreshParent(added.Parent?.ElementId, currentById);
-            RaiseStructureChanged(added.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkAdded);
+            RefreshParent(parentId, currentById);
+            RaiseStructureChanged(parentId, UiaInterop.StructureChangeType_ChildrenBulkAdded);
         }
-        foreach (var removed in diff.Removed)
+        foreach (var parentId in diff.CoalescedRemovedParents())
         {
-            RefreshParent(removed.Parent?.ElementId, currentById);
-            RaiseStructureChanged(removed.Parent?.ElementId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
+            RefreshParent(parentId, currentById);
+            RaiseStructureChanged(parentId, UiaInterop.StructureChangeType_ChildrenBulkRemoved);
         }
         foreach (var reorderedParent in diff.Reordered)
         {

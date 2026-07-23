@@ -107,10 +107,18 @@ driver is a known cost with no great env-var fix.
   sanity check on the same machine/session. Pull latest before capturing:
   as of 2026-07-23 the scripted runs disable the F12 HUD (historical numbers
   on both OSes had it on; measured impact was within noise for these
-  single-frame op latencies, but keep configurations identical), and the
-  text pipeline gained a word-level shape cache plus a digit fast path that
-  together remove HarfBuzz from the warm path — absolute create-row numbers
-  dropped ~10% vs older recordings (Windows create-10,000: ~333 → ~300 ms).
+  single-frame op latencies, but keep configurations identical), the text
+  pipeline gained a word-level shape cache plus a digit fast path (HarfBuzz
+  removed from the warm path), and the Windows UIA bridge coalesces
+  structure-changed events to topmost parents (was one cross-process event
+  per added a11y node — half the create cost). Windows create-10,000 went
+  ~333 → ~165 ms across these; don't compare against older recordings.
+- Accessibility parity check before comparing OSes: this Windows machine has
+  a background UIA client, so its bridge (tree build + diff each frame) is
+  ACTIVE during benchmarks. On Fedora the AT-SPI bridge only activates if a
+  registry/bus is reachable — if no AT runs, Linux benches a11y-free. Either
+  verify both sides match or set `HULTUI_UIA_EVENTS=0` / stop the listener
+  to equalize.
 - F11 toggles tracing with keyboard focus (saves to `/tmp/hultui-trace.json`);
   the env var records from startup and needs no focus.
 - Vsync is intentionally off in code: `SDL_GL_SetSwapInterval(0)` in
