@@ -1267,6 +1267,91 @@ public class GitRepository
         return submodules;
     }
 
+    // ── Worktrees ──
+
+    /// <summary>
+    /// Lists the repository's worktrees (the main one plus any linked ones) by
+    /// parsing <c>git worktree list --porcelain</c>. The first entry is the main
+    /// worktree; the one whose path matches this repo's is flagged current.
+    /// </summary>
+    public List<GitWorktree> GetWorktrees()
+    {
+        var result = GitProcess.Run(Path, "worktree", "list", "--porcelain");
+        if (!result.Success) return [];
+
+        var worktrees = new List<GitWorktree>();
+        // Records are blank-line separated; each is a set of "key [value]" lines.
+        string? path = null, head = null, branch = null, lockReason = null;
+        bool bare = false, detached = false, locked = false, prunable = false;
+        bool first = true;
+
+        void Flush()
+        {
+            if (path == null) return;
+            worktrees.Add(new GitWorktree(
+                path, head ?? "", branch, bare, detached, locked, lockReason,
+                IsMain: first, prunable));
+            first = false;
+            path = head = branch = lockReason = null;
+            bare = detached = locked = prunable = false;
+        }
+
+        foreach (var raw in result.Stdout.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length == 0) { Flush(); continue; }
+
+            var sp = line.IndexOf(' ');
+            var key = sp < 0 ? line : line[..sp];
+            var val = sp < 0 ? "" : line[(sp + 1)..];
+            switch (key)
+            {
+                // git prints forward slashes even on Windows; the rest of the app
+                // stores OS-native paths (folder picker, active repo), so normalize
+                // here or PathEquals/dedup against those would silently mismatch.
+                case "worktree": path = val.Replace('/', System.IO.Path.DirectorySeparatorChar); break;
+                case "HEAD": head = val; break;
+                // "branch refs/heads/<name>" — strip the ref prefix to a short name.
+                case "branch": branch = val.StartsWith("refs/heads/") ? val["refs/heads/".Length..] : val; break;
+                case "bare": bare = true; break;
+                case "detached": detached = true; break;
+                case "locked": locked = true; lockReason = val.Length > 0 ? val : null; break;
+                case "prunable": prunable = true; break;
+            }
+        }
+        Flush();   // last record has no trailing blank line
+        return worktrees;
+    }
+
+    /// <summary>
+    /// Adds a worktree at <paramref name="path"/>. With <paramref name="newBranch"/>
+    /// set, creates that branch (<c>-b</c>) starting at <paramref name="committish"/>
+    /// (or HEAD); otherwise checks out <paramref name="committish"/> — an existing
+    /// branch name, tag, or commit — directly.
+    /// </summary>
+    public GitResult AddWorktree(string path, string? committish = null, string? newBranch = null)
+    {
+        var args = new List<string> { "worktree", "add" };
+        if (!string.IsNullOrWhiteSpace(newBranch)) { args.Add("-b"); args.Add(newBranch); }
+        args.Add(path);
+        if (!string.IsNullOrWhiteSpace(committish)) args.Add(committish);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    /// <summary>Removes a worktree. <paramref name="force"/> allows removal even
+    /// when it has uncommitted changes or is locked.</summary>
+    public GitResult RemoveWorktree(string path, bool force = false)
+    {
+        var args = new List<string> { "worktree", "remove" };
+        if (force) args.Add("--force");
+        args.Add(path);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    /// <summary>Prunes worktree administrative entries whose working directories
+    /// are gone (<c>git worktree prune</c>).</summary>
+    public GitResult PruneWorktrees() => GitProcess.Run(Path, "worktree", "prune");
+
     // ── Patch application ──
 
     /// <summary>

@@ -66,6 +66,7 @@ public static class Icons
     public const string Eye = "◎";            // ◎
     public const string EyeSlash = "⊘";       // ⊘
     public const string Trash = "⌫";          // ⌫
+    public const string Broom = "⌦";          // ⌦  prune
 
     // Window controls (Windows/Linux style)
     public const string WinMinimize = "—";    // —

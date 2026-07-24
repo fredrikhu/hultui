@@ -112,6 +112,10 @@ public partial class JunctionApp
             items.Add(Item(Icons.BendDownRight, "Checkout", () => CheckoutBranch(b.Name)));
         items.Add(Item(Icons.GitBranch, $"Create branch from {title}…", () => PromptCreateBranchAt(b.Name, title)));
         items.Add(Item(Icons.PencilSimple, "Rename branch…", () => PromptRenameBranch(b.Name)));
+        // A branch already checked out (the current one) can't go in a second
+        // worktree, so only offer this for the others.
+        if (!b.IsCurrent)
+            items.Add(Item(Icons.TreeStructure, "Create worktree for this branch…", () => PromptWorktreeForBranch(b.Name)));
 
         if (!b.IsCurrent)
         {
