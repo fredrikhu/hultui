@@ -1307,6 +1307,47 @@ public class GitRepository
         return submodules;
     }
 
+    /// <summary>Updates every submodule to the commit the superproject records
+    /// (<c>submodule update --recursive</c>); <paramref name="init"/> also clones/
+    /// initializes any that aren't set up yet.</summary>
+    public GitResult UpdateSubmodules(bool init = true)
+    {
+        var args = new List<string> { "submodule", "update", "--recursive" };
+        if (init) args.Add("--init");
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    /// <summary>Updates a single submodule by path.</summary>
+    public GitResult UpdateSubmodule(string path, bool init = true)
+    {
+        var args = new List<string> { "submodule", "update" };
+        if (init) args.Add("--init");
+        args.Add("--");
+        args.Add(path);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    /// <summary>Re-syncs each submodule's remote URL from <c>.gitmodules</c> (after
+    /// the upstream URL changed).</summary>
+    public GitResult SyncSubmodules() => GitProcess.Run(Path, "submodule", "sync", "--recursive");
+
+    /// <summary>Deinitializes a submodule — empties its working tree but keeps the
+    /// gitlink so it can be re-initialized. <paramref name="force"/> discards local
+    /// changes inside it.</summary>
+    public GitResult DeinitSubmodule(string path, bool force = false)
+    {
+        var args = new List<string> { "submodule", "deinit" };
+        if (force) args.Add("--force");
+        args.Add("--");
+        args.Add(path);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    /// <summary>Adds a new submodule at <paramref name="path"/> from
+    /// <paramref name="url"/> (<c>submodule add</c>), staging .gitmodules + the gitlink.</summary>
+    public GitResult AddSubmodule(string url, string path) =>
+        GitProcess.Run(Path, "submodule", "add", url, path);
+
     // ── Worktrees ──
 
     /// <summary>
