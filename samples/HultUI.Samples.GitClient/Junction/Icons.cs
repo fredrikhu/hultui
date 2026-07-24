@@ -40,6 +40,7 @@ public static class Icons
     public const string ArchiveTray = "⇩";    // ⇩  stash
     public const string Plus = "+";
     public const string MagnifyingGlass = "⌕";// ⌕
+    public const string FileMagnifier = "⌕";  // ⌕  content (pickaxe) search
     public const string X = "✕";              // ✕
     public const string Funnel = "▽";         // ▽  include filter
     public const string CheckCircle = "✓";    // ✓

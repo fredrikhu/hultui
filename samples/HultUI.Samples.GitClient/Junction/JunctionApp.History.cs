@@ -33,8 +33,13 @@ public partial class JunctionApp
 
         var include = IncludeSet(_activeRepoPath);
         var includeList = include.OrderBy(x => x, StringComparer.Ordinal).ToList();
-        var key = $"{_activeRepoPath}|{string.Join(",", includeList)}|{DataGen(_activeRepoPath)}";
-        _history.Load(key, () => LoadHistory(_activeRepoPath, includeList), onLoaded: PickInitialCommit);
+        // Snapshot the pickaxe query/mode so the off-thread load uses a stable value.
+        var content = _contentApplied;
+        var contentRegex = _contentRegex;
+        var key = $"{_activeRepoPath}|{string.Join(",", includeList)}|{DataGen(_activeRepoPath)}"
+                + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
+        _history.Load(key, () => LoadHistory(_activeRepoPath, includeList, content, contentRegex),
+            onLoaded: PickInitialCommit);
         var data = _history.Value;
         var filtered = FilteredCommits(data);
 
@@ -52,6 +57,8 @@ public partial class JunctionApp
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildIncludeBar(includeList, filtered.Count));
+        if (_contentSearchOpen)
+            col.AddChild(BuildContentSearchBar(filtered.Count));
         col.AddChild(BuildCommitList(data, filtered));
         col.AddChild(BuildHistoryFooter());
         return col;
@@ -69,11 +76,12 @@ public partial class JunctionApp
     }
 
     // Runs off the UI thread.
-    private HistoryData LoadHistory(string path, List<string> includeList)
+    private HistoryData LoadHistory(string path, List<string> includeList,
+        string? content = null, bool contentRegex = false)
     {
         var repo = RepoFor(path);
         var refs = includeList.Count > 0 ? includeList : null;
-        var commits = repo.GetLog(includeRefs: refs);
+        var commits = repo.GetLog(includeRefs: refs, pickaxe: content, pickaxeRegex: contentRegex);
 
         // With an explicit include set, parents can reference commits outside the
         // reachable window — strip those so the graph doesn't open phantom lanes.
@@ -88,7 +96,7 @@ public partial class JunctionApp
         }
 
         var graph = GitGraphLayout.Compute(graphInput);
-        var stats = repo.GetLogStats(refs: refs);
+        var stats = repo.GetLogStats(refs: refs, pickaxe: content, pickaxeRegex: contentRegex);
         var remotes = new HashSet<string>(repo.GetRemotes(), StringComparer.Ordinal);
         return new HistoryData(commits, graph, stats, remotes);
     }
@@ -244,8 +252,88 @@ public partial class JunctionApp
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(BuildHistorySearch());
+        bar.AddChild(ContentSearchToggle());
         bar.AddChild(Text.New($"{commitCount} commits").FontSize(11f).TextColor(Nocturne.On(0.40)));
         return bar;
+    }
+
+    // Toggles the content-search (pickaxe) bar. Lit while a query is applied so the
+    // active filter is visible even with the bar collapsed.
+    private Element ContentSearchToggle()
+    {
+        var active = _contentApplied.Length > 0;
+        var b = Flex.Row(gap: 0).Width(34).Height(34).FlexShrink(0)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .CornerRadius(Nocturne.RadiusMd)
+            .BorderColor(active ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer).Tooltip("Search file contents (pickaxe)");
+        if (active) b.Background(Nocturne.Alpha(Nocturne.Accent, 0.12));
+        b.AddChild(Ui.Icon(Icons.FileMagnifier, 15f, active ? Nocturne.Accent300 : Nocturne.On(0.6)));
+        b.Key = "content-toggle" + (active ? "#a" : "") + (_contentSearchOpen ? "#o" : "");
+        b.OnClick(_ => ToggleContentSearch());
+        if (!active) b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+        return b;
+    }
+
+    // ── Content search (pickaxe) bar ─────────────────────────────────────
+
+    private Element BuildContentSearchBar(int matchCount)
+    {
+        var bar = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(8, 16, 8, 16))
+            .Background(Nocturne.Alpha(Nocturne.Accent, 0.05))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
+
+        bar.AddChild(Ui.Icon(Icons.FileMagnifier, 13f, Nocturne.Accent300).FlexShrink(0));
+
+        // -S / -G mode segment.
+        var seg = Flex.Row(gap: 2).FlexShrink(0).Padding(new Thickness(2))
+            .Background(Nocturne.Surface).BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusRow);
+        seg.AddChild(ContentModeButton("Text", regex: false));
+        seg.AddChild(ContentModeButton("Regex", regex: true));
+        bar.AddChild(seg);
+
+        // Input.
+        var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
+            .Height(32).FlexGrow(1).MaxWidth(460)
+            .Padding(new Thickness(0, 10, 0, 10))
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd);
+        var input = TextInput.New(_contentQuery);
+        input.PlaceholderText(_contentRegex
+                ? "Find commits whose diff matches this regex… (Enter)"
+                : "Find commits that added or removed this text… (Enter)")
+            .OnTextChanged(q => { _contentQuery = q; MarkDirty(); })
+            .Height(Dimension.Px(28)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .TextColor(Nocturne.Text).WithRef(_contentSearchRef);
+        input.On<KeyDownEvent>(ContentSearchKey);
+        box.AddChild(input);
+        bar.AddChild(box);
+
+        bar.AddChild(Ui.PrimaryButton("Search", Icons.MagnifyingGlass, ApplyContentSearch, 11.5f).FlexShrink(0));
+
+        if (_contentApplied.Length > 0)
+        {
+            bar.AddChild(Text.New($"{matchCount} match{(matchCount == 1 ? "" : "es")}")
+                .FontSize(11f).TextColor(Nocturne.On(0.5)).FlexShrink(0));
+            bar.AddChild(Ui.GhostButton("Clear", Icons.X, ClearContentSearch, 11f).FlexShrink(0));
+        }
+        return bar;
+    }
+
+    private Element ContentModeButton(string label, bool regex)
+    {
+        var on = _contentRegex == regex;
+        var fg = on ? Nocturne.Accent : Nocturne.On(0.55);
+        var b = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
+            .Tooltip(regex ? "-G: diff matches a regex" : "-S: literal string occurrences changed");
+        if (on) b.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
+        b.AddChild(Text.New(label).FontSize(11f).FontWeight(FontWeight.Medium).TextColor(fg));
+        b.Key = "cmode:" + label + (on ? "#on" : "");
+        b.OnClick(e => { e.StopPropagation = true; SetContentMode(regex); });
+        return b;
     }
 
     private Element BuildHistorySearch()
@@ -321,14 +409,78 @@ public partial class JunctionApp
         MarkDirty();
     }
 
+    // ── Content search actions ───────────────────────────────────────────
+
+    private void ToggleContentSearch()
+    {
+        _contentSearchOpen = !_contentSearchOpen;
+        if (_contentSearchOpen) _pendingContentSearchFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Palette entry point: switch to History, reveal the content-search
+    /// bar and focus it.</summary>
+    private void OpenContentSearch()
+    {
+        SetView(JunctionView.History);
+        _contentSearchOpen = true;
+        _pendingContentSearchFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Runs the pickaxe query (re-loads history). Empty query clears it.</summary>
+    private void ApplyContentSearch()
+    {
+        var q = _contentQuery.Trim();
+        if (q == _contentApplied) return;   // no change → no reload
+        _contentApplied = q;
+        _pendingScrollToSelected = true;
+        MarkDirty();   // the loader key now differs → History reloads with -S/-G
+    }
+
+    private void SetContentMode(bool regex)
+    {
+        if (_contentRegex == regex) return;
+        _contentRegex = regex;
+        // The loader key embeds the mode, so if a query is applied this rebuild
+        // re-runs the load with the new -S/-G flag; the same loader instance is
+        // already subscribed, so its completion is observed.
+        MarkDirty();
+    }
+
+    private void ClearContentSearch()
+    {
+        _contentQuery = "";
+        _contentApplied = "";
+        _pendingScrollToSelected = true;
+        MarkDirty();
+    }
+
+    private void ContentSearchKey(KeyDownEvent e)
+    {
+        if (e.Modifiers.HasFlag(KeyModifiers.Alt)) return;
+        if (e.Key == KeyCode.Enter) { ApplyContentSearch(); e.StopPropagation = true; return; }
+        if (e.Key == KeyCode.Escape)
+        {
+            // First Esc clears an applied query; a second closes the bar.
+            if (_contentApplied.Length > 0 || _contentQuery.Length > 0) ClearContentSearch();
+            else { _contentSearchOpen = false; MarkDirty(); }
+            e.StopPropagation = true;
+        }
+    }
+
     // ── Commit list ──────────────────────────────────────────────────────
 
     private Element BuildCommitList(HistoryData data, List<GitCommit> commits)
     {
         if (commits.Count == 0)
+        {
+            var empty = _contentApplied.Length > 0
+                ? $"No commits {(_contentRegex ? "whose diff matches" : "that changed")} \"{_contentApplied}\""
+                : _historyQuery.Trim().Length > 0 ? "No matching commits" : "No commits yet";
             return Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-                .Children(Text.New(_historyQuery.Trim().Length > 0 ? "No matching commits" : "No commits yet")
-                    .FontSize(14f).TextColor(Nocturne.On(0.45)));
+                .Children(Text.New(empty).FontSize(14f).TextColor(Nocturne.On(0.45)));
+        }
 
         var selectedIndex = _selectedCommitHash == null
             ? -1

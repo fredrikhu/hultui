@@ -115,6 +115,14 @@ public partial class JunctionApp : Component, IDisposable
     private string _historyQuery = "";
     private readonly Ref<TextInputElement> _historySearchRef = new();
     private bool _pendingHistorySearchFocus;
+    // Content search (pickaxe): a server-side `git log -S/-G` re-run, distinct from
+    // the client-side _historyQuery quick filter. Empty ⇒ inactive.
+    private bool _contentSearchOpen;
+    private string _contentQuery = "";
+    private string _contentApplied = "";       // the query actually loaded (drives the key)
+    private bool _contentRegex;                 // false = -S literal, true = -G regex
+    private readonly Ref<TextInputElement> _contentSearchRef = new();
+    private bool _pendingContentSearchFocus;
     // Per-repo "include in history" branch sets. Empty ⇒ all branches.
     private readonly Dictionary<string, HashSet<string>> _includeBranches = new();
     private readonly Ref<VirtualListElement<GitCommit>> _commitListRef = new();
@@ -533,6 +541,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingHistorySearchFocus = false;
             _historySearchRef.Current?.Focus();
+        }
+
+        if (_pendingContentSearchFocus)
+        {
+            _pendingContentSearchFocus = false;
+            _contentSearchRef.Current?.Focus();
         }
 
         if (_pendingBranchSearchFocus)

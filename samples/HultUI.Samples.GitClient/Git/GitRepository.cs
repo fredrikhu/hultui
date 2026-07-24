@@ -119,7 +119,8 @@ public class GitRepository
 
     public List<GitCommit> GetLog(int maxCount = 500, string? author = null,
         string? path = null, DateTimeOffset? after = null, DateTimeOffset? before = null,
-        bool followPath = false, IReadOnlyList<string>? includeRefs = null)
+        bool followPath = false, IReadOnlyList<string>? includeRefs = null,
+        string? pickaxe = null, bool pickaxeRegex = false)
     {
         var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
 
@@ -129,6 +130,12 @@ public class GitRepository
             $"--max-count={maxCount}",
             $"--format={format}{RecordSep}",
         };
+
+        // Content search (pickaxe). -G matches commits whose diff adds/removes a
+        // line matching the regex; -S matches commits that change the number of
+        // occurrences of the literal string (when was a symbol introduced/removed).
+        if (!string.IsNullOrEmpty(pickaxe))
+            args.Add((pickaxeRegex ? "-G" : "-S") + pickaxe);
 
         // --follow tracks history across renames but only works with a single file
         // and is incompatible with --all; use a linear, branch-scoped history instead.
@@ -200,7 +207,8 @@ public class GitRepository
     /// without a subprocess per commit. Binary files (numstat "-") count as 0.
     /// </summary>
     public Dictionary<string, (int Added, int Deleted)> GetLogStats(
-        int maxCount = 500, IReadOnlyList<string>? refs = null)
+        int maxCount = 500, IReadOnlyList<string>? refs = null,
+        string? pickaxe = null, bool pickaxeRegex = false)
     {
         var args = new List<string>
         {
@@ -209,6 +217,10 @@ public class GitRepository
             "--numstat",
             "--format=%x1e%H",   // record-separator (RS) + hash on its own line
         };
+        // Scope the numstat pass to the same pickaxe match set as GetLog so it does
+        // no more work than the rows it feeds (and keys line up exactly).
+        if (!string.IsNullOrEmpty(pickaxe))
+            args.Add((pickaxeRegex ? "-G" : "-S") + pickaxe);
         if (refs is { Count: > 0 })
             args.AddRange(refs);
         else
