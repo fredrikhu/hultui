@@ -75,6 +75,9 @@ public static class Nocturne
     public static readonly Color DiffDelText = Hex("#e3b9b9");
     public static readonly Color DiffDelSign = Hex("#cf8f8f");
     public static readonly Color DiffBlankBg = Alpha(Neutral900, 0.40);
+    // Intra-line (word-level) emphasis, drawn on top of the line background.
+    public static readonly Color DiffAddHl = new(120, 178, 116, 72);   // rgba(120,178,116,0.28)
+    public static readonly Color DiffDelHl = new(200, 120, 120, 72);
 
     public static readonly Color DangerText = Hex("#e39a9a");   // destructive menu items
     public static readonly Color DangerIcon = Hex("#cf8f8f");

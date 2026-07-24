@@ -136,8 +136,10 @@ public partial class JunctionApp
         foreach (var hunk in diff.Hunks)
         {
             rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
-            foreach (var line in hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader))
-                rows.Add(new DiffRow { Type = DiffRowType.Unified, Line = line, Spans = SpansFor(hl, line) });
+            var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
+            var intra = IntralineByLine(lines);
+            foreach (var line in lines)
+                rows.Add(new DiffRow { Type = DiffRowType.Unified, Line = line, Spans = DiffSpans(hl, line, intra) });
         }
         return rows;
     }
@@ -149,15 +151,95 @@ public partial class JunctionApp
         {
             rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
             var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
+            var intra = IntralineByLine(lines);
             foreach (var (left, right) in SplitPairs(lines))
                 rows.Add(new DiffRow
                 {
                     Type = DiffRowType.Split, Left = left, Right = right,
-                    LeftSpans = left == null ? null : SpansFor(hl, left),
-                    RightSpans = right == null ? null : SpansFor(hl, right),
+                    LeftSpans = left == null ? null : DiffSpans(hl, left, intra),
+                    RightSpans = right == null ? null : DiffSpans(hl, right, intra),
                 });
         }
         return rows;
+    }
+
+    // ── Intra-line (word-level) change emphasis ──────────────────────────
+    //
+    // Deletion/addition lines that SplitPairs puts side by side get a word
+    // diff; the changed ranges render as brighter background spans on top of
+    // the syntax colors. Keyed by line identity: identical lines can repeat
+    // within a hunk, and each occurrence pairs with a different partner.
+
+    private static Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>> IntralineByLine(
+        List<GitDiffLine> lines)
+    {
+        var byLine = new Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var (left, right) in SplitPairs(lines))
+        {
+            if (left is not { Kind: DiffLineKind.Deletion } || right is not { Kind: DiffLineKind.Addition })
+                continue;
+            var (old, @new) = IntralineDiff.Compute(left.Content, right.Content);
+            if (old != null) byLine[left] = old;
+            if (@new != null) byLine[right] = @new;
+        }
+        return byLine;
+    }
+
+    private static IReadOnlyList<HultUI.Core.Rendering.TextSpan>? DiffSpans(FileHighlight? hl, GitDiffLine line,
+        Dictionary<GitDiffLine, IReadOnlyList<(int Start, int End)>> intra)
+    {
+        var syntax = SpansFor(hl, line);
+        if (!intra.TryGetValue(line, out var ranges)) return syntax;
+        var bg = line.Kind == DiffLineKind.Addition ? Nocturne.DiffAddHl : Nocturne.DiffDelHl;
+        return MergeHighlight(syntax, ranges, bg);
+    }
+
+    // Overlays background ranges onto (possibly absent) syntax spans, keeping
+    // the result sorted and non-overlapping as TextSpan requires. Segments are
+    // cut at every syntax-span or range boundary; a segment with no syntax
+    // color gets a transparent foreground (= element text color).
+    private static IReadOnlyList<HultUI.Core.Rendering.TextSpan> MergeHighlight(
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? syntax,
+        IReadOnlyList<(int Start, int End)> ranges, Color bg)
+    {
+        var cuts = new SortedSet<int>();
+        foreach (var (s, e) in ranges) { cuts.Add(s); cuts.Add(e); }
+        if (syntax != null)
+            foreach (var s in syntax) { cuts.Add(s.Start); cuts.Add(s.End); }
+
+        var result = new List<HultUI.Core.Rendering.TextSpan>();
+        int prev = -1;
+        foreach (var cut in cuts)
+        {
+            if (prev >= 0 && cut > prev)
+            {
+                var fg = SyntaxColorAt(syntax, prev);
+                bool highlighted = RangeContains(ranges, prev);
+                if (fg.A > 0 || highlighted)
+                    result.Add(new HultUI.Core.Rendering.TextSpan(
+                        prev, cut - prev, fg, highlighted ? bg : default));
+            }
+            prev = cut;
+        }
+        return result;
+    }
+
+    private static Color SyntaxColorAt(IReadOnlyList<HultUI.Core.Rendering.TextSpan>? syntax, int pos)
+    {
+        if (syntax != null)
+            foreach (var s in syntax)
+                if (pos >= s.Start && pos < s.End)
+                    return s.Color;
+        return Color.Transparent;
+    }
+
+    private static bool RangeContains(IReadOnlyList<(int Start, int End)> ranges, int pos)
+    {
+        foreach (var (s, e) in ranges)
+            if (pos >= s && pos < e)
+                return true;
+        return false;
     }
 
     private static Element RenderDiffRow(DiffRow r) => r.Type switch

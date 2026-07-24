@@ -318,6 +318,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             drawnLength += run.Text.Length;
         if (drawnLength == 0) return;
 
+        // Background pass first so every glyph (including ones whose ink crosses
+        // a span boundary) draws on top of the finished highlight rects.
+        foreach (var span in spans)
+        {
+            if (span.Background.A == 0) continue;
+            int bs = Math.Clamp(span.Start - line.Start, 0, drawnLength);
+            int be = Math.Clamp(span.End - line.Start, 0, drawnLength);
+            if (be <= bs) continue;
+            float bx0 = LineXAt(line, bs, style);
+            float bx1 = LineXAt(line, be, style);
+            if (bx1 <= bx0) continue;
+            _pooledPaint.Color = ToSkColor(span.Background);
+            Canvas.DrawRect(SKRect.Create(baseX + bx0, lineTop, bx1 - bx0, line.Height), _pooledPaint);
+        }
+
         int cursor = 0;
         foreach (var span in spans)
         {
@@ -326,7 +341,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             if (e <= cursor) continue;
             if (s > cursor)
                 DrawLineSegment(line, cursor, s, style.TextColor, style, baseX, baselineY, lineTop);
-            DrawLineSegment(line, Math.Max(s, cursor), e, span.Color, style, baseX, baselineY, lineTop);
+            // Transparent span color = background-only span; glyphs keep the
+            // element's text color.
+            var fg = span.Color.A == 0 ? style.TextColor : span.Color;
+            DrawLineSegment(line, Math.Max(s, cursor), e, fg, style, baseX, baselineY, lineTop);
             cursor = e;
             if (cursor >= drawnLength) break;
         }

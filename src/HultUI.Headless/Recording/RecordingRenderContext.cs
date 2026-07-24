@@ -130,7 +130,8 @@ public sealed class RecordingRenderContext : IRenderContext
     public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
         int? maxLines, IReadOnlyList<TextSpan> spans)
     {
-        var spanText = string.Join(", ", spans.Select(s => $"{s.Start}+{s.Length}:{Fmt(s.Color)}"));
+        var spanText = string.Join(", ", spans.Select(s =>
+            $"{s.Start}+{s.Length}:{Fmt(s.Color)}" + (s.Background.A > 0 ? $"/bg:{Fmt(s.Background)}" : "")));
         Record("DrawText",
             $"{Quoted(text)} {Fmt(bounds)} {Style(style)}{OverflowSuffix(overflow, maxLines)} spans=[{spanText}]");
         _inner.DrawText(text, bounds, style, overflow, maxLines, spans);
