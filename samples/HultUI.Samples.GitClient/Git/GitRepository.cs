@@ -1398,13 +1398,17 @@ public class GitRepository
     /// Applies a unified diff patch via stdin to <c>git apply</c>.
     /// <paramref name="cached"/> targets the index (stage/unstage).
     /// <paramref name="reverse"/> inverts the patch (unstage or discard).
+    /// <paramref name="unidiffZero"/> passes <c>--unidiff-zero</c> for zero-context
+    /// hunks; leave it off for full-context patches (e.g. line-level selection),
+    /// where it would place hunks by line number and mis-apply insertions.
     /// </summary>
-    public GitResult ApplyPatch(string patch, bool reverse = false, bool cached = false)
+    public GitResult ApplyPatch(string patch, bool reverse = false, bool cached = false,
+        bool unidiffZero = true)
     {
         var args = new List<string> { "apply" };
         if (cached) args.Add("--cached");
         if (reverse) args.Add("--reverse");
-        args.Add("--unidiff-zero"); // allow zero-context hunks from single-hunk extraction
+        if (unidiffZero) args.Add("--unidiff-zero");
         args.Add("-");
         return GitProcess.RunWithStdin(Path, patch, args.ToArray());
     }
@@ -1487,10 +1491,22 @@ public class GitRepository
                     currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.Deletion, rawLine[1..], oldLine, null));
                     oldLine++;
                 }
-                else if (rawLine.StartsWith(' ') || rawLine.Length == 0)
+                else if (rawLine.StartsWith('\\'))
                 {
-                    var content = rawLine.Length > 0 ? rawLine[1..] : "";
-                    currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.Context, content, oldLine, newLine));
+                    // "\ No newline at end of file" attaches to the line just emitted;
+                    // flag it so partial-staging patches can reproduce the marker.
+                    if (currentHunk.Lines.Count > 0)
+                        currentHunk.Lines[^1] = currentHunk.Lines[^1] with { NoNewlineAfter = true };
+                }
+                else if (rawLine.StartsWith(' '))
+                {
+                    // A blank context line is " " (space + empty content), length 1.
+                    // A length-0 rawLine is only the trailing empty string from splitting
+                    // the diff's final newline — NOT a real line. Treating it as context
+                    // (the old behavior) appended a phantom blank row to each file's last
+                    // hunk: invisible in the viewer but fatal to patch synthesis (it
+                    // inflated the hunk counts). Skip it.
+                    currentHunk.Lines.Add(new GitDiffLine(DiffLineKind.Context, rawLine[1..], oldLine, newLine));
                     oldLine++;
                     newLine++;
                 }

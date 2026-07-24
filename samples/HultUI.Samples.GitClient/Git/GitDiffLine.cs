@@ -9,7 +9,11 @@ public enum DiffLineKind
     FileHeader,
 }
 
-public record GitDiffLine(DiffLineKind Kind, string Content, int? OldLineNumber, int? NewLineNumber);
+/// <param name="NoNewlineAfter">True when git emitted "\ No newline at end of file"
+/// right after this line — i.e. this line is the last on its side and its file has no
+/// trailing newline. Preserved so partial-staging patch synthesis can reproduce it.</param>
+public record GitDiffLine(DiffLineKind Kind, string Content, int? OldLineNumber, int? NewLineNumber,
+    bool NoNewlineAfter = false);
 
 public record GitDiffHunk(string Header, List<GitDiffLine> Lines);
 

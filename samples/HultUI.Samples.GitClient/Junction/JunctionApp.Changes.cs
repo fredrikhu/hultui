@@ -44,7 +44,13 @@ public partial class JunctionApp
             var dict = _changeSelStaged ? data.StagedDiffs : data.UnstagedDiffs;
             dict.TryGetValue(_changeSelPath, out diff);
         }
-        return BuildDiffPane(_changeSelPath ?? "", diff);
+        // Untracked files have a synthesized all-additions diff with no real index
+        // header, so line-level patch application can't target them — stage the whole
+        // file from the list instead. Line staging is for tracked modifications.
+        bool untracked = diff != null && _changeSelPath != null && !_changeSelStaged
+            && data.Unstaged.Any(f => f.Path == _changeSelPath && f.Kind == FileChangeKind.Untracked);
+        var interact = untracked ? null : ChangesDiffInteract(diff);
+        return BuildDiffPane(_changeSelPath ?? "", diff, interact);
     }
 
     // Runs off the UI thread.

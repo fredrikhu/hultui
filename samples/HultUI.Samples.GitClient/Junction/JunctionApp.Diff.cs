@@ -13,7 +13,7 @@ public partial class JunctionApp
 {
     // ── Diff pane (header + body), shared by Commit / Changes / fullscreen ──
 
-    private Element BuildDiffPane(string path, GitFileDiff? diff)
+    private Element BuildDiffPane(string path, GitFileDiff? diff, DiffInteract? interact = null)
     {
         var col = Flex.Column(gap: 0).FlexGrow(1);
 
@@ -27,9 +27,30 @@ public partial class JunctionApp
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
         col.AddChild(header);
 
-        col.AddChild(BuildDiffScroll(diff));
+        // Interactive staging: an action bar appears while lines are selected, plus
+        // a one-line hint when nothing is selected yet (so the affordance is discoverable).
+        if (interact != null && diff != null)
+        {
+            if (_stageSel.Count > 0)
+                col.AddChild(BuildStageActionBar(diff, interact));
+            else
+                col.AddChild(BuildStageHint(interact));
+        }
+
+        col.AddChild(BuildDiffScroll(diff, interact));
         return col;
     }
+
+    private Element BuildStageHint(DiffInteract it) =>
+        Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(5, 12, 5, 12))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0))
+            .Children(
+                Ui.Icon(Icons.CheckSquare, 11f, Nocturne.On(0.4)),
+                Text.New(it.Staged
+                        ? "Click a line or hunk header to unstage part of this file"
+                        : "Click a line or hunk header to stage or discard part of this file")
+                    .FontSize(10.5f).TextColor(Nocturne.On(0.4)));
 
     private Element DiffModeToggle()
     {
@@ -68,6 +89,7 @@ public partial class JunctionApp
     {
         public DiffRowType Type { get; init; }
         public string Hunk { get; init; } = "";
+        public GitDiffHunk? HunkRef { get; init; }   // set on Hunk rows, for hunk-level staging
         public GitDiffLine? Line { get; init; }   // unified
         public GitDiffLine? Left { get; init; }   // split
         public GitDiffLine? Right { get; init; }
@@ -79,7 +101,7 @@ public partial class JunctionApp
 
     // Virtualized so large diffs keep constant row height and stay cheap — a
     // plain ScrollView over a tall column compresses its rows to fit.
-    private Element BuildDiffScroll(GitFileDiff? diff)
+    private Element BuildDiffScroll(GitFileDiff? diff, DiffInteract? interact = null)
     {
         if (diff == null || diff.Hunks.Count == 0)
             return Box.New().FlexGrow(1)
@@ -87,12 +109,14 @@ public partial class JunctionApp
                 .Children(Text.New(diff == null ? "Select a file" : "No textual changes")
                     .FontSize(13f).TextColor(Nocturne.On(0.45)));
 
+        if (interact != null) SyncStageSelection(interact);
+
         var hl = HighlightForCurrent(diff.Path);
         var rows = _diffSplit ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
             .Items(rows)
-            .RenderWith(RenderDiffRow)
+            .RenderWith(r => RenderDiffRow(r, interact))
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Key by file so each file gets its own scroll position instead of one shared
@@ -135,7 +159,7 @@ public partial class JunctionApp
         var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
         {
-            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
+            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header, HunkRef = hunk });
             var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
             var intra = IntralineByLine(lines);
             foreach (var line in lines)
@@ -149,7 +173,7 @@ public partial class JunctionApp
         var rows = new List<DiffRow>();
         foreach (var hunk in diff.Hunks)
         {
-            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header });
+            rows.Add(new DiffRow { Type = DiffRowType.Hunk, Hunk = hunk.Header, HunkRef = hunk });
             var lines = hunk.Lines.Where(l => l.Kind != DiffLineKind.HunkHeader).ToList();
             var intra = IntralineByLine(lines);
             foreach (var (left, right) in SplitPairs(lines))
@@ -242,21 +266,32 @@ public partial class JunctionApp
         return false;
     }
 
-    private static Element RenderDiffRow(DiffRow r) => r.Type switch
+    private Element RenderDiffRow(DiffRow r, DiffInteract? interact) => r.Type switch
     {
-        DiffRowType.Hunk => HunkHeaderRow(r.Hunk),
+        DiffRowType.Hunk => HunkHeaderRow(r.Hunk, r.HunkRef, interact),
         DiffRowType.Split => SplitRow(r.Left, r.Right, r.LeftSpans, r.RightSpans),
-        _ => UnifiedRow(r.Line!, r.Spans),
+        _ => UnifiedRow(r.Line!, r.Spans, interact),
     };
 
-    private static Element HunkHeaderRow(string header) =>
-        Box.New()
+    private Element HunkHeaderRow(string header, GitDiffHunk? hunk, DiffInteract? interact)
+    {
+        var box = Box.New()
             .Padding(new Thickness(5, 14, 5, 14))
             .Background(Nocturne.Alpha(Nocturne.Accent, 0.06))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0))
             .Children(Ui.Mono(header, 11.5f, Nocturne.Accent300).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
 
-    private static Element UnifiedRow(GitDiffLine line, IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans)
+        // Interactive: clicking the hunk header toggles all its changed lines.
+        if (interact != null && hunk != null && HunkChangedLines(hunk).Any())
+        {
+            box.Cursor(CursorType.Pointer).Tooltip("Select all lines in this hunk");
+            box.OnClick(_ => ToggleStageHunk(hunk));
+        }
+        return box;
+    }
+
+    private Element UnifiedRow(GitDiffLine line, IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans,
+        DiffInteract? interact)
     {
         var (bg, code, sign, signColor) = line.Kind switch
         {
@@ -265,16 +300,38 @@ public partial class JunctionApp
             _ => (Color.Transparent, Nocturne.On(0.80), " ", Color.Transparent),
         };
 
-        return Flex.Row(gap: 0).AlignItems(AlignItems.Center).Background(bg)
-            .Children(
-                NumCell(line.OldLineNumber, 46f),
-                NumCell(line.NewLineNumber, 46f),
-                Box.New().Width(16).JustifyContent(JustifyContent.Center)
-                    .Children(Ui.Mono(sign, 12f, signColor)),
-                Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
-                    .Spans(spans)
-                    .FlexGrow(1).Padding(new Thickness(2, 14, 2, 0))
-                    .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
+        bool selectable = interact != null && line.Kind is DiffLineKind.Addition or DiffLineKind.Deletion;
+        bool selected = selectable && _stageSel.Contains(line);
+        if (selected) bg = Nocturne.Alpha(Nocturne.Accent, 0.22);
+
+        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center).Background(bg);
+
+        // Interactive mode gets a leading checkbox column (transparent on context
+        // rows) so the sign/number columns stay aligned across every row.
+        if (interact != null)
+        {
+            var mark = Box.New().Width(20).FlexShrink(0).JustifyContent(JustifyContent.Center);
+            if (selectable)
+                mark.AddChild(Ui.Icon(selected ? Icons.CheckSquare : Icons.Square, 12f,
+                    selected ? Nocturne.Accent : Nocturne.On(0.34)));
+            row.AddChild(mark);
+        }
+
+        row.AddChild(NumCell(line.OldLineNumber, 46f));
+        row.AddChild(NumCell(line.NewLineNumber, 46f));
+        row.AddChild(Box.New().Width(16).JustifyContent(JustifyContent.Center)
+            .Children(Ui.Mono(sign, 12f, signColor)));
+        row.AddChild(Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
+            .Spans(spans)
+            .FlexGrow(1).Padding(new Thickness(2, 14, 2, 0))
+            .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
+
+        if (selectable)
+        {
+            row.Cursor(CursorType.Pointer);
+            row.OnClick(_ => ToggleStageLine(line));
+        }
+        return row;
     }
 
     private static IEnumerable<(GitDiffLine? Left, GitDiffLine? Right)> SplitPairs(List<GitDiffLine> lines)
