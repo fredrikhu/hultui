@@ -1107,6 +1107,34 @@ public class GitRepository
     private static bool IsHex(char c) =>
         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 
+    // ── Reflog ──
+
+    /// <summary>
+    /// HEAD's reflog, newest first — the recovery surface for work "lost" to a
+    /// reset/rebase/checkout (the commit still has a reflog entry until gc).
+    /// </summary>
+    public List<GitReflogEntry> GetReflog(int maxCount = 200)
+    {
+        // %gd = selector (HEAD@{n}), %gs = reflog subject (the action), %cI = commit
+        // ISO date, %s = the commit's own subject.
+        var format = string.Join(FieldSep, ["%H", "%h", "%gd", "%gs", "%cI", "%s"]);
+        var result = GitProcess.Run(Path, "reflog", $"--max-count={maxCount}", $"--format={format}");
+        if (!result.Success) return [];
+
+        var entries = new List<GitReflogEntry>();
+        foreach (var raw in result.Stdout.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length == 0) continue;
+            var p = line.Split(FieldSep);
+            if (p.Length < 6) continue;
+            if (!DateTimeOffset.TryParse(p[4], CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                date = DateTimeOffset.MinValue;
+            entries.Add(new GitReflogEntry(p[0], p[1], p[2], p[3], date, p[5]));
+        }
+        return entries;
+    }
+
     // ── Tags ──
 
     public List<string> GetTags()

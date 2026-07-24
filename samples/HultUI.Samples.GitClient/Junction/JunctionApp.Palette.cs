@@ -196,6 +196,7 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.GitBranch, "Create new branch…", "", () => { ClosePalette(); PromptNewBranch(); }));
         items.Add(new("action", "Action", Icons.TreeStructure, "Worktrees…", "", () => { ClosePalette(); OpenWorktrees(); }));
         items.Add(new("action", "Action", Icons.FileMagnifier, "Search file contents…", "", () => { ClosePalette(); OpenContentSearch(); }));
+        items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));
         items.Add(new("action", "Action", Icons.ArchiveTray, "Stash changes", "", () => { ClosePalette(); DoStash(includeUntracked: false); }));
         items.Add(new("action", "Action", Icons.Stack, "Stash including untracked", "", () => { ClosePalette(); DoStash(includeUntracked: true); }));
