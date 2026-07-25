@@ -580,6 +580,48 @@ public class GitRepository
         return result.Success ? result.Lines.ToList() : [];
     }
 
+    /// <summary>Remotes with their fetch and push URLs, parsed from
+    /// <c>git remote -v</c> (which lists a "(fetch)" and "(push)" line each).</summary>
+    public List<GitRemote> GetRemotesDetailed()
+    {
+        var result = GitProcess.Run(Path, "remote", "-v");
+        if (!result.Success) return [];
+
+        // Preserve first-seen order; fill fetch/push as the two lines per remote arrive.
+        var order = new List<string>();
+        var fetch = new Dictionary<string, string>(StringComparer.Ordinal);
+        var push = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in result.Lines)
+        {
+            // "<name>\t<url> (fetch)" / "<name>\t<url> (push)"
+            var tab = line.IndexOf('\t');
+            if (tab < 0) continue;
+            var name = line[..tab];
+            var rest = line[(tab + 1)..];
+            var sp = rest.LastIndexOf(' ');
+            var url = sp > 0 ? rest[..sp] : rest;
+            var kind = sp > 0 ? rest[(sp + 1)..] : "";
+            if (!order.Contains(name)) order.Add(name);
+            if (kind == "(push)") push[name] = url;
+            else fetch[name] = url;
+        }
+        return order
+            .Select(n => new GitRemote(n, fetch.GetValueOrDefault(n, ""), push.GetValueOrDefault(n, fetch.GetValueOrDefault(n, ""))))
+            .ToList();
+    }
+
+    public GitResult AddRemote(string name, string url) =>
+        GitProcess.Run(Path, "remote", "add", name, url);
+
+    public GitResult RemoveRemote(string name) =>
+        GitProcess.Run(Path, "remote", "remove", name);
+
+    public GitResult RenameRemote(string oldName, string newName) =>
+        GitProcess.Run(Path, "remote", "rename", oldName, newName);
+
+    public GitResult SetRemoteUrl(string name, string url) =>
+        GitProcess.Run(Path, "remote", "set-url", name, url);
+
     /// <summary>
     /// Returns the remote-tracking branches for the given remote,
     /// e.g. ["main", "feature/foo"] for remote "origin".

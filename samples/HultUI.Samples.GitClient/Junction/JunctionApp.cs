@@ -480,6 +480,7 @@ public partial class JunctionApp : Component, IDisposable
         if (_worktreesOpen) Overlay("worktrees", BuildWorktreesPanel());
         if (_reflogOpen) Overlay("reflog", BuildReflogPanel());
         if (_submodulesOpen) Overlay("submodules", BuildSubmodulesPanel());
+        if (_remotesOpen) Overlay("remotes", BuildRemotesPanel());
         if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
         if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
@@ -860,6 +861,12 @@ public partial class JunctionApp : Component, IDisposable
         if (_submodulesOpen)
         {
             if (e.Key == KeyCode.Escape) { CloseSubmodules(); e.StopPropagation = true; }
+            return;
+        }
+
+        if (_remotesOpen)
+        {
+            if (e.Key == KeyCode.Escape) { CloseRemotes(); e.StopPropagation = true; }
             return;
         }
 
