@@ -554,6 +554,52 @@ public class GitRepository
         return GitProcess.Run(Path, "restore", "--worktree", "--", file.Path).Success;
     }
 
+    // ── Ignore / assume-unchanged ──
+
+    /// <summary>Appends a line to the repo's <c>.gitignore</c> (creating it if
+    /// needed), unless an identical line is already present. Returns false only on
+    /// an I/O error.</summary>
+    public bool AddToGitignore(string entry)
+    {
+        entry = entry.Replace('\\', '/').Trim();
+        if (entry.Length == 0) return false;
+        try
+        {
+            var file = System.IO.Path.Combine(Path, ".gitignore");
+            var existing = File.Exists(file) ? File.ReadAllText(file) : "";
+            var lines = existing.Split('\n').Select(l => l.TrimEnd('\r').Trim());
+            if (lines.Contains(entry)) return true;   // already ignored
+            var prefix = existing.Length == 0 || existing.EndsWith('\n') ? "" : "\n";
+            File.AppendAllText(file, prefix + entry + "\n");
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Toggles the assume-unchanged bit on a tracked file (<c>git update-index
+    /// --[no-]assume-unchanged</c>) — git stops (or resumes) noticing local edits to it.</summary>
+    public GitResult SetAssumeUnchanged(string path, bool assume) =>
+        GitProcess.Run(Path, "update-index", assume ? "--assume-unchanged" : "--no-assume-unchanged", "--", path);
+
+    /// <summary>Paths currently flagged assume-unchanged (the lowercase-'h' rows of
+    /// <c>git ls-files -v</c>).</summary>
+    public List<string> GetAssumeUnchangedFiles()
+    {
+        var result = GitProcess.Run(Path, "ls-files", "-v");
+        if (!result.Success) return [];
+        var paths = new List<string>();
+        foreach (var line in result.Lines)
+        {
+            // "<tag> <path>" — a lowercase tag means assume-unchanged; 'h' specifically.
+            if (line.Length >= 2 && line[0] == 'h' && line[1] == ' ')
+                paths.Add(line[2..]);
+        }
+        return paths;
+    }
+
     // ── Commit ──
 
     public GitResult Commit(string message, bool sign = false)

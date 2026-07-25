@@ -231,9 +231,10 @@ public partial class JunctionApp : Component, IDisposable
         Dictionary<string, GitFileDiff> UnstagedDiffs,
         bool IsMerging,
         IReadOnlyList<GitFileChange> Conflicted,
-        MergeSides? Merge)
+        MergeSides? Merge,
+        IReadOnlyList<string> AssumeUnchanged)
     {
-        public static readonly ChangesData Empty = new([], [], new(), new(), false, [], null);
+        public static readonly ChangesData Empty = new([], [], new(), new(), false, [], null, []);
     }
 
     // Identity of the two sides of an in-progress merge: "ours" = HEAD (the branch

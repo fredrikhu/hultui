@@ -89,7 +89,8 @@ public partial class JunctionApp
             if (ud != null) unstagedDiffs[f.Path] = ud;
         }
 
-        return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, merging, conflicted, merge);
+        var assumeUnchanged = repo.GetAssumeUnchangedFiles();
+        return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, merging, conflicted, merge, assumeUnchanged);
     }
 
     private void PickInitialChange(ChangesData data)
@@ -153,6 +154,17 @@ public partial class JunctionApp
                 "Stage all", data.Unstaged.Count > 0 ? StageAll : null, topGap: true));
             foreach (var f in data.Unstaged)
                 scroll.AddChild(ChangeRow(f, isStaged: false));
+        }
+
+        // Assume-unchanged files are hidden from status, so surface them here with a
+        // way to start watching them again (otherwise the flag is a trap — set once,
+        // never seen again).
+        if (data.AssumeUnchanged.Count > 0)
+        {
+            scroll.AddChild(SectionHeader($"Hidden · {data.AssumeUnchanged.Count}", Nocturne.On(0.42),
+                "", null, topGap: data.Staged.Count > 0 || data.Unstaged.Count > 0 || data.Conflicted.Count > 0));
+            foreach (var path in data.AssumeUnchanged)
+                scroll.AddChild(HiddenFileRow(path));
         }
 
         col.AddChild(scroll);
@@ -219,6 +231,32 @@ public partial class JunctionApp
         return row;
     }
 
+    // A row in the "Hidden" (assume-unchanged) section: the path plus a button to
+    // start watching it again.
+    private Element HiddenFileRow(string path)
+    {
+        var name = System.IO.Path.GetFileName(path);
+        var dir = path.Length > name.Length ? path[..^name.Length] : "";
+        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow).Tooltip(path);
+        row.Key = "hidden:" + path;
+        row.AddChild(Ui.Icon(Icons.EyeSlash, 13f, Nocturne.On(0.4)).FlexShrink(0));
+
+        var text = Flex.Column(gap: 0).FlexGrow(1);
+        text.AddChild(Text.New(name).FontSize(12f).TextColor(Nocturne.On(0.6))
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        if (dir.Length > 0)
+            text.AddChild(Text.New(dir).FontSize(9.5f).TextColor(Nocturne.On(0.35))
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        row.AddChild(text);
+
+        var watch = Ui.IconButton(Icons.Eye, () => SetAssumeUnchanged(path, false), "Watch again", 28f);
+        watch.OnClick(e => e.StopPropagation = true);
+        row.AddChild(watch.FlexShrink(0));
+        row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        return row;
+    }
+
     // ── File context menu ────────────────────────────────────────────────
 
     private IReadOnlyList<ContextMenuItem> ChangeFileMenuItems(GitFileChange f, bool isStaged)
@@ -241,6 +279,27 @@ public partial class JunctionApp
             OpenSelectedDiffExternally();
         }));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(f.Path)));
+
+        // Ignore / assume-unchanged apply to the worktree (unstaged) list.
+        if (!isStaged)
+        {
+            items.Add(ContextMenuItem.Separator());
+            if (f.Kind == FileChangeKind.Untracked)
+            {
+                // Ignoring only untracks files that git isn't already tracking.
+                items.Add(Item(Icons.EyeSlash, "Add to .gitignore", () => IgnorePath(f.Path)));
+                var ext = System.IO.Path.GetExtension(f.Path);
+                if (ext.Length > 1)
+                    items.Add(Item(Icons.EyeSlash, $"Ignore all *{ext}", () => IgnorePattern("*" + ext)));
+            }
+            else
+            {
+                // Tracked file: assume-unchanged hides future edits from status.
+                items.Add(Item(Icons.EyeSlash, "Assume unchanged (hide from status)",
+                    () => SetAssumeUnchanged(f.Path, true)));
+            }
+        }
+
         // Discard only from the worktree (unstaged) list, where `git restore`
         // / `git clean` are well-defined; staged rows should be unstaged first.
         if (!isStaged)
@@ -256,6 +315,32 @@ public partial class JunctionApp
         if (ActiveRepo is not { } repo) return;
         var ok = repo.DiscardChanges(f);
         Flash(ok ? $"Discarded {System.IO.Path.GetFileName(f.Path)}" : "Discard failed");
+        RefreshAll();
+    }
+
+    // ── Ignore / assume-unchanged actions ─────────────────────────────────
+
+    private void IgnorePath(string path)
+    {
+        if (ActiveRepo is not { } repo) return;
+        Flash(repo.AddToGitignore(path) ? $"Ignored {System.IO.Path.GetFileName(path)}" : "Couldn't write .gitignore");
+        RefreshAll();
+    }
+
+    private void IgnorePattern(string pattern)
+    {
+        if (ActiveRepo is not { } repo) return;
+        Flash(repo.AddToGitignore(pattern) ? $"Ignoring {pattern}" : "Couldn't write .gitignore");
+        RefreshAll();
+    }
+
+    private void SetAssumeUnchanged(string path, bool assume)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var res = repo.SetAssumeUnchanged(path, assume);
+        Flash(res.Success
+            ? (assume ? $"Hiding changes to {System.IO.Path.GetFileName(path)}" : $"Watching {System.IO.Path.GetFileName(path)} again")
+            : FirstLine(res.Stderr, "update-index failed"));
         RefreshAll();
     }
 
