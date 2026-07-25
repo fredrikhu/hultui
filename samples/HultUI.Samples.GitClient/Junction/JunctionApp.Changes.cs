@@ -305,7 +305,15 @@ public partial class JunctionApp
         descBox.AddChild(desc);
         box.AddChild(descBox);
 
-        var label = $"Commit {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}";
+        // Sign toggle: bound to the persisted default; flipping it sticks.
+        var sign = Checkbox.New(_settings.Git.SignCommits, "Sign commit (GPG/SSH)")
+            .OnCheckedChanged(v => { _settings.Git.SignCommits = v; Persist(); MarkDirty(); });
+        sign.LabelGap = 8f;
+        sign.TextColor(Nocturne.On(0.7)).FontSize(11.5f);
+        box.AddChild(sign);
+
+        var label = $"Commit {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}"
+            + (_settings.Git.SignCommits ? " (signed)" : "");
         box.AddChild(Ui.PrimaryButton(label, Icons.GitCommit, DoCommit).Width(Dimension.Percent(100)));
         return box;
     }
@@ -366,12 +374,12 @@ public partial class JunctionApp
         if (!string.IsNullOrWhiteSpace(_commitDescription))
             message += "\n\n" + _commitDescription.Trim();
 
-        var result = repo.Commit(message);
+        var result = repo.Commit(message, sign: _settings.Git.SignCommits);
         if (result.Success)
         {
             _commitSummary = "";
             _commitDescription = "";
-            Flash("Committed");
+            Flash(_settings.Git.SignCommits ? "Committed (signed)" : "Committed");
             RefreshAll();
         }
         else

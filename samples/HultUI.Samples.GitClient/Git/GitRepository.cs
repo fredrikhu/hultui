@@ -556,14 +556,18 @@ public class GitRepository
 
     // ── Commit ──
 
-    public GitResult Commit(string message)
+    public GitResult Commit(string message, bool sign = false)
     {
-        return GitProcess.Run(Path, "commit", "-m", message);
+        var args = new List<string> { "commit", "-m", message };
+        if (sign) args.Insert(1, "-S");   // GPG/SSH sign; requires a configured signing key
+        return GitProcess.Run(Path, args.ToArray());
     }
 
-    public GitResult CommitAmend(string message)
+    public GitResult CommitAmend(string message, bool sign = false)
     {
-        return GitProcess.Run(Path, "commit", "--amend", "-m", message);
+        var args = new List<string> { "commit", "--amend", "-m", message };
+        if (sign) args.Insert(1, "-S");
+        return GitProcess.Run(Path, args.ToArray());
     }
 
     public string? GetLastCommitMessage()

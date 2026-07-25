@@ -139,12 +139,16 @@ public sealed class GitOptions
     public PullStrategy PullStrategy { get; set; } = PullStrategy.Rebase;
     public bool PullAutoStash { get; set; } = true;
     public bool PruneOnFetch { get; set; } = true;
+    /// <summary>Default for the composer's Sign toggle: GPG/SSH-sign new commits
+    /// (<c>git commit -S</c>). Requires a signing key configured in git.</summary>
+    public bool SignCommits { get; set; }
 
     public GitOptions Clone() => new()
     {
         PullStrategy = PullStrategy,
         PullAutoStash = PullAutoStash,
         PruneOnFetch = PruneOnFetch,
+        SignCommits = SignCommits,
     };
 }
 
