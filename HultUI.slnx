@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/apps/">
+    <Project Path="apps/VesperCommander/VesperCommander.csproj" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/HultUi.Samples.FedoraSetup/HultUi.Samples.FedoraSetup.csproj" />
     <Project Path="samples/HultUI.Samples.HelloWorld/HultUI.Samples.HelloWorld.csproj" />
