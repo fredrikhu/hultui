@@ -480,7 +480,13 @@ public partial class CommanderApp
         var col = Flex.Column(gap: 0)
             .AlignItems(AlignItems.Stretch).Overflow(Overflow.Hidden)
             .Background(Nocturne.Surface);
-        if (full) col.FlexGrow(1); else col.Width(PreviewWidth).FlexShrink(0);
+        // Full mode reserves a 1px ring (accent when the preview holds keyboard focus)
+        // so tabbing into it never shifts the layout.
+        if (full)
+            col.FlexGrow(1).BorderWidth(1f)
+                .BorderColor(_previewFocused ? Nocturne.Accent800 : Color.Transparent);
+        else
+            col.Width(PreviewWidth).FlexShrink(0);
 
         var kicker = "Preview" + (focused != null && !focused.IsParent ? " · " + focused.Name : "");
         col.AddChild(Text.New(kicker.ToUpperInvariant()).FontSize(10f).FlexShrink(0)
@@ -526,19 +532,33 @@ public partial class CommanderApp
         }
         else
         {
-            // Text excerpt (off-thread; empty for binary/large). Fills the space
-            // between kicker and metadata and clips — metadata stays pinned below.
+            // Text excerpt (off-thread; empty for binary/large). Scrolls with the
+            // wheel, and in Full mode with the keyboard once tabbed into. The scroller
+            // is keyed per-file so each new file starts scrolled to the top.
             _previewLoader.Load(key, () => FileSystem.PreviewText(focused.FullPath, focused.Size),
                 onLoaded: _ => MarkDirty());
             var excerpt = _previewLoader.Value;
-            var body = Box.New().FlexGrow(1).Overflow(Overflow.Hidden)
+            var body = ScrollView.New().FlexGrow(1)
                 .Padding(new Thickness(4, 12, 8, 12));
+            body.ScrollbarWidth = 7f;
+            body.Key = "pv-scroll#" + key;
+            body.WithRef(_previewScroll);
+            if (full)
+            {
+                // Tab-focusable so the keyboard can drive it; lower TabIndex than the
+                // pane (2) so the first Tab from the pane lands here.
+                body.IsFocusable = true;
+                body.TabIndex = 1;
+                body.On<FocusEvent>(_ => { _previewFocused = true; MarkDirty(); });
+                body.On<BlurEvent>(_ => { _previewFocused = false; MarkDirty(); });
+                body.On<KeyDownEvent>(OnPreviewKey);
+            }
             if (excerpt.Length > 0)
             {
                 var code = Ui.Mono(excerpt, 10.5f, Nocturne.Neutral400).LineHeight(1.6f);
                 if (Icons.KindFor(focused) == IconKind.Code)
                     code.Spans(SyntaxHighlight.Spans(excerpt));   // tint keywords/types/comments
-                body.Children(code);
+                body.AddChild(code);
             }
             col.AddChild(body);
         }

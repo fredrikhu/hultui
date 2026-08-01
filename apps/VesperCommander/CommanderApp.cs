@@ -159,6 +159,12 @@ public partial class CommanderApp : Component, IDisposable
     // path + mtime + size (so editing a file refreshes its preview).
     private readonly AsyncLoader<string> _previewLoader = new("");
 
+    // The preview's text scroller (Full mode can Tab focus into it and scroll it
+    // with the arrow / page / home / end keys). Keyed per-file so a new file starts
+    // at the top; keyboard focus lives here while _previewFocused is set.
+    private readonly Ref<HultUI.Core.Elements.ScrollViewElement> _previewScroll = new();
+    private bool _previewFocused;
+
     // Off-thread image decode for the preview (keyed like the text excerpt). The
     // previous decoded image is disposed when a new one lands; superseded in-flight
     // decodes are freed by SKBitmap's finalizer.
@@ -247,9 +253,18 @@ public partial class CommanderApp : Component, IDisposable
         if (_settings.Preview == PreviewMode.Full)
         {
             // Full preview: only the active pane browses; the preview fills the rest.
-            body.AddChild(BuildPane(_active));
+            // Give both a 0 flex-basis so grow splits the row 50/50 regardless of
+            // content — otherwise the pane's large content basis starves an empty
+            // preview (e.g. on "..") into a sliver.
+            // Both are Tab-focusable so Tab cycles pane ↔ preview (the preview scroller
+            // gets the lower TabIndex, so the first Tab lands in the preview).
+            var lp = BuildPane(_active); lp.FlexBasis(Dimension.Px(0));
+            lp.IsFocusable = true; lp.TabIndex = 2;
+            body.AddChild(lp);
             body.AddChild(VDivider());
-            var pv = BuildPreview(full: true); pv.Key = "preview"; body.AddChild(pv);
+            var pv = BuildPreview(full: true); pv.Key = "preview";
+            pv.FlexBasis(Dimension.Px(0));
+            body.AddChild(pv);
         }
         else
         {
@@ -332,6 +347,7 @@ public partial class CommanderApp : Component, IDisposable
         SetCursor(side, 0);
         Marks(side).Clear();
         _search = "";
+        _previewFocused = false;
         _pendingFocusChild[side == 'L' ? 0 : 1] = focusChildName;
         MarkDirty();
     }
@@ -1050,8 +1066,45 @@ public partial class CommanderApp : Component, IDisposable
     private void CyclePreview()
     {
         _settings.Preview = (PreviewMode)(((int)_settings.Preview + 1) % 3);
+        _previewFocused = false;
         SettingsStore.Save(_settings);
         MarkDirty();
+    }
+
+    // ── Preview focus + scrolling (Full mode) ────────────────────────────
+    // The preview text is a real focusable ScrollView: Tab moves keyboard focus into
+    // it (the framework consumes Tab for focus traversal, so it never reaches the
+    // global handler), Tab again returns to the pane. While focused it takes the
+    // arrow / page / home / end keys here and swallows them so the pane cursor stays.
+    private const float PreviewLineStep = 40f;
+
+    private void OnPreviewKey(KeyDownEvent e)
+    {
+        switch (e.Key)
+        {
+            case KeyCode.Up: ScrollPreview(-PreviewLineStep); break;
+            case KeyCode.Down: ScrollPreview(PreviewLineStep); break;
+            case KeyCode.PageUp: ScrollPreview(-PreviewPageStep()); break;
+            case KeyCode.PageDown: ScrollPreview(PreviewPageStep()); break;
+            case KeyCode.Home: ScrollPreviewTo(0); break;
+            case KeyCode.End: ScrollPreviewTo(float.MaxValue); break;
+            default: return;                     // let other keys (Ctrl+Q, …) bubble
+        }
+        e.StopPropagation = true;
+    }
+
+    private float PreviewPageStep() =>
+        Math.Max(PreviewLineStep,
+            (_previewScroll.Current?.Layout.AbsoluteContentBox.Height ?? 200f) - PreviewLineStep);
+
+    private void ScrollPreview(float delta)
+    {
+        if (_previewScroll.Current is { } sv) { sv.ScrollOffsetY += delta; MarkDirty(); }
+    }
+
+    private void ScrollPreviewTo(float y)
+    {
+        if (_previewScroll.Current is { } sv) { sv.ScrollOffsetY = y; MarkDirty(); }
     }
 
     private void CycleTab(char side, int delta)

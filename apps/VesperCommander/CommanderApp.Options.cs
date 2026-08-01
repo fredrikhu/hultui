@@ -150,7 +150,7 @@ public partial class CommanderApp
         ("Command palette", "Ctrl+P"), ("Bookmark manager", "Ctrl+D"), ("Options", "Ctrl+,"),
         ("Switch pane", "Tab"), ("New tab", "Ctrl+T"), ("Close tab", "Ctrl+W"), ("Cycle tabs", "Ctrl+Tab"),
         ("Go up", "Backspace"), ("Up one folder", "Ctrl+PgUp"), ("Into folder", "Ctrl+PgDn"),
-        ("Open drive", "Alt+F1"), ("Preview panel", "Ctrl+Q"),
+        ("Open drive", "Alt+F1"), ("Preview panel", "Ctrl+Q"), ("Scroll preview (full)", "Tab, ↑↓ PgUp/Dn"),
     ];
 
     private void KeyboardPage(BoxElement page)

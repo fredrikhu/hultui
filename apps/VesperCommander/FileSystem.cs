@@ -200,11 +200,12 @@ public static class FileSystem
         return new string(s);
     }
 
-    private const long PreviewMaxBytes = 256 * 1024;
-    private const int PreviewMaxLines = 60;
+    private const long PreviewMaxBytes = 1024 * 1024;
+    private const int PreviewMaxLines = 500;
 
-    /// <summary>First lines of a small text file for the preview pane, or "" when the
-    /// file is too big, binary, or unreadable. Runs off the UI thread.</summary>
+    /// <summary>Leading lines of a text file for the (scrollable) preview pane, or ""
+    /// when the file is too big, binary, or unreadable. Runs off the UI thread; the
+    /// line cap bounds how much the preview will scroll through.</summary>
     public static string PreviewText(string path, long size)
     {
         if (size > PreviewMaxBytes) return "";
