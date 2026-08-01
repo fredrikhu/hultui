@@ -549,8 +549,12 @@ public partial class CommanderApp
                 // pane (2) so the first Tab from the pane lands here.
                 body.IsFocusable = true;
                 body.TabIndex = 1;
-                body.On<FocusEvent>(_ => { _previewFocused = true; MarkDirty(); });
-                body.On<BlurEvent>(_ => { _previewFocused = false; MarkDirty(); });
+                // Blur fires *during* reconciliation when the scroller is removed (e.g.
+                // Ctrl+Q cycles the preview away while it holds focus). Rebuilding
+                // synchronously from here re-enters the differ mid-enumeration and
+                // throws, so defer the repaint to the next frame.
+                body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
+                body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
                 body.On<KeyDownEvent>(OnPreviewKey);
             }
             if (excerpt.Length > 0)
