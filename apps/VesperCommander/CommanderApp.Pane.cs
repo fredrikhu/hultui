@@ -556,19 +556,20 @@ public partial class CommanderApp
             body.ScrollbarWidth = 7f;
             body.Key = "pv-scroll#" + key;
             body.WithRef(_previewScroll);
-            if (full)
-            {
-                // Tab-focusable so the keyboard can drive it; document order places it
-                // right after the browsing pane, so Tab moves pane → preview → pane.
-                body.IsFocusable = true;
-                // Blur fires *during* reconciliation when the scroller is removed (e.g.
-                // Ctrl+Q cycles the preview away while it holds focus). Rebuilding
-                // synchronously from here re-enters the differ mid-enumeration and
-                // throws, so defer the repaint to the next frame.
-                body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
-                body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
-                body.On<KeyDownEvent>(OnPreviewKey);
-            }
+            // Attach the focus/scroll handlers UNCONDITIONALLY. Reconciliation does not
+            // copy event handlers onto a retained element (only refs/props are). This
+            // scroller is keyed per file, so toggling Side→Full on the same file patches
+            // the existing element: IsFocusable copies across, but handlers added only
+            // in a Full build would never appear — Tab would focus a handler-less
+            // scroller (no ring, arrows still move the pane cursor). Handlers here
+            // capture only `this`, so they stay valid across reconciliation.
+            // Blur can fire *during* reconciliation (scroller removed while focused, e.g.
+            // Ctrl+Q away), so defer the repaint to avoid re-entering the differ.
+            body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
+            body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
+            body.On<KeyDownEvent>(OnPreviewKey);
+            // Only a Full-mode scroller is a Tab stop (this flag patches fine).
+            if (full) body.IsFocusable = true;
             if (excerpt.Length > 0)
             {
                 var code = Ui.Mono(excerpt, 10.5f, Nocturne.Neutral400).LineHeight(1.6f);
