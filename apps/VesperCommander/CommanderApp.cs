@@ -463,17 +463,19 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     // ── Folder size measure (Space) ──────────────────────────────────────
-    /// <summary>Measured/so-far byte total for a folder the user has Space-measured,
-    /// or null when it hasn't been measured. Read while rendering the size column.</summary>
-    private long? MeasuredDirBytes(FileEntry e) =>
-        e.IsDir && !e.IsParent && _dirSizes.TryGetValue(e.FullPath, out var ds) ? ds.Bytes : null;
+    /// <summary>Measured (or so-far) total for a Space-measured folder plus whether the
+    /// walk has finished, or null when it hasn't been measured. Read while rendering.</summary>
+    private (long bytes, bool done)? MeasuredDir(FileEntry e) =>
+        e.IsDir && !e.IsParent && _dirSizes.TryGetValue(e.FullPath, out var ds)
+            ? (ds.Bytes, ds.Done) : null;
 
-    /// <summary>Kick off (or restart, once finished) the recursive size walk for a
-    /// folder. A walk already in flight for the same path is left alone.</summary>
+    /// <summary>Kick off the recursive size walk for a folder. The result is cached, so
+    /// a folder that's already measured (or being measured) is left alone — re-pressing
+    /// Space to unmark it doesn't recompute. A refresh / content change clears the cache.</summary>
     private void StartDirSize(FileEntry e)
     {
         if (!e.IsDir || e.IsParent) return;
-        if (_dirSizes.TryGetValue(e.FullPath, out var running) && !running.Done) return;
+        if (_dirSizes.ContainsKey(e.FullPath)) return;   // cached (running or done)
         var ds = new DirSize();
         _dirSizes[e.FullPath] = ds;
         string path = e.FullPath;
@@ -495,6 +497,17 @@ public partial class CommanderApp : Component, IDisposable
         var list = Listing(side);
         int cur = Cursor(side);
         if (cur >= 0 && cur < list.Count) StartDirSize(list[cur]);
+    }
+
+    /// <summary>Drop cached folder measurements for the direct children of
+    /// <paramref name="dir"/> (any in-flight walk is cancelled), so a refresh or a
+    /// content change re-measures on the next Space instead of showing a stale total.</summary>
+    private void ClearMeasuredIn(string dir)
+    {
+        if (_dirSizes.Count == 0) return;
+        var stale = _dirSizes.Keys
+            .Where(k => PathEquals(System.IO.Path.GetDirectoryName(k), dir)).ToList();
+        foreach (var k in stale) { _dirSizes[k].Cancelled = true; _dirSizes.Remove(k); }
     }
 
     /// <summary>The entries a file operation targets: the mark set, or the focused
@@ -784,6 +797,7 @@ public partial class CommanderApp : Component, IDisposable
         {
             _genL++; _genR++;               // both panes may have changed
             Marks(op.Source).Clear();
+            ClearMeasuredIn(Dir(op.Source)); ClearMeasuredIn(op.DestDir);   // totals may be stale
         }
         MarkDirty();
     }
@@ -840,6 +854,7 @@ public partial class CommanderApp : Component, IDisposable
         _confirm = null;
         _genL++; _genR++;
         Marks(side).Clear();
+        ClearMeasuredIn(Dir(side));       // a deleted folder's cached total is now stale
         MarkDirty();
     }
 
@@ -983,6 +998,7 @@ public partial class CommanderApp : Component, IDisposable
 
     private void RefreshPane(char side)
     {
+        ClearMeasuredIn(Dir(side));
         if (side == 'L') _genL++; else _genR++;
         MarkDirty();
     }
