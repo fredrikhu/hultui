@@ -155,6 +155,13 @@ public partial class CommanderApp : Component, IDisposable
     private readonly Ref<VirtualListElement<FileEntry>> _vlistR = new();
     private bool _pendingScrollL, _pendingScrollR;
 
+    // Each pane is a Tab-focusable region; `_active` follows which one holds focus
+    // (Tab traversal and click-to-focus both route through the same FocusManager, so
+    // they stay in sync). Kept per side for programmatic focus on startup / overlay close.
+    private readonly Ref<BoxElement> _paneRefL = new();
+    private readonly Ref<BoxElement> _paneRefR = new();
+    private Ref<BoxElement> PaneRef(char side) => side == 'L' ? _paneRefL : _paneRefR;
+
     // Off-thread text excerpt for the preview column, keyed by the focused file's
     // path + mtime + size (so editing a file refreshes its preview).
     private readonly AsyncLoader<string> _previewLoader = new("");
@@ -256,11 +263,9 @@ public partial class CommanderApp : Component, IDisposable
             // Give both a 0 flex-basis so grow splits the row 50/50 regardless of
             // content — otherwise the pane's large content basis starves an empty
             // preview (e.g. on "..") into a sliver.
-            // Both are Tab-focusable so Tab cycles pane ↔ preview (the preview scroller
-            // gets the lower TabIndex, so the first Tab lands in the preview).
-            var lp = BuildPane(_active); lp.FlexBasis(Dimension.Px(0));
-            lp.IsFocusable = true; lp.TabIndex = 2;
-            body.AddChild(lp);
+            // Both panes and the preview are Tab-focusable; in Full mode only the active
+            // pane is built, so Tab cycles pane ↔ preview (document order: pane, preview).
+            body.AddChild(BuildPane(_active).FlexBasis(Dimension.Px(0)));
             body.AddChild(VDivider());
             var pv = BuildPreview(full: true); pv.Key = "preview";
             pv.FlexBasis(Dimension.Px(0));
@@ -324,6 +329,12 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
+
+        // Keep a browsing region focused so Tab traverses panes/preview predictably.
+        // The framework consumes Tab for focus traversal; with nothing focused the
+        // first Tab would just land on the already-active pane and appear to do nothing.
+        else if (!AnyOverlayOpen && _window.FocusedElement is null)
+            PaneRef(_active).Current?.Focus();
     }
 
     private void RequestScroll(char side)

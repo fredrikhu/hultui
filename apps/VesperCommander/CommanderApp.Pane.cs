@@ -104,9 +104,22 @@ public partial class CommanderApp
         var pane = Flex.Column(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch)
             .BorderColor(active ? Nocturne.Accent800 : Color.Transparent)
             .BorderWidth(1f);
-        // Clicking anywhere in the pane focuses it.
-        pane.OnClick(_ => { if (_active != side) { _active = side; MarkDirty(); } });
         pane.Key = "pane-" + side;
+        // The pane is a Tab stop: Tab traverses panes (and, in Full mode, the preview),
+        // and clicking anywhere focuses the nearest focusable ancestor — this pane. The
+        // active side follows focus, so Tab and click share one path. Defer the repaint:
+        // focus can change during reconciliation (element removal), and a synchronous
+        // rebuild there re-enters the differ.
+        pane.IsFocusable = true;
+        pane.WithRef(PaneRef(side));
+        pane.On<FocusEvent>(_ =>
+        {
+            if (_active != side || _previewFocused)
+            {
+                _active = side; _previewFocused = false;
+                HultUI.Application.InvokeOnMainThread(MarkDirty);
+            }
+        });
 
         // Tab strip on top, then breadcrumb + column header as one block on the
         // pane ground; the header's bottom border is the only divider to the list.
@@ -545,10 +558,9 @@ public partial class CommanderApp
             body.WithRef(_previewScroll);
             if (full)
             {
-                // Tab-focusable so the keyboard can drive it; lower TabIndex than the
-                // pane (2) so the first Tab from the pane lands here.
+                // Tab-focusable so the keyboard can drive it; document order places it
+                // right after the browsing pane, so Tab moves pane → preview → pane.
                 body.IsFocusable = true;
-                body.TabIndex = 1;
                 // Blur fires *during* reconciliation when the scroller is removed (e.g.
                 // Ctrl+Q cycles the preview away while it holds focus). Rebuilding
                 // synchronously from here re-enters the differ mid-enumeration and
