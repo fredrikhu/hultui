@@ -242,14 +242,25 @@ public partial class CommanderApp : Component, IDisposable
     public override Element Build()
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        body.AddChild(BuildRail());
-        body.AddChild(BuildPane('L'));
-        body.AddChild(VDivider());
-        body.AddChild(BuildPane('R'));
-        if (_settings.ShowPreview)
+        var rail = BuildRail(); rail.Key = "rail";
+        body.AddChild(rail);
+        if (_settings.Preview == PreviewMode.Full)
         {
+            // Full preview: only the active pane browses; the preview fills the rest.
+            body.AddChild(BuildPane(_active));
             body.AddChild(VDivider());
-            body.AddChild(BuildPreview());
+            var pv = BuildPreview(full: true); pv.Key = "preview"; body.AddChild(pv);
+        }
+        else
+        {
+            body.AddChild(BuildPane('L'));
+            body.AddChild(VDivider());
+            body.AddChild(BuildPane('R'));
+            if (_settings.Preview == PreviewMode.Normal)
+            {
+                body.AddChild(VDivider());
+                var pv = BuildPreview(full: false); pv.Key = "preview"; body.AddChild(pv);
+            }
         }
         body.Key = "body";
 
@@ -829,6 +840,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Open this folder in the other pane", "=", () => NavigateTo(other, Dir(side))),
             new("Focus other pane", "Tab", () => { _active = other; }),
             new("New folder", "F7", () => NewFolder(side)),
+            new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
         ];
     }
@@ -1023,6 +1035,25 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
+    /// <summary>Descend into the folder under the cursor (Ctrl+PageDown); ".." goes up.</summary>
+    private void DescendCursor(char side)
+    {
+        var list = Listing(side);
+        int cur = Cursor(side);
+        if (cur < 0 || cur >= list.Count) return;
+        var e = list[cur];
+        if (e.IsParent) GoUp(side);
+        else if (e.IsDir) NavigateTo(side, e.FullPath);
+    }
+
+    /// <summary>Cycle the preview panel Off → Side → Full (Ctrl+Q); persists.</summary>
+    private void CyclePreview()
+    {
+        _settings.Preview = (PreviewMode)(((int)_settings.Preview + 1) % 3);
+        SettingsStore.Save(_settings);
+        MarkDirty();
+    }
+
     private void CycleTab(char side, int delta)
     {
         var tabs = Tabs(side);
@@ -1143,13 +1174,22 @@ public partial class CommanderApp : Component, IDisposable
             JumpBookmark(e.Key - KeyCode.Digit1); e.StopPropagation = true; return;
         }
 
-        // Tabs: Ctrl+T new · Ctrl+W close · Ctrl+PageUp/Down cycle.
+        // Tabs: Ctrl+T new · Ctrl+W close · Ctrl+Tab / Ctrl+Shift+Tab cycle.
         if (ctrl && e.Key == KeyCode.T) { NewTab(_active); e.StopPropagation = true; return; }
         if (ctrl && e.Key == KeyCode.W) { CloseTab(_active, TabIndex(_active)); e.StopPropagation = true; return; }
-        if (ctrl && e.Key is KeyCode.PageDown or KeyCode.PageUp)
+        if (ctrl && e.Key == KeyCode.Tab)
         {
-            CycleTab(_active, e.Key == KeyCode.PageDown ? 1 : -1); e.StopPropagation = true; return;
+            CycleTab(_active, e.Modifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
+            e.StopPropagation = true; return;
         }
+
+        // Folder navigation: Ctrl+PageUp goes up one folder, Ctrl+PageDown descends
+        // into the selected folder (Total Commander style).
+        if (ctrl && e.Key == KeyCode.PageUp) { GoUp(_active); e.StopPropagation = true; return; }
+        if (ctrl && e.Key == KeyCode.PageDown) { DescendCursor(_active); e.StopPropagation = true; return; }
+
+        // Ctrl+Q cycles the preview panel: off → side → full.
+        if (ctrl && e.Key == KeyCode.Q) { CyclePreview(); e.StopPropagation = true; return; }
 
         // Alt+F1 / Alt+F2 open the drive picker for the left / right pane (global,
         // so they fire even from a focused field once fields exist).
@@ -1216,8 +1256,11 @@ public partial class CommanderApp : Component, IDisposable
         }
     }
 
-    /// <summary>Test-hosting seam: true once both panes have completed a load.</summary>
-    public bool ListingsReady => _loadedL && _loadedR;
+    /// <summary>Test-hosting seam: true once the visible pane(s) have loaded. In Full
+    /// preview only the active pane renders, so only it needs to be loaded.</summary>
+    public bool ListingsReady => _settings.Preview == PreviewMode.Full
+        ? (_active == 'L' ? _loadedL : _loadedR)
+        : _loadedL && _loadedR;
 
     public void Dispose()
     {

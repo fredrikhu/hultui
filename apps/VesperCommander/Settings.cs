@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 namespace VesperCommander;
 
 public enum ConflictMode { Ask, KeepNewer, AutoRename }
+public enum PreviewMode { Off, Normal, Full }   // hidden · side column · fills the right pane
 public enum SortMode { Name, Ext, Size, Date }
 public enum Density { Compact, Comfortable }
 public enum DiffToolKind { Builtin, VSCode, Junction }
@@ -29,7 +30,7 @@ public sealed class Settings
     public int PreviewWidth = 300;
     public bool DirsFirst = true;
     public bool ShowHidden;
-    public bool ShowPreview = true;
+    public PreviewMode Preview = PreviewMode.Normal;
 
     // Tools
     public DiffToolKind DiffTool = DiffToolKind.Builtin;

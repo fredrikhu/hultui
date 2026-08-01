@@ -278,9 +278,11 @@ public partial class CommanderApp
     private float BreadcrumbBudget()
     {
         float win = _window.LayoutWidth > 0 ? _window.LayoutWidth : 1240f;
-        float preview = _settings.ShowPreview ? PreviewWidth : 0f;
-        float dividers = _settings.ShowPreview ? 2f : 1f;
-        float paneW = (win - RailWidth - preview - dividers) / 2f;
+        // Side: two panes + 300px preview. Off: two panes. Full: one pane + preview
+        // (both 1fr) — same per-pane width as Off.
+        float paneW = _settings.Preview == PreviewMode.Normal
+            ? (win - RailWidth - PreviewWidth - 2f) / 2f
+            : (win - RailWidth - 1f) / 2f;
         return paneW - 2f /*pane border*/ - 24f /*breadcrumb h-padding*/ - 6f;
     }
 
@@ -466,16 +468,19 @@ public partial class CommanderApp
     }
 
     // ── Preview column (kicker · text excerpt · metadata) ────────────────
-    private Element BuildPreview()
+    // full: the panel fills the right pane's space (Ctrl+Q "full" mode) rather than
+    // sitting as a fixed 300px column.
+    private Element BuildPreview(bool full)
     {
         var side = _active;
         var list = Listing(side);
         int cur = Cursor(side);
         var focused = cur >= 0 && cur < list.Count ? list[cur] : null;
 
-        var col = Flex.Column(gap: 0).Width(PreviewWidth).FlexShrink(0)
+        var col = Flex.Column(gap: 0)
             .AlignItems(AlignItems.Stretch).Overflow(Overflow.Hidden)
             .Background(Nocturne.Surface);
+        if (full) col.FlexGrow(1); else col.Width(PreviewWidth).FlexShrink(0);
 
         var kicker = "Preview" + (focused != null && !focused.IsParent ? " · " + focused.Name : "");
         col.AddChild(Text.New(kicker.ToUpperInvariant()).FontSize(10f).FlexShrink(0)
@@ -507,11 +512,10 @@ public partial class CommanderApp
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
             if (image is { IsLoaded: true } src && src.IntrinsicSize.Width > 0)
             {
-                float w = PreviewWidth - 24;
-                float h = Math.Min(w * src.IntrinsicSize.Height / src.IntrinsicSize.Width, 340f);
+                // Contain fills the box and letterboxes; works at any panel width.
                 var img = Image.New(src);
                 img.Fit = ImageFit.Contain;
-                body.Children(img.Size(Dimension.Px(w), Dimension.Px(h)));
+                body.Children(img.Size(Dimension.Percent(100), Dimension.Percent(100)));
             }
             else
             {

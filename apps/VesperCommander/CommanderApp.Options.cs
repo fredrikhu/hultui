@@ -132,10 +132,13 @@ public partial class CommanderApp
         page.AddChild(FieldRow("Preview width", Stepper(_draft.PreviewWidth, "px",
             () => SetDraft(() => _draft.PreviewWidth = Math.Max(220, _draft.PreviewWidth - 20)),
             () => SetDraft(() => _draft.PreviewWidth = Math.Min(460, _draft.PreviewWidth + 20)))));
+        page.AddChild(FieldRow("Preview panel", Seg(
+            ("Off", _draft.Preview == PreviewMode.Off, () => SetDraft(() => _draft.Preview = PreviewMode.Off)),
+            ("Side", _draft.Preview == PreviewMode.Normal, () => SetDraft(() => _draft.Preview = PreviewMode.Normal)),
+            ("Full", _draft.Preview == PreviewMode.Full, () => SetDraft(() => _draft.Preview = PreviewMode.Full)))));
         var toggles = Flex.Column(gap: 2);
         toggles.AddChild(ToggleRow(_draft.DirsFirst, "Directories first", () => Flip(ref _draft.DirsFirst)));
         toggles.AddChild(ToggleRow(_draft.ShowHidden, "Show hidden and system files", () => Flip(ref _draft.ShowHidden)));
-        toggles.AddChild(ToggleRow(_draft.ShowPreview, "Quick preview panel", () => Flip(ref _draft.ShowPreview)));
         page.AddChild(toggles);
     }
 
@@ -145,8 +148,9 @@ public partial class CommanderApp
         ("New folder", "F7"), ("Diff", "F3"), ("Sync", "F9"),
         ("Mark", "Space"), ("Mark & move down", "Insert"),
         ("Command palette", "Ctrl+P"), ("Bookmark manager", "Ctrl+D"), ("Options", "Ctrl+,"),
-        ("Switch pane", "Tab"), ("New tab", "Ctrl+T"), ("Close tab", "Ctrl+W"),
-        ("Go up", "Backspace"), ("Open drive", "Alt+F1"),
+        ("Switch pane", "Tab"), ("New tab", "Ctrl+T"), ("Close tab", "Ctrl+W"), ("Cycle tabs", "Ctrl+Tab"),
+        ("Go up", "Backspace"), ("Up one folder", "Ctrl+PgUp"), ("Into folder", "Ctrl+PgDn"),
+        ("Open drive", "Alt+F1"), ("Preview panel", "Ctrl+Q"),
     ];
 
     private void KeyboardPage(BoxElement page)
