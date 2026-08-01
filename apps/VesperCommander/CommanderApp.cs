@@ -73,6 +73,16 @@ public partial class CommanderApp : Component, IDisposable
     private sealed record ConfirmSpec(string Title, string Message, string ConfirmLabel, bool Danger, Action OnConfirm);
     private ConfirmSpec? _confirm;
 
+    // Name prompt (F7 new folder, Shift+F6 rename): a titled dialog over a focused
+    // text field. Commit returns an error string (kept inline, dialog stays open) or
+    // null (success, dialog closes). Reused for both flows.
+    private sealed record NamePromptSpec(string Title, string Subtitle, string ConfirmLabel, Func<string, string?> Commit);
+    private NamePromptSpec? _namePrompt;
+    private string _namePromptValue = "";
+    private string? _namePromptError;
+    private readonly Ref<HultUI.Core.Elements.TextInputElement> _namePromptRef = new();
+    private bool _pendingNamePromptFocus;
+
     private sealed class TransferOp
     {
         public bool IsMove;
@@ -171,6 +181,20 @@ public partial class CommanderApp : Component, IDisposable
     // at the top; keyboard focus lives here while _previewFocused is set.
     private readonly Ref<HultUI.Core.Elements.ScrollViewElement> _previewScroll = new();
     private bool _previewFocused;
+
+    // Folder sizes the user has measured with Space, keyed by full path. The running
+    // total is written from a background walk (Interlocked) and read on the UI thread
+    // each render, so the size column counts up live and settles when Done. Touched
+    // (added) only on the UI thread; the worker mutates just its own DirSize.
+    private sealed class DirSize
+    {
+        private long _bytes;
+        public long Bytes => System.Threading.Interlocked.Read(ref _bytes);
+        public void Set(long v) => System.Threading.Interlocked.Exchange(ref _bytes, v);
+        public volatile bool Done;
+        public volatile bool Cancelled;
+    }
+    private readonly Dictionary<string, DirSize> _dirSizes = new(StringComparer.Ordinal);
 
     // Off-thread image decode for the preview (keyed like the text excerpt). The
     // previous decoded image is disposed when a new one lands; superseded in-flight
@@ -321,6 +345,10 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildOptions(); o.Key = "options"; root.AddChild(o);
         }
+        if (_namePrompt is { } np)
+        {
+            var o = BuildNamePrompt(np); o.Key = "name-prompt"; root.AddChild(o);
+        }
         return root;
     }
 
@@ -329,6 +357,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
+        if (_pendingNamePromptFocus) { _pendingNamePromptFocus = false; _namePromptRef.Current?.Focus(); }
 
         // Keep a browsing region focused so Tab traverses panes/preview predictably.
         // The framework consumes Tab for focus traversal; with nothing focused the
@@ -433,6 +462,41 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
+    // ── Folder size measure (Space) ──────────────────────────────────────
+    /// <summary>Measured/so-far byte total for a folder the user has Space-measured,
+    /// or null when it hasn't been measured. Read while rendering the size column.</summary>
+    private long? MeasuredDirBytes(FileEntry e) =>
+        e.IsDir && !e.IsParent && _dirSizes.TryGetValue(e.FullPath, out var ds) ? ds.Bytes : null;
+
+    /// <summary>Kick off (or restart, once finished) the recursive size walk for a
+    /// folder. A walk already in flight for the same path is left alone.</summary>
+    private void StartDirSize(FileEntry e)
+    {
+        if (!e.IsDir || e.IsParent) return;
+        if (_dirSizes.TryGetValue(e.FullPath, out var running) && !running.Done) return;
+        var ds = new DirSize();
+        _dirSizes[e.FullPath] = ds;
+        string path = e.FullPath;
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            long total = FileSystem.DirectorySize(path,
+                cancelled: () => ds.Cancelled,
+                report: n => { ds.Set(n); Repaint(); });
+            ds.Set(total);
+            ds.Done = true;
+            Application.InvokeOnMainThread(MarkDirty);
+        });
+    }
+
+    /// <summary>Space over a folder measures its size (Total Commander style — the mark
+    /// toggles too); over a file it just marks.</summary>
+    private void MeasureFocusedDir(char side)
+    {
+        var list = Listing(side);
+        int cur = Cursor(side);
+        if (cur >= 0 && cur < list.Count) StartDirSize(list[cur]);
+    }
+
     /// <summary>The entries a file operation targets: the mark set, or the focused
     /// row when nothing is marked (never the ".." parent).</summary>
     private IReadOnlyList<FileEntry> OperationTargets(char side)
@@ -508,7 +572,7 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     private bool AnyOverlayOpen => _drivePicker != null || _paletteOpen || _bookmarksOpen
-        || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen;
+        || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null;
 
     private void CloseOverlays()
     {
@@ -517,6 +581,7 @@ public partial class CommanderApp : Component, IDisposable
         _bookmarksOpen = false;
         _confirm = null;
         _optionsOpen = false;
+        _namePrompt = null;
         MarkDirty();
     }
 
@@ -866,7 +931,8 @@ public partial class CommanderApp : Component, IDisposable
             new("Swap left and right panes", "Ctrl+U", SwapPanes),
             new("Open this folder in the other pane", "=", () => NavigateTo(other, Dir(side))),
             new("Focus other pane", "Tab", () => { _active = other; }),
-            new("New folder", "F7", () => NewFolder(side)),
+            new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
+            new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
         ];
@@ -958,17 +1024,77 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    /// <summary>F7: create a uniquely-named new folder in the active pane and land on it.</summary>
-    private void NewFolder(char side)
+    // ── Name prompt (F7 new folder · Shift+F6 rename) ────────────────────
+    /// <summary>F7: prompt for a folder name, seeded blank.</summary>
+    private void OpenNewFolderPrompt(char side)
     {
-        var dir = Dir(side);
-        string name = "New Folder";
-        for (int n = 2; FileOps.Exists(System.IO.Path.Combine(dir, name)); n++) name = $"New Folder ({n})";
-        try { Directory.CreateDirectory(System.IO.Path.Combine(dir, name)); }
-        catch { return; }
+        _active = side;
+        _namePromptValue = "";
+        _namePromptError = null;
+        _namePrompt = new NamePromptSpec("New folder", Dir(side), "Create",
+            name => CreateFolder(side, name));
+        _pendingNamePromptFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Shift+F6: prompt to rename the focused entry, seeded with its name.</summary>
+    private void OpenRenamePrompt(char side)
+    {
+        var list = Listing(side);
+        int cur = Cursor(side);
+        if (cur < 0 || cur >= list.Count) return;
+        var e = list[cur];
+        if (e.IsParent) return;                    // never rename ".."
+        _active = side;
+        _namePromptValue = e.Name;
+        _namePromptError = null;
+        _namePrompt = new NamePromptSpec("Rename", e.IsDir ? "folder" : "file", "Rename",
+            newName => RenameEntry(side, e, newName));
+        _pendingNamePromptFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Commit the name prompt: run its action; on error keep the dialog open
+    /// with the message, on success close it.</summary>
+    private void CommitNamePrompt()
+    {
+        if (_namePrompt is not { } spec) return;
+        var err = spec.Commit(_namePromptValue);
+        if (err != null) { _namePromptError = err; MarkDirty(); return; }
+        _namePrompt = null;
+        MarkDirty();
+    }
+
+    private void CloseNamePrompt() { _namePrompt = null; MarkDirty(); }
+
+    /// <summary>Create a folder in <paramref name="side"/> and land on it. Returns an
+    /// error string (surfaced in the dialog) or null on success.</summary>
+    private string? CreateFolder(char side, string name)
+    {
+        name = name.Trim();
+        if (name.Length == 0) return "Enter a name";
+        var full = System.IO.Path.Combine(Dir(side), name);
+        if (FileOps.Exists(full)) return "A file or folder with that name already exists";
+        try { Directory.CreateDirectory(full); }
+        catch (Exception ex) { return ex.Message; }
         BumpGen(side);
         _pendingFocusChild[side == 'L' ? 0 : 1] = name;
-        MarkDirty();
+        return null;
+    }
+
+    /// <summary>Rename <paramref name="e"/> and land on the new name. Returns an error
+    /// string (surfaced in the dialog) or null on success (including a no-op).</summary>
+    private string? RenameEntry(char side, FileEntry e, string newName)
+    {
+        newName = newName.Trim();
+        if (newName.Length == 0) return "Enter a name";
+        if (string.Equals(newName, e.Name, StringComparison.Ordinal)) return null;   // unchanged
+        var err = FileOps.Rename(e, newName);
+        if (err != null) return err;
+        BumpGen(side);
+        Marks(side).Clear();
+        _pendingFocusChild[side == 'L' ? 0 : 1] = newName;
+        return null;
     }
 
     private void SwapPanes()
@@ -1199,6 +1325,14 @@ public partial class CommanderApp : Component, IDisposable
             }
             return;
         }
+        // Name prompt (F7 / Shift+F6): Enter commits, Esc cancels; other keys fall
+        // through to the focused text field.
+        if (_namePrompt != null)
+        {
+            if (e.Key == KeyCode.Enter) { CommitNamePrompt(); e.StopPropagation = true; }
+            else if (e.Key == KeyCode.Escape) { CloseNamePrompt(); e.StopPropagation = true; }
+            return;
+        }
         if (_paletteOpen) { HandlePaletteKey(e); return; }
         if (_bookmarksOpen) { HandleBookmarksKey(e); e.StopPropagation = true; return; }
         if (_drivePicker is char dpKey)
@@ -1282,7 +1416,7 @@ public partial class CommanderApp : Component, IDisposable
                 if (_search.Length > 0) { _search = ""; MarkDirty(); e.StopPropagation = true; }
                 return;
             case KeyCode.Space:
-                ToggleMark(side, advance: false); e.StopPropagation = true; return;
+                ToggleMark(side, advance: false); MeasureFocusedDir(side); e.StopPropagation = true; return;
             case KeyCode.Insert:
                 ToggleMark(side, advance: true); e.StopPropagation = true; return;
             case KeyCode.Down:
@@ -1304,9 +1438,11 @@ public partial class CommanderApp : Component, IDisposable
             case KeyCode.F5:
                 StartCopy(); e.StopPropagation = true; return;
             case KeyCode.F6:
-                StartMove(); e.StopPropagation = true; return;
+                if (e.Modifiers.HasFlag(KeyModifiers.Shift)) OpenRenamePrompt(side);
+                else StartMove();
+                e.StopPropagation = true; return;
             case KeyCode.F7:
-                NewFolder(side); e.StopPropagation = true; return;
+                OpenNewFolderPrompt(side); e.StopPropagation = true; return;
             case KeyCode.F8 or KeyCode.Delete:
                 StartDelete(); e.StopPropagation = true; return;
         }

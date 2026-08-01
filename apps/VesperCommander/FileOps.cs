@@ -62,6 +62,25 @@ public static class FileOps
         catch (Exception ex) { return ex.Message; }
     }
 
+    /// <summary>Rename an entry in place (Shift+F6). Allows a case-only rename on
+    /// Windows (where the target "exists" case-insensitively); any other collision
+    /// is refused. Returns null on success, else the error message.</summary>
+    public static string? Rename(FileEntry e, string newName)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(e.FullPath) ?? "";
+            var dest = Path.Combine(dir, newName);
+            if (string.Equals(e.FullPath, dest, StringComparison.Ordinal)) return null;   // no-op
+            bool caseOnly = string.Equals(e.FullPath, dest, StringComparison.OrdinalIgnoreCase);
+            if (!caseOnly && Exists(dest)) return "A file or folder with that name already exists";
+            if (e.IsDir) Directory.Move(e.FullPath, dest);
+            else File.Move(e.FullPath, dest);
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
     /// <summary>Send a path to the Recycle Bin (Windows); permanent delete elsewhere.</summary>
     public static string? Recycle(string path, bool isDir)
     {

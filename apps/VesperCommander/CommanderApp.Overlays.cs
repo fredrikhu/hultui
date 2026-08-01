@@ -240,6 +240,53 @@ public partial class CommanderApp
         return Backdrop(card, topAligned: false);
     }
 
+    // ── Name prompt (F7 new folder · Shift+F6 rename) ────────────────────
+    private Element BuildNamePrompt(NamePromptSpec spec)
+    {
+        var card = DialogCard(460);
+
+        var head = Flex.Column(gap: 4).Padding(new Thickness(14, 16, 8, 16));
+        head.AddChild(Text.New(spec.Title).FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
+        head.AddChild(Ui.Mono(spec.Subtitle, 11f, Nocturne.On(0.45)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        card.AddChild(head);
+
+        // The theme forces inputs flush/borderless, so wrap in a bordered box. Give
+        // the input explicit width/height — a bare flex child here can lay out with a
+        // collapsed content box and paint nothing.
+        var field = Box.New()
+            .Margin(new Thickness(0, 16, 14, 16))
+            .Padding(new Thickness(3, 6, 3, 6))
+            .Background(Nocturne.Surface)
+            .BorderColor(Nocturne.Accent700).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusSm);
+        // Height must clear the theme's vertical input padding (~6px each side) plus
+        // the ~13.5px font, or the input's own content-box clip crops the glyphs.
+        var input = TextInput.New(_namePromptValue).Width(Dimension.Percent(100)).Height(30);
+        input.PlaceholderText("Name");
+        // Clear a stale error as soon as the user edits; keep the value in sync so
+        // Enter (handled globally) commits the current text.
+        input.OnTextChanged(v =>
+        {
+            _namePromptValue = v;
+            if (_namePromptError != null) { _namePromptError = null; MarkDirty(); }
+        });
+        input.WithRef(_namePromptRef);
+        field.AddChild(input);
+        card.AddChild(field);
+
+        if (_namePromptError != null)
+            card.AddChild(Text.New(_namePromptError).FontSize(11.5f).TextColor(Nocturne.MarkRed)
+                .Margin(new Thickness(0, 16, 14, 0)));
+
+        var footer = DialogFooter();
+        footer.AddChild(Box.New().FlexGrow(1));
+        footer.AddChild(GhostButton("Cancel", CloseNamePrompt));
+        footer.AddChild(PrimaryButton(spec.ConfirmLabel, CommitNamePrompt));
+        card.AddChild(footer);
+
+        return Backdrop(card, topAligned: false);
+    }
+
     // ── Overwrite conflict dialog ────────────────────────────────────────
     private Element BuildOverwrite(TransferOp op)
     {

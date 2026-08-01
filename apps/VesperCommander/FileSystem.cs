@@ -169,12 +169,57 @@ public static class FileSystem
     {
         if (e.IsParent) return "";
         if (e.IsDir) return "<DIR>";
-        double v = e.Size;
-        if (v < 1000) return $"{e.Size} B";
+        return ByteCount(e.Size);
+    }
+
+    /// <summary>Compact byte size for the size column ("512 B", "1.5 M", "3 G") — the
+    /// single-letter unit form the file rows use, also for a measured folder total.</summary>
+    public static string ByteCount(long b)
+    {
+        if (b < 1000) return $"{b} B";
+        double v = b;
         string[] units = ["K", "M", "G", "T", "P"];
         int u = -1;
         do { v /= 1024; u++; } while (v >= 1000 && u < units.Length - 1);
         return v.ToString(v < 10 ? "0.0" : "0", CultureInfo.InvariantCulture) + " " + units[u];
+    }
+
+    /// <summary>Recursive byte total of a folder tree (Space "measure folder"). Runs off
+    /// the UI thread; calls <paramref name="report"/> with the running total as it goes,
+    /// and bails when <paramref name="cancelled"/> returns true. Reparse points
+    /// (junctions / symlinks) are skipped so it can't loop. Denied / vanished subtrees
+    /// are quietly skipped rather than aborting the whole walk.</summary>
+    public static long DirectorySize(string path, Func<bool> cancelled, Action<long> report)
+    {
+        long total = 0;
+        var stack = new Stack<string>();
+        stack.Push(path);
+        while (stack.Count > 0)
+        {
+            if (cancelled()) break;
+            var dir = stack.Pop();
+            try
+            {
+                foreach (var info in new DirectoryInfo(dir).EnumerateFileSystemInfos())
+                {
+                    if (cancelled()) break;
+                    FileAttributes attr;
+                    try { attr = info.Attributes; }
+                    catch { continue; }
+                    if ((attr & FileAttributes.ReparsePoint) != 0) continue;   // don't follow links
+                    if ((attr & FileAttributes.Directory) != 0)
+                        stack.Push(info.FullName);
+                    else if (info is FileInfo fi)
+                    {
+                        try { total += fi.Length; }
+                        catch { continue; }
+                        report(total);
+                    }
+                }
+            }
+            catch { /* denied / vanished directory — skip it */ }
+        }
+        return total;
     }
 
     /// <summary>ISO date for the 116px date column: <c>YYYY-MM-DD HH:MM</c>.</summary>

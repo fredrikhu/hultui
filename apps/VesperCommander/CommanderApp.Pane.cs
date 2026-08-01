@@ -398,7 +398,11 @@ public partial class CommanderApp
         row.AddChild(Ui.Mono(e.Name, 12f, fg).TextAlign(TextAlign.Left)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(1));
         if (sizeCol >= 0)
-            row.AddChild(Ui.Mono(FileSystem.SizeLabel(e), 11f, metaFg).TextAlign(TextAlign.Right).GridColumn(sizeCol));
+        {
+            // A Space-measured folder shows its (live-updating) byte total in place of "<DIR>".
+            string sizeText = MeasuredDirBytes(e) is long b ? FileSystem.ByteCount(b) : FileSystem.SizeLabel(e);
+            row.AddChild(Ui.Mono(sizeText, 11f, metaFg).TextAlign(TextAlign.Right).GridColumn(sizeCol));
+        }
         if (dateCol >= 0)
             row.AddChild(Ui.Mono(FileSystem.DateLabel(e), 11f, metaFg).GridColumn(dateCol));
 
@@ -586,7 +590,10 @@ public partial class CommanderApp
             .Padding(new Thickness(8, 12, 8, 12))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
         int mr = 0;
-        AddMeta(meta, mr++, "Size", focused.IsDir ? "Directory" : FileSystem.SizeLabel(focused));
+        string sizeMeta = MeasuredDirBytes(focused) is long mb
+            ? FileSystem.ByteCount(mb)
+            : focused.IsDir ? "Directory" : FileSystem.SizeLabel(focused);
+        AddMeta(meta, mr++, "Size", sizeMeta);
         AddMeta(meta, mr++, "Modified", FileSystem.DateLabel(focused));
         if (image is { IsLoaded: true } isrc && isrc.IntrinsicSize.Width > 0)
             AddMeta(meta, mr++, "Dimensions", $"{(int)isrc.IntrinsicSize.Width} × {(int)isrc.IntrinsicSize.Height}");
