@@ -999,8 +999,11 @@ public class TextAreaElement : BoxElement
                 ? MeasureSubstring(lineStart, le - lineStart, style)
                 : 0;
 
-            // If selection spans past this line end (into \n), extend highlight to edge
-            if (selEnd > displayEnd && selStart <= displayEnd && lineEnd > displayEnd)
+            // The selection continues onto a later visual line — fill this one to the
+            // right edge (like a browser). selEnd > displayEnd covers both a hard "\n"
+            // (displayEnd = lineEnd - 1) and a soft wrap (displayEnd = lineEnd), so
+            // wrapped mid-selection lines extend just like hard-broken ones.
+            if (selEnd > displayEnd && selStart <= displayEnd)
                 x2 = contentBox.Width;
 
             if (x2 > x1)
