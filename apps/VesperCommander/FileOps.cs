@@ -71,6 +71,21 @@ public static class FileOps
         catch { OpenInShell(filePath); }
     }
 
+    /// <summary>Launch an external diff (e.g. <c>code --diff left right</c>) for the
+    /// VS Code DiffTool option. Best-effort; failures are swallowed.</summary>
+    public static void LaunchDiff(string exe, string left, string right)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = true };
+            psi.ArgumentList.Add("--diff");
+            psi.ArgumentList.Add(left);
+            psi.ArgumentList.Add(right);
+            Process.Start(psi);
+        }
+        catch { /* best-effort */ }
+    }
+
     /// <summary>Resolve a command template into a program + argument list, without
     /// launching (pure, so it's unit-testable). Tokenizes the template (double quotes
     /// group a token), substitutes <c>{file}</c> / <c>{line}</c> / <c>{dir}</c> in each

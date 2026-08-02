@@ -299,6 +299,16 @@ public partial class CommanderApp : Component, IDisposable
     public override Element Build()
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
+
+        // Full-shell views (diff / sync) replace the rail + panes entirely.
+        if (_diffOpen)
+        {
+            var view = BuildDiff();
+            view.Key = "diff";
+            body.AddChild(view);
+        }
+        else
+        {
         var rail = BuildRail(); rail.Key = "rail";
         body.AddChild(rail);
         if (_settings.Preview == PreviewMode.Full)
@@ -325,6 +335,7 @@ public partial class CommanderApp : Component, IDisposable
                 body.AddChild(VDivider());
                 var pv = BuildPreview(full: false); pv.Key = "preview"; body.AddChild(pv);
             }
+        }
         }
         body.Key = "body";
 
@@ -386,6 +397,12 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
         if (_pendingNamePromptFocus) { _pendingNamePromptFocus = false; _namePromptRef.Current?.Focus(); }
         if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
+        if (_pendingDiffScroll)
+        {
+            _pendingDiffScroll = false;
+            if (_diffScrollRef.Current is { } sv && _diffChangeIdx < _diffChangeRows.Count)
+                sv.ScrollOffsetY = Math.Max(0, (_diffChangeRows[_diffChangeIdx] - 2) * DiffLineH);
+        }
 
         // Keep a browsing region focused so Tab traverses panes/preview predictably.
         // The framework consumes Tab for focus traversal; with nothing focused the
@@ -1117,6 +1134,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Focus other pane", "Tab", () => { _active = other; }),
             new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
             new("Find files…", "Alt+F7", () => OpenFind(side)),
+            new("Compare files (diff)", "F3", () => OpenDiff(side)),
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
@@ -1525,6 +1543,9 @@ public partial class CommanderApp : Component, IDisposable
             HandleDrivePickerKey(dpKey, e); e.StopPropagation = true; return;
         }
 
+        // Full-shell views (diff / sync) capture the keyboard while open.
+        if (_diffOpen) { HandleDiffKey(e); return; }
+
         // Review affordance (prototype): Ctrl+Shift+E/O/D force the active pane's
         // empty/offline/denied view; K clears back to the real state. Checked before
         // Ctrl+D so Shift disambiguates it from the bookmark manager.
@@ -1644,6 +1665,8 @@ public partial class CommanderApp : Component, IDisposable
                 _search = ""; ActivateCursor(side); e.StopPropagation = true; return;
             case KeyCode.Backspace:
                 BackspaceSearch(side); e.StopPropagation = true; return;
+            case KeyCode.F3:
+                OpenDiff(side); e.StopPropagation = true; return;
             case KeyCode.F4:
                 EditFocused(side); e.StopPropagation = true; return;
             case KeyCode.F5:
