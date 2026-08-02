@@ -84,7 +84,7 @@ public static class FileSystem
     /// (an empty listing, an unready volume, or an access error) — no throwing.
     /// </summary>
     public static DirListing List(string path, bool showHidden = false,
-        SortMode sort = SortMode.Name, bool dirsFirst = true)
+        SortMode sort = SortMode.Name, bool dirsFirst = true, bool descending = false)
     {
         var dirs = new List<FileEntry>();
         var files = new List<FileEntry>();
@@ -139,6 +139,9 @@ public static class FileSystem
             SortMode.Date => (a, b) => a.Modified.CompareTo(b.Modified),
             _ => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
         };
+        // Descending reverses within each group; the ".." parent still leads and the
+        // dirs-before-files grouping is preserved (only the order inside a group flips).
+        if (descending) { var asc = cmp; cmp = (a, b) => asc(b, a); }
 
         var result = new List<FileEntry>(dirs.Count + files.Count + 1);
         var parent = Directory.GetParent(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));

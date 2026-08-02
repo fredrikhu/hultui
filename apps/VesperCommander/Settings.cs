@@ -26,6 +26,7 @@ public sealed class Settings
     public bool ShowSize = true;
     public bool ShowDate = true;
     public SortMode Sort = SortMode.Name;
+    public bool SortDescending;
     public Density Density = Density.Comfortable;
     public int PreviewWidth = 300;
     public bool DirsFirst = true;

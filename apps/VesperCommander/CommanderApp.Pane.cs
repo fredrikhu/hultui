@@ -322,15 +322,33 @@ public partial class CommanderApp
             .Padding(new Thickness(5, 10, 5, 10))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         h.AddChild(Box.New().GridColumn(0));
-        h.AddChild(HeaderLabel("Name").GridColumn(1));
-        if (sizeCol >= 0) h.AddChild(HeaderLabel("Size").TextAlign(TextAlign.Right).GridColumn(sizeCol));
-        if (dateCol >= 0) h.AddChild(HeaderLabel("Modified").GridColumn(dateCol));
+        h.AddChild(HeaderCell("Name", SortMode.Name, rightAlign: false).GridColumn(1));
+        if (sizeCol >= 0) h.AddChild(HeaderCell("Size", SortMode.Size, rightAlign: true).GridColumn(sizeCol));
+        if (dateCol >= 0) h.AddChild(HeaderCell("Modified", SortMode.Date, rightAlign: false).GridColumn(dateCol));
         return h;
     }
 
-    private static TextElement HeaderLabel(string text) =>
-        Text.New(text.ToUpperInvariant()).FontSize(10f).LetterSpacing(0.08f * 10f)
-            .TextColor(Nocturne.Neutral600);
+    /// <summary>A clickable, sortable column header. The active column shows an accent
+    /// direction triangle and its label lifts to full-strength text; inactive labels
+    /// stay Neutral600. Click cycles asc↔desc on the same column or switches column
+    /// (see <see cref="SetSort"/>). The icon column is not built through here (unsortable).</summary>
+    private Element HeaderCell(string label, SortMode col, bool rightAlign)
+    {
+        bool active = _settings.Sort == col;
+        // No explicit width: the grid stretches the cell child to the track, and
+        // JustifyContent aligns the label+triangle within it (a percent width would
+        // resolve to 0 in the fixed 60px Size track and hide the label).
+        var row = Flex.Row(gap: 4).AlignItems(AlignItems.Center)
+            .JustifyContent(rightAlign ? JustifyContent.FlexEnd : JustifyContent.FlexStart)
+            .Padding(new Thickness(0, 4, 0, 4)).CornerRadius(4f)
+            .Cursor(CursorType.Pointer);
+        row.AddChild(Text.New(label.ToUpperInvariant()).FontSize(10f).LetterSpacing(0.08f * 10f)
+            .TextColor(active ? Nocturne.Text : Nocturne.Neutral600));
+        if (active)
+            row.AddChild(Ui.Icon(_settings.SortDescending ? "▾" : "▴", 9f, Nocturne.Accent));
+        row.OnClick(_ => SetSort(col));
+        return row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+    }
 
     private Element BuildList(char side, IReadOnlyList<FileEntry> list, bool active)
     {

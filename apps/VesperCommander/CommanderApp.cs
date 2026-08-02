@@ -270,7 +270,7 @@ public partial class CommanderApp : Component, IDisposable
         var loader = Loader(side);
         var dir = Dir(side);
         loader.Load($"{dir}#{Gen(side)}",
-            () => FileSystem.List(dir, _settings.ShowHidden, _settings.Sort, _settings.DirsFirst),
+            () => FileSystem.List(dir, _settings.ShowHidden, _settings.Sort, _settings.DirsFirst, _settings.SortDescending),
             onLoaded: _ =>
         {
             if (side == 'L') _loadedL = true; else _loadedR = true;
@@ -1111,6 +1111,23 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     private void ResetOptions() { _draft = new Settings(); MarkDirty(); }
+
+    /// <summary>Clicking a column header. Same column flips direction; a new column
+    /// adopts a sensible default (Name ascending, Size/Date descending — big & newest
+    /// first). Sort is global (both panes); persisted and re-applied by bumping gen.</summary>
+    private void SetSort(SortMode col)
+    {
+        if (_settings.Sort == col)
+            _settings.SortDescending = !_settings.SortDescending;
+        else
+        {
+            _settings.Sort = col;
+            _settings.SortDescending = col is SortMode.Size or SortMode.Date;
+        }
+        SettingsStore.Save(_settings);
+        _genL++; _genR++;   // re-sort both panes with the new key/direction
+        MarkDirty();
+    }
 
     /// <summary>Retry a pane's listing (offline/denied "Reconnect"/"Retry" buttons).</summary>
     private void RetryPane(char side)

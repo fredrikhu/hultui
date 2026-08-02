@@ -43,5 +43,6 @@
     <Project Path="tests/HultUI.UiTests/HultUI.UiTests.csproj" />
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
+    <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
   </Folder>
 </Solution>
