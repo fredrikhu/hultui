@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace VesperCommander;
 
@@ -28,6 +29,73 @@ public static class FileOps
                 Process.Start("xdg-open", [path]);
         }
         catch { /* no handler / launch failed — nothing sensible to do */ }
+    }
+
+    /// <summary>Launch an external editor for <paramref name="filePath"/> from a command
+    /// template (F4). The template is tokenized (double quotes group a token), then each
+    /// token has its placeholders substituted: <c>{file}</c>, <c>{line}</c>, <c>{dir}</c>.
+    /// The first token is the program; the rest are passed as separate arguments (so the
+    /// launcher, not the template author, handles quoting paths with spaces). A template
+    /// with no <c>{file}</c> gets the path appended as a final argument. A blank template
+    /// or a launch failure falls back to the OS default handler.</summary>
+    public static void LaunchEditor(string template, string filePath, int line = 1)
+    {
+        var inv = BuildEditorInvocation(template, filePath, line);
+        if (inv is not (var exe, var args))   // blank/empty template ⇒ OS default handler
+        {
+            OpenInShell(filePath);
+            return;
+        }
+        // UseShellExecute resolves PATH and runs launchers like VS Code's code.cmd; the
+        // ArgumentList quotes each arg, so a token like {file} with spaces stays intact.
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        try { Process.Start(psi); }
+        catch { OpenInShell(filePath); }
+    }
+
+    /// <summary>Resolve a command template into a program + argument list, without
+    /// launching (pure, so it's unit-testable). Tokenizes the template (double quotes
+    /// group a token), substitutes <c>{file}</c> / <c>{line}</c> / <c>{dir}</c> in each
+    /// token, and appends the file path as a final argument when the template has no
+    /// <c>{file}</c>. Returns null for a blank template (caller falls back to the shell).</summary>
+    public static (string Exe, IReadOnlyList<string> Args)? BuildEditorInvocation(
+        string template, string filePath, int line = 1)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return null;
+        var tokens = Tokenize(template);
+        if (tokens.Count == 0) return null;
+
+        string dir = Path.GetDirectoryName(filePath) ?? "";
+        string Sub(string t) => t
+            .Replace("{file}", filePath)
+            .Replace("{line}", line.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .Replace("{dir}", dir);
+
+        var args = new List<string>();
+        for (int i = 1; i < tokens.Count; i++) args.Add(Sub(tokens[i]));
+        if (!template.Contains("{file}")) args.Add(filePath);
+        return (Sub(tokens[0]), args);
+    }
+
+    /// <summary>Split a command line into tokens, treating a double-quoted run as one
+    /// token (the quotes are stripped). Whitespace outside quotes separates tokens.</summary>
+    private static List<string> Tokenize(string s)
+    {
+        var tokens = new List<string>();
+        var sb = new StringBuilder();
+        bool inQuotes = false;
+        foreach (char c in s)
+        {
+            if (c == '"') { inQuotes = !inQuotes; continue; }
+            if (char.IsWhiteSpace(c) && !inQuotes)
+            {
+                if (sb.Length > 0) { tokens.Add(sb.ToString()); sb.Clear(); }
+            }
+            else sb.Append(c);
+        }
+        if (sb.Length > 0) tokens.Add(sb.ToString());
+        return tokens;
     }
 
     /// <summary>Copy an entry into <paramref name="destDir"/> (recursively for folders).</summary>

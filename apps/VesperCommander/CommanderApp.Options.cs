@@ -145,7 +145,7 @@ public partial class CommanderApp
     private static readonly (string label, string keys)[] Shortcuts =
     [
         ("Copy", "F5"), ("Move", "F6"), ("Rename", "Shift+F6"), ("Delete", "F8"),
-        ("New folder", "F7"), ("Diff", "F3"), ("Sync", "F9"),
+        ("New folder", "F7"), ("Edit file", "F4"), ("Diff", "F3"), ("Sync", "F9"),
         ("Mark / measure folder", "Space"), ("Measure all folders", "Alt+Shift+Enter"), ("Mark & move down", "Insert"),
         ("Command palette", "Ctrl+P"), ("Bookmark manager", "Ctrl+D"), ("Options", "Ctrl+,"),
         ("Switch pane", "Tab"), ("New tab", "Ctrl+T"), ("Close tab", "Ctrl+W"), ("Cycle tabs", "Ctrl+Tab"),
@@ -179,6 +179,7 @@ public partial class CommanderApp
             ("VS Code", _draft.DiffTool == DiffToolKind.VSCode, () => SetDraft(() => _draft.DiffTool = DiffToolKind.VSCode)),
             ("Junction", _draft.DiffTool == DiffToolKind.Junction, () => SetDraft(() => _draft.DiffTool = DiffToolKind.Junction)))));
         page.AddChild(FieldRow("Editor", ReadonlyField(_draft.Editor)));
+        page.AddChild(FieldRow("Image editor", ReadonlyField(_draft.ImageEditor)));
         page.AddChild(FieldRow("Terminal", ReadonlyField(_draft.Terminal)));
         page.AddChild(FieldRow("Archiver", Seg(
             ("Built-in zip", _draft.Archiver == ArchiverKind.Builtin, () => SetDraft(() => _draft.Archiver = ArchiverKind.Builtin)),

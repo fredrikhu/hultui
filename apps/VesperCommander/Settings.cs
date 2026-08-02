@@ -36,6 +36,7 @@ public sealed class Settings
     public DiffToolKind DiffTool = DiffToolKind.Builtin;
     public string GitClient = "";
     public string Editor = "code --goto {file}:{line}";
+    public string ImageEditor = "mspaint.exe {file}";
     public string Terminal = "wt.exe -d {dir}";
     public ArchiverKind Archiver = ArchiverKind.Builtin;
 

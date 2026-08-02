@@ -438,6 +438,20 @@ public partial class CommanderApp : Component, IDisposable
         }
     }
 
+    /// <summary>F4 — open the focused file in its configured external editor. Images use
+    /// the ImageEditor template (Paint by default), everything else the Editor template
+    /// (VS Code by default). Directories and ".." are ignored.</summary>
+    private void EditFocused(char side)
+    {
+        var list = Listing(side);
+        int cur = Cursor(side);
+        if (cur < 0 || cur >= list.Count) return;
+        var e = list[cur];
+        if (e.IsDir || e.IsParent) return;
+        string template = Icons.KindFor(e) == IconKind.Image ? _settings.ImageEditor : _settings.Editor;
+        FileOps.LaunchEditor(template, e.FullPath);
+    }
+
     private void MoveCursor(char side, int delta, bool clearSearch = true)
     {
         if (clearSearch) _search = "";
@@ -1011,6 +1025,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Open this folder in the other pane", "=", () => NavigateTo(other, Dir(side))),
             new("Focus other pane", "Tab", () => { _active = other; }),
             new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
+            new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
@@ -1492,6 +1507,8 @@ public partial class CommanderApp : Component, IDisposable
                 _search = ""; ActivateCursor(side); e.StopPropagation = true; return;
             case KeyCode.Backspace:
                 BackspaceSearch(side); e.StopPropagation = true; return;
+            case KeyCode.F4:
+                EditFocused(side); e.StopPropagation = true; return;
             case KeyCode.F5:
                 StartCopy(); e.StopPropagation = true; return;
             case KeyCode.F6:
