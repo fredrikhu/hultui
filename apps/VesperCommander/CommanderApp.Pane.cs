@@ -417,9 +417,14 @@ public partial class CommanderApp
             _active = side;
             int idx = IndexOfName(Listing(side), e.Name);
             if (idx >= 0) SetCursor(side, idx);
+            // Detect a double-press here rather than via DoubleClickEvent: selecting a
+            // row MarkDirty()s, and the VirtualList re-realizes rows with fresh element
+            // identities, so the framework's click synthesis (down-target == up-target
+            // by reference) never fires for recycled rows. Two presses on the same
+            // entry within the window activate it, like Enter.
+            if (IsDoublePress(side, e.Name)) ActivateCursor(side);
             MarkDirty();
         });
-        row.On<DoubleClickEvent>(ev => { ev.StopPropagation = true; _active = side; ActivateCursor(side); });
         return row;
     }
 

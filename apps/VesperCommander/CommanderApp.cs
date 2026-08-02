@@ -25,6 +25,24 @@ public partial class CommanderApp : Component, IDisposable
     private readonly Application _app;
     private readonly Window _window;
 
+    // Manual double-click detection for the file rows (see BuildPane's PointerDown).
+    // Keyed by side + entry name so two presses on the same row within the window read
+    // as a double-click even though the row element was re-realized in between.
+    private const long DoubleClickMs = 400;
+    private string? _lastPressName;
+    private char _lastPressSide;
+    private long _lastPressTick;
+    private bool IsDoublePress(char side, string name)
+    {
+        long now = Environment.TickCount64;
+        bool dbl = _lastPressName == name && _lastPressSide == side
+                   && now - _lastPressTick <= DoubleClickMs;
+        _lastPressSide = side;
+        _lastPressTick = now;
+        _lastPressName = dbl ? null : name;   // consume, so a third press isn't a second activate
+        return dbl;
+    }
+
     // Each pane is a list of tabs; a tab owns its folder, cursor, and mark set.
     // Marks are kept by name (they survive row recycling) and cleared on navigation.
     private sealed class PaneTab(string dir)

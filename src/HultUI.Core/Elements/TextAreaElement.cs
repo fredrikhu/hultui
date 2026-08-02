@@ -8,7 +8,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextAreaElement : BoxElement
+public class TextAreaElement : BoxElement, IScrollbarDraggable
 {
     private string _text = "";
     private int _cursorPos;
@@ -622,6 +622,62 @@ public class TextAreaElement : BoxElement
     }
 
     public void EndDrag() => _isDragging = false;
+
+    // ──── Scrollbar thumb drag (IScrollbarDraggable) ────
+    private bool _draggingScrollbar;
+    private float _scrollbarGrabOffset;   // pointer Y minus thumb top at grab time
+
+    public bool IsDraggingScrollbar => _draggingScrollbar;
+
+    private float TotalContentHeight() =>
+        LineCount(GetWrapWidth(), ResolvedInherited) * GetLineHeight(ResolvedInherited);
+
+    public bool TryStartScrollbarDrag(Point position)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        float totalHeight = TotalContentHeight();
+        if (totalHeight <= contentBox.Height) return false;   // nothing to scroll ⇒ no bar
+
+        float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
+        if (position.X < trackX || position.X > trackX + ScrollbarWidth
+            || position.Y < contentBox.Y || position.Y > contentBox.Y + contentBox.Height)
+            return false;   // not on the scrollbar
+
+        float trackHeight = contentBox.Height;
+        float thumbHeight = Math.Max(20, trackHeight * (contentBox.Height / totalHeight));
+        float maxScroll = totalHeight - contentBox.Height;
+        float scrollRatio = _scrollOffsetY / Math.Max(1, maxScroll);
+        float thumbY = contentBox.Y + scrollRatio * (trackHeight - thumbHeight);
+
+        if (position.Y >= thumbY && position.Y <= thumbY + thumbHeight)
+        {
+            _draggingScrollbar = true;
+            _scrollbarGrabOffset = position.Y - thumbY;
+        }
+        else
+        {
+            // Track click — center the thumb on the pointer.
+            float clickRatio = Math.Clamp((position.Y - contentBox.Y - thumbHeight / 2) / (trackHeight - thumbHeight), 0, 1);
+            _scrollOffsetY = clickRatio * maxScroll;
+            MarkPaintDirty();
+        }
+        return true;
+    }
+
+    public void UpdateScrollbarDrag(Point position)
+    {
+        if (!_draggingScrollbar) return;
+        var contentBox = Layout.AbsoluteContentBox;
+        float totalHeight = TotalContentHeight();
+        float trackHeight = contentBox.Height;
+        float thumbHeight = Math.Max(20, trackHeight * (contentBox.Height / totalHeight));
+        float thumbTop = position.Y - _scrollbarGrabOffset;
+        float scrollRatio = Math.Clamp((thumbTop - contentBox.Y) / (trackHeight - thumbHeight), 0, 1);
+        _scrollOffsetY = scrollRatio * (totalHeight - contentBox.Height);
+        MarkPaintDirty();
+    }
+
+    public void EndScrollbarDrag() => _draggingScrollbar = false;
 
     // ──── Cursor Movement ────
 

@@ -22,7 +22,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Element? _lastHoveredElement;
-    private ScrollViewElement? _scrollbarDragTarget;
+    private IScrollbarDraggable? _scrollbarDragTarget;
     private TextInputElement? _textInputDragTarget;
     private TextAreaElement? _textAreaDragTarget;
     private TextElement? _textElementDragTarget;
@@ -1043,10 +1043,10 @@ public sealed class Window : IOverlayHost, IDisposable
         Element? current = target;
         while (current is not null)
         {
-            if (current is ScrollViewElement sv && sv.TryStartScrollbarDrag(pos))
+            if (current is IScrollbarDraggable sb && sb.TryStartScrollbarDrag(pos))
             {
-                if (sv.IsDraggingScrollbar)
-                    _scrollbarDragTarget = sv;
+                if (sb.IsDraggingScrollbar)
+                    _scrollbarDragTarget = sb;
                 return true;
             }
             current = current.Parent;
