@@ -265,6 +265,11 @@ public static class FileOps
     {
         try
         {
+            // Ensure the target folder exists — lets callers copy to a nested relative
+            // target (the sync commit sets an entry's Name to its relative path).
+            var destDir = Path.GetDirectoryName(dest);
+            if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+
             using var s = new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, ChunkSize);
             using (var d = new FileStream(dest, overwrite ? FileMode.Create : FileMode.CreateNew,
                        FileAccess.Write, FileShare.None, ChunkSize))

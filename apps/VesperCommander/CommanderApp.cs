@@ -134,6 +134,7 @@ public partial class CommanderApp : Component, IDisposable
         }
     }
     private TransferOp? _op;          // set once a copy/move is confirmed and running
+    private TransferOp? _syncSecondBatch;   // sync runs two copy batches (→ then ←); this is the second
     private bool _overwriteOpen;      // the transfer paused on a conflict awaiting a choice
     private bool _progressOpen;       // the streamed copy-progress overlay is showing
 
@@ -301,10 +302,10 @@ public partial class CommanderApp : Component, IDisposable
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
 
         // Full-shell views (diff / sync) replace the rail + panes entirely.
-        if (_diffOpen)
+        if (_diffOpen || _syncOpen)
         {
-            var view = BuildDiff();
-            view.Key = "diff";
+            var view = _diffOpen ? BuildDiff() : BuildSync();
+            view.Key = _diffOpen ? "diff" : "sync";
             body.AddChild(view);
         }
         else
@@ -985,6 +986,17 @@ public partial class CommanderApp : Component, IDisposable
             Marks(op.Source).Clear();
             ClearMeasuredIn(Dir(op.Source)); ClearMeasuredIn(op.DestDir);   // totals may be stale
         }
+
+        // Sync's second batch (the ← direction) starts once the → batch finishes.
+        if (_syncSecondBatch is { } next)
+        {
+            _syncSecondBatch = null;
+            _op = next;
+            _progressOpen = true;
+            MarkDirty();
+            System.Threading.Tasks.Task.Run(() => RunCopy(next));
+            return;
+        }
         MarkDirty();
     }
 
@@ -1135,6 +1147,7 @@ public partial class CommanderApp : Component, IDisposable
             new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
             new("Find files…", "Alt+F7", () => OpenFind(side)),
             new("Compare files (diff)", "F3", () => OpenDiff(side)),
+            new("Synchronize folders", "F9", OpenSync),
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
@@ -1545,6 +1558,7 @@ public partial class CommanderApp : Component, IDisposable
 
         // Full-shell views (diff / sync) capture the keyboard while open.
         if (_diffOpen) { HandleDiffKey(e); return; }
+        if (_syncOpen) { HandleSyncKey(e); return; }
 
         // Review affordance (prototype): Ctrl+Shift+E/O/D force the active pane's
         // empty/offline/denied view; K clears back to the real state. Checked before
@@ -1669,6 +1683,8 @@ public partial class CommanderApp : Component, IDisposable
                 OpenDiff(side); e.StopPropagation = true; return;
             case KeyCode.F4:
                 EditFocused(side); e.StopPropagation = true; return;
+            case KeyCode.F9:
+                OpenSync(); e.StopPropagation = true; return;
             case KeyCode.F5:
                 StartCopy(); e.StopPropagation = true; return;
             case KeyCode.F6:
