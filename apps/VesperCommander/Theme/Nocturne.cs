@@ -106,6 +106,19 @@ public static class Nocturne
     /// A property so it tracks the current accent after <see cref="SetAccent"/>.</summary>
     public static Color DirText => Accent200;
 
+    // ── Diff / sync change colors (Vesper-tuned) ─────────────────────────
+    // Kept in the register rather than copied from Junction's palette so diff
+    // additions/deletions stay consistent with the marked-file red used across
+    // the app. Deletions reuse <see cref="MarkRed"/>; additions get a green
+    // scaled to Vesper's ground; changed lines tint with the accent. All the
+    // *Bg accessors are properties because they mix over the mutable accent.
+    public static readonly Color DiffGreen = Hex("#3eb37e");      // add markers, new-file rail
+    public static readonly Color DiffGreenText = Hex("#7fd0a5");  // added-line text
+    public static Color DiffAddBg => Alpha(DiffGreen, 0.10);
+    public static Color DiffDelBg => Alpha(MarkRed, 0.22);
+    public static Color DiffChangeBg => Alpha(Accent500, 0.09);
+    public static Color DiffChangeMark => Alpha(Accent500, 0.28);   // intra-line highlight
+
     // ── Radii ────────────────────────────────────────────────────────────
     public const float RadiusSm = 4f;
     public const float RadiusMd = 8f;
