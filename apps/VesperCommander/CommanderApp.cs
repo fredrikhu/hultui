@@ -639,6 +639,52 @@ public partial class CommanderApp : Component, IDisposable
         return [];
     }
 
+    // ── Clipboard (Ctrl+C / Ctrl+X / Ctrl+V) ─────────────────────────────
+    // Full paths of files cut and awaiting paste — rendered ghosted in their pane
+    // until paste, Esc, or a new cut/copy clears them. Cut interops with Explorer.
+    private readonly HashSet<string> _cutPending = new(StringComparer.OrdinalIgnoreCase);
+
+    private void CopyToClipboard(bool cut)
+    {
+        var items = OperationTargets(_active);
+        if (items.Count == 0) return;
+        var paths = items.Select(e => e.FullPath).ToList();
+        Clipboard.SetFiles(paths, cut);
+        _cutPending.Clear();
+        if (cut) foreach (var p in paths) _cutPending.Add(p);
+        MarkDirty();
+    }
+
+    private void PasteFromClipboard()
+    {
+        if (!Clipboard.TryGetFiles(out var paths, out bool cut) || paths.Count == 0) return;
+        char side = _active;
+        var dest = Dir(side);
+        var items = new List<FileEntry>();
+        foreach (var p in paths)
+        {
+            if (!FileOps.Exists(p)) continue;
+            if (PathEquals(System.IO.Path.GetDirectoryName(p) ?? "", dest)) continue;   // same-folder paste = no-op
+            items.Add(FileOps.EntryFromPath(p));
+        }
+        if (items.Count == 0) return;
+
+        var op = new TransferOp(items) { IsMove = cut, Source = side, DestDir = dest };
+        _op = op;
+        if (cut)
+        {
+            ProcessMove();                 // synchronous move (reuses the overwrite gate)
+            Clipboard.Clear();             // a cut is consumed by its paste
+            _cutPending.Clear();
+        }
+        else
+        {
+            _progressOpen = true;
+            MarkDirty();
+            System.Threading.Tasks.Task.Run(() => RunCopy(op));
+        }
+    }
+
     // ── Incremental search ───────────────────────────────────────────────
     private void ExtendSearch(char side, char ch)
     {
@@ -1373,9 +1419,18 @@ public partial class CommanderApp : Component, IDisposable
         SwitchTab(side, next);
     }
 
-    private static bool PathEquals(string? a, string? b) =>
-        string.Equals(a, b, OperatingSystem.IsWindows()
+    private static bool PathEquals(string? a, string? b)
+    {
+        if (a is null || b is null) return ReferenceEquals(a, b);
+        return string.Equals(Norm(a), Norm(b), OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+        // Fold alt separators to the platform separator and drop a trailing one, so
+        // "C:/x" and "C:\x\" compare equal (paths reach us from both listings and args).
+        static string Norm(string p) => p
+            .Replace(System.IO.Path.AltDirectorySeparatorChar, System.IO.Path.DirectorySeparatorChar)
+            .TrimEnd(System.IO.Path.DirectorySeparatorChar);
+    }
 
     private void HandleDrivePickerKey(char target, KeyDownEvent e)
     {
@@ -1493,6 +1548,16 @@ public partial class CommanderApp : Component, IDisposable
             JumpBookmark(e.Key - KeyCode.Digit1); e.StopPropagation = true; return;
         }
 
+        // Ctrl+C / Ctrl+X / Ctrl+V file clipboard — but not while a text field (e.g. the
+        // preview TextArea) is focused, where these mean copy/cut/paste text.
+        if (ctrl && e.Key is KeyCode.C or KeyCode.X or KeyCode.V
+            && e.Target is not (TextInputElement or TextAreaElement))
+        {
+            if (e.Key == KeyCode.V) PasteFromClipboard();
+            else CopyToClipboard(cut: e.Key == KeyCode.X);
+            e.StopPropagation = true; return;
+        }
+
         // Tabs: Ctrl+T new · Ctrl+W close · Ctrl+Tab / Ctrl+Shift+Tab cycle.
         if (ctrl && e.Key == KeyCode.T) { NewTab(_active); e.StopPropagation = true; return; }
         if (ctrl && e.Key == KeyCode.W) { CloseTab(_active, TabIndex(_active)); e.StopPropagation = true; return; }
@@ -1545,6 +1610,7 @@ public partial class CommanderApp : Component, IDisposable
                 MarkDirty(); e.StopPropagation = true; return;
             case KeyCode.Escape:
                 if (_search.Length > 0) { _search = ""; MarkDirty(); e.StopPropagation = true; }
+                else if (_cutPending.Count > 0) { _cutPending.Clear(); Clipboard.Clear(); MarkDirty(); e.StopPropagation = true; }
                 return;
             case KeyCode.Space:
                 ToggleMark(side, advance: false); MeasureFocusedDir(side); e.StopPropagation = true; return;

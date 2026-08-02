@@ -15,6 +15,23 @@ public static class FileOps
     /// <summary>True when <paramref name="path"/> already exists as a file or folder.</summary>
     public static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
 
+    /// <summary>Build a <see cref="FileEntry"/> for an arbitrary path — used by clipboard
+    /// paste, whose sources aren't part of any pane listing.</summary>
+    public static FileEntry EntryFromPath(string path)
+    {
+        bool isDir = Directory.Exists(path);
+        long size = 0;
+        DateTime mtime = DateTime.Now;
+        try
+        {
+            if (isDir) mtime = new DirectoryInfo(path).LastWriteTime;
+            else { var fi = new FileInfo(path); size = fi.Length; mtime = fi.LastWriteTime; }
+        }
+        catch { /* best-effort metadata */ }
+        string name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return new FileEntry(name, path, isDir, size, mtime);
+    }
+
     /// <summary>Open a file with the OS default handler (Enter on a file). Windows
     /// shell-executes; macOS uses <c>open</c>, Linux <c>xdg-open</c>.</summary>
     public static void OpenInShell(string path)

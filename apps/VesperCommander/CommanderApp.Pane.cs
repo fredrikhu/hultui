@@ -433,6 +433,10 @@ public partial class CommanderApp
         // Marked (red) overrides the dir/file colour; metadata dims to the red tint.
         Color fg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
         Color metaFg = marked ? Nocturne.MarkRedDim : Nocturne.On(0.50);
+        // A cut-pending row ghosts to ~45% (icon + name) with dimmed metadata — reads as
+        // "leaving", distinct from a mark (red) and the cursor ring (which paints over it).
+        bool cut = !marked && _cutPending.Contains(e.FullPath);
+        if (cut) { fg = Nocturne.Alpha(fg, 0.45); metaFg = Nocturne.Neutral700; }
         var (cols, sizeCol, dateCol) = ListLayout();
 
         // Every row reserves a 1px border so the cursor ring never shifts siblings.
@@ -458,6 +462,7 @@ public partial class CommanderApp
             IconKind.Archive => Color.FromHex("#d9a06b"),
             _ => Nocturne.On(0.55),
         };
+        if (cut) iconColor = Nocturne.Alpha(iconColor, 0.45);
         row.AddChild(Icons.Draw(kind, iconColor).GridColumn(0));
         row.AddChild(Ui.Mono(e.Name, 12f, fg).TextAlign(TextAlign.Left)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(1));
@@ -512,6 +517,10 @@ public partial class CommanderApp
             .Padding(new Thickness(4, 12, 4, 12))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
+        // "✂ N cut · " when this pane holds cut-pending rows, then the mark counter.
+        int cut = _cutPending.Count(p => PathEquals(System.IO.Path.GetDirectoryName(p) ?? "", Dir(side)));
+        if (cut > 0)
+            footer.AddChild(Ui.Mono($"✂ {cut} cut — Ctrl+V moves · Esc cancels · ", 10.5f, Nocturne.Accent300));
         // "<n> marked · " in red, then the plain counts + free space.
         if (marked > 0)
             footer.AddChild(Ui.Mono($"{marked} marked · ", 10.5f, Nocturne.MarkRed));
