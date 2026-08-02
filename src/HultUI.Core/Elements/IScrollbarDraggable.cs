@@ -23,4 +23,9 @@ public interface IScrollbarDraggable
 
     /// <summary>End a thumb drag.</summary>
     void EndScrollbarDrag();
+
+    /// <summary>True when <paramref name="position"/> (screen coords) falls on the visible
+    /// scrollbar track. The window uses this to show the default arrow over the bar instead
+    /// of the element's own cursor (e.g. a TextArea's text caret).</summary>
+    bool IsPointOverScrollbar(Point position);
 }

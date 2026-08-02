@@ -663,8 +663,18 @@ public sealed class Window : IOverlayHost, IDisposable
                 _pointerState.UpdateHover(target, effectivePos, move.Modifiers);
                 _lastHoveredElement = target;
 
-                // Update cursor based on hovered element's resolved style
+                // Update cursor based on hovered element's resolved style. A scrollbar
+                // track overrides to the default arrow, so a scrollable element's own
+                // cursor (e.g. a TextArea's text caret) doesn't bleed onto its bar.
                 var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
+                for (var el = target; el is not null; el = el.Parent)
+                {
+                    if (el is IScrollbarDraggable sb && sb.IsPointOverScrollbar(pos))
+                    {
+                        cursor = CursorType.Default;
+                        break;
+                    }
+                }
                 PlatformWindow.SetCursor(cursor);
 
                 // Tooltip tracking

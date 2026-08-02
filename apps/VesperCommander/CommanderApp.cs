@@ -330,6 +330,9 @@ public partial class CommanderApp : Component, IDisposable
             .TextColor(Nocturne.Text)
             .FontSize(12.5f)
             .Children(BuildChrome(), body, BuildCommandLine());
+        // A right-drag mark ends wherever the button is released — pointer-up bubbles
+        // to the root even when the release lands off the rows (empty list, footer, …).
+        root.On<PointerUpEvent>(ev => { if (ev.Button == 2) EndRightMark(); });
 
         // Overlays render above the shell, each keyed so conditional presence
         // reconciles by identity (a keyless swap would leak handlers across kinds).
@@ -476,6 +479,43 @@ public partial class CommanderApp : Component, IDisposable
         }
         if (advance) MoveCursor(side, 1, clearSearch: false);
         MarkDirty();
+    }
+
+    // ── Right-drag marking ───────────────────────────────────────────────
+    // Press the RIGHT button on a row and drag: every row the pointer crosses is
+    // marked (or unmarked). The first row sets the direction — if it was unmarked we
+    // add marks, otherwise we remove them — so a right-drag over a mixed range makes
+    // it uniform, matching Total Commander. Rows recycle, so we track by name and
+    // handle each row once per drag; the release is caught at the root (below).
+    private bool _rmarkActive;
+    private char _rmarkSide;
+    private bool _rmarkAdd;
+    private readonly HashSet<string> _rmarkSeen = new(StringComparer.Ordinal);
+
+    private void BeginRightMark(char side, FileEntry e)
+    {
+        _active = side;
+        _rmarkActive = true;
+        _rmarkSide = side;
+        _rmarkSeen.Clear();
+        _rmarkAdd = !Marks(side).Contains(e.Name);   // direction from the first row
+        ApplyRightMark(side, e);
+    }
+
+    private void ApplyRightMark(char side, FileEntry e)
+    {
+        if (!_rmarkActive || side != _rmarkSide || e.IsParent) return;
+        if (!_rmarkSeen.Add(e.Name)) return;         // each row toggles once per drag
+        var marks = Marks(side);
+        if (_rmarkAdd) marks.Add(e.Name); else marks.Remove(e.Name);
+        MarkDirty();
+    }
+
+    private void EndRightMark()
+    {
+        if (!_rmarkActive) return;
+        _rmarkActive = false;
+        _rmarkSeen.Clear();
     }
 
     // ── Folder size measure (Space) ──────────────────────────────────────

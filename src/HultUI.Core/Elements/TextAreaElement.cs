@@ -664,6 +664,15 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         return true;
     }
 
+    public bool IsPointOverScrollbar(Point position)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        if (TotalContentHeight() <= contentBox.Height) return false;   // no bar drawn
+        float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
+        return position.X >= trackX && position.X <= trackX + ScrollbarWidth
+            && position.Y >= contentBox.Y && position.Y <= contentBox.Y + contentBox.Height;
+    }
+
     public void UpdateScrollbarDrag(Point position)
     {
         if (!_draggingScrollbar) return;

@@ -376,7 +376,7 @@ public partial class CommanderApp
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 10, 0, 10))
             .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
-            .Cursor(CursorType.Pointer);
+            .Cursor(CursorType.Default);
 
         if (cursor)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
@@ -413,6 +413,8 @@ public partial class CommanderApp
         // immediately — matches file-manager feel and makes press-and-act snappier.
         row.On<PointerDownEvent>(ev =>
         {
+            // Right button starts a mark-drag (no cursor move, no context menu here).
+            if (ev.Button == 2) { BeginRightMark(side, e); return; }
             if (ev.Button != 0) return;
             _active = side;
             int idx = IndexOfName(Listing(side), e.Name);
@@ -425,6 +427,9 @@ public partial class CommanderApp
             if (IsDoublePress(side, e.Name)) ActivateCursor(side);
             MarkDirty();
         });
+        // While a right-drag is active, mark every row the pointer moves onto. Moves
+        // hit-test fresh each sample, so recycled rows still receive this.
+        row.On<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); });
         return row;
     }
 

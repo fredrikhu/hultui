@@ -85,6 +85,27 @@ public partial class ScrollViewElement
         return false;
     }
 
+    /// <summary>True when the position (screen coords) falls on a visible scrollbar track.</summary>
+    public bool IsPointOverScrollbar(Point position)
+    {
+        var contentBox = Layout.AbsoluteContentBox;
+        if (ShowScrollbarY && _contentHeight > contentBox.Height)
+        {
+            float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
+            if (position.X >= trackX && position.X <= trackX + ScrollbarWidth &&
+                position.Y >= contentBox.Y && position.Y <= contentBox.Y + contentBox.Height)
+                return true;
+        }
+        if (ShowScrollbarX && _contentWidth > contentBox.Width)
+        {
+            float trackY = contentBox.Y + contentBox.Height - ScrollbarWidth;
+            if (position.Y >= trackY && position.Y <= trackY + ScrollbarWidth &&
+                position.X >= contentBox.X && position.X <= contentBox.X + contentBox.Width)
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// Called during a scrollbar drag to update scroll position based on pointer position.
     /// </summary>
