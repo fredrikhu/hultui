@@ -176,10 +176,8 @@ public partial class CommanderApp : Component, IDisposable
     // path + mtime + size (so editing a file refreshes its preview).
     private readonly AsyncLoader<string> _previewLoader = new("");
 
-    // The preview's text scroller (Full mode can Tab focus into it and scroll it
-    // with the arrow / page / home / end keys). Keyed per-file so a new file starts
-    // at the top; keyboard focus lives here while _previewFocused is set.
-    private readonly Ref<HultUI.Core.Elements.ScrollViewElement> _previewScroll = new();
+    // True while the read-only preview TextArea holds keyboard focus (Full mode), so
+    // the pane draws the accent ring around it. Driven by its Focus/Blur handlers.
     private bool _previewFocused;
 
     // Folder sizes the user has measured with Space, keyed by full path. The running
@@ -497,6 +495,14 @@ public partial class CommanderApp : Component, IDisposable
         var list = Listing(side);
         int cur = Cursor(side);
         if (cur >= 0 && cur < list.Count) StartDirSize(list[cur]);
+    }
+
+    /// <summary>Alt+Shift+Enter: measure every folder in the active pane at once. Each
+    /// gets its own cached background walk (already-measured folders are skipped).</summary>
+    private void MeasureAllDirs(char side)
+    {
+        foreach (var e in Listing(side)) StartDirSize(e);
+        MarkDirty();
     }
 
     /// <summary>Drop cached folder measurements for the direct children of
@@ -948,6 +954,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Focus other pane", "Tab", () => { _active = other; }),
             new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
+            new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
         ];
@@ -1224,41 +1231,11 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    // ── Preview focus + scrolling (Full mode) ────────────────────────────
-    // The preview text is a real focusable ScrollView: Tab moves keyboard focus into
-    // it (the framework consumes Tab for focus traversal, so it never reaches the
-    // global handler), Tab again returns to the pane. While focused it takes the
-    // arrow / page / home / end keys here and swallows them so the pane cursor stays.
-    private const float PreviewLineStep = 40f;
-
-    private void OnPreviewKey(KeyDownEvent e)
-    {
-        switch (e.Key)
-        {
-            case KeyCode.Up: ScrollPreview(-PreviewLineStep); break;
-            case KeyCode.Down: ScrollPreview(PreviewLineStep); break;
-            case KeyCode.PageUp: ScrollPreview(-PreviewPageStep()); break;
-            case KeyCode.PageDown: ScrollPreview(PreviewPageStep()); break;
-            case KeyCode.Home: ScrollPreviewTo(0); break;
-            case KeyCode.End: ScrollPreviewTo(float.MaxValue); break;
-            default: return;                     // let other keys (Ctrl+Q, …) bubble
-        }
-        e.StopPropagation = true;
-    }
-
-    private float PreviewPageStep() =>
-        Math.Max(PreviewLineStep,
-            (_previewScroll.Current?.Layout.AbsoluteContentBox.Height ?? 200f) - PreviewLineStep);
-
-    private void ScrollPreview(float delta)
-    {
-        if (_previewScroll.Current is { } sv) { sv.ScrollOffsetY += delta; MarkDirty(); }
-    }
-
-    private void ScrollPreviewTo(float y)
-    {
-        if (_previewScroll.Current is { } sv) { sv.ScrollOffsetY = y; MarkDirty(); }
-    }
+    // ── Preview focus (Full mode) ────────────────────────────────────────
+    // The preview text is a read-only, selectable TextArea. Tab moves keyboard focus
+    // into it (the framework consumes Tab for traversal, so it never reaches the global
+    // handler); while focused it handles its own selection, copy, and arrow / page /
+    // home / end scrolling. `_previewFocused` (set from its Focus/Blur) drives the ring.
 
     private void CycleTab(char side, int delta)
     {
@@ -1410,6 +1387,12 @@ public partial class CommanderApp : Component, IDisposable
         if (alt && e.Key is KeyCode.F1 or KeyCode.F2)
         {
             OpenDrivePicker(e.Key == KeyCode.F1 ? 'L' : 'R'); e.StopPropagation = true; return;
+        }
+
+        // Alt+Shift+Enter measures every folder in the active pane at once.
+        if (alt && e.Modifiers.HasFlag(KeyModifiers.Shift) && e.Key == KeyCode.Enter)
+        {
+            MeasureAllDirs(_active); e.StopPropagation = true; return;
         }
 
         var typing = e.Target is TextInputElement or TextAreaElement;

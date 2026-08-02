@@ -118,6 +118,8 @@ public static class ElementExtensions
     // ──── TextArea properties ────
     public static TextAreaElement PlaceholderText(this TextAreaElement el, string text) { el.Placeholder = text; return el; }
     public static TextAreaElement OnTextChanged(this TextAreaElement el, Action<string> handler) { el.TextChanged = handler; return el; }
+    public static TextAreaElement ReadOnly(this TextAreaElement el, bool value = true) { el.ReadOnly = value; return el; }
+    public static TextAreaElement Spans(this TextAreaElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }
 
     // ──── Checkbox properties ────
     public static T OnCheckedChanged<T>(this T el, Action<bool> handler) where T : CheckboxElement { el.OnChanged = handler; return el; }

@@ -99,6 +99,16 @@ public class TextAreaElement : BoxElement
 
     public Action<string>? TextChanged { get; set; }
 
+    /// <summary>When true the buffer can be selected, scrolled, and copied, but not
+    /// edited (no typing / Enter / Backspace / Delete / Cut / Paste), and no caret is
+    /// drawn — a selectable read-only viewer (e.g. a code preview).</summary>
+    public bool ReadOnly { get; set; }
+
+    /// <summary>Optional per-range text colors (syntax highlighting and similar), in
+    /// whole-buffer UTF-16 offsets. Purely a paint concern — never affects wrapping or
+    /// measurement. Each visible line slices the spans it overlaps.</summary>
+    public IReadOnlyList<TextSpan>? Spans { get; set; }
+
     public IClipboard? Clipboard { get; set; }
     public ITextInputHost? TextInputHost { get; set; }
 
@@ -122,7 +132,9 @@ public class TextAreaElement : BoxElement
         CornerRadius = ti.CornerRadius;
         Box.Padding = ti.Padding;
         Box.BorderWidth = ti.BorderWidth;
-        Inherited.FontSize = ti.FontSize;
+        // Theme font size is a default: an explicit builder FontSize (e.g. a code
+        // preview) wins and isn't re-clobbered every StyleResolver pass.
+        Inherited.FontSize ??= ti.FontSize;
         BackgroundColor = ti.Background ?? theme.Background;
         BorderColor = ti.BorderColor ?? theme.Border;
         FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
@@ -165,6 +177,16 @@ public class TextAreaElement : BoxElement
     {
         bool hasSelection = HasSelection;
         bool hasClipboard = Clipboard?.GetText() is not null;
+
+        // Read-only: a viewer only copies and selects — no Cut / Paste.
+        if (ReadOnly)
+            return
+            [
+                new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
+                    Action = () => { if (HasSelection && Clipboard is not null) Clipboard.SetText(SelectedText); } },
+                new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _text.Length == 0,
+                    Action = () => { _selectionStart = 0; _cursorPos = _text.Length; MarkPaintDirty(); } },
+            ];
 
         return
         [
@@ -368,7 +390,7 @@ public class TextAreaElement : BoxElement
 
     private void OnTextInput(TextInputEvent evt)
     {
-        if (!_focused) return;
+        if (!_focused || ReadOnly) return;
         _composition.Clear();
         DeleteSelection();
         InsertText(evt.Text);
@@ -378,7 +400,7 @@ public class TextAreaElement : BoxElement
 
     private void OnTextEditing(TextEditingEvent evt)
     {
-        if (!_focused) return;
+        if (!_focused || ReadOnly) return;
         if (!_composition.IsActive && evt.Text.Length > 0 && HasSelection)
             DeleteSelection();
         _composition.Set(evt.Text, evt.SegmentStart, evt.SegmentLength);
@@ -449,12 +471,14 @@ public class TextAreaElement : BoxElement
                 break;
 
             case KeyCode.Enter:
+                if (ReadOnly) return;
                 DeleteSelection();
                 InsertText("\n");
                 NotifyChanged();
                 break;
 
             case KeyCode.Backspace:
+                if (ReadOnly) return;
                 if (HasSelection)
                     DeleteSelection();
                 else if (_cursorPos > 0)
@@ -471,6 +495,7 @@ public class TextAreaElement : BoxElement
                 break;
 
             case KeyCode.Delete:
+                if (ReadOnly) return;
                 if (HasSelection)
                     DeleteSelection();
                 else if (_cursorPos < _text.Length)
@@ -494,6 +519,7 @@ public class TextAreaElement : BoxElement
                 break;
 
             case KeyCode.X when ctrl:
+                if (ReadOnly) return;
                 if (HasSelection && Clipboard is not null)
                 {
                     Clipboard.SetText(SelectedText);
@@ -503,6 +529,7 @@ public class TextAreaElement : BoxElement
                 break;
 
             case KeyCode.V when ctrl:
+                if (ReadOnly) return;
                 if (Clipboard?.GetText() is { } clipText)
                 {
                     DeleteSelection();
@@ -843,13 +870,17 @@ public class TextAreaElement : BoxElement
                     string lineText = _text[lineStart..displayEnd];
                     float lineY = contentBox.Y + i * lh - _scrollOffsetY;
                     var lineRect = new Rect(contentBox.X, lineY, wrapWidth, lh);
-                    ctx.DrawText(lineText, lineRect, style, TextOverflow.Clip, 1);
+                    var lineSpans = SpansForLine(lineStart, displayEnd);
+                    if (lineSpans is not null)
+                        ctx.DrawText(lineText, lineRect, style, TextOverflow.Clip, 1, lineSpans);
+                    else
+                        ctx.DrawText(lineText, lineRect, style, TextOverflow.Clip, 1);
                 }
             }
         }
 
-        // Draw cursor + preedit
-        if (_focused)
+        // Draw cursor + preedit (a read-only viewer shows selection only, no caret).
+        if (_focused && !ReadOnly)
         {
             if (cursorLine < 0)
                 (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
@@ -920,6 +951,26 @@ public class TextAreaElement : BoxElement
         }
     }
 
+    /// <summary>The subset of <see cref="Spans"/> overlapping the visible line
+    /// [<paramref name="lineStart"/>, <paramref name="lineEnd"/>), clipped and rebased
+    /// to line-local offsets so the per-line DrawText colours the right characters.
+    /// Returns null when the element has no spans or none touch this line.</summary>
+    private List<TextSpan>? SpansForLine(int lineStart, int lineEnd)
+    {
+        if (Spans is not { Count: > 0 } spans) return null;
+        List<TextSpan>? result = null;
+        foreach (var s in spans)
+        {
+            if (s.End <= lineStart) continue;      // entirely before this line
+            if (s.Start >= lineEnd) break;         // sorted ⇒ nothing left overlaps
+            int start = Math.Max(s.Start, lineStart);
+            int end = Math.Min(s.End, lineEnd);
+            if (end <= start) continue;
+            (result ??= []).Add(new TextSpan(start - lineStart, end - start, s.Color, s.Background));
+        }
+        return result;
+    }
+
     private void RenderSelection(IRenderContext ctx, Rect contentBox, ResolvedInheritedStyle style,
         List<int> starts, float lh, int firstVisible, int lastVisible)
     {
@@ -971,7 +1022,24 @@ public class TextAreaElement : BoxElement
             FocusBorderColor = area.FocusBorderColor;
             CursorWidth = area.CursorWidth;
             TextChanged = area.TextChanged;
-            Text = area.Text;
+            ReadOnly = area.ReadOnly;
+            Spans = area.Spans;
+
+            // Preserve the caret / selection across a reconcile patch. The Text setter
+            // collapses the selection to an end-anchored caret, which would wipe a live
+            // selection (or drag) whenever an unrelated MarkDirty() rebuilds the tree
+            // while the user is selecting. When the incoming text is the same string
+            // being viewed (the common rebuild case), restore the caret/anchor.
+            int caret = _cursorPos;
+            int anchor = _selectionStart;
+            var newText = area.Text ?? "";
+            bool sameText = _text == newText;
+            Text = newText;
+            if (sameText)
+            {
+                _cursorPos = SnapToBoundary(Math.Clamp(caret, 0, _text.Length));
+                _selectionStart = SnapToBoundary(Math.Clamp(anchor, 0, _text.Length));
+            }
         }
     }
 }

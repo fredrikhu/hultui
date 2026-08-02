@@ -146,7 +146,7 @@ public partial class CommanderApp
     [
         ("Copy", "F5"), ("Move", "F6"), ("Rename", "Shift+F6"), ("Delete", "F8"),
         ("New folder", "F7"), ("Diff", "F3"), ("Sync", "F9"),
-        ("Mark", "Space"), ("Mark & move down", "Insert"),
+        ("Mark / measure folder", "Space"), ("Measure all folders", "Alt+Shift+Enter"), ("Mark & move down", "Insert"),
         ("Command palette", "Ctrl+P"), ("Bookmark manager", "Ctrl+D"), ("Options", "Ctrl+,"),
         ("Switch pane", "Tab"), ("New tab", "Ctrl+T"), ("Close tab", "Ctrl+W"), ("Cycle tabs", "Ctrl+Tab"),
         ("Go up", "Backspace"), ("Up one folder", "Ctrl+PgUp"), ("Into folder", "Ctrl+PgDn"),

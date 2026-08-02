@@ -552,39 +552,44 @@ public partial class CommanderApp
         }
         else
         {
-            // Text excerpt (off-thread; empty for binary/large). Scrolls with the
-            // wheel, and in Full mode with the keyboard once tabbed into. The scroller
-            // is keyed per-file so each new file starts scrolled to the top.
+            // Text excerpt (off-thread; empty for binary/large). A read-only, selectable
+            // TextArea: drag or Shift+arrows select, Ctrl+C / the context menu copies,
+            // and it scrolls itself (wheel, and — in Full mode, once Tab-focused — the
+            // arrow / page / home / end keys). Keyed per file so a new file starts at the
+            // top. Wrapped in a padded box because the theme owns the TextArea's padding.
             _previewLoader.Load(key, () => FileSystem.PreviewText(focused.FullPath, focused.Size),
                 onLoaded: _ => MarkDirty());
             var excerpt = _previewLoader.Value;
-            var body = ScrollView.New().FlexGrow(1)
-                .Padding(new Thickness(4, 12, 8, 12));
-            body.ScrollbarWidth = 7f;
-            body.Key = "pv-scroll#" + key;
-            body.WithRef(_previewScroll);
-            // Attach the focus/scroll handlers UNCONDITIONALLY. Reconciliation does not
-            // copy event handlers onto a retained element (only refs/props are). This
-            // scroller is keyed per file, so toggling Side→Full on the same file patches
-            // the existing element: IsFocusable copies across, but handlers added only
-            // in a Full build would never appear — Tab would focus a handler-less
-            // scroller (no ring, arrows still move the pane cursor). Handlers here
-            // capture only `this`, so they stay valid across reconciliation.
-            // Blur can fire *during* reconciliation (scroller removed while focused, e.g.
-            // Ctrl+Q away), so defer the repaint to avoid re-entering the differ.
-            body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
-            body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
-            body.On<KeyDownEvent>(OnPreviewKey);
-            // Only a Full-mode scroller is a Tab stop (this flag patches fine).
-            if (full) body.IsFocusable = true;
-            if (excerpt.Length > 0)
+            if (excerpt.Length == 0)
             {
-                var code = Ui.Mono(excerpt, 10.5f, Nocturne.Neutral400).LineHeight(1.6f);
-                if (Icons.KindFor(focused) == IconKind.Code)
-                    code.Spans(SyntaxHighlight.Spans(excerpt));   // tint keywords/types/comments
-                body.AddChild(code);
+                col.AddChild(Box.New().FlexGrow(1));
             }
-            col.AddChild(body);
+            else
+            {
+                var wrap = Box.New().FlexGrow(1).Overflow(Overflow.Hidden)
+                    .Padding(new Thickness(4, 4, 8, 12));
+                var body = TextArea.New(excerpt).ReadOnly().FlexGrow(1)
+                    .FontFamily(Fonts.Mono).FontSize(10.5f).TextColor(Nocturne.Neutral400)
+                    .LineHeight(1.6f);
+                body.ScrollbarWidth = 7f;
+                body.Key = "pv-text#" + key;
+                if (Icons.KindFor(focused) == IconKind.Code)
+                    body.Spans(SyntaxHighlight.Spans(excerpt));   // tint keywords/types/comments
+                // Focus drives the Full-mode ring. Attach handlers UNCONDITIONALLY —
+                // reconciliation doesn't copy event handlers, and this element is keyed
+                // per file, so a handler added only in a Full build would never appear
+                // when Side→Full patches the same element. Handlers capture only `this`.
+                // Blur can fire mid-reconcile (element removed while focused, e.g. Ctrl+Q
+                // away), so defer the repaint to avoid re-entering the differ.
+                body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
+                body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
+                // Click always focuses to select; only Full mode joins the Tab cycle
+                // (TabIndex -1 keeps the side preview clickable but out of Tab traversal).
+                body.IsFocusable = true;
+                body.TabIndex = full ? 0 : -1;
+                wrap.AddChild(body);
+                col.AddChild(wrap);
+            }
         }
 
         // Metadata grid (Size / Modified / Attrs), separated by a top divider.
