@@ -348,6 +348,10 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildPalette(); o.Key = "palette"; root.AddChild(o);
         }
+        if (_findOpen)
+        {
+            var o = BuildFind(); o.Key = "find"; root.AddChild(o);
+        }
         if (_bookmarksOpen)
         {
             var o = BuildBookmarks(); o.Key = "bookmarks"; root.AddChild(o);
@@ -381,6 +385,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
         if (_pendingNamePromptFocus) { _pendingNamePromptFocus = false; _namePromptRef.Current?.Focus(); }
+        if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
 
         // Keep a browsing region focused so Tab traverses panes/preview predictably.
         // The framework consumes Tab for focus traversal; with nothing focused the
@@ -747,7 +752,8 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     private bool AnyOverlayOpen => _drivePicker != null || _paletteOpen || _bookmarksOpen
-        || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null;
+        || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
+        || _findOpen;
 
     private void CloseOverlays()
     {
@@ -757,6 +763,7 @@ public partial class CommanderApp : Component, IDisposable
         _confirm = null;
         _optionsOpen = false;
         _namePrompt = null;
+        if (_findOpen) { _findOpen = false; StopFind(); }
         MarkDirty();
     }
 
@@ -1109,6 +1116,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Open this folder in the other pane", "=", () => NavigateTo(other, Dir(side))),
             new("Focus other pane", "Tab", () => { _active = other; }),
             new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
+            new("Find files…", "Alt+F7", () => OpenFind(side)),
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
@@ -1510,6 +1518,7 @@ public partial class CommanderApp : Component, IDisposable
             return;
         }
         if (_paletteOpen) { HandlePaletteKey(e); return; }
+        if (_findOpen) { HandleFindKey(e); return; }
         if (_bookmarksOpen) { HandleBookmarksKey(e); e.StopPropagation = true; return; }
         if (_drivePicker is char dpKey)
         {
@@ -1585,6 +1594,9 @@ public partial class CommanderApp : Component, IDisposable
         {
             OpenDrivePicker(e.Key == KeyCode.F1 ? 'L' : 'R'); e.StopPropagation = true; return;
         }
+
+        // Alt+F7 opens the find-files dialog scoped to the active pane's folder.
+        if (alt && e.Key == KeyCode.F7) { OpenFind(_active); e.StopPropagation = true; return; }
 
         // Alt+Shift+Enter measures every folder in the active pane at once.
         if (alt && e.Modifiers.HasFlag(KeyModifiers.Shift) && e.Key == KeyCode.Enter)

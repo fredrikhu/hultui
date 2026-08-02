@@ -39,7 +39,7 @@ public partial class CommanderApp
     {
         var card = Flex.Column(gap: 0).Width(width)
             .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral600).BorderWidth(1f)
+            .BorderColor(Nocturne.Neutral500).BorderWidth(1f)   // brighter than the inner dividers so the frame reads
             .CornerRadius(Nocturne.RadiusMd)
             .BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
             .Overflow(Overflow.Hidden);
@@ -117,7 +117,7 @@ public partial class CommanderApp
 
         var card = Flex.Column(gap: 0).Width(520)
             .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral600).BorderWidth(1f)
+            .BorderColor(Nocturne.Neutral500).BorderWidth(1f)   // brighter frame, visible against the dim backdrop
             .CornerRadius(Nocturne.RadiusMd)
             .BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
             .Overflow(Overflow.Hidden);
@@ -199,7 +199,7 @@ public partial class CommanderApp
     {
         return Flex.Column(gap: 0).Width(width)
             .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral600).BorderWidth(1f)
+            .BorderColor(Nocturne.Neutral500).BorderWidth(1f)   // brighter frame, visible against the dim backdrop
             .CornerRadius(Nocturne.RadiusMd)
             .BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
             .Overflow(Overflow.Hidden);
