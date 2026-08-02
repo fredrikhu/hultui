@@ -153,7 +153,53 @@ public partial class CommanderApp
             .Children(Ui.Icon("+", 13f, Nocturne.On(0.45)));
         plus.OnClick(_ => NewTab(side));
         strip.AddChild(plus.HoverBg(Nocturne.Neutral900, Color.Transparent));
+
+        // History cluster, right-aligned in the tabs row (design §A). Back / Forward
+        // arrows; right-click either for the recent-folder list.
+        strip.AddChild(Box.New().FlexGrow(1));
+        strip.AddChild(BuildHistoryCluster(side));
         return strip;
+    }
+
+    private Element BuildHistoryCluster(char side)
+    {
+        var cluster = Flex.Row(gap: 0).AlignItems(AlignItems.Center);
+        cluster.AddChild(HistoryButton(side, "‹", CanGoBack(side), () => GoBack(side), "Back · Alt+←"));
+        cluster.AddChild(HistoryButton(side, "›", CanGoForward(side), () => GoForward(side), "Forward · Alt+→"));
+        cluster.ContextMenu(() => HistoryMenu(side));
+        return cluster;
+    }
+
+    private Element HistoryButton(char side, string glyph, bool enabled, Action onClick, string tooltip)
+    {
+        var btn = Box.New()
+            .Padding(new Thickness(2, 8, 2, 8)).CornerRadius(5f)
+            .Cursor(enabled ? CursorType.Pointer : CursorType.Default)
+            .Tooltip(tooltip)
+            .Children(Ui.Icon(glyph, 15f, enabled ? Nocturne.Neutral400 : Nocturne.Neutral700));
+        if (enabled)
+        {
+            btn.OnClick(_ => { _active = side; onClick(); });
+            btn.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        }
+        return btn;
+    }
+
+    /// <summary>Recent-folder list for the history cluster's right-click menu — the
+    /// tab's Back stack, most-recent first. Selecting one navigates there (recording
+    /// it as a fresh move, so the current folder joins Back).</summary>
+    private IReadOnlyList<ContextMenuItem> HistoryMenu(char side)
+    {
+        var tab = Tabs(side)[TabIndex(side)];
+        var items = new List<ContextMenuItem>();
+        for (int i = tab.Back.Count - 1; i >= 0 && items.Count < 12; i--)
+        {
+            string path = tab.Back[i];
+            items.Add(new() { Glyph = "‹", Label = TabLabel(path), Action = () => { _active = side; NavigateTo(side, path); } });
+        }
+        if (items.Count == 0)
+            items.Add(new() { Label = "No history yet", IsDisabled = true });
+        return items;
     }
 
     private Element TabChip(char side, int index, bool on)

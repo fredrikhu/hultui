@@ -51,6 +51,10 @@ public partial class CommanderApp : Component, IDisposable
         public int Cursor;
         public bool Locked;
         public readonly HashSet<string> Marks = new(StringComparer.Ordinal);
+        // Per-tab navigation history (most-recent last). Back holds folders left behind;
+        // Fwd holds folders returned-from after a Back. A new forward navigation clears Fwd.
+        public readonly List<string> Back = new();
+        public readonly List<string> Fwd = new();
     }
     private List<PaneTab> _tabsL = [];
     private List<PaneTab> _tabsR = [];
@@ -397,9 +401,18 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     // ── Navigation ───────────────────────────────────────────────────────
-    private void NavigateTo(char side, string path, string? focusChildName = null)
+    private void NavigateTo(char side, string path, string? focusChildName = null, bool recordHistory = true)
     {
-        ActiveTab(side).Dir = path;
+        var tab = ActiveTab(side);
+        // Record the folder we're leaving so Back can return to it. Skip on a no-op
+        // (same folder) and on history replay (GoBack/GoForward set recordHistory:false).
+        if (recordHistory && !PathEquals(tab.Dir, path))
+        {
+            tab.Back.Add(tab.Dir);
+            if (tab.Back.Count > 64) tab.Back.RemoveAt(0);
+            tab.Fwd.Clear();   // a fresh forward move invalidates the redo stack
+        }
+        tab.Dir = path;
         BumpGen(side);
         // Cursor reset now; the loader's onLoaded re-clamps once the listing lands.
         // If we ascended, try to land on the folder we came from.
@@ -409,6 +422,31 @@ public partial class CommanderApp : Component, IDisposable
         _previewFocused = false;
         _pendingFocusChild[side == 'L' ? 0 : 1] = focusChildName;
         MarkDirty();
+    }
+
+    private bool CanGoBack(char side) => ActiveTab(side).Back.Count > 0;
+    private bool CanGoForward(char side) => ActiveTab(side).Fwd.Count > 0;
+
+    /// <summary>Alt+← — return to the folder we last left in this tab.</summary>
+    private void GoBack(char side)
+    {
+        var tab = ActiveTab(side);
+        if (tab.Back.Count == 0) return;
+        string target = tab.Back[^1];
+        tab.Back.RemoveAt(tab.Back.Count - 1);
+        tab.Fwd.Add(tab.Dir);
+        NavigateTo(side, target, recordHistory: false);
+    }
+
+    /// <summary>Alt+→ — redo a navigation undone by <see cref="GoBack"/>.</summary>
+    private void GoForward(char side)
+    {
+        var tab = ActiveTab(side);
+        if (tab.Fwd.Count == 0) return;
+        string target = tab.Fwd[^1];
+        tab.Fwd.RemoveAt(tab.Fwd.Count - 1);
+        tab.Back.Add(tab.Dir);
+        NavigateTo(side, target, recordHistory: false);
     }
 
     // Name to select once a pending listing finishes loading (used when ascending
@@ -1471,6 +1509,10 @@ public partial class CommanderApp : Component, IDisposable
 
         // Ctrl+Q cycles the preview panel: off → side → full.
         if (ctrl && e.Key == KeyCode.Q) { CyclePreview(); e.StopPropagation = true; return; }
+
+        // Alt+← / Alt+→ move back / forward through the active pane's history.
+        if (alt && e.Key == KeyCode.Left) { GoBack(_active); e.StopPropagation = true; return; }
+        if (alt && e.Key == KeyCode.Right) { GoForward(_active); e.StopPropagation = true; return; }
 
         // Alt+F1 / Alt+F2 open the drive picker for the left / right pane (global,
         // so they fire even from a focused field once fields exist).
