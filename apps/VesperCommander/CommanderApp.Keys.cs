@@ -64,6 +64,8 @@ public partial class CommanderApp
             case Cmd.ToggleHidden: ToggleHidden(); break;
             case Cmd.Swap: SwapPanes(); break;
             case Cmd.OpenInOther: NavigateTo(side == 'L' ? 'R' : 'L', Dir(side)); break;
+            case Cmd.Extract: ExtractCursorArchive(); break;
+            case Cmd.Pack: OpenPack(); break;
         }
     }
 

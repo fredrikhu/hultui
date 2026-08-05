@@ -862,6 +862,7 @@ public partial class CommanderApp : Component, IDisposable
     // ── Copy (F5): background streamed transfer with the progress overlay ──
     private void StartCopy()
     {
+        if (InArchive(_active)) { StartExtract(); return; }   // F5 inside an archive = extract-out
         char side = _active, other = side == 'L' ? 'R' : 'L';
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
@@ -951,7 +952,8 @@ public partial class CommanderApp : Component, IDisposable
             {
                 err = FileOps.CopyStreamed(e, op.DestDir, overwrite,
                     onBytes: n => { op.FileBytesDone += n; op.TotalBytesDone += n; WaitWhilePaused(op); Repaint(); },
-                    cancelled: () => op.Cancelled || op.SkipCurrent);
+                    cancelled: () => op.Cancelled || op.SkipCurrent,
+                    sevenZip: _sevenZip, password: PasswordFor(e.FullPath));
                 // A cross-volume move deletes the source once the copy lands cleanly.
                 if (err == null && op.IsMove && !op.SkipCurrent && !op.Cancelled)
                     err = FileOps.DeletePermanent(e.FullPath, e.IsDir);

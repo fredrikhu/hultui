@@ -328,16 +328,16 @@ public static class FileOps
     /// returns true. Runs on a background thread. Returns an error message, the
     /// literal "cancelled", or null on success.</summary>
     public static string? CopyStreamed(FileEntry e, string destDir, bool overwrite,
-        Action<long> onBytes, Func<bool> cancelled)
+        Action<long> onBytes, Func<bool> cancelled, bool sevenZip = false, string? password = null)
     {
         var dest = Path.Combine(destDir, e.Name);
         return e.IsDir
-            ? CopyDirStreamed(e.FullPath, dest, overwrite, onBytes, cancelled)
-            : CopyFileStreamed(e.FullPath, dest, overwrite, onBytes, cancelled);
+            ? CopyDirStreamed(e.FullPath, dest, overwrite, onBytes, cancelled, sevenZip, password)
+            : CopyFileStreamed(e.FullPath, dest, overwrite, onBytes, cancelled, sevenZip, password);
     }
 
     private static string? CopyFileStreamed(string src, string dest, bool overwrite,
-        Action<long> onBytes, Func<bool> cancelled)
+        Action<long> onBytes, Func<bool> cancelled, bool sevenZip = false, string? password = null)
     {
         try
         {
@@ -346,7 +346,12 @@ public static class FileOps
             var destDir = Path.GetDirectoryName(dest);
             if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
 
-            using var s = new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, ChunkSize);
+            // An archive member reads from the VFS; a real file from disk.
+            var ap = ArchivePath.TryParse(src);
+            Stream s = ap is { } a
+                ? ArchiveVfs.OpenEntry(a.ArchiveFile, a.Internal, password, sevenZip) ?? throw new IOException("archive member unreadable")
+                : new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, ChunkSize);
+            using (s)
             using (var d = new FileStream(dest, overwrite ? FileMode.Create : FileMode.CreateNew,
                        FileAccess.Write, FileShare.None, ChunkSize))
             {
@@ -359,15 +364,18 @@ public static class FileOps
                     onBytes(n);
                 }
             }
-            try { File.SetLastWriteTimeUtc(dest, File.GetLastWriteTimeUtc(src)); } catch { }
+            if (ap is null) { try { File.SetLastWriteTimeUtc(dest, File.GetLastWriteTimeUtc(src)); } catch { } }
             return null;
         }
         catch (Exception ex) { return ex.Message; }
     }
 
     private static string? CopyDirStreamed(string src, string dest, bool overwrite,
-        Action<long> onBytes, Func<bool> cancelled)
+        Action<long> onBytes, Func<bool> cancelled, bool sevenZip = false, string? password = null)
     {
+        // A folder inside an archive extracts through the VFS.
+        if (ArchivePath.TryParse(src) is { } ap)
+            return ExtractArchiveDir(ap.ArchiveFile, ap.Internal, dest, overwrite, sevenZip, password, onBytes, cancelled);
         try
         {
             Directory.CreateDirectory(dest);
@@ -388,10 +396,35 @@ public static class FileOps
         catch (Exception ex) { return ex.Message; }
     }
 
+    /// <summary>Extract a folder inside an archive to <paramref name="dest"/>, recursing
+    /// through the VFS listing.</summary>
+    private static string? ExtractArchiveDir(string archiveFile, string internalPath, string dest,
+        bool overwrite, bool sevenZip, string? password, Action<long> onBytes, Func<bool> cancelled)
+    {
+        try
+        {
+            Directory.CreateDirectory(dest);
+            var listing = ArchiveVfs.ListEntries(archiveFile, internalPath, password, sevenZip);
+            foreach (var entry in listing.Entries)
+            {
+                if (entry.IsParent) continue;
+                if (cancelled()) return "cancelled";
+                string target = Path.Combine(dest, entry.Name);
+                string? err = entry.IsDir
+                    ? CopyDirStreamed(entry.FullPath, target, overwrite, onBytes, cancelled, sevenZip, password)
+                    : CopyFileStreamed(entry.FullPath, target, overwrite, onBytes, cancelled, sevenZip, password);
+                if (err != null) return err;
+            }
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
     /// <summary>Total byte size of an entry (recursive for folders), for progress totals.</summary>
     public static long EntrySize(FileEntry e)
     {
-        if (!e.IsDir) return e.Size;
+        if (!e.IsDir) return Math.Max(0, e.Size);
+        if (ArchivePath.InArchive(e.FullPath)) return Math.Max(0, e.Size);   // archive dir — approximate
         try
         {
             long total = 0;

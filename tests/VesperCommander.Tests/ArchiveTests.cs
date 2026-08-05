@@ -166,6 +166,27 @@ public class ArchiveTests : IDisposable
     }
 
     [Fact]
+    public void CopyStreamed_ExtractsArchiveMember()
+    {
+        var outDir = Path.Combine(_dir, "out");
+        var member = new FileEntry("readme.txt", ArchivePath.Combine(_zip, "readme.txt"), IsDir: false, 0, DateTime.Now);
+        var err = FileOps.CopyStreamed(member, outDir, overwrite: true, onBytes: _ => { }, cancelled: () => false);
+        Assert.Null(err);
+        Assert.Equal("hello archive", File.ReadAllText(Path.Combine(outDir, "readme.txt")));
+    }
+
+    [Fact]
+    public void CopyStreamed_ExtractsArchiveFolderRecursively()
+    {
+        var outDir = Path.Combine(_dir, "outf");
+        var folder = new FileEntry("textures", ArchivePath.Combine(_zip, "textures"), IsDir: true, 0, DateTime.Now);
+        var err = FileOps.CopyStreamed(folder, outDir, overwrite: true, onBytes: _ => { }, cancelled: () => false);
+        Assert.Null(err);
+        Assert.True(File.Exists(Path.Combine(outDir, "textures", "palette.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "textures", "hi_res", "stone.png")));
+    }
+
+    [Fact]
     public void Create_BuiltinZip_RoundTrips()
     {
         var src = Path.Combine(_dir, "note.txt");
