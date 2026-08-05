@@ -182,7 +182,7 @@ public partial class CommanderApp
         _progressOpen = true;
         MarkDirty();
         var first = _op;
-        System.Threading.Tasks.Task.Run(() => RunCopy(first));
+        System.Threading.Tasks.Task.Run(() => RunTransfer(first));
     }
 
     // ── Sync rendering ───────────────────────────────────────────────────

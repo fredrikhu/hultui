@@ -694,17 +694,13 @@ public partial class CommanderApp : Component, IDisposable
 
         var op = new TransferOp(items) { IsMove = cut, Source = side, DestDir = dest };
         _op = op;
+        _progressOpen = true;
+        MarkDirty();
+        System.Threading.Tasks.Task.Run(() => RunTransfer(op));
         if (cut)
         {
-            ProcessMove();                 // synchronous move (reuses the overwrite gate)
             Clipboard.Clear();             // a cut is consumed by its paste
             _cutPending.Clear();
-        }
-        else
-        {
-            _progressOpen = true;
-            MarkDirty();
-            System.Threading.Tasks.Task.Run(() => RunCopy(op));
         }
     }
 
@@ -812,28 +808,13 @@ public partial class CommanderApp : Component, IDisposable
             () =>
             {
                 _confirm = null;
-                _op = new TransferOp(items) { IsMove = true, Source = side, DestDir = dest };
-                ProcessMove();
+                var op = new TransferOp(items) { IsMove = true, Source = side, DestDir = dest };
+                _op = op;
+                _progressOpen = true;
+                MarkDirty();
+                System.Threading.Tasks.Task.Run(() => RunTransfer(op));
             });
         MarkDirty();
-    }
-
-    private void ProcessMove()
-    {
-        var op = _op;
-        if (op == null) return;
-        while (op.Index < op.Items.Count)
-        {
-            var e = op.Items[op.Index];
-            var destPath = System.IO.Path.Combine(op.DestDir, e.Name);
-            bool exists = FileOps.Exists(destPath);
-            if (exists && op.OverwriteAll == null) { _overwriteOpen = true; MarkDirty(); return; }
-            if (exists && op.OverwriteAll == false) { op.Skipped++; op.Index++; continue; }
-            var err = FileOps.Move(e, op.DestDir, overwrite: exists);
-            if (err != null) op.Failed++; else op.Done++;
-            op.Index++;
-        }
-        FinishTransfer();
     }
 
     // ── Copy (F5): background streamed transfer with the progress overlay ──
@@ -849,12 +830,13 @@ public partial class CommanderApp : Component, IDisposable
         _op = op;
         _progressOpen = true;
         MarkDirty();
-        System.Threading.Tasks.Task.Run(() => RunCopy(op));
+        System.Threading.Tasks.Task.Run(() => RunTransfer(op));
     }
 
-    /// <summary>The copy worker — runs off the UI thread, reporting progress and
-    /// blocking on the overwrite gate when it needs a decision.</summary>
-    private void RunCopy(TransferOp op)
+    /// <summary>The copy/move worker — runs off the UI thread, reporting progress and
+    /// blocking on the overwrite gate when it needs a decision. A same-volume move is an
+    /// instant rename; a cross-volume move streams the copy then deletes the source.</summary>
+    private void RunTransfer(TransferOp op)
     {
         // Size the queue up front so the total bar is meaningful.
         for (int i = 0; i < op.Items.Count; i++) op.ItemBytes[i] = FileOps.EntrySize(op.Items[i]);
@@ -915,9 +897,22 @@ public partial class CommanderApp : Component, IDisposable
                 }
             }
 
-            var err = FileOps.CopyStreamed(e, op.DestDir, overwrite,
-                onBytes: n => { op.FileBytesDone += n; op.TotalBytesDone += n; WaitWhilePaused(op); Repaint(); },
-                cancelled: () => op.Cancelled || op.SkipCurrent);
+            string? err;
+            if (op.IsMove && FileOps.SameVolume(e.FullPath, destPath))
+            {
+                // Same-volume move: an atomic rename, no byte streaming — fill the bar.
+                err = FileOps.Move(e, op.DestDir, overwrite);
+                if (err == null) { op.FileBytesDone = op.FileBytes; op.TotalBytesDone += op.ItemBytes[i]; }
+            }
+            else
+            {
+                err = FileOps.CopyStreamed(e, op.DestDir, overwrite,
+                    onBytes: n => { op.FileBytesDone += n; op.TotalBytesDone += n; WaitWhilePaused(op); Repaint(); },
+                    cancelled: () => op.Cancelled || op.SkipCurrent);
+                // A cross-volume move deletes the source once the copy lands cleanly.
+                if (err == null && op.IsMove && !op.SkipCurrent && !op.Cancelled)
+                    err = FileOps.DeletePermanent(e.FullPath, e.IsDir);
+            }
 
             if (op.SkipCurrent && !op.Cancelled)
             {
@@ -959,19 +954,14 @@ public partial class CommanderApp : Component, IDisposable
         if (applyToRest) op.OverwriteAll = overwrite;
         _overwriteOpen = false;
 
-        if (op.Gate is { } gate)                 // background copy: hand the choice back
+        if (op.Gate is { } gate)                 // background transfer: hand the choice back
         {
             op.ConflictOverwrite = overwrite;
             MarkDirty();
             gate.Set();
             return;
         }
-
-        // Synchronous move.
-        if (overwrite) { var err = FileOps.Move(op.Items[op.Index], op.DestDir, true); if (err != null) op.Failed++; else op.Done++; }
-        else op.Skipped++;
-        op.Index++;
-        ProcessMove();
+        MarkDirty();
     }
 
     private void FinishTransfer()
@@ -994,7 +984,7 @@ public partial class CommanderApp : Component, IDisposable
             _op = next;
             _progressOpen = true;
             MarkDirty();
-            System.Threading.Tasks.Task.Run(() => RunCopy(next));
+            System.Threading.Tasks.Task.Run(() => RunTransfer(next));
             return;
         }
         MarkDirty();

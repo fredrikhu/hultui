@@ -143,6 +143,16 @@ public static class FileOps
         catch (Exception ex) { return ex.Message; }
     }
 
+    /// <summary>True when two paths live on the same volume — a same-volume move is an
+    /// instant rename, cross-volume must copy then delete.</summary>
+    public static bool SameVolume(string a, string b)
+    {
+        var ra = Path.GetPathRoot(Path.GetFullPath(a));
+        var rb = Path.GetPathRoot(Path.GetFullPath(b));
+        return string.Equals(ra, rb, OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
     /// <summary>Move an entry into <paramref name="destDir"/>. When
     /// <paramref name="overwrite"/> and the target exists, it is recycled first.</summary>
     public static string? Move(FileEntry e, string destDir, bool overwrite)
