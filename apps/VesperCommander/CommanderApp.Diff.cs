@@ -4,6 +4,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using VesperCommander.Theme;
 
@@ -284,12 +285,22 @@ public partial class CommanderApp
         var row = Grid.Of("34px 1fr 18px 34px 1fr", gap: 0).Height(DiffLineH).AlignItems(AlignItems.Stretch);
         if (current) row.BorderColor(Nocturne.Accent600).BorderWidth(1f);
 
+        // On a changed line, highlight only the differing middle — the common prefix/suffix
+        // stay dim, so the eye lands on what actually changed.
+        (int start, int len)? hiL = null, hiR = null;
+        if (line.Op is DiffEngine.Op.Change && line.Left != null && line.Right != null)
+        {
+            var (pre, suf) = DiffEngine.IntraSpan(line.Left, line.Right);
+            hiL = (pre, Math.Max(0, line.Left.Length - suf - pre));
+            hiR = (pre, Math.Max(0, line.Right.Length - suf - pre));
+        }
+
         row.AddChild(DiffGutter(line.LeftNo).GridColumn(0));
-        row.AddChild(DiffTextCell(line.Left, leftBg, line.Op is DiffEngine.Op.Del ? Nocturne.MarkRed : Nocturne.On(0.78)).GridColumn(1));
+        row.AddChild(DiffTextCell(line.Left, leftBg, line.Op is DiffEngine.Op.Del ? Nocturne.MarkRed : Nocturne.On(0.78), hiL).GridColumn(1));
         row.AddChild(Box.New().AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Children(Ui.Mono(marker, 11f, markColor)).GridColumn(2));
         row.AddChild(DiffGutter(line.RightNo).GridColumn(3));
-        row.AddChild(DiffTextCell(line.Right, rightBg, line.Op is DiffEngine.Op.Add ? Nocturne.DiffGreenText : Nocturne.On(0.78)).GridColumn(4));
+        row.AddChild(DiffTextCell(line.Right, rightBg, line.Op is DiffEngine.Op.Add ? Nocturne.DiffGreenText : Nocturne.On(0.78), hiR).GridColumn(4));
         return row;
     }
 
@@ -300,10 +311,13 @@ public partial class CommanderApp
             .Padding(new Thickness(0, 6, 0, 0))
             .Children(Ui.Mono(no > 0 ? no.ToString() : "", 10.5f, Nocturne.Neutral700));
 
-    private Element DiffTextCell(string? text, Color bg, Color fg)
+    private Element DiffTextCell(string? text, Color bg, Color fg, (int start, int len)? highlight = null)
     {
         var box = Box.New().Background(bg).AlignItems(AlignItems.Center).Padding(new Thickness(0, 8, 0, 8));
-        box.AddChild(Ui.Mono(text ?? "", 11.5f, fg).MaxLines(1).TextOverflow(TextOverflow.Clip));
+        var mono = Ui.Mono(text ?? "", 11.5f, fg).MaxLines(1).TextOverflow(TextOverflow.Clip);
+        if (highlight is (var s, var l) && l > 0 && text != null && s + l <= text.Length)
+            mono.Spans([new TextSpan(s, l, Nocturne.DiffChangeMark)]);   // the changed run pops
+        box.AddChild(mono);
         return box;
     }
 
