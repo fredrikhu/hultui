@@ -7,6 +7,15 @@ namespace VesperCommander.Tests;
 public class PaneSearchTests
 {
     [Theory]
+    [InlineData("archive.zip", ".zip")]
+    [InlineData("backup.tar.gz", ".gz")]   // last segment only
+    [InlineData(".gitignore", ".gitignore")] // a dotfile is its own extension
+    [InlineData("Makefile", "")]            // no dot → none
+    [InlineData("noext.", ".")]             // trailing dot
+    public void ExtensionOf_TakesLastSegment(string name, string expected) =>
+        Assert.Equal(expected, CommanderApp.ExtensionOf(name));
+
+    [Theory]
     [InlineData(KeyCode.Digit8, true, '*')]   // the reported case: Shift+8 → wildcard
     [InlineData(KeyCode.Digit8, false, '8')]
     [InlineData(KeyCode.Digit2, true, '@')]

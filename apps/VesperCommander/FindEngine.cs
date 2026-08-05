@@ -37,7 +37,11 @@ public static class FindEngine
                 var glob = "^" + Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$";
                 return Regex.IsMatch(name, glob, rxOpts);
             }
-            return name.Contains(p, o.MatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+            var cmp = o.MatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            // A leading-dot query with no wildcard is an extension filter: ".zip" → *.zip
+            // (EndsWith handles compound extensions like ".tar.gz" too).
+            if (p.Length > 1 && p[0] == '.') return name.EndsWith(p, cmp);
+            return name.Contains(p, cmp);
         }
         catch (ArgumentException) { return false; }   // malformed user regex
     }

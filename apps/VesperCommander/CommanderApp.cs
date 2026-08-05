@@ -762,21 +762,35 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    /// <summary>Move the cursor to the first entry whose name starts with the search
-    /// string (case-insensitive), skipping the ".." parent.</summary>
+    /// <summary>Move the cursor to the first matching entry (case-insensitive), skipping the
+    /// ".." parent. A search that starts with "." matches on the file extension (".zip" jumps
+    /// to the first *.zip); otherwise it's a name-prefix match.</summary>
     private void JumpToSearch(char side)
     {
         var list = Listing(side);
+        bool byExt = _search.Length > 1 && _search[0] == '.';
         for (int i = 0; i < list.Count; i++)
         {
             if (list[i].IsParent) continue;
-            if (list[i].Name.StartsWith(_search, StringComparison.OrdinalIgnoreCase))
+            var name = list[i].Name;
+            bool hit = byExt
+                ? ExtensionOf(name).StartsWith(_search, StringComparison.OrdinalIgnoreCase)
+                : name.StartsWith(_search, StringComparison.OrdinalIgnoreCase);
+            if (hit)
             {
                 SetCursor(side, i);
                 RequestScroll(side);
                 return;
             }
         }
+    }
+
+    /// <summary>The extension including the leading dot (".zip"), or "" when the name has none.
+    /// A dotfile (".gitignore") counts as its own extension.</summary>
+    internal static string ExtensionOf(string name)
+    {
+        int dot = name.LastIndexOf('.');
+        return dot < 0 ? "" : name[dot..];
     }
 
     /// <summary>Map a KeyDown (with its Shift state) to the character it contributes to the

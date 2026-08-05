@@ -46,6 +46,17 @@ public class FindEngineTests
     public void EmptyPattern_MatchesEverything() =>
         Assert.True(FindEngine.NameMatches("anything.xyz", Opt("")));
 
+    [Theory]
+    [InlineData(".zip", "archive.zip", true)]
+    [InlineData(".zip", "archive.ZIP", true)]      // case-insensitive by default
+    [InlineData(".zip", "archive.zip.bak", false)] // must be the actual extension
+    [InlineData(".zip", "gzip.txt", false)]        // not a substring match
+    [InlineData(".tar.gz", "backup.tar.gz", true)] // compound extension
+    [InlineData(".rs", "main.rs", true)]
+    [InlineData(".rs", "main.rst", false)]
+    public void LeadingDot_MatchesByExtension(string pattern, string name, bool expected) =>
+        Assert.Equal(expected, FindEngine.NameMatches(name, Opt(pattern)));
+
     [Fact]
     public void ContentHits_CountsOccurrences()
     {
