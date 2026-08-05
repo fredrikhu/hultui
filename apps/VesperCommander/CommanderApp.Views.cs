@@ -79,7 +79,14 @@ public partial class CommanderApp
         var marks = Marks(side);
 
         var tv = ThumbVList(side).Current;
-        float availW = tv?.Layout.AbsoluteContentBox.Width ?? (PaneContentWidthEstimate() - 20f);
+        // Width comes from the pane geometry, not the list's own box: a VirtualList of rigid
+        // fixed-width tiles reports its content width (one tile) as its intrinsic size, and the
+        // flex stretch resolves the cross axis to that — so reading it back would collapse
+        // perRow to 1 (and, in two-pane mode, the whole pane). We set the list width
+        // explicitly instead. Height still reads the box.
+        const float pad = 10f;
+        float paneW = PaneContentWidthEstimate();
+        float availW = paneW - 2 * pad;
         float availH = tv?.Layout.AbsoluteContentBox.Height ?? (_window.LayoutHeight > 0 ? _window.LayoutHeight - 160f : 600f);
         int perRow = ThumbPerRow(availW, m.TileW, m.Gap);
         float stride = m.TileH + m.Gap;
@@ -96,14 +103,16 @@ public partial class CommanderApp
             .Items(rows)   // fresh list reference each build → re-realizes visible rows
             .RenderWith(r => ThumbRow(side, list, r * perRow, perRow, m, cursorName, marks))
             .WithRef(ThumbVList(side))
-            .FlexGrow(1);
-        return Box.New().FlexGrow(1).Padding(new Thickness(10)).Children(grid);
+            .FlexGrow(1)
+            .Width(Dimension.Px(paneW));
+        return grid;
     }
 
     private Element ThumbRow(char side, IReadOnlyList<FileEntry> list, int start, int perRow, ThumbM m,
         string? cursorName, HashSet<string> marks)
     {
-        var row = Flex.Row(gap: m.Gap).Height(m.TileH).AlignItems(AlignItems.FlexStart);
+        var row = Flex.Row(gap: m.Gap).Height(m.TileH).AlignItems(AlignItems.FlexStart)
+            .Padding(new Thickness(0, 10, 0, 10));
         for (int k = 0; k < perRow; k++)
         {
             int i = start + k;
