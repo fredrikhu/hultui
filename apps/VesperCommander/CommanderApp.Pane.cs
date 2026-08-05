@@ -196,6 +196,17 @@ public partial class CommanderApp
         var cluster = Flex.Row(gap: 0).AlignItems(AlignItems.Center);
         cluster.AddChild(HistoryButton(side, "‹", CanGoBack(side), () => GoBack(side), "Back · Alt+←"));
         cluster.AddChild(HistoryButton(side, "›", CanGoForward(side), () => GoForward(side), "Forward · Alt+→"));
+        // A caret opens the recent-folder list on left-click (also on right-click of the cluster).
+        bool hasHist = ActiveTab(side).Back.Count > 0;
+        var caret = Box.New().Padding(new Thickness(2, 4, 2, 4)).CornerRadius(5f)
+            .Cursor(hasHist ? CursorType.Pointer : CursorType.Default).Tooltip("Recent folders")
+            .Children(Ui.Icon("▾", 9f, hasHist ? Nocturne.Neutral400 : Nocturne.Neutral700));
+        if (hasHist)
+        {
+            caret.OnClick(ev => { _active = side; _window.OpenContextMenu(ev.Target, ev.Position); });
+            caret.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        }
+        cluster.AddChild(caret);
         cluster.ContextMenu(() => HistoryMenu(side));
         return cluster;
     }

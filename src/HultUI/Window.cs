@@ -1467,6 +1467,11 @@ public sealed class Window : IOverlayHost, IDisposable
 
     // ──── Context Menu ────
 
+    /// <summary>Open <paramref name="target"/>'s context menu at <paramref name="pos"/>
+    /// programmatically (e.g. from a left-click dropdown affordance), as if it had been
+    /// right-clicked. No-op if the target (or an ancestor) has no context menu.</summary>
+    public void OpenContextMenu(Element target, Point pos) => TryShowContextMenu(target, pos);
+
     private void TryShowContextMenu(Element target, Point pos)
     {
         var (owner, itemsProvider) = FindContextMenuOwner(target);
