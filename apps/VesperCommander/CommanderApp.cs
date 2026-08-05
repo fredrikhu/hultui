@@ -242,8 +242,28 @@ public partial class CommanderApp : Component, IDisposable
         _settings = SettingsStore.Load();
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
-        _tabsL.Add(new PaneTab(startDir));
-        _tabsR.Add(new PaneTab(startDirRight ?? startDir));
+
+        // Restore the last session's tabs when enabled and still valid; else open one
+        // tab per pane on the starting folder.
+        bool restored = false;
+        if (_settings.RestoreTabs && SessionStore.Load() is { } s)
+        {
+            var left = s.Left.Where(Directory.Exists).ToList();
+            var right = s.Right.Where(Directory.Exists).ToList();
+            if (left.Count > 0 && right.Count > 0)
+            {
+                foreach (var d in left) _tabsL.Add(new PaneTab(d));
+                foreach (var d in right) _tabsR.Add(new PaneTab(d));
+                _tabL = Math.Clamp(s.LeftActive, 0, _tabsL.Count - 1);
+                _tabR = Math.Clamp(s.RightActive, 0, _tabsR.Count - 1);
+                restored = true;
+            }
+        }
+        if (!restored)
+        {
+            _tabsL.Add(new PaneTab(startDir));
+            _tabsR.Add(new PaneTab(startDirRight ?? startDir));
+        }
         InitBookmarks();
 
         // Global keys land on the host when nothing is focused.
@@ -1738,6 +1758,12 @@ public partial class CommanderApp : Component, IDisposable
 
     public void Dispose()
     {
+        SaveSession();
         (_lastImage as IDisposable)?.Dispose();
     }
+
+    /// <summary>Persist the current tabs so "Restore tabs on start" can bring them back.</summary>
+    private void SaveSession() => SessionStore.Save(new SessionData(
+        _tabsL.Select(t => t.Dir).ToList(), _tabL,
+        _tabsR.Select(t => t.Dir).ToList(), _tabR));
 }
