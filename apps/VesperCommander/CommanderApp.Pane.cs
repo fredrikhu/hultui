@@ -98,7 +98,7 @@ public partial class CommanderApp
     private Element BuildPane(char side)
     {
         bool active = _active == side;
-        var list = Listing(side);
+        var list = Rows(side);   // filtered view while a type-to-find is active
         var state = PaneStateOf(side);
 
         var pane = Flex.Column(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch)
@@ -132,12 +132,16 @@ public partial class CommanderApp
         if (ViewOf(side) == ViewMode.Detail)
             pane.AddChild(BuildListHeader(InArchive(side)));
         // Non-ok states replace the list with a centered status block. An archive that
-        // couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message.
-        pane.AddChild(state == PaneState.Ok
-            ? BuildViewArea(side, list, active)
-            : ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
+        // couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message. A
+        // filter that hides everything shows a "no matches" hint instead of a bare ".." row.
+        bool noMatches = _search.Length > 0 && active && !list.Any(e => !e.IsParent);
+        pane.AddChild(state != PaneState.Ok
+            ? (ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
                 ? BuildArchiveError(side, arcStatus)
-                : BuildStateBlock(side, state));
+                : BuildStateBlock(side, state))
+            : noMatches
+                ? BuildNoMatches()
+                : BuildViewArea(side, list, active));
         pane.AddChild(BuildFooter(side, list));
         // Right-drag marquee rectangle (design §E) — an absolute overlay from the drag
         // origin to the pointer, anchored to the pane's content box.
@@ -511,7 +515,7 @@ public partial class CommanderApp
         if (cursor)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
         else if (_settings.Zebra && !marked && !e.IsParent
-                 && IndexOfName(Listing(side), e.Name) % 2 == 1)
+                 && IndexOfName(Rows(side), e.Name) % 2 == 1)
             row.Background(Nocturne.Alpha(Nocturne.Text, 0.03));   // alternating tint
 
         // Type icon rasterized from the design's SVG glyphs; marked rows tint red, a
@@ -591,6 +595,17 @@ public partial class CommanderApp
         return footer;
     }
 
+    /// <summary>Shown in place of the list when a type-to-find filter matches nothing.</summary>
+    private Element BuildNoMatches()
+    {
+        var wrap = Flex.Column(gap: 8).FlexGrow(1)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
+        wrap.AddChild(Ui.Icon("⌕", 22f, Nocturne.Neutral500));
+        wrap.AddChild(Text.New($"No matches for “{_search}”").FontSize(13f).TextColor(Nocturne.Text));
+        wrap.AddChild(Ui.Mono("Backspace to widen · Esc to clear", 10.5f, Nocturne.On(0.40)));
+        return wrap;
+    }
+
     // ── Pane content states (empty · offline · denied) ──────────────────
     private Element BuildStateBlock(char side, PaneState state)
     {
@@ -638,7 +653,7 @@ public partial class CommanderApp
     private Element BuildPreview(bool full)
     {
         var side = _active;
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         var focused = cur >= 0 && cur < list.Count ? list[cur] : null;
 
@@ -800,15 +815,17 @@ public partial class CommanderApp
             int pct = op.TotalBytes > 0 ? (int)(100 * op.TotalBytesDone / op.TotalBytes) : 0;
             row.AddChild(Ui.Mono($"▶ copying {pct}% · {op.Done}/{op.Items.Count}", 11.5f, Nocturne.Accent300));
         }
-        // While a quick-search is active, show it with a block caret; else an idle hint.
+        // While a type-to-find filter is active, show it with a block caret + match count.
         else if (_search.Length > 0)
         {
-            row.AddChild(Ui.Mono($"search: {_search}", 11.5f, Nocturne.Text));
+            row.AddChild(Ui.Mono($"filter: {_search}", 11.5f, Nocturne.Text));
             row.AddChild(Box.New().Width(7).Height(14).Background(Nocturne.Accent));
+            int matches = Rows(_active).Count(e => !e.IsParent);
+            row.AddChild(Ui.Mono($"  {matches} match{(matches == 1 ? "" : "es")} · Esc clears", 11f, Nocturne.On(0.45)));
         }
         else
         {
-            row.AddChild(Ui.Mono("Tab switch pane · ↑↓ move · Enter open · Space mark · type to find",
+            row.AddChild(Ui.Mono("Tab switch pane · ↑↓ move · Enter open · Space mark · type to filter",
                 11f, Nocturne.On(0.40)));
         }
 

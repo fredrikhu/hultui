@@ -33,7 +33,7 @@ public partial class CommanderApp
     private void OpenDiff(char side)
     {
         if (AnyOverlayOpen) return;
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count || list[cur].IsParent || list[cur].IsDir) return;
         var e = list[cur];

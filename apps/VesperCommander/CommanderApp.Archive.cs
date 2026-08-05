@@ -70,7 +70,7 @@ public partial class CommanderApp
         char side = _active, other = side == 'L' ? 'R' : 'L';
         if (InArchive(side)) { StartExtract(); return; }
 
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];

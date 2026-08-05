@@ -401,7 +401,7 @@ public partial class CommanderApp
             if (ev.Button == 2) { BeginRightMark(side, e, ev.Position); return; }   // right-drag marking
             if (ev.Button != 0) return;
             _active = side;
-            int idx = IndexOfName(Listing(side), e.Name);
+            int idx = IndexOfName(Rows(side), e.Name);
             if (idx >= 0) SetCursor(side, idx);
             if (IsDoublePress(side, e.Name)) ActivateCursor(side);
             MarkDirty();

@@ -532,7 +532,7 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>Enter/open the cursor entry: descend into a directory, ascend on "..".</summary>
     private void ActivateCursor(char side)
     {
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
@@ -561,7 +561,7 @@ public partial class CommanderApp : Component, IDisposable
     /// (VS Code by default). Directories and ".." are ignored.</summary>
     private void EditFocused(char side)
     {
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
@@ -570,10 +570,10 @@ public partial class CommanderApp : Component, IDisposable
         FileOps.LaunchEditor(template, e.FullPath);
     }
 
-    private void MoveCursor(char side, int delta, bool clearSearch = true)
+    private void MoveCursor(char side, int delta, bool clearSearch = false)
     {
-        if (clearSearch) _search = "";
-        var list = Listing(side);
+        if (clearSearch) _search = "";   // arrows keep the filter; nav within the matches
+        var list = Rows(side);
         if (list.Count == 0) return;
         int next = Math.Clamp(Cursor(side) + delta, 0, list.Count - 1);
         if (next == Cursor(side)) { MarkDirty(); return; }
@@ -600,7 +600,7 @@ public partial class CommanderApp : Component, IDisposable
     /// <paramref name="advance"/> (Insert), move the cursor down one afterwards.</summary>
     private void ToggleMark(char side, bool advance)
     {
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
@@ -684,7 +684,7 @@ public partial class CommanderApp : Component, IDisposable
     /// toggles too); over a file it just marks.</summary>
     private void MeasureFocusedDir(char side)
     {
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur >= 0 && cur < list.Count) StartDirSize(list[cur]);
     }
@@ -712,12 +712,14 @@ public partial class CommanderApp : Component, IDisposable
     /// row when nothing is marked (never the ".." parent).</summary>
     private IReadOnlyList<FileEntry> OperationTargets(char side)
     {
-        var list = Listing(side);
+        // Marks act on the full listing (a marked entry hidden by the filter still counts);
+        // the cursor fallback indexes the filtered view.
         var marks = Marks(side);
         if (marks.Count > 0)
-            return list.Where(e => !e.IsParent && marks.Contains(e.Name)).ToList();
+            return Listing(side).Where(e => !e.IsParent && marks.Contains(e.Name)).ToList();
+        var rows = Rows(side);
         int cur = Cursor(side);
-        if (cur >= 0 && cur < list.Count && !list[cur].IsParent) return [list[cur]];
+        if (cur >= 0 && cur < rows.Count && !rows[cur].IsParent) return [rows[cur]];
         return [];
     }
 
@@ -764,43 +766,84 @@ public partial class CommanderApp : Component, IDisposable
         }
     }
 
-    // ── Incremental search ───────────────────────────────────────────────
+    // ── Type-to-find filter ──────────────────────────────────────────────
+    // Typing in a pane narrows it to the matching entries (a live filter, so every match is
+    // visible at once). Arrows move within the filtered set; Esc clears and restores the
+    // cursor to where it was. Only the active pane filters (the search text is per-focus).
     private void ExtendSearch(char side, char ch)
     {
+        string? keep = CursorEntryName(side);
         _search += ch;
-        JumpToSearch(side);
+        ReclampFilterCursor(side, keep);
+        RequestScroll(side);
         MarkDirty();
     }
 
     private void BackspaceSearch(char side)
     {
         if (_search.Length == 0) return;
+        string? keep = CursorEntryName(side);
         _search = _search[..^1];
-        if (_search.Length > 0) JumpToSearch(side);
+        ReclampFilterCursor(side, keep);
+        RequestScroll(side);
         MarkDirty();
     }
 
-    /// <summary>Move the cursor to the first matching entry (case-insensitive), skipping the
-    /// ".." parent. A search that starts with "." matches on the file extension (".zip" jumps
-    /// to the first *.zip); otherwise it's a name-prefix match.</summary>
-    private void JumpToSearch(char side)
+    /// <summary>Clear the filter, moving the cursor back onto the same entry in the full
+    /// listing so you keep your place.</summary>
+    private void ExitSearch(char side)
     {
-        var list = Listing(side);
-        bool byExt = _search.Length > 1 && _search[0] == '.';
-        for (int i = 0; i < list.Count; i++)
+        if (_search.Length == 0) return;
+        string? keep = CursorEntryName(side);
+        _search = "";
+        if (keep != null) { int i = IndexOfName(Listing(side), keep); if (i >= 0) SetCursor(side, i); }
+        RequestScroll(side);
+    }
+
+    private bool SearchMatch(string name) => FilterMatch(name, _search);
+
+    /// <summary>True when <paramref name="name"/> matches the filter <paramref name="search"/>:
+    /// a substring by default, or the file extension when the text starts with "." (".cs" →
+    /// *.cs). An empty filter matches everything.</summary>
+    internal static bool FilterMatch(string name, string search)
+    {
+        if (search.Length == 0) return true;
+        if (search.Length > 1 && search[0] == '.')
+            return ExtensionOf(name).StartsWith(search, StringComparison.OrdinalIgnoreCase);
+        return name.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The entries shown for a side: the full listing, or — while a filter is active
+    /// in the active pane — only the matches (".." is always kept so you can still go up).
+    /// Cursor, navigation, rendering, and the footer all index this.</summary>
+    private IReadOnlyList<FileEntry> Rows(char side)
+    {
+        var raw = Listing(side);
+        if (side != _active || _search.Length == 0) return raw;
+        var filtered = new List<FileEntry>(raw.Count);
+        foreach (var e in raw) if (e.IsParent || SearchMatch(e.Name)) filtered.Add(e);
+        return filtered;
+    }
+
+    private string? CursorEntryName(char side)
+    {
+        var rows = Rows(side);
+        int c = Cursor(side);
+        return c >= 0 && c < rows.Count ? rows[c].Name : null;
+    }
+
+    /// <summary>After the filter changes, keep the cursor on the same entry if it still
+    /// matches, else drop it onto the first match.</summary>
+    private void ReclampFilterCursor(char side, string? keepName)
+    {
+        var rows = Rows(side);
+        int idx = keepName != null ? IndexOfName(rows, keepName) : -1;
+        if (idx < 0)
         {
-            if (list[i].IsParent) continue;
-            var name = list[i].Name;
-            bool hit = byExt
-                ? ExtensionOf(name).StartsWith(_search, StringComparison.OrdinalIgnoreCase)
-                : name.StartsWith(_search, StringComparison.OrdinalIgnoreCase);
-            if (hit)
-            {
-                SetCursor(side, i);
-                RequestScroll(side);
-                return;
-            }
+            idx = 0;
+            for (int i = 0; i < rows.Count; i++) if (!rows[i].IsParent) { idx = i; break; }
         }
+        SetCursor(side, Math.Clamp(idx, 0, Math.Max(0, rows.Count - 1)));
     }
 
     /// <summary>The extension including the leading dot (".zip"), or "" when the name has none.
@@ -1381,7 +1424,7 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>Shift+F6: prompt to rename the focused entry, seeded with its name.</summary>
     private void OpenRenamePrompt(char side)
     {
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
@@ -1441,10 +1484,10 @@ public partial class CommanderApp : Component, IDisposable
 
     private void SwapPanes()
     {
+        ExitSearch(_active);
         (_tabsL, _tabsR) = (_tabsR, _tabsL);
         (_tabL, _tabR) = (_tabR, _tabL);
         _genL++; _genR++;
-        _search = "";
         MarkDirty();
     }
 
@@ -1461,9 +1504,9 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (index < 0 || index >= tabs.Count) return;
+        ExitSearch(_active);
         _active = side;
         SetTabIndex(side, index);
-        _search = "";
         BumpGen(side);          // reload for the tab's folder
         RequestScroll(side);
         MarkDirty();
@@ -1473,12 +1516,12 @@ public partial class CommanderApp : Component, IDisposable
     /// (defaults to the active tab's folder), placed just after the active one.</summary>
     private void NewTab(char side, string? dir = null)
     {
+        ExitSearch(_active);
         var tabs = Tabs(side);
         int at = TabIndex(side) + 1;
         tabs.Insert(at, new PaneTab(dir ?? Dir(side)) { View = _settings.DefaultView });
         _active = side;
         SetTabIndex(side, at);
-        _search = "";
         BumpGen(side);
         MarkDirty();
     }
@@ -1535,7 +1578,7 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>Descend into the folder under the cursor (Ctrl+PageDown); ".." goes up.</summary>
     private void DescendCursor(char side)
     {
-        var list = Listing(side);
+        var list = Rows(side);
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
@@ -1762,10 +1805,10 @@ public partial class CommanderApp : Component, IDisposable
         switch (e.Key)
         {
             case KeyCode.Tab:
-                _search = ""; _active = _active == 'L' ? 'R' : 'L';
+                ExitSearch(_active); _active = _active == 'L' ? 'R' : 'L';
                 MarkDirty(); e.StopPropagation = true; return;
             case KeyCode.Escape:
-                if (_search.Length > 0) { _search = ""; MarkDirty(); e.StopPropagation = true; }
+                if (_search.Length > 0) { ExitSearch(side); MarkDirty(); e.StopPropagation = true; }
                 else if (_cutPending.Count > 0) { _cutPending.Clear(); Clipboard.Clear(); MarkDirty(); e.StopPropagation = true; }
                 return;
             case KeyCode.Space:
@@ -1785,7 +1828,7 @@ public partial class CommanderApp : Component, IDisposable
             case KeyCode.End:
                 MoveCursor(side, int.MaxValue / 2); e.StopPropagation = true; return;
             case KeyCode.Enter:
-                _search = ""; ActivateCursor(side); e.StopPropagation = true; return;
+                ActivateCursor(side); e.StopPropagation = true; return;   // nav clears the filter; file-open keeps it
             case KeyCode.Backspace:
                 BackspaceSearch(side); e.StopPropagation = true; return;
             case KeyCode.Left:     // focus the command line (type a shell command)

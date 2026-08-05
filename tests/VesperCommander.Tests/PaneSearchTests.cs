@@ -32,4 +32,16 @@ public class PaneSearchTests
     [Fact]
     public void SearchChar_IgnoresNonPrintableKeys() =>
         Assert.Equal('\0', CommanderApp.SearchChar(KeyCode.F5, false));
+
+    [Theory]
+    [InlineData("", "CommanderApp.cs", true)]        // empty filter matches all
+    [InlineData("com", "CommanderApp.cs", true)]     // substring, case-insensitive
+    [InlineData("COM", "CommanderApp.cs", true)]
+    [InlineData("xyz", "CommanderApp.cs", false)]
+    [InlineData(".cs", "CommanderApp.cs", true)]     // leading dot → extension (prefix)
+    [InlineData(".cs", "notes.csv", true)]           // ".csv" starts with ".cs" — incremental
+    [InlineData(".csv", "notes.csv", true)]
+    [InlineData(".cs", "readme.md", false)]
+    public void FilterMatch_SubstringOrExtension(string search, string name, bool expected) =>
+        Assert.Equal(expected, CommanderApp.FilterMatch(name, search));
 }
