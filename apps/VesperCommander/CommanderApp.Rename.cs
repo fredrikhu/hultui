@@ -23,6 +23,7 @@ public partial class CommanderApp
     private RenameEngine.CaseMode _renCase = RenameEngine.CaseMode.AsIs;
     private int _renCounterStart = 1, _renCounterStep = 1, _renCounterDigits = 3;
     private int _renActiveMask;                       // 0 = name, 1 = extension (for token insert)
+    private string? _renRegexError;                   // set each build; reddens the Find field
     private RenameEngine.Preview? _renLastValid;      // held while the regex is malformed
     private readonly Ref<TextInputElement> _renNameRef = new();
     private readonly Ref<VirtualListElement<RenameEngine.Row>> _renVList = new();
@@ -70,6 +71,7 @@ public partial class CommanderApp
         var shown = preview.RegexError != null ? (_renLastValid ?? preview) : preview;
         bool canRename = preview.RegexError == null && preview.Conflicts == 0 && preview.WillRename > 0;
 
+        _renRegexError = preview.RegexError;
         var card = DialogCard(760);
         card.AddChild(RenameHeader());
         card.AddChild(RenameControls());
@@ -96,15 +98,106 @@ public partial class CommanderApp
         return h;
     }
 
-    // Controls region — masks + token palette (counter / find-replace / case land in P2).
+    // Controls region — masks + token palette, counter, find/replace, case & trim.
     private Element RenameControls()
     {
-        var col = Flex.Column(gap: 10).Padding(new Thickness(14, 16, 12, 16));
+        var col = Flex.Column(gap: 10).Padding(new Thickness(14, 14, 12, 14));
         col.AddChild(MaskRow("Name mask", _renNameMask, 1.7f, v => { _renNameMask = v; MarkDirty(); }, _renNameRef, 0, "[N]"));
         col.AddChild(MaskRow("Extension mask", _renExtMask, 0.7f, v => { _renExtMask = v; MarkDirty(); }, null, 1, "[E] · keep"));
         col.AddChild(TokenPalette());
+        col.AddChild(Box.New().Height(1).Background(Nocturne.Divider));
+        col.AddChild(RenameCounter());
+        col.AddChild(RenameFindReplace());
+        col.AddChild(RenameCaseTrim());
         return col;
     }
+
+    // §C — counter (dormant at 45% until a [C] appears in a mask).
+    private Element RenameCounter()
+    {
+        bool active = RenameEngine.UsesCounter(RenOptions());
+        var row = Flex.Row(gap: 14).AlignItems(AlignItems.Center);
+        row.AddChild(Text.New("Counter").FontSize(12f).TextColor(Nocturne.On(0.55)).Width(96).FlexShrink(0));
+        row.AddChild(LabeledStepper("start", _renCounterStart, v => _renCounterStart = Math.Max(0, v)));
+        row.AddChild(LabeledStepper("step", _renCounterStep, v => { if (v != 0) _renCounterStep = v; }));
+        row.AddChild(LabeledStepper("digits", _renCounterDigits, v => _renCounterDigits = Math.Clamp(v, 1, 8)));
+        if (active)
+        {
+            string Fmt(int n) => n.ToString().PadLeft(Math.Max(1, _renCounterDigits), '0');
+            row.AddChild(Ui.Mono($"{Fmt(_renCounterStart)} · {Fmt(_renCounterStart + _renCounterStep)} · {Fmt(_renCounterStart + 2 * _renCounterStep)} · …",
+                11f, Nocturne.Accent200));
+        }
+        else
+            row.AddChild(Ui.Mono("insert [C] into a mask to enable the counter", 11f, Nocturne.On(0.45)));
+        if (!active) row.Opacity(0.45f);
+        return row;
+    }
+
+    private Element LabeledStepper(string label, int value, Action<int> set)
+    {
+        var r = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        r.AddChild(Ui.Mono(label, 10.5f, Nocturne.Neutral500));
+        r.AddChild(Stepper(value, "", () => { set(value - 1); MarkDirty(); }, () => { set(value + 1); MarkDirty(); }));
+        return r;
+    }
+
+    // §D — find / replace + case-sensitivity + regex, with inline validity.
+    private Element RenameFindReplace()
+    {
+        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
+        row.AddChild(Text.New("Find").FontSize(12f).TextColor(Nocturne.On(0.55)).Width(96).FlexShrink(0));
+        row.AddChild(FindField(_renFind, _renRegexError != null, v => { _renFind = v; MarkDirty(); }));
+        row.AddChild(Text.New("Replace").FontSize(11f).TextColor(Nocturne.On(0.45)));
+        row.AddChild(FindField(_renReplace, false, v => { _renReplace = v; MarkDirty(); }));
+        row.AddChild(ToggleIcon("Aa", _renMatchCase, () => { _renMatchCase = !_renMatchCase; MarkDirty(); }));
+        row.AddChild(ToggleIcon(".*", _renRegex, () => { _renRegex = !_renRegex; MarkDirty(); }));
+        return row;
+    }
+
+    private Element FindField(string value, bool bad, Action<string> onChanged)
+    {
+        var box = Box.New().FlexGrow(1).Height(26).Padding(new Thickness(3, 8, 3, 8)).CornerRadius(4f)
+            .Background(Nocturne.Bg).BorderColor(bad ? Nocturne.Alpha(Nocturne.MarkRed, 0.55) : Nocturne.Neutral700).BorderWidth(1f);
+        var input = TextInput.New(value).FlexGrow(1).Height(20);
+        input.OnTextChanged(onChanged);
+        box.AddChild(input);
+        return box;
+    }
+
+    private Element ToggleIcon(string glyph, bool on, Action toggle)
+    {
+        var b = Box.New().Width(26).Height(26).CornerRadius(5f).Cursor(CursorType.Pointer).FlexShrink(0)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .BorderColor(on ? Nocturne.Accent600 : Nocturne.Neutral700).BorderWidth(1f)
+            .Children(Ui.Mono(glyph, 11f, on ? Nocturne.Accent200 : Nocturne.Neutral400));
+        if (on) b.Background(Nocturne.Alpha(Nocturne.Accent500, 0.14));
+        b.OnClick(_ => toggle());
+        return on ? b : b.HoverBg(Nocturne.Neutral900, Color.Transparent);
+    }
+
+    // §E — case (name only) + trim.
+    private Element RenameCaseTrim()
+    {
+        var col = Flex.Column(gap: 8);
+        var caseRow = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
+        caseRow.AddChild(Text.New("Case").FontSize(12f).TextColor(Nocturne.On(0.55)).Width(96).FlexShrink(0));
+        caseRow.AddChild(Seg(
+            ("As-is", _renCase == RenameEngine.CaseMode.AsIs, () => SetRenCase(RenameEngine.CaseMode.AsIs)),
+            ("UPPER", _renCase == RenameEngine.CaseMode.Upper, () => SetRenCase(RenameEngine.CaseMode.Upper)),
+            ("lower", _renCase == RenameEngine.CaseMode.Lower, () => SetRenCase(RenameEngine.CaseMode.Lower)),
+            ("Title", _renCase == RenameEngine.CaseMode.Title, () => SetRenCase(RenameEngine.CaseMode.Title)),
+            ("First cap", _renCase == RenameEngine.CaseMode.FirstCap, () => SetRenCase(RenameEngine.CaseMode.FirstCap))));
+        col.AddChild(caseRow);
+
+        var trimRow = Flex.Row(gap: 20).AlignItems(AlignItems.Center);
+        trimRow.AddChild(Box.New().Width(96).FlexShrink(0));
+        trimRow.AddChild(CheckItem("Trim leading/trailing spaces", _renTrimEnds, () => { _renTrimEnds = !_renTrimEnds; MarkDirty(); }));
+        trimRow.AddChild(CheckItem("Collapse double spaces", _renCollapse, () => { _renCollapse = !_renCollapse; MarkDirty(); }));
+        col.AddChild(trimRow);
+        return col;
+    }
+
+    private void SetRenCase(RenameEngine.CaseMode m) { _renCase = m; MarkDirty(); }
 
     private Element MaskRow(string label, string value, float grow, Action<string> onChanged,
         Ref<TextInputElement>? refEl, int maskIndex, string placeholder)
