@@ -289,7 +289,17 @@ public partial class CommanderApp
         el.AddChild(Ui.Icon("→", 11f, Nocturne.Neutral600).GridColumn(1));
         Color newFg = conflict ? Nocturne.MarkRed : unchanged ? Nocturne.On(0.40) : Nocturne.Text;
         string newText = r.Status == RenameEngine.Status.Empty ? "(empty)" : r.NewName;
-        el.AddChild(Ui.Mono(newText, 11.5f, newFg).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(2));
+        var newEl = Ui.Mono(newText, 11.5f, newFg).MaxLines(1).TextOverflow(TextOverflow.Ellipsis);
+        // For a clean partial change, tint just the changed run (common prefix/suffix diff);
+        // a mostly-different name (>70%) renders plain to avoid noise at N rows.
+        if (r.Status == RenameEngine.Status.Ok)
+        {
+            var (pre, suf) = DiffEngine.IntraSpan(r.OldName, r.NewName);
+            int changed = r.NewName.Length - pre - suf;
+            if (changed > 0 && changed <= 0.7 * r.NewName.Length)
+                newEl.Spans([new TextSpan(pre, changed, Nocturne.Accent200)]);
+        }
+        el.AddChild(newEl.GridColumn(2));
         var reason = ReasonText(r.Status);
         if (reason.Length > 0)
         {
@@ -327,6 +337,17 @@ public partial class CommanderApp
         bar.AddChild(Ui.Mono($"{p.Conflicts} conflict{(p.Conflicts == 1 ? "" : "s")}", 11f, p.Conflicts > 0 ? Nocturne.MarkRed : Nocturne.On(0.50)));
         bar.AddChild(Ui.Mono(" · ", 11f, Nocturne.On(0.35)));
         bar.AddChild(Ui.Mono($"{p.Unchanged} unchanged", 11f, Nocturne.On(0.50)));
+        // A pointed hint when nothing will rename.
+        string? hint = p.WillRename > 0 ? null
+            : p.Conflicts > 0 && p.Rows.All(r => r.Status is RenameEngine.Status.Collision or RenameEngine.Status.Ok)
+                ? "add [C] or [N] to make results unique"
+            : p.Conflicts == 0 ? "nothing to rename — edit the mask, find/replace or case"
+            : null;
+        if (hint != null)
+        {
+            bar.AddChild(Box.New().FlexGrow(1));
+            bar.AddChild(Ui.Mono(hint, 10.5f, Nocturne.On(0.45)));
+        }
         return bar;
     }
 
@@ -334,10 +355,11 @@ public partial class CommanderApp
     {
         var footer = DialogFooter();
         footer.AddChild(GhostButton("Reset", ResetRename));
-        // The reason a disabled Rename can't fire.
+        // The reason a disabled Rename can't fire — or, for a single file, the faster path.
         string? why = p.RegexError != null ? "fix the pattern to rename"
             : p.Conflicts > 0 ? $"resolve {p.Conflicts} conflict{(p.Conflicts == 1 ? "" : "s")} to rename"
             : p.WillRename == 0 ? "nothing to rename"
+            : _renameFiles.Count == 1 ? "just one file? Shift+F6 renames inline"
             : null;
         if (why != null) footer.AddChild(Ui.Mono(why, 10.5f, Nocturne.On(0.45)));
         footer.AddChild(Box.New().FlexGrow(1));
