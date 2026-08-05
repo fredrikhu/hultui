@@ -698,6 +698,7 @@ public partial class CommanderApp
             return col;
 
         var key = $"{focused.FullPath}#{focused.Modified.Ticks}#{focused.Size}";
+        bool inArc = InArchive(side);   // the focused entry is an archive member
         HultUI.Core.Rendering.IImageSource? image = null;
 
         if (focused.IsDir)
@@ -707,7 +708,7 @@ public partial class CommanderApp
         else if (Icons.KindFor(focused) == IconKind.Image)
         {
             // Off-thread image decode; render it scaled to fit, aspect preserved.
-            _imageLoader.Load(key, () => LoadImage(focused.FullPath, focused.Size), onLoaded: img =>
+            _imageLoader.Load(key, () => inArc ? LoadImageMember(focused) : LoadImage(focused.FullPath, focused.Size), onLoaded: img =>
             {
                 if (!ReferenceEquals(_lastImage, img)) { (_lastImage as IDisposable)?.Dispose(); _lastImage = img; }
                 MarkDirty();
@@ -737,7 +738,7 @@ public partial class CommanderApp
             // and it scrolls itself (wheel, and — in Full mode, once Tab-focused — the
             // arrow / page / home / end keys). Keyed per file so a new file starts at the
             // top. Wrapped in a padded box because the theme owns the TextArea's padding.
-            _previewLoader.Load(key, () => FileSystem.PreviewText(focused.FullPath, focused.Size),
+            _previewLoader.Load(key, () => inArc ? PreviewTextMember(focused) : FileSystem.PreviewText(focused.FullPath, focused.Size),
                 onLoaded: _ => MarkDirty());
             var excerpt = _previewLoader.Value;
             if (excerpt.Length == 0)

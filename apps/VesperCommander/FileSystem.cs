@@ -316,6 +316,29 @@ public static class FileSystem
         catch { return ""; }
     }
 
+    /// <summary>Text excerpt from an in-memory buffer (e.g. an extracted archive member) —
+    /// same NUL-binary guard and line/length caps as <see cref="PreviewText"/>.</summary>
+    public static string PreviewTextFromBytes(byte[] bytes)
+    {
+        int scan = Math.Min(bytes.Length, 512);
+        for (int i = 0; i < scan; i++) if (bytes[i] == 0) return "";   // NUL ⇒ binary
+        try
+        {
+            using var reader = new StreamReader(new MemoryStream(bytes));
+            var sb = new System.Text.StringBuilder();
+            string? line;
+            int n = 0;
+            while (n < PreviewMaxLines && (line = reader.ReadLine()) != null)
+            {
+                if (n > 0) sb.Append('\n');
+                sb.Append(line.Length > 200 ? line[..200] : line);
+                n++;
+            }
+            return sb.ToString();
+        }
+        catch { return ""; }
+    }
+
     public static string FreeLabel(string path)
     {
         long b = FreeBytes(path);

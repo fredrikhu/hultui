@@ -236,6 +236,47 @@ public partial class CommanderApp : Component, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Read a bounded copy of an archive member's bytes (for preview), or null when
+    /// oversized / unreadable. The member stream may be non-seekable, so we copy.</summary>
+    private byte[]? ReadMemberBytes(FileEntry e, long maxBytes)
+    {
+        if (e.Size <= 0 || e.Size > maxBytes) return null;
+        if (ArchivePath.TryParse(e.FullPath) is not { } ap) return null;
+        try
+        {
+            using var s = ArchiveVfs.OpenEntry(ap.ArchiveFile, ap.Internal, PasswordFor(e.FullPath), _sevenZip);
+            if (s == null) return null;
+            using var ms = new MemoryStream();
+            var buf = new byte[16 * 1024];
+            int r;
+            while ((r = s.Read(buf, 0, buf.Length)) > 0)
+            {
+                ms.Write(buf, 0, r);
+                if (ms.Length > maxBytes) return null;
+            }
+            return ms.ToArray();
+        }
+        catch { return null; }
+    }
+
+    private string PreviewTextMember(FileEntry e)
+    {
+        var bytes = ReadMemberBytes(e, 256 * 1024);
+        return bytes == null ? "" : FileSystem.PreviewTextFromBytes(bytes);
+    }
+
+    private HultUI.Core.Rendering.IImageSource? LoadImageMember(FileEntry e)
+    {
+        var bytes = ReadMemberBytes(e, 24 * 1024 * 1024);
+        if (bytes == null) return null;
+        try
+        {
+            var bmp = SkiaSharp.SKBitmap.Decode(bytes);
+            return bmp == null ? null : new HultUI.Rendering.Skia.SkiaImageSource(bmp);
+        }
+        catch { return null; }
+    }
+
     private const float RailWidth = 44f;
     private float PreviewWidth => _settings.PreviewWidth;
     private float RowHeight => _settings.Density == Density.Compact ? 20f : 24f;
