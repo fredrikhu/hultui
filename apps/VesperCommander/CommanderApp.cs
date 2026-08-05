@@ -65,6 +65,8 @@ public partial class CommanderApp : Component, IDisposable
     // Options window: edits a draft copy; Save commits + persists + applies.
     private bool _optionsOpen;
     private int _optionsPage;                        // 0 General 1 Panes 2 Keyboard 3 Tools 4 Colors
+    private string _optSearch = "";                  // filters settings across all pages when non-empty
+    private readonly Ref<HultUI.Core.Elements.TextInputElement> _optSearchRef = new();
     private Settings _draft = new();
 
     // Incremental "type to find" for the active pane: word characters extend it and
@@ -816,6 +818,7 @@ public partial class CommanderApp : Component, IDisposable
         _bookmarksOpen = false;
         _confirm = null;
         _optionsOpen = false;
+        _optSearch = "";
         _namePrompt = null;
         _packOpen = false;
         _pwOpen = false;
@@ -1268,6 +1271,7 @@ public partial class CommanderApp : Component, IDisposable
     private void OpenOptions()
     {
         _draft = _settings.Clone();
+        _optSearch = "";
         _optionsOpen = true;
         MarkDirty();
     }
@@ -1594,11 +1598,17 @@ public partial class CommanderApp : Component, IDisposable
                 if (e.Key != KeyCode.Escape) RebindTo(rc, ChordOf(e));   // Esc cancels
                 _rebindCmd = null; MarkDirty(); e.StopPropagation = true; return;
             }
+            bool inField = e.Target is TextInputElement;
             switch (e.Key)
             {
-                case KeyCode.Escape: _optionsOpen = false; MarkDirty(); e.StopPropagation = true; break;
-                case KeyCode.Down: _optionsPage = Math.Min(OptionPages.Length - 1, _optionsPage + 1); MarkDirty(); e.StopPropagation = true; break;
-                case KeyCode.Up: _optionsPage = Math.Max(0, _optionsPage - 1); MarkDirty(); e.StopPropagation = true; break;
+                // Esc backs out of the search first, then closes the window.
+                case KeyCode.Escape:
+                    if (_optSearch.Length > 0) _optSearch = "";
+                    else _optionsOpen = false;
+                    MarkDirty(); e.StopPropagation = true; break;
+                // Arrows switch nav pages — but not while the search field owns them (caret move).
+                case KeyCode.Down when !inField: _optionsPage = Math.Min(OptionPages.Length - 1, _optionsPage + 1); MarkDirty(); e.StopPropagation = true; break;
+                case KeyCode.Up when !inField: _optionsPage = Math.Max(0, _optionsPage - 1); MarkDirty(); e.StopPropagation = true; break;
             }
             return;
         }

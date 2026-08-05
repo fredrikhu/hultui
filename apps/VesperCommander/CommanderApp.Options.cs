@@ -24,15 +24,16 @@ public partial class CommanderApp
     private Element BuildOptions()
     {
         var card = DialogCard(940);
+        bool searching = _optSearch.Trim().Length > 0;
 
-        // Header: gear · "Options" · current page · ✕.
-        var header = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
+        // Header: gear · "Options" · search field · ✕.
+        var header = Flex.Row(gap: 10).AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         header.AddChild(Ui.Icon("⚙", 14f, Nocturne.Accent));
         header.AddChild(Text.New("Options").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
-        header.AddChild(Text.New(OptionPages[_optionsPage].label).FontSize(11f).TextColor(Nocturne.On(0.45)));
         header.AddChild(Box.New().FlexGrow(1));
+        header.AddChild(OptionsSearchField());
         var close = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
             .Children(Ui.Icon("✕", 12f, Nocturne.Neutral600));
         close.OnClick(_ => CloseOverlays());
@@ -45,7 +46,8 @@ public partial class CommanderApp
         var body = Grid.Of("184px 1fr", "1fr").Height(460);
         body.AddChild(OptionsNav().GridCell(0, 0));
         var page = Flex.Column(gap: 14).Padding(new Thickness(16, 20, 16, 20)).GridCell(0, 1);
-        OptionsPage(page);
+        if (searching) OptionsSearchResults(page, _optSearch.Trim());
+        else OptionsPage(page);
         body.AddChild(page);
         card.AddChild(body);
 
@@ -77,11 +79,152 @@ public partial class CommanderApp
                 .TextAlign(TextAlign.Center).TextColor(on ? Nocturne.Accent200 : Nocturne.Neutral400));
             item.AddChild(Text.New(OptionPages[i].label).FontSize(12f)
                 .TextColor(on ? Nocturne.Accent200 : Nocturne.Neutral400));
-            item.OnClick(_ => { _optionsPage = idx; MarkDirty(); });
+            // Picking a page also drops out of a search so you land on the real page.
+            item.OnClick(_ => { _optionsPage = idx; _optSearch = ""; MarkDirty(); });
             if (!on) item.HoverBg(Nocturne.Neutral900, Color.Transparent);
             nav.AddChild(item);
         }
         return nav;
+    }
+
+    // ── Settings search ──────────────────────────────────────────────────
+    // One row per setting, tagged with its page and keywords. Both the normal pages
+    // and the search results build their controls from these delegates, so a match in
+    // the results is the same live control you'd toggle on its page.
+    private readonly record struct OptRow(int Page, string Label, string Keywords, Func<Element> Build);
+
+    private Element OptionsSearchField()
+    {
+        var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center).Width(250)
+            .Padding(new Thickness(4, 10, 4, 10)).CornerRadius(6f)
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral700).BorderWidth(1f);
+        box.AddChild(Ui.Icon("⌕", 13f, Nocturne.On(0.45)));
+        var input = TextInput.New(_optSearch).FlexGrow(1).Height(26);
+        input.PlaceholderText("Search settings…");
+        input.OnTextChanged(v => { _optSearch = v; MarkDirty(); });
+        input.WithRef(_optSearchRef);
+        box.AddChild(input);
+        if (_optSearch.Length > 0)
+        {
+            var clear = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(0, 3, 0, 3))
+                .Children(Ui.Icon("✕", 10f, Nocturne.Neutral500));
+            clear.OnClick(_ => { _optSearch = ""; MarkDirty(); });
+            box.AddChild(clear);
+        }
+        return box;
+    }
+
+    private void OptionsSearchResults(BoxElement page, string query)
+    {
+        var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        bool Matches(OptRow r)
+        {
+            var hay = $"{r.Label} {r.Keywords} {OptionPages[r.Page].label}";
+            return terms.All(t => hay.Contains(t, StringComparison.OrdinalIgnoreCase));
+        }
+        var hits = OptionCatalog().Where(Matches).ToList();
+
+        page.AddChild(SectionHeader("Search",
+            hits.Count == 0 ? $"Nothing matches “{query}”"
+            : hits.Count == 1 ? "1 setting" : $"{hits.Count} settings"));
+        if (hits.Count == 0)
+        {
+            page.AddChild(Text.New("Try a shorter term, or a page name like “keyboard”.")
+                .FontSize(12f).TextColor(Nocturne.Neutral500));
+            return;
+        }
+
+        var scroll = ScrollView.Vertical().MaxHeight(360);
+        var col = Flex.Column(gap: 12);
+        foreach (var group in hits.GroupBy(r => r.Page).OrderBy(g => g.Key))
+        {
+            var section = Flex.Column(gap: 2);
+            section.AddChild(GroupLabel(OptionPages[group.Key].label));
+            foreach (var r in group) section.AddChild(r.Build());
+            col.AddChild(section);
+        }
+        scroll.AddChild(col);
+        page.AddChild(scroll);
+    }
+
+    private List<OptRow> OptionCatalog()
+    {
+        var c = new List<OptRow>
+        {
+            // General
+            new(0, "Restore tabs and pane paths on start", "startup session remember reopen",
+                () => ToggleRow(_draft.RestoreTabs, "Restore tabs and pane paths on start", () => Flip(ref _draft.RestoreTabs))),
+            new(0, "Single instance", "startup one window prevent second launch",
+                () => ToggleRow(_draft.SingleInstance, "Single instance — a second launch is prevented", () => Flip(ref _draft.SingleInstance))),
+            new(0, "Confirm before delete", "safety trash",
+                () => ToggleRow(_draft.ConfirmDelete, "Confirm before delete", () => Flip(ref _draft.ConfirmDelete), "F8")),
+            new(0, "Delete to Recycle Bin", "trash permanent safety",
+                () => ToggleRow(_draft.Recycle, "Delete to Recycle Bin instead of permanently", () => Flip(ref _draft.Recycle))),
+            new(0, "On copy conflict", "overwrite keep newer auto rename move",
+                () => FieldRow("On copy conflict", Seg(
+                    ("Ask", _draft.Conflict == ConflictMode.Ask, () => SetDraft(() => _draft.Conflict = ConflictMode.Ask)),
+                    ("Keep newer", _draft.Conflict == ConflictMode.KeepNewer, () => SetDraft(() => _draft.Conflict = ConflictMode.KeepNewer)),
+                    ("Auto-rename", _draft.Conflict == ConflictMode.AutoRename, () => SetDraft(() => _draft.Conflict = ConflictMode.AutoRename))))),
+            // Panes
+            new(1, "Size column", "columns visible",
+                () => ToggleRow(_draft.ShowSize, "Size column", () => Flip(ref _draft.ShowSize))),
+            new(1, "Modified column", "columns visible date",
+                () => ToggleRow(_draft.ShowDate, "Modified column", () => Flip(ref _draft.ShowDate))),
+            new(1, "Sort by", "order name ext size date",
+                () => FieldRow("Sort by", Seg(
+                    ("Name", _draft.Sort == SortMode.Name, () => SetDraft(() => _draft.Sort = SortMode.Name)),
+                    ("Ext", _draft.Sort == SortMode.Ext, () => SetDraft(() => _draft.Sort = SortMode.Ext)),
+                    ("Size", _draft.Sort == SortMode.Size, () => SetDraft(() => _draft.Sort = SortMode.Size)),
+                    ("Date", _draft.Sort == SortMode.Date, () => SetDraft(() => _draft.Sort = SortMode.Date))))),
+            new(1, "Row density", "compact comfortable spacing height",
+                () => FieldRow("Row density", Seg(
+                    ("Compact", _draft.Density == Density.Compact, () => SetDraft(() => _draft.Density = Density.Compact)),
+                    ("Comfortable", _draft.Density == Density.Comfortable, () => SetDraft(() => _draft.Density = Density.Comfortable))))),
+            new(1, "Preview width", "panel size px",
+                () => FieldRow("Preview width", Stepper(_draft.PreviewWidth, "px",
+                    () => SetDraft(() => _draft.PreviewWidth = Math.Max(220, _draft.PreviewWidth - 20)),
+                    () => SetDraft(() => _draft.PreviewWidth = Math.Min(460, _draft.PreviewWidth + 20))))),
+            new(1, "Preview panel", "off side full image",
+                () => FieldRow("Preview panel", Seg(
+                    ("Off", _draft.Preview == PreviewMode.Off, () => SetDraft(() => _draft.Preview = PreviewMode.Off)),
+                    ("Side", _draft.Preview == PreviewMode.Normal, () => SetDraft(() => _draft.Preview = PreviewMode.Normal)),
+                    ("Full", _draft.Preview == PreviewMode.Full, () => SetDraft(() => _draft.Preview = PreviewMode.Full))))),
+            new(1, "Directories first", "folders sort order",
+                () => ToggleRow(_draft.DirsFirst, "Directories first", () => Flip(ref _draft.DirsFirst))),
+            new(1, "Show hidden and system files", "dotfiles",
+                () => ToggleRow(_draft.ShowHidden, "Show hidden and system files", () => Flip(ref _draft.ShowHidden))),
+            // Tools
+            new(3, "Diff tool", "compare vscode junction builtin",
+                () => FieldRow("Diff tool", Seg(
+                    ("Built-in", _draft.DiffTool == DiffToolKind.Builtin, () => SetDraft(() => _draft.DiffTool = DiffToolKind.Builtin)),
+                    ("VS Code", _draft.DiffTool == DiffToolKind.VSCode, () => SetDraft(() => _draft.DiffTool = DiffToolKind.VSCode)),
+                    ("Junction", _draft.DiffTool == DiffToolKind.Junction, () => SetDraft(() => _draft.DiffTool = DiffToolKind.Junction))))),
+            new(3, "Editor", "external text",
+                () => FieldRow("Editor", ReadonlyField(_draft.Editor))),
+            new(3, "Image editor", "external",
+                () => FieldRow("Image editor", ReadonlyField(_draft.ImageEditor))),
+            new(3, "Terminal", "external shell console",
+                () => FieldRow("Terminal", ReadonlyField(_draft.Terminal))),
+            new(3, "Git client", "external version control",
+                () => FieldRow("Git client", ReadonlyField(_draft.GitClient.Length > 0 ? _draft.GitClient : "— not set —"))),
+            new(3, "Archiver", "zip 7-zip compression",
+                () => FieldRow("Archiver", Seg(
+                    ("Built-in zip", _draft.Archiver == ArchiverKind.Builtin, () => SetDraft(() => _draft.Archiver = ArchiverKind.Builtin)),
+                    ("7-Zip", _draft.Archiver == ArchiverKind.SevenZip, () => SetDraft(() => _draft.Archiver = ArchiverKind.SevenZip))))),
+            new(3, "7-Zip path", "archiver external",
+                () => FieldRow("7-Zip path", ReadonlyField(_draft.SevenZipPath.Length > 0 ? _draft.SevenZipPath : "— using PATH —"))),
+            // Colors
+            new(4, "Accent color", "theme swatch palette",
+                () => FieldRow("Accent", AccentRow())),
+            new(4, "Glow on the active pane border", "highlight ring",
+                () => ToggleRow(_draft.Glow, "Glow on the active pane border", () => Flip(ref _draft.Glow))),
+            new(4, "Alternating row tint", "zebra stripes",
+                () => ToggleRow(_draft.Zebra, "Alternating row tint", () => Flip(ref _draft.Zebra))),
+        };
+        // Keyboard: one searchable row per rebindable command.
+        foreach (var (cmd, label) in Keybindings.Order)
+            c.Add(new OptRow(2, label, "shortcut keybinding hotkey key", () => KeyBindRow(cmd, label)));
+        return c;
     }
 
     private void OptionsPage(BoxElement page)
@@ -150,24 +293,7 @@ public partial class CommanderApp
         var list = ScrollView.Vertical().MaxHeight(340);
         var col = Flex.Column(gap: 0);
         foreach (var (cmd, label) in Keybindings.Order)
-        {
-            bool capturing = _rebindCmd == cmd;
-            var row = Grid.Of("1fr auto").Height(28).AlignItems(AlignItems.Center)
-                .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(5f).Cursor(CursorType.Pointer);
-            row.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.Text).GridCell(0, 0));
-
-            BoxElement chip = capturing
-                ? Box.New().Padding(new Thickness(1, 6, 2, 6)).CornerRadius(4f)
-                    .Background(Nocturne.Accent900).BorderColor(Nocturne.Accent).BorderWidth(1f)
-                    .Children(Ui.Mono("press keys…", 10f, Nocturne.Accent200))
-                : Ui.Kbd(Keybindings.Format(CurrentChord(cmd, _draft)));
-            row.AddChild(chip.GridCell(0, 1));
-
-            var target = cmd;
-            row.OnClick(_ => { _rebindCmd = target; MarkDirty(); });
-            if (!capturing) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
-            col.AddChild(row);
-        }
+            col.AddChild(KeyBindRow(cmd, label));
         list.AddChild(col);
         page.AddChild(list);
 
@@ -183,6 +309,27 @@ public partial class CommanderApp
             footer.AddChild(reset.HoverBg(Nocturne.Neutral900, Color.Transparent));
         }
         page.AddChild(footer);
+    }
+
+    /// <summary>One rebindable-command row: label + current chord (or a capture chip while
+    /// this command is being rebound). Shared by the Keyboard page and settings search.</summary>
+    private Element KeyBindRow(Cmd cmd, string label)
+    {
+        bool capturing = _rebindCmd == cmd;
+        var row = Grid.Of("1fr auto").Height(28).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(5f).Cursor(CursorType.Pointer);
+        row.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.Text).GridCell(0, 0));
+
+        BoxElement chip = capturing
+            ? Box.New().Padding(new Thickness(1, 6, 2, 6)).CornerRadius(4f)
+                .Background(Nocturne.Accent900).BorderColor(Nocturne.Accent).BorderWidth(1f)
+                .Children(Ui.Mono("press keys…", 10f, Nocturne.Accent200))
+            : Ui.Kbd(Keybindings.Format(CurrentChord(cmd, _draft)));
+        row.AddChild(chip.GridCell(0, 1));
+
+        row.OnClick(_ => { _rebindCmd = cmd; MarkDirty(); });
+        if (!capturing) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        return row;
     }
 
     private void ToolsPage(BoxElement page)
@@ -209,14 +356,7 @@ public partial class CommanderApp
     private void ColorsPage(BoxElement page)
     {
         page.AddChild(SectionHeader("Colors", "Marked files stay red — the one convention we don't make configurable."));
-        var accents = Flex.Row(gap: 8);
-        for (int i = 0; i < AccentPalette.Length; i++)
-        {
-            int idx = i;
-            accents.AddChild(Swatch(Color.FromHex(AccentPalette[i]), _draft.Accent == i,
-                () => SetDraft(() => _draft.Accent = idx)));
-        }
-        page.AddChild(FieldRow("Accent", accents));
+        page.AddChild(FieldRow("Accent", AccentRow()));
         page.AddChild(FieldRow("Marked files", SwatchStatic(Nocturne.MarkRed, "fixed")));
         page.AddChild(FieldRow("Directory names", SwatchStatic(Nocturne.Accent200, "accent-200")));
         page.AddChild(Divider());
@@ -224,6 +364,18 @@ public partial class CommanderApp
         toggles.AddChild(ToggleRow(_draft.Glow, "Glow on the active pane border", () => Flip(ref _draft.Glow)));
         toggles.AddChild(ToggleRow(_draft.Zebra, "Alternating row tint", () => Flip(ref _draft.Zebra)));
         page.AddChild(toggles);
+    }
+
+    private Element AccentRow()
+    {
+        var accents = Flex.Row(gap: 8);
+        for (int i = 0; i < AccentPalette.Length; i++)
+        {
+            int idx = i;
+            accents.AddChild(Swatch(Color.FromHex(AccentPalette[i]), _draft.Accent == i,
+                () => SetDraft(() => _draft.Accent = idx)));
+        }
+        return accents;
     }
 
     // ── Reusable controls ────────────────────────────────────────────────
