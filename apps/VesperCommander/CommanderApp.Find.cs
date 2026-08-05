@@ -18,13 +18,16 @@ public partial class CommanderApp
     private string _findPattern = "";
     private string _findContains = "";
     private bool _findRecursive, _findMatchCase, _findRegex, _findHidden;
-    private readonly List<FindEngine.Hit> _findResults = new();
+    private readonly List<FindEngine.Hit> _findResults = new();   // main-thread only
+    private readonly System.Collections.Concurrent.ConcurrentQueue<FindEngine.Hit> _findIncoming = new();
+    private long _lastFindRepaint;
     private int _findSel;
     private int _findScanned, _findApproxTotal, _findDenied;
     private bool _findSearching;
     private System.Threading.CancellationTokenSource? _findCts;
     private bool _pendingFindFocus;
     private readonly Ref<TextInputElement> _findPatternRef = new();
+    private readonly Ref<VirtualListElement<FindEngine.Hit>> _findVList = new();
 
     private const int FindResultCap = 2000;
 
@@ -57,12 +60,14 @@ public partial class CommanderApp
         _findSearching = false;
     }
 
-    /// <summary>(Re)start the search from the current inputs. Cancels any running search;
-    /// streams hits + progress back on the UI thread. Empty query ⇒ idle (no results).</summary>
+    /// <summary>(Re)start the search from the current inputs. Cancels any running search.
+    /// The walk runs off-thread; hits queue lock-free and a throttled repaint drains them,
+    /// so a big recursive search never floods the UI thread. Empty query ⇒ idle.</summary>
     private void RunFind()
     {
         StopFind();
         _findResults.Clear();
+        _findIncoming.Clear();
         _findSel = 0; _findScanned = 0; _findApproxTotal = 0; _findDenied = 0;
         if (_findPattern.Length == 0 && _findContains.Length == 0) { MarkDirty(); return; }
 
@@ -74,24 +79,37 @@ public partial class CommanderApp
             _findRecursive, _findMatchCase, _findRegex, _findHidden);
         string root = Dir(_findSide);
 
+        // Callbacks run on the walker thread. We do NOT marshal + MarkDirty per hit (that
+        // rebuilds the whole result list every time and saturates the UI thread on a large
+        // recursive search). Instead hits enqueue lock-free and FindRepaint coalesces the
+        // UI refresh to ≤ ~12/s; DrainFindResults moves them onto the list during Build.
         var task = FindEngine.Run(root, opts,
-            onHit: h => Application.InvokeOnMainThread(() =>
-            {
-                if (_findCts == cts && _findResults.Count < FindResultCap) { _findResults.Add(h); MarkDirty(); }
-            }),
-            onProgress: (s, t) => Application.InvokeOnMainThread(() =>
-            {
-                if (_findCts == cts) { _findScanned = s; _findApproxTotal = t; MarkDirty(); }
-            }),
-            onDenied: _ => Application.InvokeOnMainThread(() =>
-            {
-                if (_findCts == cts) { _findDenied++; MarkDirty(); }
-            }),
+            onHit: h => { if (!cts.IsCancellationRequested) { _findIncoming.Enqueue(h); FindRepaint(); } },
+            onProgress: (s, t) => { if (!cts.IsCancellationRequested) { _findScanned = s; _findApproxTotal = t; FindRepaint(); } },
+            onDenied: _ => { if (!cts.IsCancellationRequested) { System.Threading.Interlocked.Increment(ref _findDenied); FindRepaint(); } },
             cts.Token);
         task.ContinueWith(_ => Application.InvokeOnMainThread(() =>
         {
-            if (_findCts == cts) { _findSearching = false; MarkDirty(); }
+            if (_findCts == cts) { _findSearching = false; MarkDirty(); }   // final refresh drains the tail
         }));
+    }
+
+    /// <summary>Coalesced repaint request from the walker thread — at most one queued
+    /// MarkDirty per ~80 ms, regardless of how fast hits arrive.</summary>
+    private void FindRepaint()
+    {
+        var now = Environment.TickCount64;
+        if (now - _lastFindRepaint < 80) return;
+        _lastFindRepaint = now;
+        Application.InvokeOnMainThread(MarkDirty);
+    }
+
+    /// <summary>Move queued hits onto the (main-thread-only) results list, honoring the cap.
+    /// Called from Build so the list reflects the walk without per-hit marshalling.</summary>
+    private void DrainFindResults()
+    {
+        while (_findResults.Count < FindResultCap && _findIncoming.TryDequeue(out var h))
+            _findResults.Add(h);
     }
 
     private void JumpFindResult(char side)
@@ -136,6 +154,7 @@ public partial class CommanderApp
     // ── Find overlay ─────────────────────────────────────────────────────
     private Element BuildFind()
     {
+        DrainFindResults();   // pull queued hits onto the list before rendering
         var card = Card(560, "Find files", Dir(_findSide));
 
         // Pattern + optional "containing text" inputs.
@@ -223,13 +242,28 @@ public partial class CommanderApp
             return empty;
         }
 
-        // Results (streaming or settled).
-        var scroll = ScrollView.Vertical().MaxHeight(360).Padding(new Thickness(6, 6, 6, 6));
-        var col = Flex.Column(gap: 0);
-        for (int i = 0; i < _findResults.Count; i++)
-            col.AddChild(FindResultRow(_findResults[i], i == _findSel));
-        scroll.AddChild(col);
-        return scroll;
+        // Results. Small sets render inline (grow-to-content); large sets virtualize so a
+        // recursive search with thousands of hits only realizes the visible rows.
+        const int InlineMax = 60;
+        if (_findResults.Count <= InlineMax)
+        {
+            var scroll = ScrollView.Vertical().MaxHeight(360).Padding(new Thickness(6, 6, 6, 6));
+            var col = Flex.Column(gap: 0);
+            for (int i = 0; i < _findResults.Count; i++)
+                col.AddChild(FindResultRow(_findResults[i], i == _findSel));
+            scroll.AddChild(col);
+            return scroll;
+        }
+
+        // Fresh snapshot each build so the VirtualList re-realizes visible rows against
+        // current state (the reference-equality gotcha).
+        return VirtualListElement<FindEngine.Hit>.New()
+            .ItemHeight((int)RowHeight)
+            .Items(_findResults.ToList())
+            .RenderWith(h => FindResultRow(h, _findResults.IndexOf(h) == _findSel))
+            .WithRef(_findVList)
+            .Height(360)
+            .Padding(new Thickness(6, 6, 6, 6));
     }
 
     private Element FindResultRow(FindEngine.Hit h, bool selected)
