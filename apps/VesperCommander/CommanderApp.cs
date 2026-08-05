@@ -779,14 +779,25 @@ public partial class CommanderApp : Component, IDisposable
         }
     }
 
-    /// <summary>Map a KeyDown to the search character it contributes, or '\0' if it
-    /// isn't a word character (letters, digits, and a few common name punctuation).</summary>
-    private static char SearchChar(KeyCode key) => key switch
+    /// <summary>Map a KeyDown (with its Shift state) to the character it contributes to the
+    /// incremental search, or '\0' when the key isn't a printable name character. Symbols use
+    /// the US-QWERTY shifted layout — the same assumption the fixed-symbol shortcuts already
+    /// make — so Shift+8 types '*' (a wildcard) rather than '8'.</summary>
+    internal static char SearchChar(KeyCode key, bool shift) => key switch
     {
         >= KeyCode.A and <= KeyCode.Z => (char)('a' + (key - KeyCode.A)),
-        >= KeyCode.Digit0 and <= KeyCode.Digit9 => (char)('0' + (key - KeyCode.Digit0)),
-        KeyCode.Period => '.',
-        KeyCode.Minus => '-',
+        >= KeyCode.Digit0 and <= KeyCode.Digit9 => shift ? ")!@#$%^&*("[key - KeyCode.Digit0] : (char)('0' + (key - KeyCode.Digit0)),
+        KeyCode.Period => shift ? '>' : '.',
+        KeyCode.Comma => shift ? '<' : ',',
+        KeyCode.Minus => shift ? '_' : '-',
+        KeyCode.Equals => shift ? '+' : '=',
+        KeyCode.Slash => shift ? '?' : '/',
+        KeyCode.Backslash => shift ? '|' : '\\',
+        KeyCode.Semicolon => shift ? ':' : ';',
+        KeyCode.Quote => shift ? '"' : '\'',
+        KeyCode.BracketLeft => shift ? '{' : '[',
+        KeyCode.BracketRight => shift ? '}' : ']',
+        KeyCode.Backtick => shift ? '~' : '`',
         _ => '\0',
     };
 
@@ -1744,7 +1755,7 @@ public partial class CommanderApp : Component, IDisposable
         // search (no Ctrl/Alt, so it doesn't swallow shortcuts added later).
         if (!ctrl && !alt)
         {
-            char ch = SearchChar(e.Key);
+            char ch = SearchChar(e.Key, e.Modifiers.HasFlag(KeyModifiers.Shift));
             if (ch != '\0') { ExtendSearch(side, ch); e.StopPropagation = true; }
         }
     }
