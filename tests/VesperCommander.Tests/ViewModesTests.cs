@@ -7,18 +7,18 @@ public class ViewModesTests
 {
     // ── Brief grid math ──────────────────────────────────────────────────
     [Fact]
-    public void BriefGrid_StretchesColumnsWhenTheyFit()
+    public void BriefGrid_FixedColumnsThatFitDoNotScroll()
     {
-        // 41 items, 28 rows fit the height → 2 columns; both fit 600px → stretched, no scroll.
+        // 41 items, 28 rows fit the height → 2 columns; both fit 600px (3 fit) → no scroll.
         var (rows, cols, colW, overflow) = CommanderApp.BriefGrid(41, availW: 600, availH: 680, rowH: 24);
         Assert.Equal(28, rows);
         Assert.Equal(2, cols);
         Assert.False(overflow);
-        Assert.Equal(300f, colW, 3);
+        Assert.Equal(186f, colW);   // fixed width, left-packed
     }
 
     [Fact]
-    public void BriefGrid_FixedWidthAndScrollWhenColumnsOverflow()
+    public void BriefGrid_ScrollsWhenColumnsOverflow()
     {
         // 100 items, 10 rows per column → 10 columns; only ~2 fit 400px → overflow, fixed 186.
         var (rows, cols, colW, overflow) = CommanderApp.BriefGrid(100, availW: 400, availH: 240, rowH: 24);

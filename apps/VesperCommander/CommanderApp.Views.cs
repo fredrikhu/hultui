@@ -20,14 +20,14 @@ public partial class CommanderApp
     /// <summary>Brief grid geometry: rows per column (the height fills before wrapping),
     /// total columns, the column width (186px fixed once columns overflow the pane, else
     /// stretched to fill), and whether the pane scrolls horizontally.</summary>
+    internal const float BriefColWidth = 186f;
     internal static (int rows, int cols, float colW, bool overflow) BriefGrid(int count, float availW, float availH, float rowH)
     {
         int rows = Math.Max(1, (int)(availH / rowH));
         int cols = Math.Max(1, (count + rows - 1) / rows);
-        int maxFit = Math.Max(1, (int)(availW / 186f));
-        bool overflow = cols > maxFit;
-        float colW = overflow ? 186f : availW / cols;
-        return (rows, cols, colW, overflow);
+        int maxFit = Math.Max(1, (int)(availW / BriefColWidth));
+        // Fixed-width columns, left-packed (Total Commander style); overflow scrolls horizontally.
+        return (rows, cols, BriefColWidth, cols > maxFit);
     }
 
     /// <summary>Thumbnail tiles that fit across the pane width, at least one.</summary>
@@ -267,10 +267,16 @@ public partial class CommanderApp
         var marks = Marks(side);
         float rowH = RowHeight;
 
+        // Both dimensions come from the window geometry, never from the ScrollView's own box:
+        // a horizontal ScrollView shrink-wraps its height to its content, so reading its height
+        // back would collapse rowsPerCol to 1 (items would spread across single-item columns);
+        // reading the pane height back is equally circular (it reflects the collapsed state).
+        // The window height minus the fixed chrome (title bar + tab strip + breadcrumb + footer)
+        // is a stable input that can't feed the loop.
         var sv = BriefScroll(side).Current;
-        float availH = sv?.Layout.AbsoluteContentBox.Height ?? (_window.LayoutHeight > 0 ? _window.LayoutHeight - 150f : 620f);
-        float availW = sv?.Layout.AbsoluteContentBox.Width ?? PaneContentWidthEstimate();
-        if (availH < rowH) availH = rowH;
+        float availH = Math.Max(rowH, (_window.LayoutHeight > 0 ? _window.LayoutHeight : 820f) - BriefChromeHeight);
+        float paneW = PaneContentWidthEstimate();
+        float availW = paneW;
 
         var (rows, totalCols, colW, overflow) = BriefGrid(n, availW, availH, rowH);
         int visCols = overflow ? Math.Max(1, (int)(availW / colW)) : totalCols;
@@ -302,12 +308,19 @@ public partial class CommanderApp
             content.AddChild(column);
         }
 
-        var scroll = ScrollView.Horizontal().WithRef(BriefScroll(side)).FlexGrow(1);
+        // Explicit width + height so the horizontal ScrollView can't shrink-wrap to content.
+        var scroll = ScrollView.Horizontal().WithRef(BriefScroll(side)).FlexShrink(0)
+            .Width(Dimension.Px(paneW)).Height(Dimension.Px(availH));
         scroll.Children(content);
         // Any scroll re-windows which columns realize on the next build.
         scroll.On<ScrollEvent>(_ => MarkDirty());
         return scroll;
     }
+
+    // Title bar + tab strip + breadcrumb + footer around the Brief list, subtracted from the
+    // window height to get the column-fill height. Approximate — a few px off just shifts the
+    // wrap point by one cell; kept a touch generous so the list never overflows the footer.
+    private const float BriefChromeHeight = 142f;
 
     private Element BriefCell(char side, FileEntry e, string? cursorName, bool marked)
     {
