@@ -46,6 +46,9 @@ public partial class CommanderApp
     /// <summary>Open the configured terminal at the active folder (palette / no-command).</summary>
     private void OpenTerminalHere() => FileOps.OpenTerminal(_settings.Terminal, Dir(_active));
 
+    /// <summary>Open the configured git client at the active folder (palette). No-op if unset.</summary>
+    private void OpenGitClientHere() => FileOps.OpenGitClient(_settings.GitClient, Dir(_active));
+
     private void HandleCommandKey(KeyDownEvent e)
     {
         switch (e.Key)

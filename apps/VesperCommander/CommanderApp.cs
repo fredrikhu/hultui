@@ -1140,6 +1140,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Compare files (diff)", "F3", () => OpenDiff(side)),
             new("Synchronize folders", "F9", OpenSync),
             new("Open terminal here", null, OpenTerminalHere),
+            new("Open in git client", null, OpenGitClientHere),
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),

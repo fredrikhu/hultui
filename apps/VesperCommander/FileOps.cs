@@ -119,6 +119,24 @@ public static class FileOps
         catch { /* best-effort */ }
     }
 
+    /// <summary>Open the configured git client at <paramref name="dir"/> (a command
+    /// template, <c>{dir}</c> substituted, launched with the folder as its working
+    /// directory). No-op when the template is blank. Best-effort.</summary>
+    public static void OpenGitClient(string template, string dir)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return;
+        var tokens = Tokenize(template);
+        if (tokens.Count == 0) return;
+        try
+        {
+            var psi = new ProcessStartInfo(tokens[0].Replace("{dir}", dir))
+            { UseShellExecute = true, WorkingDirectory = dir };
+            for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i].Replace("{dir}", dir));
+            Process.Start(psi);
+        }
+        catch { /* best-effort */ }
+    }
+
     /// <summary>Launch an external diff (e.g. <c>code --diff left right</c>) for the
     /// VS Code DiffTool option. Best-effort; failures are swallowed.</summary>
     public static void LaunchDiff(string exe, string left, string right)

@@ -181,6 +181,7 @@ public partial class CommanderApp
         page.AddChild(FieldRow("Editor", ReadonlyField(_draft.Editor)));
         page.AddChild(FieldRow("Image editor", ReadonlyField(_draft.ImageEditor)));
         page.AddChild(FieldRow("Terminal", ReadonlyField(_draft.Terminal)));
+        page.AddChild(FieldRow("Git client", ReadonlyField(_draft.GitClient.Length > 0 ? _draft.GitClient : "— not set —")));
         page.AddChild(FieldRow("Archiver", Seg(
             ("Built-in zip", _draft.Archiver == ArchiverKind.Builtin, () => SetDraft(() => _draft.Archiver = ArchiverKind.Builtin)),
             ("7-Zip", _draft.Archiver == ArchiverKind.SevenZip, () => SetDraft(() => _draft.Archiver = ArchiverKind.SevenZip)))));
