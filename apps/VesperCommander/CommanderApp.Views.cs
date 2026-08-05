@@ -24,8 +24,16 @@ public partial class CommanderApp
     private readonly float[] _briefColW = { 186f, 186f };
     private readonly Ref<ScrollViewElement> _briefScrollL = new(), _briefScrollR = new();
     private Ref<ScrollViewElement> BriefScroll(char side) => side == 'L' ? _briefScrollL : _briefScrollR;
+    private readonly Ref<VirtualListElement<int>> _thumbVListL = new(), _thumbVListR = new();
+    private Ref<VirtualListElement<int>> ThumbVList(char side) => side == 'L' ? _thumbVListL : _thumbVListR;
 
     private const float ViewToggleWidth = 88f;   // reserved so breadcrumbs truncate first
+
+    // Tile / grid geometry, per density (design §D). tileH = pad 4 + image + gap 4 + name + pad 4.
+    private readonly record struct ThumbM(float TileW, float TileH, float ImgW, float ImgH, float Icon, int NameLines, float Gap);
+    private ThumbM ThumbMetrics() => _settings.Density == Density.Compact
+        ? new ThumbM(TileW: 84, TileH: 82, ImgW: 76, ImgH: 56, Icon: 24, NameLines: 1, Gap: 7)
+        : new ThumbM(TileW: 100, TileH: 110, ImgW: 92, ImgH: 70, Icon: 30, NameLines: 2, Gap: 8);
 
     private Element BuildViewArea(char side, IReadOnlyList<FileEntry> list, bool active) => ViewOf(side) switch
     {
@@ -34,9 +42,122 @@ public partial class CommanderApp
         _ => BuildList(side, list, active),
     };
 
-    // P1 stub — replaced by the real tile grid in P2. Thumbnails render as Detail for now.
-    private Element BuildThumbs(char side, IReadOnlyList<FileEntry> list, bool active) =>
-        BuildList(side, list, active);
+    // ── Thumbnail grid (§D) ──────────────────────────────────────────────
+    // A wrap grid of fixed tiles. Items are chunked into rows-of-tiles and driven through a
+    // VirtualListElement<int> (one entry per grid row) so large folders virtualize for free —
+    // only the on-screen rows realize, so only their tiles request thumbnails (P3).
+    private Element BuildThumbs(char side, IReadOnlyList<FileEntry> list, bool active)
+    {
+        var m = ThumbMetrics();
+        int n = list.Count;
+        int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, n - 1));
+        string? cursorName = active && n > 0 ? list[cur].Name : null;
+        var marks = Marks(side);
+
+        var tv = ThumbVList(side).Current;
+        float availW = tv?.Layout.AbsoluteContentBox.Width ?? (PaneContentWidthEstimate() - 20f);
+        float availH = tv?.Layout.AbsoluteContentBox.Height ?? (_window.LayoutHeight > 0 ? _window.LayoutHeight - 160f : 600f);
+        int perRow = Math.Max(1, (int)((availW + m.Gap) / (m.TileW + m.Gap)));
+        float stride = m.TileH + m.Gap;
+        int visRows = Math.Max(1, (int)(availH / stride));
+        _thumbCols[Si(side)] = perRow;
+        _viewPage[Si(side)] = perRow * visRows;
+
+        int rowCount = (n + perRow - 1) / perRow;
+        var rows = new List<int>(rowCount);
+        for (int r = 0; r < rowCount; r++) rows.Add(r);
+
+        var grid = VirtualListElement<int>.New()
+            .ItemHeight((int)stride)
+            .Items(rows)   // fresh list reference each build → re-realizes visible rows
+            .RenderWith(r => ThumbRow(side, list, r * perRow, perRow, m, cursorName, marks))
+            .WithRef(ThumbVList(side))
+            .FlexGrow(1);
+        return Box.New().FlexGrow(1).Padding(new Thickness(10)).Children(grid);
+    }
+
+    private Element ThumbRow(char side, IReadOnlyList<FileEntry> list, int start, int perRow, ThumbM m,
+        string? cursorName, HashSet<string> marks)
+    {
+        var row = Flex.Row(gap: m.Gap).Height(m.TileH).AlignItems(AlignItems.FlexStart);
+        for (int k = 0; k < perRow; k++)
+        {
+            int i = start + k;
+            if (i >= list.Count) break;
+            var e = list[i];
+            row.AddChild(Tile(side, e, m, cursorName, marks.Contains(e.Name)));
+        }
+        return row;
+    }
+
+    private Element Tile(char side, FileEntry e, ThumbM m, string? cursorName, bool marked)
+    {
+        bool cursor = e.Name == cursorName;
+        bool cut = !marked && _cutPending.Contains(e.FullPath);
+        Color nameFg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
+        if (cut) nameFg = Nocturne.Alpha(nameFg, 0.45);
+        var kind = Icons.KindFor(e);
+        Color? tint = marked ? Nocturne.MarkRed : null;
+
+        var tile = Flex.Column(gap: 4).Width(m.TileW).Height(m.TileH).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(4)).CornerRadius(Nocturne.RadiusRow)
+            .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
+            .Cursor(CursorType.Default).Tooltip(e.Name);
+        if (cursor) tile.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
+
+        // Image area on a Neutral900 backing. P2 shows the kind icon (images use a dimmed
+        // image glyph as a placeholder); P3 swaps in the decoded thumbnail.
+        var area = Box.New().Width(m.ImgW).Height(m.ImgH).FlexShrink(0)
+            .CornerRadius(Nocturne.RadiusSm).Background(Nocturne.Neutral900)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
+        if (kind == IconKind.Image)
+        {
+            var ph = Icons.Draw(IconKind.Image, tint, m.Icon);
+            ph.Opacity = 0.4f;   // placeholder until the decode lands
+            area.AddChild(ph);
+        }
+        else
+        {
+            area.AddChild(Icons.Draw(kind, tint, m.Icon));
+        }
+        // Ext badge on non-image files (dirs / parent / images get none).
+        if (!e.IsDir && !e.IsParent && kind != IconKind.Image && ExtBadge(e) is { } badge)
+            area.AddChild(badge);
+        // Marked chip stays visible on bright thumbnails.
+        if (marked) area.AddChild(MarkChip());
+        tile.AddChild(area);
+
+        tile.AddChild(Ui.Mono(e.Name, 10.5f, nameFg).TextAlign(TextAlign.Center)
+            .MaxLines(m.NameLines).TextOverflow(TextOverflow.Ellipsis).Width(m.TileW - 8));
+
+        if (cut) tile.Opacity = 0.45f;                 // whole-tile ghost
+        else if (!cursor) tile.HoverBg(Nocturne.Alpha(Nocturne.Accent500, 0.06), Color.Transparent);
+        AttachEntryPointer(tile, side, e);
+        return tile;
+    }
+
+    private static Element? ExtBadge(FileEntry e)
+    {
+        string ext = ExtensionOf(e.Name).TrimStart('.').ToUpperInvariant();
+        if (ext.Length == 0) return null;
+        if (ext.Length > 4) ext = ext[..4];
+        var badge = Box.New().Padding(new Thickness(1, 3, 1, 3)).CornerRadius(3f)
+            .Background(Nocturne.Alpha(Nocturne.Neutral800, 0.88))
+            .Children(Ui.Mono(ext, 8.5f, Nocturne.Neutral300));
+        badge.Position.Type = PositionType.Absolute;
+        badge.Position.Right = Dimension.Px(3);
+        badge.Position.Bottom = Dimension.Px(3);
+        return badge;
+    }
+
+    private static Element MarkChip()
+    {
+        var chip = Box.New().Width(7).Height(7).CornerRadius(2f).Background(Nocturne.MarkRed);
+        chip.Position.Type = PositionType.Absolute;
+        chip.Position.Left = Dimension.Px(3);
+        chip.Position.Top = Dimension.Px(3);
+        return chip;
+    }
 
     // ── View-mode toggle (breadcrumb-row end) ────────────────────────────
     private Element ViewToggle(char side)
@@ -153,6 +274,17 @@ public partial class CommanderApp
         return cell;
     }
 
+    /// <summary>Keep the cursor's row in the vertical viewport (Thumbnails).</summary>
+    private void ScrollThumbToCursor(char side)
+    {
+        var tv = ThumbVList(side).Current;
+        if (tv == null) return;
+        var m = ThumbMetrics();
+        int perRow = Math.Max(1, _thumbCols[Si(side)]);
+        int rowIdx = Cursor(side) / perRow;
+        tv.ScrollRangeIntoView(rowIdx * (m.TileH + m.Gap), m.TileH + m.Gap);
+    }
+
     /// <summary>Keep the cursor's column in the horizontal viewport (Brief only).</summary>
     private void ScrollBriefToCursor(char side)
     {
@@ -171,15 +303,19 @@ public partial class CommanderApp
     // through to the default per-pane handler.
     private bool ViewNav(char side, KeyCode key)
     {
-        if (ViewOf(side) != ViewMode.Brief) return false;
-        int rows = Math.Max(1, _briefRows[Si(side)]);
+        var mode = ViewOf(side);
+        if (mode == ViewMode.Detail) return false;
         int page = Math.Max(1, _viewPage[Si(side)]);
+        // Brief: ↑↓ step one item (column-major), ←→ jump a whole column (rowsPerCol).
+        // Thumbnails: ←→ step one tile, ↑↓ jump a whole row (perRow).
+        int rowStep = mode == ViewMode.Brief ? 1 : Math.Max(1, _thumbCols[Si(side)]);
+        int colStep = mode == ViewMode.Brief ? Math.Max(1, _briefRows[Si(side)]) : 1;
         switch (key)
         {
-            case KeyCode.Up: MoveCursor(side, -1); return true;
-            case KeyCode.Down: MoveCursor(side, 1); return true;
-            case KeyCode.Left: MoveCursor(side, -rows); return true;      // one column left
-            case KeyCode.Right: MoveCursor(side, rows); return true;      // one column right
+            case KeyCode.Up: MoveCursor(side, -rowStep); return true;
+            case KeyCode.Down: MoveCursor(side, rowStep); return true;
+            case KeyCode.Left: MoveCursor(side, -colStep); return true;
+            case KeyCode.Right: MoveCursor(side, colStep); return true;
             case KeyCode.Home: MoveCursor(side, int.MinValue / 2); return true;
             case KeyCode.End: MoveCursor(side, int.MaxValue / 2); return true;
             case KeyCode.PageDown: MoveCursor(side, page); return true;

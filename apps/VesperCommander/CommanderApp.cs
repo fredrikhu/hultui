@@ -468,9 +468,9 @@ public partial class CommanderApp : Component, IDisposable
 
     private void ScrollCursorIntoView(char side)
     {
-        // Brief scrolls horizontally by column; Detail (and the Thumbnails' inner
-        // VirtualList) scroll vertically by fixed-height band math.
+        // Brief scrolls horizontally by column; Detail and Thumbnails scroll vertically.
         if (ViewOf(side) == ViewMode.Brief) { ScrollBriefToCursor(side); return; }
+        if (ViewOf(side) == ViewMode.Thumbnails) { ScrollThumbToCursor(side); return; }
         VList(side).Current?.ScrollRangeIntoView(Cursor(side) * RowHeight, RowHeight);
     }
 
