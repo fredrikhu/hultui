@@ -17,7 +17,7 @@ public partial class CommanderApp
     private char _findSide;
     private string _findPattern = "";
     private string _findContains = "";
-    private bool _findRecursive, _findMatchCase, _findRegex, _findHidden;
+    private bool _findRecursive, _findMatchCase, _findRegex, _findHidden, _findArchives;
     private readonly List<FindEngine.Hit> _findResults = new();   // main-thread only
     private readonly System.Collections.Concurrent.ConcurrentQueue<FindEngine.Hit> _findIncoming = new();
     private long _lastFindRepaint;
@@ -76,7 +76,7 @@ public partial class CommanderApp
         _findCts = cts;
         var opts = new FindEngine.Options(
             _findPattern, _findContains.Length > 0 ? _findContains : null,
-            _findRecursive, _findMatchCase, _findRegex, _findHidden);
+            _findRecursive, _findMatchCase, _findRegex, _findHidden, _findArchives, _sevenZip);
         string root = Dir(_findSide);
 
         // Callbacks run on the walker thread. We do NOT marshal + MarkDirty per hit (that
@@ -173,6 +173,7 @@ public partial class CommanderApp
         controls.AddChild(FindCheck("Match case", _findMatchCase, () => { _findMatchCase = !_findMatchCase; RunFind(); }));
         controls.AddChild(FindCheck("Regex", _findRegex, () => { _findRegex = !_findRegex; RunFind(); }));
         controls.AddChild(FindCheck("Hidden", _findHidden, () => { _findHidden = !_findHidden; RunFind(); }));
+        controls.AddChild(FindCheck("Archives", _findArchives, () => { _findArchives = !_findArchives; RunFind(); }));
         card.AddChild(controls);
 
         card.AddChild(BuildFindBody());
@@ -283,9 +284,21 @@ public partial class CommanderApp
         var name = Flex.Row(gap: 6).AlignItems(AlignItems.Center).FlexGrow(1).Overflow(Overflow.Hidden);
         name.AddChild(Ui.Mono(h.Name, 12f, h.IsDir ? Nocturne.DirText : Nocturne.Text)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
-        string parent = RelativeParent(h.ParentDir);
-        if (parent.Length > 0)
-            name.AddChild(Ui.Mono("· " + parent, 10.5f, Nocturne.On(0.42)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        // Archive member: "· archive.zip › internal" with the archive name amber.
+        if (ArchivePath.TryParse(h.ParentDir) is { } ap)
+        {
+            name.AddChild(Ui.Mono("· ", 10.5f, Nocturne.On(0.42)));
+            name.AddChild(Icons.Draw(IconKind.Archive, ArchiveAmber));
+            name.AddChild(Ui.Mono(System.IO.Path.GetFileName(ap.ArchiveFile)
+                + (ap.Internal.Length > 0 ? " › " + ap.Internal : ""), 10.5f, ArchiveAmber)
+                .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        }
+        else
+        {
+            string parent = RelativeParent(h.ParentDir);
+            if (parent.Length > 0)
+                name.AddChild(Ui.Mono("· " + parent, 10.5f, Nocturne.On(0.42)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        }
         if (h.ContentHits > 0)
             name.AddChild(Ui.Mono($"· {h.ContentHits} hit{(h.ContentHits == 1 ? "" : "s")}", 10.5f, Nocturne.Accent300));
         row.AddChild(name);
@@ -328,6 +341,9 @@ public partial class CommanderApp
         {
             footer.AddChild(Ui.Mono($"{_findResults.Count} match{(_findResults.Count == 1 ? "" : "es")}"
                 + (_findResults.Count >= FindResultCap ? " (capped)" : ""), 10.5f, Nocturne.On(0.55)));
+            int inArc = _findResults.Count(h => ArchivePath.InArchive(h.ParentDir));
+            if (inArc > 0)
+                footer.AddChild(Ui.Mono($" · {inArc} inside archives", 10.5f, ArchiveAmber));
             footer.AddChild(Box.New().FlexGrow(1));
             footer.AddChild(Ui.Kbd("↵")); footer.AddChild(Ui.Mono("jump", 10.5f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("Ctrl+↵")); footer.AddChild(Ui.Mono("other pane", 10.5f, Nocturne.On(0.45)));

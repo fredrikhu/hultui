@@ -187,6 +187,28 @@ public class ArchiveTests : IDisposable
     }
 
     [Fact]
+    public async Task Find_DescendsIntoArchivesWhenEnabled()
+    {
+        var hits = new List<FindEngine.Hit>();
+        var opts = new FindEngine.Options("*.png", null, Recursive: true, MatchCase: false,
+            Regex: false, Hidden: false, Archives: true, SevenZip: false);
+        await FindEngine.Run(_dir, opts, h => { lock (hits) hits.Add(h); }, (_, _) => { }, _ => { },
+            System.Threading.CancellationToken.None);
+        Assert.Contains(hits, h => h.Name == "palette.png" && ArchivePath.InArchive(h.ParentDir));
+    }
+
+    [Fact]
+    public async Task Find_SkipsArchivesWhenDisabled()
+    {
+        var hits = new List<FindEngine.Hit>();
+        var opts = new FindEngine.Options("palette.png", null, Recursive: true, MatchCase: false,
+            Regex: false, Hidden: false, Archives: false, SevenZip: false);
+        await FindEngine.Run(_dir, opts, h => { lock (hits) hits.Add(h); }, (_, _) => { }, _ => { },
+            System.Threading.CancellationToken.None);
+        Assert.DoesNotContain(hits, h => h.Name == "palette.png");   // it's only inside the archive
+    }
+
+    [Fact]
     public void Create_BuiltinZip_RoundTrips()
     {
         var src = Path.Combine(_dir, "note.txt");
