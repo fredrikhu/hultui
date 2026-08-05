@@ -95,6 +95,14 @@ public class RenameEngineTests
     }
 
     [Fact]
+    public void Conflict_TooLong() =>
+        Assert.Equal(RenameEngine.Status.TooLong, NewNameStatus("a.txt", new O(NameMask: new string('x', 300))));
+
+    [Fact]
+    public void ExtMask_TokenExpands() =>
+        Assert.Equal("a.001", NewName("a.txt", new O(NameMask: "[N]", ExtMask: "[C]")));
+
+    [Fact]
     public void MalformedRegex_ReportsErrorNoRows()
     {
         var p = RenameEngine.Build([("a.txt", @"C:\d\a.txt")], new O(Find: "([0-9", Regex: true));

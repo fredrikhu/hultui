@@ -25,6 +25,8 @@ public partial class CommanderApp
     private int _renActiveMask;                       // 0 = name, 1 = extension (for token insert)
     private string? _renRegexError;                   // set each build; reddens the Find field
     private RenameEngine.Preview? _renLastValid;      // held while the regex is malformed
+    private List<(RenameEngine.Row Row, string Error)>? _renFailures;   // partial-failure mode
+    private int _renSucceeded;                         // count applied so far (across retries)
     private readonly Ref<TextInputElement> _renNameRef = new();
     private readonly Ref<VirtualListElement<RenameEngine.Row>> _renVList = new();
     private bool _pendingRenameFocus;
@@ -49,6 +51,7 @@ public partial class CommanderApp
         _renCase = RenameEngine.CaseMode.AsIs;
         _renCounterStart = 1; _renCounterStep = 1; _renCounterDigits = 3;
         _renActiveMask = 0; _renLastValid = null;
+        _renFailures = null; _renSucceeded = 0;
         _renameOpen = true; _pendingRenameFocus = true;
         MarkDirty();
     }
@@ -58,7 +61,9 @@ public partial class CommanderApp
         switch (e.Key)
         {
             case KeyCode.Escape: CloseOverlays(); e.StopPropagation = true; break;
-            case KeyCode.Enter: CommitRename(); e.StopPropagation = true; break;
+            case KeyCode.Enter:
+                if (_renFailures != null) RetryRename(); else CommitRename();
+                e.StopPropagation = true; break;
         }
         // Other keys fall through to the focused mask / field.
     }
@@ -66,6 +71,7 @@ public partial class CommanderApp
     // ── Build ────────────────────────────────────────────────────────────
     private Element BuildRename()
     {
+        if (_renFailures != null) return BuildRenameFailure();
         var preview = RenameEngine.Build(_renameFiles, RenOptions());
         if (preview.RegexError == null) _renLastValid = preview;
         var shown = preview.RegexError != null ? (_renLastValid ?? preview) : preview;
@@ -398,9 +404,74 @@ public partial class CommanderApp
     {
         var p = RenameEngine.Build(_renameFiles, RenOptions());
         if (p.RegexError != null || p.Conflicts > 0 || p.WillRename == 0) return;   // gated
-        RenameEngine.Apply(p.Rows);   // partial-failure handling arrives in P4
-        _renameOpen = false;
-        BumpGen(_renameSide);          // refresh the pane
+        ApplyAndSettle(p.Rows);
+    }
+
+    private void RetryRename()
+    {
+        if (_renFailures is not { } fails) return;
+        ApplyAndSettle(fails.Select(f => f.Row).ToList());
+    }
+
+    /// <summary>Run a set of Ok rows through the engine. Full success closes with a status
+    /// line; a partial failure keeps the dialog open in failure mode (banner + failed rows +
+    /// Retry). Completed renames are never rolled back.</summary>
+    private void ApplyAndSettle(IReadOnlyList<RenameEngine.Row> rows)
+    {
+        var results = RenameEngine.Apply(rows);
+        _renSucceeded += results.Count(r => r.Error == null);
+        BumpGen(_renameSide);   // refresh the pane
+
+        var failed = results.Where(r => r.Error != null).Select(r => (r.Row, r.Error!)).ToList();
+        if (failed.Count == 0)
+        {
+            _notice = $"Renamed {_renSucceeded} file{(_renSucceeded == 1 ? "" : "s")}";
+            _renFailures = null; _renameOpen = false;
+        }
+        else _renFailures = failed;   // stay open, show what failed
         MarkDirty();
+    }
+
+    // ── Partial-failure view ─────────────────────────────────────────────
+    private Element BuildRenameFailure()
+    {
+        var fails = _renFailures!;
+        var card = DialogCard(760);
+        card.AddChild(RenameHeader());
+
+        var banner = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Padding(new Thickness(8, 14, 8, 14))
+            .Background(Nocturne.Alpha(Nocturne.MarkRed, 0.07))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
+        banner.AddChild(Ui.Icon("⚠", 12f, Nocturne.MarkRed));
+        banner.AddChild(Ui.Mono($"{_renSucceeded} renamed · {fails.Count} failed", 12f, Nocturne.Text));
+        banner.AddChild(Ui.Mono("— renamed files keep their new names", 11f, Nocturne.On(0.45)));
+        card.AddChild(banner);
+
+        var list = ScrollView.Vertical().MaxHeight(280);
+        var col = Flex.Column(gap: 0);
+        foreach (var (row, err) in fails)
+        {
+            var r = Grid.Of("1fr 16px 1.2fr 1.2fr", gap: 8).Height(24).AlignItems(AlignItems.Center)
+                .Padding(new Thickness(0, 14, 0, 14));
+            r.AddChild(Ui.Mono(row.OldName, 11.5f, Nocturne.On(0.55)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(0));
+            r.AddChild(Ui.Icon("→", 11f, Nocturne.Neutral600).GridColumn(1));
+            r.AddChild(Ui.Mono(row.NewName, 11.5f, Nocturne.Text).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(2));
+            r.AddChild(Ui.Mono(err, 10f, Nocturne.MarkRed).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(3));
+            col.AddChild(r);
+        }
+        list.AddChild(col);
+        card.AddChild(Box.New().Padding(new Thickness(8, 14, 8, 14)).Children(list));
+
+        var footer = DialogFooter();
+        footer.AddChild(Ui.Mono($"showing {fails.Count} failed", 10.5f, Nocturne.On(0.45)));
+        footer.AddChild(Box.New().FlexGrow(1));
+        footer.AddChild(GhostButton("Close", CloseOverlays));
+        var retry = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusSm)
+            .BorderColor(Nocturne.Accent).BorderWidth(1f)
+            .Children(Text.New($"Retry {fails.Count} failed").FontSize(12f).TextColor(Nocturne.Accent200));
+        retry.OnClick(_ => RetryRename());
+        footer.AddChild(retry.HoverBg(Nocturne.Alpha(Nocturne.Accent500, 0.10), Color.Transparent));
+        card.AddChild(footer);
+        return Backdrop(card, topAligned: true, topPad: 46f);
     }
 }
