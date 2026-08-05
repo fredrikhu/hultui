@@ -723,8 +723,14 @@ public partial class CommanderApp
             return row;
         }
 
+        // A transient notice (e.g. a locked-tab write block) takes the line briefly.
+        if (_notice != null)
+        {
+            row.AddChild(Ui.Icon("⚿", 12f, Nocturne.MarkRed));
+            row.AddChild(Ui.Mono(_notice, 11.5f, Nocturne.MarkRed));
+        }
         // A backgrounded transfer shows a compact indicator here.
-        if (_op is { } op && !_progressOpen)
+        else if (_op is { } op && !_progressOpen)
         {
             int pct = op.TotalBytes > 0 ? (int)(100 * op.TotalBytesDone / op.TotalBytes) : 0;
             row.AddChild(Ui.Mono($"▶ copying {pct}% · {op.Done}/{op.Items.Count}", 11.5f, Nocturne.Accent300));

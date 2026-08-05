@@ -70,6 +70,7 @@ public partial class CommanderApp : Component, IDisposable
     // Incremental "type to find" for the active pane: word characters extend it and
     // jump the cursor to the first prefix match; any nav/Enter/Tab/Escape clears it.
     private string _search = "";
+    private string? _notice;   // transient message shown in the command line (cleared on next key)
 
     // ── Overlays (at most one open) ──────────────────────────────────────
     // Drive picker: the pane it targets ('L'/'R'), plus the highlighted row.
@@ -683,6 +684,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (!Clipboard.TryGetFiles(out var paths, out bool cut) || paths.Count == 0) return;
         char side = _active;
+        if (LockedBlock(side, "paste into a locked tab")) return;
         var dest = Dir(side);
         var items = new List<FileEntry>();
         foreach (var p in paths)
@@ -793,6 +795,16 @@ public partial class CommanderApp : Component, IDisposable
         return Marks(side).Count == 1 ? "1 item" : $"{Marks(side).Count} items";
     }
 
+    /// <summary>True (and posts a transient notice) when the given pane's active tab is
+    /// locked read-only — gates the write ops (delete/rename/new-folder/copy/move/paste).</summary>
+    private bool LockedBlock(char side, string action)
+    {
+        if (!ActiveTab(side).Locked) return false;
+        _notice = $"Tab is locked (read-only) — can't {action}";
+        MarkDirty();
+        return true;
+    }
+
     // ── Move (F6): synchronous confirm + transfer (moves are usually instant) ──
     private void StartMove()
     {
@@ -801,6 +813,7 @@ public partial class CommanderApp : Component, IDisposable
         if (items.Count == 0) return;
         var dest = Dir(other);
         if (PathEquals(dest, Dir(side))) return;
+        if (LockedBlock(side, "move out of a locked tab") || LockedBlock(other, "move into a locked tab")) return;
 
         _confirm = new ConfirmSpec(
             $"Move {(items.Count == 1 ? "item" : "items")}",
@@ -827,6 +840,7 @@ public partial class CommanderApp : Component, IDisposable
         var dest = Dir(other);
         if (PathEquals(dest, Dir(side))) return;
 
+        if (LockedBlock(other, "copy into a locked tab")) return;
         var op = new TransferOp(items) { IsMove = false, Source = side, DestDir = dest };
         _op = op;
         _progressOpen = true;
@@ -1022,6 +1036,7 @@ public partial class CommanderApp : Component, IDisposable
         char side = _active;
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
+        if (LockedBlock(side, "delete here")) return;
         // "Confirm before delete" off ⇒ act immediately.
         if (!_settings.ConfirmDelete) { DoDelete(side, items); return; }
         var dest = _settings.Recycle ? "\nItems are sent to the Recycle Bin." : "\nItems are permanently deleted.";
@@ -1259,6 +1274,7 @@ public partial class CommanderApp : Component, IDisposable
     private void OpenNewFolderPrompt(char side)
     {
         _active = side;
+        if (LockedBlock(side, "create a folder here")) return;
         _namePromptValue = "";
         _namePromptError = null;
         _namePrompt = new NamePromptSpec("New folder", Dir(side), "Create",
@@ -1275,6 +1291,7 @@ public partial class CommanderApp : Component, IDisposable
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
         if (e.IsParent) return;                    // never rename ".."
+        if (LockedBlock(side, "rename here")) return;
         _active = side;
         _namePromptValue = e.Name;
         _namePromptError = null;
@@ -1494,6 +1511,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
+        if (_notice != null) { _notice = null; MarkDirty(); }   // transient — clears on the next key
 
         // Modal overlays own the keyboard while open. The palette keeps its query
         // field focused, so its handler consumes only nav/Enter/Escape and lets text
