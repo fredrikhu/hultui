@@ -198,6 +198,23 @@ public class ArchiveTests : IDisposable
     }
 
     [Fact]
+    public async Task Find_ContentSearchInsideArchive()
+    {
+        var hits = new List<FindEngine.Hit>();
+        // "archive" appears in readme.txt's content ("hello archive"); the pattern matches every
+        // name, so this exercises content-grep of members — and that a name-matched archive
+        // isn't walked twice (the member is found exactly once).
+        var opts = new FindEngine.Options("*", "archive", Recursive: true, MatchCase: false,
+            Regex: false, Hidden: false, Archives: true, SevenZip: false);
+        await FindEngine.Run(_dir, opts, h => { lock (hits) hits.Add(h); }, (_, _) => { }, _ => { },
+            System.Threading.CancellationToken.None);
+        var readme = hits.Where(h => h.Name == "readme.txt").ToList();
+        Assert.Single(readme);
+        Assert.True(readme[0].ContentHits >= 1);
+        Assert.DoesNotContain(hits, h => h.Name == "palette.png");   // "PNGDATA" has no "archive"
+    }
+
+    [Fact]
     public async Task Find_SkipsArchivesWhenDisabled()
     {
         var hits = new List<FindEngine.Hit>();

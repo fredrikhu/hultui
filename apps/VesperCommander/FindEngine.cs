@@ -55,14 +55,44 @@ public static class FindEngine
         {
             var info = new FileInfo(path);
             if (info.Length == 0 || info.Length > MaxContentBytes) return 0;
-            byte[] bytes = File.ReadAllBytes(path);
-            int scan = Math.Min(bytes.Length, 8192);
-            for (int i = 0; i < scan; i++) if (bytes[i] == 0) return 0;   // binary
-            string text = Encoding.UTF8.GetString(bytes);
-            var cmp = o.MatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-            int count = 0, idx = 0;
-            while ((idx = text.IndexOf(o.ContainingText, idx, cmp)) >= 0) { count++; idx += o.ContainingText.Length; }
-            return count;
+            return CountHits(File.ReadAllBytes(path), o);
+        }
+        catch { return 0; }
+    }
+
+    /// <summary>Occurrences of the containing text in a byte buffer, or 0 when it's binary
+    /// (a NUL in the first 8 KB). Shared by the disk and archive-member paths.</summary>
+    private static int CountHits(byte[] bytes, Options o)
+    {
+        if (string.IsNullOrEmpty(o.ContainingText)) return 0;
+        int scan = Math.Min(bytes.Length, 8192);
+        for (int i = 0; i < scan; i++) if (bytes[i] == 0) return 0;   // binary
+        string text = Encoding.UTF8.GetString(bytes);
+        var cmp = o.MatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        int count = 0, idx = 0;
+        while ((idx = text.IndexOf(o.ContainingText, idx, cmp)) >= 0) { count++; idx += o.ContainingText.Length; }
+        return count;
+    }
+
+    /// <summary>Content-grep an archive member by reading its (bounded) bytes via
+    /// <see cref="ArchiveVfs.OpenEntry"/>. 0 when empty / oversized / binary / unreadable.</summary>
+    private static int ContentHitsInArchive(FileEntry e, Options o)
+    {
+        if (string.IsNullOrEmpty(o.ContainingText) || e.Size <= 0 || e.Size > MaxContentBytes) return 0;
+        if (ArchivePath.TryParse(e.FullPath) is not { } ap) return 0;
+        try
+        {
+            using var s = ArchiveVfs.OpenEntry(ap.ArchiveFile, ap.Internal, null, o.SevenZip);
+            if (s == null) return 0;
+            using var ms = new MemoryStream();
+            var buf = new byte[16 * 1024];
+            int r;
+            while ((r = s.Read(buf, 0, buf.Length)) > 0)
+            {
+                ms.Write(buf, 0, r);
+                if (ms.Length > MaxContentBytes) return 0;
+            }
+            return CountHits(ms.ToArray(), o);
         }
         catch { return 0; }
     }
@@ -115,18 +145,16 @@ public static class FindEngine
                     try { mtime = info.LastWriteTime; if (!isDir && info is FileInfo fi) size = fi.Length; } catch { }
                     onHit(new Hit(info.FullName, info.Name, isDir, size, mtime,
                         Path.GetDirectoryName(info.FullName) ?? "", hits));
-
-                    // Descend into an archive file's members when the option is on.
-                    if (o.Archives && !isDir && ArchiveVfs.IsArchiveFile(info.FullName))
-                        WalkArchive(info.FullName, "", o, onHit, ct);
+                    // (The archive descent above runs before the name check so it always fires
+                    // once — no second walk here, which would double-count a name-matched archive.)
                 }
                 onProgress(scanned, scanned + stack.Count);
             }
         }, ct);
     }
 
-    /// <summary>Match filenames of an archive's members (name-only — content search inside
-    /// archives is out of scope in v1). Encrypted / unreadable archives are skipped.</summary>
+    /// <summary>Match an archive's members by name and, when a "containing text" is set, by
+    /// extracted content. Encrypted / unreadable archives are skipped.</summary>
     private static void WalkArchive(string archiveFile, string internalPath, Options o,
         Action<Hit> onHit, CancellationToken ct)
     {
@@ -140,10 +168,15 @@ public static class FindEngine
                 if (ArchivePath.TryParse(e.FullPath) is { } ap) WalkArchive(ap.ArchiveFile, ap.Internal, o, onHit, ct);
                 continue;
             }
-            if (!string.IsNullOrEmpty(o.ContainingText)) continue;   // no content search inside archives (v1)
             if (!NameMatches(e.Name, o)) continue;
+            int hits = 0;
+            if (!string.IsNullOrEmpty(o.ContainingText))
+            {
+                hits = ContentHitsInArchive(e, o);
+                if (hits == 0) continue;
+            }
             onHit(new Hit(e.FullPath, e.Name, IsDir: false, e.Size, e.Modified,
-                Path.GetDirectoryName(e.FullPath) ?? "", ContentHits: 0));
+                Path.GetDirectoryName(e.FullPath) ?? "", hits));
         }
     }
 }
