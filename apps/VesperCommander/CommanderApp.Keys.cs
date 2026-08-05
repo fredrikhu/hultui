@@ -66,6 +66,9 @@ public partial class CommanderApp
             case Cmd.OpenInOther: NavigateTo(side == 'L' ? 'R' : 'L', Dir(side)); break;
             case Cmd.Extract: ExtractCursorArchive(); break;
             case Cmd.Pack: OpenPack(); break;
+            case Cmd.ViewDetail: SetView(side, ViewMode.Detail); break;
+            case Cmd.ViewBrief: SetView(side, ViewMode.Brief); break;
+            case Cmd.ViewThumbnails: SetView(side, ViewMode.Thumbnails); break;
         }
     }
 

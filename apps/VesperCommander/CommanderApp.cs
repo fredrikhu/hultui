@@ -50,6 +50,7 @@ public partial class CommanderApp : Component, IDisposable
         public string Dir = dir;
         public int Cursor;
         public bool Locked;
+        public ViewMode View = ViewMode.Detail;   // per-tab list layout, persisted per session
         public readonly HashSet<string> Marks = new(StringComparer.Ordinal);
         // Per-tab navigation history (most-recent last). Back holds folders left behind;
         // Fwd holds folders returned-from after a Back. A new forward navigation clears Fwd.
@@ -253,12 +254,14 @@ public partial class CommanderApp : Component, IDisposable
         bool restored = false;
         if (_settings.RestoreTabs && SessionStore.Load() is { } s)
         {
-            var left = s.Left.Where(Directory.Exists).ToList();
-            var right = s.Right.Where(Directory.Exists).ToList();
+            // Pair each dir with its saved view mode before filtering, so a dropped
+            // (no-longer-existing) folder doesn't misalign the remaining view indices.
+            var left = s.Left.Select((d, i) => (d, v: ViewAt(s.LeftViews, i))).Where(x => Directory.Exists(x.d)).ToList();
+            var right = s.Right.Select((d, i) => (d, v: ViewAt(s.RightViews, i))).Where(x => Directory.Exists(x.d)).ToList();
             if (left.Count > 0 && right.Count > 0)
             {
-                foreach (var d in left) _tabsL.Add(new PaneTab(d));
-                foreach (var d in right) _tabsR.Add(new PaneTab(d));
+                foreach (var (d, v) in left) _tabsL.Add(new PaneTab(d) { View = v });
+                foreach (var (d, v) in right) _tabsR.Add(new PaneTab(d) { View = v });
                 _tabL = Math.Clamp(s.LeftActive, 0, _tabsL.Count - 1);
                 _tabR = Math.Clamp(s.RightActive, 0, _tabsR.Count - 1);
                 restored = true;
@@ -266,8 +269,8 @@ public partial class CommanderApp : Component, IDisposable
         }
         if (!restored)
         {
-            _tabsL.Add(new PaneTab(startDir));
-            _tabsR.Add(new PaneTab(startDirRight ?? startDir));
+            _tabsL.Add(new PaneTab(startDir) { View = _settings.DefaultView });
+            _tabsR.Add(new PaneTab(startDirRight ?? startDir) { View = _settings.DefaultView });
         }
         InitBookmarks();
 
@@ -290,6 +293,15 @@ public partial class CommanderApp : Component, IDisposable
     private void SetCursor(char side, int value) => ActiveTab(side).Cursor = value;
     private HashSet<string> Marks(char side) => ActiveTab(side).Marks;
     private void BumpGen(char side) { if (side == 'L') _genL++; else _genR++; }
+
+    private ViewMode ViewOf(char side) => ActiveTab(side).View;
+    private void SetView(char side, ViewMode mode)
+    {
+        if (ActiveTab(side).View == mode) return;
+        ActiveTab(side).View = mode;
+        RequestScroll(side);
+        MarkDirty();
+    }
 
     private PaneState PaneStateOf(char side) =>
         (side == 'L' ? _forceStateL : _forceStateR) ?? Loader(side).Value.State;
@@ -456,7 +468,9 @@ public partial class CommanderApp : Component, IDisposable
 
     private void ScrollCursorIntoView(char side)
     {
-        // Fixed row height ⇒ band math, no per-row layout needed.
+        // Brief scrolls horizontally by column; Detail (and the Thumbnails' inner
+        // VirtualList) scroll vertically by fixed-height band math.
+        if (ViewOf(side) == ViewMode.Brief) { ScrollBriefToCursor(side); return; }
         VList(side).Current?.ScrollRangeIntoView(Cursor(side) * RowHeight, RowHeight);
     }
 
@@ -1452,7 +1466,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         int at = TabIndex(side) + 1;
-        tabs.Insert(at, new PaneTab(dir ?? Dir(side)));
+        tabs.Insert(at, new PaneTab(dir ?? Dir(side)) { View = _settings.DefaultView });
         _active = side;
         SetTabIndex(side, at);
         _search = "";
@@ -1487,7 +1501,9 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (index < 0 || index >= tabs.Count) return;
+        var srcView = tabs[index].View;
         NewTab(side, tabs[index].Dir);
+        ActiveTab(side).View = srcView;   // a duplicate keeps the source's view mode
     }
 
     /// <summary>Open the tab's folder as a new tab in the other pane.</summary>
@@ -1730,6 +1746,10 @@ public partial class CommanderApp : Component, IDisposable
         // Rebindable per-pane commands (bare / Shift chords) resolve through the keymap.
         if (MatchHotkey(e, wantGlobal: false, out var pcmd)) { Dispatch(pcmd); e.StopPropagation = true; return; }
 
+        // Brief / Thumbnail modes remap the arrow + paging keys (column / grid motion)
+        // before the Detail switch, so e.g. Left navigates instead of opening the command line.
+        if (ViewNav(side, e.Key)) { e.StopPropagation = true; return; }
+
         switch (e.Key)
         {
             case KeyCode.Tab:
@@ -1786,8 +1806,15 @@ public partial class CommanderApp : Component, IDisposable
         (_lastImage as IDisposable)?.Dispose();
     }
 
-    /// <summary>Persist the current tabs so "Restore tabs on start" can bring them back.</summary>
+    /// <summary>The view mode saved at index <paramref name="i"/> (or Detail when absent).</summary>
+    private static ViewMode ViewAt(List<int>? views, int i) =>
+        views != null && i < views.Count && Enum.IsDefined((ViewMode)views[i]) ? (ViewMode)views[i] : ViewMode.Detail;
+
+    /// <summary>Persist the current tabs (dirs + per-tab view mode) so "Restore tabs on
+    /// start" can bring them back exactly.</summary>
     private void SaveSession() => SessionStore.Save(new SessionData(
         _tabsL.Select(t => t.Dir).ToList(), _tabL,
-        _tabsR.Select(t => t.Dir).ToList(), _tabR));
+        _tabsR.Select(t => t.Dir).ToList(), _tabR,
+        _tabsL.Select(t => (int)t.View).ToList(),
+        _tabsR.Select(t => (int)t.View).ToList()));
 }

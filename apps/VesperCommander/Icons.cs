@@ -7,7 +7,7 @@ using SkiaSharp;
 
 namespace VesperCommander;
 
-public enum IconKind { Folder, Parent, File, Code, Image, Archive }
+public enum IconKind { Folder, Parent, File, Code, Image, Archive, ViewDetail, ViewBrief, ViewThumb }
 
 /// <summary>
 /// File-list icons rasterized from the design's inline-SVG glyphs. HultUI's canvas has no
@@ -35,11 +35,11 @@ public static class Icons
         };
     }
 
-    public static Element Draw(IconKind kind, Color? tint = null)
+    public static Element Draw(IconKind kind, Color? tint = null, float size = 16f)
     {
         var img = Image.New(Rasterize(kind, tint));
         img.Fit = ImageFit.Contain;
-        return img.Width(16).Height(16).FlexShrink(0);
+        return img.Width(size).Height(size).FlexShrink(0);
     }
 
     /// <summary>Drop cached bitmaps after the accent ramp changes (design colours read the
@@ -88,6 +88,13 @@ public static class Icons
 
     private static SKPath Svg(string d) => SKPath.ParseSvgPathData(d);
 
+    private static SKPath Rect(float x, float y, float w, float h, float r)
+    {
+        var p = new SKPath();
+        p.AddRoundRect(new SKRect(x, y, x + w, y + h), r, r);
+        return p;
+    }
+
     // The design's file-type glyphs (batch-1/2 handoff sprite). Colours read the live ramp.
     private static IEnumerable<(SKPath path, bool fill, float stroke, Color color)> Parts(IconKind kind)
     {
@@ -121,6 +128,28 @@ public static class Icons
             case IconKind.Archive:
                 yield return (Svg(page), false, 1.2f, Theme.Nocturne.Neutral600);
                 yield return (Svg("M7.6 2.5v3.6m1-1.8H7"), false, 1.1f, Theme.Nocturne.Neutral500);
+                break;
+
+            // View-mode toggle glyphs (rows / two columns / 2×2 grid). Filled rounded
+            // rects; the toggle passes a tint so idle/hover/active colours override these.
+            case IconKind.ViewDetail:
+                foreach (float y in new[] { 3f, 7f, 11f })
+                {
+                    yield return (Rect(2, y, 2, 2, 0.6f), true, 0, Theme.Nocturne.Neutral500);
+                    yield return (Rect(6, y, 8, 2, 1f), true, 0, Theme.Nocturne.Neutral500);
+                }
+                break;
+
+            case IconKind.ViewBrief:
+                foreach (float x in new[] { 2f, 9f })
+                    foreach (float y in new[] { 3f, 7f, 11f })
+                        yield return (Rect(x, y, 5, 2, 1f), true, 0, Theme.Nocturne.Neutral500);
+                break;
+
+            case IconKind.ViewThumb:
+                foreach (float x in new[] { 2f, 8.8f })
+                    foreach (float y in new[] { 2f, 8.8f })
+                        yield return (Rect(x, y, 5.2f, 5.2f, 1f), true, 0, Theme.Nocturne.Neutral500);
                 break;
 
             default: // File

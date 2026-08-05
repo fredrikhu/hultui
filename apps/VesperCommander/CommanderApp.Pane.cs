@@ -128,11 +128,13 @@ public partial class CommanderApp
         // pane ground; the header's bottom border is the only divider to the list.
         pane.AddChild(BuildTabStrip(side));
         pane.AddChild(BuildBreadcrumb(side, active));
-        pane.AddChild(BuildListHeader(InArchive(side)));
-        // Non-ok states replace the row list with a centered status block. An archive
-        // that couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message.
+        // The column header belongs to Detail only — Brief and Thumbnails have no columns.
+        if (ViewOf(side) == ViewMode.Detail)
+            pane.AddChild(BuildListHeader(InArchive(side)));
+        // Non-ok states replace the list with a centered status block. An archive that
+        // couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message.
         pane.AddChild(state == PaneState.Ok
-            ? BuildList(side, list, active)
+            ? BuildViewArea(side, list, active)
             : ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
                 ? BuildArchiveError(side, arcStatus)
                 : BuildStateBlock(side, state));
@@ -258,10 +260,10 @@ public partial class CommanderApp
         var dir = Dir(side);
         // Transparent, no border — groups with the header below it. Spacing is
         // uniform via the row gap alone (no per-separator margins), so every "/"
-        // sits the same distance from its neighbours.
-        var row = Flex.Row(gap: 3).FlexShrink(0).AlignItems(AlignItems.Center)
-            .FlexWrap(FlexWrap.NoWrap).Overflow(Overflow.Hidden)
-            .Padding(new Thickness(7, 12, 5, 12));
+        // sits the same distance from its neighbours. The crumb row grows; the view
+        // toggle is pinned flush-right (see the outer wrapper at the end).
+        var row = Flex.Row(gap: 3).FlexGrow(1).AlignItems(AlignItems.Center)
+            .FlexWrap(FlexWrap.NoWrap).Overflow(Overflow.Hidden);
 
         // Drive segment: monospace accent crumb → jumps the pane to the volume root.
         // Trim the trailing separator so the first "/" divider isn't doubled ("C:\ /").
@@ -320,7 +322,13 @@ public partial class CommanderApp
             row.AddChild(Sep());
             row.AddChild(Crumb(side, segs[i], prefixes[i], leaf: i == segs.Length - 1, archive: i == archIdx));
         }
-        return row;
+
+        // The crumb row + the pinned view toggle share the breadcrumb strip's padding.
+        var outer = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(7, 12, 5, 12));
+        outer.AddChild(row);
+        outer.AddChild(ViewToggle(side));
+        return outer;
     }
 
     private static Element Sep() =>
@@ -375,7 +383,7 @@ public partial class CommanderApp
         float paneW = _settings.Preview == PreviewMode.Normal
             ? (win - RailWidth - PreviewWidth - 2f) / 2f
             : (win - RailWidth - 1f) / 2f;
-        return paneW - 2f /*pane border*/ - 24f /*breadcrumb h-padding*/ - 6f;
+        return paneW - 2f /*pane border*/ - 24f /*breadcrumb h-padding*/ - 6f - ViewToggleWidth;
     }
 
     private static float EstTextWidth(string s, bool mono) =>
@@ -515,27 +523,11 @@ public partial class CommanderApp
         if (dateCol >= 0)
             row.AddChild(Ui.Mono(FileSystem.DateLabel(e), 11f, metaFg).GridColumn(dateCol));
 
-        // Select on left mouse-DOWN (not click), so the cursor tracks the press
-        // immediately — matches file-manager feel and makes press-and-act snappier.
-        row.On<PointerDownEvent>(ev =>
-        {
-            // Right button starts a mark-drag (no cursor move, no context menu here).
-            if (ev.Button == 2) { BeginRightMark(side, e); return; }
-            if (ev.Button != 0) return;
-            _active = side;
-            int idx = IndexOfName(Listing(side), e.Name);
-            if (idx >= 0) SetCursor(side, idx);
-            // Detect a double-press here rather than via DoubleClickEvent: selecting a
-            // row MarkDirty()s, and the VirtualList re-realizes rows with fresh element
-            // identities, so the framework's click synthesis (down-target == up-target
-            // by reference) never fires for recycled rows. Two presses on the same
-            // entry within the window activate it, like Enter.
-            if (IsDoublePress(side, e.Name)) ActivateCursor(side);
-            MarkDirty();
-        });
-        // While a right-drag is active, mark every row the pointer moves onto. Moves
-        // hit-test fresh each sample, so recycled rows still receive this.
-        row.On<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); });
+        // Select on left mouse-DOWN, double-press to open, right-drag to mark — shared
+        // with brief cells and thumbnail tiles. (Double-press rather than DoubleClickEvent
+        // because the VirtualList recycles rows with fresh identities between the presses,
+        // so the framework's down==up click synthesis never fires for a recycled row.)
+        AttachEntryPointer(row, side, e);
         return row;
     }
 

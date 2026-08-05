@@ -9,6 +9,7 @@ public enum SortMode { Name, Ext, Size, Date }
 public enum Density { Compact, Comfortable }
 public enum DiffToolKind { Builtin, VSCode, Junction }
 public enum ArchiverKind { Builtin, SevenZip }
+public enum ViewMode { Detail, Brief, Thumbnails }   // per-pane file-list layout
 
 /// <summary>User settings, edited in the Options window and persisted as JSON.
 /// Public fields (not properties) so the Options page can flip them by <c>ref</c>;
@@ -32,6 +33,7 @@ public sealed class Settings
     public bool DirsFirst = true;
     public bool ShowHidden;
     public PreviewMode Preview = PreviewMode.Normal;
+    public ViewMode DefaultView = ViewMode.Detail;   // new tabs/panes open in this mode
 
     // Tools
     public DiffToolKind DiffTool = DiffToolKind.Builtin;

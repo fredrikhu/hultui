@@ -189,6 +189,8 @@ public partial class CommanderApp
                     ("Off", _draft.Preview == PreviewMode.Off, () => SetDraft(() => _draft.Preview = PreviewMode.Off)),
                     ("Side", _draft.Preview == PreviewMode.Normal, () => SetDraft(() => _draft.Preview = PreviewMode.Normal)),
                     ("Full", _draft.Preview == PreviewMode.Full, () => SetDraft(() => _draft.Preview = PreviewMode.Full))))),
+            new(1, "Default view", "brief thumbnail grid detail mode layout",
+                () => FieldRow("Default view", DefaultViewSeg())),
             new(1, "Directories first", "folders sort order",
                 () => ToggleRow(_draft.DirsFirst, "Directories first", () => Flip(ref _draft.DirsFirst))),
             new(1, "Show hidden and system files", "dotfiles",
@@ -274,6 +276,7 @@ public partial class CommanderApp
         page.AddChild(FieldRow("Row density", Seg(
             ("Compact", _draft.Density == Density.Compact, () => SetDraft(() => _draft.Density = Density.Compact)),
             ("Comfortable", _draft.Density == Density.Comfortable, () => SetDraft(() => _draft.Density = Density.Comfortable)))));
+        page.AddChild(FieldRow("Default view", DefaultViewSeg()));
         page.AddChild(FieldRow("Preview width", Stepper(_draft.PreviewWidth, "px",
             () => SetDraft(() => _draft.PreviewWidth = Math.Max(220, _draft.PreviewWidth - 20)),
             () => SetDraft(() => _draft.PreviewWidth = Math.Min(460, _draft.PreviewWidth + 20)))));
@@ -365,6 +368,11 @@ public partial class CommanderApp
         toggles.AddChild(ToggleRow(_draft.Zebra, "Alternating row tint", () => Flip(ref _draft.Zebra)));
         page.AddChild(toggles);
     }
+
+    private Element DefaultViewSeg() => Seg(
+        ("Detail", _draft.DefaultView == ViewMode.Detail, () => SetDraft(() => _draft.DefaultView = ViewMode.Detail)),
+        ("Brief", _draft.DefaultView == ViewMode.Brief, () => SetDraft(() => _draft.DefaultView = ViewMode.Brief)),
+        ("Thumbnails", _draft.DefaultView == ViewMode.Thumbnails, () => SetDraft(() => _draft.DefaultView = ViewMode.Thumbnails)));
 
     private Element AccentRow()
     {

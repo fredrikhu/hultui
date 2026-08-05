@@ -11,6 +11,7 @@ public enum Cmd
     Copy, Move, Rename, Delete, NewFolder, Edit, Diff, Sync, Find, MeasureAll,
     Palette, Bookmarks, Options, NewTab, CloseTab, GoUpFolder, IntoFolder,
     Preview, Refresh, ToggleHidden, Swap, OpenInOther, Pack, Extract,
+    ViewDetail, ViewBrief, ViewThumbnails,
 }
 
 /// <summary>A key plus its modifiers — one per command.</summary>
@@ -47,6 +48,9 @@ public static class Keybindings
         [Cmd.OpenInOther] = new(KeyCode.Equals, false, false, false),
         [Cmd.Pack] = new(KeyCode.F5, false, true, false),       // Alt+F5
         [Cmd.Extract] = new(KeyCode.F9, false, true, false),    // Alt+F9
+        [Cmd.ViewDetail] = new(KeyCode.F1, true, false, false),      // Ctrl+F1
+        [Cmd.ViewBrief] = new(KeyCode.F2, true, false, false),       // Ctrl+F2
+        [Cmd.ViewThumbnails] = new(KeyCode.F3, true, false, false),  // Ctrl+F3
     };
 
     /// <summary>Commands in display order, with their Keyboard-page labels.</summary>
@@ -62,6 +66,7 @@ public static class Keybindings
         (Cmd.ToggleHidden, "Toggle hidden files"), (Cmd.Swap, "Swap panes"),
         (Cmd.OpenInOther, "Open in other pane"),
         (Cmd.Pack, "Pack (create archive)"), (Cmd.Extract, "Extract archive"),
+        (Cmd.ViewDetail, "View: Detail"), (Cmd.ViewBrief, "View: Brief"), (Cmd.ViewThumbnails, "View: Thumbnails"),
     ];
 
     public static string Format(Chord c)
