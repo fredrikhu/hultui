@@ -387,6 +387,8 @@ public partial class CommanderApp : Component, IDisposable
         // A right-drag mark ends wherever the button is released — pointer-up bubbles
         // to the root even when the release lands off the rows (empty list, footer, …).
         root.On<PointerUpEvent>(ev => { if (ev.Button == 2) EndRightMark(); });
+        // Track the marquee's far corner anywhere the pointer moves (incl. gaps between tiles).
+        root.On<PointerMoveEvent>(ev => { if (_rmarkActive) { _rmarkCur = ev.Position; MarkDirty(); } });
 
         // Overlays render above the shell, each keyed so conditional presence
         // reconciles by identity (a keyless swap would leak handlers across kinds).
@@ -621,13 +623,15 @@ public partial class CommanderApp : Component, IDisposable
     private char _rmarkSide;
     private bool _rmarkAdd;
     private readonly HashSet<string> _rmarkSeen = new(StringComparer.Ordinal);
+    private HultUI.Core.Primitives.Point _rmarkStart, _rmarkCur;   // marquee rect (window coords)
 
-    private void BeginRightMark(char side, FileEntry e)
+    private void BeginRightMark(char side, FileEntry e, HultUI.Core.Primitives.Point at)
     {
         _active = side;
         _rmarkActive = true;
         _rmarkSide = side;
         _rmarkSeen.Clear();
+        _rmarkStart = _rmarkCur = at;
         _rmarkAdd = !Marks(side).Contains(e.Name);   // direction from the first row
         ApplyRightMark(side, e);
     }

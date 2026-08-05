@@ -139,6 +139,24 @@ public partial class CommanderApp
                 ? BuildArchiveError(side, arcStatus)
                 : BuildStateBlock(side, state));
         pane.AddChild(BuildFooter(side, list));
+        // Right-drag marquee rectangle (design §E) — an absolute overlay from the drag
+        // origin to the pointer, anchored to the pane's content box.
+        if (_rmarkActive && _rmarkSide == side && PaneRef(side).Current is { } pr)
+        {
+            var cb = pr.Layout.AbsoluteContentBox;
+            float x0 = Math.Min(_rmarkStart.X, _rmarkCur.X), y0 = Math.Min(_rmarkStart.Y, _rmarkCur.Y);
+            float w = Math.Abs(_rmarkCur.X - _rmarkStart.X), h = Math.Abs(_rmarkCur.Y - _rmarkStart.Y);
+            if (w > 3 || h > 3)   // ignore a plain right-click
+            {
+                var rect = Box.New().Width(w).Height(h).CornerRadius(2f)
+                    .Background(Nocturne.Alpha(Nocturne.Accent500, 0.08))
+                    .BorderColor(Nocturne.Accent600).BorderWidth(1f);
+                rect.Position.Type = PositionType.Absolute;
+                rect.Position.Left = Dimension.Px(x0 - cb.X);
+                rect.Position.Top = Dimension.Px(y0 - cb.Y);
+                pane.AddChild(rect);
+            }
+        }
         return pane;
     }
 

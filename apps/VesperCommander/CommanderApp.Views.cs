@@ -82,8 +82,7 @@ public partial class CommanderApp
         // Width comes from the pane geometry, not the list's own box: a VirtualList of rigid
         // fixed-width tiles reports its content width (one tile) as its intrinsic size, and the
         // flex stretch resolves the cross axis to that — so reading it back would collapse
-        // perRow to 1 (and, in two-pane mode, the whole pane). We set the list width
-        // explicitly instead. Height still reads the box.
+        // perRow to 1. We set the list width explicitly instead. Height still reads the box.
         const float pad = 10f;
         float paneW = PaneContentWidthEstimate();
         float availW = paneW - 2 * pad;
@@ -98,14 +97,13 @@ public partial class CommanderApp
         var rows = new List<int>(rowCount);
         for (int r = 0; r < rowCount; r++) rows.Add(r);
 
-        var grid = VirtualListElement<int>.New()
+        return VirtualListElement<int>.New()
             .ItemHeight((int)stride)
             .Items(rows)   // fresh list reference each build → re-realizes visible rows
             .RenderWith(r => ThumbRow(side, list, r * perRow, perRow, m, cursorName, marks))
             .WithRef(ThumbVList(side))
             .FlexGrow(1)
             .Width(Dimension.Px(paneW));
-        return grid;
     }
 
     private Element ThumbRow(char side, IReadOnlyList<FileEntry> list, int start, int perRow, ThumbM m,
@@ -164,6 +162,7 @@ public partial class CommanderApp
                 var ph = Icons.Draw(IconKind.Image, tint, m.Icon);
                 ph.Opacity = 0.4f;   // dimmed placeholder while the decode runs
                 area.AddChild(ph);
+                area.AddChild(ShimmerBand(m));
             }
         }
         else
@@ -197,6 +196,18 @@ public partial class CommanderApp
         badge.Position.Right = Dimension.Px(3);
         badge.Position.Bottom = Dimension.Px(3);
         return badge;
+    }
+
+    /// <summary>A faint light band across the loading placeholder (design §E) — a static
+    /// "shimmer" cue that a thumbnail is decoding, without a strobing per-tile spinner.</summary>
+    private static Element ShimmerBand(ThumbM m)
+    {
+        var band = Box.New().Width(m.ImgW).Height(m.ImgH * 0.3f)
+            .Background(Nocturne.Alpha(Nocturne.Neutral100, 0.045));
+        band.Position.Type = PositionType.Absolute;
+        band.Position.Left = Dimension.Px(0);
+        band.Position.Top = Dimension.Px(m.ImgH * 0.35f);
+        return band;
     }
 
     private static Element MarkChip()
@@ -374,7 +385,7 @@ public partial class CommanderApp
     {
         el.On<PointerDownEvent>(ev =>
         {
-            if (ev.Button == 2) { BeginRightMark(side, e); return; }   // right-drag marking
+            if (ev.Button == 2) { BeginRightMark(side, e, ev.Position); return; }   // right-drag marking
             if (ev.Button != 0) return;
             _active = side;
             int idx = IndexOfName(Listing(side), e.Name);
