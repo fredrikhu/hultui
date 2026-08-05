@@ -303,6 +303,17 @@ public partial class CommanderApp : Component, IDisposable
     private SortMode SortOf(char side) => ActiveTab(side).Sort;
     private bool SortDescOf(char side) => ActiveTab(side).SortDescending;
 
+    /// <summary>Open <paramref name="path"/> as a new tab in the active pane and bring the
+    /// window forward — used when a second launch is folded into this instance (single-instance
+    /// IPC). Called on the UI thread.</summary>
+    public void OpenPathAsTab(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        NewTab(_active, path);
+        _window.Raise();
+        MarkDirty();
+    }
+
     private ViewMode ViewOf(char side) => ActiveTab(side).View;
     private void SetView(char side, ViewMode mode)
     {

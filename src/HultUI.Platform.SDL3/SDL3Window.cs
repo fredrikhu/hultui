@@ -380,6 +380,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
         else SDL_RestoreWindow(_window);
     }
 
+    public void Raise()
+    {
+        SDL_RestoreWindow(_window);   // un-minimize first, then bring to front
+        SDL_RaiseWindow(_window);
+    }
+
     public bool IsMaximized =>
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
 

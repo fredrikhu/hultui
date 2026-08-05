@@ -92,6 +92,11 @@ public class TextInputElement : BoxElement
     /// on-screen glyphs are masked.</summary>
     public bool Masked { get; set; }
 
+    /// <summary>Optional paint-only colour spans over the value (e.g. mask-token highlighting).
+    /// The caret, selection, and clipboard still operate on the raw text; ignored while masked
+    /// or composing.</summary>
+    public IReadOnlyList<Rendering.TextSpan>? Spans { get; set; }
+
     public Action<string>? TextChanged { get; set; }
 
     /// <summary>
@@ -567,7 +572,10 @@ public class TextInputElement : BoxElement
         else if (displayText.Length > 0)
         {
             var textRect = new Rect(contentBox.X - _scrollOffset, contentBox.Y, totalTextWidth + scrollPadding, contentBox.Height);
-            ctx.DrawText(displayText, textRect, style, TextOverflow.Clip, 1);
+            // Paint-only syntax spans (e.g. mask token highlighting) — only when the display
+            // text is the real value (not masked bullets or an IME preedit).
+            var spans = Masked || composing ? null : Spans;
+            ctx.DrawText(displayText, textRect, style, TextOverflow.Clip, 1, spans);
         }
 
         float textHeight = ctx.MeasureText("X", style).Height;

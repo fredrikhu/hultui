@@ -120,6 +120,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public void Maximize() => IsMaximized = true;
 
     public void Restore() => IsMaximized = false;
+    public void Raise() { }
 
     public void SetMinimumSize(int layoutWidth, int layoutHeight) { }
 

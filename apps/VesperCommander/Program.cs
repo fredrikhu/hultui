@@ -3,14 +3,21 @@ using HultUI.Core.Styling;
 using VesperCommander;
 using VesperCommander.Theme;
 
-// Single-instance guard (Windows): when the setting is on, a second launch exits so
-// only one Vesper window runs. (Forwarding the second launch's folder to the running
-// instance as a tab would need IPC and is out of scope.)
+// The folder this launch wants to open: a directory argument, else the working directory.
+var startPath = args.Length > 0 && Directory.Exists(args[0]) ? args[0] : Directory.GetCurrentDirectory();
+
+// Single-instance (Windows): the owning instance holds a named mutex and runs an IPC server;
+// a second launch hands its folder to the running window (which opens it as a tab) and exits.
 System.Threading.Mutex? instanceLock = null;
-if (OperatingSystem.IsWindows() && SettingsStore.Load().SingleInstance)
+bool single = OperatingSystem.IsWindows() && SettingsStore.Load().SingleInstance;
+if (single)
 {
     instanceLock = new System.Threading.Mutex(initiallyOwned: true, @"Local\VesperCommander.SingleInstance", out bool isNew);
-    if (!isNew) return;
+    if (!isNew)
+    {
+        SingleInstance.TrySignal(startPath);   // fold this launch into the running instance
+        return;
+    }
 }
 
 // The Application ctor creates the SDL window + GL context + Skia GRContext
@@ -23,11 +30,15 @@ var window = app.PrimaryWindow;
 // Floor the window so the two panes + preview never collapse below usability.
 window.SetMinimumSize(880, 560);
 
-// Both panes open on the current directory until real navigation lands.
-var start = Directory.GetCurrentDirectory();
-var commander = new CommanderApp(app, window, start);
+var commander = new CommanderApp(app, window, startPath);
 window.Closed += commander.Dispose;
 app.SetRoot(commander.Mount());
 
+// Listen for second launches and open their folder as a tab (marshaled to the UI thread).
+using var ipcCts = new System.Threading.CancellationTokenSource();
+if (single)
+    SingleInstance.StartServer(path => Application.InvokeOnMainThread(() => commander.OpenPathAsTab(path)), ipcCts.Token);
+
 app.Run();
+ipcCts.Cancel();
 instanceLock?.Dispose();

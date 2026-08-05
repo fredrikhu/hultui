@@ -120,6 +120,8 @@ public sealed class Window : IOverlayHost, IDisposable
     public void Minimize() => PlatformWindow.Minimize();
     public void Maximize() => PlatformWindow.Maximize();
     public void Restore() => PlatformWindow.Restore();
+    /// <summary>Bring the window to the front (e.g. when a second launch is folded in).</summary>
+    public void Raise() => PlatformWindow.Raise();
     public void ToggleMaximize() { if (IsMaximized) Restore(); else Maximize(); }
 
     /// <summary>Current viewport width in density-independent (layout) units.</summary>

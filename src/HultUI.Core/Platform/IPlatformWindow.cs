@@ -69,6 +69,8 @@ public interface IPlatformWindow : IDisposable
     void Minimize();
     void Maximize();
     void Restore();
+    /// <summary>Bring the window to the front / request the OS's attention.</summary>
+    void Raise();
 
     void SetMinimumSize(int layoutWidth, int layoutHeight);
     void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels);
