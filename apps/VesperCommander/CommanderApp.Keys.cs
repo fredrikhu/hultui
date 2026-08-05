@@ -72,6 +72,7 @@ public partial class CommanderApp
             case Cmd.ViewDetail: SetView(side, ViewMode.Detail); break;
             case Cmd.ViewBrief: SetView(side, ViewMode.Brief); break;
             case Cmd.ViewThumbnails: SetView(side, ViewMode.Thumbnails); break;
+            case Cmd.MultiRename: OpenRename(); break;
         }
     }
 

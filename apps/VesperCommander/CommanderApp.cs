@@ -418,6 +418,10 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildPack(); o.Key = "pack"; root.AddChild(o);
         }
+        if (_renameOpen)
+        {
+            var o = BuildRename(); o.Key = "rename"; root.AddChild(o);
+        }
         if (_pwOpen)
         {
             var o = BuildPasswordPrompt(); o.Key = "password"; root.AddChild(o);
@@ -458,6 +462,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
         if (_pendingCmdFocus) { _pendingCmdFocus = false; _cmdRef.Current?.Focus(); }
         if (_pendingPackFocus) { _pendingPackFocus = false; _packNameRef.Current?.Focus(); }
+        if (_pendingRenameFocus) { _pendingRenameFocus = false; _renNameRef.Current?.Focus(); }
         if (_pendingPwFocus) { _pendingPwFocus = false; _pwRef.Current?.Focus(); }
         if (_pendingDiffScroll)
         {
@@ -905,7 +910,7 @@ public partial class CommanderApp : Component, IDisposable
 
     private bool AnyOverlayOpen => _drivePicker != null || _paletteOpen || _bookmarksOpen
         || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
-        || _findOpen || _packOpen || _pwOpen;
+        || _findOpen || _packOpen || _pwOpen || _renameOpen;
 
     private void CloseOverlays()
     {
@@ -918,6 +923,7 @@ public partial class CommanderApp : Component, IDisposable
         _namePrompt = null;
         _packOpen = false;
         _pwOpen = false;
+        _renameOpen = false;
         if (_findOpen) { _findOpen = false; StopFind(); }
         MarkDirty();
     }
@@ -1299,6 +1305,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Open in git client", null, OpenGitClientHere),
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
+            new($"Multi-rename… ({OperationTargets(side).Count(e => !e.IsParent)} files)", "Ctrl+M", OpenRename),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
@@ -1732,6 +1739,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_paletteOpen) { HandlePaletteKey(e); return; }
         if (_findOpen) { HandleFindKey(e); return; }
         if (_packOpen) { HandlePackKey(e); return; }
+        if (_renameOpen) { HandleRenameKey(e); return; }
         if (_pwOpen) { HandlePasswordKey(e); return; }
         if (_bookmarksOpen) { HandleBookmarksKey(e); e.StopPropagation = true; return; }
         if (_drivePicker is char dpKey)
