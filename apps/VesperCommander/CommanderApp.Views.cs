@@ -27,6 +27,12 @@ public partial class CommanderApp
     private readonly Ref<VirtualListElement<int>> _thumbVListL = new(), _thumbVListR = new();
     private Ref<VirtualListElement<int>> ThumbVList(char side) => side == 'L' ? _thumbVListL : _thumbVListR;
 
+    // Shared thumbnail decode cache. A decode lands on a worker thread and marshals a
+    // rebuild so the tile swaps its thumbnail in.
+    private ThumbnailCache? _thumbsCache;
+    private ThumbnailCache Thumbs => _thumbsCache ??= new ThumbnailCache(
+        () => HultUI.Application.InvokeOnMainThread(MarkDirty));
+
     private const float ViewToggleWidth = 88f;   // reserved so breadcrumbs truncate first
 
     // Tile / grid geometry, per density (design §D). tileH = pad 4 + image + gap 4 + name + pad 4.
@@ -110,19 +116,35 @@ public partial class CommanderApp
         var area = Box.New().Width(m.ImgW).Height(m.ImgH).FlexShrink(0)
             .CornerRadius(Nocturne.RadiusSm).Background(Nocturne.Neutral900)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
-        if (kind == IconKind.Image)
+        if (kind == IconKind.Image && !e.IsDir)
         {
-            var ph = Icons.Draw(IconKind.Image, tint, m.Icon);
-            ph.Opacity = 0.4f;   // placeholder until the decode lands
-            area.AddChild(ph);
+            int target = (int)(Math.Max(m.ImgW, m.ImgH) * 2f);
+            var (thumb, tstatus) = Thumbs.Get(e.FullPath, e.Size, e.Modified, target);
+            if (tstatus == ThumbnailCache.Status.Ready && thumb is { IsLoaded: true } src && src.IntrinsicSize.Width > 0)
+            {
+                var im = Image.New(src);
+                im.Fit = ImageFit.Contain;   // letterbox on the backing
+                area.AddChild(im.Size(Dimension.Percent(100), Dimension.Percent(100)));
+            }
+            else if (tstatus == ThumbnailCache.Status.Failed)
+            {
+                // Undecodable / oversized → full-strength icon + ext badge ("won't preview").
+                area.AddChild(Icons.Draw(IconKind.Image, tint, m.Icon));
+                if (!e.IsParent && ExtBadge(e) is { } fb) area.AddChild(fb);
+            }
+            else
+            {
+                var ph = Icons.Draw(IconKind.Image, tint, m.Icon);
+                ph.Opacity = 0.4f;   // dimmed placeholder while the decode runs
+                area.AddChild(ph);
+            }
         }
         else
         {
             area.AddChild(Icons.Draw(kind, tint, m.Icon));
+            // Ext badge on non-image files (dirs / parent get none; images use the thumbnail).
+            if (!e.IsDir && !e.IsParent && ExtBadge(e) is { } badge) area.AddChild(badge);
         }
-        // Ext badge on non-image files (dirs / parent / images get none).
-        if (!e.IsDir && !e.IsParent && kind != IconKind.Image && ExtBadge(e) is { } badge)
-            area.AddChild(badge);
         // Marked chip stays visible on bright thumbnails.
         if (marked) area.AddChild(MarkChip());
         tile.AddChild(area);

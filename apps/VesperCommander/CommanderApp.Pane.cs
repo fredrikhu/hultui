@@ -565,8 +565,11 @@ public partial class CommanderApp
             return footer;
         }
 
-        var label = $"{files} files, {dirs} dirs" + (free.Length > 0 ? $" · {free}" : "");
-        footer.AddChild(Ui.Mono(label, 10.5f, Nocturne.On(0.50)));
+        // While the thumbnail grid is decoding, the right slot counts down instead of free space.
+        int decoding = ViewOf(side) == ViewMode.Thumbnails && _thumbsCache != null ? _thumbsCache.PendingCount : 0;
+        var tail = decoding > 0 ? $"decoding {decoding}…" : free;
+        var label = $"{files} files, {dirs} dirs" + (tail.Length > 0 ? $" · {tail}" : "");
+        footer.AddChild(Ui.Mono(label, 10.5f, decoding > 0 ? Nocturne.Accent300 : Nocturne.On(0.50)));
         return footer;
     }
 

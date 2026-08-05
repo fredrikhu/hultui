@@ -1804,6 +1804,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         SaveSession();
         (_lastImage as IDisposable)?.Dispose();
+        _thumbsCache?.Dispose();
     }
 
     /// <summary>The view mode saved at index <paramref name="i"/> (or Detail when absent).</summary>
