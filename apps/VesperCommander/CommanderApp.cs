@@ -1614,6 +1614,11 @@ public partial class CommanderApp : Component, IDisposable
         // Ctrl+Q cycles the preview panel: off → side → full.
         if (ctrl && e.Key == KeyCode.Q) { CyclePreview(); e.StopPropagation = true; return; }
 
+        // Ctrl+R refresh · Ctrl+H toggle hidden · Ctrl+U swap panes.
+        if (ctrl && e.Key == KeyCode.R) { RefreshPane(_active); e.StopPropagation = true; return; }
+        if (ctrl && e.Key == KeyCode.H) { ToggleHidden(); e.StopPropagation = true; return; }
+        if (ctrl && e.Key == KeyCode.U) { SwapPanes(); e.StopPropagation = true; return; }
+
         // Alt+← / Alt+→ move back / forward through the active pane's history.
         if (alt && e.Key == KeyCode.Left) { GoBack(_active); e.StopPropagation = true; return; }
         if (alt && e.Key == KeyCode.Right) { GoForward(_active); e.StopPropagation = true; return; }
@@ -1680,6 +1685,8 @@ public partial class CommanderApp : Component, IDisposable
                 EditFocused(side); e.StopPropagation = true; return;
             case KeyCode.F9:
                 OpenSync(); e.StopPropagation = true; return;
+            case KeyCode.Equals:   // "=" mirrors this folder into the other pane
+                NavigateTo(side == 'L' ? 'R' : 'L', Dir(side)); e.StopPropagation = true; return;
             case KeyCode.Left:     // focus the command line (type a shell command)
                 OpenCommandLine(side); e.StopPropagation = true; return;
             case KeyCode.F5:
