@@ -388,6 +388,10 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildFind(); o.Key = "find"; root.AddChild(o);
         }
+        if (_packOpen)
+        {
+            var o = BuildPack(); o.Key = "pack"; root.AddChild(o);
+        }
         if (_bookmarksOpen)
         {
             var o = BuildBookmarks(); o.Key = "bookmarks"; root.AddChild(o);
@@ -423,6 +427,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingNamePromptFocus) { _pendingNamePromptFocus = false; _namePromptRef.Current?.Focus(); }
         if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
         if (_pendingCmdFocus) { _pendingCmdFocus = false; _cmdRef.Current?.Focus(); }
+        if (_pendingPackFocus) { _pendingPackFocus = false; _packNameRef.Current?.Focus(); }
         if (_pendingDiffScroll)
         {
             _pendingDiffScroll = false;
@@ -797,7 +802,7 @@ public partial class CommanderApp : Component, IDisposable
 
     private bool AnyOverlayOpen => _drivePicker != null || _paletteOpen || _bookmarksOpen
         || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
-        || _findOpen;
+        || _findOpen || _packOpen;
 
     private void CloseOverlays()
     {
@@ -807,6 +812,7 @@ public partial class CommanderApp : Component, IDisposable
         _confirm = null;
         _optionsOpen = false;
         _namePrompt = null;
+        _packOpen = false;
         if (_findOpen) { _findOpen = false; StopFind(); }
         MarkDirty();
     }
@@ -1600,6 +1606,7 @@ public partial class CommanderApp : Component, IDisposable
         }
         if (_paletteOpen) { HandlePaletteKey(e); return; }
         if (_findOpen) { HandleFindKey(e); return; }
+        if (_packOpen) { HandlePackKey(e); return; }
         if (_bookmarksOpen) { HandleBookmarksKey(e); e.StopPropagation = true; return; }
         if (_drivePicker is char dpKey)
         {

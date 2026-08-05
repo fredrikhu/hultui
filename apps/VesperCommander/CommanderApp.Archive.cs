@@ -26,9 +26,6 @@ public partial class CommanderApp
         return true;
     }
 
-    // Pack dialog lands in the next phase.
-    private void OpenPack() { _notice = "Pack (Alt+F5) lands in the next step"; MarkDirty(); }
-
     // ── Extract (copy-out) ───────────────────────────────────────────────
     private void StartArchiveTransfer(List<FileEntry> items, string dest, char source)
     {

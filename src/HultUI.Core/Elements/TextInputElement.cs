@@ -87,6 +87,11 @@ public class TextInputElement : BoxElement
     public Color FocusBorderColor { get; set; } = new(66, 135, 245, 255);
     public float CursorWidth { get; set; } = 1.5f;
 
+    /// <summary>Render the value as bullets (password entry). The real text is still held
+    /// in <see cref="Text"/> and reported through <see cref="TextChanged"/>; only the
+    /// on-screen glyphs are masked.</summary>
+    public bool Masked { get; set; }
+
     public Action<string>? TextChanged { get; set; }
 
     /// <summary>
@@ -496,6 +501,8 @@ public class TextInputElement : BoxElement
         string displayText = composing
             ? string.Concat(_text.AsSpan(0, _cursorPos), _composition.Text, _text.AsSpan(_cursorPos))
             : _text;
+        // Password masking: substitute bullets for the value (not while composing).
+        if (Masked && !composing) displayText = new string('●', _text.Length);
 
         // IME caret placement. SDL's start/length are ambiguous (Wayland
         // sends cursor_begin/cursor_end, other backends send active-segment
