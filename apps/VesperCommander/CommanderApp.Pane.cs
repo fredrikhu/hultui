@@ -104,6 +104,9 @@ public partial class CommanderApp
         var pane = Flex.Column(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch)
             .BorderColor(active ? Nocturne.Accent800 : Color.Transparent)
             .BorderWidth(1f);
+        // Optional accent glow around the active pane (Colors → "Glow on the active pane").
+        if (active && _settings.Glow)
+            pane.BoxShadow(0, 0, 14, Nocturne.Alpha(Nocturne.Accent, 0.3));
         pane.Key = "pane-" + side;
         // The pane is a Tab stop: Tab traverses panes (and, in Full mode, the preview),
         // and clicking anywhere focuses the nearest focusable ancestor — this pane. The
