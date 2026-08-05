@@ -5,6 +5,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using VesperCommander.Theme;
 
@@ -267,6 +268,32 @@ public partial class CommanderApp
             .Padding(new Thickness(6, 6, 6, 6));
     }
 
+    /// <summary>The matched span in a result name, coloured accent so the match stands out.
+    /// Substrings and leading-dot extensions get an exact span; a regex highlights its match;
+    /// globs (non-contiguous) get none.</summary>
+    private IReadOnlyList<TextSpan>? FindNameSpans(string name)
+    {
+        var p = _findPattern;
+        if (p.Length == 0) return null;
+        var cmp = _findMatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        try
+        {
+            if (_findRegex)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(name, p,
+                    _findMatchCase ? System.Text.RegularExpressions.RegexOptions.None
+                                   : System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                return m.Success && m.Length > 0 ? [new TextSpan(m.Index, m.Length, Nocturne.Accent200)] : null;
+            }
+            if (p.Contains('*') || p.Contains('?')) return null;   // glob spans aren't contiguous
+            if (p.Length > 1 && p[0] == '.')
+                return name.EndsWith(p, cmp) ? [new TextSpan(name.Length - p.Length, p.Length, Nocturne.Accent200)] : null;
+            int idx = name.IndexOf(p, cmp);
+            return idx >= 0 ? [new TextSpan(idx, p.Length, Nocturne.Accent200)] : null;
+        }
+        catch { return null; }
+    }
+
     private Element FindResultRow(FindEngine.Hit h, bool selected)
     {
         // Reserve the 1px border on every row (transparent when unselected) so selecting
@@ -283,7 +310,7 @@ public partial class CommanderApp
 
         var name = Flex.Row(gap: 6).AlignItems(AlignItems.Center).FlexGrow(1).Overflow(Overflow.Hidden);
         name.AddChild(Ui.Mono(h.Name, 12f, h.IsDir ? Nocturne.DirText : Nocturne.Text)
-            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).Spans(FindNameSpans(h.Name)));
         // Archive member: "· archive.zip › internal" with the archive name amber.
         if (ArchivePath.TryParse(h.ParentDir) is { } ap)
         {
