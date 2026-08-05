@@ -142,33 +142,45 @@ public partial class CommanderApp
         page.AddChild(toggles);
     }
 
-    private static readonly (string label, string keys)[] Shortcuts =
-    [
-        ("Copy", "F5"), ("Move", "F6"), ("Rename", "Shift+F6"), ("Delete", "F8"),
-        ("New folder", "F7"), ("Edit file", "F4"), ("Diff", "F3"), ("Sync", "F9"),
-        ("Mark / measure folder", "Space"), ("Measure all folders", "Alt+Shift+Enter"), ("Mark & move down", "Insert"),
-        ("Command palette", "Ctrl+P"), ("Bookmark manager", "Ctrl+D"), ("Options", "Ctrl+,"),
-        ("Switch pane", "Tab"), ("New tab", "Ctrl+T"), ("Close tab", "Ctrl+W"), ("Cycle tabs", "Ctrl+Tab"),
-        ("Go up", "Backspace"), ("Up one folder", "Ctrl+PgUp"), ("Into folder", "Ctrl+PgDn"),
-        ("Open drive", "Alt+F1"), ("Preview panel", "Ctrl+Q"), ("Scroll preview (full)", "Tab, ↑↓ PgUp/Dn"),
-    ];
-
     private void KeyboardPage(BoxElement page)
     {
-        page.AddChild(SectionHeader("Keyboard", "Type to search in the active pane."));
-        var list = Flex.Column(gap: 0).MaxHeight(360).Overflow(Overflow.Hidden);
-        foreach (var (label, keys) in Shortcuts)
+        page.AddChild(SectionHeader("Keyboard", "Click a shortcut to rebind it; press the new keys, or Esc to cancel."));
+        var list = ScrollView.Vertical().MaxHeight(340);
+        var col = Flex.Column(gap: 0);
+        foreach (var (cmd, label) in Keybindings.Order)
         {
-            var row = Grid.Of("1fr auto").Height(27).AlignItems(AlignItems.Center)
-                .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(5f);
+            bool capturing = _rebindCmd == cmd;
+            var row = Grid.Of("1fr auto").Height(28).AlignItems(AlignItems.Center)
+                .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(5f).Cursor(CursorType.Pointer);
             row.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.Text).GridCell(0, 0));
-            row.AddChild(Ui.Kbd(keys).GridCell(0, 1));
-            row.HoverBg(Nocturne.Neutral900, Color.Transparent);
-            list.AddChild(row);
+
+            BoxElement chip = capturing
+                ? Box.New().Padding(new Thickness(1, 6, 2, 6)).CornerRadius(4f)
+                    .Background(Nocturne.Accent900).BorderColor(Nocturne.Accent).BorderWidth(1f)
+                    .Children(Ui.Mono("press keys…", 10f, Nocturne.Accent200))
+                : Ui.Kbd(Keybindings.Format(CurrentChord(cmd, _draft)));
+            row.AddChild(chip.GridCell(0, 1));
+
+            var target = cmd;
+            row.OnClick(_ => { _rebindCmd = target; MarkDirty(); });
+            if (!capturing) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+            col.AddChild(row);
         }
+        list.AddChild(col);
         page.AddChild(list);
-        page.AddChild(Text.New($"{Shortcuts.Length} commands · rebinding lands in a later update")
-            .FontSize(11f).TextColor(Nocturne.Neutral500));
+
+        var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(6, 0, 0, 0));
+        footer.AddChild(Text.New($"{Keybindings.Order.Length} rebindable commands").FontSize(11f).TextColor(Nocturne.Neutral500));
+        footer.AddChild(Box.New().FlexGrow(1));
+        if (_draft.KeyBindings.Count > 0)
+        {
+            var reset = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(4, 11, 4, 11)).CornerRadius(Nocturne.RadiusSm)
+                .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
+                .Children(Text.New($"Reset {_draft.KeyBindings.Count} to defaults").FontSize(11f).TextColor(Nocturne.Neutral300));
+            reset.OnClick(_ => { _draft.KeyBindings.Clear(); _rebindCmd = null; MarkDirty(); });
+            footer.AddChild(reset.HoverBg(Nocturne.Neutral900, Color.Transparent));
+        }
+        page.AddChild(footer);
     }
 
     private void ToolsPage(BoxElement page)

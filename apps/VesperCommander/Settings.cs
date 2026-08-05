@@ -46,7 +46,15 @@ public sealed class Settings
     public bool Glow;
     public bool Zebra;
 
-    public Settings Clone() => (Settings)MemberwiseClone();
+    // Keyboard — command-name → chord overrides (only non-default bindings are stored).
+    public Dictionary<string, string> KeyBindings = new();
+
+    public Settings Clone()
+    {
+        var c = (Settings)MemberwiseClone();
+        c.KeyBindings = new Dictionary<string, string>(KeyBindings);   // deep-copy the map
+        return c;
+    }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, IncludeFields = true)]

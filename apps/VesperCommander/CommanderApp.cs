@@ -242,6 +242,7 @@ public partial class CommanderApp : Component, IDisposable
         _settings = SettingsStore.Load();
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
+        RebuildKeymap();
 
         // Restore the last session's tabs when enabled and still valid; else open one
         // tab per pane on the starting folder.
@@ -1254,6 +1255,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         _settings = _draft.Clone();
         SettingsStore.Save(_settings);
+        RebuildKeymap();                            // apply any rebinds
         Nocturne.SetAccent(_settings.Accent);      // retheme the accent ramp
         Icons.InvalidateCache();                    // icons bake the ramp — re-rasterize
         _app.Theme = Nocturne.ToHultTheme();        // refresh built-in widgets
@@ -1564,6 +1566,13 @@ public partial class CommanderApp : Component, IDisposable
         // to any focused field.
         if (_optionsOpen)
         {
+            // Capturing a rebind: the next non-modifier key becomes the command's chord.
+            if (_rebindCmd is { } rc)
+            {
+                if (Keybindings.IsModifier(e.Key)) { e.StopPropagation = true; return; }
+                if (e.Key != KeyCode.Escape) RebindTo(rc, ChordOf(e));   // Esc cancels
+                _rebindCmd = null; MarkDirty(); e.StopPropagation = true; return;
+            }
             switch (e.Key)
             {
                 case KeyCode.Escape: _optionsOpen = false; MarkDirty(); e.StopPropagation = true; break;
@@ -1612,14 +1621,9 @@ public partial class CommanderApp : Component, IDisposable
             MarkDirty(); e.StopPropagation = true; return;
         }
 
-        // ⌘P / Ctrl+P toggles the command palette from anywhere.
-        if (ctrl && e.Key == KeyCode.P) { TogglePalette(); e.StopPropagation = true; return; }
-
-        // Ctrl+D opens the bookmark manager.
-        if (ctrl && e.Key == KeyCode.D) { OpenBookmarks(); e.StopPropagation = true; return; }
-
-        // Ctrl+, opens the Options window.
-        if (ctrl && e.Key == KeyCode.Comma) { OpenOptions(); e.StopPropagation = true; return; }
+        // Rebindable global commands (Ctrl/Alt combos) resolve through the keymap; the
+        // fixed combos below aren't rebindable.
+        if (MatchHotkey(e, wantGlobal: true, out var gcmd)) { Dispatch(gcmd); e.StopPropagation = true; return; }
 
         // Ctrl+1..9 jump the active pane to the Nth bookmark.
         if (ctrl && e.Key is >= KeyCode.Digit1 and <= KeyCode.Digit9)
@@ -1637,46 +1641,21 @@ public partial class CommanderApp : Component, IDisposable
             e.StopPropagation = true; return;
         }
 
-        // Tabs: Ctrl+T new · Ctrl+W close · Ctrl+Tab / Ctrl+Shift+Tab cycle.
-        if (ctrl && e.Key == KeyCode.T) { NewTab(_active); e.StopPropagation = true; return; }
-        if (ctrl && e.Key == KeyCode.W) { CloseTab(_active, TabIndex(_active)); e.StopPropagation = true; return; }
+        // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs.
         if (ctrl && e.Key == KeyCode.Tab)
         {
             CycleTab(_active, e.Modifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
             e.StopPropagation = true; return;
         }
 
-        // Folder navigation: Ctrl+PageUp goes up one folder, Ctrl+PageDown descends
-        // into the selected folder (Total Commander style).
-        if (ctrl && e.Key == KeyCode.PageUp) { GoUp(_active); e.StopPropagation = true; return; }
-        if (ctrl && e.Key == KeyCode.PageDown) { DescendCursor(_active); e.StopPropagation = true; return; }
-
-        // Ctrl+Q cycles the preview panel: off → side → full.
-        if (ctrl && e.Key == KeyCode.Q) { CyclePreview(); e.StopPropagation = true; return; }
-
-        // Ctrl+R refresh · Ctrl+H toggle hidden · Ctrl+U swap panes.
-        if (ctrl && e.Key == KeyCode.R) { RefreshPane(_active); e.StopPropagation = true; return; }
-        if (ctrl && e.Key == KeyCode.H) { ToggleHidden(); e.StopPropagation = true; return; }
-        if (ctrl && e.Key == KeyCode.U) { SwapPanes(); e.StopPropagation = true; return; }
-
         // Alt+← / Alt+→ move back / forward through the active pane's history.
         if (alt && e.Key == KeyCode.Left) { GoBack(_active); e.StopPropagation = true; return; }
         if (alt && e.Key == KeyCode.Right) { GoForward(_active); e.StopPropagation = true; return; }
 
-        // Alt+F1 / Alt+F2 open the drive picker for the left / right pane (global,
-        // so they fire even from a focused field once fields exist).
+        // Alt+F1 / Alt+F2 open the drive picker for the left / right pane.
         if (alt && e.Key is KeyCode.F1 or KeyCode.F2)
         {
             OpenDrivePicker(e.Key == KeyCode.F1 ? 'L' : 'R'); e.StopPropagation = true; return;
-        }
-
-        // Alt+F7 opens the find-files dialog scoped to the active pane's folder.
-        if (alt && e.Key == KeyCode.F7) { OpenFind(_active); e.StopPropagation = true; return; }
-
-        // Alt+Shift+Enter measures every folder in the active pane at once.
-        if (alt && e.Modifiers.HasFlag(KeyModifiers.Shift) && e.Key == KeyCode.Enter)
-        {
-            MeasureAllDirs(_active); e.StopPropagation = true; return;
         }
 
         var typing = e.Target is TextInputElement or TextAreaElement;
@@ -1689,6 +1668,9 @@ public partial class CommanderApp : Component, IDisposable
         {
             GoUp(side); e.StopPropagation = true; return;
         }
+
+        // Rebindable per-pane commands (bare / Shift chords) resolve through the keymap.
+        if (MatchHotkey(e, wantGlobal: false, out var pcmd)) { Dispatch(pcmd); e.StopPropagation = true; return; }
 
         switch (e.Key)
         {
@@ -1719,25 +1701,9 @@ public partial class CommanderApp : Component, IDisposable
                 _search = ""; ActivateCursor(side); e.StopPropagation = true; return;
             case KeyCode.Backspace:
                 BackspaceSearch(side); e.StopPropagation = true; return;
-            case KeyCode.F3:
-                OpenDiff(side); e.StopPropagation = true; return;
-            case KeyCode.F4:
-                EditFocused(side); e.StopPropagation = true; return;
-            case KeyCode.F9:
-                OpenSync(); e.StopPropagation = true; return;
-            case KeyCode.Equals:   // "=" mirrors this folder into the other pane
-                NavigateTo(side == 'L' ? 'R' : 'L', Dir(side)); e.StopPropagation = true; return;
             case KeyCode.Left:     // focus the command line (type a shell command)
                 OpenCommandLine(side); e.StopPropagation = true; return;
-            case KeyCode.F5:
-                StartCopy(); e.StopPropagation = true; return;
-            case KeyCode.F6:
-                if (e.Modifiers.HasFlag(KeyModifiers.Shift)) OpenRenamePrompt(side);
-                else StartMove();
-                e.StopPropagation = true; return;
-            case KeyCode.F7:
-                OpenNewFolderPrompt(side); e.StopPropagation = true; return;
-            case KeyCode.F8 or KeyCode.Delete:
+            case KeyCode.Delete:   // alias for the (rebindable) Delete command
                 StartDelete(); e.StopPropagation = true; return;
         }
 
