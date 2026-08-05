@@ -51,6 +51,8 @@ public partial class CommanderApp : Component, IDisposable
         public int Cursor;
         public bool Locked;
         public ViewMode View = ViewMode.Detail;   // per-tab list layout, persisted per session
+        public SortMode Sort = SortMode.Name;      // per-tab sort column + direction (seeded
+        public bool SortDescending;                // from the Options default at tab creation)
         public readonly HashSet<string> Marks = new(StringComparer.Ordinal);
         // Per-tab navigation history (most-recent last). Back holds folders left behind;
         // Fwd holds folders returned-from after a Back. A new forward navigation clears Fwd.
@@ -260,8 +262,8 @@ public partial class CommanderApp : Component, IDisposable
             var right = s.Right.Select((d, i) => (d, v: ViewAt(s.RightViews, i))).Where(x => Directory.Exists(x.d)).ToList();
             if (left.Count > 0 && right.Count > 0)
             {
-                foreach (var (d, v) in left) _tabsL.Add(new PaneTab(d) { View = v });
-                foreach (var (d, v) in right) _tabsR.Add(new PaneTab(d) { View = v });
+                foreach (var (d, v) in left) _tabsL.Add(SeededTab(d, v));
+                foreach (var (d, v) in right) _tabsR.Add(SeededTab(d, v));
                 _tabL = Math.Clamp(s.LeftActive, 0, _tabsL.Count - 1);
                 _tabR = Math.Clamp(s.RightActive, 0, _tabsR.Count - 1);
                 restored = true;
@@ -269,8 +271,8 @@ public partial class CommanderApp : Component, IDisposable
         }
         if (!restored)
         {
-            _tabsL.Add(new PaneTab(startDir) { View = _settings.DefaultView });
-            _tabsR.Add(new PaneTab(startDirRight ?? startDir) { View = _settings.DefaultView });
+            _tabsL.Add(SeededTab(startDir, _settings.DefaultView));
+            _tabsR.Add(SeededTab(startDirRight ?? startDir, _settings.DefaultView));
         }
         InitBookmarks();
 
@@ -294,6 +296,13 @@ public partial class CommanderApp : Component, IDisposable
     private HashSet<string> Marks(char side) => ActiveTab(side).Marks;
     private void BumpGen(char side) { if (side == 'L') _genL++; else _genR++; }
 
+    /// <summary>A new tab seeded with the current Options defaults for view mode + sort.</summary>
+    private PaneTab SeededTab(string dir, ViewMode view) => new(dir)
+        { View = view, Sort = _settings.Sort, SortDescending = _settings.SortDescending };
+
+    private SortMode SortOf(char side) => ActiveTab(side).Sort;
+    private bool SortDescOf(char side) => ActiveTab(side).SortDescending;
+
     private ViewMode ViewOf(char side) => ActiveTab(side).View;
     private void SetView(char side, ViewMode mode)
     {
@@ -312,8 +321,9 @@ public partial class CommanderApp : Component, IDisposable
     {
         var loader = Loader(side);
         var dir = Dir(side);
+        var sort = SortOf(side); var desc = SortDescOf(side);   // per-tab; captured for the worker
         loader.Load($"{dir}#{Gen(side)}",
-            () => FileSystem.List(dir, _settings.ShowHidden, _settings.Sort, _settings.DirsFirst, _settings.SortDescending, _sevenZip, PasswordFor(dir)),
+            () => FileSystem.List(dir, _settings.ShowHidden, sort, _settings.DirsFirst, desc, _sevenZip, PasswordFor(dir)),
             onLoaded: _ =>
         {
             if (side == 'L') _loadedL = true; else _loadedR = true;
@@ -1385,17 +1395,20 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>Clicking a column header. Same column flips direction; a new column
     /// adopts a sensible default (Name ascending, Size/Date descending — big & newest
     /// first). Sort is global (both panes); persisted and re-applied by bumping gen.</summary>
-    private void SetSort(SortMode col)
+    /// <summary>Clicking a column header sorts that pane's active tab — same column flips the
+    /// direction, a new column switches to it (size/date default to descending). Sort is
+    /// per-tab; the Options "Default sort" only seeds new tabs.</summary>
+    private void SetSort(char side, SortMode col)
     {
-        if (_settings.Sort == col)
-            _settings.SortDescending = !_settings.SortDescending;
+        var tab = ActiveTab(side);
+        if (tab.Sort == col)
+            tab.SortDescending = !tab.SortDescending;
         else
         {
-            _settings.Sort = col;
-            _settings.SortDescending = col is SortMode.Size or SortMode.Date;
+            tab.Sort = col;
+            tab.SortDescending = col is SortMode.Size or SortMode.Date;
         }
-        SettingsStore.Save(_settings);
-        _genL++; _genR++;   // re-sort both panes with the new key/direction
+        BumpGen(side);   // re-sort this pane with the new key/direction
         MarkDirty();
     }
 
@@ -1519,7 +1532,7 @@ public partial class CommanderApp : Component, IDisposable
         ExitSearch(_active);
         var tabs = Tabs(side);
         int at = TabIndex(side) + 1;
-        tabs.Insert(at, new PaneTab(dir ?? Dir(side)) { View = _settings.DefaultView });
+        tabs.Insert(at, SeededTab(dir ?? Dir(side), _settings.DefaultView));
         _active = side;
         SetTabIndex(side, at);
         BumpGen(side);
@@ -1553,9 +1566,12 @@ public partial class CommanderApp : Component, IDisposable
     {
         var tabs = Tabs(side);
         if (index < 0 || index >= tabs.Count) return;
-        var srcView = tabs[index].View;
-        NewTab(side, tabs[index].Dir);
-        ActiveTab(side).View = srcView;   // a duplicate keeps the source's view mode
+        var src = tabs[index];
+        NewTab(side, src.Dir);
+        var dup = ActiveTab(side);        // a duplicate keeps the source's view mode + sort
+        dup.View = src.View;
+        dup.Sort = src.Sort;
+        dup.SortDescending = src.SortDescending;
     }
 
     /// <summary>Open the tab's folder as a new tab in the other pane.</summary>

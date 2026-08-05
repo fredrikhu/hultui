@@ -170,8 +170,8 @@ public partial class CommanderApp
                 () => ToggleRow(_draft.ShowSize, "Size column", () => Flip(ref _draft.ShowSize))),
             new(1, "Modified column", "columns visible date",
                 () => ToggleRow(_draft.ShowDate, "Modified column", () => Flip(ref _draft.ShowDate))),
-            new(1, "Sort by", "order name ext size date",
-                () => FieldRow("Sort by", Seg(
+            new(1, "Default sort", "order name ext size date",
+                () => FieldRow("Default sort", Seg(
                     ("Name", _draft.Sort == SortMode.Name, () => SetDraft(() => _draft.Sort = SortMode.Name)),
                     ("Ext", _draft.Sort == SortMode.Ext, () => SetDraft(() => _draft.Sort = SortMode.Ext)),
                     ("Size", _draft.Sort == SortMode.Size, () => SetDraft(() => _draft.Sort = SortMode.Size)),
@@ -268,7 +268,7 @@ public partial class CommanderApp
         cols.AddChild(CheckItem("Modified", _draft.ShowDate, () => Flip(ref _draft.ShowDate)));
         page.AddChild(cols);
         page.AddChild(Divider());
-        page.AddChild(FieldRow("Sort by", Seg(
+        page.AddChild(FieldRow("Default sort", Seg(
             ("Name", _draft.Sort == SortMode.Name, () => SetDraft(() => _draft.Sort = SortMode.Name)),
             ("Ext", _draft.Sort == SortMode.Ext, () => SetDraft(() => _draft.Sort = SortMode.Ext)),
             ("Size", _draft.Sort == SortMode.Size, () => SetDraft(() => _draft.Sort = SortMode.Size)),

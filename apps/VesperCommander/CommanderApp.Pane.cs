@@ -130,7 +130,7 @@ public partial class CommanderApp
         pane.AddChild(BuildBreadcrumb(side, active));
         // The column header belongs to Detail only — Brief and Thumbnails have no columns.
         if (ViewOf(side) == ViewMode.Detail)
-            pane.AddChild(BuildListHeader(InArchive(side)));
+            pane.AddChild(BuildListHeader(side, InArchive(side)));
         // Non-ok states replace the list with a centered status block. An archive that
         // couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message. A
         // filter that hides everything shows a "no matches" hint instead of a bare ".." row.
@@ -424,7 +424,11 @@ public partial class CommanderApp
         return (cols, sizeCol, ratioCol, dateCol);
     }
 
-    private Element BuildListHeader(bool inArchive)
+    // Which header the pointer is over (side + column), so an inactive column can show a
+    // dim "would sort" triangle on hover.
+    private (char side, SortMode col)? _hoverSort;
+
+    private Element BuildListHeader(char side, bool inArchive)
     {
         var (cols, sizeCol, ratioCol, dateCol) = ListLayout(inArchive);
         var h = Grid.Of(cols, gap: 10).FlexShrink(0)
@@ -432,21 +436,22 @@ public partial class CommanderApp
             .Padding(new Thickness(5, 10, 5, 10))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         h.AddChild(Box.New().GridColumn(0));
-        h.AddChild(HeaderCell("Name", SortMode.Name, rightAlign: false).GridColumn(1));
-        if (sizeCol >= 0) h.AddChild(HeaderCell("Size", SortMode.Size, rightAlign: true).GridColumn(sizeCol));
+        h.AddChild(HeaderCell(side, "Name", SortMode.Name, rightAlign: false).GridColumn(1));
+        if (sizeCol >= 0) h.AddChild(HeaderCell(side, "Size", SortMode.Size, rightAlign: true).GridColumn(sizeCol));
         if (ratioCol >= 0) h.AddChild(Text.New("RATIO").FontSize(10f).LetterSpacing(0.08f * 10f)
             .TextColor(Nocturne.Neutral600).TextAlign(TextAlign.Right).GridColumn(ratioCol));
-        if (dateCol >= 0) h.AddChild(HeaderCell("Modified", SortMode.Date, rightAlign: false).GridColumn(dateCol));
+        if (dateCol >= 0) h.AddChild(HeaderCell(side, "Modified", SortMode.Date, rightAlign: false).GridColumn(dateCol));
         return h;
     }
 
     /// <summary>A clickable, sortable column header. The active column shows an accent
-    /// direction triangle and its label lifts to full-strength text; inactive labels
-    /// stay Neutral600. Click cycles asc↔desc on the same column or switches column
-    /// (see <see cref="SetSort"/>). The icon column is not built through here (unsortable).</summary>
-    private Element HeaderCell(string label, SortMode col, bool rightAlign)
+    /// direction triangle and its label lifts to full-strength text; hovering an inactive
+    /// column shows a dim ascending triangle so it reads as sortable. The triangle's width is
+    /// always reserved so the label never shifts. Click cycles asc↔desc / switches column.</summary>
+    private Element HeaderCell(char side, string label, SortMode col, bool rightAlign)
     {
-        bool active = _settings.Sort == col;
+        bool active = SortOf(side) == col;
+        bool hover = !active && _hoverSort is (var hs, var hc) && hs == side && hc == col;
         // No explicit width: the grid stretches the cell child to the track, and
         // JustifyContent aligns the label+triangle within it (a percent width would
         // resolve to 0 in the fixed 60px Size track and hide the label).
@@ -456,9 +461,13 @@ public partial class CommanderApp
             .Cursor(CursorType.Pointer);
         row.AddChild(Text.New(label.ToUpperInvariant()).FontSize(10f).LetterSpacing(0.08f * 10f)
             .TextColor(active ? Nocturne.Text : Nocturne.Neutral600));
-        if (active)
-            row.AddChild(Ui.Icon(_settings.SortDescending ? "▾" : "▴", 9f, Nocturne.Accent));
-        row.OnClick(_ => SetSort(col));
+        // Reserve the triangle on every header; colour it accent (active), a dim ghost
+        // (hover), or transparent (idle) so hovering never shifts the label.
+        Color tri = active ? Nocturne.Accent : hover ? Nocturne.Neutral500 : Color.Transparent;
+        row.AddChild(Ui.Icon(active && SortDescOf(side) ? "▾" : "▴", 9f, tri));
+        row.OnClick(_ => SetSort(side, col));
+        row.OnPointerEnter(_ => { if (_hoverSort != (side, col)) { _hoverSort = (side, col); MarkDirty(); } });
+        row.OnPointerLeave(_ => { if (_hoverSort == (side, col)) { _hoverSort = null; MarkDirty(); } });
         return row.HoverBg(Nocturne.Neutral900, Color.Transparent);
     }
 
