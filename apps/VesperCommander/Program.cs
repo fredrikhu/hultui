@@ -3,6 +3,16 @@ using HultUI.Core.Styling;
 using VesperCommander;
 using VesperCommander.Theme;
 
+// Single-instance guard (Windows): when the setting is on, a second launch exits so
+// only one Vesper window runs. (Forwarding the second launch's folder to the running
+// instance as a tab would need IPC and is out of scope.)
+System.Threading.Mutex? instanceLock = null;
+if (OperatingSystem.IsWindows() && SettingsStore.Load().SingleInstance)
+{
+    instanceLock = new System.Threading.Mutex(initiallyOwned: true, @"Local\VesperCommander.SingleInstance", out bool isNew);
+    if (!isNew) return;
+}
+
 // The Application ctor creates the SDL window + GL context + Skia GRContext
 // synchronously on the main thread. Borderless: Vesper draws its own chrome
 // (the Nocturne shell is a rounded, bordered card).
@@ -20,3 +30,4 @@ window.Closed += commander.Dispose;
 app.SetRoot(commander.Mount());
 
 app.Run();
+instanceLock?.Dispose();

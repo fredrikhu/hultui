@@ -100,7 +100,7 @@ public partial class CommanderApp
         page.AddChild(SectionHeader("Startup & behavior", "How Vesper opens and what it remembers."));
         var toggles = Flex.Column(gap: 2);
         toggles.AddChild(ToggleRow(_draft.RestoreTabs, "Restore tabs and pane paths on start", () => Flip(ref _draft.RestoreTabs)));
-        toggles.AddChild(ToggleRow(_draft.SingleInstance, "Single instance — new windows open as tabs", () => Flip(ref _draft.SingleInstance)));
+        toggles.AddChild(ToggleRow(_draft.SingleInstance, "Single instance — a second launch is prevented", () => Flip(ref _draft.SingleInstance)));
         toggles.AddChild(ToggleRow(_draft.ConfirmDelete, "Confirm before delete", () => Flip(ref _draft.ConfirmDelete), "F8"));
         toggles.AddChild(ToggleRow(_draft.Recycle, "Delete to Recycle Bin instead of permanently", () => Flip(ref _draft.Recycle)));
         page.AddChild(toggles);
