@@ -398,6 +398,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
         if (_pendingNamePromptFocus) { _pendingNamePromptFocus = false; _namePromptRef.Current?.Focus(); }
         if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
+        if (_pendingCmdFocus) { _pendingCmdFocus = false; _cmdRef.Current?.Focus(); }
         if (_pendingDiffScroll)
         {
             _pendingDiffScroll = false;
@@ -1138,6 +1139,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Find files…", "Alt+F7", () => OpenFind(side)),
             new("Compare files (diff)", "F3", () => OpenDiff(side)),
             new("Synchronize folders", "F9", OpenSync),
+            new("Open terminal here", null, OpenTerminalHere),
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
@@ -1550,6 +1552,9 @@ public partial class CommanderApp : Component, IDisposable
         if (_diffOpen) { HandleDiffKey(e); return; }
         if (_syncOpen) { HandleSyncKey(e); return; }
 
+        // The command line owns Enter/Esc while active; text falls through to its field.
+        if (_cmdActive) { HandleCommandKey(e); return; }
+
         // Review affordance (prototype): Ctrl+Shift+E/O/D force the active pane's
         // empty/offline/denied view; K clears back to the real state. Checked before
         // Ctrl+D so Shift disambiguates it from the bookmark manager.
@@ -1675,6 +1680,8 @@ public partial class CommanderApp : Component, IDisposable
                 EditFocused(side); e.StopPropagation = true; return;
             case KeyCode.F9:
                 OpenSync(); e.StopPropagation = true; return;
+            case KeyCode.Left:     // focus the command line (type a shell command)
+                OpenCommandLine(side); e.StopPropagation = true; return;
             case KeyCode.F5:
                 StartCopy(); e.StopPropagation = true; return;
             case KeyCode.F6:

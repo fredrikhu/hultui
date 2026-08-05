@@ -707,6 +707,25 @@ public partial class CommanderApp
             .Padding(new Thickness(7, 12, 7, 12))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
         row.AddChild(Ui.Mono("❯", 12.5f, Nocturne.Accent));
+
+        // Active command line: a cwd prompt + editable field. Enter runs the command in a
+        // terminal at the active folder (empty → opens the configured terminal); Esc exits.
+        if (_cmdActive)
+        {
+            var dir = Dir(_active);
+            var leaf = System.IO.Path.GetFileName(dir.TrimEnd(
+                System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+            row.AddChild(Ui.Mono((leaf.Length > 0 ? leaf : dir) + " ›", 11.5f, Nocturne.Accent300).FlexShrink(0));
+            var input = TextInput.New(_cmdText).FlexGrow(1).Height(26);
+            input.PlaceholderText("run a command here — Enter opens a terminal, Esc cancels");
+            input.OnTextChanged(v => _cmdText = v);
+            input.WithRef(_cmdRef);
+            row.AddChild(input);
+            row.AddChild(Ui.Kbd("Enter"));
+            row.AddChild(Ui.Kbd("Esc"));
+            return row;
+        }
+
         // A backgrounded transfer shows a compact indicator here.
         if (_op is { } op && !_progressOpen)
         {

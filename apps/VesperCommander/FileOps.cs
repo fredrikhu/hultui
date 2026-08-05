@@ -71,6 +71,54 @@ public static class FileOps
         catch { OpenInShell(filePath); }
     }
 
+    /// <summary>Run a typed command in a terminal at <paramref name="dir"/> (the command
+    /// line). Windows opens a cmd window that stays open (/k); other OSes run via sh.</summary>
+    public static void RunInTerminal(string command, string dir)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("cmd.exe", "/k " + command)
+                { UseShellExecute = true, WorkingDirectory = dir });
+            else
+                Process.Start(new ProcessStartInfo("/bin/sh", "-c \"" + command.Replace("\"", "\\\"") + "; exec $SHELL\"")
+                { UseShellExecute = false, WorkingDirectory = dir });
+        }
+        catch { /* best-effort */ }
+    }
+
+    /// <summary>Open a terminal at <paramref name="dir"/> using the configured template
+    /// (e.g. <c>wt.exe -d {dir}</c>); falls back to the OS default shell.</summary>
+    public static void OpenTerminal(string template, string dir)
+    {
+        if (!string.IsNullOrWhiteSpace(template))
+        {
+            var tokens = Tokenize(template);
+            if (tokens.Count > 0)
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo(tokens[0].Replace("{dir}", dir))
+                    { UseShellExecute = true, WorkingDirectory = dir };
+                    for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i].Replace("{dir}", dir));
+                    Process.Start(psi);
+                    return;
+                }
+                catch { /* fall through to the default shell */ }
+            }
+        }
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("cmd.exe") { UseShellExecute = true, WorkingDirectory = dir });
+            else if (OperatingSystem.IsMacOS())
+                Process.Start(new ProcessStartInfo("open", ["-a", "Terminal", dir]));
+            else
+                Process.Start(new ProcessStartInfo("x-terminal-emulator") { UseShellExecute = false, WorkingDirectory = dir });
+        }
+        catch { /* best-effort */ }
+    }
+
     /// <summary>Launch an external diff (e.g. <c>code --diff left right</c>) for the
     /// VS Code DiffTool option. Best-effort; failures are swallowed.</summary>
     public static void LaunchDiff(string exe, string left, string right)
