@@ -243,6 +243,8 @@ public partial class CommanderApp : Component, IDisposable
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
         RebuildKeymap();
+        SevenZip.ExePath = _settings.SevenZipPath;
+        _sevenZip = SevenZip.Available();   // probed once — the probe spawns a process
 
         // Restore the last session's tabs when enabled and still valid; else open one
         // tab per pane on the starting folder.
@@ -297,7 +299,7 @@ public partial class CommanderApp : Component, IDisposable
         var loader = Loader(side);
         var dir = Dir(side);
         loader.Load($"{dir}#{Gen(side)}",
-            () => FileSystem.List(dir, _settings.ShowHidden, _settings.Sort, _settings.DirsFirst, _settings.SortDescending),
+            () => FileSystem.List(dir, _settings.ShowHidden, _settings.Sort, _settings.DirsFirst, _settings.SortDescending, _sevenZip, PasswordFor(dir)),
             onLoaded: _ =>
         {
             if (side == 'L') _loadedL = true; else _loadedR = true;
@@ -516,6 +518,10 @@ public partial class CommanderApp : Component, IDisposable
         {
             NavigateTo(side, e.FullPath);
         }
+        else if (ArchiveVfs.IsArchiveFile(e.FullPath) && File.Exists(e.FullPath))
+        {
+            NavigateTo(side, e.FullPath);   // browse into the archive (as a folder)
+        }
         else
         {
             FileOps.OpenInShell(e.FullPath);   // open with the OS default handler
@@ -705,7 +711,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (!Clipboard.TryGetFiles(out var paths, out bool cut) || paths.Count == 0) return;
         char side = _active;
-        if (LockedBlock(side, "paste into a locked tab")) return;
+        if (LockedBlock(side, "paste into a locked tab") || InArchiveBlock(side)) return;
         var dest = Dir(side);
         var items = new List<FileEntry>();
         foreach (var p in paths)
@@ -835,6 +841,7 @@ public partial class CommanderApp : Component, IDisposable
         var dest = Dir(other);
         if (PathEquals(dest, Dir(side))) return;
         if (LockedBlock(side, "move out of a locked tab") || LockedBlock(other, "move into a locked tab")) return;
+        if (InArchiveBlock(side) || InArchiveBlock(other)) return;   // read-only in v1
 
         _confirm = new ConfirmSpec(
             $"Move {(items.Count == 1 ? "item" : "items")}",
@@ -861,7 +868,7 @@ public partial class CommanderApp : Component, IDisposable
         var dest = Dir(other);
         if (PathEquals(dest, Dir(side))) return;
 
-        if (LockedBlock(other, "copy into a locked tab")) return;
+        if (LockedBlock(other, "copy into a locked tab") || InArchiveBlock(other)) return;
         var op = new TransferOp(items) { IsMove = false, Source = side, DestDir = dest };
         _op = op;
         _progressOpen = true;
@@ -1057,7 +1064,7 @@ public partial class CommanderApp : Component, IDisposable
         char side = _active;
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
-        if (LockedBlock(side, "delete here")) return;
+        if (LockedBlock(side, "delete here") || InArchiveBlock(side)) return;
         // "Confirm before delete" off ⇒ act immediately.
         if (!_settings.ConfirmDelete) { DoDelete(side, items); return; }
         var dest = _settings.Recycle ? "\nItems are sent to the Recycle Bin." : "\nItems are permanently deleted.";
@@ -1296,7 +1303,7 @@ public partial class CommanderApp : Component, IDisposable
     private void OpenNewFolderPrompt(char side)
     {
         _active = side;
-        if (LockedBlock(side, "create a folder here")) return;
+        if (LockedBlock(side, "create a folder here") || InArchiveBlock(side)) return;
         _namePromptValue = "";
         _namePromptError = null;
         _namePrompt = new NamePromptSpec("New folder", Dir(side), "Create",
@@ -1313,7 +1320,7 @@ public partial class CommanderApp : Component, IDisposable
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
         if (e.IsParent) return;                    // never rename ".."
-        if (LockedBlock(side, "rename here")) return;
+        if (LockedBlock(side, "rename here") || InArchiveBlock(side)) return;
         _active = side;
         _namePromptValue = e.Name;
         _namePromptError = null;

@@ -85,8 +85,13 @@ public static class FileSystem
     /// (an empty listing, an unready volume, or an access error) — no throwing.
     /// </summary>
     public static DirListing List(string path, bool showHidden = false,
-        SortMode sort = SortMode.Name, bool dirsFirst = true, bool descending = false)
+        SortMode sort = SortMode.Name, bool dirsFirst = true, bool descending = false,
+        bool sevenZip = false, string? password = null)
     {
+        // A path that descends into an archive lists through the VFS instead of disk.
+        if (ArchivePath.TryParse(path) is { } ap)
+            return ListArchive(ap.ArchiveFile, ap.Internal, sort, dirsFirst, descending, sevenZip, password);
+
         var dirs = new List<FileEntry>();
         var files = new List<FileEntry>();
 
@@ -129,20 +134,7 @@ public static class FileSystem
         catch (IOException) { return new(PaneState.Offline, []); }
         catch { return new(PaneState.Denied, []); }
 
-        Comparison<FileEntry> cmp = sort switch
-        {
-            SortMode.Ext => (a, b) =>
-            {
-                int c = string.Compare(Path.GetExtension(a.Name), Path.GetExtension(b.Name), StringComparison.OrdinalIgnoreCase);
-                return c != 0 ? c : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
-            },
-            SortMode.Size => (a, b) => a.Size.CompareTo(b.Size),
-            SortMode.Date => (a, b) => a.Modified.CompareTo(b.Modified),
-            _ => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
-        };
-        // Descending reverses within each group; the ".." parent still leads and the
-        // dirs-before-files grouping is preserved (only the order inside a group flips).
-        if (descending) { var asc = cmp; cmp = (a, b) => asc(b, a); }
+        var cmp = Comparator(sort, descending);
 
         var result = new List<FileEntry>(dirs.Count + files.Count + 1);
         var parent = Directory.GetParent(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -166,6 +158,47 @@ public static class FileSystem
 
         var state = dirs.Count == 0 && files.Count == 0 ? PaneState.Empty : PaneState.Ok;
         return new(state, result);
+    }
+
+    /// <summary>Sort comparator for a listing, honoring the sort key and direction.</summary>
+    private static Comparison<FileEntry> Comparator(SortMode sort, bool descending)
+    {
+        Comparison<FileEntry> cmp = sort switch
+        {
+            SortMode.Ext => (a, b) =>
+            {
+                int c = string.Compare(Path.GetExtension(a.Name), Path.GetExtension(b.Name), StringComparison.OrdinalIgnoreCase);
+                return c != 0 ? c : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            },
+            SortMode.Size => (a, b) => a.Size.CompareTo(b.Size),
+            SortMode.Date => (a, b) => a.Modified.CompareTo(b.Modified),
+            _ => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
+        };
+        // Descending reverses within each group; ".." still leads and dirs-before-files holds.
+        if (descending) { var asc = cmp; cmp = (a, b) => asc(b, a); }
+        return cmp;
+    }
+
+    /// <summary>List one level inside an archive through the VFS, sorted like a folder.
+    /// Non-Ok statuses (empty / corrupt / needs-7-Zip / encrypted) map onto the pane state.</summary>
+    private static DirListing ListArchive(string archiveFile, string internalPath,
+        SortMode sort, bool dirsFirst, bool descending, bool sevenZip, string? password)
+    {
+        var al = ArchiveVfs.ListEntries(archiveFile, internalPath, password, sevenZip);
+        if (al.Status is not (ArchiveStatus.Ok or ArchiveStatus.Empty))
+            return new(PaneState.Denied, al.Entries);   // distinct archive-error views land in a later phase
+        if (al.Status == ArchiveStatus.Empty)
+            return new(PaneState.Empty, al.Entries);
+
+        var cmp = Comparator(sort, descending);
+        var parent = al.Entries.Where(e => e.IsParent).ToList();
+        var dirs = al.Entries.Where(e => e.IsDir && !e.IsParent).ToList();
+        var files = al.Entries.Where(e => !e.IsDir).ToList();
+        var result = new List<FileEntry>(al.Entries.Count);
+        result.AddRange(parent);
+        if (dirsFirst) { dirs.Sort(cmp); files.Sort(cmp); result.AddRange(dirs); result.AddRange(files); }
+        else { var all = dirs.Concat(files).ToList(); all.Sort(cmp); result.AddRange(all); }
+        return new(PaneState.Ok, result);
     }
 
     /// <summary>Human-readable size for the 60px size column; directories read "&lt;DIR&gt;".</summary>

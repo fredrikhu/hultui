@@ -40,6 +40,7 @@ public sealed class Settings
     public string ImageEditor = "mspaint.exe {file}";
     public string Terminal = "wt.exe -d {dir}";
     public ArchiverKind Archiver = ArchiverKind.Builtin;
+    public string SevenZipPath = "";        // path to 7z.exe for 7z/rar/encryption; "" = try PATH
 
     // Colors
     public int Accent;                      // index into the accent palette

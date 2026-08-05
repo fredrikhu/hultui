@@ -128,7 +128,7 @@ public partial class CommanderApp
         // pane ground; the header's bottom border is the only divider to the list.
         pane.AddChild(BuildTabStrip(side));
         pane.AddChild(BuildBreadcrumb(side, active));
-        pane.AddChild(BuildListHeader());
+        pane.AddChild(BuildListHeader(InArchive(side)));
         // Non-ok states replace the row list with a centered status block.
         pane.AddChild(state == PaneState.Ok
             ? BuildList(side, list, active)
@@ -277,6 +277,13 @@ public partial class CommanderApp
         var p = root;
         for (int i = 0; i < segs.Length; i++) { p = System.IO.Path.Combine(p, segs[i]); prefixes[i] = p; }
 
+        // The segment that is the archive file, if we're browsing inside one — it renders
+        // as an amber crumb and is pinned against truncation.
+        int archIdx = -1;
+        if (ArchivePath.TryParse(dir) is { } ap)
+            for (int i = 0; i < segs.Length; i++)
+                if (PathEquals(prefixes[i], ap.ArchiveFile)) { archIdx = i; break; }
+
         // Left-truncate by WHOLE folders: keep the drive + as many trailing segments
         // as fit, and if any leading ones are dropped show a single "…" after the
         // drive → "C: / … / folder 3 / folder 4". The leaf is always kept.
@@ -290,10 +297,13 @@ public partial class CommanderApp
             used += w;
             start = i;
         }
+        // Never truncate past the archive crumb (design §A: drive + archive are pinned).
+        if (archIdx >= 0) start = Math.Min(start, archIdx);
         bool truncated = start > 0;
         if (truncated) budget -= EstSepWidth() + EstTextWidth("…", mono: false);
         // Dropping the ellipsis's width may push the last kept segment over; trim one more.
-        while (truncated && start < segs.Length - 1 && used > budget)
+        // (Skipped inside an archive so the pinned archive crumb is never trimmed.)
+        while (truncated && archIdx < 0 && start < segs.Length - 1 && used > budget)
             used -= EstSepWidth() + EstTextWidth(segs[start++], mono: false);
 
         if (truncated)
@@ -305,7 +315,7 @@ public partial class CommanderApp
         for (int i = start; i < segs.Length; i++)
         {
             row.AddChild(Sep());
-            row.AddChild(Crumb(side, segs[i], prefixes[i], leaf: i == segs.Length - 1));
+            row.AddChild(Crumb(side, segs[i], prefixes[i], leaf: i == segs.Length - 1, archive: i == archIdx));
         }
         return row;
     }
@@ -322,8 +332,25 @@ public partial class CommanderApp
         return d.HoverBg(Nocturne.Neutral900, Color.Transparent);
     }
 
-    private BoxElement Crumb(char side, string label, string target, bool leaf)
+    private static readonly Color ArchiveAmber = Color.FromHex("#d9a06b");
+
+    private BoxElement Crumb(char side, string label, string target, bool leaf, bool archive = false)
     {
+        // Archive crumb: amber name + zip glyph over an amber @10% fill (design §A) —
+        // glyph pairs with the color so it's not color-alone.
+        if (archive)
+        {
+            var box = Box.New().FlexShrink(0)
+                .Padding(new Thickness(1, 6, 1, 5)).CornerRadius(Nocturne.RadiusSm)
+                .Background(Nocturne.Alpha(ArchiveAmber, 0.10)).Cursor(CursorType.Pointer);
+            var inner = Flex.Row(gap: 4).AlignItems(AlignItems.Center);
+            inner.AddChild(Icons.Draw(IconKind.Archive, ArchiveAmber));
+            inner.AddChild(Ui.Mono(label, 11.5f, ArchiveAmber));
+            box.AddChild(inner);
+            box.OnClick(_ => { _active = side; NavigateTo(side, target); });
+            return box.HoverBg(Nocturne.Alpha(ArchiveAmber, 0.16), Nocturne.Alpha(ArchiveAmber, 0.10));
+        }
+
         var c = Box.New().FlexShrink(0)
             .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
             .Cursor(CursorType.Pointer)
@@ -354,18 +381,19 @@ public partial class CommanderApp
     private static float EstSepWidth() => 6f + 2 * 3f /*slash + row gaps*/;
 
     // Column layout depends on which optional columns (Size / Date) are enabled.
-    private (string cols, int sizeCol, int dateCol) ListLayout()
+    private (string cols, int sizeCol, int ratioCol, int dateCol) ListLayout(bool inArchive)
     {
         var cols = "16px 1fr";
-        int next = 2, sizeCol = -1, dateCol = -1;
+        int next = 2, sizeCol = -1, ratioCol = -1, dateCol = -1;
         if (_settings.ShowSize) { cols += " 60px"; sizeCol = next++; }
+        if (inArchive) { cols += " 40px"; ratioCol = next++; }   // packed/uncompressed %
         if (_settings.ShowDate) { cols += " 116px"; dateCol = next++; }
-        return (cols, sizeCol, dateCol);
+        return (cols, sizeCol, ratioCol, dateCol);
     }
 
-    private Element BuildListHeader()
+    private Element BuildListHeader(bool inArchive)
     {
-        var (cols, sizeCol, dateCol) = ListLayout();
+        var (cols, sizeCol, ratioCol, dateCol) = ListLayout(inArchive);
         var h = Grid.Of(cols, gap: 10).FlexShrink(0)
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(5, 10, 5, 10))
@@ -373,6 +401,8 @@ public partial class CommanderApp
         h.AddChild(Box.New().GridColumn(0));
         h.AddChild(HeaderCell("Name", SortMode.Name, rightAlign: false).GridColumn(1));
         if (sizeCol >= 0) h.AddChild(HeaderCell("Size", SortMode.Size, rightAlign: true).GridColumn(sizeCol));
+        if (ratioCol >= 0) h.AddChild(Text.New("RATIO").FontSize(10f).LetterSpacing(0.08f * 10f)
+            .TextColor(Nocturne.Neutral600).TextAlign(TextAlign.Right).GridColumn(ratioCol));
         if (dateCol >= 0) h.AddChild(HeaderCell("Modified", SortMode.Date, rightAlign: false).GridColumn(dateCol));
         return h;
     }
@@ -440,7 +470,7 @@ public partial class CommanderApp
         // "leaving", distinct from a mark (red) and the cursor ring (which paints over it).
         bool cut = !marked && _cutPending.Contains(e.FullPath);
         if (cut) { fg = Nocturne.Alpha(fg, 0.45); metaFg = Nocturne.Neutral700; }
-        var (cols, sizeCol, dateCol) = ListLayout();
+        var (cols, sizeCol, ratioCol, dateCol) = ListLayout(InArchive(side));
 
         // Every row reserves a 1px border so the cursor ring never shifts siblings.
         var row = Grid.Of(cols, gap: 10).Height(RowHeight)
@@ -471,6 +501,13 @@ public partial class CommanderApp
                 ? FileSystem.ByteCount(b) + (done ? "" : "…")
                 : FileSystem.SizeLabel(e);
             row.AddChild(Ui.Mono(sizeText, 11f, metaFg).TextAlign(TextAlign.Right).GridColumn(sizeCol));
+        }
+        if (ratioCol >= 0)
+        {
+            // packed/uncompressed % for an archive member; "—" for dirs / the parent.
+            string ratio = e.IsParent || e.IsDir || e.PackedSize < 0 || e.Size <= 0
+                ? "—" : $"{(int)Math.Round(100.0 * e.PackedSize / e.Size)}%";
+            row.AddChild(Ui.Mono(ratio, 11f, metaFg).TextAlign(TextAlign.Right).GridColumn(ratioCol));
         }
         if (dateCol >= 0)
             row.AddChild(Ui.Mono(FileSystem.DateLabel(e), 11f, metaFg).GridColumn(dateCol));
@@ -521,6 +558,18 @@ public partial class CommanderApp
         // "<n> marked · " in red, then the plain counts + free space.
         if (marked > 0)
             footer.AddChild(Ui.Mono($"{marked} marked · ", 10.5f, Nocturne.MarkRed));
+
+        // Inside an archive: amber counts + packed/% instead of free space (meaningless here).
+        if (InArchive(side))
+        {
+            long total = list.Where(e => !e.IsParent && !e.IsDir).Sum(e => e.Size);
+            long packed = list.Where(e => !e.IsParent && !e.IsDir && e.PackedSize >= 0).Sum(e => e.PackedSize);
+            string pct = total > 0 ? $" · packed {FileSystem.ByteCount(packed)} · {(int)Math.Round(100.0 * packed / total)}%" : "";
+            footer.AddChild(Ui.Mono($"{files} files · {dirs} dirs · {FileSystem.ByteCount(total)} uncompressed{pct}",
+                10.5f, ArchiveAmber));
+            return footer;
+        }
+
         var label = $"{files} files, {dirs} dirs" + (free.Length > 0 ? $" · {free}" : "");
         footer.AddChild(Ui.Mono(label, 10.5f, Nocturne.On(0.50)));
         return footer;
