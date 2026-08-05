@@ -197,6 +197,11 @@ public partial class CommanderApp
         page.AddChild(FieldRow("Archiver", Seg(
             ("Built-in zip", _draft.Archiver == ArchiverKind.Builtin, () => SetDraft(() => _draft.Archiver = ArchiverKind.Builtin)),
             ("7-Zip", _draft.Archiver == ArchiverKind.SevenZip, () => SetDraft(() => _draft.Archiver = ArchiverKind.SevenZip)))));
+        page.AddChild(FieldRow("7-Zip path", ReadonlyField(_draft.SevenZipPath.Length > 0 ? _draft.SevenZipPath : "— using PATH —")));
+        page.AddChild(Text.New(_sevenZip
+                ? "7-Zip found — 7z, rar (read), and encryption are available."
+                : "7-Zip not found — only built-in zip works. Set the path in settings.json.")
+            .FontSize(11f).TextColor(_sevenZip ? Nocturne.On(0.45) : Nocturne.MarkRedDim));
     }
 
     private void ColorsPage(BoxElement page)

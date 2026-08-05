@@ -129,10 +129,13 @@ public partial class CommanderApp
         pane.AddChild(BuildTabStrip(side));
         pane.AddChild(BuildBreadcrumb(side, active));
         pane.AddChild(BuildListHeader(InArchive(side)));
-        // Non-ok states replace the row list with a centered status block.
+        // Non-ok states replace the row list with a centered status block. An archive
+        // that couldn't be read (encrypted / corrupt / needs-7-Zip) shows its own message.
         pane.AddChild(state == PaneState.Ok
             ? BuildList(side, list, active)
-            : BuildStateBlock(side, state));
+            : ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
+                ? BuildArchiveError(side, arcStatus)
+                : BuildStateBlock(side, state));
         pane.AddChild(BuildFooter(side, list));
         return pane;
     }

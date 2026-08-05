@@ -392,6 +392,10 @@ public partial class CommanderApp : Component, IDisposable
         {
             var o = BuildPack(); o.Key = "pack"; root.AddChild(o);
         }
+        if (_pwOpen)
+        {
+            var o = BuildPasswordPrompt(); o.Key = "password"; root.AddChild(o);
+        }
         if (_bookmarksOpen)
         {
             var o = BuildBookmarks(); o.Key = "bookmarks"; root.AddChild(o);
@@ -428,6 +432,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
         if (_pendingCmdFocus) { _pendingCmdFocus = false; _cmdRef.Current?.Focus(); }
         if (_pendingPackFocus) { _pendingPackFocus = false; _packNameRef.Current?.Focus(); }
+        if (_pendingPwFocus) { _pendingPwFocus = false; _pwRef.Current?.Focus(); }
         if (_pendingDiffScroll)
         {
             _pendingDiffScroll = false;
@@ -802,7 +807,7 @@ public partial class CommanderApp : Component, IDisposable
 
     private bool AnyOverlayOpen => _drivePicker != null || _paletteOpen || _bookmarksOpen
         || _confirm != null || _overwriteOpen || _progressOpen || _optionsOpen || _namePrompt != null
-        || _findOpen || _packOpen;
+        || _findOpen || _packOpen || _pwOpen;
 
     private void CloseOverlays()
     {
@@ -813,6 +818,7 @@ public partial class CommanderApp : Component, IDisposable
         _optionsOpen = false;
         _namePrompt = null;
         _packOpen = false;
+        _pwOpen = false;
         if (_findOpen) { _findOpen = false; StopFind(); }
         MarkDirty();
     }
@@ -1607,6 +1613,7 @@ public partial class CommanderApp : Component, IDisposable
         if (_paletteOpen) { HandlePaletteKey(e); return; }
         if (_findOpen) { HandleFindKey(e); return; }
         if (_packOpen) { HandlePackKey(e); return; }
+        if (_pwOpen) { HandlePasswordKey(e); return; }
         if (_bookmarksOpen) { HandleBookmarksKey(e); e.StopPropagation = true; return; }
         if (_drivePicker is char dpKey)
         {

@@ -20,8 +20,10 @@ public sealed record DriveEntry(
 /// <summary>The state a pane's listing is in — drives the empty/offline/denied views.</summary>
 public enum PaneState { Ok, Empty, Offline, Denied }
 
-/// <summary>A directory listing plus the state it resolved to.</summary>
-public sealed record DirListing(PaneState State, IReadOnlyList<FileEntry> Entries)
+/// <summary>A directory listing plus the state it resolved to. <see cref="Archive"/> is
+/// set (to a non-Ok status) when a browsed archive couldn't be read — encrypted, corrupt,
+/// or needing 7-Zip — so the pane can show the right message.</summary>
+public sealed record DirListing(PaneState State, IReadOnlyList<FileEntry> Entries, ArchiveStatus? Archive = null)
 {
     public static readonly DirListing Loading = new(PaneState.Ok, []);
 }
@@ -186,9 +188,9 @@ public static class FileSystem
     {
         var al = ArchiveVfs.ListEntries(archiveFile, internalPath, password, sevenZip);
         if (al.Status is not (ArchiveStatus.Ok or ArchiveStatus.Empty))
-            return new(PaneState.Denied, al.Entries);   // distinct archive-error views land in a later phase
+            return new(PaneState.Denied, al.Entries, al.Status);   // pane renders the specific message
         if (al.Status == ArchiveStatus.Empty)
-            return new(PaneState.Empty, al.Entries);
+            return new(PaneState.Empty, al.Entries, ArchiveStatus.Empty);
 
         var cmp = Comparator(sort, descending);
         var parent = al.Entries.Where(e => e.IsParent).ToList();
