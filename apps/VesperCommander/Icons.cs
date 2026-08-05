@@ -1,18 +1,22 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
-using HultUI.Core.Rendering;
+using HultUI.Rendering.Skia;
+using SkiaSharp;
 
 namespace VesperCommander;
 
 public enum IconKind { Folder, Parent, File, Code, Image, Archive }
 
 /// <summary>
-/// Canvas-drawn 16px outline icons for the file list (folder / parent / file /
-/// code / image / archive). HultUI's canvas exposes strokes and rounded rects but
-/// no arbitrary path fill, so these are built from lines, rounded-rect strokes,
-/// and circles — the design's inline-SVG glyphs approximated with primitives.
-/// Coordinates are in a local 0..16 box (the element is 16×16).
+/// File-list icons rasterized from the design's inline-SVG glyphs. HultUI's canvas has no
+/// arbitrary path fill or arcs, so instead of approximating the vectors with line
+/// primitives we parse the real SVG path data with Skia and rasterize each icon to a small
+/// tinted bitmap (cached per kind + tint). This reproduces the design exactly — the solid
+/// folder, the rounded-corner page outlines, the framed image glyph — rather than a
+/// stroke-only lookalike. A <paramref name="tint"/> overrides every part's colour (marked
+/// rows go red); otherwise each part uses its design colour.
 /// </summary>
 public static class Icons
 {
@@ -31,57 +35,98 @@ public static class Icons
         };
     }
 
-    public static CanvasElement Draw(IconKind kind, Color color) =>
-        Canvas.New(ctx => Render(ctx, kind, color)).Width(16).Height(16).FlexShrink(0);
-
-    private static void Render(ICanvasDrawingContext ctx, IconKind kind, Color c)
+    public static Element Draw(IconKind kind, Color? tint = null)
     {
-        const float st = 1.25f;
+        var img = Image.New(Rasterize(kind, tint));
+        img.Fit = ImageFit.Contain;
+        return img.Width(16).Height(16).FlexShrink(0);
+    }
+
+    /// <summary>Drop cached bitmaps after the accent ramp changes (design colours read the
+    /// live ramp). Call from the Options "save" path.</summary>
+    public static void InvalidateCache()
+    {
+        foreach (var v in _cache.Values) v.Dispose();
+        _cache.Clear();
+    }
+
+    private static readonly Dictionary<long, SkiaImageSource> _cache = new();
+    private const int Supersample = 32;   // rendered at 2× for a 16px display
+
+    private static SkiaImageSource Rasterize(IconKind kind, Color? tint)
+    {
+        long key = ((long)(tint is { } t ? Pack(t) : 0xFFFF_FFFFu) << 8) | (byte)kind;
+        if (_cache.TryGetValue(key, out var cached)) return cached;
+
+        var bmp = new SKBitmap(Supersample, Supersample, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(bmp))
+        {
+            canvas.Clear(SKColors.Transparent);
+            canvas.Scale(Supersample / 16f);   // author in the design's 16-unit box
+            foreach (var (path, fill, stroke, color) in Parts(kind))
+            {
+                using var _ = path;
+                var c = tint ?? color;
+                using var paint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Color = new SKColor(c.R, c.G, c.B, c.A),
+                    Style = fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke,
+                    StrokeWidth = stroke,
+                    StrokeCap = SKStrokeCap.Round,
+                    StrokeJoin = SKStrokeJoin.Round,
+                };
+                canvas.DrawPath(path, paint);
+            }
+        }
+        var src = new SkiaImageSource(bmp);
+        _cache[key] = src;
+        return src;
+    }
+
+    private static uint Pack(Color c) => ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+
+    private static SKPath Svg(string d) => SKPath.ParseSvgPathData(d);
+
+    // The design's file-type glyphs (batch-1/2 handoff sprite). Colours read the live ramp.
+    private static IEnumerable<(SKPath path, bool fill, float stroke, Color color)> Parts(IconKind kind)
+    {
+        const string page = "M4 1.5h5.5L13 5v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z";
         switch (kind)
         {
             case IconKind.Folder:
-                ctx.DrawRoundedRectStroke(new Rect(2, 5.5f, 12, 8), new CornerRadius(1.5f), c, st);
-                ctx.DrawLine(new Point(2, 5.6f), new Point(3.3f, 3.9f), c, st);
-                ctx.DrawLine(new Point(3.3f, 3.9f), new Point(6.4f, 3.9f), c, st);
-                ctx.DrawLine(new Point(6.4f, 3.9f), new Point(7.7f, 5.6f), c, st);
+                yield return (Svg("M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.6 1.8H13A1.5 1.5 0 0 1 14.5 6v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V4z"),
+                    true, 0, Theme.Nocturne.Accent600);
                 break;
 
             case IconKind.Parent:
-                ctx.DrawLine(new Point(8, 3.5f), new Point(8, 12.5f), c, st);
-                ctx.DrawLine(new Point(8, 3.5f), new Point(4.8f, 6.7f), c, st);
-                ctx.DrawLine(new Point(8, 3.5f), new Point(11.2f, 6.7f), c, st);
+                yield return (Svg("M8 13V4m0 0L4.5 7.5M8 4l3.5 3.5"), false, 1.4f, Theme.Nocturne.Neutral400);
                 break;
 
             case IconKind.Code:
-                Page(ctx, c, st);
-                ctx.DrawLine(new Point(7, 6.8f), new Point(5.4f, 9), c, st);
-                ctx.DrawLine(new Point(5.4f, 9), new Point(7, 11.2f), c, st);
-                ctx.DrawLine(new Point(9, 6.8f), new Point(10.6f, 9), c, st);
-                ctx.DrawLine(new Point(10.6f, 9), new Point(9, 11.2f), c, st);
+                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Accent500);
+                yield return (Svg("M6.4 8.4L5.2 9.6l1.2 1.2m3.2-2.4l1.2 1.2-1.2 1.2"), false, 1.1f, Theme.Nocturne.Accent400);
                 break;
 
             case IconKind.Image:
-                Page(ctx, c, st);
-                ctx.DrawCircleStroke(new Point(6.4f, 6.6f), 1f, c, st * 0.85f);
-                ctx.DrawLine(new Point(4.5f, 11.4f), new Point(7.4f, 8.4f), c, st);
-                ctx.DrawLine(new Point(7.4f, 8.4f), new Point(11.5f, 11.4f), c, st);
+                var rect = new SKPath();
+                rect.AddRoundRect(new SKRect(2.5f, 3, 13.5f, 13), 1.2f, 1.2f);
+                yield return (rect, false, 1.2f, Theme.Nocturne.Neutral500);
+                var lens = new SKPath();
+                lens.AddCircle(6, 6.4f, 1);
+                yield return (lens, true, 0, Theme.Nocturne.Neutral500);
+                yield return (Svg("M3.4 11.6l3-3 2.4 2.4 1.8-1.6 2 2.2"), false, 1.1f, Theme.Nocturne.Neutral500);
                 break;
 
             case IconKind.Archive:
-                Page(ctx, c, st);
-                for (float y = 4.5f; y < 12; y += 2f)
-                    ctx.DrawLine(new Point(8, y), new Point(8, y + 1f), c, st);
+                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Neutral600);
+                yield return (Svg("M7.6 2.5v3.6m1-1.8H7"), false, 1.1f, Theme.Nocturne.Neutral500);
                 break;
 
             default: // File
-                Page(ctx, c, st);
-                ctx.DrawLine(new Point(5.6f, 7), new Point(10.4f, 7), c, st * 0.8f);
-                ctx.DrawLine(new Point(5.6f, 9.4f), new Point(10.4f, 9.4f), c, st * 0.8f);
-                ctx.DrawLine(new Point(5.6f, 11.8f), new Point(8.8f, 11.8f), c, st * 0.8f);
+                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Neutral600);
+                yield return (Svg("M9.5 1.5V5H13"), false, 1.2f, Theme.Nocturne.Neutral600);
                 break;
         }
     }
-
-    private static void Page(ICanvasDrawingContext ctx, Color c, float st) =>
-        ctx.DrawRoundedRectStroke(new Rect(3.5f, 2.5f, 9, 11), new CornerRadius(1.3f), c, st);
 }

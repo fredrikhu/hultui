@@ -244,16 +244,7 @@ public partial class CommanderApp
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
 
         var fe = new FileEntry(h.Name, h.FullPath, h.IsDir, h.Size, h.Modified);
-        var kind = Icons.KindFor(fe);
-        Color iconColor = kind switch
-        {
-            IconKind.Folder => Nocturne.DirText,
-            IconKind.Code => Nocturne.Accent300,
-            IconKind.Image => Color.FromHex("#8fd0b0"),
-            IconKind.Archive => Color.FromHex("#d9a06b"),
-            _ => Nocturne.On(0.55),
-        };
-        row.AddChild(Icons.Draw(kind, iconColor));
+        row.AddChild(Icons.Draw(Icons.KindFor(fe)));
 
         var name = Flex.Row(gap: 6).AlignItems(AlignItems.Center).FlexGrow(1).Overflow(Overflow.Hidden);
         name.AddChild(Ui.Mono(h.Name, 12f, h.IsDir ? Nocturne.DirText : Nocturne.Text)

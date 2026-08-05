@@ -1219,6 +1219,7 @@ public partial class CommanderApp : Component, IDisposable
         _settings = _draft.Clone();
         SettingsStore.Save(_settings);
         Nocturne.SetAccent(_settings.Accent);      // retheme the accent ramp
+        Icons.InvalidateCache();                    // icons bake the ramp — re-rasterize
         _app.Theme = Nocturne.ToHultTheme();        // refresh built-in widgets
         _optionsOpen = false;
         _genL++; _genR++;          // re-sort / re-filter with the new settings

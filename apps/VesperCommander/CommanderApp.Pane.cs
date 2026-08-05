@@ -452,18 +452,12 @@ public partial class CommanderApp
                  && IndexOfName(Listing(side), e.Name) % 2 == 1)
             row.Background(Nocturne.Alpha(Nocturne.Text, 0.03));   // alternating tint
 
-        // Canvas-drawn type icon; coloured by category (marked rows stay red).
+        // Type icon rasterized from the design's SVG glyphs; marked rows tint red, a
+        // cut-pending row ghosts via element opacity (keeps the design's own colours).
         var kind = Icons.KindFor(e);
-        Color iconColor = marked ? Nocturne.MarkRed : kind switch
-        {
-            IconKind.Folder => Nocturne.DirText,
-            IconKind.Code => Nocturne.Accent300,
-            IconKind.Image => Color.FromHex("#8fd0b0"),
-            IconKind.Archive => Color.FromHex("#d9a06b"),
-            _ => Nocturne.On(0.55),
-        };
-        if (cut) iconColor = Nocturne.Alpha(iconColor, 0.45);
-        row.AddChild(Icons.Draw(kind, iconColor).GridColumn(0));
+        var iconEl = Icons.Draw(kind, marked ? Nocturne.MarkRed : (Color?)null);
+        if (cut) iconEl.Opacity = 0.45f;
+        row.AddChild(iconEl.GridColumn(0));
         row.AddChild(Ui.Mono(e.Name, 12f, fg).TextAlign(TextAlign.Left)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(1));
         if (sizeCol >= 0)
