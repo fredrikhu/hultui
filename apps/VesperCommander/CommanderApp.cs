@@ -1284,10 +1284,15 @@ public partial class CommanderApp : Component, IDisposable
     // ── Navigation / view actions (also palette targets) ─────────────────
     private void GoUp(char side)
     {
-        var parent = Directory.GetParent(Dir(side).TrimEnd(
+        var dir = Dir(side);
+        // Already at a drive / UNC root → stay put. (Trimming the trailing separator off
+        // "C:\" leaves "C:", which Directory.GetParent resolves relative to the process's
+        // working directory — i.e. it would jump to the parent of the launch folder.)
+        if (PathEquals(dir, System.IO.Path.GetPathRoot(dir) ?? dir)) return;
+        var parent = Directory.GetParent(dir.TrimEnd(
             System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
         if (parent == null) return;
-        var leaving = new DirectoryInfo(Dir(side)).Name;
+        var leaving = new DirectoryInfo(dir).Name;
         NavigateTo(side, parent.FullName, leaving);
     }
 
