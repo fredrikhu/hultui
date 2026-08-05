@@ -10,7 +10,8 @@ public sealed record FileEntry(
     long Size,
     DateTime Modified,
     FileAttributes Attributes = 0,
-    bool IsParent = false);
+    bool IsParent = false,
+    long PackedSize = -1);   // compressed size for an archive member; -1 = not in an archive
 
 /// <summary>A mounted volume for the drive picker.</summary>
 public sealed record DriveEntry(
