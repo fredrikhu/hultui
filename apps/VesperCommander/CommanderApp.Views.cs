@@ -16,6 +16,24 @@ public partial class CommanderApp
     // per-pane layouts over the same listing; the toggle lives in the breadcrumb row.
     private static int Si(char side) => side == 'L' ? 0 : 1;
 
+    // ── Pure layout math (unit-tested; drives both rendering and navigation) ──
+    /// <summary>Brief grid geometry: rows per column (the height fills before wrapping),
+    /// total columns, the column width (186px fixed once columns overflow the pane, else
+    /// stretched to fill), and whether the pane scrolls horizontally.</summary>
+    internal static (int rows, int cols, float colW, bool overflow) BriefGrid(int count, float availW, float availH, float rowH)
+    {
+        int rows = Math.Max(1, (int)(availH / rowH));
+        int cols = Math.Max(1, (count + rows - 1) / rows);
+        int maxFit = Math.Max(1, (int)(availW / 186f));
+        bool overflow = cols > maxFit;
+        float colW = overflow ? 186f : availW / cols;
+        return (rows, cols, colW, overflow);
+    }
+
+    /// <summary>Thumbnail tiles that fit across the pane width, at least one.</summary>
+    internal static int ThumbPerRow(float availW, float tileW, float gap) =>
+        Math.Max(1, (int)((availW + gap) / (tileW + gap)));
+
     // Per-side geometry cached at Build time so the key handler can navigate without
     // re-measuring: Brief rows-per-column, Thumbnail columns-per-row, and a page step.
     private readonly int[] _briefRows = { 1, 1 };
@@ -63,7 +81,7 @@ public partial class CommanderApp
         var tv = ThumbVList(side).Current;
         float availW = tv?.Layout.AbsoluteContentBox.Width ?? (PaneContentWidthEstimate() - 20f);
         float availH = tv?.Layout.AbsoluteContentBox.Height ?? (_window.LayoutHeight > 0 ? _window.LayoutHeight - 160f : 600f);
-        int perRow = Math.Max(1, (int)((availW + m.Gap) / (m.TileW + m.Gap)));
+        int perRow = ThumbPerRow(availW, m.TileW, m.Gap);
         float stride = m.TileH + m.Gap;
         int visRows = Math.Max(1, (int)(availH / stride));
         _thumbCols[Si(side)] = perRow;
@@ -234,11 +252,7 @@ public partial class CommanderApp
         float availW = sv?.Layout.AbsoluteContentBox.Width ?? PaneContentWidthEstimate();
         if (availH < rowH) availH = rowH;
 
-        int rows = Math.Max(1, (int)(availH / rowH));
-        int totalCols = Math.Max(1, (n + rows - 1) / rows);
-        int maxFit = Math.Max(1, (int)(availW / 186f));
-        bool overflow = totalCols > maxFit;
-        float colW = overflow ? 186f : availW / totalCols;
+        var (rows, totalCols, colW, overflow) = BriefGrid(n, availW, availH, rowH);
         int visCols = overflow ? Math.Max(1, (int)(availW / colW)) : totalCols;
 
         _briefRows[Si(side)] = rows;
