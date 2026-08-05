@@ -39,8 +39,10 @@ public partial class CommanderApp
         header.AddChild(close.HoverBg(Nocturne.Neutral900, Color.Transparent));
         card.AddChild(header);
 
-        // Body: 184px nav | page content.
-        var body = Grid.Of("184px 1fr").MinHeight(520);
+        // Body: 184px nav | page content. A fixed height + a 1fr row makes both cells
+        // (notably the nav's surface) fill the dialog regardless of the page's content,
+        // and keeps the window a stable size as you switch pages.
+        var body = Grid.Of("184px 1fr", "1fr").Height(460);
         body.AddChild(OptionsNav().GridCell(0, 0));
         var page = Flex.Column(gap: 14).Padding(new Thickness(16, 20, 16, 20)).GridCell(0, 1);
         OptionsPage(page);
