@@ -327,7 +327,10 @@ public partial class CommanderApp
             ? Box.New().Padding(new Thickness(1, 6, 2, 6)).CornerRadius(4f)
                 .Background(Nocturne.Accent900).BorderColor(Nocturne.Accent).BorderWidth(1f)
                 .Children(Ui.Mono("press keys…", 10f, Nocturne.Accent200))
-            : Ui.Kbd(Keybindings.Format(CurrentChord(cmd, _draft)));
+            : CurrentChord(cmd, _draft) is { } ch
+                ? Ui.Kbd(Keybindings.Format(ch))
+                : Box.New().Padding(new Thickness(1, 6, 2, 6))   // stolen chord's former owner
+                    .Children(Ui.Mono("unassigned", 10f, Nocturne.Neutral600));
         row.AddChild(chip.GridCell(0, 1));
 
         row.OnClick(_ => { _rebindCmd = cmd; MarkDirty(); });

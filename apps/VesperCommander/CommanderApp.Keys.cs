@@ -16,9 +16,12 @@ public partial class CommanderApp
         foreach (var (cmd, def) in Keybindings.Defaults)
         {
             var chord = def;
-            if (_settings.KeyBindings.TryGetValue(cmd.ToString(), out var s) && Keybindings.Parse(s) is { } c)
-                chord = c;
-            _keyReverse[chord] = cmd;   // last write wins if two commands collide
+            if (_settings.KeyBindings.TryGetValue(cmd.ToString(), out var s))
+            {
+                if (s.Length == 0) continue;                     // explicitly unbound (a conflict steal)
+                if (Keybindings.Parse(s) is { } c) chord = c;
+            }
+            _keyReverse[chord] = cmd;   // conflicts are prevented at rebind time (RebindTo steals)
         }
     }
 
@@ -72,19 +75,41 @@ public partial class CommanderApp
         }
     }
 
-    /// <summary>Record a rebind in the draft: store the chord as an override, or drop the
-    /// override when it matches the default (so only real changes persist).</summary>
+    /// <summary>Record a rebind in the draft: store the chord as an override (or drop it when
+    /// it matches the default, so only real changes persist), then <b>steal</b> the chord from
+    /// any other command that held it — that command reverts to its default, or becomes
+    /// explicitly unbound ("") when its default is the very chord we took. This keeps the map
+    /// unambiguous instead of a nondeterministic last-write-wins.</summary>
     private void RebindTo(Cmd cmd, Chord chord)
     {
         if (chord.Equals(Keybindings.Defaults[cmd]))
             _draft.KeyBindings.Remove(cmd.ToString());
         else
             _draft.KeyBindings[cmd.ToString()] = Keybindings.Format(chord);
+
+        foreach (var (other, _) in Keybindings.Order)
+        {
+            if (other == cmd) continue;
+            if (CurrentChord(other, _draft) is { } oc && oc.Equals(chord))
+            {
+                if (Keybindings.Defaults[other].Equals(chord))
+                    _draft.KeyBindings[other.ToString()] = "";   // its default IS this chord → unbind
+                else
+                    _draft.KeyBindings.Remove(other.ToString());  // revert to its own (free) default
+            }
+        }
     }
 
     /// <summary>The chord bound to a command in the given settings (draft while editing),
-    /// falling back to the default.</summary>
-    private static Chord CurrentChord(Cmd cmd, Settings s) =>
-        s.KeyBindings.TryGetValue(cmd.ToString(), out var str) && Keybindings.Parse(str) is { } c
-            ? c : Keybindings.Defaults[cmd];
+    /// falling back to the default. Null when the command is explicitly unbound (a stolen
+    /// chord's former owner).</summary>
+    private static Chord? CurrentChord(Cmd cmd, Settings s)
+    {
+        if (s.KeyBindings.TryGetValue(cmd.ToString(), out var str))
+        {
+            if (str.Length == 0) return null;                       // explicitly unbound
+            if (Keybindings.Parse(str) is { } c) return c;
+        }
+        return Keybindings.Defaults[cmd];
+    }
 }
