@@ -42,13 +42,16 @@ public static class ArchiveVfs
     public static ArchiveListing ListEntries(string archiveFile, string internalPath, string? password, bool sevenZip)
     {
         if (!File.Exists(archiveFile)) return new(ArchiveStatus.NotFound, []);
-        string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
+        // Resolve any nested-archive hops to a real on-disk archive; entry paths stay virtual.
+        if (Resolve(archiveFile, internalPath, password, sevenZip) is not var (disk, inner))
+            return new(ArchiveStatus.Corrupt, []);
+        string ext = Path.GetExtension(disk).ToLowerInvariant();
         bool builtin = ext is ".zip" && !NeedsSevenZip(ext, sevenZip);
         try
         {
             return builtin
-                ? ListZip(archiveFile, internalPath)
-                : sevenZip ? SevenZip.List(archiveFile, internalPath, password)
+                ? ListZip(disk, inner, archiveFile, internalPath)
+                : sevenZip ? SevenZip.List(disk, inner, password)
                            : new(ArchiveStatus.NeedsSevenZip, []);
         }
         catch (InvalidDataException) { return new(ArchiveStatus.Corrupt, []); }
@@ -58,10 +61,12 @@ public static class ArchiveVfs
     private static bool NeedsSevenZip(string ext, bool sevenZip) =>
         ext is not ".zip";   // only plain zip is built-in-readable here
 
-    private static ArchiveListing ListZip(string archiveFile, string internalPath)
+    // diskArchive/diskInternal locate the bytes; virtArchive/virtInternal build the entry
+    // FullPaths (the virtual chain, so nested archives read seamlessly in the breadcrumb).
+    private static ArchiveListing ListZip(string diskArchive, string diskInternal, string virtArchive, string virtInternal)
     {
-        using var zip = ZipFile.OpenRead(archiveFile);
-        string prefix = internalPath.Length == 0 ? "" : internalPath.Replace('\\', '/').TrimEnd('/') + "/";
+        using var zip = ZipFile.OpenRead(diskArchive);
+        string prefix = diskInternal.Length == 0 ? "" : diskInternal.Replace('\\', '/').TrimEnd('/') + "/";
         var dirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var files = new List<FileEntry>();
         long totalSize = 0, totalPacked = 0;
@@ -76,8 +81,8 @@ public static class ArchiveVfs
             if (slash >= 0) { dirs.Add(rest[..slash]); continue; }
             if (entry.FullName.EndsWith("/")) continue;   // a directory marker entry
 
-            string inner = internalPath.Length == 0 ? rest : internalPath + Path.DirectorySeparatorChar + rest;
-            files.Add(new FileEntry(rest, ArchivePath.Combine(archiveFile, inner),
+            string inner = virtInternal.Length == 0 ? rest : virtInternal + Path.DirectorySeparatorChar + rest;
+            files.Add(new FileEntry(rest, ArchivePath.Combine(virtArchive, inner),
                 IsDir: false, entry.Length, entry.LastWriteTime.DateTime, PackedSize: entry.CompressedLength));
             totalSize += entry.Length;
             totalPacked += entry.CompressedLength;
@@ -85,12 +90,12 @@ public static class ArchiveVfs
 
         var result = new List<FileEntry>
         {
-            new("..", ArchivePath.ParentOf(archiveFile, internalPath), IsDir: true, 0, DateTime.Now, IsParent: true),
+            new("..", ArchivePath.ParentOf(virtArchive, virtInternal), IsDir: true, 0, DateTime.Now, IsParent: true),
         };
         foreach (var d in dirs)
         {
-            string inner = internalPath.Length == 0 ? d : internalPath + Path.DirectorySeparatorChar + d;
-            result.Add(new FileEntry(d, ArchivePath.Combine(archiveFile, inner), IsDir: true, 0, DateTime.Now));
+            string inner = virtInternal.Length == 0 ? d : virtInternal + Path.DirectorySeparatorChar + d;
+            result.Add(new FileEntry(d, ArchivePath.Combine(virtArchive, inner), IsDir: true, 0, DateTime.Now));
         }
         result.AddRange(files);
 
@@ -101,6 +106,12 @@ public static class ArchiveVfs
     /// <summary>Open a member's bytes for reading (extract / preview). Caller disposes.</summary>
     public static Stream? OpenEntry(string archiveFile, string internalPath, string? password, bool sevenZip)
     {
+        if (Resolve(archiveFile, internalPath, password, sevenZip) is not var (disk, inner)) return null;
+        return OpenEntryDirect(disk, inner, password, sevenZip);
+    }
+
+    private static Stream? OpenEntryDirect(string archiveFile, string internalPath, string? password, bool sevenZip)
+    {
         string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
         if (ext is ".zip" && !sevenZip)
         {
@@ -110,6 +121,59 @@ public static class ArchiveVfs
             return new ArchiveEntryStream(zip, entry.Open());
         }
         return sevenZip ? SevenZip.OpenEntry(archiveFile, internalPath, password) : null;
+    }
+
+    // ── Nested archives (archive inside an archive) ──────────────────────
+    // The internal path may cross into a member that is itself an archive (outer.zip →
+    // inner.zip → …). Resolve() walks the path, extracting each nested archive member to a
+    // temp file, and returns the real on-disk archive + the remaining internal path. Entry
+    // FullPaths stay virtual (the outer chain), so the breadcrumb and navigation are seamless
+    // for zip-in-zip. Extractions are cached for the session and cleaned up on exit.
+    private static readonly Dictionary<string, string> _nestedTemp = new(StringComparer.OrdinalIgnoreCase);
+
+    private static (string disk, string inner)? Resolve(string archiveFile, string internalPath, string? password, bool sevenZip)
+    {
+        string current = archiveFile;
+        var segs = internalPath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        var acc = new List<string>();
+        foreach (var seg in segs)
+        {
+            acc.Add(seg);
+            if (IsArchiveFile(seg))
+            {
+                var temp = ExtractNested(current, string.Join('\\', acc), password, sevenZip);
+                if (temp == null) return null;   // couldn't extract the nested archive
+                current = temp;
+                acc.Clear();
+            }
+        }
+        return (current, string.Join('\\', acc));
+    }
+
+    private static string? ExtractNested(string diskArchive, string memberInternal, string? password, bool sevenZip)
+    {
+        string key = diskArchive + "|" + memberInternal;
+        if (_nestedTemp.TryGetValue(key, out var cached) && File.Exists(cached)) return cached;
+        try
+        {
+            using var s = OpenEntryDirect(diskArchive, memberInternal, password, sevenZip);
+            if (s == null) return null;
+            var dir = Path.Combine(Path.GetTempPath(), "vesper-nested");
+            Directory.CreateDirectory(dir);
+            var temp = Path.Combine(dir, Guid.NewGuid().ToString("N") + Path.GetExtension(memberInternal));
+            using (var fs = File.Create(temp)) s.CopyTo(fs);
+            _nestedTemp[key] = temp;
+            return temp;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Delete the temp files created for nested-archive browsing (app exit).</summary>
+    public static void CleanupTemp()
+    {
+        try { var d = Path.Combine(Path.GetTempPath(), "vesper-nested"); if (Directory.Exists(d)) Directory.Delete(d, true); }
+        catch { }
+        _nestedTemp.Clear();
     }
 
     /// <summary>Create <paramref name="archivePath"/> from <paramref name="items"/>

@@ -226,6 +226,38 @@ public class ArchiveTests : IDisposable
     }
 
     [Fact]
+    public void Nested_ListAndOpenThroughChain()
+    {
+        // inner.zip (with a nested folder) embedded inside outer.zip.
+        var innerPath = Path.Combine(_dir, "inner.zip");
+        using (var inner = ZipFile.Open(innerPath, ZipArchiveMode.Create))
+            WriteEntry(inner, "deep/hello.txt", "nested content");
+        var outerPath = Path.Combine(_dir, "outer.zip");
+        using (var outer = ZipFile.Open(outerPath, ZipArchiveMode.Create))
+            outer.CreateEntryFromFile(innerPath, "inner.zip");
+
+        // List the root of the nested archive via the outer, and its subfolder.
+        var root = ArchiveVfs.ListEntries(outerPath, "inner.zip", null, sevenZip: false);
+        Assert.Equal(ArchiveStatus.Ok, root.Status);
+        Assert.Contains(root.Entries, e => e.Name == "deep" && e.IsDir);
+        var deep = ArchiveVfs.ListEntries(outerPath, @"inner.zip\deep", null, sevenZip: false);
+        Assert.Contains(deep.Entries, e => e.Name == "hello.txt");
+
+        // Entry FullPaths stay virtual (outer\inner\…), so navigation is seamless.
+        var member = deep.Entries.First(e => e.Name == "hello.txt");
+        Assert.Equal(Path.Combine(outerPath, "inner.zip", "deep", "hello.txt"), member.FullPath);
+
+        // Open a member through the whole chain.
+        using (var s = ArchiveVfs.OpenEntry(outerPath, @"inner.zip\deep\hello.txt", null, sevenZip: false))
+        {
+            Assert.NotNull(s);
+            using var r = new StreamReader(s!);
+            Assert.Equal("nested content", r.ReadToEnd());
+        }
+        ArchiveVfs.CleanupTemp();
+    }
+
+    [Fact]
     public void Create_BuiltinZip_RoundTrips()
     {
         var src = Path.Combine(_dir, "note.txt");

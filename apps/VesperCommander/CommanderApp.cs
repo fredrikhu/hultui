@@ -613,9 +613,9 @@ public partial class CommanderApp : Component, IDisposable
         {
             NavigateTo(side, e.FullPath);
         }
-        else if (ArchiveVfs.IsArchiveFile(e.FullPath) && File.Exists(e.FullPath))
+        else if (ArchiveVfs.IsArchiveFile(e.FullPath) && (File.Exists(e.FullPath) || InArchive(side)))
         {
-            NavigateTo(side, e.FullPath);   // browse into the archive (as a folder)
+            NavigateTo(side, e.FullPath);   // browse into the archive — incl. a nested one (a member)
         }
         else
         {
@@ -1933,6 +1933,7 @@ public partial class CommanderApp : Component, IDisposable
         SaveSession();
         (_lastImage as IDisposable)?.Dispose();
         _thumbsCache?.Dispose();
+        ArchiveVfs.CleanupTemp();   // remove any nested-archive temp extractions
     }
 
     /// <summary>The view mode saved at index <paramref name="i"/> (or Detail when absent).</summary>
