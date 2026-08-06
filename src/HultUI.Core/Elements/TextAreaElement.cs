@@ -438,23 +438,31 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
                 _preferredX = -1;
                 break;
 
+            // In a read-only viewer there's no visible caret to chase, so plain
+            // navigation scrolls the content like a pager (matching the old keyboard
+            // scroll). Shift+navigation still moves the caret to extend a selection.
             case KeyCode.Up:
+                if (ReadOnly && !shift) { ScrollLines(-1); break; }
                 MoveCursorVertical(-1, shift);
                 break;
 
             case KeyCode.Down:
+                if (ReadOnly && !shift) { ScrollLines(1); break; }
                 MoveCursorVertical(1, shift);
                 break;
 
             case KeyCode.PageUp:
+                if (ReadOnly && !shift) { ScrollPage(-1); break; }
                 MoveCursorVertical(-GetPageLineCount(), shift);
                 break;
 
             case KeyCode.PageDown:
+                if (ReadOnly && !shift) { ScrollPage(1); break; }
                 MoveCursorVertical(GetPageLineCount(), shift);
                 break;
 
             case KeyCode.Home:
+                if (ReadOnly && !shift) { _scrollOffsetY = 0; break; }
                 if (ctrl)
                     MoveCursorTo(0, shift);
                 else
@@ -463,6 +471,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
                 break;
 
             case KeyCode.End:
+                if (ReadOnly && !shift) { _scrollOffsetY = MaxScrollY(); break; }
                 if (ctrl)
                     MoveCursorTo(_text.Length, shift);
                 else
@@ -610,6 +619,24 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         _scrollOffsetY = Math.Clamp(_scrollOffsetY - evt.DeltaY * ScrollSpeed, 0, maxScroll);
         evt.StopPropagation = true;
         MarkPaintDirty();
+    }
+
+    /// <summary>Current vertical scroll offset in pixels.</summary>
+    internal float ScrollOffsetY => _scrollOffsetY;
+
+    /// <summary>Largest valid vertical scroll offset (content height minus viewport).</summary>
+    private float MaxScrollY() => Math.Max(0, TotalContentHeight() - Layout.AbsoluteContentBox.Height);
+
+    /// <summary>Scrolls the viewport by <paramref name="lines"/> text lines (read-only pager nav).</summary>
+    private void ScrollLines(int lines) =>
+        _scrollOffsetY = Math.Clamp(_scrollOffsetY + lines * GetLineHeight(ResolvedInherited), 0, MaxScrollY());
+
+    /// <summary>Scrolls the viewport a page (a viewport minus one line of context) up/down.</summary>
+    private void ScrollPage(int dir)
+    {
+        float lh = GetLineHeight(ResolvedInherited);
+        float page = Math.Max(lh, Layout.AbsoluteContentBox.Height - lh);
+        _scrollOffsetY = Math.Clamp(_scrollOffsetY + dir * page, 0, MaxScrollY());
     }
 
     public void UpdateDragPosition(Point position)
