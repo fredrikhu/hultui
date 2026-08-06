@@ -69,6 +69,8 @@ Assert.NotEmpty(window.OverlayContents);           // tooltip is open
 
 **The one escape from determinism:** `PumpUntil(condition)` / `PumpUntilCompleted(task)` pump repeatedly with a *real-time* timeout (default 5 s), yielding briefly between pumps so background work (`Task.Run`, `AsyncLoader`) can finish and post back to the UI queue. Use them exactly at async boundaries; keep everything else on explicit pumps.
 
+The corollary: a bare `for (…) session.PumpFrame();` loop is **not** a way to wait. It yields nothing and advances almost no wall-clock, so a `Task.Run` producer may not have finished by the last iteration — which reads as data that never arrives. Passing a `TimeSpan` advances *virtual* time for animations and timers; it does not give background threads real time either. Wait with `PumpUntil`, or sleep between pumps.
+
 ## Input Driver
 
 All coordinates are layout units — the space element bounds live in.

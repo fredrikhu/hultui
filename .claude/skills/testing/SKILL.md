@@ -57,7 +57,7 @@ session.PumpFrame(TimeSpan.FromMilliseconds(600));  // virtual time: tooltips, a
 ```
 
 - Queries (`GetByText`, `FindByRole`, `FindByAutomationId`) read a fresh a11y snapshot — every query doubles as an accessibility check. Re-query after interacting; snapshot props are frozen.
-- `PumpUntil`/`PumpUntilCompleted` are the *only* real-time escape — use exactly at async boundaries.
+- `PumpUntil`/`PumpUntilCompleted` are the *only* real-time escape — use exactly at async boundaries. **`PumpFrame()` does not wait**, so a `for` loop of them advances almost no wall-clock and background work (git subprocesses, `AsyncLoader` producers) never finishes — a debug probe built that way reported a "permanently stuck loader" that was simply never given time. Wait with `PumpUntil`, or pump with a real sleep.
 - Render regressions: `HeadlessOptions.DeterministicRecording()` → assert on `window.RenderLog` text baselines (readable, git-diffable). `FixedMetricsMeasureContext` makes them cross-OS.
 - `window.CapturePixels()` for pixels, but **never** pixel-exact text asserts across OSes (system fonts differ).
 
@@ -110,6 +110,30 @@ Each row shows the last frame's value plus a rolling 5s peak. Reading them:
 7. **`PatchFrom` on `TextInputElement`** preserves caret/selection only when text is unchanged — rebuild-heavy UIs rely on this; there are regression tests in `TextInputElementTests`.
 8. **Flex rows inside a scrolled column** need `FlexShrink(0)` in tests only if you built them before 2026-07-18's shrink fix — new tests use `Height(h).FlexShrink(0)` for explicit fixed rows (see `ScrollIntoViewTests.BuildList`).
 
+## Polling hides bugs that only an idle app has
+
+`PumpUntil(() => { session.PumpFrame(); return tree.Contains("…"); })` keeps rebuilding until the content shows up. That is exactly what a **stuck** UI needs to un-stick itself, so a test written this way passes while the real app hangs.
+
+It happened: a pane whose data arrived but whose view never re-rendered (the loader wasn't subscribed) looked fine under every polling test, and only showed up as "stays on *Loading…* until I switch tabs". The idle app produces no rebuilds; the test produced dozens.
+
+So when the thing under test is **whether an update propagates**, assert the mechanism, not the eventual pixels:
+
+- assert the state that proves the wiring (a tracked signal incremented, a handler ran, a subscription exists) — that is a single deterministic check, not a race;
+- or pump a *bounded* number of frames after the async work has demonstrably landed, so nothing else can nudge the UI;
+- keep `PumpUntil` for genuinely waiting on async completion, which is what it is for.
+
+Same shape as gotcha 2: incidental rebuilds also come from a `GitWatcher` firing, a toast timer, or hover — none of which the idle app is doing while the user stares at a spinner.
+
+## Assert against what is actually rendered
+
+a11y dumps carry the *rendered* string, not your source literal. Section headers upper-case their labels (`SectionHeader` → `"HIDDEN"`, `"INCOMING · THEIRS"`), so `Contains("Hidden")` silently never matches. Dump the tree once and grep it before writing the assertion. Likewise, reflection into a sample app: `[Reactive]` members are **properties**, so `GetField("View")` returns null — use `GetProperty`.
+
+## Sample-app fixtures: git will merge your test data
+
+Building a repo for a conflict or multi-hunk test, two edits placed a line or two apart come back as **one** region — git coalesces nearby changes. Two tests asserted "2 hunks" and got 1 until the edits were separated by ~12 untouched lines. If a fixture must produce N distinct hunks or conflict regions, space the edits out and assert the count before relying on it.
+
 ## Verify like you mean it
 
 When a test guards a fixed bug, run a **negative control**: temporarily reintroduce the bug and confirm the test fails with the same signature as the original report (e.g. re-adding `+ cur` to the scroll clamp fails 3 of 4 ScrollIntoView tests — down-scroll still passes, matching "down works, up broken"). Then revert. A regression test that never failed proves nothing.
+
+The control also tells you how much of the suite actually covers the bug, which is the real signal. Reverting `ForceRebuild` to its untracked form failed 2 of 4 re-tracking tests — and revealed a second symptom nobody had reported (stale subscriptions causing *spurious* rebuilds). Swapping the list's chord check for a naive "any modifier" failed **1 of 11** keyboard tests: without that single NumLock case the regression would have shipped looking green.
