@@ -399,7 +399,7 @@ public partial class CommanderApp
     {
         el.On<PointerDownEvent>(ev =>
         {
-            if (ev.Button == 2) { BeginRightMark(side, e, ev.Position); return; }   // right-drag marking
+            if (ev.Button == 2) { BeginRightMark(side, e); return; }   // right-drag marking
             if (ev.Button != 0) return;
             _active = side;
             int idx = IndexOfName(Rows(side), e.Name);
