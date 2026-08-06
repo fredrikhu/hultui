@@ -458,7 +458,14 @@ public partial class CommanderApp : Component, IDisposable
             .Children(BuildChrome(), body, BuildCommandLine());
         // A right-drag mark ends wherever the button is released — pointer-up bubbles
         // to the root even when the release lands off the rows (empty list, footer, …).
-        root.On<PointerUpEvent>(ev => { if (ev.Button == 2) EndRightMark(); });
+        // The Find dialog's corner-grip resize tracks the same way: move updates the size,
+        // up ends the drag, both regardless of where the pointer wandered.
+        root.On<PointerMoveEvent>(ev => { if (_findResizing) UpdateFindResize(ev.Position.X, ev.Position.Y); });
+        root.On<PointerUpEvent>(ev =>
+        {
+            if (ev.Button == 2) EndRightMark();
+            if (_findResizing) _findResizing = false;
+        });
 
         // Overlays render above the shell, each keyed so conditional presence
         // reconciles by identity (a keyless swap would leak handlers across kinds).
@@ -530,6 +537,16 @@ public partial class CommanderApp : Component, IDisposable
             if (_diffScrollRef.Current is { } sv && _diffChangeIdx < _diffChangeRows.Count)
                 sv.ScrollOffsetY = Math.Max(0, (_diffChangeRows[_diffChangeIdx] - 2) * DiffLineH);
         }
+        if (_pendingFindScroll)
+        {
+            _pendingFindScroll = false;
+            // Reveal the selected result. Small sets render in an inline ScrollView, large
+            // sets in a VirtualList — only one exists per build, so try both. Fixed row
+            // height ⇒ the selected band is index * RowHeight (no need to read the element).
+            float top = _findSel * RowHeight;
+            if (_findScrollRef.Current is { } fsv) fsv.ScrollRangeIntoView(top, RowHeight);
+            else _findVList.Current?.ScrollRangeIntoView(top, RowHeight);
+        }
 
         // Keep a browsing region focused so Tab traverses panes/preview predictably.
         // The framework consumes Tab for focus traversal; with nothing focused the
@@ -598,6 +615,13 @@ public partial class CommanderApp : Component, IDisposable
         tab.Fwd.RemoveAt(tab.Fwd.Count - 1);
         tab.Back.Add(tab.Dir);
         NavigateTo(side, target, recordHistory: false);
+    }
+
+    /// <summary>Ctrl+Shift+C — put the pane's current folder path on the clipboard. Uses the
+    /// window's text clipboard (cross-platform), so it works on Linux too.</summary>
+    private void CopyCurrentPath(char side)
+    {
+        try { _window.Clipboard.SetText(Dir(side)); } catch { /* clipboard busy — ignore */ }
     }
 
     // Name to select once a pending listing finishes loading (used when ascending
@@ -1871,6 +1895,14 @@ public partial class CommanderApp : Component, IDisposable
             };
             if (_active == 'L') _forceStateL = s; else _forceStateR = s;
             MarkDirty(); e.StopPropagation = true; return;
+        }
+
+        // Ctrl+Shift+C copies the active pane's current folder path to the clipboard
+        // (Explorer's "Copy as path"). Skipped in a text field, where it means copy text.
+        if (ctrl && e.Modifiers.HasFlag(KeyModifiers.Shift) && e.Key == KeyCode.C
+            && e.Target is not (TextInputElement or TextAreaElement))
+        {
+            CopyCurrentPath(_active); e.StopPropagation = true; return;
         }
 
         // Rebindable global commands (Ctrl/Alt combos) resolve through the keymap; the

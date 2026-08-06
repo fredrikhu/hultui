@@ -47,9 +47,13 @@ public partial class CommanderApp
         var header = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        header.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
+        // Title never shrinks/wraps; a long subtitle (e.g. a path) clips with an ellipsis
+        // rather than pushing the title onto a second line.
+        header.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.Medium)
+            .TextColor(Nocturne.Text).FlexShrink(0).MaxLines(1));
         if (subtitle != null)
-            header.AddChild(Ui.Mono(subtitle, 11f, Nocturne.On(0.45)));
+            header.AddChild(Ui.Mono(subtitle, 11f, Nocturne.On(0.45))
+                .FlexShrink(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         header.AddChild(Box.New().FlexGrow(1));
         var close = Box.New().Cursor(CursorType.Pointer)
             .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
@@ -210,7 +214,10 @@ public partial class CommanderApp
         return Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 14, 10, 14))
             .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
+            // Round the bottom to the card's radius so this brighter bar (always the last row)
+            // doesn't square off the card's rounded bottom corners.
+            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusMd, Nocturne.RadiusMd));
     }
 
     // ── Confirm dialog (delete, and copy/move go-ahead) ──────────────────

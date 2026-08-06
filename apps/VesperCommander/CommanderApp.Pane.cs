@@ -123,6 +123,15 @@ public partial class CommanderApp
                 HultUI.Application.InvokeOnMainThread(MarkDirty);
             }
         });
+        // Mouse back / forward buttons (SDL X1=4, X2=5) navigate this pane's history —
+        // the same as Alt+←/→. The press targets whichever pane it lands on.
+        pane.On<PointerDownEvent>(ev =>
+        {
+            if (ev.Button is not (4 or 5) || AnyOverlayOpen) return;
+            _active = side;
+            if (ev.Button == 4) GoBack(side); else GoForward(side);
+            ev.StopPropagation = true;
+        });
 
         // Tab strip on top, then breadcrumb + column header as one block on the
         // pane ground; the header's bottom border is the only divider to the list.

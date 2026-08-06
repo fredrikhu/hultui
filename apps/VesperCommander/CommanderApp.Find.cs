@@ -27,8 +27,19 @@ public partial class CommanderApp
     private bool _findSearching;
     private System.Threading.CancellationTokenSource? _findCts;
     private bool _pendingFindFocus;
+    private bool _pendingFindScroll;   // keyboard nav moved _findSel → reveal it after build
     private readonly Ref<TextInputElement> _findPatternRef = new();
     private readonly Ref<VirtualListElement<FindEngine.Hit>> _findVList = new();
+    private readonly Ref<ScrollViewElement> _findScrollRef = new();   // the inline (small-set) list
+
+    // Dialog size (session-remembered) and the live corner-grip drag. Width sizes the card;
+    // height sizes the results area (the one part worth growing). Defaults match the original
+    // fixed layout.
+    private float _findW = 560f;
+    private float _findListH = 360f;
+    private bool _findResizing;
+    private float _findResizeX0, _findResizeY0, _findResizeW0, _findResizeH0;
+    private const float FindMinW = 460f, FindMinListH = 160f;
 
     private const int FindResultCap = 2000;
 
@@ -132,9 +143,16 @@ public partial class CommanderApp
                 if (_findSearching) StopFind(); else CloseFind();
                 e.StopPropagation = true; break;
             case KeyCode.Up:
-                _findSel = Math.Max(0, _findSel - 1); MarkDirty(); e.StopPropagation = true; break;
+                _findSel = Math.Max(0, _findSel - 1); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
             case KeyCode.Down:
-                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + 1); MarkDirty(); e.StopPropagation = true; break;
+                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + 1); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+            case KeyCode.PageUp:
+                _findSel = Math.Max(0, _findSel - FindPageRows()); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+            case KeyCode.PageDown:
+                _findSel = Math.Min(Math.Max(0, _findResults.Count - 1), _findSel + FindPageRows()); _pendingFindScroll = true; MarkDirty(); e.StopPropagation = true; break;
+            // Ctrl+R flips the scope segment (This folder ↔ Recursive) without leaving the field.
+            case KeyCode.R when e.Modifiers.HasFlag(KeyModifiers.Ctrl):
+                _findRecursive = !_findRecursive; RunFind(); e.StopPropagation = true; break;
             case KeyCode.Enter:
                 if (_findResults.Count > 0)
                 {
@@ -152,11 +170,56 @@ public partial class CommanderApp
         }
     }
 
+    /// <summary>Rows one Page key jumps — a viewport of results minus a row of overlap.</summary>
+    private int FindPageRows() => Math.Max(1, (int)(_findListH / RowHeight) - 1);
+
+    /// <summary>Live corner-grip resize (called from the root pointer-move handler). Grows the
+    /// card width and the results height from where the drag began, clamped to the window.</summary>
+    private void UpdateFindResize(float x, float y)
+    {
+        float maxW = Math.Max(FindMinW, (_window.LayoutWidth > 0 ? _window.LayoutWidth : 1240f) - 80f);
+        float maxH = Math.Max(FindMinListH, (_window.LayoutHeight > 0 ? _window.LayoutHeight : 800f) - 320f);
+        // The card is horizontally centred, so it grows from both edges — double the width
+        // delta so the right edge tracks the mouse 1:1. It's top-aligned vertically, so the
+        // bottom edge already follows the mouse and the height delta stays as-is.
+        _findW = Math.Clamp(_findResizeW0 + 2f * (x - _findResizeX0), FindMinW, maxW);
+        _findListH = Math.Clamp(_findResizeH0 + (y - _findResizeY0), FindMinListH, maxH);
+        MarkDirty();
+    }
+
+    /// <summary>Collapse a path to fit <paramref name="budget"/> px the way the breadcrumb does:
+    /// keep the drive, drop leading folders behind a "…", and keep as many trailing folders as
+    /// fit (the leaf always survives). Returns the path unchanged when it already fits.</summary>
+    private static string CollapsePath(string path, float budget)
+    {
+        if (budget <= 0 || EstTextWidth(path, mono: true) <= budget) return path;
+        char[] seps = { System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar };
+        string sep = System.IO.Path.DirectorySeparatorChar.ToString();
+        string root = System.IO.Path.GetPathRoot(path) ?? "";
+        string head = root.TrimEnd(seps);                                  // "C:"
+        var segs = (path.Length > root.Length ? path[root.Length..] : "").Split(seps, StringSplitOptions.RemoveEmptyEntries);
+        if (segs.Length == 0) return path;
+
+        float used = EstTextWidth(head + sep + "…", mono: true);
+        var kept = new List<string>();
+        for (int i = segs.Length - 1; i >= 0; i--)
+        {
+            float w = EstTextWidth(sep + segs[i], mono: true);
+            if (kept.Count > 0 && used + w > budget) break;                // always keep the leaf
+            used += w; kept.Insert(0, segs[i]);
+        }
+        if (kept.Count == segs.Length) return path;                        // nothing dropped after all
+        return head + sep + "…" + sep + string.Join(sep, kept);
+    }
+
     // ── Find overlay ─────────────────────────────────────────────────────
     private Element BuildFind()
     {
         DrainFindResults();   // pull queued hits onto the list before rendering
-        var card = Card(560, "Find files", Dir(_findSide));
+        // Collapse the path breadcrumb-style ("C:\…\a\b\c") so a deep folder can't wrap the
+        // header onto a second line. Budget = card width minus the title, close ✕ and paddings.
+        float pathBudget = _findW - 28f - EstTextWidth("Find files", mono: false) - 8f - 30f;
+        var card = Card(_findW, "Find files", CollapsePath(Dir(_findSide), pathBudget));
 
         // Pattern + optional "containing text" inputs.
         card.AddChild(FindInputRow("⌕", _findPattern, "*.rs, name fragment, or /regex/…",
@@ -179,6 +242,7 @@ public partial class CommanderApp
 
         card.AddChild(BuildFindBody());
         card.AddChild(BuildFindFooter());
+        card.AddChild(FindResizeGrip());   // absolute — pinned to the card's corner, over the footer
         return Backdrop(card, topAligned: true, topPad: 70f);
     }
 
@@ -249,7 +313,7 @@ public partial class CommanderApp
         const int InlineMax = 60;
         if (_findResults.Count <= InlineMax)
         {
-            var scroll = ScrollView.Vertical().MaxHeight(360).Padding(new Thickness(6, 6, 6, 6));
+            var scroll = ScrollView.Vertical().MaxHeight(_findListH).Padding(new Thickness(6, 6, 6, 6)).WithRef(_findScrollRef);
             var col = Flex.Column(gap: 0);
             for (int i = 0; i < _findResults.Count; i++)
                 col.AddChild(FindResultRow(_findResults[i], i == _findSel));
@@ -264,7 +328,7 @@ public partial class CommanderApp
             .Items(_findResults.ToList())
             .RenderWith(h => FindResultRow(h, _findResults.IndexOf(h) == _findSel))
             .WithRef(_findVList)
-            .Height(360)
+            .Height(_findListH)
             .Padding(new Thickness(6, 6, 6, 6));
     }
 
@@ -354,7 +418,10 @@ public partial class CommanderApp
     {
         var footer = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 12, 6, 12))
-            .Background(Nocturne.Surface);
+            .Background(Nocturne.Surface)
+            // Match the card's rounded bottom so the brighter footer doesn't square off (and
+            // paint over) the card's rounded corners.
+            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusMd, Nocturne.RadiusMd));
 
         if (_findSearching)
         {
@@ -373,13 +440,14 @@ public partial class CommanderApp
                 footer.AddChild(Ui.Mono($" · {inArc} inside archives", 10.5f, ArchiveAmber));
             footer.AddChild(Box.New().FlexGrow(1));
             footer.AddChild(Ui.Kbd("↵")); footer.AddChild(Ui.Mono("jump", 10.5f, Nocturne.On(0.45)));
-            footer.AddChild(Ui.Kbd("Ctrl+↵")); footer.AddChild(Ui.Mono("other pane", 10.5f, Nocturne.On(0.45)));
+            footer.AddChild(Ui.Kbd("Ctrl+R")); footer.AddChild(Ui.Mono("scope", 10.5f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("Esc"));
         }
         else
         {
-            footer.AddChild(Ui.Kbd("Esc")); footer.AddChild(Ui.Mono("close", 10.5f, Nocturne.On(0.45)));
+            footer.AddChild(Ui.Kbd("Ctrl+R")); footer.AddChild(Ui.Mono("scope", 10.5f, Nocturne.On(0.45)));
             footer.AddChild(Box.New().FlexGrow(1));
+            footer.AddChild(Ui.Kbd("Esc")); footer.AddChild(Ui.Mono("close", 10.5f, Nocturne.On(0.45)));
         }
 
         if (_findDenied > 0)
@@ -391,5 +459,33 @@ public partial class CommanderApp
             footer.AddChild(banner);
         }
         return footer;
+    }
+
+    /// <summary>The corner resize grip. Absolutely positioned in the card's bottom-right so it
+    /// pins to the dialog edge without taking part in (or nudging) the footer's layout.</summary>
+    private Element FindResizeGrip()
+    {
+        // A fully-visible triangle whose tip rests at the rounded corner. We deliberately do NOT
+        // overflow it past the edge — the card's Overflow.Hidden would slice the oversized glyph
+        // into an odd crescent. Big top/left padding keeps a comfortable hit target.
+        var grip = Box.New().Cursor(CursorType.ResizeNWSE)
+            .Padding(new Thickness(6, 0, 0, 9))
+            .Children(Ui.Icon("◢", 14f, Nocturne.On(0.50)))
+            .Tooltip("Drag to resize");
+        grip.Position.Type = PositionType.Absolute;
+        grip.Position.Right = Dimension.Px(1);
+        // The glyph carries empty descent space below the triangle, so it reads higher than it
+        // sits to the right. Nudge down by ~that descent: only the empty space overflows (clipped
+        // invisibly), bringing the triangle's bottom leg level with its right one.
+        grip.Position.Bottom = Dimension.Px(-2);
+        grip.On<PointerDownEvent>(ev =>
+        {
+            if (ev.Button != 0) return;
+            _findResizing = true;
+            _findResizeX0 = ev.Position.X; _findResizeY0 = ev.Position.Y;
+            _findResizeW0 = _findW; _findResizeH0 = _findListH;
+            ev.StopPropagation = true;
+        });
+        return grip;
     }
 }
