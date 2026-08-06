@@ -940,17 +940,21 @@ public partial class JunctionApp : Component, IDisposable
 
         // Commit view: arrows/page/home/end move the file selection — unless the
         // diff pane is focused, which consumes those keys to scroll (StopPropagation).
+        // Ctrl/Cmd+↑/↓ steps to the previous/next commit without going back to
+        // History — from the Commit view (which re-renders for it) and the Files
+        // view (which re-roots its tree at the new commit). The list is
+        // newest-first, so Up = newer, Down = older. Same path as the ▲/▼ buttons
+        // in both headers, so keyboard and mouse stay in step.
+        if (ctrl && e.Key is KeyCode.Up or KeyCode.Down
+            && View is JunctionView.Commit or JunctionView.Files)
+        {
+            MoveCommitSelection(e.Key == KeyCode.Up ? -1 : 1);
+            e.StopPropagation = true;
+            return;
+        }
+
         if (View == JunctionView.Commit)
         {
-            // Ctrl/Cmd+↑/↓ steps to the previous/next commit without going back to
-            // History. The list is newest-first, so Up = newer, Down = older.
-            if (ctrl && e.Key is KeyCode.Up or KeyCode.Down)
-            {
-                // Same path as the header's ▲/▼ buttons, so both stay in step.
-                MoveCommitSelection(e.Key == KeyCode.Up ? -1 : 1);
-                e.StopPropagation = true;
-                return;
-            }
             if (MoveFileByKey(e))
                 e.StopPropagation = true;
             return;

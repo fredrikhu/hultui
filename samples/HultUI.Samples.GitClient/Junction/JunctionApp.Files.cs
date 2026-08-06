@@ -117,6 +117,12 @@ public partial class JunctionApp
         else
             bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Text.New($"{fileCount} files").FontSize(11f).TextColor(Nocturne.On(0.4)).FlexShrink(0));
+        // Same commit stepping as the Commit view, so the browser can walk history
+        // without leaving this tab.
+        bar.AddChild(Ui.IconButton(Icons.CaretUp, () => MoveCommitSelection(-1),
+            "Previous commit (Ctrl ↑)", 30f).FlexShrink(0));
+        bar.AddChild(Ui.IconButton(Icons.CaretDown, () => MoveCommitSelection(1),
+            "Next commit (Ctrl ↓)", 30f).FlexShrink(0));
         return bar;
     }
 

@@ -136,7 +136,11 @@ public partial class JunctionApp
             SetCommitSelection(commits[i].Hash);
         }
         _pendingScrollToSelected = true;
-        MarkDirty();
+        // Rerender, not MarkDirty: changing the selected commit changes the Files
+        // view's per-commit tree/content loader KEYS, so the next build activates new
+        // AsyncLoader instances — an untracked rebuild would leave them unsubscribed
+        // and the browser stuck on "Loading…" (see OnExternalChange).
+        Rerender();
     }
 
     /// <summary>Ctrl+Space: toggles the focused commit in/out of the selection
