@@ -1,0 +1,94 @@
+# Builds the Vesper Commander Windows installer.
+#
+# Every push to main produces a CI-versioned installer as a workflow artifact.
+# Pushing a tag like `vesper-v1.2.0` additionally publishes a GitHub Release
+# with the installer attached.
+
+name: Vesper Commander installer
+
+on:
+  push:
+    branches: [main]
+    tags: ['vesper-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vesper-installer-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build app (Release)
+        run: dotnet build apps/VesperCommander/VesperCommander.csproj -c Release
+
+      - name: Run tests
+        run: dotnet test tests/VesperCommander.Tests/VesperCommander.Tests.csproj -c Release
+
+  installer:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write # for the release step on tag builds
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # Tag vesper-v1.2.0 -> 1.2.0; other builds get a CI prerelease version.
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/vesper-v*') {
+            $version = $env:GITHUB_REF_NAME.Substring('vesper-v'.Length)
+          } else {
+            $version = "0.1.0-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer version: $version"
+
+      # Native AOT publish (PublishAot is set in the csproj); the runner image
+      # includes the required MSVC toolchain.
+      - name: Publish Vesper Commander (win-x64, AOT)
+        run: dotnet publish apps/VesperCommander/VesperCommander.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\VesperCommander\Installer\vesper.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VesperCommander-Setup-${{ steps.version.outputs.version }}
+          path: apps/VesperCommander/Installer/Output/*.exe
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/vesper-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem apps\VesperCommander\Installer\Output\*.exe | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $exe.FullName `
+            --title "Vesper Commander ${{ steps.version.outputs.version }}" `
+            --generate-notes

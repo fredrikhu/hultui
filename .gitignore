@@ -8,3 +8,4 @@ obj/
 
 # Inno Setup compiler output (installer builds)
 samples/HultUI.Samples.GitClient/Installer/Output/
+apps/VesperCommander/Installer/Output/
