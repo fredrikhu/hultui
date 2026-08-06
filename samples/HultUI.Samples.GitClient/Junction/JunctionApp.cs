@@ -13,7 +13,7 @@ using GitClient.Theme;
 
 namespace GitClient.Junction;
 
-public enum JunctionView { Overview, History, Commit, Changes, Branches }
+public enum JunctionView { Overview, History, Commit, Changes, Branches, Files }
 
 /// <summary>
 /// Root of the Junction multi-repo git client: a workspace-oriented shell
@@ -526,6 +526,7 @@ public partial class JunctionApp : Component, IDisposable
             JunctionView.Commit => BuildCommitView(),
             JunctionView.Changes => BuildChangesView(),
             JunctionView.Branches => BuildBranchesView(),
+            JunctionView.Files => BuildFilesView(),
             _ => BuildHistoryView(),
         };
         view.Key = "view-" + View;
@@ -926,6 +927,7 @@ public partial class JunctionApp : Component, IDisposable
             KeyCode.Digit3 => JunctionView.Commit,
             KeyCode.Digit4 => JunctionView.Changes,
             KeyCode.Digit5 => JunctionView.Branches,
+            KeyCode.Digit6 => JunctionView.Files,
             _ => (JunctionView?)null,
         };
         if (viewForKey is { } v) { SetView(v); e.StopPropagation = true; return; }
@@ -934,6 +936,15 @@ public partial class JunctionApp : Component, IDisposable
         // diff pane is focused, which consumes those keys to scroll (StopPropagation).
         if (View == JunctionView.Commit)
         {
+            // Ctrl/Cmd+↑/↓ steps to the previous/next commit without going back to
+            // History. The list is newest-first, so Up = newer, Down = older.
+            if (ctrl && e.Key is KeyCode.Up or KeyCode.Down)
+            {
+                // Same path as the header's ▲/▼ buttons, so both stay in step.
+                MoveCommitSelection(e.Key == KeyCode.Up ? -1 : 1);
+                e.StopPropagation = true;
+                return;
+            }
             if (MoveFileByKey(e))
                 e.StopPropagation = true;
             return;

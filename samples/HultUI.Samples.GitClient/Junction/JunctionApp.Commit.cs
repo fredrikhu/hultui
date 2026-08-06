@@ -213,8 +213,8 @@ public partial class JunctionApp
         row1.AddChild(Ui.GhostButton("History", Icons.ArrowLeft, () => SetView(JunctionView.History)));
         row1.AddChild(Text.New(commit?.Subject ?? "Loading…").FontSize(15f).FontWeight(FontWeight.Medium)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        row1.AddChild(Ui.IconButton(Icons.CaretUp, () => MoveCommitSelection(-1), "Previous commit", 30f));
-        row1.AddChild(Ui.IconButton(Icons.CaretDown, () => MoveCommitSelection(1), "Next commit", 30f));
+        row1.AddChild(Ui.IconButton(Icons.CaretUp, () => MoveCommitSelection(-1), "Previous commit (Ctrl ↑)", 30f));
+        row1.AddChild(Ui.IconButton(Icons.CaretDown, () => MoveCommitSelection(1), "Next commit (Ctrl ↓)", 30f));
         box.AddChild(row1);
 
         var author = commit?.AuthorName ?? "";

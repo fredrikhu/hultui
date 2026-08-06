@@ -46,6 +46,7 @@ public static class Icons
     public const string CheckCircle = "✓";    // ✓
     public const string CaretUp = "▴";        // ▴
     public const string CaretDown = "▾";      // ▾
+    public const string CaretRight = "▸";     // ▸  collapsed folder
 
     // Ref chips
     public const string ArrowFatRight = "➤";  // ➤  HEAD

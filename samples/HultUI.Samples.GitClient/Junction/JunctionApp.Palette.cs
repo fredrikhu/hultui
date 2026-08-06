@@ -214,6 +214,7 @@ public partial class JunctionApp
         GoTo("Commit details", Icons.GitDiff, JunctionView.Commit);
         GoTo("Changes", Icons.Pencil, JunctionView.Changes);
         GoTo("Branches", Icons.GitBranch, JunctionView.Branches);
+        GoTo("Files", Icons.Folders, JunctionView.Files);
 
         // Repositories (union of all workspaces).
         foreach (var path in _settings.RepositoryPaths)

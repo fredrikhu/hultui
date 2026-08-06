@@ -189,6 +189,11 @@ public partial class JunctionApp
             return;
         }
 
+        // Ctrl/Cmd+arrows are the app's commit-stepping shortcut. The focused diff
+        // list must let them bubble instead of scrolling and swallowing them.
+        if (e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super))
+            return;
+
         var page = Math.Max(DiffRowHeight, list.Layout.AbsoluteContentBox.Height - DiffRowHeight);
         var handled = true;
         switch (e.Key)

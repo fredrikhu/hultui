@@ -396,6 +396,20 @@ public class GitRepository
         return File.Exists(fullPath) ? File.ReadAllText(fullPath) : null;
     }
 
+    /// <summary>
+    /// Every file path in a commit's tree (recursive, blobs only), in git's sorted
+    /// order. Used by the Files browser to show the repository as it was at a commit.
+    /// </summary>
+    public List<string> GetTreeFiles(string gitRef)
+    {
+        var result = GitProcess.Run(Path, "ls-tree", "-r", "--name-only", "-z", gitRef);
+        if (!result.Success) return [];
+        // -z: NUL-separated, so paths with spaces or quotes need no unescaping.
+        return result.Stdout
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+    }
+
     // ── Blob bytes (images / binaries) ──
 
     /// <summary>Raw bytes of a blob at a ref, or null if it doesn't exist there.</summary>
