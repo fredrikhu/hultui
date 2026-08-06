@@ -13,6 +13,13 @@ public partial class JunctionApp
 {
     // ── Diff pane (header + body), shared by Commit / Changes / fullscreen ──
 
+    // Stable tokens that let a drag select across the diff's per-line code labels
+    // (Ctrl+C copies the span). Unified is one column; split keeps its two columns
+    // separate so a drag down one side doesn't rope in the other.
+    private readonly object _diffGroupUnified = new();
+    private readonly object _diffGroupLeft = new();
+    private readonly object _diffGroupRight = new();
+
     private Element BuildDiffPane(string path, GitFileDiff? diff, DiffInteract? interact = null)
     {
         var col = Flex.Column(gap: 0).FlexGrow(1);
@@ -362,6 +369,7 @@ public partial class JunctionApp
         row.AddChild(Box.New().Width(16).JustifyContent(JustifyContent.Center)
             .Children(Ui.Mono(sign, 12f, signColor)));
         row.AddChild(Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
+            .Selectable().SelectionGroup(_diffGroupUnified)
             .Spans(spans)
             .FlexGrow(1).Padding(new Thickness(2, 14, 2, 0))
             .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
@@ -396,7 +404,7 @@ public partial class JunctionApp
         }
     }
 
-    private static Element SplitRow(GitDiffLine? left, GitDiffLine? right,
+    private Element SplitRow(GitDiffLine? left, GitDiffLine? right,
         IReadOnlyList<HultUI.Core.Rendering.TextSpan>? leftSpans,
         IReadOnlyList<HultUI.Core.Rendering.TextSpan>? rightSpans) =>
         Flex.Row(gap: 0).AlignItems(AlignItems.Stretch)
@@ -404,7 +412,7 @@ public partial class JunctionApp
                 SplitHalf(left, isLeft: true, leftSpans),
                 SplitHalf(right, isLeft: false, rightSpans));
 
-    private static Element SplitHalf(GitDiffLine? line, bool isLeft,
+    private Element SplitHalf(GitDiffLine? line, bool isLeft,
         IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans)
     {
         var (bg, code) = line?.Kind switch
@@ -421,7 +429,9 @@ public partial class JunctionApp
             .Background(bg);
         if (isLeft) half.BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         half.AddChild(NumCell(num, 44f));
-        half.AddChild(Ui.Mono(text, 12f, code).Spans(spans).FlexGrow(1).FlexShrink(1)
+        half.AddChild(Ui.Mono(text, 12f, code).Selectable()
+            .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight)
+            .Spans(spans).FlexGrow(1).FlexShrink(1)
             .Padding(new Thickness(2, 10, 2, 0)).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
         return half;
     }

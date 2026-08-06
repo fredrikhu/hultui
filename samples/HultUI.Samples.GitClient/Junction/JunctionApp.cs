@@ -581,6 +581,14 @@ public partial class JunctionApp : Component, IDisposable
             _modalNameRef.Current?.Focus();
         }
 
+        if (_pendingFilesTreeScroll)
+        {
+            _pendingFilesTreeScroll = false;
+            // Tree rows are a fixed height, so index math needs no per-row layout.
+            _filesTreeScrollRef.Current?.ScrollRangeIntoView(
+                FilesCursorIndex() * FileTreeRowHeight, FileTreeRowHeight);
+        }
+
         if (_pendingScrollToSelected)
         {
             _pendingScrollToSelected = false;
@@ -947,6 +955,16 @@ public partial class JunctionApp : Component, IDisposable
         if (View == JunctionView.Commit)
         {
             if (MoveFileByKey(e))
+                e.StopPropagation = true;
+            return;
+        }
+
+        // Files view: arrows/page/home/end + left/right + Enter navigate the file tree.
+        // Only fires when the content body isn't focused — a focused body consumes these
+        // keys to scroll and stops propagation before they reach this global handler.
+        if (View == JunctionView.Files)
+        {
+            if (HandleFilesTreeKey(e))
                 e.StopPropagation = true;
             return;
         }

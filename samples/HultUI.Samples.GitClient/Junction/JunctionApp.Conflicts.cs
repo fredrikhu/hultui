@@ -317,6 +317,7 @@ public partial class JunctionApp
         }
         foreach (var line in lines.Take(MaxConflictLinesShown))
             box.AddChild(Ui.Mono(line.Length == 0 ? " " : line, 11.5f, Nocturne.On(0.85))
+                .Selectable()
                 .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
         if (lines.Count > MaxConflictLinesShown)
             box.AddChild(Text.New($"… {lines.Count - MaxConflictLinesShown} more lines")

@@ -101,6 +101,10 @@ public static class ElementExtensions
     /// (drag to select, double/triple-click, Ctrl+C, right-click Copy).</summary>
     public static T Selectable<T>(this T el, bool value = true) where T : TextElement { el.Selectable = value; return el; }
 
+    /// <summary>Lets a mouse drag select across every label sharing the same <paramref name="group"/>
+    /// token (e.g. a diff's code lines); Ctrl+C copies the whole span. See <see cref="TextElement.SelectionGroup"/>.</summary>
+    public static T SelectionGroup<T>(this T el, object? group) where T : TextElement { el.SelectionGroup = group; return el; }
+
     /// <summary>Per-range text colors (syntax highlighting); see <see cref="TextElement.Spans"/>.</summary>
     public static T Spans<T>(this T el, IReadOnlyList<Rendering.TextSpan>? spans) where T : TextElement { el.Spans = spans; return el; }
 

@@ -116,6 +116,16 @@ public class TextElement : Element
     /// <summary>Clipboard reference — set by the window when this label is focused.</summary>
     public IClipboard? Clipboard { get; set; }
 
+    /// <summary>
+    /// Opt-in token that lets a mouse drag select across several labels at once. Give
+    /// every label that should share one selection the <b>same</b> (stable, non-null)
+    /// reference — e.g. all the code-line labels of a diff. A drag then spans from the
+    /// pressed label to the one under the pointer, and Ctrl+C / Copy yields every
+    /// covered label's text joined by newlines. Null (the default) keeps a label's
+    /// selection self-contained.
+    /// </summary>
+    public object? SelectionGroup { get; set; }
+
     private int SelectionStart => Math.Min(_anchor, _caret);
     private int SelectionEnd => Math.Max(_anchor, _caret);
     public bool HasSelection => _anchor != _caret;
@@ -123,6 +133,20 @@ public class TextElement : Element
 
     /// <summary>True while the user is dragging to select. Used by the window for pointer capture.</summary>
     public bool IsDragging => _isDragging;
+
+    // ── Cross-label (group) selection support, driven by the window ──
+    internal int ContentLength => _content.Length;
+    internal int CaretOffset => _caret;
+    /// <summary>Maps a screen point to a caret offset in this label's text.</summary>
+    internal int OffsetAt(Point screenPos) => PositionFromPoint(screenPos);
+    /// <summary>Sets this label's selection range directly (window group-drag driver).</summary>
+    internal void SetSelectionRange(int anchor, int caret)
+    {
+        int n = _content.Length;
+        _anchor = Math.Clamp(anchor, 0, n);
+        _caret = Math.Clamp(caret, 0, n);
+        MarkPaintDirty();
+    }
 
     protected internal override void ApplyTheme(Theme theme)
     {
@@ -207,7 +231,9 @@ public class TextElement : Element
         switch (evt.Key)
         {
             case KeyCode.C when ctrl:
-                if (HasSelection) Clipboard?.SetText(SelectedText);
+                // A grouped label's copy spans the whole group; the window handles it
+                // (it knows the sibling labels), so don't also copy just this line.
+                if (SelectionGroup is null && HasSelection) Clipboard?.SetText(SelectedText);
                 break;
             case KeyCode.A when ctrl:
                 _anchor = 0;
@@ -283,6 +309,7 @@ public class TextElement : Element
             // already clamped the offsets to the new text.
             Selectable = text.Selectable;
             SelectionColor = text.SelectionColor;
+            SelectionGroup = text.SelectionGroup;
         }
     }
 
