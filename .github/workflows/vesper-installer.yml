@@ -35,6 +35,14 @@ jobs:
       - name: Run tests
         run: dotnet test tests/VesperCommander.Tests/VesperCommander.Tests.csproj -c Release
 
+      # Vesper renders through HultUI's Skia pipeline, so a framework render
+      # regression can crash the app even when VesperCommander's own tests pass.
+      # These headless tests exercise real render passes and gate the release on
+      # them (a shipped 1.0.0 carried an unguarded spanned-DrawText NRE that only
+      # the full-solution CI caught — this closes that gap for Vesper's pipeline).
+      - name: Run framework render tests (headless)
+        run: dotnet test tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj -c Release
+
   installer:
     needs: test
     runs-on: windows-latest
