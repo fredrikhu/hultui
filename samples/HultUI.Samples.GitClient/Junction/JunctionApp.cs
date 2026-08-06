@@ -553,6 +553,12 @@ public partial class JunctionApp : Component, IDisposable
             _contentSearchRef.Current?.Focus();
         }
 
+        if (_pendingConflictEditFocus)
+        {
+            _pendingConflictEditFocus = false;
+            _conflictEditRef.Current?.Focus();
+        }
+
         if (_pendingBranchSearchFocus)
         {
             _pendingBranchSearchFocus = false;
