@@ -25,4 +25,11 @@
     <ProjectReference Include="..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- VS Code TextMate grammars + Dark+ theme for the code preview highlighter
+         (same engine the GitClient/Junction diff uses). AOT-safe: GitClient
+         publishes AOT with this package. -->
+    <PackageReference Include="TextMateSharp.Grammars" Version="2.0.4" />
+  </ItemGroup>
+
 </Project>

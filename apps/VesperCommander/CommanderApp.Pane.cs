@@ -750,8 +750,9 @@ public partial class CommanderApp
                     .LineHeight(1.6f);
                 body.ScrollbarWidth = 7f;
                 body.Key = "pv-text#" + key;
-                if (Icons.KindFor(focused) == IconKind.Code)
-                    body.Spans(SyntaxHighlight.Spans(excerpt));   // tint keywords/types/comments
+                if (Icons.KindFor(focused) == IconKind.Code
+                    && PreviewSpans(focused.Name, excerpt) is { } codeSpans)
+                    body.Spans(codeSpans);   // VS Code Dark+ tokens (null while tokenizing off-thread)
                 // Focus drives the Full-mode ring. Attach handlers UNCONDITIONALLY —
                 // reconciliation doesn't copy event handlers, and this element is keyed
                 // per file, so a handler added only in a Full build would never appear

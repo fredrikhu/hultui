@@ -6,6 +6,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using VesperCommander.Theme;
 
 namespace VesperCommander;
@@ -208,6 +209,15 @@ public partial class CommanderApp : Component, IDisposable
     // True while the read-only preview TextArea holds keyboard focus (Full mode), so
     // the pane draws the accent ring around it. Driven by its Focus/Blur handlers.
     private bool _previewFocused;
+
+    // TextMate spans for the current preview excerpt, tokenized off the UI thread so
+    // scrolling stays smooth — the excerpt first renders plain and the colors pop in when
+    // the background tokenize lands. Keyed on the excerpt *instance*: the excerpt loads
+    // asynchronously, so keying on the string reference (not the file key) both dedupes
+    // per loaded excerpt and keeps text + spans in lock-step (else offsets drift when a
+    // freshly-switched file briefly still shows the previous excerpt). Null ⇒ not ready.
+    private string? _previewSpanExcerpt;
+    private IReadOnlyList<TextSpan>? _previewSpans;
 
     // Folder sizes the user has measured with Space, keyed by full path. The running
     // total is written from a background walk (Interlocked) and read on the UI thread
@@ -715,6 +725,31 @@ public partial class CommanderApp : Component, IDisposable
         _rmarkSeen.Clear();
     }
 
+    /// <summary>TextMate (Dark+) spans for the preview excerpt, or null while they're still
+    /// being tokenized (or the language is unsupported) — the caller then renders the excerpt
+    /// plain. Tokenizing runs on a thread-pool thread so it never blocks scrolling; the result
+    /// is applied on the UI thread and only if the excerpt is still the current one.
+    /// <paramref name="name"/> selects the grammar by extension.</summary>
+    private IReadOnlyList<TextSpan>? PreviewSpans(string name, string excerpt)
+    {
+        if (ReferenceEquals(excerpt, _previewSpanExcerpt))
+            return _previewSpans;   // already tokenized (or in flight → still null)
+
+        _previewSpanExcerpt = excerpt;
+        _previewSpans = null;
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            var spans = SyntaxHighlighter.SpansForText(name, excerpt);
+            Application.InvokeOnMainThread(() =>
+            {
+                if (!ReferenceEquals(excerpt, _previewSpanExcerpt)) return;   // user moved on
+                _previewSpans = spans;
+                MarkDirty();   // repaint the excerpt with its colors
+            });
+        });
+        return null;
+    }
+
     // ── Folder size measure (Space) ──────────────────────────────────────
     /// <summary>Measured (or so-far) total for a Space-measured folder plus whether the
     /// walk has finished, or null when it hasn't been measured. Read while rendering.</summary>
@@ -835,9 +870,9 @@ public partial class CommanderApp : Component, IDisposable
     // cursor to where it was. Only the active pane filters (the search text is per-focus).
     private void ExtendSearch(char side, char ch)
     {
-        string? keep = CursorEntryName(side);
+        int anchor = CursorListingPos(side);
         _search += ch;
-        ReclampFilterCursor(side, keep);
+        ReclampFilterCursor(side, anchor);
         RequestScroll(side);
         MarkDirty();
     }
@@ -845,9 +880,9 @@ public partial class CommanderApp : Component, IDisposable
     private void BackspaceSearch(char side)
     {
         if (_search.Length == 0) return;
-        string? keep = CursorEntryName(side);
+        int anchor = CursorListingPos(side);
         _search = _search[..^1];
-        ReclampFilterCursor(side, keep);
+        ReclampFilterCursor(side, anchor);
         RequestScroll(side);
         MarkDirty();
     }
@@ -895,18 +930,37 @@ public partial class CommanderApp : Component, IDisposable
         return c >= 0 && c < rows.Count ? rows[c].Name : null;
     }
 
-    /// <summary>After the filter changes, keep the cursor on the same entry if it still
-    /// matches, else drop it onto the first match.</summary>
-    private void ReclampFilterCursor(char side, string? keepName)
+    /// <summary>The cursor's index in the *full* listing (not the filtered view), so a filter
+    /// change can anchor the new cursor to where you actually were. 0 when the cursor is off
+    /// the list.</summary>
+    private int CursorListingPos(char side)
     {
-        var rows = Rows(side);
-        int idx = keepName != null ? IndexOfName(rows, keepName) : -1;
-        if (idx < 0)
+        string? name = CursorEntryName(side);
+        int i = name != null ? IndexOfName(Listing(side), name) : -1;
+        return i < 0 ? 0 : i;
+    }
+
+    /// <summary>After the filter changes, move the cursor to the first match at or after where
+    /// it was (<paramref name="anchor"/> is the old position in the full listing) — so typing a
+    /// filter walks forward from your place instead of snapping to the top or jumping up to a
+    /// match above you. If the current entry still matches it's that first match, so it stays.
+    /// When every match is above the anchor, fall back to the nearest one.</summary>
+    private void ReclampFilterCursor(char side, int anchor)
+    {
+        var full = Listing(side);
+        int firstAtOrAfter = -1, lastBefore = -1, row = -1;
+        for (int i = 0; i < full.Count; i++)
         {
-            idx = 0;
-            for (int i = 0; i < rows.Count; i++) if (!rows[i].IsParent) { idx = i; break; }
+            var e = full[i];
+            if (!(e.IsParent || SearchMatch(e.Name))) continue;   // not in the filtered view
+            row++;                                                 // its index within Rows(side)
+            if (e.IsParent) continue;                              // ".." is never a landing target
+            if (i >= anchor) { firstAtOrAfter = row; break; }
+            lastBefore = row;
         }
-        SetCursor(side, Math.Clamp(idx, 0, Math.Max(0, rows.Count - 1)));
+        int idx = firstAtOrAfter >= 0 ? firstAtOrAfter : Math.Max(0, lastBefore);
+        int count = Rows(side).Count;
+        SetCursor(side, Math.Clamp(idx, 0, Math.Max(0, count - 1)));
     }
 
     /// <summary>The extension including the leading dot (".zip"), or "" when the name has none.
