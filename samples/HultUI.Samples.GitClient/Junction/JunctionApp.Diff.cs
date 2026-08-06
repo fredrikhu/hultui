@@ -50,6 +50,14 @@ public partial class JunctionApp
                         .FontSize(10.5f).TextColor(Nocturne.On(0.45))));
         }
 
+        // Images have no textual diff (git reports "Binary files … differ"), so they
+        // get a before/after view instead of the empty "No textual changes" pane.
+        if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
+        {
+            col.AddChild(imagePane);
+            return col;
+        }
+
         col.AddChild(BuildDiffScroll(diff, interact));
         return col;
     }

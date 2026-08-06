@@ -396,6 +396,30 @@ public class GitRepository
         return File.Exists(fullPath) ? File.ReadAllText(fullPath) : null;
     }
 
+    // ── Blob bytes (images / binaries) ──
+
+    /// <summary>Raw bytes of a blob at a ref, or null if it doesn't exist there.</summary>
+    public byte[]? GetFileBytes(string gitRef, string filePath)
+    {
+        var (ok, bytes) = GitProcess.RunBytes(Path, "show", $"{gitRef}:{filePath}");
+        return ok ? bytes : null;
+    }
+
+    /// <summary>Raw bytes of the staged (index) copy of a file.</summary>
+    public byte[]? GetIndexFileBytes(string filePath)
+    {
+        var (ok, bytes) = GitProcess.RunBytes(Path, "show", $":{filePath}");
+        return ok ? bytes : null;
+    }
+
+    /// <summary>Raw bytes of the working-tree copy, or null if it's gone.</summary>
+    public byte[]? GetWorkingFileBytes(string filePath)
+    {
+        var fullPath = System.IO.Path.Combine(Path, filePath);
+        try { return File.Exists(fullPath) ? File.ReadAllBytes(fullPath) : null; }
+        catch { return null; }
+    }
+
     /// <summary>
     /// Returns the staged file list diffed against a specific base ref.
     /// Used in amend mode to diff the index against HEAD~1 so that the

@@ -101,6 +101,33 @@ public static class GitProcess
         return new GitResult(process.ExitCode, stdout, stderr);
     }
 
+    /// <summary>
+    /// Runs git and returns stdout as raw bytes. Needed for blob content (images and
+    /// other binaries) — <see cref="Run"/> decodes stdout as UTF-8, which corrupts
+    /// any non-text payload.
+    /// </summary>
+    public static (bool Success, byte[] Stdout) RunBytes(string workingDirectory, params string[] args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            // No StandardOutputEncoding: we read BaseStream directly, undecoded.
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+
+        using var process = Process.Start(psi)!;
+        using var buffer = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(buffer);
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode == 0, buffer.ToArray());
+    }
+
     public static GitResult RunWithStdin(string workingDirectory, string stdin, params string[] args)
     {
         var psi = new ProcessStartInfo

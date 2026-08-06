@@ -60,6 +60,7 @@ public static class Icons
     public const string Rows = "≡";           // ≡  unified
     public const string Columns = "▥";        // ▥  split
     public const string FileCode = "▤";       // ▤
+    public const string FileImage = "▦";      // ▦  image diff
     public const string CheckSquare = "☑";    // ☑
     public const string Square = "☐";         // ☐
 
