@@ -407,7 +407,8 @@ public partial class CommanderApp
             if (IsDoublePress(side, e.Name)) ActivateCursor(side);
             MarkDirty();
         });
-        el.On<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); });
+        // Marquee coverage is computed at the root from the drag rectangle (see ApplyMarquee),
+        // so no per-entry move handler is needed.
     }
 
     private float PaneContentWidthEstimate()

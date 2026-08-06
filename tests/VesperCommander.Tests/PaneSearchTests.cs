@@ -44,4 +44,15 @@ public class PaneSearchTests
     [InlineData(".cs", "readme.md", false)]
     public void FilterMatch_SubstringOrExtension(string search, string name, bool expected) =>
         Assert.Equal(expected, CommanderApp.FilterMatch(name, search));
+
+    // Marquee ≥50%-coverage: entry box is (10,10) 100×20.
+    [Theory]
+    [InlineData(0, 0, 200, 200, true)]     // rect fully contains the entry
+    [InlineData(10, 10, 60, 30, true)]     // covers the left half exactly (50%)
+    [InlineData(10, 10, 40, 30, false)]    // covers 30% of width → <50%
+    [InlineData(300, 300, 400, 400, false)] // disjoint
+    [InlineData(10, 20, 110, 30, true)]    // full width × bottom half height = 50% area
+    [InlineData(10, 25, 110, 35, false)]   // full width × 25% height = 25% area
+    public void CoversHalf_Area(float rx0, float ry0, float rx1, float ry1, bool expected) =>
+        Assert.Equal(expected, CommanderApp.CoversHalf(rx0, ry0, rx1, ry1, ex: 10, ey: 10, ew: 100, eh: 20));
 }
