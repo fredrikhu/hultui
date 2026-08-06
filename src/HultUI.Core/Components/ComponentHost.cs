@@ -52,7 +52,12 @@ public sealed class ComponentHost : Element
     internal void ForceRebuild()
     {
         if (_buildEffect is null) return;
-        Rebuild();
+        // Run THROUGH the effect (forced past its change check) so Build()'s reactive
+        // reads are re-tracked. Calling Rebuild() directly left the effect subscribed
+        // only to whatever an earlier build happened to read, so any source first read
+        // during a MarkDirty rebuild — e.g. a freshly created per-key AsyncLoader —
+        // was never subscribed to, and its later completion went unobserved.
+        _buildEffect.Execute(force: true);
     }
 
     protected override void OnMounted()

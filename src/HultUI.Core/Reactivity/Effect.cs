@@ -24,13 +24,29 @@ public sealed class Effect : IReactiveNode, IDependencyTracker, IDisposable
     /// <summary>
     /// Runs the effect, tracking dependencies. Called on creation and when re-scheduled.
     /// </summary>
-    internal void Execute()
+    internal void Execute() => Execute(force: false);
+
+    /// <summary>
+    /// Runs the effect, re-tracking its dependencies.
+    /// </summary>
+    /// <param name="force">
+    /// Skips the "did any dependency actually change?" check. Used when something
+    /// <b>outside</b> the reactive graph invalidated the effect — e.g. a component's
+    /// <c>MarkDirty()</c> after non-reactive state changed. No dependency version has
+    /// moved, but the effect must still re-run <i>and</i> re-collect its dependencies,
+    /// so that sources first read during this run are subscribed to.
+    /// </param>
+    internal void Execute(bool force)
     {
         if (_disposed) return;
 
+        // A forced run re-entered from inside the effect body (MarkDirty called during
+        // Build) would recurse; ignore it, matching NotifyDirty's behaviour while executing.
+        if (force && _executing) return;
+
         // On subsequent runs, check if any dependency actually changed.
         // Force dirty Computeds to refresh, then compare versions.
-        if (!_firstRun && _dependencies is not null && _depVersions is not null)
+        if (!force && !_firstRun && _dependencies is not null && _depVersions is not null)
         {
             bool anyChanged = false;
             for (int i = 0; i < _dependencies.Count; i++)

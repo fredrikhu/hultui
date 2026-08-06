@@ -13,7 +13,9 @@ public abstract class Component
 
     /// <summary>
     /// Produce the element tree for this component.
-    /// Called inside a reactive Effect — any Signal/Computed reads are tracked.
+    /// Always called inside this component's reactive Effect — every Signal/Computed
+    /// read is tracked, including on a <see cref="MarkDirty"/> rebuild, so a source
+    /// first read during any build is subscribed to from then on.
     /// </summary>
     public abstract Element Build();
 
@@ -31,6 +33,9 @@ public abstract class Component
 
     /// <summary>
     /// Marks this component as needing a rebuild. Use when non-reactive state changes.
+    /// The rebuild runs through the component's reactive Effect, so it re-tracks
+    /// dependencies — it is safe for a rebuild triggered this way to start reading a
+    /// reactive source it has never read before.
     /// </summary>
     protected void MarkDirty() => Host?.ForceRebuild();
 
