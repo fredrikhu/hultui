@@ -449,8 +449,8 @@ public partial class CommanderApp : Component, IDisposable
         // A right-drag mark ends wherever the button is released — pointer-up bubbles
         // to the root even when the release lands off the rows (empty list, footer, …).
         root.On<PointerUpEvent>(ev => { if (ev.Button == 2) EndRightMark(); });
-        // Track the marquee's far corner anywhere the pointer moves and re-evaluate coverage.
-        root.On<PointerMoveEvent>(ev => { if (_rmarkActive) { _rmarkCur = ev.Position; ApplyMarquee(_rmarkSide); } });
+        // Track the marquee's far corner anywhere the pointer moves (incl. gaps between tiles).
+        root.On<PointerMoveEvent>(ev => { if (_rmarkActive) { _rmarkCur = ev.Position; MarkDirty(); } });
 
         // Overlays render above the shell, each keyed so conditional presence
         // reconciles by identity (a keyless swap would leak handlers across kinds).
@@ -680,111 +680,43 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    // ── Right-drag marquee marking ───────────────────────────────────────
-    // Press the RIGHT button and drag a rectangle: every entry the rectangle covers by ≥50%
-    // of its area is marked (design §E). The starting entry sets the direction — if it was
-    // unmarked we add, otherwise we remove — so a drag over a mixed range makes it uniform.
-    // Coverage is recomputed live against a snapshot of the marks taken at the drag start, so
-    // entries un-cover cleanly as the rectangle shrinks. The geometry is analytic per view
-    // mode (rows / brief columns / tile grid) — no per-element bounds needed. Release at root.
+    // ── Right-drag marking ───────────────────────────────────────────────
+    // Press the RIGHT button on a row and drag: every row the pointer crosses is
+    // marked (or unmarked). The first row sets the direction — if it was unmarked we
+    // add marks, otherwise we remove them — so a right-drag over a mixed range makes
+    // it uniform, matching Total Commander. Rows recycle, so we track by name and
+    // handle each row once per drag; the release is caught at the root (below).
     private bool _rmarkActive;
     private char _rmarkSide;
     private bool _rmarkAdd;
-    private readonly HashSet<string> _rmarkBase = new(StringComparer.Ordinal);   // marks at drag start
-    private HultUI.Core.Primitives.Point _rmarkStart, _rmarkCur;                  // marquee rect (window coords)
+    private readonly HashSet<string> _rmarkSeen = new(StringComparer.Ordinal);
+    private HultUI.Core.Primitives.Point _rmarkStart, _rmarkCur;   // marquee rect (window coords)
 
     private void BeginRightMark(char side, FileEntry e, HultUI.Core.Primitives.Point at)
     {
         _active = side;
         _rmarkActive = true;
         _rmarkSide = side;
+        _rmarkSeen.Clear();
         _rmarkStart = _rmarkCur = at;
-        _rmarkAdd = !Marks(side).Contains(e.Name);   // direction from the entry under the press
-        _rmarkBase.Clear();
-        _rmarkBase.UnionWith(Marks(side));
-        ApplyMarquee(side);
+        _rmarkAdd = !Marks(side).Contains(e.Name);   // direction from the first row
+        ApplyRightMark(side, e);
+    }
+
+    private void ApplyRightMark(char side, FileEntry e)
+    {
+        if (!_rmarkActive || side != _rmarkSide || e.IsParent) return;
+        if (!_rmarkSeen.Add(e.Name)) return;         // each row toggles once per drag
+        var marks = Marks(side);
+        if (_rmarkAdd) marks.Add(e.Name); else marks.Remove(e.Name);
+        MarkDirty();
     }
 
     private void EndRightMark()
     {
         if (!_rmarkActive) return;
         _rmarkActive = false;
-    }
-
-    /// <summary>Rebuild the mark set = the drag-start snapshot, plus (or minus) every entry the
-    /// marquee rectangle now covers by ≥50% of its area.</summary>
-    private void ApplyMarquee(char side)
-    {
-        var rows = Rows(side);
-        var marks = Marks(side);
-        marks.Clear();
-        marks.UnionWith(_rmarkBase);
-
-        float rx0 = Math.Min(_rmarkStart.X, _rmarkCur.X), ry0 = Math.Min(_rmarkStart.Y, _rmarkCur.Y);
-        float rx1 = Math.Max(_rmarkStart.X, _rmarkCur.X), ry1 = Math.Max(_rmarkStart.Y, _rmarkCur.Y);
-        foreach (var (i, ex, ey, ew, eh) in EntryRects(side, rows.Count))
-        {
-            if (i < 0 || i >= rows.Count || rows[i].IsParent) continue;
-            if (CoversHalf(rx0, ry0, rx1, ry1, ex, ey, ew, eh))
-            {
-                if (_rmarkAdd) marks.Add(rows[i].Name); else marks.Remove(rows[i].Name);
-            }
-        }
-        MarkDirty();
-    }
-
-    /// <summary>True when the marquee rectangle [(rx0,ry0)-(rx1,ry1)] covers at least half of
-    /// the entry box's area (design §E).</summary>
-    internal static bool CoversHalf(float rx0, float ry0, float rx1, float ry1, float ex, float ey, float ew, float eh)
-    {
-        float ix = Math.Max(0, Math.Min(rx1, ex + ew) - Math.Max(rx0, ex));
-        float iy = Math.Max(0, Math.Min(ry1, ey + eh) - Math.Max(ry0, ey));
-        float area = ew * eh;
-        return area > 0 && ix * iy >= 0.5f * area;
-    }
-
-    /// <summary>The on-screen rectangle (window coords) of each entry index in the active
-    /// pane, computed analytically from the scroller's viewport + offset and the mode's fixed
-    /// geometry. Yields nothing until the scroller has laid out.</summary>
-    private IEnumerable<(int i, float x, float y, float w, float h)> EntryRects(char side, int count)
-    {
-        switch (ViewOf(side))
-        {
-            case ViewMode.Brief:
-            {
-                var sv = BriefScroll(side).Current;
-                if (sv == null) yield break;
-                var box = sv.Layout.AbsoluteContentBox;
-                int rows = Math.Max(1, _briefRows[Si(side)]);
-                float colW = _briefColW[Si(side)], rowH = RowHeight, sx = sv.ScrollOffsetX;
-                for (int i = 0; i < count; i++)
-                    yield return (i, box.X - sx + (i / rows) * colW, box.Y + (i % rows) * rowH, colW, rowH);
-                break;
-            }
-            case ViewMode.Thumbnails:
-            {
-                var tv = ThumbVList(side).Current;
-                if (tv == null) yield break;
-                var box = tv.Layout.AbsoluteContentBox;
-                int perRow = Math.Max(1, _thumbCols[Si(side)]);
-                var m = ThumbMetrics();
-                float stride = m.TileH + m.Gap, sy = tv.ScrollOffsetY;
-                for (int i = 0; i < count; i++)
-                    yield return (i, box.X + 10f + (i % perRow) * (m.TileW + m.Gap),
-                        box.Y - sy + (i / perRow) * stride, m.TileW, m.TileH);
-                break;
-            }
-            default:   // Detail — full-width rows in the VirtualList
-            {
-                var vl = VList(side).Current;
-                if (vl == null) yield break;
-                var box = vl.Layout.AbsoluteContentBox;
-                float rowH = RowHeight, sy = vl.ScrollOffsetY;
-                for (int i = 0; i < count; i++)
-                    yield return (i, box.X, box.Y - sy + i * rowH, box.Width, rowH);
-                break;
-            }
-        }
+        _rmarkSeen.Clear();
     }
 
     // ── Folder size measure (Space) ──────────────────────────────────────
