@@ -33,11 +33,12 @@ public interface IRenderContext
     /// Draws text like <see cref="DrawText"/>, but colors the character ranges in
     /// <paramref name="spans"/> individually (uncovered ranges use the style's
     /// text color). Layout, wrapping, and truncation are identical to the plain
-    /// overload. Default ignores the spans so non-visual render contexts need not
-    /// implement it.
+    /// overload. A null or empty <paramref name="spans"/> renders exactly like the
+    /// plain overload. Default ignores the spans so non-visual render contexts need
+    /// not implement it.
     /// </summary>
     void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines,
-        IReadOnlyList<TextSpan> spans)
+        IReadOnlyList<TextSpan>? spans)
         => DrawText(text, bounds, style, overflow, maxLines);
 
     void DrawImage(IImageSource source, Rect destRect, ImageFit fit);

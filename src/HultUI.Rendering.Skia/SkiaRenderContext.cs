@@ -265,9 +265,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     }
 
     public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
-        int? maxLines, IReadOnlyList<TextSpan> spans)
+        int? maxLines, IReadOnlyList<TextSpan>? spans)
     {
-        if (spans.Count == 0)
+        if (spans is null || spans.Count == 0)
         {
             DrawText(text, bounds, style, overflow, maxLines);
             return;

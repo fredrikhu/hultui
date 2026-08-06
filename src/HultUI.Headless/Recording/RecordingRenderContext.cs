@@ -128,8 +128,13 @@ public sealed class RecordingRenderContext : IRenderContext
     }
 
     public void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow,
-        int? maxLines, IReadOnlyList<TextSpan> spans)
+        int? maxLines, IReadOnlyList<TextSpan>? spans)
     {
+        if (spans is null || spans.Count == 0)   // no spans ⇒ record it as a plain DrawText
+        {
+            DrawText(text, bounds, style, overflow, maxLines);
+            return;
+        }
         var spanText = string.Join(", ", spans.Select(s =>
             $"{s.Start}+{s.Length}:{Fmt(s.Color)}" + (s.Background.A > 0 ? $"/bg:{Fmt(s.Background)}" : "")));
         Record("DrawText",
