@@ -589,10 +589,24 @@ public partial class CommanderApp
             return footer;
         }
 
+        // Folder size: own files always count; a subfolder adds its bytes only once the
+        // user has Space-measured it. While any subfolder is unmeasured (or still walking)
+        // the total is a lower bound, shown with a leading "≥".
+        long size = 0;
+        bool partial = false;
+        foreach (var e in list)
+        {
+            if (e.IsParent) continue;
+            if (!e.IsDir) { size += e.Size; continue; }
+            if (MeasuredDir(e) is { } m) { size += m.bytes; partial |= !m.done; }
+            else partial = true;
+        }
+        string sizeLabel = (partial ? "≥ " : "") + FileSystem.ByteCount(size);
+
         // While the thumbnail grid is decoding, the right slot counts down instead of free space.
         int decoding = ViewOf(side) == ViewMode.Thumbnails && _thumbsCache != null ? _thumbsCache.PendingCount : 0;
         var tail = decoding > 0 ? $"decoding {decoding}…" : free;
-        var label = $"{files} files, {dirs} dirs" + (tail.Length > 0 ? $" · {tail}" : "");
+        var label = $"{files} files, {dirs} dirs, {sizeLabel}" + (tail.Length > 0 ? $" · {tail}" : "");
         footer.AddChild(Ui.Mono(label, 10.5f, decoding > 0 ? Nocturne.Accent300 : Nocturne.On(0.50)));
         return footer;
     }
