@@ -30,6 +30,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 OutputDir=Output
 OutputBaseFilename=VesperCommander-Setup-{#AppVersion}
+SetupIconFile=..\Assets\vesper.ico
 UninstallDisplayIcon={app}\VesperCommander.exe
 Compression=lzma2/max
 SolidCompression=yes

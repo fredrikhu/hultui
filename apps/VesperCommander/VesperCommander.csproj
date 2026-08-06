@@ -11,6 +11,9 @@
     <IsAotCompatible>true</IsAotCompatible>
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- Embedded as a Win32 resource: the taskbar / Explorer / Alt-Tab icon.
+         The installer reuses the same file for the setup wizard. -->
+    <ApplicationIcon>Assets\vesper.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
