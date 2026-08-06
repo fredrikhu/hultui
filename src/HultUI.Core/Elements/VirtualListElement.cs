@@ -1,4 +1,5 @@
 using HultUI.Core.Accessibility;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -124,10 +125,49 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private Theme? _activeTheme;
     private LayoutEngine? _childLayoutEngine;
 
+    /// <summary>
+    /// When true (and the list is focused), Up/Down scroll by one item, PageUp/PageDown
+    /// by a viewport, and Home/End jump to the ends. Off by default so a list whose
+    /// owner already drives selection from these keys doesn't get double handling.
+    /// </summary>
+    /// <remarks>
+    /// Chorded keys are deliberately left alone: a key held with Shift, Ctrl, Alt or
+    /// Super bubbles untouched, so application shortcuts still reach their handler
+    /// even while the list has focus. (Only those four count — <c>KeyModifiers</c> also
+    /// carries CapsLock/NumLock, which are lock states that must not suppress scrolling.)
+    /// </remarks>
+    public bool KeyboardScrollEnabled { get; set; }
+
+    /// <summary>The modifiers that make a key a chord belonging to someone else.
+    /// Excludes the lock states, which say nothing about what is being held.</summary>
+    private const KeyModifiers ChordModifiers =
+        KeyModifiers.Shift | KeyModifiers.Ctrl | KeyModifiers.Alt | KeyModifiers.Super;
+
     public VirtualListElement()
     {
         // Column direction so children stack vertically
         Flex.Direction = FlexDirection.Column;
+        On<KeyDownEvent>(HandleKeyboardScroll);
+    }
+
+    private void HandleKeyboardScroll(KeyDownEvent e)
+    {
+        if (!KeyboardScrollEnabled) return;
+        if ((e.Modifiers & ChordModifiers) != 0) return;   // someone else's shortcut
+
+        // A page keeps one row of context, matching how editors page.
+        float page = Math.Max(_itemHeight, Layout.AbsoluteContentBox.Height - _itemHeight);
+        switch (e.Key)
+        {
+            case KeyCode.Down: ScrollOffsetY += _itemHeight; break;
+            case KeyCode.Up: ScrollOffsetY -= _itemHeight; break;
+            case KeyCode.PageDown: ScrollOffsetY += page; break;
+            case KeyCode.PageUp: ScrollOffsetY -= page; break;
+            case KeyCode.Home: ScrollOffsetY = 0; break;
+            case KeyCode.End: ScrollOffsetY = _contentHeight; break;   // ScrollOffsetY clamps
+            default: return;                                            // not ours; let it bubble
+        }
+        e.StopPropagation = true;
     }
 
     public static new VirtualListElement<T> New() => new();
@@ -372,6 +412,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             AccessibleLabel = vl.AccessibleLabel;
             CanSelectMultiple = vl.CanSelectMultiple;
             OnSelectionChanged = vl.OnSelectionChanged;
+            // Handlers aren't copied on patch, but this flag gates the mounted
+            // instance's own handler, so it has to ride across.
+            KeyboardScrollEnabled = vl.KeyboardScrollEnabled;
             // The live multi-selection lives on the mounted instance (it's mutated
             // by AT, not rebuilt), so only adopt the rebuilt set when it carries one.
             if (vl._multiSelected.Count > 0)

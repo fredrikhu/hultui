@@ -207,6 +207,9 @@ public static class ElementExtensions
     public static VirtualListElement<T> SelectedIndex<T>(this VirtualListElement<T> el, int index) { el.SelectedIndex = index; return el; }
     public static VirtualListElement<T> CanSelectMultiple<T>(this VirtualListElement<T> el, bool value = true) { el.CanSelectMultiple = value; return el; }
     public static VirtualListElement<T> OnSelectionChanged<T>(this VirtualListElement<T> el, Action<IReadOnlyList<int>> handler) { el.OnSelectionChanged = handler; return el; }
+    /// <summary>Let the focused list scroll itself with Up/Down/Page/Home/End.
+    /// Chorded keys (Shift/Ctrl/Alt/Super) still bubble to the app.</summary>
+    public static VirtualListElement<T> KeyboardScroll<T>(this VirtualListElement<T> el, bool enabled = true) { el.KeyboardScrollEnabled = enabled; return el; }
 
     // ──── Tooltip ────
     public static T Tooltip<T>(this T el, string text) where T : Element { el.TooltipText = text; return el; }

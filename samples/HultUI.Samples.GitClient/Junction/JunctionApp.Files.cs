@@ -363,6 +363,7 @@ public partial class JunctionApp
         list.Key = "filebody:" + (_filesSelPath ?? "");
         list.IsFocusable = true;
         list.TabIndex = 0;
+        list.KeyboardScroll();   // click the body, then arrow/page through the file
         return list;
     }
 

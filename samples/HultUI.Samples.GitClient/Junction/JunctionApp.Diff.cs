@@ -173,40 +173,25 @@ public partial class JunctionApp
         // offset — switching files reconciles to a fresh list that starts at the top.
         list.Key = "diff:" + diff.Path;
         // Focusable so clicking the diff lets arrow / page / home / end scroll it.
+        // KeyboardScroll handles those (and leaves chorded keys to the app, so
+        // Ctrl+↑/↓ commit stepping still works while the diff has focus).
         list.IsFocusable = true;
         list.TabIndex = 0;
-        list.On<KeyDownEvent>(e => DiffScrollKey(e, list));
+        list.KeyboardScroll();
+        list.On<KeyDownEvent>(DiffPaneKey);
         return list;
     }
 
-    private void DiffScrollKey(KeyDownEvent e, VirtualListElement<DiffRow> list)
+    // Scrolling is the list's own (KeyboardScroll); this only adds the app-level
+    // key the diff pane owns.
+    private void DiffPaneKey(KeyDownEvent e)
     {
         if (e.Key == KeyCode.Escape && _diffFull)
         {
             _diffFull = false;
             MarkDirty();
             e.StopPropagation = true;
-            return;
         }
-
-        // Ctrl/Cmd+arrows are the app's commit-stepping shortcut. The focused diff
-        // list must let them bubble instead of scrolling and swallowing them.
-        if (e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super))
-            return;
-
-        var page = Math.Max(DiffRowHeight, list.Layout.AbsoluteContentBox.Height - DiffRowHeight);
-        var handled = true;
-        switch (e.Key)
-        {
-            case KeyCode.Down: list.ScrollOffsetY += DiffRowHeight; break;
-            case KeyCode.Up: list.ScrollOffsetY -= DiffRowHeight; break;
-            case KeyCode.PageDown: list.ScrollOffsetY += page; break;
-            case KeyCode.PageUp: list.ScrollOffsetY -= page; break;
-            case KeyCode.Home: list.ScrollOffsetY = 0; break;
-            case KeyCode.End: list.ScrollOffsetY = 1_000_000f; break;   // clamped to content
-            default: handled = false; break;
-        }
-        if (handled) e.StopPropagation = true;
     }
 
     private static List<DiffRow> FlattenUnified(GitFileDiff diff, FileHighlight? hl)
