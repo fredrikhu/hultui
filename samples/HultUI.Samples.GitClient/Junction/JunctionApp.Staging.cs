@@ -31,6 +31,10 @@ public partial class JunctionApp
     {
         if (View != JunctionView.Changes || diff == null || _changeSelPath == null || _changeSelConflicted)
             return null;
+        // With --ignore-all-space the diff no longer describes the file byte-for-byte
+        // (whitespace-only changes are omitted and shown as context), so a patch built
+        // from it wouldn't apply. Staging stays off until the toggle is cleared.
+        if (_settings.Git.IgnoreWhitespace) return null;
         return new DiffInteract(_changeSelPath, _changeSelStaged);
     }
 

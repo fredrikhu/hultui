@@ -23,6 +23,7 @@ public partial class JunctionApp
         header.AddChild(Ui.Mono(path.Length > 0 ? path : "—", 12f, Nocturne.Text)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         header.AddChild(DiffModeToggle());
+        header.AddChild(IgnoreWhitespaceToggle());
         header.AddChild(Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)").FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
         col.AddChild(header);
@@ -35,6 +36,18 @@ public partial class JunctionApp
                 col.AddChild(BuildStageActionBar(diff, interact));
             else
                 col.AddChild(BuildStageHint(interact));
+        }
+        else if (diff != null && View == JunctionView.Changes && !_changeSelConflicted
+                 && _settings.Git.IgnoreWhitespace)
+        {
+            // Explain the missing affordance rather than just dropping it.
+            col.AddChild(Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center)
+                .Padding(new Thickness(5, 12, 5, 12))
+                .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0))
+                .Children(
+                    Ui.Mono("W", 11f, Nocturne.Accent300),
+                    Text.New("Ignoring whitespace — line staging is off (this view no longer matches the file exactly)")
+                        .FontSize(10.5f).TextColor(Nocturne.On(0.45))));
         }
 
         col.AddChild(BuildDiffScroll(diff, interact));
@@ -65,6 +78,35 @@ public partial class JunctionApp
         seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => { _diffSplit = false; MarkDirty(); }));
         seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => { _diffSplit = true; MarkDirty(); }));
         return seg;
+    }
+
+    // "Ignore whitespace" (git --ignore-all-space). Lit while active; the tooltip
+    // names the staging trade-off, since a -w diff can't produce appliable patches.
+    private Element IgnoreWhitespaceToggle()
+    {
+        bool on = _settings.Git.IgnoreWhitespace;
+        var b = Flex.Row(gap: 0).Width(30).Height(30).FlexShrink(0)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .CornerRadius(Nocturne.RadiusSm)
+            .BorderColor(on ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer)
+            .Tooltip(on
+                ? "Ignoring whitespace — line staging is off while active"
+                : "Ignore whitespace changes");
+        if (on) b.Background(Nocturne.Alpha(Nocturne.Accent, 0.14));
+        b.AddChild(Ui.Mono("W", 12f, on ? Nocturne.Accent300 : Nocturne.On(0.55)));
+        b.Key = "ws-toggle" + (on ? "#on" : "");
+        b.OnClick(e => { e.StopPropagation = true; ToggleIgnoreWhitespace(); });
+        if (!on) b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+        return b;
+    }
+
+    private void ToggleIgnoreWhitespace()
+    {
+        _settings.Git.IgnoreWhitespace = !_settings.Git.IgnoreWhitespace;
+        _stageSel.Clear();     // a -w diff's lines aren't stageable; drop any picks
+        Persist();
+        RefreshAll();          // diff loaders re-key on the flag and reload
     }
 
     private Element DiffModeButton(string label, string glyph, bool active, Action onClick)

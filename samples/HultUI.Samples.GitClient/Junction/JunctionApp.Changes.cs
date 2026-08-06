@@ -16,7 +16,10 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Changes", "Open a repository first.");
 
-        _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadChanges, onLoaded: PickInitialChange);
+        // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
+        bool ws = _settings.Git.IgnoreWhitespace;
+        _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}|w{ws}",
+            () => LoadChanges(ws), onLoaded: PickInitialChange);
         var data = _changes.Value;
 
         // During a merge the right pane is always shown — it hosts the per-file
@@ -54,7 +57,7 @@ public partial class JunctionApp
     }
 
     // Runs off the UI thread.
-    private ChangesData LoadChanges()
+    private ChangesData LoadChanges(bool ignoreWhitespace = false)
     {
         var repo = RepoFor(_activeRepoPath);
         var staged = repo.GetStagedChanges();
@@ -76,9 +79,9 @@ public partial class JunctionApp
                 repo.GetMergingBranchName(), repo.GetCommit("MERGE_HEAD"));
         }
 
-        var stagedDiffs = repo.GetWorkingDiff(staged: true)
+        var stagedDiffs = repo.GetWorkingDiff(staged: true, ignoreWhitespace: ignoreWhitespace)
             .GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var unstagedDiffs = repo.GetWorkingDiff(staged: false)
+        var unstagedDiffs = repo.GetWorkingDiff(staged: false, ignoreWhitespace: ignoreWhitespace)
             .GroupBy(d => d.Path).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         // Untracked files aren't in `git diff`; synthesize an all-additions diff.

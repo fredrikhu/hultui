@@ -83,8 +83,9 @@ public partial class JunctionApp
         return col;
     }
 
+    // The ignore-whitespace flag is part of the key so toggling it reloads the diff.
     private string RangeDetailKey((string BaseHash, string HeadHash) range) =>
-        $"{_activeRepoPath}|{range.BaseHash}..{range.HeadHash}|{DataGen(_activeRepoPath)}";
+        $"{_activeRepoPath}|{range.BaseHash}..{range.HeadHash}|{DataGen(_activeRepoPath)}|w{_settings.Git.IgnoreWhitespace}";
 
     private void PrefetchRangeDetail((string BaseHash, string HeadHash) range)
     {
@@ -99,7 +100,7 @@ public partial class JunctionApp
         var repo = RepoFor(_activeRepoPath);
         var commit = repo.GetCommit(range.HeadHash);
         var files = repo.GetRangeFiles(range.BaseHash, range.HeadHash);
-        var diffs = repo.GetRangeDiff(range.BaseHash, range.HeadHash);
+        var diffs = repo.GetRangeDiff(range.BaseHash, range.HeadHash, _settings.Git.IgnoreWhitespace);
         var byPath = diffs
             .GroupBy(d => d.Path)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
@@ -167,7 +168,8 @@ public partial class JunctionApp
         return row;
     }
 
-    private string CommitDetailKey(string hash) => $"{_activeRepoPath}|{hash}|{DataGen(_activeRepoPath)}";
+    private string CommitDetailKey(string hash) =>
+        $"{_activeRepoPath}|{hash}|{DataGen(_activeRepoPath)}|w{_settings.Git.IgnoreWhitespace}";
 
     /// <summary>Eagerly loads a commit's files+diff into <see cref="_commitDetail"/>.
     /// Called both when a commit is selected in History (prefetch) and when the
@@ -185,7 +187,7 @@ public partial class JunctionApp
         var repo = RepoFor(_activeRepoPath);
         var commit = repo.GetCommit(hash);
         var files = repo.GetCommitFiles(hash);
-        var diffs = repo.GetCommitDiff(hash);
+        var diffs = repo.GetCommitDiff(hash, _settings.Git.IgnoreWhitespace);
         var byPath = diffs
             .GroupBy(d => d.Path)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);

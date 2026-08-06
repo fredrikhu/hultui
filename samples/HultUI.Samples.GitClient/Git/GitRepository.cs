@@ -302,12 +302,24 @@ public class GitRepository
             ["diff-tree", "--no-commit-id", "-r", "--numstat", "-M", "-m", "--first-parent", "--root", commitHash]);
     }
 
-    public List<GitFileDiff> GetCommitDiff(string commitHash)
+    public List<GitFileDiff> GetCommitDiff(string commitHash, bool ignoreWhitespace = false)
     {
         // --root so the initial (parentless) commit diffs against the empty tree.
-        var result = GitProcess.Run(Path, "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", "--root", commitHash);
+        var args = new List<string>
+            { "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", "--root" };
+        if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
+        args.Add(commitHash);
+        var result = GitProcess.Run(Path, args.ToArray());
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
+
+    /// <summary>
+    /// <c>--ignore-all-space</c>: whitespace-only changes are hidden entirely and
+    /// whitespace differences within a line are ignored when matching. Note this
+    /// makes the diff a <b>display</b> artifact — patches synthesized from it will
+    /// not apply, so interactive staging is disabled while it's on.
+    /// </summary>
+    private const string IgnoreWhitespaceFlag = "--ignore-all-space";
 
     /// <summary>File list of the tree diff between two arbitrary commits
     /// (Fork-style multi-select compare: base = oldest, head = newest).</summary>
@@ -319,21 +331,24 @@ public class GitRepository
     }
 
     /// <summary>Patch of the tree diff between two arbitrary commits.</summary>
-    public List<GitFileDiff> GetRangeDiff(string baseHash, string headHash)
+    public List<GitFileDiff> GetRangeDiff(string baseHash, string headHash, bool ignoreWhitespace = false)
     {
-        var result = GitProcess.Run(Path, "diff", "-M", baseHash, headHash);
+        var args = new List<string> { "diff", "-M" };
+        if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
+        args.Add(baseHash);
+        args.Add(headHash);
+        var result = GitProcess.Run(Path, args.ToArray());
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 
-    public List<GitFileDiff> GetWorkingDiff(bool staged, string? baseRef = null)
+    public List<GitFileDiff> GetWorkingDiff(bool staged, string? baseRef = null, bool ignoreWhitespace = false)
     {
-        var args = staged
-            ? baseRef != null
-                ? new[] { "diff", "--cached", baseRef }
-                : new[] { "diff", "--cached" }
-            : new[] { "diff" };
+        var args = new List<string> { "diff" };
+        if (staged) args.Add("--cached");
+        if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
+        if (staged && baseRef != null) args.Add(baseRef);
 
-        var result = GitProcess.Run(Path, args);
+        var result = GitProcess.Run(Path, args.ToArray());
         return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
     }
 

@@ -143,12 +143,17 @@ public sealed class GitOptions
     /// (<c>git commit -S</c>). Requires a signing key configured in git.</summary>
     public bool SignCommits { get; set; }
 
+    /// <summary>Diff viewer: pass <c>--ignore-all-space</c> so whitespace-only
+    /// changes are hidden. Display-only — interactive staging is disabled while on.</summary>
+    public bool IgnoreWhitespace { get; set; }
+
     public GitOptions Clone() => new()
     {
         PullStrategy = PullStrategy,
         PullAutoStash = PullAutoStash,
         PruneOnFetch = PruneOnFetch,
         SignCommits = SignCommits,
+        IgnoreWhitespace = IgnoreWhitespace,
     };
 }
 
