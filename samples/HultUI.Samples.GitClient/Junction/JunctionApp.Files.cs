@@ -26,10 +26,13 @@ public partial class JunctionApp
     private readonly HashSet<string> _filesExpanded = new(StringComparer.Ordinal);
     private string? _filesTreeKey;   // the commit the expansion/selection belongs to
 
-    private readonly Dictionary<string, AsyncLoader<IReadOnlyList<string>>> _treeLoaders =
-        new(StringComparer.Ordinal);
-    private readonly Dictionary<string, AsyncLoader<FileContent>> _fileContentLoaders =
-        new(StringComparer.Ordinal);
+    // Bounded: browsing walks a new commit tree and a new file body per selection,
+    // each pinning its parsed lines/spans, so these must not accumulate forever.
+    private readonly KeyedAsyncLoader<string, IReadOnlyList<string>> _treeLoaders =
+        new([], capacity: 12, comparer: StringComparer.Ordinal);
+    private readonly KeyedAsyncLoader<string, FileContent> _fileContentLoaders =
+        new(FileContent.Empty, capacity: 24, onEvicted: DisposeFileContent,
+            comparer: StringComparer.Ordinal);
 
     private sealed record FileContent(
         string[]? Lines,
@@ -40,6 +43,11 @@ public partial class JunctionApp
     {
         public static readonly FileContent Empty = new(null, null, null, false, 0);
     }
+
+    /// <summary>An evicted file body may hold a decoded image; its text lines and
+    /// spans are plain managed arrays and need no help.</summary>
+    private static void DisposeFileContent(FileContent content) =>
+        (content.Image?.Source as IDisposable)?.Dispose();
 
     private const float FileTreeRowHeight = 24f;
     private const int FileLineHeight = 20;
@@ -56,7 +64,7 @@ public partial class JunctionApp
         var key = $"{_activeRepoPath}|{reference}|{DataGen(_activeRepoPath)}";
         SyncFilesTree(key);
 
-        var loader = LoaderFor(_treeLoaders, key, (IReadOnlyList<string>)[]);
+        var loader = _treeLoaders.For(key);
         var repoPath = _activeRepoPath;
         loader.Load(key, () => RepoFor(repoPath).GetTreeFiles(reference), onLoaded: PickInitialTreeFile);
         var paths = loader.Value;
@@ -296,7 +304,7 @@ public partial class JunctionApp
         }
 
         var key = $"{_activeRepoPath}|{reference}|{path}";
-        var loader = LoaderFor(_fileContentLoaders, key, FileContent.Empty);
+        var loader = _fileContentLoaders.For(key);
         var repoPath = _activeRepoPath;
         loader.Load(key, () => LoadFileContent(repoPath, reference, path));
         var content = loader.Value;

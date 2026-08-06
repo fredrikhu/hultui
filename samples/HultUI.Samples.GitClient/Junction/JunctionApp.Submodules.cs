@@ -18,11 +18,11 @@ public partial class JunctionApp
 
     private bool _submodulesOpen;
 
-    private readonly Dictionary<string, AsyncLoader<IReadOnlyList<GitSubmodule>>> _submoduleLoaders =
-        new(PathComparer);
+    private readonly KeyedAsyncLoader<string, IReadOnlyList<GitSubmodule>> _submoduleLoaders =
+        new([], capacity: 16, comparer: PathComparer);
 
     private AsyncLoader<IReadOnlyList<GitSubmodule>> _submodules =>
-        LoaderFor(_submoduleLoaders, _activeRepoPath, (IReadOnlyList<GitSubmodule>)[]);
+        _submoduleLoaders.For(_activeRepoPath);
 
     private bool _submoduleOpRunning;
 

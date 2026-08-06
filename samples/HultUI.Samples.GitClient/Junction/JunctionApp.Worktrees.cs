@@ -19,11 +19,11 @@ public partial class JunctionApp
 
     private bool _worktreesOpen;
 
-    private readonly Dictionary<string, AsyncLoader<IReadOnlyList<GitWorktree>>> _worktreeLoaders =
-        new(PathComparer);
+    private readonly KeyedAsyncLoader<string, IReadOnlyList<GitWorktree>> _worktreeLoaders =
+        new([], capacity: 16, comparer: PathComparer);
 
     private AsyncLoader<IReadOnlyList<GitWorktree>> _worktrees =>
-        LoaderFor(_worktreeLoaders, _activeRepoPath, (IReadOnlyList<GitWorktree>)[]);
+        _worktreeLoaders.For(_activeRepoPath);
 
     private void OpenWorktrees()
     {

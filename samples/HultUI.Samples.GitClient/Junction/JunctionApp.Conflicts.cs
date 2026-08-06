@@ -98,8 +98,10 @@ public partial class JunctionApp
     // Regions left unresolved re-render with their original markers, so a partial
     // save is still a valid conflicted file.
 
-    private readonly Dictionary<string, AsyncLoader<ConflictDocument?>> _conflictDocLoaders =
-        new(StringComparer.Ordinal);
+    // Bounded: one slot per conflicted file version; a big merge would otherwise
+    // pin every parsed document for the session.
+    private readonly KeyedAsyncLoader<string, ConflictDocument?> _conflictDocLoaders =
+        new(null, capacity: 16, comparer: StringComparer.Ordinal);
 
     private string? _conflictKey;                                        // "repo|path|gen" the choices belong to
     private readonly Dictionary<int, ConflictChoice> _conflictChoices = new();
@@ -140,7 +142,7 @@ public partial class JunctionApp
     {
         var key = $"{_activeRepoPath}|{path}|{DataGen(_activeRepoPath)}";
         SyncConflictChoices(key);
-        var loader = LoaderFor(_conflictDocLoaders, key, (ConflictDocument?)null);
+        var loader = _conflictDocLoaders.For(key);
         var repoPath = _activeRepoPath;
         loader.Load(key, () => LoadConflictDoc(repoPath, path));
         var doc = loader.Value;

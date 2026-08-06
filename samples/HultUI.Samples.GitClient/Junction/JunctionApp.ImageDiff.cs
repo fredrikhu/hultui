@@ -38,8 +38,20 @@ public partial class JunctionApp
         public static readonly ImageDiffData Empty = new(null, null);
     }
 
-    private readonly Dictionary<string, AsyncLoader<ImageDiffData>> _imageDiffLoaders =
-        new(StringComparer.Ordinal);
+    // Bounded AND disposing: each slot pins two decoded bitmaps, so eviction has to
+    // release them rather than wait for finalization.
+    private readonly KeyedAsyncLoader<string, ImageDiffData> _imageDiffLoaders =
+        new(ImageDiffData.Empty, capacity: 8, onEvicted: DisposeImageDiff,
+            comparer: StringComparer.Ordinal);
+
+    /// <summary>Releases an evicted comparison's decoded bitmaps. Skia bitmaps are
+    /// unmanaged memory, so waiting for finalization would let a browsing session hold
+    /// far more than the cache's nominal size.</summary>
+    private static void DisposeImageDiff(ImageDiffData data)
+    {
+        (data.Old?.Source as IDisposable)?.Dispose();
+        (data.New?.Source as IDisposable)?.Dispose();
+    }
 
     // Runs off the UI thread: git show + decode.
     private static ImageSide? MakeSide(byte[]? bytes)
@@ -108,7 +120,7 @@ public partial class JunctionApp
             ? $"{_activeRepoPath}|{baseHash ?? commitHash + "^"}..{commitHash}|{path}"
             : $"{_activeRepoPath}|{DataGen(_activeRepoPath)}|{mode}|{path}";
 
-        var loader = LoaderFor(_imageDiffLoaders, key, ImageDiffData.Empty);
+        var loader = _imageDiffLoaders.For(key);
         var repoPath = _activeRepoPath;
         loader.Load(key, () => LoadImageDiff(repoPath, path, mode, commitHash, baseHash));
 

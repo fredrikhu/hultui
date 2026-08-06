@@ -36,7 +36,8 @@ public partial class JunctionApp : Component, IDisposable
     // One GitRepository per path, plus a background summary loader per path so
     // the sidebar's branch / ahead-behind / dirty badges never block Build().
     private readonly Dictionary<string, GitRepository> _repos = new();
-    private readonly Dictionary<string, AsyncLoader<RepoSummary>> _summaryLoaders = new();
+    private readonly KeyedAsyncLoader<string, RepoSummary> _summaryLoaders =
+        new(RepoSummary.Pending, capacity: 32, comparer: PathComparer);
 
     // Per-repo data generation. Every cached loader keys on it, so a repo's
     // views/summary reload only when *that* repo's data actually changed (a git
@@ -89,7 +90,8 @@ public partial class JunctionApp : Component, IDisposable
 
     // History state. Per-repo loaders (kept in a dictionary) retain each repo's
     // last-loaded value so returning to a repo is instant; see LoaderFor.
-    private readonly Dictionary<string, AsyncLoader<HistoryData>> _historyLoaders = new(PathComparer);
+    private readonly KeyedAsyncLoader<string, HistoryData> _historyLoaders =
+        new(HistoryData.Empty, capacity: 16, comparer: PathComparer);
     // Multi-selection à la Windows lists: _selectedCommitHash is the focused/lead
     // commit (keyboard nav, context menus), _selectedCommitHashes the full selection
     // (always contains the focused one), _selectionAnchorHash the Shift-range anchor.
@@ -137,7 +139,8 @@ public partial class JunctionApp : Component, IDisposable
     private string? _selectedFilePath;    // file selected in the Commit view
 
     // Changes (staging) state.
-    private readonly Dictionary<string, AsyncLoader<ChangesData>> _changesLoaders = new(PathComparer);
+    private readonly KeyedAsyncLoader<string, ChangesData> _changesLoaders =
+        new(ChangesData.Empty, capacity: 16, comparer: PathComparer);
     private string? _changeSelPath;
     private bool _changeSelStaged;
     // True when the selected file is a merge conflict; the right pane then shows the
@@ -149,7 +152,8 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<TextAreaElement> _descRef = new();
 
     // Branches (management) state.
-    private readonly Dictionary<string, AsyncLoader<BranchesData>> _branchesLoaders = new(PathComparer);
+    private readonly KeyedAsyncLoader<string, BranchesData> _branchesLoaders =
+        new(BranchesData.Empty, capacity: 16, comparer: PathComparer);
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
@@ -328,11 +332,7 @@ public partial class JunctionApp : Component, IDisposable
 
     private RepoSummary SummaryFor(string path)
     {
-        if (!_summaryLoaders.TryGetValue(path, out var loader))
-        {
-            loader = new AsyncLoader<RepoSummary>(RepoSummary.Pending);
-            _summaryLoaders[path] = loader;
-        }
+        var loader = _summaryLoaders.For(path);
         loader.Load($"{path}#{DataGen(path)}", () => LoadSummary(path));
         return loader.Value;
     }
@@ -352,21 +352,12 @@ public partial class JunctionApp : Component, IDisposable
         _dataGen[path] = DataGen(path) + 1;
     }
 
-    private static AsyncLoader<T> LoaderFor<T>(Dictionary<string, AsyncLoader<T>> map, string path, T empty)
-    {
-        if (!map.TryGetValue(path, out var loader))
-        {
-            loader = new AsyncLoader<T>(empty);
-            map[path] = loader;
-        }
-        return loader;
-    }
 
     // The active repo's loaders. Each repo has its own, so its last-loaded value
     // survives while another repo is on screen — switching back is a cache hit.
-    private AsyncLoader<HistoryData> _history => LoaderFor(_historyLoaders, _activeRepoPath, HistoryData.Empty);
-    private AsyncLoader<ChangesData> _changes => LoaderFor(_changesLoaders, _activeRepoPath, ChangesData.Empty);
-    private AsyncLoader<BranchesData> _branches => LoaderFor(_branchesLoaders, _activeRepoPath, BranchesData.Empty);
+    private AsyncLoader<HistoryData> _history => _historyLoaders.For(_activeRepoPath);
+    private AsyncLoader<ChangesData> _changes => _changesLoaders.For(_activeRepoPath);
+    private AsyncLoader<BranchesData> _branches => _branchesLoaders.For(_activeRepoPath);
 
     /// <summary>Reconcile the watcher set with the repos in the active workspace
     /// (plus the active repo). Cheap to call every Build — it only diffs the sets.</summary>

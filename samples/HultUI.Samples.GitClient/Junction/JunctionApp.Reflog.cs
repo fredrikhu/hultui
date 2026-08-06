@@ -18,11 +18,11 @@ public partial class JunctionApp
 
     private bool _reflogOpen;
 
-    private readonly Dictionary<string, AsyncLoader<IReadOnlyList<GitReflogEntry>>> _reflogLoaders =
-        new(PathComparer);
+    private readonly KeyedAsyncLoader<string, IReadOnlyList<GitReflogEntry>> _reflogLoaders =
+        new([], capacity: 16, comparer: PathComparer);
 
     private AsyncLoader<IReadOnlyList<GitReflogEntry>> _reflog =>
-        LoaderFor(_reflogLoaders, _activeRepoPath, (IReadOnlyList<GitReflogEntry>)[]);
+        _reflogLoaders.For(_activeRepoPath);
 
     private void OpenReflog()
     {

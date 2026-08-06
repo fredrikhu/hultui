@@ -18,11 +18,11 @@ public partial class JunctionApp
 
     private bool _remotesOpen;
 
-    private readonly Dictionary<string, AsyncLoader<IReadOnlyList<GitRemote>>> _remoteDetailLoaders =
-        new(PathComparer);
+    private readonly KeyedAsyncLoader<string, IReadOnlyList<GitRemote>> _remoteDetailLoaders =
+        new([], capacity: 16, comparer: PathComparer);
 
     private AsyncLoader<IReadOnlyList<GitRemote>> _remoteDetails =>
-        LoaderFor(_remoteDetailLoaders, _activeRepoPath, (IReadOnlyList<GitRemote>)[]);
+        _remoteDetailLoaders.For(_activeRepoPath);
 
     private void OpenRemotes()
     {
