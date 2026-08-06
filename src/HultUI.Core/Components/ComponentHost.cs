@@ -52,13 +52,31 @@ public sealed class ComponentHost : Element
     internal void ForceRebuild()
     {
         if (_buildEffect is null) return;
+        // A rebuild requested while a reconcile is in progress (e.g. MarkDirty from a
+        // BlurEvent handler fired as the focused element is removed) must not run a
+        // nested reconcile — it would mutate the child collection the outer pass is
+        // enumerating. Defer it until the outermost reconcile unwinds.
+        if (TreeDiffer.IsReconciling)
+        {
+            TreeDiffer.DeferRebuild(this);
+            return;
+        }
         // Run THROUGH the effect (forced past its change check) so Build()'s reactive
         // reads are re-tracked. Calling Rebuild() directly left the effect subscribed
         // only to whatever an earlier build happened to read, so any source first read
         // during a MarkDirty rebuild — e.g. a freshly created per-key AsyncLoader —
         // was never subscribed to, and its later completion went unobserved.
         _buildEffect.Execute(force: true);
+        // The effect has finished executing, so any rebuild deferred during a reconcile
+        // it ran can now execute without hitting the effect's re-entrancy guard.
+        TreeDiffer.DrainDeferred();
     }
+
+    /// <summary>
+    /// Runs a rebuild that was deferred because it was requested mid-reconcile.
+    /// Called by <see cref="TreeDiffer"/> once the outermost reconcile finishes.
+    /// </summary>
+    internal void RunDeferredRebuild() => _buildEffect?.Execute(force: true);
 
     protected override void OnMounted()
     {

@@ -123,13 +123,13 @@ public partial class CommanderApp
                 HultUI.Application.InvokeOnMainThread(MarkDirty);
             }
         });
-        // Mouse back / forward buttons (SDL X1=4, X2=5) navigate this pane's history —
-        // the same as Alt+←/→. The press targets whichever pane it lands on.
+        // Mouse back / forward buttons navigate this pane's history — the same as
+        // Alt+←/→. The press targets whichever pane it lands on.
         pane.On<PointerDownEvent>(ev =>
         {
-            if (ev.Button is not (4 or 5) || AnyOverlayOpen) return;
+            if (ev.Button is not (PointerEvent.BackButton or PointerEvent.ForwardButton) || AnyOverlayOpen) return;
             _active = side;
-            if (ev.Button == 4) GoBack(side); else GoForward(side);
+            if (ev.Button == PointerEvent.BackButton) GoBack(side); else GoForward(side);
             ev.StopPropagation = true;
         });
 
@@ -481,27 +481,16 @@ public partial class CommanderApp
         string? cursorName = active && list.Count > 0 && cur < list.Count ? list[cur].Name : null;
         var marks = Marks(side);
 
-        // VirtualListElement only re-realizes its rows when the Items *reference*
-        // changes (PatchFrom checks ReferenceEquals). Our cached listing keeps the
-        // same reference across rebuilds, so a mark/cursor/search change would leave
-        // stale (or blank) rows. Hand it a fresh zero-copy snapshot each build to
-        // force re-realization of the ~viewport visible rows against current state.
+        // VirtualListElement re-realizes its ~viewport rows on every rebuild now, so a
+        // mark/cursor/search change repaints against current state even when the cached
+        // listing keeps the same reference. (It used to only re-realize on an Items
+        // reference change, which needed a fresh snapshot wrapper here each build.)
         return VirtualListElement<FileEntry>.New()
             .ItemHeight((int)RowHeight)
-            .Items(new ListSnapshot(list))
+            .Items(list)
             .RenderWith(e => FileRow(side, e, cursorName, marks.Contains(e.Name)))
             .WithRef(VList(side))
             .FlexGrow(1);
-    }
-
-    /// <summary>A distinct-reference, zero-copy view over the cached listing, so the
-    /// VirtualList treats each build as new items and re-renders visible rows.</summary>
-    private sealed class ListSnapshot(IReadOnlyList<FileEntry> inner) : IReadOnlyList<FileEntry>
-    {
-        public FileEntry this[int i] => inner[i];
-        public int Count => inner.Count;
-        public IEnumerator<FileEntry> GetEnumerator() => inner.GetEnumerator();
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => inner.GetEnumerator();
     }
 
     private Element FileRow(char side, FileEntry e, string? cursorName, bool marked)

@@ -38,6 +38,24 @@ public class TextInputElementTests
     }
 
     [Fact]
+    public void BareFlexChildInput_HasIntrinsicContentHeight()
+    {
+        // No explicit Width/Height: without a MeasureContent the content box collapses
+        // to zero and the input paints nothing. It must measure a line box instead.
+        var input = TextInputElement.New("Hi");
+        var container = BoxElement.New();
+        container.Box.Width = 400;
+        container.Box.Height = 400;
+        container.AddChild(input);
+
+        StyleResolver.Resolve(container, Theme.Light.ToResolvedStyle());
+        _layout.PerformLayout(container, 400, 400);
+
+        Assert.True(input.Layout.AbsoluteContentBox.Height > 0,
+            "a bare flex-child input should have a non-zero content box height");
+    }
+
+    [Fact]
     public void TextInput_InsertsText()
     {
         var input = CreateInput("Hello");

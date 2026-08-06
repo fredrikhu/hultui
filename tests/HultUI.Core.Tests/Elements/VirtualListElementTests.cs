@@ -231,4 +231,28 @@ public class VirtualListElementTests
         // Scroll offset should be preserved (inherited from ScrollViewElement patch behavior)
         Assert.Equal(200, vl.ScrollOffsetY);
     }
+
+    [Fact]
+    public void Rebuild_WithSameItemsInstance_ReRealizesRows()
+    {
+        var vl = CreateList(100, viewportHeight: 200, itemHeight: 40);
+        Assert.True(vl.Children.Count > 1);
+
+        // Simulate a MarkDirty rebuild: patch from a freshly-built list carrying the
+        // SAME items instance, then the tree differ wipes the internally-realized rows
+        // because the incoming element carries none (they're created at render).
+        var incoming = VirtualListElement<string>.New().ItemHeight(40).Items(vl.Items);
+        incoming.ItemTemplate = i => TextElement.New(i);
+        vl.PatchFrom(incoming);
+        vl.ReplaceChildren();               // differ removes spacer + rows
+        Assert.Empty(vl.Children);
+
+        // The next layout/sync must re-realize the visible window. The pre-fix bug left
+        // the range unchanged, so the early-out skipped rebuilding and rows stayed blank.
+        _layout.PerformLayout(vl, 300, 200);
+        vl.UpdateContentSize();
+        _layout.PerformLayout(vl, 300, 200);
+
+        Assert.True(vl.Children.Count > 1);
+    }
 }

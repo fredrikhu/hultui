@@ -423,12 +423,18 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 foreach (var i in vl._multiSelected) _multiSelected.Add(i);
             }
 
-            // Only update items if reference changed
-            if (!ReferenceEquals(_items, vl._items))
-            {
-                _items = vl._items;
-                InvalidateItems();
-            }
+            // Adopt the rebuilt items and re-realize the visible window on every
+            // patch — not only when the Items reference changed. The tree differ
+            // wipes our internally-realized rows on each reconcile (the incoming
+            // element carries no children; rows are created during render), so if
+            // we skip InvalidateItems here, SyncVisibleItems' early-out sees an
+            // unchanged visible range and never rebuilds — leaving the rows blank
+            // after any MarkDirty() rebuild that reused the same list instance.
+            // Re-realizing spans only the viewport (~dozens of rows), so it's cheap
+            // even for large lists, and it refreshes each row's template closure so
+            // captured per-row state (cursor/selection/marks) can't go stale.
+            _items = vl._items;
+            InvalidateItems();
         }
     }
 }

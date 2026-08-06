@@ -10,4 +10,6 @@ public enum MouseButton
     Left = 0,
     Middle = 1,
     Right = 2,
+    Back = 4,    // X1 side button (SDL passes 4 through unchanged)
+    Forward = 5, // X2 side button (SDL passes 5 through unchanged)
 }

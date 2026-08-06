@@ -133,6 +133,21 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
     }
 
     /// <summary>
+    /// Horizontal counterpart of <see cref="ScrollRangeIntoView"/>: scrolls the
+    /// minimum distance needed to bring the horizontal band <c>[left, left + width]</c>
+    /// fully into the viewport. Coordinates are in this scroll's own content space
+    /// (0 is the left edge of the content).
+    /// </summary>
+    public void ScrollRangeIntoViewHorizontal(float left, float width)
+    {
+        var viewportWidth = Layout.AbsoluteContentBox.Width;
+        float cur = _scrollOffsetX;
+        float right = left + width;
+        if (left < cur) ScrollOffsetX = left;
+        else if (right > cur + viewportWidth) ScrollOffsetX = right - viewportWidth;
+    }
+
+    /// <summary>
     /// Scrolls <paramref name="child"/> — a descendant laid out inside this view —
     /// fully into vertical view. Reads the child's laid-out box, so it handles
     /// variable-height rows; call it after the frame the child was laid out in.

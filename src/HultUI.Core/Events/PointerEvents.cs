@@ -17,7 +17,22 @@ public abstract class PointerEvent : ElementEvent
         }
     }
 
-    /// <summary>Which mouse button was involved (0=left, 1=middle, 2=right).</summary>
+    /// <summary>Left mouse button (normalized value 0).</summary>
+    public const int LeftButton = 0;
+    /// <summary>Middle mouse button (normalized value 1).</summary>
+    public const int MiddleButton = 1;
+    /// <summary>Right mouse button (normalized value 2).</summary>
+    public const int RightButton = 2;
+    /// <summary>Back / X1 side button (normalized value 4).</summary>
+    public const int BackButton = 4;
+    /// <summary>Forward / X2 side button (normalized value 5).</summary>
+    public const int ForwardButton = 5;
+
+    /// <summary>
+    /// Which mouse button was involved. Compare against the named constants
+    /// (<see cref="LeftButton"/>, <see cref="MiddleButton"/>, <see cref="RightButton"/>,
+    /// <see cref="BackButton"/>, <see cref="ForwardButton"/>) rather than raw ints.
+    /// </summary>
     public int Button { get; init; }
 
     /// <summary>Modifier keys held during the event.</summary>

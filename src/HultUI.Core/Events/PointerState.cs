@@ -16,6 +16,7 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
     private Element? _hoveredElement;
     private Element? _pressedElement;
     private int _pressedButton;
+    private Point _pressedPosition;
     private Point _lastPosition;
     private DateTime _lastClickTime;
     private Point _lastClickPosition;
@@ -89,6 +90,7 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         ClearPressedChain(); // defensive: drop any stale press (e.g. a press consumed by a drag)
         _pressedElement = target;
         _pressedButton = button;
+        _pressedPosition = position;
 
         // :active-style press applies to the target and its ancestors.
         for (var el = target; el is not null; el = el.Parent)
@@ -120,8 +122,18 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         ClickEvent? clickEvent = null;
         DoubleClickEvent? doubleClickEvent = null;
 
-        // Synthesize click if released on the same element that was pressed
-        if (button == _pressedButton && ReferenceEquals(target, _pressedElement))
+        // Synthesize click if released on the same element that was pressed.
+        // A retained-mode rebuild between down and up (e.g. selecting a row
+        // MarkDirty()s and re-realizes VirtualList rows with fresh identities)
+        // detaches the pressed element, so identity no longer matches even
+        // though the pointer never left the spot. Fall back to: the pressed
+        // element was removed from the tree (Parent is null) and the pointer
+        // stayed put — treat it as a click on whatever now sits under it.
+        bool sameTarget = ReferenceEquals(target, _pressedElement);
+        bool pressedRecycled = !sameTarget
+            && _pressedElement is { Parent: null }
+            && Distance(position, _pressedPosition) < DoubleClickMaxDistance;
+        if (button == _pressedButton && (sameTarget || pressedRecycled))
         {
             var now = _time.GetUtcNow().UtcDateTime;
             var timeSinceLastClick = (now - _lastClickTime).TotalMilliseconds;

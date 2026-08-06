@@ -125,7 +125,10 @@ public class TextInputElement : BoxElement
         CornerRadius = ti.CornerRadius;
         Box.Padding = ti.Padding;
         Box.BorderWidth = ti.BorderWidth;
-        Inherited.FontSize = ti.FontSize;
+        // Theme font size is a default: an explicit builder FontSize wins and isn't
+        // re-clobbered on the StyleResolver passes that aren't preceded by a rebuild
+        // (matches TextAreaElement).
+        Inherited.FontSize ??= ti.FontSize;
         BackgroundColor = ti.Background ?? theme.Background;
         BorderColor = ti.BorderColor ?? theme.Border;
         FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
@@ -485,6 +488,30 @@ public class TextInputElement : BoxElement
         if (_renderCtx is not null)
             return _renderCtx.MeasureText(sub, style).Width;
         return sub.Length * style.FontSize * 0.6f; // fallback for tests
+    }
+
+    /// <summary>Default content width for an input with no text and no explicit width,
+    /// so a bare flex child still occupies a visible box.</summary>
+    private const float DefaultContentWidth = 120f;
+
+    internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
+    {
+        var style = ResolvedInherited;
+        // Height comes from the font's line box. Without this, a bare flex-child
+        // input (no explicit Height) measures its content as zero and paints
+        // nothing — text, caret and placeholder all live inside a collapsed box.
+        float lineHeight = ctx.MeasureText("Ag", style, float.PositiveInfinity, 1).Height;
+        if (lineHeight <= 0) lineHeight = style.FontSize * 1.4f;
+
+        // A default content width keeps an ungrown input visible; a flex-grown or
+        // explicitly-sized input still wins (grow and forced sizing override the
+        // measured content size).
+        float textWidth = string.IsNullOrEmpty(_text)
+            ? 0f
+            : ctx.MeasureText(_text, style, float.PositiveInfinity, 1).Width;
+        float width = Math.Max(textWidth + CursorWidth, DefaultContentWidth);
+
+        return new Size(width, lineHeight);
     }
 
     public override void Render(IRenderContext ctx)

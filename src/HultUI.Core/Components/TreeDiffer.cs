@@ -8,22 +8,80 @@ namespace HultUI.Core.Components;
 /// </summary>
 internal static class TreeDiffer
 {
+    // Reconciliation must not be re-entered: a structural mutation here can fire
+    // synchronous events (e.g. BlurEvent when the focused element is removed), and
+    // a handler that calls MarkDirty() would otherwise run a nested reconcile that
+    // mutates the very child collection the outer pass is enumerating ("Collection
+    // was modified"). We track depth and defer any rebuild requested mid-reconcile
+    // until the outermost pass unwinds.
+    [ThreadStatic] private static int _depth;
+    [ThreadStatic] private static List<ComponentHost>? _deferred;
+
+    /// <summary>True while a reconcile is in progress on this thread.</summary>
+    public static bool IsReconciling => _depth > 0;
+
+    /// <summary>
+    /// Queue a component host to rebuild once the current reconcile finishes.
+    /// Deduplicated — a host queued twice rebuilds once. Called by
+    /// <see cref="ComponentHost.ForceRebuild"/> when <see cref="IsReconciling"/>.
+    /// </summary>
+    public static void DeferRebuild(ComponentHost host)
+    {
+        _deferred ??= [];
+        if (!_deferred.Contains(host))
+            _deferred.Add(host);
+    }
+
     /// <summary>
     /// Reconcile a single child slot: patch <paramref name="existing"/> to match
     /// <paramref name="incoming"/>, or replace it under <paramref name="parent"/>.
     /// </summary>
     public static void Reconcile(Element parent, Element existing, Element incoming)
     {
-        if (CanPatch(existing, incoming))
+        _depth++;
+        try
         {
-            Patch(existing, incoming);
+            if (CanPatch(existing, incoming))
+            {
+                Patch(existing, incoming);
+            }
+            else
+            {
+                // Types differ — swap out
+                var index = IndexOf(parent, existing);
+                parent.RemoveChild(existing);
+                parent.InsertChild(index, incoming);
+            }
         }
-        else
+        finally
         {
-            // Types differ — swap out
-            var index = IndexOf(parent, existing);
-            parent.RemoveChild(existing);
-            parent.InsertChild(index, incoming);
+            _depth--;
+        }
+    }
+
+    /// <summary>
+    /// Runs any rebuilds deferred during a reconcile. Called by the component host once
+    /// its forced rebuild's Effect has finished executing, and by the window once per
+    /// frame as a safety net — never from inside <see cref="Reconcile"/>, because the
+    /// deferred rebuild re-enters the component's Effect, which ignores a forced run
+    /// while it is still executing.
+    /// </summary>
+    public static void DrainDeferred()
+    {
+        if (IsReconciling) return; // still nested; the outermost caller will drain
+        // Rebuilds queued during the reconcile run now that the tree is stable.
+        // Each rebuild is itself a reconcile (re-entering with _depth back at 0),
+        // and may queue more; loop until the queue is empty. A bounded guard keeps
+        // a pathological rebuild→dirty→rebuild cycle from spinning forever.
+        int guard = 0;
+        while (_deferred is { Count: > 0 })
+        {
+            var batch = _deferred;
+            _deferred = null;
+            foreach (var host in batch)
+                host.RunDeferredRebuild();
+            if (++guard > 100)
+                break;
         }
     }
 

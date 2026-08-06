@@ -124,7 +124,7 @@ public sealed unsafe class EventTranslator
         1 => 0, // SDL_BUTTON_LEFT → 0
         2 => 1, // SDL_BUTTON_MIDDLE → 1
         3 => 2, // SDL_BUTTON_RIGHT → 2
-        _ => sdlButton
+        _ => sdlButton // SDL_BUTTON_X1 → 4 (Back), SDL_BUTTON_X2 → 5 (Forward)
     };
 
     private static KeyModifiers TranslateKeyMod(SDL_Keymod mod)

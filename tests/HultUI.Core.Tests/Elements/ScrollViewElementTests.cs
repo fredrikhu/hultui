@@ -244,4 +244,33 @@ public class ScrollViewElementTests
         var hitScrolled2 = HitTester.HitTest(sv, new Point(100, 75));
         Assert.Same(items[3], hitScrolled2);
     }
+
+    [Fact]
+    public void ScrollRangeIntoViewHorizontal_RevealsOffscreenBand_Minimally()
+    {
+        var sv = ScrollViewElement.New();
+        sv.Box.Width = 100;
+        sv.Box.Height = 100;
+
+        // A single wide child gives 500px of horizontal content in a 100px viewport.
+        var child = BoxElement.New();
+        child.Box.Width = 500;
+        child.Box.Height = 100;
+        sv.AddChild(child);
+
+        _layout.PerformLayout(sv, 100, 100);
+        sv.UpdateContentSize();
+
+        // Band [300,340] is right of the viewport → scroll so its right edge is flush.
+        sv.ScrollRangeIntoViewHorizontal(300, 40);
+        Assert.Equal(240, sv.ScrollOffsetX);   // 340 - 100
+
+        // A band already within [240,340] → no movement.
+        sv.ScrollRangeIntoViewHorizontal(250, 10);
+        Assert.Equal(240, sv.ScrollOffsetX);
+
+        // Band left of the viewport → scroll left to its left edge.
+        sv.ScrollRangeIntoViewHorizontal(50, 10);
+        Assert.Equal(50, sv.ScrollOffsetX);
+    }
 }

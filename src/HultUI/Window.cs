@@ -1,6 +1,7 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -215,6 +216,9 @@ public sealed class Window : IOverlayHost, IDisposable
         if (!string.IsNullOrEmpty(_envTracePath))
             _tracer.StartRecording();
         _layoutEngine = new LayoutEngine(platformWindow.Surface.MeasureContext, _tracer);
+        // Expose the surface's measure context as ambient state so Build()-time code
+        // can measure text (sizing, budgeting, path collapse) without a layout pass.
+        TextMeasure.Context = platformWindow.Surface.MeasureContext;
         Clipboard = platformWindow.Clipboard;
         TextInputHost = platformWindow.TextInputHost;
         _devTools = new DevToolsOverlay(_perf);
@@ -440,6 +444,13 @@ public sealed class Window : IOverlayHost, IDisposable
 
         _tracer.MarkFrame();
         using var _frameTrace = _tracer.Begin("Frame", "Frame");
+
+        // Safety net: run any rebuild that was deferred because it was requested during
+        // a reconcile (e.g. MarkDirty from a BlurEvent when a focused element was
+        // removed). A rebuild triggered via ForceRebuild drains itself, but one whose
+        // outer reconcile was signal-driven has no such caller — this catches it before
+        // style/layout so its effect is visible this frame.
+        TreeDiffer.DrainDeferred();
 
         var theme = Application.Theme;
 
@@ -915,9 +926,20 @@ public sealed class Window : IOverlayHost, IDisposable
                 }
                 normalKeyHandling:
 
-                // Tab / Shift+Tab focus traversal
+                // Tab / Shift+Tab focus traversal. Dispatch the key to the focused
+                // element first so an app can observe or intercept Tab; a handler
+                // that sets StopPropagation cancels the default traversal (mirrors a
+                // browser's preventDefault on a Tab keydown). Without this the key
+                // never reached KeyDown handlers at all, so app-level Tab bindings
+                // were silently dead.
                 if (key.IsDown && key.KeyCode == KeyCode.Tab)
                 {
+                    var tabTarget = _focusManager.FocusedElement ?? _root;
+                    var tabEvent = new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat };
+                    EventDispatcher.Dispatch(tabEvent, tabTarget);
+                    if (tabEvent.StopPropagation)
+                        break;
+
                     if (key.Modifiers.HasFlag(KeyModifiers.Shift))
                         _focusManager.MoveFocusPrevious(_root);
                     else
