@@ -246,7 +246,11 @@ public partial class JunctionApp
     private void SelectTreeFile(string path)
     {
         _filesSelPath = path;
-        MarkDirty();
+        // Rerender, not MarkDirty: this activates a NEW per-file content loader, and
+        // a MarkDirty rebuild is untracked — the Effect would never subscribe to that
+        // loader's signals, so its async completion goes unobserved and the pane sits
+        // on "Loading…" until some other tracked rebuild (e.g. switching tabs).
+        Rerender();
     }
 
     // ── Content pane ─────────────────────────────────────────────────────

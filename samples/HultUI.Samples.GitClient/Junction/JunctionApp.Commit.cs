@@ -313,7 +313,8 @@ public partial class JunctionApp
         i = Math.Clamp(i + delta, 0, files.Count - 1);
         _selectedFilePath = files[i].Path;
         _pendingScrollToSelected = true;
-        MarkDirty();
+        // Rerender: selecting an image file activates a new per-file image-diff loader.
+        Rerender();
         return true;
     }
 
@@ -351,7 +352,7 @@ public partial class JunctionApp
                 .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         row.AddChild(text);
 
-        row.OnClick(_ => { _selectedFilePath = f.Path; MarkDirty(); });
+        row.OnClick(_ => { _selectedFilePath = f.Path; Rerender(); });
         if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }

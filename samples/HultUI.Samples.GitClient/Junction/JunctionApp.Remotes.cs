@@ -28,7 +28,10 @@ public partial class JunctionApp
     {
         if (!HasActiveRepo) { Flash("Open a repository first"); return; }
         _remotesOpen = true;
-        MarkDirty();
+        // Rerender, not MarkDirty: opening activates this repo's loader for the
+        // first time, and an untracked MarkDirty rebuild would leave the Effect
+        // unsubscribed from it (panel stuck on its loading placeholder).
+        Rerender();
     }
 
     private void CloseRemotes()

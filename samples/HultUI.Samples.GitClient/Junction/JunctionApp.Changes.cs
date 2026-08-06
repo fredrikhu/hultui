@@ -408,12 +408,15 @@ public partial class JunctionApp
 
     // ── Actions ──────────────────────────────────────────────────────────
 
+    // Both selections can activate a NEW per-file AsyncLoader (image diff / conflict
+    // document), so they must go through Rerender — a MarkDirty rebuild is untracked
+    // and the Effect would never subscribe to the new loader's signals.
     private void SelectChange(string path, bool staged)
     {
         _changeSelPath = path;
         _changeSelStaged = staged;
         _changeSelConflicted = false;
-        MarkDirty();
+        Rerender();
     }
 
     private void SelectConflict(string path)
@@ -421,7 +424,7 @@ public partial class JunctionApp
         _changeSelPath = path;
         _changeSelConflicted = true;
         _changeSelStaged = false;
-        MarkDirty();
+        Rerender();
     }
 
     private void Stage(string path)

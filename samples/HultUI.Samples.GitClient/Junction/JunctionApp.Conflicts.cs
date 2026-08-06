@@ -162,6 +162,16 @@ public partial class JunctionApp
         var body = ScrollView.New().FlexGrow(1).Padding(new Thickness(14));
         var inner = Flex.Column(gap: 12);
 
+        // Which side is which comes first — you need to know what "ours" and
+        // "theirs" mean before choosing between them.
+        if (merge is { } sides)
+        {
+            inner.AddChild(MergeSideCard("Incoming · theirs", sides.TheirsBranch, sides.Theirs,
+                Nocturne.Accent2_400, path));
+            inner.AddChild(MergeSideCard("Current · ours", sides.OursBranch, sides.Ours,
+                Nocturne.Accent400, path));
+        }
+
         if (doc == null)
         {
             inner.AddChild(Text.New("Reading file…").FontSize(12.5f).TextColor(Nocturne.On(0.5)));
@@ -182,12 +192,6 @@ public partial class JunctionApp
         {
             foreach (var h in doc.Hunks)
                 inner.AddChild(ConflictHunkCard(h, doc.Hunks.Count));
-        }
-
-        if (merge is { } m)
-        {
-            inner.AddChild(MergeSideCard("Incoming · theirs", m.TheirsBranch, m.Theirs, Nocturne.Accent2_400));
-            inner.AddChild(MergeSideCard("Current · ours", m.OursBranch, m.Ours, Nocturne.Accent400));
         }
 
         body.AddChild(inner);
@@ -349,7 +353,10 @@ public partial class JunctionApp
             ? t.Replace("\r\n", "\n").TrimEnd('\n').Split('\n')
             : [];
 
-    private Element MergeSideCard(string role, string? branch, GitCommit? commit, Color accent)
+    /// <param name="filePath">The conflicted file, so clicking the hash opens that
+    /// side's commit with this file already selected.</param>
+    private Element MergeSideCard(string role, string? branch, GitCommit? commit, Color accent,
+        string? filePath = null)
     {
         var card = Flex.Column(gap: 4)
             .Padding(new Thickness(9, 11, 9, 11))
@@ -367,7 +374,7 @@ public partial class JunctionApp
         if (commit is { } c)
         {
             var line = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
-            line.AddChild(Ui.Mono(c.ShortHash, 11f, accent).FlexShrink(0));
+            line.AddChild(CommitHashLink(c, accent, filePath));
             line.AddChild(Text.New(c.Subject).FontSize(12f).TextColor(Nocturne.Text)
                 .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
             card.AddChild(line);
@@ -378,6 +385,32 @@ public partial class JunctionApp
             card.AddChild(Text.New("(commit unavailable)").FontSize(11f).TextColor(Nocturne.On(0.4)));
         }
         return card;
+    }
+
+    /// <summary>The short hash as a link: opens that side's commit in the Commit view
+    /// with <paramref name="filePath"/> selected, so you can read what that side
+    /// actually changed before deciding. (If the commit doesn't touch that file, the
+    /// Commit view falls back to its first file.)</summary>
+    private Element CommitHashLink(GitCommit c, Color accent, string? filePath)
+    {
+        var box = Flex.Row(gap: 4).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(Nocturne.RadiusSm)
+            .Cursor(CursorType.Pointer)
+            .Tooltip($"Open {c.ShortHash} in the Commit view");
+        box.AddChild(Ui.Mono(c.ShortHash, 11f, accent));
+        box.AddChild(Ui.Icon(Icons.ArrowRight, 9f, Nocturne.Alpha(accent, 0.7)));
+        box.Key = "hashlink:" + c.Hash + ":" + (filePath ?? "");
+        box.OnClick(e => { e.StopPropagation = true; OpenCommitForSide(c.Hash, filePath); });
+        box.HoverBg(Nocturne.Alpha(accent, 0.16), Color.Transparent);
+        return box;
+    }
+
+    private void OpenCommitForSide(string hash, string? filePath)
+    {
+        SetCommitSelection(hash);                  // collapses any range compare too
+        if (!string.IsNullOrEmpty(filePath)) _selectedFilePath = filePath;
+        PrefetchCommitDetail(hash);
+        SetView(JunctionView.Commit);              // reactive → tracked rebuild
     }
 
     // A small bordered action button; a null onClick renders it disabled (used for

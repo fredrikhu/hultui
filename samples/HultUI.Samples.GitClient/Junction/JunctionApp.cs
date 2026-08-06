@@ -393,7 +393,13 @@ public partial class JunctionApp : Component, IDisposable
     private void OnExternalChange(string path)
     {
         BumpDataGen(path);
-        MarkDirty();
+        // Rerender, not MarkDirty: bumping the generation changes every loader key
+        // for this repo, so the next build activates NEW AsyncLoader instances. A
+        // MarkDirty rebuild is untracked, so the Effect would never subscribe to
+        // them and their async completions would go unobserved — the view sits on
+        // its loading placeholder until some other tracked rebuild (e.g. switching
+        // tabs) happens to re-subscribe. See RefreshAll, which already does this.
+        Rerender();
     }
 
     // Runs off the UI thread — no UI / reactive access.
