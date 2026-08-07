@@ -233,9 +233,11 @@ public partial class JunctionApp
                     .Children(Text.New(badge.ToString()).FontSize(9f).TextColor(Nocturne.Accent100)));
 
         tab.OnClick(_ => SetView(view));
+        // Declarative hover: the interaction config follows the latest build, so the
+        // tint attaches only while inactive and disappears when the tab becomes active
+        // (un-hover then restores the active build's Bg base, no guard needed).
         if (!active)
-            tab.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = Nocturne.Alpha(Nocturne.Text, 0.05));
-        tab.OnPointerLeave(e => { if (View != view) ((BoxElement)e.CurrentTarget).BackgroundColor = Color.Transparent; });
+            tab.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.05), Color.Transparent);
         return tab;
     }
 

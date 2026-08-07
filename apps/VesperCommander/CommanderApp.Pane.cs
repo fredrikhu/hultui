@@ -396,11 +396,7 @@ public partial class CommanderApp
         chip.ContextMenu(() => TabMenu(side, index));
         // Middle-click closes the tab (a common convenience).
         chip.On<PointerDownEvent>(e => { if (e.Button == 1) CloseTab(side, index); });
-        if (!on)
-        {
-            chip.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = Nocturne.Neutral900);
-            chip.OnPointerLeave(e => ((BoxElement)e.CurrentTarget).BackgroundColor = Color.Transparent);
-        }
+        if (!on) chip.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return chip;
     }
 

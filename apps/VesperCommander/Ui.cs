@@ -41,16 +41,13 @@ public static class Ui
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
             .Children(Mono(text, 10f, Nocturne.Neutral300));
 
-    /// <summary>The canonical hover idiom: swap background on enter/leave.
-    /// Acts on <c>e.CurrentTarget</c>, not the captured <paramref name="el"/> —
-    /// reconciliation copies handlers onto the retained element, so the closure's
-    /// <paramref name="el"/> is the discarded incoming build after the first patch.</summary>
-    public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement
-    {
-        el.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = hover);
-        el.OnPointerLeave(e => ((BoxElement)e.CurrentTarget).BackgroundColor = normal);
-        return el;
-    }
+    /// <summary>The canonical hover idiom: tint the background while hovered.
+    /// Declarative (Interaction system): the tint is re-applied after any rebuild,
+    /// so it survives mid-hover reconciliation, and un-hover restores the element's
+    /// base snapshot. <paramref name="normal"/> documents the resting color at the
+    /// call site; the restore itself comes from the base snapshot.</summary>
+    public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement =>
+        el.OnHover(b => b.BackgroundColor = hover);
 
     // ── Buttons ──────────────────────────────────────────────────────────
     // The shared button family (mirrors Junction's Ui.*): a rounded pill with an

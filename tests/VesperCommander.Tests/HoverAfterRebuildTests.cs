@@ -7,12 +7,12 @@ using Xunit;
 namespace VesperCommander.Tests;
 
 /// <summary>
-/// Regression guard for hover surviving reconciliation. Handlers are copied from the
-/// incoming build onto the retained element, so a hover handler that captured its own
-/// element local (the old <c>Ui.HoverBg</c>) would tint the DISCARDED incoming instance —
-/// hover highlight silently dead on every element that survives a rebuild. The fixed
-/// helper acts on <c>e.CurrentTarget</c>; this drives the real app through rebuilds and
-/// asserts a hover actually repaints the live element.
+/// Regression guard for hover surviving reconciliation. <c>Ui.HoverBg</c> declares the
+/// tint through the Interaction system: the override is copied to the retained element
+/// on patch and re-applied by <c>RefreshInteractionAfterPatch</c>, so the highlight both
+/// works after rebuilds AND survives a rebuild that lands mid-hover (a manual
+/// enter/leave handler would have its tint wiped by the patch until re-entry — the
+/// CI flake fixed in 4c0a4ee). Drives the real app end to end.
 /// </summary>
 public class HoverAfterRebuildTests
 {
@@ -42,25 +42,27 @@ public class HoverAfterRebuildTests
             Invoke(commander, "MarkDirty");
             session.PumpFrame();
 
-            // Drain stragglers (async dir-size probes, watcher callbacks) that would
-            // otherwise post a MarkDirty later: a rebuild patches Background back to
-            // the build's value and wipes a manual hover tint, which made this flake
-            // on slow CI runners.
-            for (int i = 0; i < 10; i++) { session.PumpFrame(); Thread.Sleep(20); }
-
             var back = session.Window.FindByAutomationId("hist-back-L");
             Assert.NotNull(back);
             var box = (BoxElement)back!.Element;
             var b = box.Layout.AbsoluteBorderBox;
             var before = box.BackgroundColor;
 
-            // Input injection is synchronous: the enter handler has run when MoveMouse
-            // returns. Assert without pumping another frame — the tint is what proves
-            // the copied handler acted on the LIVE element, and a queued rebuild in
-            // that frame would legitimately reset the background prop.
+            // Input injection is synchronous: hover state is set and the interaction
+            // override applied when MoveMouse returns.
             session.Window.MoveMouse(b.X + b.Width / 2, b.Y + b.Height / 2);
-
             Assert.NotEqual(before, box.BackgroundColor);
+
+            // The tint must survive a rebuild landing mid-hover: the patch resets the
+            // background prop, then RefreshInteractionAfterPatch re-applies the hover
+            // override. (This is why async stragglers no longer need draining here.)
+            Invoke(commander, "MarkDirty");
+            session.PumpFrame();
+            Assert.NotEqual(before, box.BackgroundColor);
+
+            // And un-hover restores the base look.
+            session.Window.MoveMouse(b.X + b.Width / 2, b.Y + b.Height + 80);
+            Assert.Equal(before, box.BackgroundColor);
         }
         finally
         {

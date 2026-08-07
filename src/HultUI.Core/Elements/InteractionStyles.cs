@@ -43,6 +43,20 @@ internal sealed class InteractionStyles
         _transitions = source._transitions;
     }
 
+    /// <summary>
+    /// Drops all overrides and transitions, keeping the state flags. Used when the
+    /// incoming build attached no interaction at all: config follows the latest
+    /// build (like event handlers), so a conditionally-attached hover style must
+    /// disappear when the condition stops holding.
+    /// </summary>
+    public void ClearConfig()
+    {
+        OnHover = null;
+        OnPressed = null;
+        OnFocus = null;
+        _transitions = null;
+    }
+
     /// <summary>Forces the base snapshot to be recaptured on the next recompute.</summary>
     public void InvalidateBase() => _base = null;
 

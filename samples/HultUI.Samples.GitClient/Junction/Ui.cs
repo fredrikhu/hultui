@@ -62,15 +62,12 @@ public static class Ui
 
     // ── Hover ────────────────────────────────────────────────────────────
 
-    // Acts on e.CurrentTarget, not the captured el — reconciliation copies handlers
-    // onto the retained element, so the closure's el is the discarded incoming build
-    // after the first patch.
-    public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement
-    {
-        el.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = hover);
-        el.OnPointerLeave(e => ((BoxElement)e.CurrentTarget).BackgroundColor = normal);
-        return el;
-    }
+    // Declarative hover tint (Interaction system): re-applied after any rebuild, so
+    // it survives mid-hover reconciliation; un-hover restores the element's base
+    // snapshot. `normal` documents the resting color; the restore itself comes from
+    // the base snapshot.
+    public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement =>
+        el.OnHover(b => b.BackgroundColor = hover);
 
     // ── Buttons ──────────────────────────────────────────────────────────
 

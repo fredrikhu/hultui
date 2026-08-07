@@ -600,12 +600,17 @@ public abstract class Element
         ContextMenuItems = source.ContextMenuItems;
         _opacity = source._opacity;
         Transform = source.Transform;
-        // Interaction overrides are pure functions of the element, so the config
-        // carries across reconciliation. Copy it here (order-independent); the base
-        // snapshot is refreshed and the active states re-applied by the reconciler
-        // in RefreshInteractionAfterPatch, once all visual props have been copied.
+        // Interaction config follows the latest build, like event handlers: overrides
+        // are pure functions of the element, so the incoming build's config carries
+        // across reconciliation — and an incoming element WITHOUT interaction clears
+        // any stale config (a conditionally-attached hover style must disappear when
+        // its condition stops holding). The base snapshot is refreshed and the active
+        // states re-applied in RefreshInteractionAfterPatch, once all visual props
+        // have been copied.
         if (source._interaction is { } sourceInteraction)
             Interaction.CopyConfigFrom(sourceInteraction);
+        else
+            _interaction?.ClearConfig();
         Role = source.Role;
         AccessibleName = source.AccessibleName;
         AccessibleDescription = source.AccessibleDescription;
