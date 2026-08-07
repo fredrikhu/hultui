@@ -371,8 +371,8 @@ public partial class JunctionApp
             .Background(selected ? Nocturne.Accent900 : Nocturne.Bg)
             .BorderColor(border).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd)
             .Cursor(CursorType.Pointer);
-        // Reordering swaps rows, so key by commit identity — the framework doesn't
-        // copy handlers on reconcile, and handlers here resolve the row by identity.
+        // Reordering swaps rows, so key by commit identity — rows keep their own
+        // retained state across moves instead of patching into each other by position.
         row.Key = "rb-" + r.Hash;
         row.On<ClickEvent>(_ => SelectRebaseRow(r));
 
@@ -485,8 +485,8 @@ public partial class JunctionApp
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton("Cancel", null, CloseRebase, 12.5f));
-        // Key by state — the enabled/disabled variants are different elements and the
-        // framework doesn't copy handlers on patch (see the modal primary button).
+        // Key by state so the enabled/disabled variants swap as fresh elements
+        // rather than patching into each other (they carry different hover styling).
         var start = bad ? DisabledStartButton() : Ui.PrimaryButton("Start rebase", Icons.Play, RunRebase, 12.5f);
         start.Key = "rebase-start-" + (bad ? "off" : "on");
         bar.AddChild(start);

@@ -468,7 +468,8 @@ public partial class CommanderApp : Component, IDisposable
         });
 
         // Overlays render above the shell, each keyed so conditional presence
-        // reconciles by identity (a keyless swap would leak handlers across kinds).
+        // reconciles by identity (a keyless swap would bleed retained state — focus,
+        // caret, scroll — across overlay kinds).
         if (_drivePicker is char dp)
         {
             var o = BuildDrivePicker(dp); o.Key = "drive-picker"; root.AddChild(o);

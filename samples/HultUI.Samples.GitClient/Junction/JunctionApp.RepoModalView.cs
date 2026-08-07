@@ -123,10 +123,8 @@ public partial class JunctionApp
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton("Cancel", null, CloseModal, 12.5f));
         var valid = ModalValid(f);
-        // Key by validity: the enabled/disabled variants are different elements at
-        // the same position, and the framework doesn't copy handlers on patch — so
-        // without distinct keys the enabled button would reuse the disabled (handler-
-        // less) element and never submit.
+        // Key by validity so the enabled/disabled variants swap as fresh elements
+        // rather than patching into each other (they carry different hover styling).
         var primary = valid
             ? Ui.PrimaryButton(meta.PrimaryLabel, meta.PrimaryIcon, SubmitModal, 12.5f)
             : DisabledButton(meta.PrimaryLabel, meta.PrimaryIcon);

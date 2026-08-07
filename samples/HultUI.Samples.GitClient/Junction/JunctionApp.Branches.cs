@@ -207,8 +207,9 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow)
             .BorderColor(Nocturne.On(0.06)).BorderWidth(new Thickness(0, 0, 1, 0))
             .Cursor(CursorType.Pointer);
-        // Focus + compare-pick in the key so the highlight/handlers refresh (handlers
-        // aren't copied on patch — a stale one would otherwise clobber the background).
+        // Focus + compare-pick in the key so a state flip replaces the row outright:
+        // the hover baseline differs per state, and a fresh element can't be left
+        // showing the other state's hover tint.
         row.Key = b.Name + (focused ? "#f" : "") + (comparePick ? "#c" + compareRole : "");
         row.Background(comparePick ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900

@@ -12,9 +12,10 @@ namespace VesperCommander.Tests;
 /// and asserts the back chevron is reachable by assistive tech (AutomationId + Button
 /// role) and that clicking it actually navigates to the previous folder.
 ///
-/// <para>The original bug was the framework not copying event handlers when the differ
-/// patches a retained element in place, so the enabled build's click handler never
-/// landed. The fix keys the buttons by enabled state to force a fresh element.</para>
+/// <para>The original bug: the differ didn't copy event handlers when patching a
+/// retained element, so the enabled build's click handler never landed. Reconciliation
+/// now copies app handlers from the incoming build (see HandlerReconcileTests in core),
+/// and this test pins that a conditionally-attached handler lands with no key tricks.</para>
 /// </summary>
 public class HistoryClusterTests
 {
@@ -41,8 +42,8 @@ public class HistoryClusterTests
             var prev = Dir(commander, 'L');   // == root
 
             // Navigate -> sub: records prev in Back, flipping the button disabled -> enabled.
-            // Its handler only lands if the differ replaces the retained (handler-less) box,
-            // which the state-dependent key forces.
+            // The enabled build attaches a click handler; reconciliation must copy it onto
+            // the retained (previously handler-less) box.
             Invoke(commander, "NavigateTo", 'L', sub, null, true);
             session.PumpFrame();
             Assert.Equal(sub, Dir(commander, 'L'));

@@ -455,12 +455,10 @@ public partial class JunctionApp : Component, IDisposable
         EnsureWatchers();
 
         // Key every child. The overlays below are added conditionally, so without
-        // keys they reconcile by position — and when one overlay disappears while
-        // another appears at the same index, the framework patches one subtree onto
-        // the other and (since it doesn't copy handlers) leaks a stale handler onto
-        // the new element. Distinct keys make each overlay reconcile only against
-        // its own kind. (Bit us as the "+" popover's Clone handler leaking onto the
-        // add-repo modal.)
+        // keys they reconcile by position — when one overlay disappears while another
+        // appears at the same index, the framework would patch one subtree onto the
+        // other, bleeding retained state (focus, caret, scroll) across kinds. Distinct
+        // keys make each overlay reconcile only against its own kind.
         var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
         var body = BuildBody(); body.Key = "body";
         var root = Flex.Column(gap: 0)
@@ -491,10 +489,9 @@ public partial class JunctionApp : Component, IDisposable
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         // Key the sidebar by collapsed-state so toggling replaces the subtree
-        // instead of patching the expanded layout into the rail (which would
-        // otherwise reuse a handler-less element as the expand button — the
-        // framework doesn't copy event handlers on reconcile). Key the main
-        // column too so the two body children reconcile by key, not position.
+        // instead of patching the expanded layout into the rail — the two shapes
+        // share no meaningful retained state. Key the main column too so the two
+        // body children reconcile by key, not position.
         var sidebar = BuildSidebar();
         sidebar.Key = _sidebarCollapsed ? "sidebar-rail" : "sidebar-expanded";
         var main = BuildMainColumn();
@@ -508,10 +505,8 @@ public partial class JunctionApp : Component, IDisposable
     {
         // Key the toolbar and the view root so the two children reconcile by key.
         // Without keys they reconcile by position, which patches one view's
-        // elements onto another's when switching views — and since event handlers
-        // aren't copied on patch, a stale handler from the previous view leaks
-        // onto the new element (e.g. History's "open commit details" footer button
-        // patched onto Commit's fullscreen button, firing SetView on click).
+        // elements onto another's when switching views, bleeding retained state
+        // (focus, scroll positions) across unrelated views.
         var toolbar = BuildToolbar();
         toolbar.Key = "toolbar";
         var col = Flex.Column(gap: 0).FlexGrow(1).Children(toolbar);

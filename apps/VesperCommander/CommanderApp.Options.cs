@@ -42,10 +42,9 @@ public partial class CommanderApp
         // and keeps the window a stable size as you switch pages.
         var body = Grid.Of("184px 1fr", "1fr").Height(460);
         body.AddChild(OptionsNav().GridCell(0, 0));
-        // Key the page subtree by which page (or the search view) it holds. Switching
-        // pages otherwise reconciles the new controls onto the old ones by position, and
-        // the differ does NOT copy event handlers — so a switched-to page's toggles /
-        // swatches would be stranded with dead handlers until an unrelated rebuild.
+        // Key the page subtree by which page (or the search view) it holds. A keyless
+        // switch would patch the new page's controls onto the old ones by position,
+        // bleeding retained state (focus, caret) across logically unrelated controls.
         var page = Flex.Column(gap: 14).Padding(new Thickness(16, 20, 16, 20)).GridCell(0, 1);
         page.Key = searching ? "opt-page:search" : "opt-page:" + _optionsPage;
         if (searching) OptionsSearchResults(page, _optSearch.Trim());

@@ -891,12 +891,10 @@ public partial class CommanderApp
                 if (Icons.KindFor(focused) == IconKind.Code
                     && PreviewSpans(focused.Name, excerpt) is { } codeSpans)
                     body.Spans(codeSpans);   // VS Code Dark+ tokens (null while tokenizing off-thread)
-                // Focus drives the Full-mode ring. Attach handlers UNCONDITIONALLY —
-                // reconciliation doesn't copy event handlers, and this element is keyed
-                // per file, so a handler added only in a Full build would never appear
-                // when Side→Full patches the same element. Handlers capture only `this`.
-                // Blur can fire mid-reconcile (element removed while focused, e.g. Ctrl+Q
-                // away), so defer the repaint to avoid re-entering the differ.
+                // Focus drives the Full-mode ring; handlers capture only `this`, so
+                // they stay valid when reconciliation copies them onto the retained
+                // element. Blur can fire mid-reconcile (element removed while focused,
+                // e.g. Ctrl+Q away), so defer the repaint rather than re-enter the differ.
                 body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
                 body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
                 // Click always focuses to select; only Full mode joins the Tab cycle

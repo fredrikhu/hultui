@@ -335,9 +335,9 @@ public partial class JunctionApp
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
-        // Include selection in the key so a selection change replaces the row with
-        // fresh handlers — otherwise the stale hover handler (handlers aren't copied
-        // on reconcile) resets the background and the highlight never appears.
+        // Include selection in the key so a selection change replaces the row outright:
+        // the hover baseline differs per state, and a fresh element can't be left
+        // showing the other state's hover tint.
         row.Key = f.Path + (selected ? "#s" : "");
         if (selected) row.Background(Nocturne.Accent900);
 
