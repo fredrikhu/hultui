@@ -297,12 +297,18 @@ When patching, app event handlers (registered via `On<TEvent>`) **are copied fro
 var box = Box.New();
 box.On<PointerEnterEvent>(_ => box.BackgroundColor = hoverColor);
 
-// Correct: e.CurrentTarget is the element the handler runs on — always live.
-var box = Box.New();
-box.On<PointerEnterEvent>(e => ((BoxElement)e.CurrentTarget).BackgroundColor = hoverColor);
+// Correct for hover/press/focus styling: declare it. The override survives
+// patching, is re-applied after every rebuild (a rebuild landing mid-hover
+// can't wipe the tint), and un-hover restores the element's base look.
+var box = Box.New().OnHover(b => b.BackgroundColor = hoverColor);
+
+// Correct for other self-references (reading layout to anchor a popover,
+// imperative writes): e.CurrentTarget is the element the handler runs on —
+// always the live one.
+btn.On<ClickEvent>(e => OpenPopoverUnder(e.CurrentTarget.Layout.AbsoluteBorderBox));
 ```
 
-The same applies to reading layout for popover anchoring (`e.CurrentTarget.Layout.AbsoluteBorderBox`) and any other self-reference. For *cross*-element references (a button that focuses an input), use `Ref<T>` via `.WithRef(...)` — refs are repointed to the live element during patching.
+Interaction config (`.OnHover`/`.OnPressed`/`.OnFocus` and transitions) follows the latest build just like handlers: the incoming element's config replaces the retained one, and an incoming element *without* any interaction clears it — so conditionally attaching a hover style (`if (!active) el.OnHover(...)`) behaves correctly across state flips. For *cross*-element references (a button that focuses an input), use `Ref<T>` via `.WithRef(...)` — refs are repointed to the live element during patching.
 
 Keys still matter for *state*: an unkeyed patch preserves the retained element's transient state (focus, caret, scroll position), so when a slot switches between logically different content — a settings page behind a nav list, a wizard step — key the slot by what it shows so unrelated state doesn't bleed across.
 
