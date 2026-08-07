@@ -285,30 +285,26 @@ public override Element Build()
 
 Without keys, inserting an item at the beginning of the list would cause every element to be patched with the next item's data instead of shifting elements down.
 
-### Keys and event handlers
+### Event handlers follow the latest build
 
-**This is critical:** when patching, event handlers are **not** copied from the new tree. Handlers from the original `Build()` are preserved because they capture references to the live element instances. This means that if the differ patches element #0 to display a different item, the event handler still captures the *original* item's data.
+When patching, app event handlers (registered via `On<TEvent>`) **are copied from the new tree** — the retained element always runs the latest `Build()`'s handlers, exactly like properties and callback props. A handler that closes over per-item data therefore stays in sync with what the element displays: if the differ patches element #0 from "Apple" → "Banana", the handler is the new build's, and it captured "Banana". Conditionally attached handlers work the same way — a button built disabled (no handler) then rebuilt enabled gets the enabled build's handler; no key tricks required. (Element-internal wiring, like a `TextInputElement`'s own key handling, is *owned* by the element and survives patching untouched.)
 
-```csharp
-// BUG: without keys, handlers capture stale values after rebuild
-for (int i = 0; i < items.Count; i++)
-{
-    var item = items[i];
-    var box = Box.New().Children(Text.New(item));
-    box.On<ClickEvent>(_ => Console.WriteLine(item)); // captures 'item'
-    children[i] = box;
-}
-```
-
-If `items` changes from `["Apple", "Banana"]` to `["Banana"]`, the differ patches element #0 from "Apple" → "Banana" visually, but the click handler still prints "Apple". The fix is to set a key based on item identity:
+**The one rule this imposes:** a handler must never capture a *build-scope element variable*. The elements a build creates are throwaway blueprints — after reconciliation, the live tree is the retained instances, and the captured variable points at the discarded incoming build. Reach the live element through the event instead:
 
 ```csharp
-var box = Box.New().Children(Text.New(item));
-box.Key = item; // differ now matches by identity, not position
-box.On<ClickEvent>(_ => Console.WriteLine(item));
+// BUG: 'box' is this build's instance; after a patch the handler (copied to
+// the retained element) still writes to the discarded blueprint.
+var box = Box.New();
+box.On<PointerEnterEvent>(_ => box.BackgroundColor = hoverColor);
+
+// Correct: e.CurrentTarget is the element the handler runs on — always live.
+var box = Box.New();
+box.On<PointerEnterEvent>(e => ((BoxElement)e.CurrentTarget).BackgroundColor = hoverColor);
 ```
 
-This applies to any per-item behavior captured in closures: event handlers, drag & drop handlers, animation callbacks, etc.
+The same applies to reading layout for popover anchoring (`e.CurrentTarget.Layout.AbsoluteBorderBox`) and any other self-reference. For *cross*-element references (a button that focuses an input), use `Ref<T>` via `.WithRef(...)` — refs are repointed to the live element during patching.
+
+Keys still matter for *state*: an unkeyed patch preserves the retained element's transient state (focus, caret, scroll position), so when a slot switches between logically different content — a settings page behind a nav list, a wizard step — key the slot by what it shows so unrelated state doesn't bleed across.
 
 ### Keys and animations
 
