@@ -236,7 +236,14 @@ public partial class CommanderApp
         cluster.AddChild(CaretBtn(side));
         cluster.AddChild(NavBtn(side, IconKind.NavForward, CanGoForward(side),
             $"hist-fwd-{side}", "Forward", "Forward · Alt+→", () => GoForward(side)));
-        cluster.ContextMenu(() => HistoryMenu(side));
+        // Right-click anywhere in the cluster also opens the recent-folder popover.
+        cluster.On<PointerDownEvent>(e =>
+        {
+            if (e.Button != PointerEvent.RightButton || ActiveTab(side).Back.Count == 0) return;
+            e.StopPropagation = true;
+            _active = side;
+            OpenHistoryPopover(side, cluster);
+        });
         return cluster;
     }
 
@@ -287,33 +294,90 @@ public partial class CommanderApp
         {
             btn.On<ClickEvent>(e =>
             {
-                // Stop propagation so this same click isn't also treated as an outside
-                // click that immediately dismisses the menu we're opening.
                 e.StopPropagation = true;
                 _active = side;
-                var box = btn.Layout.AbsoluteBorderBox;
-                _window.OpenContextMenu(btn, new Point(box.X, box.Y + box.Height + 2f));
+                OpenHistoryPopover(side, btn.Parent!);   // anchor to the cluster (right-aligned)
             });
             btn.HoverBg(Nocturne.Neutral900, Color.Transparent);
         }
         return btn;
     }
 
-    /// <summary>Recent-folder list for the history cluster's right-click menu — the
-    /// tab's Back stack, most-recent first. Selecting one navigates there (recording
-    /// it as a fresh move, so the current folder joins Back).</summary>
-    private IReadOnlyList<ContextMenuItem> HistoryMenu(char side)
+    // ── Recent-folders popover (caret click / cluster right-click) ───────
+    // An anchored Nocturne card of the current folder + Back stack, each row a real
+    // folder icon + full path (collapsed to C:\…\last\few when it won't fit).
+    private (char side, float x, float y, float w)? _historyPop;
+
+    private void OpenHistoryPopover(char side, Element anchor)
     {
-        var tab = Tabs(side)[TabIndex(side)];
-        var items = new List<ContextMenuItem>();
-        for (int i = tab.Back.Count - 1; i >= 0 && items.Count < 12; i--)
+        const float w = 300f;
+        var box = anchor.Layout.AbsoluteBorderBox;
+        float x = Math.Max(8f, box.X + box.Width - w);   // right edge aligns with the cluster
+        float y = box.Y + box.Height + 4f;
+        _historyPop = (side, x, y, w);
+        MarkDirty();
+    }
+
+    private void CloseHistoryPopover() { _historyPop = null; MarkDirty(); }
+
+    private Element BuildHistoryPopover((char side, float x, float y, float w) hp)
+    {
+        var (side, x, y, w) = hp;
+        var tab = ActiveTab(side);
+
+        // Full-screen transparent catcher: any click outside the card dismisses.
+        var layer = Box.New().Width(Dimension.Percent(100)).Height(Dimension.Percent(100)).ZIndex(60);
+        layer.Position.Type = PositionType.Absolute;
+        layer.Position.Top = Dimension.Px(0);
+        layer.Position.Left = Dimension.Px(0);
+        layer.On<ClickEvent>(_ => CloseHistoryPopover());
+        layer.On<PointerDownEvent>(e => { if (e.Button == PointerEvent.RightButton) CloseHistoryPopover(); });
+
+        var card = Flex.Column(gap: 0).Width(w)
+            .Background(Nocturne.Surface).BorderColor(Nocturne.Neutral700).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd).BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
+            .Padding(new Thickness(4, 4, 4, 4));
+        card.Position.Type = PositionType.Absolute;
+        card.Position.Left = Dimension.Px(x);
+        card.Position.Top = Dimension.Px(y);
+        card.On<ClickEvent>(e => e.StopPropagation = true);   // clicks inside stay inside
+
+        float budget = w - 60f;   // room for the folder icon, gaps, padding and trailing bullet
+
+        // Current folder (active, non-navigable), then the Back stack, most-recent first.
+        card.AddChild(HistoryRow(side, Dir(side), active: true, budget));
+        for (int i = tab.Back.Count - 1, n = 0; i >= 0 && n < 10; i--, n++)
+            card.AddChild(HistoryRow(side, tab.Back[i], active: false, budget));
+
+        // Footer key hints.
+        card.AddChild(Box.New().Height(1).Background(Nocturne.Divider).Margin(new Thickness(3, 6, 3, 6)));
+        var foot = Flex.Row(gap: 5).AlignItems(AlignItems.Center).Padding(new Thickness(2, 10, 5, 10));
+        foot.AddChild(Ui.Kbd("Alt+←")); foot.AddChild(Ui.Mono("back", 10.5f, Nocturne.Neutral500));
+        foot.AddChild(Ui.Kbd("Alt+→")); foot.AddChild(Ui.Mono("forward", 10.5f, Nocturne.Neutral500));
+        foot.AddChild(Box.New().FlexGrow(1));
+        foot.AddChild(Ui.Kbd("↵")); foot.AddChild(Ui.Mono("jump", 10.5f, Nocturne.Neutral500));
+        card.AddChild(foot);
+
+        layer.AddChild(card);
+        return layer;
+    }
+
+    private Element HistoryRow(char side, string path, bool active, float budget)
+    {
+        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(28)
+            .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(Nocturne.RadiusSm)
+            .Cursor(active ? CursorType.Default : CursorType.Pointer);
+        row.AddChild(Icons.Draw(IconKind.Folder, null, 14f));
+        row.AddChild(Ui.Mono(CollapsePath(path, budget), 11.5f, active ? Nocturne.Accent200 : Nocturne.On(0.80))
+            .FlexGrow(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        if (active)
+            row.AddChild(Ui.Icon("●", 9f, Nocturne.Accent));
+        else
         {
-            string path = tab.Back[i];
-            items.Add(new() { Glyph = "‹", Label = TabLabel(path), Action = () => { _active = side; NavigateTo(side, path); } });
+            row.OnClick(_ => { CloseHistoryPopover(); _active = side; NavigateTo(side, path); });
+            row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         }
-        if (items.Count == 0)
-            items.Add(new() { Label = "No history yet", IsDisabled = true });
-        return items;
+        return row;
     }
 
     private Element TabChip(char side, int index, bool on)
