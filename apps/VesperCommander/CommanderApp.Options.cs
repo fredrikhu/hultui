@@ -96,9 +96,7 @@ public partial class CommanderApp
             .Padding(new Thickness(4, 10, 4, 10)).CornerRadius(6f)
             .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral700).BorderWidth(1f);
         box.AddChild(Ui.Icon("⌕", 13f, Nocturne.On(0.45)));
-        // Height must clear the 13.5px font's line box plus the theme's 12px vertical
-        // input padding, or the input's content-box clips descenders (26 was too tight).
-        var input = TextInput.New(_optSearch).FlexGrow(1).Height(30);
+        var input = Ui.Field(TextInput.New(_optSearch));
         input.PlaceholderText("Search settings…");
         input.OnTextChanged(v => { _optSearch = v; MarkDirty(); });
         input.WithRef(_optSearchRef);

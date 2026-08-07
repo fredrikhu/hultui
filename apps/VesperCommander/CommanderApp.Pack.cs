@@ -174,7 +174,7 @@ public partial class CommanderApp
 
         // Archive name.
         var nameRow = PackSection("ARCHIVE NAME");
-        var input = TextInput.New(_packName).FlexGrow(1).Height(30);
+        var input = Ui.Field(TextInput.New(_packName));
         input.PlaceholderText("archive name");
         input.OnTextChanged(v => { _packName = v; _packError = null; });
         input.WithRef(_packNameRef);
@@ -215,7 +215,7 @@ public partial class CommanderApp
         if (_packEncrypt && canEncrypt)
         {
             var pwRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Padding(new Thickness(2, 22, 2, 0));
-            var pw = TextInput.New(_packPassword).FlexGrow(1).Height(28);
+            var pw = Ui.Field(TextInput.New(_packPassword));
             pw.Masked = true;
             pw.PlaceholderText("password");
             pw.OnTextChanged(v => _packPassword = v);

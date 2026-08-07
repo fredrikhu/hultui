@@ -159,9 +159,12 @@ public partial class CommanderApp
 
     private Element FindField(string value, bool bad, Action<string> onChanged)
     {
-        var box = Box.New().FlexGrow(1).Height(26).Padding(new Thickness(3, 8, 3, 8)).CornerRadius(4f)
+        // Box height = the field height with no vertical padding, so the input's own
+        // theme padding is the only vertical inset (double-padding would clip or, if the
+        // box is unclamped, let the growing input balloon the field).
+        var box = Box.New().FlexGrow(1).Height(Ui.FieldHeight).Padding(new Thickness(0, 8, 0, 8)).CornerRadius(4f)
             .Background(Nocturne.Bg).BorderColor(bad ? Nocturne.Alpha(Nocturne.MarkRed, 0.55) : Nocturne.Neutral700).BorderWidth(1f);
-        var input = TextInput.New(value).FlexGrow(1).Height(20);
+        var input = Ui.Field(TextInput.New(value));
         input.OnTextChanged(onChanged);
         box.AddChild(input);
         return box;
@@ -207,9 +210,9 @@ public partial class CommanderApp
     {
         var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
         row.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.On(0.55)).Width(96).FlexShrink(0));
-        var box = Box.New().FlexGrow(grow).Height(30).Padding(new Thickness(4, 8, 4, 8)).CornerRadius(4f)
+        var box = Box.New().FlexGrow(grow).Height(Ui.FieldHeight).Padding(new Thickness(0, 8, 0, 8)).CornerRadius(4f)
             .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral700).BorderWidth(1f);
-        var input = TextInput.New(value).FlexGrow(1).Height(22);
+        var input = Ui.Field(TextInput.New(value));
         input.PlaceholderText(placeholder);
         input.OnTextChanged(onChanged);
         input.Spans(MaskSpans(value));                 // paint-only: tokens Accent200

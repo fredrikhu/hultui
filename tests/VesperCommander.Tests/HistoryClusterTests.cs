@@ -33,12 +33,12 @@ public class HistoryClusterTests
             session.Application.SetRoot(commander.Mount());
             session.PumpFrame();
 
-            // The pane's Back stack starts empty (the session store persists folders, not
-            // history), so the back button's first build is DISABLED — no click handler.
-            // Whatever folder the pane opened on is where a Back should return to; capture
-            // it (relative assert keeps the test independent of any restored session).
-            var prev = Dir(commander, 'L');
-            Assert.NotEqual(sub, prev);
+            // Force a deterministic baseline at root, independent of any session the app
+            // restored from disk (the store persists folders, not history — so Back is empty
+            // and the back button's first build is DISABLED, with no click handler).
+            Invoke(commander, "NavigateTo", 'L', root, null, false);
+            session.PumpFrame();
+            var prev = Dir(commander, 'L');   // == root
 
             // Navigate -> sub: records prev in Back, flipping the button disabled -> enabled.
             // Its handler only lands if the differ replaces the retained (handler-less) box,

@@ -955,7 +955,7 @@ public partial class CommanderApp
             var leaf = System.IO.Path.GetFileName(dir.TrimEnd(
                 System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
             row.AddChild(Ui.Mono((leaf.Length > 0 ? leaf : dir) + " ›", 11.5f, Nocturne.Accent300).FlexShrink(0));
-            var input = TextInput.New(_cmdText).FlexGrow(1).Height(26);
+            var input = Ui.Field(TextInput.New(_cmdText));
             input.PlaceholderText("run a command here — Enter opens a terminal, Esc cancels");
             input.OnTextChanged(v => _cmdText = v);
             input.WithRef(_cmdRef);

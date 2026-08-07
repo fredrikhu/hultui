@@ -134,7 +134,7 @@ public partial class CommanderApp
 
         var fieldRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
         fieldRow.AddChild(Ui.Icon("⚿", 13f, _pwWrong ? Nocturne.MarkRed : ArchiveAmber));
-        var input = TextInput.New(_pwValue).FlexGrow(1).Height(30);
+        var input = Ui.Field(TextInput.New(_pwValue));
         input.Masked = true;
         input.PlaceholderText("password");
         input.OnTextChanged(v => { _pwValue = v; _pwWrong = false; });

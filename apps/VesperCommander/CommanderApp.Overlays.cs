@@ -139,9 +139,8 @@ public partial class CommanderApp
             .Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         queryRow.AddChild(Ui.Icon("⌕", 15f, Nocturne.On(0.45)));
-        var input = TextInput.New(_paletteQuery);
+        var input = Ui.Field(TextInput.New(_paletteQuery));
         input.PlaceholderText("Type a command…");
-        input.FlexGrow(1);
         input.OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; MarkDirty(); });
         input.WithRef(_paletteRef);
         queryRow.AddChild(input);
@@ -264,7 +263,7 @@ public partial class CommanderApp
             .CornerRadius(Nocturne.RadiusSm);
         // Height must clear the theme's vertical input padding (~6px each side) plus
         // the ~13.5px font, or the input's own content-box clip crops the glyphs.
-        var input = TextInput.New(_namePromptValue).Width(Dimension.Percent(100)).Height(30);
+        var input = TextInput.New(_namePromptValue).Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
         input.PlaceholderText("Name");
         // Clear a stale error as soon as the user edits; keep the value in sync so
         // Enter (handled globally) commits the current text.

@@ -21,6 +21,17 @@ public static class Ui
     public static TextElement Mono(string text, float size, Color color) =>
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);
 
+    /// <summary>Minimum height for a single-line <see cref="TextInputElement"/>: the theme
+    /// hard-sets ~12px of vertical input padding, so a shorter box clips the 13.5px font's
+    /// descenders. Every field should size to this (see <see cref="Field"/>).</summary>
+    public const float FieldHeight = 30f;
+
+    /// <summary>Configure a TextInput as a standard single-line field — grow to fill its
+    /// row and use the non-clipping <see cref="FieldHeight"/>. Set placeholder / handlers /
+    /// ref on the returned element. (Fields that need a fixed width instead of growing
+    /// should set <c>.Width(...).Height(Ui.FieldHeight)</c> directly.)</summary>
+    public static TextInputElement Field(TextInputElement input) => input.FlexGrow(1).Height(FieldHeight);
+
     /// <summary>A keycap chip (10px mono, hairline border) as in the design's <c>.kbd</c>.</summary>
     public static BoxElement Kbd(string text) =>
         Box.New()

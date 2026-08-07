@@ -256,7 +256,7 @@ public partial class CommanderApp
         // Explicit height: a flex-only TextInput collapses its content box and paints
         // neither text nor placeholder (known HultUI gotcha). 30 clears the 13.5px field
         // font's ascenders/descenders — 22 clipped them top and bottom.
-        var input = TextInput.New(value).FlexGrow(1).Height(30);
+        var input = Ui.Field(TextInput.New(value));
         input.PlaceholderText(placeholder);
         input.OnTextChanged(v => onChange(v));
         if (refBox != null) input.WithRef(refBox);
