@@ -133,6 +133,10 @@ public partial class CommanderApp : Component, IDisposable
         public ManualResetEventSlim? Gate;           // set while paused at a conflict (bg waits)
         public bool ConflictOverwrite;               // the choice released through Gate
 
+        /// <summary>Items that failed purely for lack of rights, with the destination they
+        /// were headed for — the batch offered for an elevated retry when the run ends.</summary>
+        public readonly List<(string Source, string Target, bool IsDir)> Denied = [];
+
         public TransferOp() { }
         public TransferOp(List<FileEntry> items)
         {
@@ -1275,7 +1279,13 @@ public partial class CommanderApp : Component, IDisposable
                 op.TotalBytesDone += Math.Max(0, op.ItemBytes[i] - op.FileBytesDone);
             }
             else if (err == "cancelled") { break; }
-            else if (err != null) { op.Status[i] = 4; op.Failed++; }
+            else if (err != null)
+            {
+                op.Status[i] = 4; op.Failed++;
+                // Remember permission failures so the finish can offer an elevated retry.
+                if (FileOps.IsDenied(err) && !ArchivePath.InArchive(e.FullPath))
+                    op.Denied.Add((e.FullPath, System.IO.Path.Combine(op.DestDir, e.Name), e.IsDir));
+            }
             else { op.Status[i] = 2; op.Done++; }           // done
             Repaint();
         }
@@ -1342,6 +1352,17 @@ public partial class CommanderApp : Component, IDisposable
             System.Threading.Tasks.Task.Run(() => RunTransfer(next));
             return;
         }
+
+        // Items that failed only for lack of rights: offer to redo just those elevated.
+        // Only carries the "apply to all" overwrite choice — a per-item "yes" isn't
+        // re-asked here, so such an item reports "target exists" rather than silently
+        // overwriting something the user didn't approve in this batch.
+        if (op is { Denied.Count: > 0 } && !op.Cancelled)
+        {
+            OfferElevation(
+                Job(op.IsMove ? "move" : "copy", op.Denied, overwrite: op.OverwriteAll ?? false),
+                op.IsMove ? "Move" : "Copy");
+        }
         MarkDirty();
     }
 
@@ -1390,16 +1411,20 @@ public partial class CommanderApp : Component, IDisposable
 
     private void DoDelete(char side, List<FileEntry> items)
     {
+        var denied = new List<(string, string, bool)>();
         foreach (var e in items)
         {
-            if (_settings.Recycle) FileOps.Recycle(e.FullPath, e.IsDir);
-            else FileOps.DeletePermanent(e.FullPath, e.IsDir);
+            var err = _settings.Recycle
+                ? FileOps.Recycle(e.FullPath, e.IsDir)
+                : FileOps.DeletePermanent(e.FullPath, e.IsDir);
+            if (FileOps.IsDenied(err)) denied.Add((e.FullPath, e.FullPath, e.IsDir));
         }
         _confirm = null;
         _genL++; _genR++;
         Marks(side).Clear();
         ClearMeasuredIn(Dir(side));       // a deleted folder's cached total is now stale
         MarkDirty();
+        if (denied.Count > 0) OfferElevation(Job("delete", denied, recycle: _settings.Recycle), "Delete");
     }
 
     // ── Bookmarks ────────────────────────────────────────────────────────
@@ -1659,7 +1684,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (_namePrompt is not { } spec) return;
         var err = spec.Commit(_namePromptValue);
-        if (err != null) { _namePromptError = err; MarkDirty(); return; }
+        if (err != null) { _namePromptError = FileOps.Clean(err); MarkDirty(); return; }
         _namePrompt = null;
         MarkDirty();
     }
@@ -1675,6 +1700,11 @@ public partial class CommanderApp : Component, IDisposable
         var full = System.IO.Path.Combine(Dir(side), name);
         if (FileOps.Exists(full)) return "A file or folder with that name already exists";
         try { Directory.CreateDirectory(full); }
+        catch (UnauthorizedAccessException ex)
+        {
+            // No rights in this folder — close the prompt and offer to create it elevated.
+            return OfferElevation(Job("mkdir", [(full, full, true)]), "New folder") ? null : ex.Message;
+        }
         catch (Exception ex) { return ex.Message; }
         BumpGen(side);
         _pendingFocusChild[side == 'L' ? 0 : 1] = name;
@@ -1689,6 +1719,11 @@ public partial class CommanderApp : Component, IDisposable
         if (newName.Length == 0) return "Enter a name";
         if (string.Equals(newName, e.Name, StringComparison.Ordinal)) return null;   // unchanged
         var err = FileOps.Rename(e, newName);
+        if (FileOps.IsDenied(err))
+        {
+            var target = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(e.FullPath) ?? "", newName);
+            if (OfferElevation(Job("rename", [(e.FullPath, target, e.IsDir)]), "Rename")) return null;
+        }
         if (err != null) return err;
         BumpGen(side);
         Marks(side).Clear();

@@ -15,6 +15,39 @@ public static class FileOps
     /// <summary>True when <paramref name="path"/> already exists as a file or folder.</summary>
     public static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
 
+    // ── Access-denied tagging ────────────────────────────────────────────
+    // Ops report failure as a message string, and callers need to tell "you lack the
+    // rights" (offer elevation) from "the disk is full" (don't). Rather than widen every
+    // signature — the streamed copy recurses and returns through lambdas — a denied error
+    // is returned with this prefix. Callers ask IsDenied / strip it with Clean. The tag is
+    // set from the exception type + HRESULT, never from message text, so it survives
+    // localized OS strings.
+    private const string DeniedTag = "[denied] ";
+
+    /// <summary>True when <paramref name="error"/> came from a permission failure — the
+    /// signal to offer "retry as administrator".</summary>
+    public static bool IsDenied(string? error) => error != null && error.StartsWith(DeniedTag, StringComparison.Ordinal);
+
+    /// <summary>An error string with the internal denied tag stripped, for display.</summary>
+    public static string? Clean(string? error) => IsDenied(error) ? error![DeniedTag.Length..] : error;
+
+    /// <summary>Turn an exception into an error string, tagged when it is a permission
+    /// failure (<c>UnauthorizedAccessException</c>, or an IO error carrying Win32
+    /// ERROR_ACCESS_DENIED / ERROR_PRIVILEGE_NOT_HELD, or EACCES/EPERM on Unix).</summary>
+    private static string Fail(Exception ex) => IsDeniedException(ex) ? DeniedTag + ex.Message : ex.Message;
+
+    private static bool IsDeniedException(Exception ex)
+    {
+        if (ex is UnauthorizedAccessException) return true;
+        // Windows wraps a Win32 code as HRESULT 0x8007xxxx: 5 = ACCESS_DENIED,
+        // 1314 = PRIVILEGE_NOT_HELD (e.g. creating a symlink without the right).
+        const int facilityWin32 = unchecked((int)0x80070000);
+        if ((ex.HResult & unchecked((int)0xFFFF0000)) == facilityWin32)
+            return (ex.HResult & 0xFFFF) is 5 or 1314;
+        // On Unix, IOException carries the raw errno: 1 = EPERM, 13 = EACCES.
+        return ex is IOException && ex.HResult is 1 or 13;
+    }
+
     /// <summary>Build a <see cref="FileEntry"/> for an arbitrary path — used by clipboard
     /// paste, whose sources aren't part of any pane listing.</summary>
     public static FileEntry EntryFromPath(string path)
@@ -206,7 +239,7 @@ public static class FileOps
             else File.Copy(e.FullPath, dest, overwrite);
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     /// <summary>True when two paths live on the same volume — a same-volume move is an
@@ -235,7 +268,7 @@ public static class FileOps
             else File.Move(e.FullPath, dest);
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     /// <summary>Rename an entry in place (Shift+F6). Allows a case-only rename on
@@ -254,7 +287,7 @@ public static class FileOps
             else File.Move(e.FullPath, dest);
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     /// <summary>Send a path to the Recycle Bin (Windows); permanent delete elsewhere.</summary>
@@ -265,7 +298,10 @@ public static class FileOps
             if (OperatingSystem.IsWindows())
             {
                 int rc = ShellRecycle(path);
-                if (rc != 0) return $"delete failed (0x{rc:X})";
+                // SHFileOperation reports Win32 codes directly; 5 = ACCESS_DENIED, and
+                // 0x78 (DE_ACCESSDENIEDSRC) is its own "source access denied".
+                if (rc != 0)
+                    return (rc is 5 or 0x78 ? DeniedTag : "") + $"delete failed (0x{rc:X})";
             }
             else
             {
@@ -274,7 +310,7 @@ public static class FileOps
             }
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     /// <summary>True when the source file is newer than the (existing) target — the
@@ -308,7 +344,7 @@ public static class FileOps
             else File.Delete(path);
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     private static void CopyDirectory(string src, string dest, bool overwrite)
@@ -367,7 +403,7 @@ public static class FileOps
             if (ap is null) { try { File.SetLastWriteTimeUtc(dest, File.GetLastWriteTimeUtc(src)); } catch { } }
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     private static string? CopyDirStreamed(string src, string dest, bool overwrite,
@@ -393,7 +429,7 @@ public static class FileOps
             }
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     /// <summary>Extract a folder inside an archive to <paramref name="dest"/>, recursing
@@ -417,7 +453,7 @@ public static class FileOps
             }
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return Fail(ex); }
     }
 
     /// <summary>Total byte size of an entry (recursive for folders), for progress totals.</summary>

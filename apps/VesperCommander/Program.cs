@@ -3,6 +3,12 @@ using HultUI.Core.Styling;
 using VesperCommander;
 using VesperCommander.Theme;
 
+// Elevated worker mode: this process was re-launched with administrator/root rights to
+// perform one batch of file operations (see Elevation). It must run before anything else
+// — no window, no settings, no single-instance handshake — and exit with the outcome.
+if (args.Length >= 2 && args[0] == Elevation.WorkerFlag)
+    return Elevation.RunWorker(args[1]);
+
 // The folder this launch wants to open: a directory argument, else the working directory.
 var startPath = args.Length > 0 && Directory.Exists(args[0]) ? args[0] : Directory.GetCurrentDirectory();
 
@@ -16,7 +22,7 @@ if (single)
     if (!isNew)
     {
         SingleInstance.TrySignal(startPath);   // fold this launch into the running instance
-        return;
+        return 0;
     }
 }
 
@@ -42,3 +48,4 @@ if (single)
 app.Run();
 ipcCts.Cancel();
 instanceLock?.Dispose();
+return 0;
