@@ -42,7 +42,12 @@ public partial class CommanderApp
         // and keeps the window a stable size as you switch pages.
         var body = Grid.Of("184px 1fr", "1fr").Height(460);
         body.AddChild(OptionsNav().GridCell(0, 0));
+        // Key the page subtree by which page (or the search view) it holds. Switching
+        // pages otherwise reconciles the new controls onto the old ones by position, and
+        // the differ does NOT copy event handlers — so a switched-to page's toggles /
+        // swatches would be stranded with dead handlers until an unrelated rebuild.
         var page = Flex.Column(gap: 14).Padding(new Thickness(16, 20, 16, 20)).GridCell(0, 1);
+        page.Key = searching ? "opt-page:search" : "opt-page:" + _optionsPage;
         if (searching) OptionsSearchResults(page, _optSearch.Trim());
         else OptionsPage(page);
         body.AddChild(page);
@@ -380,8 +385,11 @@ public partial class CommanderApp
         for (int i = 0; i < AccentPalette.Length; i++)
         {
             int idx = i;
-            accents.AddChild(Swatch(Color.FromHex(AccentPalette[i]), _draft.Accent == i,
-                () => SetDraft(() => _draft.Accent = idx)));
+            var sw = Swatch(Color.FromHex(AccentPalette[i]), _draft.Accent == i,
+                () => SetDraft(() => _draft.Accent = idx));
+            sw.AutomationId = "opt-accent:" + idx;
+            sw.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+            accents.AddChild(sw);
         }
         return accents;
     }
@@ -398,7 +406,9 @@ public partial class CommanderApp
             .Background(value ? Nocturne.Accent700 : Nocturne.Neutral800).Cursor(CursorType.Pointer);
         sw.AddChild(Box.New().Width(13).Height(13).CornerRadius(7f)
             .Background(value ? Nocturne.Accent200 : Nocturne.Neutral500));
-        sw.OnClick(_ => onToggle());
+        // No OnClick here: the switch always lives inside a ToggleRow whose row-level
+        // OnClick already covers it. Adding one here made a click on the switch fire the
+        // toggle twice (switch + bubbled row), netting no change — so the switch looked dead.
         return sw;
     }
 
@@ -411,6 +421,9 @@ public partial class CommanderApp
         if (kbd != null) lbl.AddChild(Ui.Kbd(kbd));
         row.AddChild(lbl);
         row.OnClick(_ => onToggle());
+        row.AutomationId = "opt-toggle:" + label;
+        row.Role = HultUI.Core.Accessibility.AccessibilityRole.Switch;
+        row.AccessibleName = label;
         return row;
     }
 
