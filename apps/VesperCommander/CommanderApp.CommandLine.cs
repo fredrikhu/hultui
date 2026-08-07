@@ -37,7 +37,19 @@ public partial class CommanderApp
         var dir = Dir(_active);
         _cmdActive = false;
         _cmdText = "";
-        if (cmd.Length > 0) FileOps.RunInTerminal(cmd, dir);
+        // "cd <path>" navigates the pane instead of spawning a shell (bare "cd" goes
+        // home) — same resolution as the Go-to-path prompt; errors post a notice.
+        if (cmd.Equals("cd", StringComparison.OrdinalIgnoreCase)
+            || cmd.StartsWith("cd ", StringComparison.OrdinalIgnoreCase))
+        {
+            var target = cmd.Length > 2 ? cmd[3..].Trim() : "~";
+            if (GotoPath(_active, target.Length > 0 ? target : "~") is { } err)
+            {
+                _notice = err;
+                MarkDirty();
+            }
+        }
+        else if (cmd.Length > 0) FileOps.RunInTerminal(cmd, dir);
         else FileOps.OpenTerminal(_settings.Terminal, dir);
         PaneRef(_active).Current?.Focus();
         MarkDirty();

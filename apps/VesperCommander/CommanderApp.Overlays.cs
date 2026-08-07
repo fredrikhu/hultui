@@ -264,7 +264,7 @@ public partial class CommanderApp
         // Height must clear the theme's vertical input padding (~6px each side) plus
         // the ~13.5px font, or the input's own content-box clip crops the glyphs.
         var input = TextInput.New(_namePromptValue).Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
-        input.PlaceholderText("Name");
+        input.PlaceholderText(spec.Placeholder);
         // Clear a stale error as soon as the user edits; keep the value in sync so
         // Enter (handled globally) commits the current text.
         input.OnTextChanged(v =>

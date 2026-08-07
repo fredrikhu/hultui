@@ -423,7 +423,16 @@ public partial class CommanderApp
         // sits the same distance from its neighbours. The crumb row grows; the view
         // toggle is pinned flush-right (see the outer wrapper at the end).
         var row = Flex.Row(gap: 3).FlexGrow(1).AlignItems(AlignItems.Center)
-            .FlexWrap(FlexWrap.NoWrap).Overflow(Overflow.Hidden);
+            .FlexWrap(FlexWrap.NoWrap).Overflow(Overflow.Hidden)
+            .Background(Color.Transparent)   // give the empty strip a hit area
+            .Tooltip("Click to type a path (Ctrl+G)");
+        row.AutomationId = $"crumb-strip-{side}";
+        row.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        row.AccessibleName = "Go to path";
+        // Clicking the empty run after the last crumb turns the trail into an editable
+        // path box, the way an address bar does. Guarded on the row being the hit target
+        // so a click that landed on a crumb still just navigates.
+        row.OnClick(e => { if (ReferenceEquals(e.Target, e.CurrentTarget)) OpenGotoPrompt(side); });
 
         // Drive segment: monospace accent crumb → jumps the pane to the volume root.
         // Trim the trailing separator so the first "/" divider isn't doubled ("C:\ /").

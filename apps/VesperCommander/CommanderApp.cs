@@ -105,7 +105,8 @@ public partial class CommanderApp : Component, IDisposable
     // Name prompt (F7 new folder, Shift+F6 rename): a titled dialog over a focused
     // text field. Commit returns an error string (kept inline, dialog stays open) or
     // null (success, dialog closes). Reused for both flows.
-    private sealed record NamePromptSpec(string Title, string Subtitle, string ConfirmLabel, Func<string, string?> Commit);
+    private sealed record NamePromptSpec(string Title, string Subtitle, string ConfirmLabel, Func<string, string?> Commit,
+        string Placeholder = "Name");
     private NamePromptSpec? _namePrompt;
     private string _namePromptValue = "";
     private string? _namePromptError;
@@ -620,6 +621,66 @@ public partial class CommanderApp : Component, IDisposable
         tab.Fwd.RemoveAt(tab.Fwd.Count - 1);
         tab.Back.Add(tab.Dir);
         NavigateTo(side, target, recordHistory: false);
+    }
+
+    /// <summary>Ctrl+G — prompt for a path (relative or absolute) and jump the pane there.</summary>
+    private void OpenGotoPrompt(char side)
+    {
+        _active = side;
+        _namePromptValue = "";
+        _namePromptError = null;
+        _namePrompt = new NamePromptSpec("Go to path", Dir(side), "Go",
+            path => GotoPath(side, path), Placeholder: "Absolute, or relative to this folder");
+        _pendingNamePromptFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Resolve <paramref name="raw"/> and navigate <paramref name="side"/> to it.
+    /// Relative paths (incl. "..") resolve against the pane's folder; "~" and %VAR% expand;
+    /// a file target lands on the file in its parent; an archive target browses inside.
+    /// Returns an error string (dialog stays open) or null on success.</summary>
+    private string? GotoPath(char side, string raw)
+    {
+        var input = raw.Trim().Trim('"');
+        if (input.Length == 0) return "Enter a path.";
+
+        string resolved;
+        try
+        {
+            var p = Environment.ExpandEnvironmentVariables(input);
+            if (p == "~") p = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            else if (p.StartsWith("~/") || p.StartsWith("~\\"))
+                p = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), p[2..]);
+            // A bare drive ("d:") is drive-relative — it would resolve against the process's
+            // per-drive working directory, not the root the user almost certainly means.
+            if (p.Length == 2 && p[1] == ':' && char.IsAsciiLetter(p[0]))
+                p += System.IO.Path.DirectorySeparatorChar;
+            resolved = System.IO.Path.GetFullPath(p, Dir(side));
+        }
+        catch (Exception ex) { return ex.Message; }
+
+        if (Directory.Exists(resolved))
+        {
+            NavigateTo(side, resolved);
+            return null;
+        }
+        if (File.Exists(resolved))
+        {
+            if (ArchiveVfs.IsArchiveFile(resolved)) { NavigateTo(side, resolved); return null; }
+            // A plain file: land in its folder with the cursor on it.
+            var parent = System.IO.Path.GetDirectoryName(resolved);
+            if (parent == null) return $"Not a folder: {resolved}";
+            NavigateTo(side, parent, focusChildName: System.IO.Path.GetFileName(resolved));
+            return null;
+        }
+        // Inside an archive the member dirs aren't on disk — navigate if the archive file
+        // itself exists and let the listing surface any bad member path.
+        if (ArchivePath.TryParse(resolved) is { } ap && File.Exists(ap.ArchiveFile))
+        {
+            NavigateTo(side, resolved);
+            return null;
+        }
+        return $"Path not found: {resolved}";
     }
 
     /// <summary>Ctrl+Shift+C — put the pane's current folder path on the clipboard. Uses the
@@ -1423,6 +1484,7 @@ public partial class CommanderApp : Component, IDisposable
         return
         [
             new("Go up one folder", "Backspace", () => GoUp(side)),
+            new("Go to path…", "Ctrl+G", () => OpenGotoPrompt(side)),
             new("Open drive…", "Alt+F1", () => OpenDrivePicker(side)),
             new("Refresh", "Ctrl+R", () => RefreshPane(side)),
             new($"{(_settings.ShowHidden ? "Hide" : "Show")} hidden files", "Ctrl+H", ToggleHidden),
