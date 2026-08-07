@@ -42,14 +42,23 @@ public class HoverAfterRebuildTests
             Invoke(commander, "MarkDirty");
             session.PumpFrame();
 
+            // Drain stragglers (async dir-size probes, watcher callbacks) that would
+            // otherwise post a MarkDirty later: a rebuild patches Background back to
+            // the build's value and wipes a manual hover tint, which made this flake
+            // on slow CI runners.
+            for (int i = 0; i < 10; i++) { session.PumpFrame(); Thread.Sleep(20); }
+
             var back = session.Window.FindByAutomationId("hist-back-L");
             Assert.NotNull(back);
             var box = (BoxElement)back!.Element;
             var b = box.Layout.AbsoluteBorderBox;
             var before = box.BackgroundColor;
 
+            // Input injection is synchronous: the enter handler has run when MoveMouse
+            // returns. Assert without pumping another frame — the tint is what proves
+            // the copied handler acted on the LIVE element, and a queued rebuild in
+            // that frame would legitimately reset the background prop.
             session.Window.MoveMouse(b.X + b.Width / 2, b.Y + b.Height / 2);
-            session.PumpFrame();
 
             Assert.NotEqual(before, box.BackgroundColor);
         }
