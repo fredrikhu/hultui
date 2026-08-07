@@ -700,10 +700,6 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
 
         var comparing = SelectedRange() != null;
-        bar.AddChild(Hint("↑ ↓", "select commit"));
-        bar.AddChild(Hint("Ctrl/Shift + click/↑↓", "select commits to compare"));
-        bar.AddChild(Hint("Ctrl+Space", "toggle commit"));
-        bar.AddChild(Hint("↵", comparing ? "compare selected" : "open commit details"));
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton(
             comparing ? $"Compare {_selectedCommitHashes.Count} commits" : "Open commit details",

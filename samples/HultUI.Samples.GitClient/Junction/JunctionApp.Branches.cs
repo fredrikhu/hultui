@@ -34,7 +34,6 @@ public partial class JunctionApp
             col.AddChild(BuildBranchCompareBar(_branchCompare!.Value));
         col.AddChild(BuildBranchTableHeader());
         col.AddChild(BuildBranchScroll(list));
-        col.AddChild(BuildBranchesFooter());
         return col;
     }
 
@@ -340,22 +339,6 @@ public partial class JunctionApp
         b.AddChild(Ui.Icon(glyph, fontSize + 1f, Nocturne.On(0.32)));
         b.AddChild(Text.New(label).FontSize(fontSize).FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.32)));
         return b;
-    }
-
-    // ── Footer legend ────────────────────────────────────────────────────
-
-    private Element BuildBranchesFooter()
-    {
-        var bar = Flex.Row(gap: 16).FlexShrink(0).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(8, 26, 8, 26))
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
-        bar.AddChild(Hint("/", "search"));
-        bar.AddChild(Hint("↑ ↓", "navigate"));
-        bar.AddChild(Hint("↵", "checkout"));
-        bar.AddChild(Hint("p", "push"));
-        bar.AddChild(Hint("l", "pull"));
-        bar.AddChild(Hint("i", "include in history"));
-        return bar;
     }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
