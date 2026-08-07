@@ -219,7 +219,7 @@ public partial class CommanderApp
         // Collapse the path breadcrumb-style ("C:\…\a\b\c") so a deep folder can't wrap the
         // header onto a second line. Budget = card width minus the title, close ✕ and paddings.
         float pathBudget = _findW - 28f - EstTextWidth("Find files", mono: false) - 8f - 30f;
-        var card = Card(_findW, "Find files", CollapsePath(Dir(_findSide), pathBudget));
+        var card = Card(_findW, "Find files", CollapsePath(Dir(_findSide), pathBudget), "⌕");
 
         // Pattern + optional "containing text" inputs.
         card.AddChild(FindInputRow("⌕", _findPattern, "*.rs, name fragment, or /regex/…",
@@ -418,10 +418,10 @@ public partial class CommanderApp
     {
         var footer = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 12, 6, 12))
-            .Background(Nocturne.Surface)
-            // Match the card's rounded bottom so the brighter footer doesn't square off (and
-            // paint over) the card's rounded corners.
-            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusMd, Nocturne.RadiusMd));
+            // Transparent (the card's Surface shows through) with a top hairline —
+            // the shared dialog-footer idiom. Bottom radius matches the card.
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
+            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusLg, Nocturne.RadiusLg));
 
         if (_findSearching)
         {

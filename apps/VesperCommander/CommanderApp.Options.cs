@@ -26,18 +26,15 @@ public partial class CommanderApp
         var card = DialogCard(940);
         bool searching = _optSearch.Trim().Length > 0;
 
-        // Header: gear · "Options" · search field · ✕.
-        var header = Flex.Row(gap: 10).AlignItems(AlignItems.Center)
+        // Header: accent tile · "Options" · search field · ✕.
+        var header = Flex.Row(gap: 12).AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        header.AddChild(Ui.Icon("⚙", 14f, Nocturne.Accent));
-        header.AddChild(Text.New("Options").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
+        header.AddChild(Ui.HeaderTile("⚙"));
+        header.AddChild(Text.New("Options").FontSize(15f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
         header.AddChild(Box.New().FlexGrow(1));
         header.AddChild(OptionsSearchField());
-        var close = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
-            .Children(Ui.Icon("✕", 12f, Nocturne.Neutral600));
-        close.OnClick(_ => CloseOverlays());
-        header.AddChild(close.HoverBg(Nocturne.Neutral900, Color.Transparent));
+        header.AddChild(Ui.IconButton("✕", CloseOverlays, "Close", 28f));
         card.AddChild(header);
 
         // Body: 184px nav | page content. A fixed height + a 1fr row makes both cells
@@ -55,7 +52,7 @@ public partial class CommanderApp
         var footer = DialogFooter();
         footer.AddChild(GhostButton("Reset to defaults", ResetOptions));
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", CloseOverlays));
+        footer.AddChild(SecondaryButton("Cancel", CloseOverlays));
         footer.AddChild(PrimaryButton("Save", SaveOptions));
         card.AddChild(footer);
 

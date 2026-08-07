@@ -17,50 +17,88 @@ public partial class CommanderApp
     private static Element VDivider() =>
         Box.New().Width(1).FlexShrink(0).Background(Nocturne.Divider);
 
-    // ── Chrome (draggable strip + window controls) ───────────────────────
+    // ── Chrome (brand · search & commands · window controls) ─────────────
+    // Mirrors Junction's title bar so the two apps read as one family: a
+    // text brand pinned left (the app-mark tile lives in the rail, as in
+    // Junction's sidebar), a centred "Search & commands" box that opens the
+    // palette, and icon-glyph window controls flush right.
     private Element BuildChrome()
     {
-        var bar = Flex.Row(gap: 0).Height(30).FlexShrink(0)
+        var bar = Flex.Row(gap: 0).Height(40).FlexShrink(0)
             .AlignItems(AlignItems.Stretch)
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        var drag = Flex.Row(gap: 8).FlexGrow(1).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, 12, 0, 12));
-        drag.AddChild(Text.New("Vesper Commander").FontSize(12f)
+        // Brand pinned left with a fixed inset; draggable (no handlers on children).
+        var crumb = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, 0, 0, 14));
+        crumb.AddChild(Text.New("Vesper Commander").FontSize(13f)
             .FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.70)));
-        drag.WindowDrag();
-        bar.AddChild(drag);
+        crumb.WindowDrag();
+        bar.AddChild(crumb);
+
+        // Right group: search box + window controls, flush right.
+        var right = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Center);
+        // Leading draggable filler so the gap between the brand and the search box
+        // drags the window too (a plain grow spacer has no WindowDrag ancestor).
+        right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
+
+        var search = Flex.Row(gap: 8)
+            .Height(26).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, 8, 0, 10))
+            .Background(Nocturne.Bg)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Search & commands (Ctrl P)");
+        search.AddChild(Ui.Icon("⌕", 13f, Nocturne.On(0.55)));
+        search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
+        search.AddChild(Ui.Kbd("Ctrl P"));
+        search.OnClick(_ => TogglePalette());
+        search.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.08), Nocturne.Bg);
+        right.AddChild(search);
+
+        right.AddChild(Box.New().Width(10));
 
         var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
-        controls.AddChild(WinButton("–", "Minimize", () => _window.Minimize(), Nocturne.Neutral800));
-        controls.AddChild(WinButton("□", "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800)
+        controls.AddChild(WinButton("—", "Minimize", () => _window.Minimize(), Nocturne.Neutral800));
+        controls.AddChild(WinButton("▢", "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800)
             .WindowMaximizeButton());
         controls.AddChild(WinButton("✕", "Close", () => _window.Close(), new Color(232, 17, 35)));
-        bar.AddChild(controls);
+        right.AddChild(controls);
+
+        bar.AddChild(right);
         return bar;
     }
 
     private BoxElement WinButton(string glyph, string tooltip, Action onClick, Color hoverBg)
     {
-        var b = Flex.Row(gap: 0).Width(42).Height(30)
+        var b = Flex.Row(gap: 0).Width(46).Height(40)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Cursor(CursorType.Pointer).Tooltip(tooltip);
-        b.AddChild(Text.New(glyph).FontSize(11f).TextColor(Nocturne.On(0.75)));
+        b.AddChild(Ui.Icon(glyph, 11f, Nocturne.On(0.75)));
         b.OnClick(_ => onClick());
         return b.HoverBg(hoverBg, Color.Transparent);
     }
 
-    // ── Left rail (app glyph · bookmark jumps · + manager · palette) ─────
+    // ── Left rail (app-mark · bookmark jumps · + manager) ────────────────
+    // The left panel adopts Junction's sidebar treatment: it sits on the app
+    // ground (Bg) with a hairline right divider, and the app identity is an
+    // accent-tile mark (Junction's sidebar app-mark). Commands moved to the
+    // title-bar search box, so the rail is a top-aligned bookmark strip.
     private Element BuildRail()
     {
-        var rail = Flex.Column(gap: 4).Width(RailWidth).FlexShrink(0)
+        var rail = Flex.Column(gap: 6).Width(RailWidth).FlexShrink(0)
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 0, 10, 0))
-            .Background(Nocturne.Surface)
+            .Background(Nocturne.Bg)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
-        rail.AddChild(Text.New("V").FontSize(15f).FontWeight(FontWeight.SemiBold)
-            .TextColor(Nocturne.Accent).Margin(new Thickness(2, 0, 4, 0)));
+        rail.AddChild(Box.New().Width(26).Height(26).FlexShrink(0)
+            .CornerRadius(Nocturne.RadiusMd).Background(Nocturne.Accent800)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .Margin(new Thickness(2, 0, 4, 0))
+            .Children(Text.New("V").FontSize(13f).FontWeight(FontWeight.SemiBold)
+                .TextColor(Nocturne.Accent200)));
         rail.AddChild(Box.New().Width(18).Height(1).Background(Nocturne.Divider)
             .Margin(new Thickness(2, 0, 4, 0)));
 
@@ -73,20 +111,23 @@ public partial class CommanderApp
                 $"{b.Name} ({HotkeyLabel(idx)})", () => JumpBookmark(idx)));
         }
         rail.AddChild(RailButton("+", "Bookmarks (Ctrl+D)", OpenBookmarks));
-
-        rail.AddChild(Box.New().FlexGrow(1));
-        rail.AddChild(RailButton("⌘", "Commands (Ctrl+P)", TogglePalette));
         return rail;
     }
 
+    // A rail action as a Junction-style tile: a rounded neutral square with a
+    // hairline border and a semibold glyph, sized to match the accent app-mark.
     private BoxElement RailButton(string glyph, string tooltip, Action onClick)
     {
-        var b = Box.New().Width(26).Height(24)
+        var b = Box.New().Width(26).Height(26).FlexShrink(0)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-            .CornerRadius(5f).Cursor(CursorType.Pointer).Tooltip(tooltip)
-            .Children(Text.New(glyph).FontSize(12f).TextColor(Nocturne.Neutral400));
+            .CornerRadius(Nocturne.RadiusMd)
+            .Background(Nocturne.Neutral900)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer).Tooltip(tooltip)
+            .Children(Text.New(glyph).FontSize(12f).FontWeight(FontWeight.SemiBold)
+                .TextColor(Nocturne.Neutral300));
         b.OnClick(_ => onClick());
-        return b.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        return b.HoverBg(Nocturne.Neutral800, Nocturne.Neutral900);
     }
 
     // ── Pane (breadcrumb · list header · list · footer) ──────────────────

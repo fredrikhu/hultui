@@ -170,7 +170,7 @@ public partial class CommanderApp
     private Element BuildPack()
     {
         long bytes = _packItems.Sum(e => e.IsDir ? 0 : e.Size);
-        var card = Card(520, "Pack", $"{_packItems.Count} item{(_packItems.Count == 1 ? "" : "s")} · {FileSystem.ByteLabel(bytes)}");
+        var card = Card(520, "Pack", $"{_packItems.Count} item{(_packItems.Count == 1 ? "" : "s")} · {FileSystem.ByteLabel(bytes)}", "⊞");
 
         // Archive name.
         var nameRow = PackSection("ARCHIVE NAME");
@@ -235,10 +235,12 @@ public partial class CommanderApp
         card.AddChild(dst);
 
         // Footer.
-        var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(8, 14, 8, 14));
+        var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(8, 14, 8, 14))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
+            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusLg, Nocturne.RadiusLg));
         footer.AddChild(Ui.Kbd("↵")); footer.AddChild(Ui.Mono("pack · Esc cancel", 10.5f, Nocturne.On(0.45)));
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", ClosePack));
+        footer.AddChild(SecondaryButton("Cancel", ClosePack));
         footer.AddChild(PrimaryButton($"Pack {_packItems.Count} item{(_packItems.Count == 1 ? "" : "s")}", CommitPack));
         card.AddChild(footer);
 

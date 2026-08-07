@@ -89,18 +89,15 @@ public partial class CommanderApp
 
     private Element RenameHeader()
     {
-        var h = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Padding(new Thickness(10, 14, 10, 14))
+        var h = Flex.Row(gap: 12).AlignItems(AlignItems.Center).Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        h.AddChild(Ui.Icon("✎", 14f, Nocturne.Accent400));
+        h.AddChild(Ui.HeaderTile("✎"));
         h.AddChild(Text.New($"Multi-rename {_renameFiles.Count} file{(_renameFiles.Count == 1 ? "" : "s")}")
-            .FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
+            .FontSize(15f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text).FlexShrink(0));
         var dir = System.IO.Path.GetDirectoryName(_renameFiles[0].FullPath) ?? "";
         h.AddChild(Ui.Mono(dir, 11f, Nocturne.On(0.55)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
         h.AddChild(Ui.Kbd("Ctrl+M"));
-        var close = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
-            .Children(Ui.Icon("✕", 12f, Nocturne.Neutral600));
-        close.OnClick(_ => CloseOverlays());
-        h.AddChild(close.HoverBg(Nocturne.Neutral900, Color.Transparent));
+        h.AddChild(Ui.IconButton("✕", CloseOverlays, "Close", 28f));
         return h;
     }
 
@@ -369,7 +366,7 @@ public partial class CommanderApp
             : null;
         if (why != null) footer.AddChild(Ui.Mono(why, 10.5f, Nocturne.On(0.45)));
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", CloseOverlays));
+        footer.AddChild(SecondaryButton("Cancel", CloseOverlays));
         footer.AddChild(RenamePrimary(p.WillRename, canRename));
         return footer;
     }
@@ -465,7 +462,7 @@ public partial class CommanderApp
         var footer = DialogFooter();
         footer.AddChild(Ui.Mono($"showing {fails.Count} failed", 10.5f, Nocturne.On(0.45)));
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Close", CloseOverlays));
+        footer.AddChild(SecondaryButton("Close", CloseOverlays));
         var retry = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusSm)
             .BorderColor(Nocturne.Accent).BorderWidth(1f)
             .Children(Text.New($"Retry {fails.Count} failed").FontSize(12f).TextColor(Nocturne.Accent200));

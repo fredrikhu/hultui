@@ -33,33 +33,46 @@ public partial class CommanderApp
         return backdrop;
     }
 
-    /// <summary>A Nocturne card shell: bordered, rounded, shadowed panel with an
-    /// optional header (title + dimmed subtitle + close ✕).</summary>
-    private BoxElement Card(float width, string title, string? subtitle)
+    /// <summary>A Nocturne card shell: the shared <see cref="DialogCard"/> frame plus a
+    /// header. With a <paramref name="glyph"/> it's Junction's accent app-mark tile +
+    /// stacked title/subtitle + bordered close (the family look for titled dialogs);
+    /// without one it falls back to the compact title-row header.</summary>
+    private BoxElement Card(float width, string title, string? subtitle, string? glyph = null)
     {
-        var card = Flex.Column(gap: 0).Width(width)
-            .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral500).BorderWidth(1f)   // brighter than the inner dividers so the frame reads
-            .CornerRadius(Nocturne.RadiusMd)
-            .BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
-            .Overflow(Overflow.Hidden);
+        var card = DialogCard(width);
 
-        var header = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(10, 14, 10, 14))
+        var header = Flex.Row(gap: glyph != null ? 12 : 8).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(glyph != null ? 12 : 10, 14, glyph != null ? 12 : 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        // Title never shrinks/wraps; a long subtitle (e.g. a path) clips with an ellipsis
-        // rather than pushing the title onto a second line.
-        header.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.Medium)
-            .TextColor(Nocturne.Text).FlexShrink(0).MaxLines(1));
-        if (subtitle != null)
-            header.AddChild(Ui.Mono(subtitle, 11f, Nocturne.On(0.45))
-                .FlexShrink(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
-        header.AddChild(Box.New().FlexGrow(1));
-        var close = Box.New().Cursor(CursorType.Pointer)
-            .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
-            .Children(Ui.Icon("✕", 12f, Nocturne.Neutral600));
-        close.OnClick(_ => CloseOverlays());
-        header.AddChild(close.HoverBg(Nocturne.Neutral900, Color.Transparent));
+
+        if (glyph != null)
+        {
+            header.AddChild(Ui.HeaderTile(glyph));
+            var titleCol = Flex.Column(gap: 2).FlexShrink(1).FlexGrow(1);
+            titleCol.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.Medium)
+                .TextColor(Nocturne.Text).MaxLines(1));
+            if (subtitle != null)
+                titleCol.AddChild(Ui.Mono(subtitle, 11f, Nocturne.On(0.5))
+                    .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+            header.AddChild(titleCol);
+            header.AddChild(Ui.IconButton("✕", CloseOverlays, "Close", 28f));
+        }
+        else
+        {
+            // Title never shrinks/wraps; a long subtitle (e.g. a path) clips with an ellipsis
+            // rather than pushing the title onto a second line.
+            header.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.Medium)
+                .TextColor(Nocturne.Text).FlexShrink(0).MaxLines(1));
+            if (subtitle != null)
+                header.AddChild(Ui.Mono(subtitle, 11f, Nocturne.On(0.45))
+                    .FlexShrink(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+            header.AddChild(Box.New().FlexGrow(1));
+            var close = Box.New().Cursor(CursorType.Pointer)
+                .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
+                .Children(Ui.Icon("✕", 12f, Nocturne.Neutral600));
+            close.OnClick(_ => CloseOverlays());
+            header.AddChild(close.HoverBg(Nocturne.Neutral900, Color.Transparent));
+        }
         card.AddChild(header);
         return card;
     }
@@ -67,7 +80,7 @@ public partial class CommanderApp
     // ── Drive picker (Alt+F1 / Alt+F2 or the breadcrumb drive crumb) ─────
     private Element BuildDrivePicker(char side)
     {
-        var card = Card(420, "Select drive", side == 'L' ? "left pane" : "right pane");
+        var card = Card(420, "Select drive", side == 'L' ? "left pane" : "right pane", "▤");
 
         var listBox = Flex.Column(gap: 0).Padding(new Thickness(6, 6, 6, 6));
         for (int i = 0; i < _drives.Count; i++)
@@ -119,12 +132,7 @@ public partial class CommanderApp
         var cmds = FilteredCommands();
         if (_paletteSel >= cmds.Count) _paletteSel = Math.Max(0, cmds.Count - 1);
 
-        var card = Flex.Column(gap: 0).Width(520)
-            .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral500).BorderWidth(1f)   // brighter frame, visible against the dim backdrop
-            .CornerRadius(Nocturne.RadiusMd)
-            .BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
-            .Overflow(Overflow.Hidden);
+        var card = DialogCard(520);
 
         // Query field: a search glyph + borderless input (the theme flattens inputs).
         var queryRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
@@ -170,54 +178,42 @@ public partial class CommanderApp
     }
 
     // ── Buttons (footer / detail actions) ────────────────────────────────
+    // Thin adapters over the shared Ui.* button family so every call site here and
+    // across the app renders one consistent, Junction-matching button set.
     private static BoxElement GhostButton(string label, Action onClick, bool enabled = true)
-    {
-        var fg = enabled ? Nocturne.Accent : Nocturne.On(0.30);
-        var b = Box.New().Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusMd)
-            .Cursor(enabled ? CursorType.Pointer : CursorType.Default)
-            .Children(Text.New(label).FontSize(12f).TextColor(fg));
-        if (enabled)
-        {
-            b.OnClick(_ => onClick());
-            b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.10), Color.Transparent);
-        }
-        return b;
-    }
+        => Ui.GhostButton(label, null, onClick, enabled);
 
-    private static BoxElement PrimaryButton(string label, Action onClick) =>
-        OutlineButton(label, Nocturne.Accent, onClick);
+    private static BoxElement SecondaryButton(string label, Action onClick)
+        => Ui.SecondaryButton(label, null, onClick);
 
-    private static BoxElement DangerButton(string label, Action onClick) =>
-        OutlineButton(label, Nocturne.MarkRed, onClick);
+    private static BoxElement PrimaryButton(string label, Action onClick)
+        => Ui.PrimaryButton(label, null, onClick);
 
-    private static BoxElement OutlineButton(string label, Color color, Action onClick)
-    {
-        var b = Box.New().Padding(new Thickness(5, 14, 5, 14)).CornerRadius(Nocturne.RadiusMd)
-            .BorderColor(color).BorderWidth(1f).Cursor(CursorType.Pointer)
-            .Children(Text.New(label).FontSize(12f).FontWeight(FontWeight.Medium).TextColor(color));
-        b.OnClick(_ => onClick());
-        return b.HoverBg(Nocturne.Alpha(color, 0.12), Color.Transparent);
-    }
+    private static BoxElement DangerButton(string label, Action onClick)
+        => Ui.DangerButton(label, null, onClick);
 
+    // The single dialog frame: a raised Surface panel with a hairline Neutral700
+    // border and a large radius — Junction's modal shell, so both apps read as one
+    // family. (Was a darker Bg card + drop shadow; the raised Surface no longer
+    // needs the shadow to lift off the dim backdrop.)
     private BoxElement DialogCard(float width)
     {
         return Flex.Column(gap: 0).Width(width)
-            .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral500).BorderWidth(1f)   // brighter frame, visible against the dim backdrop
-            .CornerRadius(Nocturne.RadiusMd)
-            .BoxShadow(0, 16, 40, new Color(0, 0, 0, 166))
+            .Background(Nocturne.Surface)
+            .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusLg)
             .Overflow(Overflow.Hidden);
     }
 
+    // Transparent footer (same Surface as the card) separated by a top hairline —
+    // Junction's footer idiom. The bottom radius matches the card so nothing squares
+    // off the rounded corners.
     private BoxElement DialogFooter()
     {
         return Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(10, 14, 10, 14))
-            .Background(Nocturne.Surface)
+            .Padding(new Thickness(11, 14, 11, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
-            // Round the bottom to the card's radius so this brighter bar (always the last row)
-            // doesn't square off the card's rounded bottom corners.
-            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusMd, Nocturne.RadiusMd));
+            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusLg, Nocturne.RadiusLg));
     }
 
     // ── Confirm dialog (delete, and copy/move go-ahead) ──────────────────
@@ -238,7 +234,7 @@ public partial class CommanderApp
 
         var footer = DialogFooter();
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", () => { _confirm = null; MarkDirty(); }));
+        footer.AddChild(SecondaryButton("Cancel", () => { _confirm = null; MarkDirty(); }));
         footer.AddChild(spec.Danger
             ? DangerButton(spec.ConfirmLabel, spec.OnConfirm)
             : PrimaryButton(spec.ConfirmLabel, spec.OnConfirm));
@@ -263,7 +259,7 @@ public partial class CommanderApp
         var field = Box.New()
             .Margin(new Thickness(0, 16, 14, 16))
             .Padding(new Thickness(3, 6, 3, 6))
-            .Background(Nocturne.Surface)
+            .Background(Nocturne.Bg)   // darker than the Surface card so the field reads
             .BorderColor(Nocturne.Accent700).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusSm);
         // Height must clear the theme's vertical input padding (~6px each side) plus
@@ -287,7 +283,7 @@ public partial class CommanderApp
 
         var footer = DialogFooter();
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", CloseNamePrompt));
+        footer.AddChild(SecondaryButton("Cancel", CloseNamePrompt));
         footer.AddChild(PrimaryButton(spec.ConfirmLabel, CommitNamePrompt));
         card.AddChild(footer);
 
@@ -357,7 +353,8 @@ public partial class CommanderApp
     private Element BuildProgress(TransferOp op)
     {
         int processed = op.Done + op.Skipped + op.Failed;
-        var card = Card(560, op.IsMove ? "Moving" : "Copying", $"{processed} of {op.Items.Count}");
+        var card = Card(560, op.IsMove ? "Moving" : "Copying", $"{processed} of {op.Items.Count}",
+            op.IsMove ? "⇄" : "⧉");
 
         var body = Flex.Column(gap: 12).Padding(new Thickness(12, 16, 12, 16));
 
@@ -382,7 +379,7 @@ public partial class CommanderApp
         footer.AddChild(GhostButton("Skip file  S", SkipCurrentFile));
         footer.AddChild(GhostButton("Background  B", BackgroundTransfer));
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", CancelTransfer));
+        footer.AddChild(SecondaryButton("Cancel", CancelTransfer));
         card.AddChild(footer);
 
         return Backdrop(card, topAligned: false);
@@ -449,7 +446,7 @@ public partial class CommanderApp
     private Element BuildBookmarks()
     {
         if (_bookmarkSel >= _bookmarks.Count) _bookmarkSel = Math.Max(0, _bookmarks.Count - 1);
-        var card = Card(900, "Bookmarks", "Hotkeys jump the active pane");
+        var card = Card(900, "Bookmarks", "Hotkeys jump the active pane", "★");
 
         var body = Grid.Of("260px 1fr").MinHeight(240);
 
@@ -469,10 +466,7 @@ public partial class CommanderApp
         card.AddChild(body);
 
         // Footer: Add · Remove · (spacer) · Done.
-        var footer = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(10, 14, 10, 14))
-            .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
+        var footer = DialogFooter();
         footer.AddChild(GhostButton("Add current folder", AddBookmark));
         footer.AddChild(GhostButton("Remove", () => RemoveBookmark(_bookmarkSel), _bookmarks.Count > 0));
         footer.AddChild(Box.New().FlexGrow(1));

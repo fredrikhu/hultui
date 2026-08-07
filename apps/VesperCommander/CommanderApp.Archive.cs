@@ -129,7 +129,7 @@ public partial class CommanderApp
 
     private Element BuildPasswordPrompt()
     {
-        var card = Card(420, "Password required", System.IO.Path.GetFileName(_pwArchive));
+        var card = Card(420, "Password required", System.IO.Path.GetFileName(_pwArchive), "⚿");
         var body = Flex.Column(gap: 8).Padding(new Thickness(10, 14, 10, 14));
 
         var fieldRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
@@ -147,10 +147,12 @@ public partial class CommanderApp
             : Ui.Mono("Never stored or logged · asked once per archive this session", 10f, Nocturne.On(0.40)));
         card.AddChild(body);
 
-        var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(8, 14, 8, 14));
+        var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(8, 14, 8, 14))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
+            .CornerRadius(new CornerRadius(0, 0, Nocturne.RadiusLg, Nocturne.RadiusLg));
         footer.AddChild(Ui.Kbd("↵")); footer.AddChild(Ui.Mono("unlock · Esc", 10.5f, Nocturne.On(0.45)));
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(GhostButton("Cancel", ClosePasswordPrompt));
+        footer.AddChild(SecondaryButton("Cancel", ClosePasswordPrompt));
         footer.AddChild(PrimaryButton("Unlock", SubmitPassword));
         card.AddChild(footer);
         return Backdrop(card, topAligned: true, topPad: 90f);

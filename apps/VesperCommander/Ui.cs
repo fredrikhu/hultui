@@ -1,6 +1,9 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 using VesperCommander.Theme;
 
 namespace VesperCommander;
@@ -33,5 +36,84 @@ public static class Ui
         el.OnPointerEnter(_ => el.BackgroundColor = hover);
         el.OnPointerLeave(_ => el.BackgroundColor = normal);
         return el;
+    }
+
+    // ── Buttons ──────────────────────────────────────────────────────────
+    // The shared button family (mirrors Junction's Ui.*): a rounded pill with an
+    // optional leading glyph and a tinted hover. Primary = accent outline,
+    // Secondary = neutral outline, Ghost = borderless, Danger = mark-red outline.
+    // A disabled button dims its foreground and drops its hover + click.
+    private static BoxElement BtnBase(Action onClick, bool enabled)
+    {
+        var b = Flex.Row(gap: 6).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusMd)
+            .Cursor(enabled ? CursorType.Pointer : CursorType.Default);
+        if (enabled) b.OnClick(_ => onClick());
+        return b;
+    }
+
+    private static void Fill(BoxElement b, string? glyph, string label, float fontSize, Color fg)
+    {
+        if (glyph != null) b.AddChild(Icon(glyph, fontSize + 1, fg));
+        b.AddChild(Text.New(label).FontSize(fontSize).FontWeight(FontWeight.Medium).TextColor(fg));
+    }
+
+    public static BoxElement PrimaryButton(string label, string? glyph, Action onClick,
+        bool enabled = true, float fontSize = 12.5f)
+    {
+        var fg = enabled ? Nocturne.Accent : Nocturne.On(0.30);
+        var b = BtnBase(onClick, enabled)
+            .BorderColor(enabled ? Nocturne.Accent : Nocturne.On(0.18)).BorderWidth(1f);
+        Fill(b, glyph, label, fontSize, fg);
+        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.12), Color.Transparent) : b;
+    }
+
+    public static BoxElement SecondaryButton(string label, string? glyph, Action onClick,
+        bool enabled = true, float fontSize = 12.5f)
+    {
+        var fg = enabled ? Nocturne.Text : Nocturne.On(0.30);
+        var b = BtnBase(onClick, enabled).BorderColor(Nocturne.Divider).BorderWidth(1f);
+        Fill(b, glyph, label, fontSize, fg);
+        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent) : b;
+    }
+
+    public static BoxElement GhostButton(string label, string? glyph, Action onClick,
+        bool enabled = true, float fontSize = 12f)
+    {
+        var fg = enabled ? Nocturne.Accent : Nocturne.On(0.30);
+        var b = BtnBase(onClick, enabled);
+        Fill(b, glyph, label, fontSize, fg);
+        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.10), Color.Transparent) : b;
+    }
+
+    public static BoxElement DangerButton(string label, string? glyph, Action onClick,
+        bool enabled = true, float fontSize = 12.5f)
+    {
+        var fg = enabled ? Nocturne.MarkRed : Nocturne.On(0.30);
+        var b = BtnBase(onClick, enabled)
+            .BorderColor(enabled ? Nocturne.MarkRed : Nocturne.On(0.18)).BorderWidth(1f);
+        Fill(b, glyph, label, fontSize, fg);
+        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.MarkRed, 0.12), Color.Transparent) : b;
+    }
+
+    /// <summary>A dialog-header app-mark: a 34px accent-800 tile with an accent-200
+    /// glyph — Junction's modal-header idiom, so titled dialogs read as one family.</summary>
+    public static BoxElement HeaderTile(string glyph) =>
+        Box.New().Width(34).Height(34).FlexShrink(0).CornerRadius(Nocturne.RadiusMd)
+            .Background(Nocturne.Accent800)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .Children(Icon(glyph, 16f, Nocturne.Accent200));
+
+    /// <summary>A square icon-only button with a hairline border (Junction's IconButton).</summary>
+    public static BoxElement IconButton(string glyph, Action onClick, string? tooltip = null, float size = 34f)
+    {
+        var b = Flex.Row(gap: 0).Width(size).Height(size)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .CornerRadius(Nocturne.RadiusMd).BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer);
+        if (tooltip != null) b.Tooltip(tooltip);
+        b.AddChild(Icon(glyph, 15f, Nocturne.Text));
+        b.OnClick(_ => onClick());
+        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
     }
 }
