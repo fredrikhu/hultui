@@ -150,7 +150,7 @@ The custom visual is laid out once and rendered at the cursor position during th
 
 ## Keys and Dynamic Lists
 
-When rendering a list of draggable items in a component's `Build()` method, always set a unique `Key` on each element based on the item's identity. Without keys, the tree differ patches elements by position, which causes event handlers to capture stale values after a rebuild.
+When rendering a list of draggable items in a component's `Build()` method, set a unique `Key` on each element based on the item's identity. Without keys, the tree differ patches elements by position, so inserts and reorders bleed retained state (an in-progress drag, hover, focus) across items. Handlers themselves always follow the latest build — see "Event handlers follow the latest build" in REACTIVITY.md.
 
 ```csharp
 for (int i = 0; i < items.Count; i++)

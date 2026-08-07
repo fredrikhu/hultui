@@ -74,6 +74,8 @@ These propagate to child elements unless overridden.
 
 You can also call `el.On<TEvent>(handler)` directly for any event type.
 
+Handlers are replaced by each rebuild's versions during reconciliation, so closures stay in sync with what the element displays. One rule: never capture the element variable itself — use `e.CurrentTarget` for self-reference (hover tints, reading `.Layout`) and `Ref<T>` for cross-element reach. See "Event handlers follow the latest build" in REACTIVITY.md.
+
 ### Accessibility
 
 | Fluent | Type |
