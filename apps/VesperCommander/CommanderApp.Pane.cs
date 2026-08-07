@@ -242,7 +242,7 @@ public partial class CommanderApp
             if (e.Button != PointerEvent.RightButton || ActiveTab(side).Back.Count == 0) return;
             e.StopPropagation = true;
             _active = side;
-            OpenHistoryPopover(side, cluster);
+            OpenHistoryPopover(side, e.CurrentTarget);   // live cluster, not the captured build's copy
         });
         return cluster;
     }
@@ -263,11 +263,6 @@ public partial class CommanderApp
         btn.AutomationId = autoId;
         btn.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
         btn.AccessibleName = enabled ? name : $"{name} (unavailable)";
-        // Key by enabled state: the differ patches a retained element's props but does
-        // NOT copy event handlers, so a disabled→enabled rebuild would otherwise reuse
-        // the handler-less box and the click would never fire. A changing key forces a
-        // fresh element (with the handler) instead.
-        btn.Key = $"{autoId}:{enabled}";
         if (enabled)
         {
             btn.On<ClickEvent>(e => { e.StopPropagation = true; _active = side; onClick(); });
@@ -289,14 +284,13 @@ public partial class CommanderApp
         btn.AutomationId = $"hist-caret-{side}";
         btn.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
         btn.AccessibleName = "Recent folders";
-        btn.Key = $"hist-caret-{side}:{hasHist}";   // fresh element on state flip (handlers aren't copied on reconcile)
         if (hasHist)
         {
             btn.On<ClickEvent>(e =>
             {
                 e.StopPropagation = true;
                 _active = side;
-                OpenHistoryPopover(side, btn.Parent!);   // anchor to the cluster (right-aligned)
+                OpenHistoryPopover(side, e.CurrentTarget.Parent!);   // anchor to the live cluster (right-aligned)
             });
             btn.HoverBg(Nocturne.Neutral900, Color.Transparent);
         }
@@ -404,8 +398,8 @@ public partial class CommanderApp
         chip.On<PointerDownEvent>(e => { if (e.Button == 1) CloseTab(side, index); });
         if (!on)
         {
-            chip.OnPointerEnter(_ => chip.BackgroundColor = Nocturne.Neutral900);
-            chip.OnPointerLeave(_ => chip.BackgroundColor = Color.Transparent);
+            chip.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = Nocturne.Neutral900);
+            chip.OnPointerLeave(e => ((BoxElement)e.CurrentTarget).BackgroundColor = Color.Transparent);
         }
         return chip;
     }

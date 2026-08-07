@@ -267,7 +267,19 @@ public abstract class Element
         On(EventPhase.Bubble, handler);
     }
 
-    public void On<TEvent>(EventPhase phase, Action<TEvent> handler) where TEvent : ElementEvent
+    public void On<TEvent>(EventPhase phase, Action<TEvent> handler) where TEvent : ElementEvent =>
+        AddHandler(phase, handler, owned: false);
+
+    /// <summary>
+    /// Register an element-owned handler: part of this element's own machinery
+    /// (constructor wiring, handlers on internally-built children). Owned handlers
+    /// survive reconciliation; app handlers registered via <see cref="On{TEvent}(Action{TEvent})"/>
+    /// are replaced by the incoming build's handlers in <see cref="PatchFrom"/>.
+    /// </summary>
+    internal void OnOwn<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent =>
+        AddHandler(EventPhase.Bubble, handler, owned: true);
+
+    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned) where TEvent : ElementEvent
     {
         _handlers ??= [];
         var type = typeof(TEvent);
@@ -276,7 +288,7 @@ public abstract class Element
             list = [];
             _handlers[type] = list;
         }
-        list.Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt)));
+        list.Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned));
     }
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
@@ -289,7 +301,10 @@ public abstract class Element
         if (_handlers is null) return;
         if (!_handlers.TryGetValue(evt.GetType(), out var list)) return;
 
-        foreach (var entry in list)
+        // Snapshot: a handler can MarkDirty → synchronous rebuild → PatchFrom, which
+        // swaps this element's app handlers mid-dispatch (CopyAppHandlersFrom). The
+        // event runs the handlers that were attached when dispatch started.
+        foreach (var entry in list.ToArray())
         {
             if (entry.Phase == phase || phase == EventPhase.Target)
             {
@@ -596,10 +611,15 @@ public abstract class Element
         AccessibleDescription = source.AccessibleDescription;
         AutomationId = source.AutomationId;
         AccessibleExpanded = source.AccessibleExpanded;
-        // Event handlers are NOT copied. Handlers from the first Build()
-        // capture references to the existing (live) elements. Copying handlers
-        // from a new Build() would bring closures pointing to detached elements.
-        // For cross-element references, use Ref<T> — refs ARE updated here.
+        // App event handlers ARE copied: the incoming build is the source of truth,
+        // so a retained element always runs the latest build's handlers (matching how
+        // callback props like ButtonElement.Clicked already behave). Element-OWNED
+        // handlers (constructor wiring registered via OnOwn) are kept instead — the
+        // incoming element's owned closures capture the incoming (detached) instance.
+        // Caveat for app code: a handler that captures a *sibling element* from its own
+        // build now points at a detached element after the next patch — reach across
+        // elements via Ref<T> (repointed below), never via captured element locals.
+        CopyAppHandlersFrom(source);
         if (source._refs != null)
         {
             foreach (var r in source._refs)
@@ -609,6 +629,43 @@ public abstract class Element
         MarkLayoutDirty();
         MarkPaintDirty();
         MarkStyleDirty();
+    }
+
+    /// <summary>
+    /// Drop this element's app handlers and adopt the incoming build's, preserving
+    /// element-owned (constructor-wired) handlers and their registration order:
+    /// owned handlers always precede app handlers, both at creation and after a patch.
+    /// </summary>
+    private void CopyAppHandlersFrom(Element source)
+    {
+        if (_handlers is not null)
+        {
+            List<Type>? empty = null;
+            foreach (var (type, list) in _handlers)
+            {
+                list.RemoveAll(static e => !e.Owned);
+                if (list.Count == 0)
+                    (empty ??= []).Add(type);
+            }
+            if (empty is not null)
+                foreach (var type in empty)
+                    _handlers.Remove(type);
+        }
+
+        if (source._handlers is null)
+            return;
+        foreach (var (type, list) in source._handlers)
+        {
+            foreach (var entry in list)
+            {
+                if (entry.Owned)
+                    continue;
+                _handlers ??= [];
+                if (!_handlers.TryGetValue(type, out var target))
+                    _handlers[type] = target = [];
+                target.Add(entry);
+            }
+        }
     }
 
     // ──── Rendering ────
@@ -622,4 +679,4 @@ public abstract class Element
         Size.Zero;
 }
 
-internal readonly record struct EventHandlerEntry(EventPhase Phase, Action<ElementEvent> Handler);
+internal readonly record struct EventHandlerEntry(EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false);

@@ -60,7 +60,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         Box.OverflowX = Overflow.Hidden;
         Box.OverflowY = Overflow.Scroll;
 
-        On<ScrollEvent>(OnScroll);
+        OnOwn<ScrollEvent>(OnScroll);
     }
 
     public new static ScrollViewElement New() => new();

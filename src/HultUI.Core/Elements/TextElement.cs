@@ -159,12 +159,12 @@ public class TextElement : Element
         if (_selectionWired) return;
         _selectionWired = true;
 
-        On<PointerDownEvent>(OnPointerDown);
-        On<PointerMoveEvent>(OnPointerMove);
-        On<PointerUpEvent>(OnPointerUp);
-        On<ClickEvent>(OnClick);
-        On<KeyDownEvent>(OnKeyDown);
-        On<BlurEvent>(_ => { if (HasSelection) { ClearSelection(); MarkPaintDirty(); } });
+        OnOwn<PointerDownEvent>(OnPointerDown);
+        OnOwn<PointerMoveEvent>(OnPointerMove);
+        OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<ClickEvent>(OnClick);
+        OnOwn<KeyDownEvent>(OnKeyDown);
+        OnOwn<BlurEvent>(_ => { if (HasSelection) { ClearSelection(); MarkPaintDirty(); } });
 
         ContextMenuItems = BuildContextMenuItems;
     }

@@ -147,7 +147,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     {
         // Column direction so children stack vertically
         Flex.Direction = FlexDirection.Column;
-        On<KeyDownEvent>(HandleKeyboardScroll);
+        OnOwn<KeyDownEvent>(HandleKeyboardScroll);
     }
 
     private void HandleKeyboardScroll(KeyDownEvent e)

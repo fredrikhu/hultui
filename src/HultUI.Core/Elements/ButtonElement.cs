@@ -53,38 +53,38 @@ public class ButtonElement : BoxElement
         Flex.FlexShrink = 0;
         Inherited.Cursor = CursorType.Pointer;
 
-        On<PointerEnterEvent>(_ =>
+        OnOwn<PointerEnterEvent>(_ =>
         {
             _hovered = true;
             UpdateVisualState();
         });
-        On<PointerLeaveEvent>(_ =>
+        OnOwn<PointerLeaveEvent>(_ =>
         {
             _hovered = false;
             _pressed = false;
             UpdateVisualState();
         });
-        On<PointerDownEvent>(_ =>
+        OnOwn<PointerDownEvent>(_ =>
         {
             _pressed = true;
             UpdateVisualState();
         });
-        On<PointerUpEvent>(_ =>
+        OnOwn<PointerUpEvent>(_ =>
         {
             _pressed = false;
             UpdateVisualState();
         });
-        On<FocusEvent>(_ =>
+        OnOwn<FocusEvent>(_ =>
         {
             _focused = true;
             MarkPaintDirty();
         });
-        On<BlurEvent>(_ =>
+        OnOwn<BlurEvent>(_ =>
         {
             _focused = false;
             MarkPaintDirty();
         });
-        On<KeyDownEvent>(evt =>
+        OnOwn<KeyDownEvent>(evt =>
         {
             if (!_focused) return;
             if (evt.Key is KeyCode.Enter or KeyCode.Space)

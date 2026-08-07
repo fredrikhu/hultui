@@ -62,10 +62,13 @@ public static class Ui
 
     // ── Hover ────────────────────────────────────────────────────────────
 
+    // Acts on e.CurrentTarget, not the captured el — reconciliation copies handlers
+    // onto the retained element, so the closure's el is the discarded incoming build
+    // after the first patch.
     public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement
     {
-        el.OnPointerEnter(_ => el.BackgroundColor = hover);
-        el.OnPointerLeave(_ => el.BackgroundColor = normal);
+        el.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = hover);
+        el.OnPointerLeave(e => ((BoxElement)e.CurrentTarget).BackgroundColor = normal);
         return el;
     }
 

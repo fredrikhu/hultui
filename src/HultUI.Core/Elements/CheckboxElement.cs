@@ -51,10 +51,10 @@ public class CheckboxElement : Element
     {
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
-        On<ClickEvent>(OnClick);
-        On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
-        On<KeyDownEvent>(evt =>
+        OnOwn<ClickEvent>(OnClick);
+        OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
+        OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        OnOwn<KeyDownEvent>(evt =>
         {
             if (!_focused) return;
             if (evt.Key == KeyCode.Space)

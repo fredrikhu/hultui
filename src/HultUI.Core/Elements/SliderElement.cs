@@ -52,13 +52,13 @@ public class SliderElement : Element, IRangeValueElement
     {
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
-        On<PointerDownEvent>(e => { _dragging = true; Focus(); ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
-        On<PointerMoveEvent>(e => { if (_dragging) ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
-        On<PointerUpEvent>(_ => _dragging = false);
-        On<PointerLeaveEvent>(_ => _dragging = false);
-        On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        On<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
-        On<KeyDownEvent>(e =>
+        OnOwn<PointerDownEvent>(e => { _dragging = true; Focus(); ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
+        OnOwn<PointerMoveEvent>(e => { if (_dragging) ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
+        OnOwn<PointerUpEvent>(_ => _dragging = false);
+        OnOwn<PointerLeaveEvent>(_ => _dragging = false);
+        OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
+        OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
+        OnOwn<KeyDownEvent>(e =>
         {
             if (!_focused) return;
             switch (e.Key)

@@ -150,8 +150,8 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         Inherited.FontSize = 14f;
         Inherited.Cursor = CursorType.Text;
 
-        On<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
-        On<BlurEvent>(_ =>
+        OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
+        OnOwn<BlurEvent>(_ =>
         {
             _focused = false;
             if (_composition.IsActive)
@@ -161,14 +161,14 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
             }
             MarkPaintDirty();
         });
-        On<TextInputEvent>(OnTextInput);
-        On<TextEditingEvent>(OnTextEditing);
-        On<KeyDownEvent>(OnKeyDown);
-        On<PointerDownEvent>(OnPointerDown);
-        On<PointerMoveEvent>(OnPointerMove);
-        On<PointerUpEvent>(OnPointerUp);
-        On<ClickEvent>(OnClick);
-        On<ScrollEvent>(OnScroll);
+        OnOwn<TextInputEvent>(OnTextInput);
+        OnOwn<TextEditingEvent>(OnTextEditing);
+        OnOwn<KeyDownEvent>(OnKeyDown);
+        OnOwn<PointerDownEvent>(OnPointerDown);
+        OnOwn<PointerMoveEvent>(OnPointerMove);
+        OnOwn<PointerUpEvent>(OnPointerUp);
+        OnOwn<ClickEvent>(OnClick);
+        OnOwn<ScrollEvent>(OnScroll);
 
         ContextMenuItems = BuildContextMenuItems;
     }

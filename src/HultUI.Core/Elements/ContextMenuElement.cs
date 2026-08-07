@@ -33,9 +33,9 @@ internal sealed class ContextMenuElement : Element
         _closeMenu = closeMenu;
         _hasIcons = items.Any(i => i.Glyph is not null);
 
-        On<PointerMoveEvent>(OnPointerMove);
-        On<PointerDownEvent>(OnPointerDown);
-        On<PointerLeaveEvent>(_ => { _hoveredIndex = -1; MarkPaintDirty(); });
+        OnOwn<PointerMoveEvent>(OnPointerMove);
+        OnOwn<PointerDownEvent>(OnPointerDown);
+        OnOwn<PointerLeaveEvent>(_ => { _hoveredIndex = -1; MarkPaintDirty(); });
     }
 
     public int HoveredIndex => _hoveredIndex;

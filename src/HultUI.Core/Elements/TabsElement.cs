@@ -201,7 +201,7 @@ public sealed class TabsElement : BoxElement
         if (tab.OnClose is { } onClose)
             header.AddChild(BuildClose(onClose));
 
-        header.On<ClickEvent>(_ => SetSelected(index));
+        header.OnOwn<ClickEvent>(_ => SetSelected(index));
         return header;
     }
 
@@ -276,7 +276,7 @@ public sealed class TabsElement : BoxElement
             .Cursor(CursorType.Pointer)
             .OnHover(c => c.Background(_theme.SurfaceVariant))
             .Children(TextBuild.New("×").FontSize(13f).TextColor(_theme.Secondary));
-        close.On<ClickEvent>(e => { e.StopPropagation = true; onClose(); });
+        close.OnOwn<ClickEvent>(e => { e.StopPropagation = true; onClose(); });
         return close;
     }
 

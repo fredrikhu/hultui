@@ -41,11 +41,14 @@ public static class Ui
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
             .Children(Mono(text, 10f, Nocturne.Neutral300));
 
-    /// <summary>The canonical hover idiom: swap background on enter/leave.</summary>
+    /// <summary>The canonical hover idiom: swap background on enter/leave.
+    /// Acts on <c>e.CurrentTarget</c>, not the captured <paramref name="el"/> —
+    /// reconciliation copies handlers onto the retained element, so the closure's
+    /// <paramref name="el"/> is the discarded incoming build after the first patch.</summary>
     public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement
     {
-        el.OnPointerEnter(_ => el.BackgroundColor = hover);
-        el.OnPointerLeave(_ => el.BackgroundColor = normal);
+        el.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = hover);
+        el.OnPointerLeave(e => ((BoxElement)e.CurrentTarget).BackgroundColor = normal);
         return el;
     }
 

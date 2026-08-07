@@ -81,8 +81,8 @@ public partial class JunctionApp
         b.On<ClickEvent>(e =>
         {
             e.StopPropagation = true;
-            // Read the (already-laid-out) button box so popovers anchor under it.
-            var box = b.Layout.AbsoluteBorderBox;
+            // Read the live button's laid-out box so popovers anchor under it.
+            var box = e.CurrentTarget.Layout.AbsoluteBorderBox;
             _popoverX = box.X;
             _popoverY = box.Y + box.Height + 4;
             onClick();

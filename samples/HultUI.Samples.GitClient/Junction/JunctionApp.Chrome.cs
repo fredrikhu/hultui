@@ -234,8 +234,8 @@ public partial class JunctionApp
 
         tab.OnClick(_ => SetView(view));
         if (!active)
-            tab.OnPointerEnter(_ => tab.BackgroundColor = Nocturne.Alpha(Nocturne.Text, 0.05));
-        tab.OnPointerLeave(_ => { if (View != view) tab.BackgroundColor = Color.Transparent; });
+            tab.OnPointerEnter(e => ((BoxElement)e.CurrentTarget).BackgroundColor = Nocturne.Alpha(Nocturne.Text, 0.05));
+        tab.OnPointerLeave(e => { if (View != view) ((BoxElement)e.CurrentTarget).BackgroundColor = Color.Transparent; });
         return tab;
     }
 
@@ -295,7 +295,7 @@ public partial class JunctionApp
         b.On<ClickEvent>(e =>
         {
             e.StopPropagation = true;
-            var box = b.Layout.AbsoluteBorderBox;
+            var box = e.CurrentTarget.Layout.AbsoluteBorderBox;   // live element's box, not the captured build's
             _popoverX = Math.Max(8f, box.X + box.Width - 230f);
             _popoverY = box.Y + box.Height + 4f;
             _popover = StashMenuItems();
