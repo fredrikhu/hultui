@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\apps\VesperCommander\VesperCommander.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
   </ItemGroup>
 
 </Project>

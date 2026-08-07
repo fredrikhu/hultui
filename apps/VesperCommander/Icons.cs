@@ -7,7 +7,7 @@ using SkiaSharp;
 
 namespace VesperCommander;
 
-public enum IconKind { Folder, Parent, File, Code, Image, Archive, ViewDetail, ViewBrief, ViewThumb }
+public enum IconKind { Folder, Parent, File, Code, Image, Archive, ViewDetail, ViewBrief, ViewThumb, NavBack, NavForward, NavCaret }
 
 /// <summary>
 /// File-list icons rasterized from the design's inline-SVG glyphs. HultUI's canvas has no
@@ -150,6 +150,20 @@ public static class Icons
                 foreach (float x in new[] { 2f, 8.8f })
                     foreach (float y in new[] { 2f, 8.8f })
                         yield return (Rect(x, y, 5.2f, 5.2f, 1f), true, 0, Theme.Nocturne.Neutral500);
+                break;
+
+            // Navigation chevrons (design §A mock: 16-unit box, 1.4 stroke, round caps).
+            // The caller tints these per state (Neutral400 enabled / Neutral700 disabled).
+            case IconKind.NavBack:
+                yield return (Svg("M9.5 12L5.5 8l4-4"), false, 1.4f, Theme.Nocturne.Neutral400);
+                break;
+
+            case IconKind.NavForward:
+                yield return (Svg("M6.5 4l4 4-4 4"), false, 1.4f, Theme.Nocturne.Neutral400);
+                break;
+
+            case IconKind.NavCaret:
+                yield return (Svg("M5 6.5l3 3 3-3"), false, 1.4f, Theme.Nocturne.Neutral400);
                 break;
 
             default: // File

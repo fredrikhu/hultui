@@ -225,34 +225,75 @@ public partial class CommanderApp
 
     private Element BuildHistoryCluster(char side)
     {
-        var cluster = Flex.Row(gap: 0).AlignItems(AlignItems.Center);
-        cluster.AddChild(HistoryButton(side, "‹", CanGoBack(side), () => GoBack(side), "Back · Alt+←"));
-        cluster.AddChild(HistoryButton(side, "›", CanGoForward(side), () => GoForward(side), "Forward · Alt+→"));
-        // A caret opens the recent-folder list on left-click (also on right-click of the cluster).
-        bool hasHist = ActiveTab(side).Back.Count > 0;
-        var caret = Box.New().Padding(new Thickness(2, 4, 2, 4)).CornerRadius(5f)
-            .Cursor(hasHist ? CursorType.Pointer : CursorType.Default).Tooltip("Recent folders")
-            .Children(Ui.Icon("▾", 9f, hasHist ? Nocturne.Neutral400 : Nocturne.Neutral700));
-        if (hasHist)
-        {
-            caret.OnClick(ev => { _active = side; _window.OpenContextMenu(ev.Target, ev.Position); });
-            caret.HoverBg(Nocturne.Neutral900, Color.Transparent);
-        }
-        cluster.AddChild(caret);
+        // Design §A: back · caret · forward as one visual unit — 26/16/26 × 24, gap 0,
+        // radius Sm, right-aligned so the cluster's right edge sits at the pane's 8px
+        // padding. Right-click anywhere (or left-click the caret) opens the recents list.
+        // The tab strip aligns its children to the bottom (tabs meet the content border),
+        // so the cluster opts out with AlignSelf.Center to sit centered in the strip.
+        var cluster = Flex.Row(gap: 0).AlignItems(AlignItems.Center).AlignSelf(AlignSelf.Center);
+        cluster.AddChild(NavBtn(side, IconKind.NavBack, CanGoBack(side),
+            $"hist-back-{side}", "Back", "Back · Alt+←", () => GoBack(side)));
+        cluster.AddChild(CaretBtn(side));
+        cluster.AddChild(NavBtn(side, IconKind.NavForward, CanGoForward(side),
+            $"hist-fwd-{side}", "Forward", "Forward · Alt+→", () => GoForward(side)));
         cluster.ContextMenu(() => HistoryMenu(side));
         return cluster;
     }
 
-    private Element HistoryButton(char side, string glyph, bool enabled, Action onClick, string tooltip)
+    // A back/forward chevron: a fixed 26×24 hit target with a Neutral400 glyph when
+    // enabled (Neutral700 + no handler otherwise). Acts on ClickEvent and stops
+    // propagation so a pane-focus rebuild can't swallow the gesture. Carries an
+    // AutomationId + Button role so it's reachable by assistive tech (and tests).
+    private Element NavBtn(char side, IconKind icon, bool enabled,
+        string autoId, string name, string tooltip, Action onClick)
     {
-        var btn = Box.New()
-            .Padding(new Thickness(2, 8, 2, 8)).CornerRadius(5f)
+        var btn = Box.New().Width(26).Height(24)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .CornerRadius(5f)
             .Cursor(enabled ? CursorType.Pointer : CursorType.Default)
             .Tooltip(tooltip)
-            .Children(Ui.Icon(glyph, 15f, enabled ? Nocturne.Neutral400 : Nocturne.Neutral700));
+            .Children(Icons.Draw(icon, enabled ? Nocturne.Neutral400 : Nocturne.Neutral700, 13f));
+        btn.AutomationId = autoId;
+        btn.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        btn.AccessibleName = enabled ? name : $"{name} (unavailable)";
+        // Key by enabled state: the differ patches a retained element's props but does
+        // NOT copy event handlers, so a disabled→enabled rebuild would otherwise reuse
+        // the handler-less box and the click would never fire. A changing key forces a
+        // fresh element (with the handler) instead.
+        btn.Key = $"{autoId}:{enabled}";
         if (enabled)
         {
-            btn.OnClick(_ => { _active = side; onClick(); });
+            btn.On<ClickEvent>(e => { e.StopPropagation = true; _active = side; onClick(); });
+            btn.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        }
+        return btn;
+    }
+
+    // The 16×24 caret: opens the recent-folder dropdown anchored just under itself.
+    private Element CaretBtn(char side)
+    {
+        bool hasHist = ActiveTab(side).Back.Count > 0;
+        var btn = Box.New().Width(16).Height(24)
+            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+            .CornerRadius(5f)
+            .Cursor(hasHist ? CursorType.Pointer : CursorType.Default)
+            .Tooltip("Recent folders")
+            .Children(Icons.Draw(IconKind.NavCaret, hasHist ? Nocturne.Neutral400 : Nocturne.Neutral700, 11f));
+        btn.AutomationId = $"hist-caret-{side}";
+        btn.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        btn.AccessibleName = "Recent folders";
+        btn.Key = $"hist-caret-{side}:{hasHist}";   // fresh element on state flip (handlers aren't copied on reconcile)
+        if (hasHist)
+        {
+            btn.On<ClickEvent>(e =>
+            {
+                // Stop propagation so this same click isn't also treated as an outside
+                // click that immediately dismisses the menu we're opening.
+                e.StopPropagation = true;
+                _active = side;
+                var box = btn.Layout.AbsoluteBorderBox;
+                _window.OpenContextMenu(btn, new Point(box.X, box.Y + box.Height + 2f));
+            });
             btn.HoverBg(Nocturne.Neutral900, Color.Transparent);
         }
         return btn;
