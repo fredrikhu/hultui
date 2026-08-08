@@ -6,6 +6,7 @@ using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Platform;
 using HultUI.Core.Styling;
+using HultUI.DevTools;
 using HultUI.Platform.SDL3;
 
 namespace HultUI;
@@ -64,6 +65,55 @@ public sealed class Application : IDisposable
     public PerformanceCounters Performance => PrimaryWindow.Performance;
     public DevToolsOverlay DevTools => PrimaryWindow.DevTools;
     public IClipboard Clipboard => PrimaryWindow.Clipboard;
+
+    // ──── DevTools inspector ────
+
+    private InspectorHost? _inspectorHost;
+
+    /// <summary>The inspector host, or null until the panel is opened for the first time.</summary>
+    internal InspectorHost? InspectorHost => _inspectorHost;
+
+    /// <summary>
+    /// Whether Ctrl+Shift+I / Ctrl+Shift+C open the DevTools inspector. Set false in
+    /// apps that already bind those chords; <see cref="OpenInspector"/> still works,
+    /// so the app can offer the inspector on a chord of its own choosing.
+    /// </summary>
+    public bool DevToolsHotkeysEnabled { get; set; } = true;
+
+    /// <summary>True while the inspector panel is open.</summary>
+    public bool IsInspectorOpen => _inspectorHost?.IsOpen ?? false;
+
+    /// <summary>
+    /// Opens the DevTools inspector against <paramref name="target"/> (default: the
+    /// primary window), raising it if it is already open. With
+    /// <paramref name="startPicking"/> the picker is armed immediately, so the next
+    /// click in the inspected window selects an element instead of operating it.
+    /// </summary>
+    public void OpenInspector(Window? target = null, bool startPicking = false)
+    {
+        _inspectorHost ??= new InspectorHost(this);
+        _inspectorHost.Open(target ?? PrimaryWindow, startPicking);
+    }
+
+    /// <summary>Closes the inspector panel. No-op when it isn't open.</summary>
+    public void CloseInspector() => _inspectorHost?.Close();
+
+    internal void ToggleInspector(Window target, bool startPicking)
+    {
+        _inspectorHost ??= new InspectorHost(this);
+        _inspectorHost.Toggle(target, startPicking);
+    }
+
+    /// <summary>
+    /// Creates the inspector's window. Flagged as DevTools so it is excluded from
+    /// inspection and from the run loop's "is anything still open" test.
+    /// </summary>
+    internal Window CreateDevToolsWindow(string title, int width, int height)
+    {
+        var window = CreateWindow(title, width, height);
+        window.IsDevToolsWindow = true;
+        return window;
+    }
 
     /// <summary>
     /// Creates an application with a primary window on the default (SDL3)
@@ -132,7 +182,10 @@ public sealed class Application : IDisposable
 
         var frameStopwatch = Stopwatch.StartNew();
 
-        while (!_quitRequested && _windows.Any(w => w.IsOpen))
+        // The DevTools window is excluded from the liveness test: once the app's own
+        // windows are gone there is nothing left to inspect, and an inspector left
+        // open would otherwise keep a closed application running.
+        while (!_quitRequested && _windows.Any(w => w.IsOpen && !w.IsDevToolsWindow))
         {
             // Delta time
             float deltaSeconds = (float)frameStopwatch.Elapsed.TotalSeconds;
@@ -154,6 +207,10 @@ public sealed class Application : IDisposable
 
             // Tick animations (marks elements dirty as needed)
             AnimationManager.Tick(deltaSeconds);
+
+            // Run any inspector refresh its rate limit deferred, so the panel still
+            // catches up after the inspected window goes idle mid-interval.
+            _inspectorHost?.Tick();
 
             // Render any dirty windows
             bool anyRendered = RenderDirtyWindows(force: false);

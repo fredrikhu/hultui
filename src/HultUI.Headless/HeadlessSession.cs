@@ -74,6 +74,19 @@ public sealed class HeadlessSession : IDisposable
         return Wrap(Application.CreateWindow(title, width, height, style));
     }
 
+    /// <summary>
+    /// Wraps a window this session did not create — one the application opened
+    /// itself (a secondary window, the DevTools inspector) — in a driver, so tests
+    /// can inject input into it and query its content like any other.
+    /// </summary>
+    public HeadlessWindow Attach(Window window)
+    {
+        ThrowIfDisposed();
+        if (window.PlatformWindow is not HeadlessPlatformWindow)
+            throw new ArgumentException("The window does not belong to this headless session.", nameof(window));
+        return Wrap(window);
+    }
+
     private HeadlessWindow Wrap(Window window)
         => new(this, window, (HeadlessPlatformWindow)window.PlatformWindow);
 
@@ -100,6 +113,7 @@ public sealed class HeadlessSession : IDisposable
         Application.ProcessPendingResizes();
         Application.DrainMainThreadQueue();
         AnimationManager.Tick((float)delta.TotalSeconds);
+        Application.InspectorHost?.Tick();
         bool rendered = Application.RenderDirtyWindows(forceRender);
         Application.CleanupClosedWindows();
         return rendered;

@@ -125,6 +125,8 @@ Each window has its own:
 | DevTools overlay | `window.DevTools` (F12 per window) |
 | Element tree | `window.SetRoot(element)` |
 
+The DevTools inspector is application-wide rather than per-window: one panel, re-targeted with `app.OpenInspector(window)`. Its own window is flagged `IsDevToolsWindow`, so it is excluded from inspection and does not keep `Run()` alive after your windows close. See [DEVTOOLS.md](DEVTOOLS.md).
+
 ---
 
 ## Window List

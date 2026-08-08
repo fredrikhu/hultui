@@ -122,6 +122,20 @@ public sealed class Window : IOverlayHost, IDisposable
     public bool IsOpen => PlatformWindow.IsOpen && !_disposed;
     public WindowStyle Style => PlatformWindow.Style;
 
+    /// <summary>
+    /// True for the DevTools inspector's own window. Such a window is not
+    /// inspectable (the panel would change as a result of being looked at) and does
+    /// not keep <see cref="Application.Run"/> alive on its own.
+    /// </summary>
+    public bool IsDevToolsWindow { get; internal set; }
+
+    /// <summary>
+    /// Raised after this window presents a frame. Used by the DevTools inspector to
+    /// re-read the tree it is describing; it fires on the UI thread and must stay
+    /// cheap, since it runs once per rendered frame.
+    /// </summary>
+    internal event Action? FrameRendered;
+
     // ──── Window management (custom chrome) ────
     public bool IsMaximized => PlatformWindow.IsMaximized;
     public void Minimize() => PlatformWindow.Minimize();
@@ -606,11 +620,94 @@ public sealed class Window : IOverlayHost, IDisposable
             foreach (var cb in due)
                 cb();
         }
+
+        FrameRendered?.Invoke();
+    }
+
+    /// <summary>
+    /// Gives the DevTools inspector first refusal on an input event. Returns true
+    /// when the event was consumed and must not reach the app.
+    ///
+    /// Two distinct jobs live here. In the inspector's own window, navigation keys
+    /// drive the panel. In an inspected window with the picker armed, pointer input
+    /// selects elements instead of operating them — that is the whole point of a
+    /// picker, and it is why the interception has to happen before dispatch rather
+    /// than as a handler somewhere in the tree.
+    /// </summary>
+    private bool TryHandleDevToolsInput(InputEvent evt)
+    {
+        var host = Application.InspectorHost;
+
+        if (IsDevToolsWindow)
+        {
+            return host is not null
+                   && evt is InputEvent.KeyInput { IsDown: true } panelKey
+                   && host.HandleKey(panelKey.KeyCode, panelKey.Modifiers);
+        }
+
+        if (Application.DevToolsHotkeysEnabled
+            && evt is InputEvent.KeyInput { IsDown: true } key
+            && key.Modifiers.HasFlag(KeyModifiers.Ctrl) && key.Modifiers.HasFlag(KeyModifiers.Shift))
+        {
+            // Ctrl+Shift+I opens the panel, Ctrl+Shift+C opens it already picking —
+            // the arrangement every browser uses, so it needs no learning.
+            if (key.KeyCode == KeyCode.I)
+            {
+                Application.ToggleInspector(this, startPicking: false);
+                return true;
+            }
+            if (key.KeyCode == KeyCode.C)
+            {
+                Application.ToggleInspector(this, startPicking: true);
+                return true;
+            }
+        }
+
+        if (_devTools.Inspector is not { IsPicking: true } inspector) return false;
+
+        switch (evt)
+        {
+            case InputEvent.MouseMoveInput move:
+                inspector.SetHovered(PickTargetAt(new Point(move.X, move.Y)));
+                // The preview moved, so the highlight has to be repainted even
+                // though nothing in the app tree changed.
+                _root!.MarkPaintDirty();
+                return true;
+
+            case InputEvent.MouseButtonInput { IsDown: true } press:
+                inspector.Pick(PickTargetAt(new Point(press.X, press.Y)));
+                _root!.MarkPaintDirty();
+                return true;
+
+            // Swallow the matching release so the app never sees a lone button-up
+            // (which reads as the end of a drag it never started).
+            case InputEvent.MouseButtonInput:
+                return true;
+
+            case InputEvent.KeyInput { IsDown: true, KeyCode: KeyCode.Escape }:
+                inspector.SetPicking(false);
+                _root!.MarkPaintDirty();
+                return true;
+
+            // Wheel events fall through on purpose: scrolling the app to reach an
+            // element that is off-screen is part of picking it.
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>The element the picker would select at <paramref name="pos"/> (overlays first, then the main tree).</summary>
+    private Element? PickTargetAt(Point pos)
+    {
+        var (overlayTarget, _) = HitTestOverlays(pos);
+        return overlayTarget ?? (_root is null ? null : HitTester.HitTest(_root, pos));
     }
 
     private void HandleInputEvent(InputEvent evt)
     {
         if (_root is null) return;
+
+        if (TryHandleDevToolsInput(evt)) return;
 
         // Snapshot state that decides whether a mouse move needs a frame (see
         // the tail of this method). Everything a move can visually change marks

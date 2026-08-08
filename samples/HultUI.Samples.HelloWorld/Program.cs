@@ -84,7 +84,7 @@ var root = Flex.Column(gap: 16).Padding(24).AccessibleRole(AccessibilityRole.App
     // Footer
     footerBar = Box.New().Height(40).FlexShrink(0).Padding(10).Background(Color.FromHex("#1E293B")).CornerRadius(8f)
         .TextColor(Color.FromHex("#64748B")).FontSize(12f)
-        .Children(Text.New("Built with HultUI — Press F12 for DevTools"))
+        .Children(Text.New("Built with HultUI — F12 for the perf HUD, Ctrl+Shift+C to inspect an element"))
 );
 
 using var app = new Application("HultUI - Hello World", 900, 650);

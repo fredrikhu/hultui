@@ -14,6 +14,13 @@ public sealed class ComponentHost : Element
     private readonly Component _component;
     private Effect? _buildEffect;
 
+    /// <summary>
+    /// The component this host builds. Exposed so tooling (the DevTools inspector)
+    /// can label a node with the component the app author wrote rather than the
+    /// generic host element.
+    /// </summary>
+    public Component Component => _component;
+
     public ComponentHost(Component component)
     {
         _component = component;

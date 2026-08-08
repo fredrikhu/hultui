@@ -12,6 +12,7 @@ public sealed class DevToolsOverlay
     private static readonly Color PaddingColor = new(100, 200, 100, 40);
     private static readonly Color MarginColor = new(255, 160, 64, 40);
     private static readonly Color HoverHighlight = new(64, 160, 255, 50);
+    private static readonly Color PickHighlight = new(120, 220, 160, 70);
     private static readonly Color HudBackground = new(0, 0, 0, 200);
     private static readonly Color HudText = new(220, 220, 220, 255);
 
@@ -27,6 +28,18 @@ public sealed class DevToolsOverlay
 
     public Element? HoveredElement { get; set; }
 
+    /// <summary>
+    /// The inspector this window's highlight follows, when one is open. The
+    /// inspector's panel lives in its own window; all that belongs over the app is
+    /// the box-model outline of whatever is selected or being picked. Independent of
+    /// <see cref="IsEnabled"/>: inspecting an element shouldn't drag the FPS HUD
+    /// along with it.
+    /// </summary>
+    public ElementInspector? Inspector { get; set; }
+
+    /// <summary>True when something needs painting over the app that isn't the F12 HUD.</summary>
+    public bool HasHighlight => Inspector?.Highlighted is not null;
+
     private readonly PerformanceCounters _perf;
 
     public DevToolsOverlay(PerformanceCounters perf)
@@ -36,13 +49,23 @@ public sealed class DevToolsOverlay
 
     public void Render(IRenderContext ctx, Element root, float viewportWidth, float viewportHeight)
     {
+        var highlighted = Inspector?.Highlighted;
+        if (highlighted is not null)
+        {
+            // A live pick preview reads as "this is what you'd get", the committed
+            // selection as "this is what you have" — different colors so the two
+            // are never confused mid-pick.
+            bool isPreview = ReferenceEquals(highlighted, Inspector!.Hovered);
+            RenderHighlight(ctx, highlighted, viewportWidth, isPreview ? PickHighlight : HoverHighlight);
+        }
+
         if (!IsEnabled) return;
 
         if (ShowBoundingBoxes)
             RenderBoundingBoxes(ctx, root, 0, 0);
 
-        if (HoveredElement is not null)
-            RenderElementInspector(ctx, HoveredElement, viewportWidth);
+        if (HoveredElement is not null && !ReferenceEquals(HoveredElement, highlighted))
+            RenderHighlight(ctx, HoveredElement, viewportWidth, HoverHighlight);
 
         RenderPerformanceHud(ctx, viewportWidth);
     }
@@ -81,7 +104,7 @@ public sealed class DevToolsOverlay
             RenderBoundingBoxes(ctx, child, scrollOffsetX, scrollOffsetY);
     }
 
-    private void RenderElementInspector(IRenderContext ctx, Element element, float viewportWidth)
+    private void RenderHighlight(IRenderContext ctx, Element element, float viewportWidth, Color fill)
     {
         var layout = element.Layout;
 
@@ -94,7 +117,7 @@ public sealed class DevToolsOverlay
             layout.AbsoluteBorderBox.Height);
 
         // Highlight the element
-        ctx.DrawRect(box, HoverHighlight);
+        ctx.DrawRect(box, fill);
 
         // Draw margin area
         var marginBox = new Rect(
@@ -117,18 +140,15 @@ public sealed class DevToolsOverlay
         ctx.DrawRect(new Rect(cx + contentBox.Width, cy, layout.Padding.Right, contentBox.Height), PaddingColor);
 
         // Info tooltip
-        var typeName = element.GetType().Name;
-        var name = element.Name ?? element.AccessibleName ?? "";
-        var sizeText = $"{box.Width:F0} x {box.Height:F0}";
-        var label = string.IsNullOrEmpty(name) ? $"{typeName}  {sizeText}" : $"{typeName} \"{name}\"  {sizeText}";
+        var label = $"{ElementProperties.Summarize(element)}  {box.Width:F0} × {box.Height:F0}";
+        var style = new ResolvedInheritedStyle("monospace", 11, FontWeight.Regular, HudText, TextDirection.Ltr, CursorType.Default);
 
-        float tooltipW = label.Length * 7f + 16;
+        float tooltipW = ctx.MeasureText(label, style).Width + 16;
         float tooltipH = 22;
-        float tooltipX = Math.Min(box.X, viewportWidth - tooltipW - 4);
+        float tooltipX = Math.Max(4, Math.Min(box.X, viewportWidth - tooltipW - 4));
         float tooltipY = box.Y > tooltipH + 4 ? box.Y - tooltipH - 4 : box.Y + box.Height + 4;
 
         ctx.DrawRect(new Rect(tooltipX, tooltipY, tooltipW, tooltipH), HudBackground);
-        var style = new ResolvedInheritedStyle("monospace", 11, FontWeight.Regular, HudText, TextDirection.Ltr, CursorType.Default);
         ctx.DrawText(label, new Rect(tooltipX + 8, tooltipY + 4, tooltipW - 16, tooltipH - 8), style, TextOverflow.Clip, 1);
     }
 

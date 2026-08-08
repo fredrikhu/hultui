@@ -296,6 +296,13 @@ public abstract class Element
 
     internal bool HasAnyEventHandlers => _handlers is not null && _handlers.Count > 0;
 
+    /// <summary>
+    /// Names of the event types this element has handlers for, for DevTools
+    /// introspection ("why doesn't my click fire" is usually "nothing is listening").
+    /// </summary>
+    internal IEnumerable<string> HandlerEventNames =>
+        _handlers is null ? [] : _handlers.Keys.Select(static t => t.Name);
+
     internal void InvokeHandlers(ElementEvent evt, EventPhase phase)
     {
         if (_handlers is null) return;
