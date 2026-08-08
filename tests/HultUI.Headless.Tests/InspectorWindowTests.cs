@@ -270,6 +270,65 @@ public class InspectorWindowTests
     }
 
     [Fact]
+    public void ThePropertyPane_DrawsTheBoxModelFromResolvedEdges()
+    {
+        using var session = HeadlessSession.Create(width: 300, height: 200);
+
+        // Distinct values per edge, so a diagram that transposed or reused one
+        // would not still look right.
+        var target = Box.New()
+            .Height(RowH).FlexShrink(0)
+            .Margin(new Thickness(3, 4, 5, 6))
+            .Border(new Thickness(1, 2, 11, 12), Color.Red)
+            .Padding(new Thickness(7, 8, 9, 10));
+        target.Name = "boxy";
+        session.Window.SetRoot(Flex.Column().Children(target));
+        session.PumpFrame();
+
+        session.Application.OpenInspector(startPicking: true);
+        session.PumpFrame();
+        var centre = Centre(target);
+        session.Window.Click(centre.X, centre.Y);
+        session.PumpFrames(2);
+
+        var panel = session.Attach(session.Application.Windows.Single(w => w.IsDevToolsWindow));
+        var tree = panel.DumpAccessibilityTree();
+
+        Assert.Contains("Label \"margin\"", tree);
+        Assert.Contains("Label \"border\"", tree);
+        Assert.Contains("Label \"padding\"", tree);
+
+        // Every edge of every band, plus the content size — read back from the
+        // element's own resolved layout, so this pins that the diagram shows what
+        // layout produced rather than what the style asked for.
+        var layout = target.Layout;
+        foreach (var edge in new[]
+                 {
+                     layout.Margin.Top, layout.Margin.Right, layout.Margin.Bottom, layout.Margin.Left,
+                     layout.Border.Top, layout.Border.Right, layout.Border.Bottom, layout.Border.Left,
+                     layout.Padding.Top, layout.Padding.Right, layout.Padding.Bottom, layout.Padding.Left,
+                 })
+        {
+            Assert.Contains($"Label \"{edge:0.###}\"", tree);
+        }
+
+        var content = layout.AbsoluteContentBox;
+        Assert.Contains($"Label \"{content.Width:0.###}×{content.Height:0.###}\"", tree);
+
+        // The labels existing is not the same as the picture being right: each band
+        // has to sit inside the one before it. Their left edges step inward in order.
+        float MarginLeftOf(string text) => panel.GetByText(text).Bounds.X;
+        float marginBand = MarginLeftOf("margin");
+        float borderBand = MarginLeftOf("border");
+        float paddingBand = MarginLeftOf("padding");
+        float contentBand = MarginLeftOf($"{content.Width:0.###}×{content.Height:0.###}");
+
+        Assert.True(marginBand < borderBand, $"margin {marginBand} should be outside border {borderBand}");
+        Assert.True(borderBand < paddingBand, $"border {borderBand} should be outside padding {paddingBand}");
+        Assert.True(paddingBand < contentBand, $"padding {paddingBand} should be outside content {contentBand}");
+    }
+
+    [Fact]
     public void ThePanelTracksTheAppTree_AsItRebuilds()
     {
         using var session = HeadlessSession.Create(width: 300, height: 200);

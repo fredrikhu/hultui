@@ -40,6 +40,10 @@ With the picker armed, moving the pointer over the app outlines the element unde
 
 **Tree pane.** The live element tree, virtualized, so a 10,000-element app scrolls without cost. Click a row to select it; click the twisty to fold a subtree. Rows show the type, an identifying descriptor (`#name`, `#automation-id`, or the element's text), and the laid-out size.
 
+**Box model.** At the top of the property pane, the nested-bands diagram every browser inspector draws — margin outside border outside padding outside content, each band labelled with its four resolved edges and the content box giving its measured size. The numeric rows say the same thing, but only the diagram answers *which box is eating my space* without being read.
+
+The bands keep the conventional tan / khaki / olive / blue rather than following the app theme. They are a legend as much as a drawing — the same four colours in every devtools anyone has used — so re-tinting them per theme would cost that recognition for nothing.
+
 **Property pane.** Everything the selected element resolves to, grouped: Element, Layout, Box, Paint, Flex, Position, Grid item, Text, State, Accessibility. Rows left at their framework default are omitted, so the pane reads as *what this element does* rather than a wall of `auto`. **Layout is the exception** — measured geometry is always shown, because "it laid out to zero" is the answer to most questions that bring anyone to an inspector.
 
 **Filter.** Type in the toolbar box to match type names and descriptors. Matches appear with the ancestors needed to reach them, regardless of what is expanded.

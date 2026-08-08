@@ -258,7 +258,7 @@ internal sealed class InspectorView : Component
         }
         else
         {
-            var blocks = new List<Element>();
+            var blocks = new List<Element> { BoxModelDiagram(selected) };
             if (_inspector.IsSelectionStale)
             {
                 blocks.Add(Box.New()
@@ -289,6 +289,85 @@ internal sealed class InspectorView : Component
 
         return ScrollView.Vertical().FlexGrow(1).Children(content);
     }
+
+    // ──── Box model diagram ────
+    //
+    // The nested-rings picture every browser inspector draws: margin outside
+    // border outside padding outside content, each band labelled with its four
+    // resolved edges. The numeric rows say the same thing, but only the diagram
+    // answers "which box is eating my space" without being read.
+    //
+    // The bands keep the conventional tan/khaki/olive/blue rather than following
+    // the app theme. They are a legend as much as a drawing — the same four colors
+    // in every devtools anyone has used — and re-tinting them per theme would cost
+    // that recognition for nothing. The labels are pinned dark to stay legible on
+    // them whatever the surrounding panel is doing.
+    private static readonly Color MarginFill = new(196, 154, 90);
+    private static readonly Color BorderFill = new(205, 178, 118);
+    private static readonly Color PaddingFill = new(181, 201, 138);
+    private static readonly Color ContentFill = new(137, 184, 204);
+    private static readonly Color DiagramText = new(38, 36, 32);
+
+    private static Element BoxModelDiagram(Element target)
+    {
+        var layout = target.Layout;
+        var content = layout.AbsoluteContentBox;
+
+        var contentBox = Box.New()
+            .Background(ContentFill)
+            .Border(new Thickness(1), Shade(ContentFill))
+            .Padding(new Thickness(5, 10))
+            .MinWidth(104)
+            .AlignItems(AlignItems.Center)
+            .JustifyContent(JustifyContent.Center)
+            .Children(Label($"{Num(content.Width)}×{Num(content.Height)}"));
+
+        return Box.New()
+            .Margin(new Thickness(0, 0, 12, 0))
+            .AlignItems(AlignItems.FlexStart)
+            .Children(
+                Ring("margin", layout.Margin, MarginFill, BorderStyle.Dashed,
+                    Ring("border", layout.Border, BorderFill, BorderStyle.Solid,
+                        Ring("padding", layout.Padding, PaddingFill, BorderStyle.Dashed,
+                            contentBox))));
+    }
+
+    /// <summary>One labelled band of the box model, wrapped around <paramref name="inner"/>.</summary>
+    private static Element Ring(string name, Thickness edges, Color fill, BorderStyle style, Element inner)
+    {
+        // Equal gutters left and right of the top/bottom rows, wide enough for the
+        // longest band name, so the edge value lands centred over the band rather
+        // than pushed off-centre by the label sharing its row.
+        const float Gutter = 52f;
+        const float SideGutter = 24f;
+
+        return Box.New()
+            .Background(fill)
+            .Border(new Thickness(1), Shade(fill), style)
+            .Padding(4)
+            .Children(
+                Flex.Row().AlignItems(AlignItems.Center).Children(
+                    Label(name).Width(Gutter),
+                    Label(Num(edges.Top)).FlexGrow(1).TextAlign(TextAlign.Center),
+                    Box.New().Width(Gutter)),
+                Flex.Row().AlignItems(AlignItems.Center).Children(
+                    Label(Num(edges.Left)).Width(SideGutter).TextAlign(TextAlign.Center),
+                    Box.New().FlexGrow(1).Padding(new Thickness(2, 0)).Children(inner),
+                    Label(Num(edges.Right)).Width(SideGutter).TextAlign(TextAlign.Center)),
+                Flex.Row().AlignItems(AlignItems.Center).Children(
+                    Box.New().Width(Gutter),
+                    Label(Num(edges.Bottom)).FlexGrow(1).TextAlign(TextAlign.Center),
+                    Box.New().Width(Gutter)));
+    }
+
+    private static TextElement Label(string text) =>
+        TextEl.New(text).FontSize(10f).TextColor(DiagramText).MaxLines(1);
+
+    /// <summary>Trims trailing zeros so a whole number reads as "0", not "0.00".</summary>
+    private static string Num(float value) => value.ToString("0.###");
+
+    /// <summary>A darker edge of <paramref name="c"/>, for the band's own outline.</summary>
+    private static Color Shade(Color c) => InspectorPalette.Mix(c, DiagramText, 0.35f);
 
     // ──── Status bar ────
 
