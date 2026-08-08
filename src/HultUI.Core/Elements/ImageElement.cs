@@ -28,7 +28,8 @@ public class ImageElement : Element
         set { if (_fit == value) return; _fit = value; MarkPaintDirty(); }
     }
 
-    public static ImageElement New(IImageSource? source = null) => new() { Source = source };
+    public static ImageElement New(IImageSource? source = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new ImageElement { Source = source }.WithOrigin(file, line);
 
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx)
     {

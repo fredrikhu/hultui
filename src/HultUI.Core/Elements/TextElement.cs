@@ -64,7 +64,8 @@ public class TextElement : Element
         return true;
     }
 
-    public static TextElement New(string content) => new() { _content = content };
+    public static TextElement New(string content, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new TextElement { _content = content }.WithOrigin(file, line);
 
     // ──── Text selection (opt-in) ────
 

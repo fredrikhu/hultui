@@ -6,5 +6,5 @@ namespace HultUI.Core.Builders;
 
 public static class Image
 {
-    public static ImageElement New(IImageSource? source = null) => ImageElement.New(source);
+    public static ImageElement New(IImageSource? source = null, [OriginFile] string? file = null, [OriginLine] int line = 0) => ImageElement.New(source, file, line);
 }

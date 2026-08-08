@@ -22,6 +22,51 @@ public abstract class Element
     /// </summary>
     public string? AutomationId { get; set; }
 
+    // ──── Source origin (DevTools) ────
+    // Storage is conditional, unlike the factory parameters that feed it: two extra
+    // fields on every Element is real memory at 10k+ elements, and nothing on the
+    // layout, style, render, or hit-test paths ever reads them.
+#if HULTUI_ELEMENT_ORIGIN
+    private string? _originFile;
+    private int _originLine;
+#endif
+
+    /// <summary>
+    /// Where this element was created — the source file and line of the factory call.
+    /// Null when the build has origins compiled out (see <c>HultUIElementOrigin</c> in
+    /// Directory.Build.targets) or when the element was constructed directly rather
+    /// than through a factory.
+    /// </summary>
+    public ElementOrigin? Origin
+    {
+#if HULTUI_ELEMENT_ORIGIN
+        get => _originFile is null ? null : new ElementOrigin(_originFile, _originLine);
+#else
+        get => null;
+#endif
+    }
+
+    internal void SetOrigin(string? file, int line)
+    {
+#if HULTUI_ELEMENT_ORIGIN
+        _originFile = file;
+        _originLine = line;
+#endif
+    }
+
+    /// <summary>
+    /// Adopts <paramref name="source"/>'s origin during reconciliation. Usually a
+    /// no-op — the same call site rebuilt — but a retained element can be reused for
+    /// a different branch of a conditional build, and then its origin has moved.
+    /// </summary>
+    private void CopyOriginFrom(Element source)
+    {
+#if HULTUI_ELEMENT_ORIGIN
+        _originFile = source._originFile;
+        _originLine = source._originLine;
+#endif
+    }
+
     // ──── Tree structure ────
     public Element? Parent { get; internal set; }
     // Allocated on first child: roughly half of a real tree is leaves (text,
@@ -582,6 +627,7 @@ public abstract class Element
     {
         Key = source.Key;
         Name = source.Name;
+        CopyOriginFrom(source);
         // Copy styles without forcing allocation on either side: when the source
         // never touched a style and the target did, reset the target to defaults
         // (copying from the shared immutable default); when neither side has one,

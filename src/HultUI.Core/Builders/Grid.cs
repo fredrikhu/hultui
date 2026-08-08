@@ -9,9 +9,9 @@ public static class Grid
     /// Create a grid container from CSS-grid-style template strings.
     /// Examples: <c>Grid.Of("200px auto 1fr")</c>, <c>Grid.Of("auto 1fr", "auto auto")</c>.
     /// </summary>
-    public static BoxElement Of(string columns, string rows = "auto", float gap = 0)
+    public static BoxElement Of(string columns, string rows = "auto", float gap = 0, [OriginFile] string? file = null, [OriginLine] int line = 0)
     {
-        var box = BoxElement.New();
+        var box = BoxElement.New(file, line);
         box.Grid.ColumnTemplate = GridTemplate.Parse(columns);
         box.Grid.RowTemplate = GridTemplate.Parse(rows);
         box.Grid.RowGap = gap;
@@ -23,9 +23,9 @@ public static class Grid
     /// Create a grid container from explicit track arrays. Use when you want to
     /// build templates programmatically without going through the string parser.
     /// </summary>
-    public static BoxElement Of(GridTrack[] columns, GridTrack[] rows, float gap = 0)
+    public static BoxElement Of(GridTrack[] columns, GridTrack[] rows, float gap = 0, [OriginFile] string? file = null, [OriginLine] int line = 0)
     {
-        var box = BoxElement.New();
+        var box = BoxElement.New(file, line);
         box.Grid.ColumnTemplate = columns;
         box.Grid.RowTemplate = rows;
         box.Grid.RowGap = gap;

@@ -63,7 +63,8 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         OnOwn<ScrollEvent>(OnScroll);
     }
 
-    public new static ScrollViewElement New() => new();
+    public new static ScrollViewElement New([OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new ScrollViewElement().WithOrigin(file, line);
 
     private void OnScroll(ScrollEvent evt)
     {

@@ -4,5 +4,5 @@ namespace HultUI.Core.Builders;
 
 public static class TextArea
 {
-    public static TextAreaElement New(string text = "") => TextAreaElement.New(text);
+    public static TextAreaElement New(string text = "", [OriginFile] string? file = null, [OriginLine] int line = 0) => TextAreaElement.New(text, file, line);
 }

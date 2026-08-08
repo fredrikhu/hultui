@@ -59,7 +59,7 @@ public sealed class TabsElement : BoxElement
     private Theme _theme = Theme.Light;
     private bool _built;
 
-    public new static TabsElement New() => new();
+    public new static TabsElement New([OriginFile] string? file = null, [OriginLine] int line = 0) => new TabsElement().WithOrigin(file, line);
 
     public int SelectedIndex => _selectedIndex;
 
@@ -313,5 +313,5 @@ public sealed class TabsElement : BoxElement
 
 public static class Tabs
 {
-    public static TabsElement New() => TabsElement.New();
+    public static TabsElement New([OriginFile] string? file = null, [OriginLine] int line = 0) => TabsElement.New(file, line);
 }

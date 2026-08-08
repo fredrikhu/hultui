@@ -188,7 +188,9 @@ public class TextInputElement : BoxElement
     /// <summary>True while the user is dragging to select text. Used by Application for pointer capture.</summary>
     public bool IsDragging => _isDragging;
 
-    public static TextInputElement New(string text = "") => new() { _text = text, _cursorPos = text.Length, _selectionStart = text.Length };
+    public static TextInputElement New(string text = "", [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new TextInputElement { _text = text, _cursorPos = text.Length, _selectionStart = text.Length }
+            .WithOrigin(file, line);
 
     private void OnTextInput(TextInputEvent evt)
     {

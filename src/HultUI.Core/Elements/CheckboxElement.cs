@@ -65,8 +65,11 @@ public class CheckboxElement : Element
         });
     }
 
-    public static CheckboxElement New(bool isChecked = false) => new() { _isChecked = isChecked };
-    public static CheckboxElement New(bool isChecked, string label) => new() { _isChecked = isChecked, Label = label };
+    // One factory rather than two overloads: with a trailing optional string in
+    // the signature, New(true, "Label") would bind "Label" to the captured file
+    // path instead of the label, and overload resolution would pick that silently.
+    public static CheckboxElement New(bool isChecked = false, string? label = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new CheckboxElement { _isChecked = isChecked, Label = label }.WithOrigin(file, line);
 
     private void OnClick(ClickEvent evt)
     {

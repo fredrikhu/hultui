@@ -284,6 +284,14 @@ internal sealed class InspectorView : Component
                 }
             }
 
+            if (!ElementProperties.OriginsAvailable)
+            {
+                // Otherwise the missing "Created at" row just looks like a bug.
+                blocks.Add(TextEl.New("Built without element origins — rebuild with -p:HultUIElementOrigin=true "
+                                      + "to see where each element was created.")
+                    .FontSize(10f).TextColor(p.Muted).Margin(new Thickness(12, 0, 0, 0)));
+            }
+
             content.Children([.. blocks]);
         }
 

@@ -7,7 +7,8 @@ public class CanvasElement : BoxElement
 {
     public Action<ICanvasDrawingContext>? Draw { get; set; }
 
-    public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null) => new() { Draw = draw };
+    public static CanvasElement New(Action<ICanvasDrawingContext>? draw = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new CanvasElement { Draw = draw }.WithOrigin(file, line);
 
     public override void Render(IRenderContext ctx)
     {

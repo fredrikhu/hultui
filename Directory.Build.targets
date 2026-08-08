@@ -1,0 +1,32 @@
+<Project>
+
+  <!--
+    Element origins: the DevTools inspector's "Created at" row, captured with
+    [CallerFilePath]/[CallerLineNumber] on the element factories.
+
+    Compiled in for Debug and out for Release. Two extra fields on every Element
+    is not free at 10k elements, and leaving the caller attributes in place would
+    bake the building machine's absolute source paths into shipped binaries.
+
+    Override either way, independently of the configuration:
+        dotnet build -c Release -p:HultUIElementOrigin=true
+        dotnet build -c Debug   -p:HultUIElementOrigin=false
+
+    This lives in .targets rather than .props because Directory.Build.props is
+    imported before the SDK defaults, where $(Configuration) is still empty
+    unless it was passed on the command line.
+
+    The captured parameters stay in the signature either way — only the caller
+    attributes are conditional — so an assembly built with origins on and one
+    built with them off remain binary compatible.
+  -->
+  <PropertyGroup>
+    <HultUIElementOrigin Condition="'$(HultUIElementOrigin)' == '' and '$(Configuration)' == 'Debug'">true</HultUIElementOrigin>
+    <HultUIElementOrigin Condition="'$(HultUIElementOrigin)' == ''">false</HultUIElementOrigin>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HultUIElementOrigin)' == 'true'">
+    <DefineConstants>$(DefineConstants);HULTUI_ELEMENT_ORIGIN</DefineConstants>
+  </PropertyGroup>
+
+</Project>

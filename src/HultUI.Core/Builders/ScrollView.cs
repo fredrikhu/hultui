@@ -4,14 +4,14 @@ namespace HultUI.Core.Builders;
 
 public static class ScrollView
 {
-    public static ScrollViewElement New() => ScrollViewElement.New();
+    public static ScrollViewElement New([OriginFile] string? file = null, [OriginLine] int line = 0) => ScrollViewElement.New(file, line);
 
-    public static ScrollViewElement Vertical() =>
-        ScrollViewElement.New();
+    public static ScrollViewElement Vertical([OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        ScrollViewElement.New(file, line);
 
-    public static ScrollViewElement Horizontal()
+    public static ScrollViewElement Horizontal([OriginFile] string? file = null, [OriginLine] int line = 0)
     {
-        var sv = ScrollViewElement.New();
+        var sv = ScrollViewElement.New(file, line);
         sv.Box.OverflowX = Layout.Overflow.Scroll;
         sv.Box.OverflowY = Layout.Overflow.Hidden;
         sv.ShowScrollbarX = true;

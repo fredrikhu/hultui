@@ -71,8 +71,9 @@ public class SliderElement : Element, IRangeValueElement
         });
     }
 
-    public static SliderElement New(double value = 0, double min = 0, double max = 100) =>
-        new() { _min = min, _max = max, _value = Math.Clamp(value, min, max) };
+    public static SliderElement New(double value = 0, double min = 0, double max = 100, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new SliderElement { _min = min, _max = max, _value = Math.Clamp(value, min, max) }
+            .WithOrigin(file, line);
 
     protected internal override void ApplyTheme(Theme theme)
     {

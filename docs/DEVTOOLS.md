@@ -46,6 +46,10 @@ The bands keep the conventional tan / khaki / olive / blue rather than following
 
 **Property pane.** Everything the selected element resolves to, grouped: Element, Layout, Box, Paint, Flex, Position, Grid item, Text, State, Accessibility. Rows left at their framework default are omitted, so the pane reads as *what this element does* rather than a wall of `auto`. **Layout is the exception** — measured geometry is always shown, because "it laid out to zero" is the answer to most questions that bring anyone to an inspector.
 
+**Created at.** The Element group carries the source file and line where the element was built — `CommanderApp.Pane.cs:214` — captured with `[CallerFilePath]`/`[CallerLineNumber]` on the element factories. It names *your* call site, not the builder that forwarded the call: `Flex.Row()` reports the line in your component, not `Flex.cs`.
+
+This is compiled in for Debug and out for Release. See [Element origins](#element-origins) below.
+
 **Filter.** Type in the toolbar box to match type names and descriptors. Matches appear with the ancestors needed to reach them, regardless of what is expanded.
 
 ### Keyboard
@@ -108,6 +112,29 @@ Context menus, tooltips, and dialogs are separate element trees, not children of
 - **A removed element stays selected**, flagged as stale. Its last known property values still read fine; the panel says so rather than implying it is live.
 - **Describing an element is a pure read.** It allocates no style objects on the element and marks nothing dirty — a debugger that perturbs the tree it describes is worse than no debugger.
 - **The panel follows the application theme**, but reads only three tokens from it: `Background`, `TextColor`, and `Primary`. Surfaces, borders, hover tints, and muted text are blended between them. `Theme` is a record whose every token defaults to a light value, and apps typically override only the few they care about — a dark theme that never assigns `SurfaceVariant` or `Border` still reports slate-100 and slate-200 for them. Deriving instead of reading means the panel stays internally consistent on a partially specified theme, which is the common case.
+
+---
+
+## Element origins
+
+The "Created at" row is gated on the `HultUIElementOrigin` MSBuild property, defined in `Directory.Build.targets`. It defaults to **on for Debug, off for Release**, and overrides either way:
+
+```bash
+dotnet build -c Release -p:HultUIElementOrigin=true
+```
+
+`Element.Origin` is null when it's off, and the inspector says so rather than leaving the row's absence a mystery. `ElementProperties.OriginsAvailable` reports which kind of build you're in.
+
+**What "off" actually costs you nothing of.** Only the *attributes* are conditional, never the parameters — the signatures are identical in both builds. Two consequences follow, and both are the point:
+
+- **No source paths in the binary.** With no `[CallerFilePath]` present the compiler emits the parameter's default rather than a string literal. Verified on the HelloWorld sample: the release assembly contains zero UTF-16 occurrences of the repo path with origins off, and exactly one with them on — one interned string per source file, not per call site.
+- **No binary-compatibility trap.** Because the signature doesn't change, an assembly built with origins on and one built with them off are interchangeable. You can't get a `MissingMethodException` by mixing them.
+
+The per-element storage *is* conditional — two fields, compiled out entirely — because that's the part that costs memory on a 10k-element tree.
+
+**Measured cost with origins on:** none detectable. Running the Benchmark sample's `--auto` suite in Release both ways, every operation landed inside run-to-run noise — origins-on posted the faster minimum on `create 10,000`. Nothing on the layout, style, render, or hit-test paths reads the fields.
+
+**One caveat worth knowing.** Threading the caller info required collapsing `Checkbox.New(bool, string)` and `RadioButton.New(string, bool, string)` into single factories with an optional `label`. With two overloads, `Checkbox.New(true, "Enable")` would bind `"Enable"` to the captured file path — overload resolution prefers the candidate that omits fewer optional parameters, and it does so silently. All existing call sites compile and behave identically; the merge exists to make the silent misbinding impossible.
 
 ---
 

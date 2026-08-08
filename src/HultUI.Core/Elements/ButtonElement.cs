@@ -95,11 +95,11 @@ public class ButtonElement : BoxElement
         });
     }
 
-    public static ButtonElement New(string label, ButtonVariant variant = ButtonVariant.Primary)
+    public static ButtonElement New(string label, ButtonVariant variant = ButtonVariant.Primary, [OriginFile] string? file = null, [OriginLine] int line = 0)
     {
         var btn = new ButtonElement { _variant = variant };
-        btn.AddChild(TextElement.New(label));
-        return btn;
+        btn.AddChild(TextElement.New(label, file, line));
+        return btn.WithOrigin(file, line);
     }
 
     protected internal override void ApplyTheme(Theme theme)

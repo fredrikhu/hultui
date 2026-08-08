@@ -170,7 +170,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         e.StopPropagation = true;
     }
 
-    public static new VirtualListElement<T> New() => new();
+    public static new VirtualListElement<T> New([OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new VirtualListElement<T>().WithOrigin(file, line);
 
     protected internal override void ApplyTheme(Theme theme)
     {

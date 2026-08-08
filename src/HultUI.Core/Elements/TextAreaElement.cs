@@ -202,7 +202,9 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         ];
     }
 
-    public static TextAreaElement New(string text = "") => new() { _text = text, _cursorPos = text.Length, _selectionStart = text.Length };
+    public static TextAreaElement New(string text = "", [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new TextAreaElement { _text = text, _cursorPos = text.Length, _selectionStart = text.Length }
+            .WithOrigin(file, line);
 
     // ──── Line Wrapping ────
 

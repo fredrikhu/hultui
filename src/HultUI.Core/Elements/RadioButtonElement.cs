@@ -72,11 +72,12 @@ public class RadioButtonElement : Element
         });
     }
 
-    public static RadioButtonElement New(string groupName = "", bool isChecked = false) =>
-        new() { GroupName = groupName, _isChecked = isChecked };
-
-    public static RadioButtonElement New(string groupName, bool isChecked, string label) =>
-        new() { GroupName = groupName, _isChecked = isChecked, Label = label };
+    // Collapsed for the same reason as CheckboxElement.New: a trailing optional
+    // string would swallow the label into the captured file path.
+    public static RadioButtonElement New(string groupName = "", bool isChecked = false, string? label = null,
+        [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new RadioButtonElement { GroupName = groupName, _isChecked = isChecked, Label = label }
+            .WithOrigin(file, line);
 
     private void OnClick(ClickEvent evt)
     {

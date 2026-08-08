@@ -4,5 +4,5 @@ namespace HultUI.Core.Builders;
 
 public static class TextInput
 {
-    public static TextInputElement New(string text = "") => TextInputElement.New(text);
+    public static TextInputElement New(string text = "", [OriginFile] string? file = null, [OriginLine] int line = 0) => TextInputElement.New(text, file, line);
 }

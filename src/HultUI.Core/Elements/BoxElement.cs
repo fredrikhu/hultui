@@ -65,7 +65,7 @@ public class BoxElement : Element
         }
     }
 
-    public static BoxElement New() => new();
+    public static BoxElement New([OriginFile] string? file = null, [OriginLine] int line = 0) => new BoxElement().WithOrigin(file, line);
 
     internal override void PatchFrom(Element source)
     {

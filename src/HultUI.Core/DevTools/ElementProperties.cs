@@ -22,6 +22,18 @@ public sealed record PropertyGroup(string Name, IReadOnlyList<PropertyRow> Rows)
 public static class ElementProperties
 {
     /// <summary>
+    /// Whether this build captures element origins (the "Created at" row). False in
+    /// builds without <c>HultUIElementOrigin</c> — Release by default — so a panel
+    /// can explain the row's absence instead of leaving it a mystery.
+    /// </summary>
+    public static bool OriginsAvailable =>
+#if HULTUI_ELEMENT_ORIGIN
+        true;
+#else
+        false;
+#endif
+
+    /// <summary>
     /// Short type label for a tree row: the <c>Element</c> suffix is dropped
     /// (<c>BoxElement</c> → <c>Box</c>) and generics are spelled out
     /// (<c>VirtualListElement&lt;FileRow&gt;</c> → <c>VirtualList&lt;FileRow&gt;</c>).
@@ -100,6 +112,9 @@ public static class ElementProperties
             Add(rows, "AutomationId", element.AutomationId);
             if (TextOf(element) is { } text) rows.Add(new("Text", "\"" + Elide(text, 120) + "\""));
             rows.Add(new("Children", element.Children.Count.ToString()));
+            // Absent in builds with origins compiled out, and for elements built by
+            // `new` rather than a factory. See Element.Origin.
+            if (element.Origin is { } origin) rows.Add(new("Created at", origin.ToString()));
         });
 
         var layout = element.Layout;
