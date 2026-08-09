@@ -16,11 +16,14 @@ namespace Junction.Tests;
 /// </summary>
 public class DiffSelectionTests
 {
+    // In pixels from the row's edges, not fractions of it: the strip is only a pixel or two
+    // deep, so 90% of the way down a 20px row is still comfortably inside the label and says
+    // nothing. The first and last pixel of the row are the ones in question.
     [Theory]
-    [InlineData(0.10f)]   // just inside the top edge of a line
-    [InlineData(0.50f)]   // the middle, which always worked
-    [InlineData(0.90f)]   // just inside the bottom edge
-    public void PressingAnywhereOverALineBeginsASelection(float where)
+    [InlineData(0.5f)]     // the very top pixel of the row
+    [InlineData(-0.5f)]    // the very bottom pixel (measured back from the bottom edge)
+    [InlineData(9f)]       // the middle, which always worked
+    public void PressingAnywhereOverALineBeginsASelection(float inset)
     {
         DiffScrollTests.Hosted((session, app) =>
         {
@@ -32,11 +35,12 @@ public class DiffSelectionTests
             var box = row.Layout.AbsoluteBorderBox;
             Assert.True(box.Height > 0, "the row has no height");
 
-            session.Window.MouseDown(box.X + box.Width / 2, box.Y + box.Height * where);
+            float y = inset >= 0 ? box.Y + inset : box.Bottom + inset;
+            session.Window.MouseDown(box.X + box.Width / 2, y);
             session.PumpFrame();
 
             Assert.True(AnyLabelDragging(session),
-                $"a press {where:P0} down the line began no selection");
+                $"a press {y - box.Y:0.0}px into a {box.Height:0}px row began no selection");
         });
     }
 

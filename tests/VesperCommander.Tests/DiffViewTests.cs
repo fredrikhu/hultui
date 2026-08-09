@@ -704,9 +704,13 @@ public class DiffViewTests
     // The same dead zone, vertically: the cell used to centre its label, so the slack above
     // and below belonged to the box rather than the line.
     [Theory]
-    [InlineData(0.08f)]   // just inside the top edge
-    [InlineData(0.92f)]   // just inside the bottom edge
-    public void PressingAtALinesTopOrBottomEdgeStartsASelection(float where)
+    // In pixels from the row's edges, not fractions of it: the strip left by a centred label
+    // is only a pixel or two deep, so a press 92% of the way down a 20px row lands inside the
+    // label and proves nothing. The first and last pixel are the ones in question.
+    [InlineData(0.5f)]     // the very top pixel of the row
+    [InlineData(-0.5f)]    // the very bottom pixel, measured back from the bottom edge
+    [InlineData(9f)]       // the middle, which always worked
+    public void PressingAtALinesTopOrBottomEdgeStartsASelection(float inset)
     {
         using var t = new Fixture();
         t.WriteLeft("a.txt", "left line\n");
@@ -717,10 +721,11 @@ public class DiffViewTests
 
         var (cell, _) = t.FirstLineCell();
         var box = cell.Layout.AbsoluteBorderBox;
-        t.PressInBody(box.X + box.Width / 2, box.Y + box.Height * where);
+        float y = inset >= 0 ? box.Y + inset : box.Bottom + inset;
+        t.PressInBody(box.X + box.Width / 2, y);
 
         Assert.True(t.LeftGroup.HasSelection || t.PressedLabelIsDragging(),
-            $"a press {where:P0} down the row did not begin a selection");
+            $"a press {y - box.Y:0.0}px into a {box.Height:0}px row did not begin a selection");
     }
 
     // The row's tint should run the full width of its cell. With padding on the painted box

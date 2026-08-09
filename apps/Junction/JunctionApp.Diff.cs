@@ -464,7 +464,12 @@ public partial class JunctionApp
         bool selected = selectable && _stageSel.Contains(line);
         if (selected) bg = Nocturne.Alpha(Nocturne.Accent, 0.22);
 
-        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center).Background(bg);
+        // Stretch, so the code label can fill the row's height. Centred, the label was only
+        // as tall as its own text and the pixel or two above and below it belonged to the
+        // row — a strip between the lines where a press began no selection at all.
+        // Stretching alone is not enough: the label also has to grow inside its cell, or the
+        // cell fills the row and the label still does not fill the cell.
+        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch).Background(bg);
 
         // Interactive mode gets a leading checkbox column (transparent on context
         // rows) so the sign/number columns stay aligned across every row.
@@ -488,6 +493,7 @@ public partial class JunctionApp
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(spans)
                 .Padding(new Thickness(2, 14, 2, 0))
+                .FlexGrow(1)
                 .MaxLines(1).OverflowMode(TextOverflow.Clip)));
 
         if (selectable)
@@ -541,7 +547,9 @@ public partial class JunctionApp
         var num = isLeft ? line?.OldLineNumber : line?.NewLineNumber;
         var text = line == null ? " " : (line.Content.Length == 0 ? " " : line.Content);
 
-        var half = Flex.Row(gap: 0).AlignItems(AlignItems.Center).FlexGrow(1).FlexBasis(Dimension.Px(0))
+        // Stretch for the same reason as the unified row: a centred label leaves a strip of
+        // the row above and below it that swallows presses meant to start a selection.
+        var half = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch).FlexGrow(1).FlexBasis(Dimension.Px(0))
             .Background(bg);
         if (isLeft) half.BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         half.AddChild(NumCell(num, 44f));
@@ -550,7 +558,8 @@ public partial class JunctionApp
             Ui.Mono(text, 12f, code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(spans)
-                .Padding(new Thickness(2, 10, 2, 0)).MaxLines(1).OverflowMode(TextOverflow.Clip)));
+                .Padding(new Thickness(2, 10, 2, 0)).FlexGrow(1)
+                .MaxLines(1).OverflowMode(TextOverflow.Clip)));
         return half;
     }
 
