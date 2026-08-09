@@ -13,7 +13,7 @@ namespace VesperCommander;
 public partial class CommanderApp
 {
     // ── Diff view (F3) — full-shell builtin ──────────────────────────────
-    private enum DiffViewState { Ok, Identical, Binary, Missing }
+    private enum DiffViewState { Comparing, Ok, Identical, Binary, TooLarge, Missing }
 
     private bool _diffOpen;
     private char _diffSide;
@@ -243,36 +243,86 @@ public partial class CommanderApp
     {
         _diffOpen = false;
         _diffResult = null;
+        // Bumping the generation orphans any comparison still running, so a slow one cannot
+        // land on a view the user has already left.
+        _diffGen++;
         // The panes don't exist yet — this build still shows the diff. Ask for the focus
         // once they're back; PaneRef still holds the element from before the view opened.
         _pendingPaneFocus = _diffSide;
         MarkDirty();
     }
 
+    /// <summary>
+    /// Reads both files and compares them off the UI thread, then applies the result.
+    /// <para>
+    /// Reading and diffing are both unbounded work — a 4MB file to parse, and a comparison
+    /// whose cost depends on how different the two sides are, not their size. Doing either on
+    /// the UI thread froze the window for as long as it took, with no way to back out. Now the
+    /// view opens on "Comparing…" and stays responsive, so Esc still closes it.
+    /// </para>
+    /// <para>
+    /// A generation stamp taken before the work starts is checked when it finishes: opening
+    /// another comparison, or closing this one, leaves the older result to be discarded rather
+    /// than letting it land on top of what the user is now looking at.
+    /// </para>
+    /// </summary>
     private void ComputeDiff()
     {
         _diffResult = null;
         _diffRows = new();
         _diffChangeRows = new();
         _diffChangeIdx = 0;
+        _diffTops = [];
         _diffPan.Reset();
         _diffPan.ContentWidth = 0;
+        _diffState = DiffViewState.Comparing;
 
-        if (!File.Exists(_diffLeftPath) || !File.Exists(_diffRightPath)) { _diffState = DiffViewState.Missing; return; }
-        var (la, lbin) = LoadForDiff(_diffLeftPath);
-        var (ra, rbin) = LoadForDiff(_diffRightPath);
-        if (lbin || rbin || la is null || ra is null) { _diffState = DiffViewState.Binary; return; }
-        if (DiffEngine.TooLarge(la, ra)) { _diffState = DiffViewState.Binary; return; }
+        string leftPath = _diffLeftPath, rightPath = _diffRightPath;
+        int generation = ++_diffGen;
 
-        _diffResult = DiffEngine.Diff(la, ra);
-        _diffState = _diffResult.Identical ? DiffViewState.Identical : DiffViewState.Ok;
-        if (_diffState == DiffViewState.Ok)
+        Task.Run(() =>
         {
-            BuildDiffRowModel();
-            _diffPan.ContentWidth = HorizontalPan.MeasureWidest(la.Concat(ra), DiffFontSize, Fonts.Mono);
-            _diffGen++;
-            StartDiffHighlight(la, ra);
-        }
+            var outcome = CompareFiles(leftPath, rightPath);
+            HultUI.Application.InvokeOnMainThread(() =>
+            {
+                if (_diffGen != generation) return;   // superseded, or the view was closed
+                ApplyDiff(outcome);
+                MarkDirty();
+            });
+        });
+    }
+
+    private readonly record struct DiffOutcome(
+        DiffViewState State, DiffEngine.Result? Result, string[]? Left, string[]? Right);
+
+    /// <summary>The whole comparison, off the UI thread. Touches no view state.</summary>
+    private static DiffOutcome CompareFiles(string leftPath, string rightPath)
+    {
+        if (!File.Exists(leftPath) || !File.Exists(rightPath))
+            return new DiffOutcome(DiffViewState.Missing, null, null, null);
+
+        var (la, lbin) = LoadForDiff(leftPath);
+        var (ra, rbin) = LoadForDiff(rightPath);
+        if (lbin || rbin || la is null || ra is null)
+            return new DiffOutcome(DiffViewState.Binary, null, null, null);
+        if (DiffEngine.TooLarge(la, ra))
+            return new DiffOutcome(DiffViewState.TooLarge, null, null, null);
+
+        var result = DiffEngine.Diff(la, ra);
+        return new DiffOutcome(
+            result.Identical ? DiffViewState.Identical : DiffViewState.Ok, result, la, ra);
+    }
+
+    private void ApplyDiff(DiffOutcome outcome)
+    {
+        _diffState = outcome.State;
+        _diffResult = outcome.Result;
+        if (outcome.State != DiffViewState.Ok || outcome.Left is null || outcome.Right is null) return;
+
+        BuildDiffRowModel();
+        _diffPan.ContentWidth = HorizontalPan.MeasureWidest(
+            outcome.Left.Concat(outcome.Right), DiffFontSize, Fonts.Mono);
+        StartDiffHighlight(outcome.Left, outcome.Right);
     }
 
     private static (string[]? lines, bool binary) LoadForDiff(string path)
@@ -456,6 +506,12 @@ public partial class CommanderApp
                 $"{(_diffResult?.Lines.Count ?? 0)} lines · same content"),
             DiffViewState.Binary => DiffMessage(Glyphs.BinaryFile, "Can't show a text diff",
                 "One side is binary or larger than 4 MB."),
+            // Distinct from binary on purpose: these files are perfectly readable text, and
+            // saying otherwise sent people looking for a problem with the files themselves.
+            DiffViewState.TooLarge => DiffMessage(Glyphs.BinaryFile, "Too large to compare",
+                $"Comparing needs both sides under {DiffEngine.MaxLines:N0} lines."),
+            DiffViewState.Comparing => DiffMessage(Glyphs.Check, "Comparing…",
+                System.IO.Path.GetFileName(_diffLeftPath)),
             _ => DiffMissingBody(),
         });
         if (_diffState == DiffViewState.Ok && _diffPan.CanPan)

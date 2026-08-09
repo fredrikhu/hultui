@@ -676,6 +676,74 @@ public class DiffViewTests
         Assert.Equal("left line 1501", copied[1500]);
     }
 
+    // ── comparing off the UI thread, and saying why when it can't ────────
+
+    // The comparison used to run inside the F3 handler, so a slow pair froze the window with
+    // no way out. It opens on a "Comparing…" state now and the result arrives later.
+    [Fact]
+    public void TheViewOpensBeforeTheComparisonHasFinished()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", Lines("left {0}", 400));
+        t.WriteRight("a.txt", Lines("right {0}", 400));
+        t.Open();
+
+        t.PutCursorOn('L', "a.txt");
+        t.Press(KeyCode.F3);   // one frame only — the diff cannot have run yet
+
+        Assert.True(t.DiffOpen);
+        Assert.Equal("Comparing", t.DiffState);
+
+        t.Session.PumpUntil(() => t.DiffState != "Comparing", System.TimeSpan.FromSeconds(30));
+        Assert.Equal("Ok", t.DiffState);
+    }
+
+    [Fact]
+    public void EscapeStillClosesTheViewWhileItIsComparing()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", Lines("left {0}", 400));
+        t.WriteRight("a.txt", Lines("right {0}", 400));
+        t.Open();
+
+        t.PutCursorOn('L', "a.txt");
+        t.Press(KeyCode.F3);
+        Assert.Equal("Comparing", t.DiffState);
+
+        t.Press(KeyCode.Escape);
+
+        Assert.False(t.DiffOpen);
+    }
+
+    // A file too long to compare is ordinary readable text. Reporting it as binary sent
+    // people looking for a problem with the file itself.
+    [Fact]
+    public void AFileTooLongToCompareSaysSoRatherThanClaimingItIsBinary()
+    {
+        using var t = new Fixture();
+        var huge = Lines("line {0}", DiffEngine.MaxLines + 10);
+        t.WriteLeft("a.txt", huge);
+        t.WriteRight("a.txt", huge + "extra\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        Assert.Equal("TooLarge", t.DiffState);
+    }
+
+    [Fact]
+    public void ABinaryFileIsStillReportedAsBinary()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.bin", "text\0with a nul\n");
+        t.WriteRight("a.bin", "other\0with a nul\n");
+        t.Open();
+
+        t.OpenDiffOn("a.bin");
+
+        Assert.Equal("Binary", t.DiffState);
+    }
+
     // ── monospace fast path for row heights ──────────────────────────────
     //
     // Wrapped rows get their height from a shortcut: in a monospace face a line that is
@@ -821,6 +889,11 @@ public class DiffViewTests
         {
             PutCursorOn('L', name);
             Press(KeyCode.F3);
+            // The comparison runs off the UI thread now, so the view opens on "Comparing…"
+            // and the result lands a frame or more later. Wait for it to settle, or every
+            // assertion below would be racing an empty view.
+            _session.PumpUntil(() => DiffState != "Comparing", System.TimeSpan.FromSeconds(30));
+            _session.PumpFrame();
         }
 
         public void Press(KeyCode key, KeyModifiers modifiers = KeyModifiers.None)
