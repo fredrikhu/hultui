@@ -334,6 +334,40 @@ public class TextPipelineTests
     }
 
     [Fact]
+    public void Clip_KeepsTheSameLineHeightAsEveryOtherPath()
+    {
+        // Height feeds MeasureContent, so a clipped line that reports a different height
+        // from a wrapped or ellipsized one silently resizes whatever contains it.
+        var pipeline = CreatePipeline(charWidth: 10);
+        var style = DefaultStyle with { LineHeight = 24f };
+
+        var clip = pipeline.Layout("the quick brown fox jumps", style, 60, maxLines: 1, TextOverflow.Clip);
+        var ellipsis = pipeline.Layout("the quick brown fox jumps", style, 60, maxLines: 1, TextOverflow.Ellipsis);
+        var fits = pipeline.Layout("short", style, 600, maxLines: 1, TextOverflow.Clip);
+
+        Assert.Equal(ellipsis.Size.Height, clip.Size.Height, 3);
+        Assert.Equal(fits.Size.Height, clip.Size.Height, 3);
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(3f)]     // narrower than one 10px character
+    public void Clip_TooNarrowForAnyCharacterStillOccupiesALinesHeight(float width)
+    {
+        // Flex measures children at a zero basis routinely, so this is an ordinary layout
+        // path, not a degenerate one. Reporting no height for a non-empty string collapses
+        // whatever contains it — it shrank Junction's repository cards by 6px.
+        var pipeline = CreatePipeline(charWidth: 10);
+        var style = DefaultStyle with { LineHeight = 24f };
+
+        var narrow = pipeline.Layout("hello", style, width, maxLines: 1, TextOverflow.Clip);
+        var roomy = pipeline.Layout("hello", style, 600, maxLines: 1, TextOverflow.Clip);
+
+        Assert.Equal(roomy.Size.Height, narrow.Size.Height, 3);
+        Assert.Equal(0, narrow.Size.Width);
+    }
+
+    [Fact]
     public void Clip_TextThatFitsIsUnchanged()
     {
         var pipeline = CreatePipeline(charWidth: 10);

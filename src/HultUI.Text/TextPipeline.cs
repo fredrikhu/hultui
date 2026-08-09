@@ -117,7 +117,12 @@ public sealed class TextPipeline
     // glyph that straddles the edge would let it spill out of the box.
     private TextLayout ClipToWidth(string text, ResolvedInheritedStyle style, float maxWidth)
     {
-        if (maxWidth <= 0) return TextLayout.Empty;
+        // Not even one character fits. The line is still a line: it occupies its font's
+        // height, and an empty layout here would tell MeasureContent that a non-empty
+        // string needs no vertical space. Flex measures children against a zero basis as a
+        // matter of course, so this runs during ordinary layout, and a zero height there
+        // collapses whatever contains the text.
+        if (maxWidth <= 0) return EmptyLineOfHeight(style);
 
         // Gallop out from a short prefix before bisecting, so every string measured stays
         // within twice the answer. Bisecting from text.Length instead would start by
@@ -137,10 +142,17 @@ public sealed class TextPipeline
         }
 
         best = SnapPrefix(text, best);   // never split a surrogate pair
-        if (best == 0) return TextLayout.Empty;
+        if (best == 0) return EmptyLineOfHeight(style);
 
         var line = ShapeLineText(text[..best], style, 0);
         return new TextLayout([line], new Size(line.Width, line.Height));
+    }
+
+    // A line with no glyphs but the full height of one, taken from the primary font.
+    private TextLayout EmptyLineOfHeight(ResolvedInheritedStyle style)
+    {
+        var line = ShapeLineText("", style, 0);
+        return new TextLayout([line], new Size(0, line.Height));
     }
 
     // Width-independent: itemize + shape the whole string, record its natural
