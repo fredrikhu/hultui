@@ -676,6 +676,51 @@ public class DiffViewTests
         Assert.Equal("left line 1501", copied[1500]);
     }
 
+    // The cell used to carry 8px of padding, and that padding belonged to the box painting
+    // the row's colour rather than to the label. Pressing in it hit the box, so a drag begun
+    // at a line's leading edge — where the eye goes, and where indented code leaves blank
+    // space — selected nothing.
+    [Fact]
+    public void PressingAtALinesLeadingEdgeStartsASelection()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "    indented left line\n");
+        t.WriteRight("a.txt", "    indented right line\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        // The border box, not the content box: the content box is defined to sit inside any
+        // padding, so pressing relative to it would land where the label already is and prove
+        // nothing about the margin being complained of.
+        var (cell, _) = t.FirstLineCell();
+        var box = cell.Layout.AbsoluteBorderBox;
+        t.PressInBody(box.X + 1f, box.Y + box.Height / 2);
+
+        Assert.True(t.LeftGroup.HasSelection || t.PressedLabelIsDragging(),
+            "a press at the very start of the line did not begin a selection");
+    }
+
+    // The row's tint should run the full width of its cell. With padding on the painted box
+    // the colour stopped 8px short at each end, which made added and removed rows look
+    // unevenly sized next to each other.
+    [Fact]
+    public void ALinesTintFillsItsWholeCell()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "left\n");
+        t.WriteRight("a.txt", "right\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        // Against the border box — the area that actually gets painted. The content box is
+        // inset by any padding, so comparing to it holds however much padding there is.
+        var (cell, label) = t.FirstLineCell();
+        Assert.Equal(cell.Layout.AbsoluteBorderBox.Width, label.Layout.AbsoluteBorderBox.Width, 1);
+        Assert.Equal(cell.Layout.AbsoluteBorderBox.X, label.Layout.AbsoluteBorderBox.X, 1);
+    }
+
     [Fact]
     public void F8WalksTheChangesAndShiftF8WalksBack()
     {
@@ -1105,6 +1150,27 @@ public class DiffViewTests
                 if (e is HultUI.Core.Elements.TextElement { Content: "LEFT" or "RIGHT" }) found.Add(e);
                 foreach (var c in e.Children) Walk(c);
             }
+        }
+
+        /// <summary>Presses at a point inside the body, in screen coordinates — rows are laid
+        /// out in the body's content space, so the scroll offset has to come off the Y.</summary>
+        public void PressInBody(float x, float y)
+        {
+            _session.Window.MouseDown(x, y - Body.ScrollOffsetY);
+            _session.PumpFrame();
+        }
+
+        /// <summary>Whether any realized code label took the press and began a drag.</summary>
+        public bool PressedLabelIsDragging()
+        {
+            foreach (var row in BodyRows())
+            {
+                if (row.Children.Count < 5) continue;
+                foreach (var cell in new[] { row.Children[1], row.Children[4] })
+                    if (FirstLabel(cell) is HultUI.Core.Elements.TextElement { IsDragging: true })
+                        return true;
+            }
+            return false;
         }
 
         public HultUI.Core.Elements.TextSelectionGroup LeftGroup =>

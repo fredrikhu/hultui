@@ -110,15 +110,12 @@ public partial class CommanderApp
         if (!DiffWrap || _diffRows[index].Line is not { } line) return DiffLineH;
 
         var style = TextMeasure.StyleFor(DiffFontSize, Fonts.Mono);
-        // The text wraps inside the cell's padding, not across the whole column. Measuring
-        // against the column made a line that fits the column but not the padded box report
-        // one line and get a one-line row — then wrap to two when drawn, and be clipped.
-        float inner = width - DiffCellPadX * 2;
+        // The label now fills its cell exactly, so the column width is the wrap width.
         float text = Math.Max(
-            WrappedHeight(line.Left ?? "", style, inner),
-            WrappedHeight(line.Right ?? "", style, inner));
+            WrappedHeight(line.Left ?? "", style, width),
+            WrappedHeight(line.Right ?? "", style, width));
         // A blank line still owns a row.
-        return Math.Max(DiffLineH, text + DiffCellPadY * 2);
+        return Math.Max(DiffLineH, text);
     }
 
     // ── Monospace fast path for row heights ──────────────────────────────
@@ -498,10 +495,6 @@ public partial class CommanderApp
     // to work out how much width is left for the two code columns.
     private const float DiffGutterW = 34f;
     private const float DiffMarkerW = 18f;
-    // The code cell's padding, per side. Shared with the row-height calculation: the text
-    // wraps inside this, so a height measured against the bare column is a clipped row.
-    private const float DiffCellPadX = 8f;
-    private const float DiffCellPadY = 2f;
 
     private Element BuildDiff()
     {
@@ -730,7 +723,11 @@ public partial class CommanderApp
         // the content sits at the top rather than centred in a row it no longer defines.
         var box = Box.New().Background(bg)
             .JustifyContent(DiffWrap ? JustifyContent.FlexStart : JustifyContent.Center)
-            .Padding(new Thickness(DiffWrap ? DiffCellPadY : 0, DiffCellPadX, DiffWrap ? DiffCellPadY : 0, DiffCellPadX))
+            // No padding. It used to sit here, on the box that also paints the row's colour,
+            // which cost twice: the line's tinted band stopped short of the text by 8px on
+            // each side so added and removed rows looked unevenly sized, and a click in that
+            // margin landed on the box rather than the label, so selecting a line by its
+            // leading whitespace — the natural place to start a drag — did nothing at all.
             .OverflowX(Overflow.Hidden);
         // Wrapped there is no offset to apply, and the cell already clips.
 
