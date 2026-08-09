@@ -33,7 +33,12 @@ public static class SyntaxHighlighter
     private static Color? _defaultFg;
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
-    private static readonly Dictionary<string, bool> CanHighlightByExt = new(StringComparer.OrdinalIgnoreCase);
+    // Concurrent, and read outside Gate on purpose. A tokenize holds Gate for as long as it
+    // takes to parse the file — tens of milliseconds for a large one — and the UI thread asks
+    // CanHighlight once per visible row per frame. Sharing one lock meant a background
+    // tokenize stalled the very frame that was meant to show the text it had already read.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> CanHighlightByExt =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Extensions absent from TextMateSharp's bundled language table that are
@@ -109,6 +114,9 @@ public static class SyntaxHighlighter
     {
         var ext = ResolveExtension(path);
         if (ext is null) return false;
+        // Answer from the cache without taking Gate: a running tokenize holds it, and a file
+        // list asking per row per frame must not queue behind a parse.
+        if (CanHighlightByExt.TryGetValue(ext, out var cached)) return cached;
         lock (Gate)
         {
             if (CanHighlightByExt.TryGetValue(ext, out var known)) return known;
