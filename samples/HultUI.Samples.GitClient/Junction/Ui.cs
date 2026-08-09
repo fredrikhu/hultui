@@ -21,12 +21,25 @@ public static class Ui
     // ── Text / glyphs ────────────────────────────────────────────────────
 
     /// <summary>
+    /// Converts a nominal icon size — the numbers throughout this UI, which were chosen
+    /// when icons were text glyphs — into the box a vector icon needs to look the same.
+    ///
+    /// <para>Measured rather than guessed. The Unicode stand-ins inked a mean 64% of
+    /// their font size (they are drawn well inside the em box); Phosphor's paths ink
+    /// about 72% of theirs. Reusing the old numbers as box sizes therefore drew every
+    /// icon ~13% oversized. Applying the ratio once keeps every relative size the design
+    /// chose — a 9 badge against a 15 button — and corrects only the systematic error.</para>
+    /// </summary>
+    public static float IconBox(float nominal) => MathF.Round(nominal * 0.88f * 2f) / 2f;
+
+    /// <summary>
     /// A Phosphor glyph as real vector artwork. <paramref name="name"/> is a Phosphor
     /// icon name — use the constants in <see cref="Icons"/> rather than a literal, so a
-    /// typo is caught by IconNameTests instead of silently rendering an empty box.
+    /// typo is caught by JunctionIconNameTests instead of silently rendering an empty box.
+    /// <paramref name="size"/> is nominal; see <see cref="IconBox"/>.
     /// </summary>
     public static Element Icon(string name, float size, Color color) =>
-        Phosphor.Draw(name, size, color);
+        Phosphor.Draw(name, IconBox(size), color);
 
     public static TextElement Mono(string text, float size, Color color) =>
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);

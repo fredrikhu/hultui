@@ -268,7 +268,7 @@ public partial class JunctionApp
             // The shared file-type glyphs, same as Vesper's panes: a Unicode stand-in
             // could only tell images from everything-else, so a .csproj, a .zip and a
             // .cs all looked alike in a tree that is mostly source files.
-            row.AddChild(FileIcons.Draw(FileIcons.KindFor(node.Name), JunctionFileIconPalette, size: 12f)
+            row.AddChild(FileIcons.Draw(FileIcons.KindFor(node.Name), JunctionFileIconPalette, size: Ui.IconBox(12f))
                 .FlexShrink(0));
         }
 

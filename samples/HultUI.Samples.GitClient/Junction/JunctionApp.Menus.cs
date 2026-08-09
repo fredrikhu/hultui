@@ -14,7 +14,7 @@ public partial class JunctionApp
     /// <summary>Phosphor artwork for a menu row, tinted to whatever colour the menu
     /// resolved for that item's state (normal, disabled, danger).</summary>
     private static Func<Color, IImageSource?> MenuIcon(string name) =>
-        color => Phosphor.Source(name, 14f, color);
+        color => Phosphor.Source(name, Ui.IconBox(14f), color);
 
     private static ContextMenuItem Item(string glyph, string label, Action run) =>
         new() { Icon = MenuIcon(glyph), Label = label, Action = run };

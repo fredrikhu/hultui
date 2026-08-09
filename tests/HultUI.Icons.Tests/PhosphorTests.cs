@@ -92,3 +92,41 @@ public class JunctionIconNameTests
             Assert.True(Phosphor.Has(key), key);
     }
 }
+
+/// <summary>
+/// The nominal-to-box size conversion. Junction's icon sizes were chosen when icons were
+/// text glyphs, and a vector fills more of its box than a glyph fills its em — so reusing
+/// the numbers unchanged drew everything oversized.
+/// </summary>
+public class IconSizeTests
+{
+    [Fact]
+    public void NominalSizesShrinkToTheirVisualEquivalent()
+    {
+        // Measured: the Unicode stand-ins inked ~64% of the font size, Phosphor paths ink
+        // ~72% of the box. Under, but close.
+        Assert.True(GitClient.Junction.Ui.IconBox(16f) < 16f);
+        Assert.InRange(GitClient.Junction.Ui.IconBox(16f) / 16f, 0.85f, 0.92f);
+    }
+
+    [Fact]
+    public void TheRelativeSizeHierarchyIsPreserved()
+    {
+        // One ratio applied uniformly, so the design's relationships — a small badge
+        // against a larger button glyph — survive the correction.
+        float badge = GitClient.Junction.Ui.IconBox(9f);
+        float row = GitClient.Junction.Ui.IconBox(12f);
+        float button = GitClient.Junction.Ui.IconBox(15f);
+        Assert.True(badge < row && row < button);
+        Assert.Equal(12f / 9f, row / badge, 1);
+    }
+
+    [Fact]
+    public void SizesLandOnHalfPixels()
+    {
+        // Rounded to halves so rasters land on sensible pixel counts instead of
+        // producing a slightly different bitmap per call site.
+        foreach (var n in new[] { 9f, 10f, 11f, 12f, 13f, 13.5f, 14f, 15f, 16f, 17f, 26f })
+            Assert.Equal(0f, GitClient.Junction.Ui.IconBox(n) * 2f % 1f);
+    }
+}
