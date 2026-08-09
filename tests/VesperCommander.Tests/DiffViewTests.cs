@@ -707,8 +707,9 @@ public class DiffViewTests
     // In pixels from the row's edges, not fractions of it: the strip left by a centred label
     // is only a pixel or two deep, so a press 92% of the way down a 20px row lands inside the
     // label and proves nothing. The first and last pixel are the ones in question.
-    [InlineData(0.5f)]     // the very top pixel of the row
-    [InlineData(-0.5f)]    // the very bottom pixel, measured back from the bottom edge
+    [InlineData(1.5f)]     // near the top edge, inside the strip a centred label leaves
+    [InlineData(-1.5f)]    // near the bottom edge, likewise. Not half a pixel: that rounds
+                           // into the neighbouring row and makes the test a coin toss.
     [InlineData(9f)]       // the middle, which always worked
     public void PressingAtALinesTopOrBottomEdgeStartsASelection(float inset)
     {
@@ -720,12 +721,13 @@ public class DiffViewTests
         t.OpenDiffOn("a.txt");
 
         var (cell, _) = t.FirstLineCell();
-        var box = cell.Layout.AbsoluteBorderBox;
-        float y = inset >= 0 ? box.Y + inset : box.Bottom + inset;
-        t.PressInBody(box.X + box.Width / 2, y);
+        var box = LayoutProbe.Painted(cell);
+        var at = inset >= 0 ? LayoutProbe.InsetFromTop(box, inset)
+                            : LayoutProbe.InsetFromBottom(box, -inset);
+        t.PressInBody(at.X, at.Y);
 
         Assert.True(t.LeftGroup.HasSelection || t.PressedLabelIsDragging(),
-            $"a press {y - box.Y:0.0}px into a {box.Height:0}px row did not begin a selection");
+            $"a press {at.Y - box.Y:0.0}px into a {box.Height:0}px row did not begin a selection");
     }
 
     // The row's tint should run the full width of its cell. With padding on the painted box
@@ -967,13 +969,8 @@ public class DiffViewTests
             $"{count} lines of wide glyphs ({drawn:0}px) sit in a {row.Layout.AbsoluteBorderBox.Height:0}px row");
     }
 
-    private static HultUI.Core.Elements.TextElement? FirstLabelIn(HultUI.Core.Elements.Element cell)
-    {
-        if (cell is HultUI.Core.Elements.TextElement self) return self;
-        foreach (var child in cell.Children)
-            if (FirstLabelIn(child) is { } found) return found;
-        return null;
-    }
+    private static HultUI.Core.Elements.TextElement? FirstLabelIn(HultUI.Core.Elements.Element cell) =>
+        LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(cell).FirstOrDefault();
 
     private static string Lines(string format, int count) =>
         string.Concat(System.Linq.Enumerable.Range(1, count)
@@ -1047,29 +1044,16 @@ public class DiffViewTests
         /// <summary>How wide the text a label actually painted is — not its element box,
         /// which always stretches to the cell. A selectable TextElement keeps the lines it
         /// laid out so it can hit-test a selection against them; this reads those.</summary>
-        public float DrawnWidth(HultUI.Core.Elements.Element label)
-        {
-            var lines = (HultUI.Core.Rendering.TextLineBox[])
-                typeof(HultUI.Core.Elements.TextElement)
-                    .GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
-                    .GetValue(label)!;
-            float w = 0;
-            foreach (var line in lines) w = System.Math.Max(w, line.Width);
-            return w;
-        }
+        public float DrawnWidth(HultUI.Core.Elements.Element label) =>
+            LayoutProbe.DrawnText((HultUI.Core.Elements.TextElement)label).Width;
 
         /// <summary>Height of the text actually laid out in a label, and how many lines it
         /// broke into. Read from the line boxes, not the element box: the box is clamped by
         /// its cell and so can never report overflowing it — only the laid-out text can.</summary>
         public (float Height, int LineCount) DrawnText(HultUI.Core.Elements.Element label)
         {
-            var lines = (HultUI.Core.Rendering.TextLineBox[])
-                typeof(HultUI.Core.Elements.TextElement)
-                    .GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
-                    .GetValue(label)!;
-            float bottom = 0;
-            foreach (var line in lines) bottom = System.Math.Max(bottom, line.OffsetY + line.Height);
-            return (bottom, lines.Length);
+            var drawn = LayoutProbe.DrawnText((HultUI.Core.Elements.TextElement)label);
+            return (drawn.Height, drawn.LineCount);
         }
 
         public HultUI.Core.Elements.Element? TryScrollbarTrack() =>
@@ -1124,12 +1108,9 @@ public class DiffViewTests
 
         /// <summary>The label inside a code cell. Scrolling wraps it in the pan's clipping
         /// cell, wrapping does not, so it is found by descent rather than by index.</summary>
-        private static HultUI.Core.Elements.Element FirstLabel(HultUI.Core.Elements.Element cell)
-        {
-            foreach (var d in Descend(cell))
-                if (d is HultUI.Core.Elements.TextElement) return d;
-            throw new Xunit.Sdk.XunitException("the cell holds no label");
-        }
+        private static HultUI.Core.Elements.Element FirstLabel(HultUI.Core.Elements.Element cell) =>
+            LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(cell).FirstOrDefault()
+            ?? throw new Xunit.Sdk.XunitException("the cell holds no label");
 
         private static IEnumerable<HultUI.Core.Elements.Element> Descend(HultUI.Core.Elements.Element e)
         {
@@ -1183,7 +1164,8 @@ public class DiffViewTests
         /// out in the body's content space, so the scroll offset has to come off the Y.</summary>
         public void PressInBody(float x, float y)
         {
-            _session.Window.MouseDown(x, y - Body.ScrollOffsetY);
+            var at = LayoutProbe.OnScreen(new HultUI.Core.Primitives.Point(x, y), Body);
+            _session.Window.MouseDown(at.X, at.Y);
             _session.PumpFrame();
         }
 
