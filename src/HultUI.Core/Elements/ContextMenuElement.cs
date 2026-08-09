@@ -31,7 +31,7 @@ internal sealed class ContextMenuElement : Element
         _items = items;
         _theme = theme;
         _closeMenu = closeMenu;
-        _hasIcons = items.Any(i => i.Glyph is not null);
+        _hasIcons = items.Any(i => i.Glyph is not null || i.Icon is not null);
 
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerDownEvent>(OnPointerDown);
@@ -253,14 +253,19 @@ internal sealed class ContextMenuElement : Element
             var labelStyle = item.IsDisabled ? disabledStyle : item.IsDanger ? dangerStyle : itemStyle;
 
             // Leading glyph (fixed icon column, so labels stay aligned).
-            if (item.Glyph is not null)
+            if (item.Glyph is not null || item.Icon is not null)
             {
                 var glyphRect = new Rect(
                     box.X + _theme.ItemPadding.Left,
                     box.Y + y + _theme.ItemPadding.Top,
                     iconCol - _theme.IconGap,
                     textSize.Height);
-                ctx.DrawText(item.Glyph, glyphRect, labelStyle, TextOverflow.Clip, 1);
+                // Artwork wins over the text glyph; it is asked for the same colour the
+                // label resolved to, so disabled and danger items stay consistent.
+                if (item.Icon?.Invoke(labelStyle.TextColor) is { } icon)
+                    ctx.DrawImage(icon, glyphRect, ImageFit.Contain);
+                else if (item.Glyph is not null)
+                    ctx.DrawText(item.Glyph, glyphRect, labelStyle, TextOverflow.Clip, 1);
             }
 
             // Label

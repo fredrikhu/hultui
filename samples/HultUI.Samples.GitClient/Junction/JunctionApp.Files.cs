@@ -10,7 +10,7 @@ using HultUI.Core.Styling;
 using GitClient.Git;
 using GitClient.Theme;
 
-using HultUI.FileIcons;
+using HultUI.Icons;
 
 namespace GitClient.Junction;
 

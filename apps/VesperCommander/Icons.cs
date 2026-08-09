@@ -3,7 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Rendering.Skia;
-using HultUI.FileIcons;
+using HultUI.Icons;
 using SkiaSharp;
 
 namespace VesperCommander;

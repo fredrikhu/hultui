@@ -1,16 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    File-type icons shared by the HultUI apps. Which glyph a file gets is decided
-    by HultUI.Syntax: if the highlighter can colour it, it is code. That is the
-    whole point of the shared library — a per-app list of "code" extensions
-    drifts from the grammar set, and two apps' lists drift from each other.
+    Icon artwork shared by the HultUI apps: file-type glyphs (FileIcons) and the
+    Phosphor set the Junction design calls for (Phosphor). Both rasterize SVG path
+    data through the same cache.
+
+    Which glyph a *file* gets is decided by HultUI.Syntax: if the highlighter can
+    colour it, it is code. That is the point of sharing it — a per-app list of
+    "code" extensions drifts from the grammar set, and two apps' lists drift from
+    each other.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>HultUI.FileIcons</RootNamespace>
+    <RootNamespace>HultUI.Icons</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

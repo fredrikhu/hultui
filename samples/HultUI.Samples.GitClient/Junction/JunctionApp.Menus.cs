@@ -1,20 +1,29 @@
 using HultUI.Core.Elements;
 using GitClient.Git;
 
+using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
+using HultUI.Icons;
+
 namespace GitClient.Junction;
 
 public partial class JunctionApp
 {
     // ── Item builders ────────────────────────────────────────────────────
 
+    /// <summary>Phosphor artwork for a menu row, tinted to whatever colour the menu
+    /// resolved for that item's state (normal, disabled, danger).</summary>
+    private static Func<Color, IImageSource?> MenuIcon(string name) =>
+        color => Phosphor.Source(name, 14f, color);
+
     private static ContextMenuItem Item(string glyph, string label, Action run) =>
-        new() { Glyph = glyph, Label = label, Action = run };
+        new() { Icon = MenuIcon(glyph), Label = label, Action = run };
 
     private static ContextMenuItem Danger(string glyph, string label, Action run) =>
-        new() { Glyph = glyph, Label = label, Action = run, IsDanger = true };
+        new() { Icon = MenuIcon(glyph), Label = label, Action = run, IsDanger = true };
 
     private static ContextMenuItem SubMenu(string glyph, string label, IReadOnlyList<ContextMenuItem> children) =>
-        new() { Glyph = glyph, Label = label, Children = children };
+        new() { Icon = MenuIcon(glyph), Label = label, Children = children };
 
     private ContextMenuItem IncludeItem(string name)
     {

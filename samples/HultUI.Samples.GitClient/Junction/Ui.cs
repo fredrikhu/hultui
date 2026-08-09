@@ -6,6 +6,8 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using GitClient.Theme;
 
+using HultUI.Icons;
+
 namespace GitClient.Junction;
 
 /// <summary>
@@ -18,8 +20,13 @@ public static class Ui
 {
     // ── Text / glyphs ────────────────────────────────────────────────────
 
-    public static TextElement Icon(string glyph, float size, Color color) =>
-        Text.New(glyph).FontSize(size).TextColor(color);
+    /// <summary>
+    /// A Phosphor glyph as real vector artwork. <paramref name="name"/> is a Phosphor
+    /// icon name — use the constants in <see cref="Icons"/> rather than a literal, so a
+    /// typo is caught by IconNameTests instead of silently rendering an empty box.
+    /// </summary>
+    public static Element Icon(string name, float size, Color color) =>
+        Phosphor.Draw(name, size, color);
 
     public static TextElement Mono(string text, float size, Color color) =>
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);

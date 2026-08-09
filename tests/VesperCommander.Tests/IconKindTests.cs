@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using HultUI.FileIcons;
+using HultUI.Icons;
 using SkiaSharp;
 using Xunit;
 

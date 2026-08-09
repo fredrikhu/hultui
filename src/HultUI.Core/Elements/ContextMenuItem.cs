@@ -13,6 +13,18 @@ public sealed class ContextMenuItem
     /// reserves an icon column so labels stay aligned.</summary>
     public string? Glyph { get; init; }
 
+    /// <summary>
+    /// Optional leading icon as artwork, taking precedence over <see cref="Glyph"/>.
+    /// Reserves the same icon column.
+    ///
+    /// <para>It is a factory over the colour rather than a plain image because the menu
+    /// resolves that colour per item state — normal, disabled, or danger — and a
+    /// pre-tinted raster could not follow it. The app is handed the resolved colour and
+    /// returns matching artwork; icon sets that cache per colour (as HultUI.Icons does)
+    /// make the repeat calls free.</para>
+    /// </summary>
+    public Func<Primitives.Color, Rendering.IImageSource?>? Icon { get; init; }
+
     /// <summary>Destructive items paint their glyph and label in the theme's
     /// danger colour.</summary>
     public bool IsDanger { get; init; }
