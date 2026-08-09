@@ -4,22 +4,25 @@ using HultUI.Core.Rendering;
 using TextMateSharp.Grammars;
 using TextMateSharp.Registry;
 using TextMateSharp.Themes;
-using TmTheme = TextMateSharp.Themes.Theme;
+using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with HultUI.Core.Styling.Theme
 
-namespace VesperCommander;
+namespace HultUI.Syntax;
 
 /// <summary>
 /// Syntax tokenizer backed by TextMateSharp (VS Code's TextMate grammars, Dark+
-/// theme) — the same engine and palette the GitClient/Junction diff uses, so code
-/// previews read with real editor colors rather than a heuristic tint.
+/// theme), shared by every HultUI app that shows code — Vesper Commander's file
+/// preview and Junction's diff both run through here, so a file colours the same way
+/// in both.
 ///
-/// <para>Text is tokenized in full (per-line state carries block comments and
-/// multi-line strings across line breaks) and returned as per-line colored spans.
-/// Tokens the theme leaves at the default editor foreground produce no span, so
-/// plain identifiers keep the element's own text color.</para>
+/// <para>Text is tokenized in full — per-line state carries block comments and
+/// multi-line strings across line breaks, so a diff hunk alone would mis-colour — and
+/// returned as per-line coloured spans ready for <c>TextElement.Spans</c>. Tokens the
+/// theme leaves at the default editor foreground produce no span, so plain
+/// identifiers keep the element's own text colour (a diff row's add/delete tint stays
+/// visible between keywords).</para>
 ///
-/// <para>Thread-safe via a single gate; the preview excerpt is small (≤500 short
-/// lines) so a synchronous tokenize is cheap, but callers still memoize per file.</para>
+/// <para>Thread-safe via a single gate. Call it from a background thread: a large
+/// file tokenizes in the low hundreds of milliseconds, and callers memoize per file.</para>
 /// </summary>
 public static class SyntaxHighlighter
 {
@@ -90,6 +93,21 @@ public static class SyntaxHighlighter
     private const int MaxLineCount = 20_000;
     private static readonly TimeSpan LineBudget = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan FileBudget = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// Whether a grammar exists for <paramref name="path"/> — i.e. whether tokenizing
+    /// it could produce colour at all.
+    ///
+    /// <para>Callers that need to decide up front whether to take the highlighting
+    /// path should ask this rather than keep a private list of "code" extensions:
+    /// such a list silently diverges from the grammar set, which is exactly how
+    /// <c>.slnx</c>, <c>.csproj</c>, and <c>.ps1</c> ended up highlighting in one app
+    /// and not the other.</para>
+    /// </summary>
+    public static bool CanHighlight(string path)
+    {
+        lock (Gate) return GrammarFor(path) != null;
+    }
 
     /// <summary>
     /// Tokenizes <paramref name="text"/> as the language implied by

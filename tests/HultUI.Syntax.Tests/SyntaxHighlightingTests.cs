@@ -1,7 +1,8 @@
 using System.Linq;
+using HultUI.Syntax;
 using Xunit;
 
-namespace VesperCommander.Tests;
+namespace HultUI.Syntax.Tests;
 
 /// <summary>
 /// Which file types the preview colours. TextMateSharp bundles 64 languages keyed by
@@ -80,6 +81,43 @@ public class SyntaxHighlightingTests
 
         Assert.NotEmpty(viaXml);
         Assert.Equal(viaXml, viaAlias);
+    }
+
+    [Theory]
+    // The set Vesper's preview used to gate on (IconKind.Code) — a hand-kept list of
+    // 25 extensions for choosing a glyph, which quietly decided highlighting too.
+    [InlineData("a.cs")] [InlineData("a.json")] [InlineData("a.xml")] [InlineData("a.md")]
+    // …and the ones that list omitted, which is why they coloured in Junction's diff
+    // but not in Vesper's preview. CanHighlight is now the single answer for both.
+    [InlineData("a.csproj")] [InlineData("a.slnx")] [InlineData("a.props")]
+    [InlineData("a.targets")] [InlineData("a.ps1")] [InlineData("a.config")]
+    [InlineData("a.fs")] [InlineData("a.swift")] [InlineData("a.lua")] [InlineData("a.dart")]
+    [InlineData("Dockerfile")] [InlineData("Makefile")]
+    public void CanHighlight_IsTheSingleGateBothAppsAskNow(string fileName)
+    {
+        Assert.True(SyntaxHighlighter.CanHighlight(fileName), fileName);
+    }
+
+    [Theory]
+    [InlineData("photo.png")]
+    [InlineData("archive.zip")]
+    [InlineData("notes.unknownext")]
+    public void CanHighlight_IsFalseWithoutAGrammar(string fileName)
+    {
+        Assert.False(SyntaxHighlighter.CanHighlight(fileName), fileName);
+    }
+
+    [Fact]
+    public void CanHighlight_AgreesWithWhetherTokenizingProducesAnything()
+    {
+        // The predicate must not promise colour the tokenizer won't deliver, or a
+        // caller that branches on it renders an empty highlight path.
+        foreach (var name in new[] { "a.cs", "a.slnx", "a.ps1", "Dockerfile", "photo.png" })
+        {
+            bool claimed = SyntaxHighlighter.CanHighlight(name);
+            bool resolved = SyntaxHighlighter.TokenizeLines(name, "// x\n<a/>\n$y = 1\nFROM alpine\n") is not null;
+            Assert.Equal(claimed, resolved);
+        }
     }
 
     [Theory]

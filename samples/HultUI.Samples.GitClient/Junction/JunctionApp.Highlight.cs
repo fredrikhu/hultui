@@ -1,7 +1,6 @@
 using HultUI;
 using HultUI.Core.Rendering;
 using GitClient.Git;
-using GitClient.Highlighting;
 
 namespace GitClient.Junction;
 

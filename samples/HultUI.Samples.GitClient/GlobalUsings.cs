@@ -3,6 +3,10 @@
 global using Text = HultUI.Core.Builders.Text;
 global using TextArea = HultUI.Core.Builders.TextArea;
 
+// The syntax tokenizer moved to the shared HultUI.Syntax library; this keeps the
+// existing SyntaxHighlighter.* call sites reading unchanged.
+global using SyntaxHighlighter = HultUI.Syntax.SyntaxHighlighter;
+
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 

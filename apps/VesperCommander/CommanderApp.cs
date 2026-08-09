@@ -833,7 +833,7 @@ public partial class CommanderApp : Component, IDisposable
         _previewSpans = null;
         System.Threading.Tasks.Task.Run(() =>
         {
-            var spans = SyntaxHighlighter.SpansForText(name, excerpt);
+            var spans = HultUI.Syntax.SyntaxHighlighter.SpansForText(name, excerpt);
             Application.InvokeOnMainThread(() =>
             {
                 if (!ReferenceEquals(excerpt, _previewSpanExcerpt)) return;   // user moved on

@@ -8,7 +8,6 @@ using HultUI.Core.Rendering;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using GitClient.Git;
-using GitClient.Highlighting;
 using GitClient.Theme;
 
 namespace GitClient.Junction;

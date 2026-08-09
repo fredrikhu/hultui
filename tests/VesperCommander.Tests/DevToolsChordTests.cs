@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using HultUI.Core.Events;
 using HultUI.Headless;
 using Xunit;
@@ -65,6 +66,15 @@ public class DevToolsChordTests
             Session = HeadlessSession.Create(1240, 820);
             _app = new CommanderApp(Session.Application, Session.Window.Window, Root);
             Session.Application.SetRoot(_app.Mount());
+            Session.PumpFrame();
+
+            // Pin the pane explicitly. CommanderApp reads the developer's real
+            // settings.json, so with RestoreTabs on it reopens a saved session and the
+            // active folder is whatever that machine last had — which made the
+            // copy-as-path assertion pass or fail depending on the box it ran on.
+            typeof(CommanderApp)
+                .GetMethod("NavigateTo", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(_app, ['L', Root, null, false]);
             Session.PumpFrame();
         }
 

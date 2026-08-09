@@ -893,7 +893,11 @@ public partial class CommanderApp
                     .LineHeight(1.6f);
                 body.ScrollbarWidth = 7f;
                 body.Key = "pv-text#" + key;
-                if (Icons.KindFor(focused) == IconKind.Code
+                // Ask the highlighter, not the icon table: IconKind.Code lists 25
+                // extensions for picking a glyph, and gating on it meant .slnx, .csproj,
+                // .props and .ps1 previewed uncoloured here while Junction — which has no
+                // such gate — coloured them fine.
+                if (HultUI.Syntax.SyntaxHighlighter.CanHighlight(focused.Name)
                     && PreviewSpans(focused.Name, excerpt) is { } codeSpans)
                     body.Spans(codeSpans);   // VS Code Dark+ tokens (null while tokenizing off-thread)
                 // Focus drives the Full-mode ring; handlers capture only `this`, so
