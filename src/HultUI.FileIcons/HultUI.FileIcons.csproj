@@ -15,6 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="VesperCommander.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
     <ProjectReference Include="..\HultUI.Rendering.Skia\HultUI.Rendering.Skia.csproj" />
     <ProjectReference Include="..\HultUI.Syntax\HultUI.Syntax.csproj" />

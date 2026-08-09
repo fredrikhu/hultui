@@ -87,31 +87,35 @@ public static class FileIcons
         {
             if (Cache.TryGetValue(key, out var cached)) return cached;
 
-            var bmp = new SKBitmap(Supersample, Supersample, SKColorType.Rgba8888, SKAlphaType.Premul);
-            using (var canvas = new SKCanvas(bmp))
-            {
-                canvas.Clear(SKColors.Transparent);
-                canvas.Scale(Supersample / 16f);   // author in a 16-unit box
-                foreach (var (path, fill, stroke, color) in Parts(kind, palette))
-                {
-                    using var _ = path;
-                    var c = tint ?? color;
-                    using var paint = new SKPaint
-                    {
-                        IsAntialias = true,
-                        Color = new SKColor(c.R, c.G, c.B, c.A),
-                        Style = fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke,
-                        StrokeWidth = stroke,
-                        StrokeCap = SKStrokeCap.Round,
-                        StrokeJoin = SKStrokeJoin.Round,
-                    };
-                    canvas.DrawPath(path, paint);
-                }
-            }
-            var src = new SkiaImageSource(bmp);
+            var src = new SkiaImageSource(RenderBitmap(kind, palette, tint));
             Cache[key] = src;
             return src;
         }
+    }
+
+    /// <summary>Draws one glyph into a fresh supersampled bitmap.</summary>
+    internal static SKBitmap RenderBitmap(FileIconKind kind, FileIconPalette palette, Color? tint = null)
+    {
+        var bmp = new SKBitmap(Supersample, Supersample, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using var canvas = new SKCanvas(bmp);
+        canvas.Clear(SKColors.Transparent);
+        canvas.Scale(Supersample / 16f);   // author in a 16-unit box
+        foreach (var (path, fill, stroke, color) in Parts(kind, palette))
+        {
+            using var _ = path;
+            var c = tint ?? color;
+            using var paint = new SKPaint
+            {
+                IsAntialias = true,
+                Color = new SKColor(c.R, c.G, c.B, c.A),
+                Style = fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke,
+                StrokeWidth = stroke,
+                StrokeCap = SKStrokeCap.Round,
+                StrokeJoin = SKStrokeJoin.Round,
+            };
+            canvas.DrawPath(path, paint);
+        }
+        return bmp;
     }
 
     private static uint Pack(Color c) => ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
@@ -121,10 +125,18 @@ public static class FileIcons
     /// <summary>
     /// Parses path data authored in a <paramref name="from"/>-unit box and places it as a
     /// <paramref name="box"/>-unit glyph at (<paramref name="x"/>, <paramref name="y"/>).
+    ///
+    /// <para><paramref name="fillType"/> has to be passed explicitly for imported artwork.
+    /// SVG carries the fill rule as a presentation attribute — often, as in the Visual
+    /// Studio icon, buried in a CSS class rather than on the element — and Skia's path
+    /// parser reads only the <c>d</c> string, defaulting to nonzero. A shape whose holes
+    /// are wound the same way as its outline then fills solid instead of being cut out.</para>
     /// </summary>
-    private static SKPath Fitted(string d, float from, float box, float x, float y)
+    private static SKPath Fitted(string d, float from, float box, float x, float y,
+        SKPathFillType fillType = SKPathFillType.Winding)
     {
         var p = SKPath.ParseSvgPathData(d);
+        p.FillType = fillType;
         p.Transform(SKMatrix.CreateScale(box / from, box / from));
         p.Transform(SKMatrix.CreateTranslation(x, y));
         return p;
@@ -139,6 +151,10 @@ public static class FileIcons
     // masks nor gradients — but the mask path on its own IS the silhouette, notches
     // included, so filling it in the app accent is both exact and in-palette. Authored in
     // the file's 96-unit box; Fitted() scales it into the 16-unit one.
+    //
+    // The two trailing subpaths are the notches, and they are holes only under even-odd.
+    // The source declares that through a CSS class, which path data alone cannot carry —
+    // see Fitted(), and IconKindTests, which asserts both notches are actually cut out.
     private const string VisualStudioMark =
         "M68.89,95.6a6,6,0,0,0,3.93-.44L92.6,85.65A6,6,0,0,0,96,80.24V15.76a6,6,0,0,0-3.4-5.41L72.82.84A6,6,0,0,0,68.34.55," +
         "6,6,0,0,0,66,2L34.12,37.26,15.5,22l-1.63-1.4a4,4,0,0,0-3.61-.83,2.55,2.55,0,0,0-.53.18L2.46,23A4,4,0,0,0,0,26.37c0," +
@@ -183,14 +199,14 @@ public static class FileIcons
             // A solution is a container, so it gets the bare mark the way Folder does;
             // a project is a document, so it gets the page with the mark set into it.
             case FileIconKind.Solution:
-                yield return (Fitted(VisualStudioMark, 96f, 14f, 1f, 1f), true, 0, p.Accent400);
+                yield return (Fitted(VisualStudioMark, 96f, 14f, 1f, 1f, SKPathFillType.EvenOdd), true, 0, p.Accent400);
                 break;
 
             case FileIconKind.Project:
                 yield return (Svg(page), false, 1.2f, p.Accent600);
                 // Sized to clear the page's 1.2-wide outline on both sides rather than
                 // sit against it.
-                yield return (Fitted(VisualStudioMark, 96f, 7.8f, 4.3f, 6.1f), true, 0, p.Accent400);
+                yield return (Fitted(VisualStudioMark, 96f, 7.8f, 4.3f, 6.1f, SKPathFillType.EvenOdd), true, 0, p.Accent400);
                 break;
 
             default: // File

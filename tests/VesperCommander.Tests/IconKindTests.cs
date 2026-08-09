@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using HultUI.FileIcons;
+using SkiaSharp;
 using Xunit;
 
 namespace VesperCommander.Tests;
@@ -83,6 +84,32 @@ public class IconKindTests
             };
             Assert.Equal(expected, Kind(name));
         }
+    }
+
+    [Fact]
+    public void TheVisualStudioMarkHasBothNotchesCutOut()
+    {
+        // The mark's two triangular notches are separate subpaths, and they only become
+        // holes under even-odd. Skia's path parser reads the `d` string alone and
+        // defaults to nonzero, so the right notch — wound the same way as the outline —
+        // filled solid while the left one happened to work. Sample the middle of each.
+        using var bmp = FileIcons.RenderBitmap(FileIconKind.Solution, Icons.Palette);
+
+        // A point in the source's 96-unit box, mapped through the glyph's placement
+        // (14 units at offset 1) and then the 2x supersample.
+        static (int x, int y) At(float sx, float sy) =>
+            ((int)MathF.Round((sx * 14f / 96f + 1f) * 2f), (int)MathF.Round((sy * 14f / 96f + 1f) * 2f));
+
+        var right = At(63.7f, 48f);   // inside triangle (72,27.68) (47.21,48) (72,68.32)
+        var left = At(16.1f, 48f);    // inside triangle (12,34.27) (24.41,48) (12,61.73)
+
+        Assert.Equal((byte)0, bmp.GetPixel(right.x, right.y).Alpha);
+        Assert.Equal((byte)0, bmp.GetPixel(left.x, left.y).Alpha);
+
+        // …and solid just outside the right notch, so the assertions above cannot pass
+        // by the glyph having failed to render at all.
+        var body = At(80f, 48f);
+        Assert.True(bmp.GetPixel(body.x, body.y).Alpha > 200);
     }
 
     [Fact]
