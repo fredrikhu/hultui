@@ -78,7 +78,13 @@ HultUI.Rendering.Skia       SkiaSharp GPU renderer, HarfBuzz text shaping, font 
 HultUI.Platform.SDL3        SDL3 windowing, OpenGL context, input translation.
 HultUI.SourceGenerators      [Reactive] source generator (Roslyn incremental).
 HultUI                      Meta-package. Application class ties everything together.
+
+HultUI.Icons                Optional. SVG icons: the Phosphor set and file-type glyphs.
+HultUI.Syntax               Optional. TextMate syntax highlighting for code views.
 ```
+
+The last two are satellites an app references directly; nothing in the framework depends on
+them, so an app that needs neither pays for neither.
 
 ### Dependency Graph
 
@@ -169,6 +175,7 @@ out of a shipped build. See [DevTools](docs/DEVTOOLS.md).
 - [Drag and Drop](docs/DRAG-AND-DROP.md) -- internal element drag and OS file/text drops
 - [Custom Window Chrome](docs/CUSTOM-CHROME.md) -- borderless windows with custom title bars
 - [Multi-Window](docs/MULTI-WINDOW.md) -- multiple windows with shared state
+- [Icons](docs/ICONS.md) -- SVG icon rendering, the bundled Phosphor set, and file-type glyphs
 - [DevTools](docs/DEVTOOLS.md) -- element inspector (Ctrl+Shift+I) and performance HUD (F12)
 - [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
