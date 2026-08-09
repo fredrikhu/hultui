@@ -38,15 +38,19 @@ public class DiffSelectionTests
             session.PumpUntil(() => FirstCodeLabel(session) is { Layout.AbsoluteBorderBox.Height: > 0 },
                 System.TimeSpan.FromSeconds(20));
             var label = FirstCodeLabel(session) ?? throw new Xunit.Sdk.XunitException("no code label on screen");
-            // The row's box, not the label's: the dead strip is the part of the row the
-            // label does not cover, so pressing inside the label proves nothing. The label
-            // sits in the pan cell, which sits in the row.
-            var row = label.Parent?.Parent ?? throw new Xunit.Sdk.XunitException("the label has no row");
-            var box = row.Layout.AbsoluteBorderBox;
+            // The row's painted box, not the label's: the dead strip is the part of the row
+            // the label does not cover, so pressing inside the label proves nothing. The row
+            // is found by its relationship to the list rather than by counting parents —
+            // wrapping and panning change how many sit between it and the label.
+            var list = Field<HultUI.Core.Reactivity.Ref<Element>>(app, "_diffBodyRef").Current!;
+            var row = LayoutProbe.RowIn(label, list)
+                ?? throw new Xunit.Sdk.XunitException("the label is not inside a row of the list");
+            var box = LayoutProbe.Painted(row);
             Assert.True(box.Height > 0, "the row has no height");
 
-            float y = inset >= 0 ? box.Y + inset : box.Bottom + inset;
-            session.Window.MouseDown(box.X + box.Width / 2, y);
+            var at = inset >= 0 ? LayoutProbe.InsetFromTop(box, inset)
+                                : LayoutProbe.InsetFromBottom(box, -inset);
+            session.Window.MouseDown(at.X, at.Y);
             session.PumpFrame();
 
             // That *this* label began the drag, not merely that something did. "Any label"
@@ -54,7 +58,7 @@ public class DiffSelectionTests
             // happens at a row boundary — so it cannot tell a working row from a press that
             // slid off it.
             Assert.True(label.IsDragging,
-                $"a press {y - box.Y:0.0}px into a {box.Height:0}px row went somewhere other than its own line"
+                $"a press {at.Y - box.Y:0.0}px into a {box.Height:0}px row went somewhere other than its own line"
                 + (AnyLabelDragging(session) ? " (a different line took it)" : " (no line took it)"));
         });
     }
@@ -73,6 +77,9 @@ public class DiffSelectionTests
             foreach (var c in e.Children) Walk(c);
         }
     }
+
+    private static T Field<T>(JunctionApp app, string name) =>
+        (T)typeof(JunctionApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
 
     private static bool AnyLabelDragging(HeadlessSession session)
     {
