@@ -1,0 +1,24 @@
+# Line endings.
+#
+# Everything text is stored and checked out as LF, on every platform. The repository was
+# already 488 files LF to 79 CRLF, with three files mixed inside themselves; that spread
+# meant an edit made on Windows could rewrite a whole file's worth of line endings and bury
+# a real change in thousands of lines of noise.
+#
+# eol=lf rather than plain `text=auto` deliberately: `text=auto` alone normalises the index
+# but checks out the platform's native ending, so the working tree here would turn CRLF and
+# no longer match what is committed. Pinning both keeps what you see equal to what git has.
+# .NET, MSBuild and every editor in use read LF without complaint, and the two Windows-only
+# script types in the tree (.ps1, .iss) were already LF.
+* text=auto eol=lf
+
+# Binary: never touched, never diffed as text. `text=auto` would infer this correctly, but
+# an inference is a thing that can go wrong on a file that happens to look textual.
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.dll binary
+*.exe binary
+*.snk binary
