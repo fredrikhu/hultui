@@ -478,11 +478,16 @@ public partial class CommanderApp : Component, IDisposable
         // to the root even when the release lands off the rows (empty list, footer, …).
         // The Find dialog's corner-grip resize tracks the same way: move updates the size,
         // up ends the drag, both regardless of where the pointer wandered.
-        root.On<PointerMoveEvent>(ev => { if (_findResizing) UpdateFindResize(ev.Position.X, ev.Position.Y); });
+        root.On<PointerMoveEvent>(ev =>
+        {
+            if (_findResizing) UpdateFindResize(ev.Position.X, ev.Position.Y);
+            if (_diffHDragging) DragDiffBarTo(ev.Position.X);
+        });
         root.On<PointerUpEvent>(ev =>
         {
             if (ev.Button == 2) EndRightMark();
             if (_findResizing) _findResizing = false;
+            _diffHDragging = false;
         });
 
         // Overlays render above the shell, each keyed so conditional presence

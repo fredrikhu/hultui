@@ -123,6 +123,182 @@ public class DiffViewTests
     }
 
     [Fact]
+    public void ALongLineScrollsSidewaysInsteadOfBeingCutOff()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 400) + "\n");
+        t.WriteRight("a.txt", new string('R', 400) + "\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        float max = t.MaxScrollX();
+        Assert.True(max > 0, "a 400-character line left nothing to scroll into");
+
+        var (cell, text) = t.FirstLineCell();
+        float atRest = text.Layout.AbsoluteBorderBox.X;
+
+        t.Press(KeyCode.Right);
+        Assert.Equal(atRest - 28f, t.FirstLineCell().text.Layout.AbsoluteBorderBox.X, 1);
+
+        t.Press(KeyCode.Right, KeyModifiers.Ctrl);
+        Assert.Equal(atRest - max, t.FirstLineCell().text.Layout.AbsoluteBorderBox.X, 1);
+
+        t.Press(KeyCode.Left, KeyModifiers.Ctrl);
+        Assert.Equal(atRest, t.FirstLineCell().text.Layout.AbsoluteBorderBox.X, 1);
+        Assert.Equal(cell.Layout.AbsoluteContentBox.X, t.FirstLineCell().text.Layout.AbsoluteBorderBox.X, 1);
+    }
+
+    [Fact]
+    public void TheScrolledLineIsWidenedSoTextArrivesFromTheRight()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 400) + "\n");
+        t.WriteRight("a.txt", new string('R', 400) + "\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        float atRest = t.FirstLineCell().text.Layout.AbsoluteBorderBox.Width;
+
+        t.Press(KeyCode.Right);
+
+        // Shifting alone would leave a 28px hole at the right edge; the stretch has to give
+        // the line back the width it was moved by.
+        Assert.Equal(atRest + 28f, t.FirstLineCell().text.Layout.AbsoluteBorderBox.Width, 1);
+    }
+
+    [Fact]
+    public void ALongLineFillsItsCellInsteadOfStoppingAtTheLastWordThatFits()
+    {
+        using var t = new Fixture();
+        // Minified JSON: one enormous line whose only break opportunities are commas and
+        // colons, far apart. This is the shape that made the text stop mid-cell.
+        var json = "[" + string.Join(",", System.Linq.Enumerable.Range(0, 400)
+            .Select(i => $"{{\"name\":\"thread_{i}\",\"ph\":\"M\",\"pid\":1,\"tid\":2}}")) + "]\n";
+        t.WriteLeft("a.json", json);
+        t.WriteRight("a.json", json.Replace("\"pid\":1", "\"pid\":9"));
+        t.Open();
+
+        t.OpenDiffOn("a.json");
+
+        var (cell, text) = t.FirstLineCell();
+        float drawn = t.DrawnWidth(text);
+        float cellW = cell.Layout.AbsoluteContentBox.Width;
+        // The line runs to thousands of characters, so the drawn part should reach the
+        // cell's edge — within one character of it, since only whole characters are kept.
+        // (The element box always fills the cell; it is the laid-out text that fell short.)
+        Assert.True(drawn > cellW - 12f, $"the line stopped {cellW - drawn:0}px short of the cell edge");
+        Assert.True(drawn <= cellW + 0.5f, "the line overflowed the cell");
+    }
+
+    [Fact]
+    public void TheScrollbarThumbTracksTheOffset()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 4000) + "\n");
+        t.WriteRight("a.txt", new string('R', 4000) + "\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        var (track, thumb) = t.ScrollbarParts();
+        Assert.True(thumb.Layout.AbsoluteBorderBox.Width < track.Layout.AbsoluteContentBox.Width,
+            "a thumb that fills the track says there is nothing to scroll");
+        Assert.Equal(track.Layout.AbsoluteContentBox.X, thumb.Layout.AbsoluteBorderBox.X, 1);
+
+        t.Press(KeyCode.Right, KeyModifiers.Ctrl);   // all the way right
+
+        var (track2, thumb2) = t.ScrollbarParts();
+        Assert.Equal(track2.Layout.AbsoluteContentBox.Right,
+            thumb2.Layout.AbsoluteBorderBox.Right, 1);
+    }
+
+    [Fact]
+    public void DraggingTheScrollbarMovesTheText()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 4000) + "\n");
+        t.WriteRight("a.txt", new string('R', 4000) + "\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        float atRest = t.FirstLineCell().text.Layout.AbsoluteBorderBox.X;
+
+        var (track, _) = t.ScrollbarParts();
+        var box = track.Layout.AbsoluteContentBox;
+        t.DragScrollbar(from: box.X + 20, to: box.X + box.Width / 2);
+
+        Assert.True(t.FirstLineCell().text.Layout.AbsoluteBorderBox.X < atRest - 100,
+            "dragging the thumb to the middle barely moved the text");
+    }
+
+    [Fact]
+    public void AShortComparisonHasNoScrollbarAtAll()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "one\n");
+        t.WriteRight("a.txt", "two\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        Assert.Null(t.TryScrollbarTrack());
+    }
+
+    [Fact]
+    public void AShortComparisonHasNowhereToScrollSideways()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "one\n");
+        t.WriteRight("a.txt", "two\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        Assert.Equal(0f, t.MaxScrollX());
+        float atRest = t.FirstLineCell().text.Layout.AbsoluteBorderBox.X;
+        t.Press(KeyCode.Right);
+        Assert.Equal(atRest, t.FirstLineCell().text.Layout.AbsoluteBorderBox.X, 1);
+    }
+
+    [Fact]
+    public void ClickingALineToSelectItDoesNotSwallowTheViewsOwnKeys()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", Lines("left {0}", 200));
+        t.WriteRight("a.txt", Lines("right {0}", 200));
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        t.ClickFirstLine();
+        // Without this the rest of the test proves nothing — a click that missed the label
+        // leaves focus where it was and the keys would work for the old reason.
+        Assert.Same(t.FirstLineCell().text, t.Focused);
+
+        t.Press(KeyCode.Down);
+        Assert.True(t.ScrollY > 0, "Down stopped scrolling once a line had focus");
+
+        t.Press(KeyCode.Escape);
+        Assert.False(t.DiffOpen, "Escape stopped closing the view once a line had focus");
+    }
+
+    [Fact]
+    public void TheTwoSidesSelectSeparately()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "one\n");
+        t.WriteRight("a.txt", "two\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        var left = (HultUI.Core.Elements.TextElement)t.FirstLineCell().text;
+        var right = (HultUI.Core.Elements.TextElement)t.FirstLineRightCell().text;
+        Assert.True(left.Selectable);
+        Assert.True(right.Selectable);
+        Assert.NotNull(left.SelectionGroup);
+        Assert.NotSame(left.SelectionGroup, right.SelectionGroup);
+    }
+
+    [Fact]
     public void ThePaneGetsTheKeyboardBackAfterLeavingTheDiffView()
     {
         using var t = new Fixture();
@@ -202,6 +378,88 @@ public class DiffViewTests
         Assert.Equal("Missing", t.DiffState);
     }
 
+    // ── Syntax colouring ─────────────────────────────────────────────────
+    [Fact]
+    public void ARecognisedFileTypeGetsSyntaxColours()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.cs", "class Old { }\n");
+        t.WriteRight("a.cs", "class New { }\n");
+        t.Open();
+
+        t.OpenDiffOn("a.cs");
+        t.WaitForHighlight();
+
+        var spans = ((HultUI.Core.Elements.TextElement)t.FirstLineCell().text).Spans;
+        Assert.NotNull(spans);
+        // "class" is a keyword, so it must come out in some colour of its own.
+        Assert.Contains(spans!, s => s.Start == 0 && s.Length == 5 && s.Color != default);
+    }
+
+    [Fact]
+    public void AnUnknownFileTypeStillMarksTheChangedRun()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.zzz", "value one\n");
+        t.WriteRight("a.zzz", "value two\n");
+        t.Open();
+
+        t.OpenDiffOn("a.zzz");
+
+        var spans = ((HultUI.Core.Elements.TextElement)t.FirstLineCell().text).Spans;
+        var mark = Assert.Single(spans!);
+        Assert.Equal("one", "value one".Substring(mark.Start, mark.Length));
+        // The marker is a background wash; repainting the glyphs in a 28%-alpha tint would
+        // make the changed word the *least* readable thing on the line.
+        Assert.NotEqual(default, mark.Background);
+        Assert.Equal(default, mark.Color);
+    }
+
+    [Fact]
+    public void TheChangedRunKeepsItsSyntaxColourUnderTheMarker()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.cs", "class Old { }\n");
+        t.WriteRight("a.cs", "class New { }\n");
+        t.Open();
+
+        t.OpenDiffOn("a.cs");
+        t.WaitForHighlight();
+
+        var spans = ((HultUI.Core.Elements.TextElement)t.FirstLineCell().text).Spans!;
+        // Sorted and non-overlapping is the contract TextElement.Spans is documented under,
+        // and the merge is where it would be broken.
+        for (int i = 1; i < spans.Count; i++)
+            Assert.True(spans[i].Start >= spans[i - 1].Start + spans[i - 1].Length,
+                $"span {i} at {spans[i].Start} overlaps the one ending at {spans[i - 1].Start + spans[i - 1].Length}");
+        // The keyword is outside the changed run, so it is coloured but not marked; the
+        // changed word carries both.
+        Assert.Contains(spans, s => s.Color != default && s.Background == default);
+        Assert.Contains(spans, s => s.Color != default && s.Background != default);
+    }
+
+    [Fact]
+    public void ColoursFromThePreviousComparisonDoNotLeakIntoTheNext()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.cs", "class Old { }\n");
+        t.WriteRight("a.cs", "class New { }\n");
+        t.WriteLeft("b.zzz", "plain one\n");
+        t.WriteRight("b.zzz", "plain two\n");
+        t.Open();
+
+        t.OpenDiffOn("a.cs");
+        t.Press(KeyCode.Escape);
+        t.OpenDiffOn("b.zzz");
+        t.Session.PumpFrames(5);
+
+        // b.zzz has no grammar, so nothing here should be coloured. The generation key also
+        // guards the harder case — a slow tokenize landing after the switch — but that one
+        // can't be made to happen on demand, so this covers the reachable half.
+        var spans = ((HultUI.Core.Elements.TextElement)t.FirstLineCell().text).Spans!;
+        Assert.All(spans, s => Assert.Equal(default, s.Color));
+    }
+
     private static string Lines(string format, int count) =>
         string.Concat(System.Linq.Enumerable.Range(1, count)
             .Select(i => string.Format(format, i) + "\n"));
@@ -246,11 +504,65 @@ public class DiffViewTests
             Press(KeyCode.F3);
         }
 
-        public void Press(KeyCode key)
+        public void Press(KeyCode key, KeyModifiers modifiers = KeyModifiers.None)
         {
-            _session.Window.PressKey(key);
+            _session.Window.PressKey(key, modifiers);
             _session.PumpFrame();
         }
+
+        public void ClickFirstLine()
+        {
+            var box = FirstLineCell().text.Layout.AbsoluteBorderBox;
+            _session.Window.Click(box.X + 4, box.Y + box.Height / 2);
+            _session.PumpFrame();
+        }
+
+        public float MaxScrollX() => (float)Call("DiffMaxScrollX")!;
+
+        /// <summary>How wide the text a label actually painted is — not its element box,
+        /// which always stretches to the cell. A selectable TextElement keeps the lines it
+        /// laid out so it can hit-test a selection against them; this reads those.</summary>
+        public float DrawnWidth(HultUI.Core.Elements.Element label)
+        {
+            var lines = (HultUI.Core.Rendering.TextLineBox[])
+                typeof(HultUI.Core.Elements.TextElement)
+                    .GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .GetValue(label)!;
+            float w = 0;
+            foreach (var line in lines) w = System.Math.Max(w, line.Width);
+            return w;
+        }
+
+        public HultUI.Core.Elements.BoxElement? TryScrollbarTrack() =>
+            Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.BoxElement>>("_diffHTrackRef").Current is { Parent: not null } track
+                ? track : null;
+
+        public (HultUI.Core.Elements.Element track, HultUI.Core.Elements.Element thumb) ScrollbarParts()
+        {
+            var track = TryScrollbarTrack() ?? throw new Xunit.Sdk.XunitException("there is no horizontal scrollbar");
+            return (track, track.Children[0]);
+        }
+
+        public void DragScrollbar(float from, float to)
+        {
+            var y = ScrollbarParts().track.Layout.AbsoluteContentBox.Y + 4;
+            _session.Window.MouseDown(from, y);
+            _session.PumpFrame();
+            _session.Window.MoveMouse(to, y);
+            _session.PumpFrame();
+            _session.Window.MouseUp(to, y);
+            _session.PumpFrame();
+        }
+
+        public HultUI.Core.Elements.Element? Focused => _session.Window.Window.FocusedElement;
+
+        public HeadlessSession Session => _session;
+
+        /// <summary>Wait for the background tokenize to land. Genuinely asynchronous work,
+        /// which is what PumpUntil is for — the assertions that follow are about content,
+        /// not about whether an idle app repaints.</summary>
+        public void WaitForHighlight() =>
+            _session.PumpUntil(() => Field<object?>("_diffHlLeft") != null, System.TimeSpan.FromSeconds(20));
 
         public bool DiffOpen => Field<bool>("_diffOpen");
         public int Cursor(char side) => (int)Call("Cursor", side)!;
@@ -268,6 +580,13 @@ public class DiffViewTests
         public (HultUI.Core.Elements.Element cell, HultUI.Core.Elements.Element text) FirstLineCell()
         {
             var cell = FirstRow().Children[1];
+            return (cell, cell.Children[0]);
+        }
+
+        /// <summary>The right-hand code cell of the first line — grid column 4.</summary>
+        public (HultUI.Core.Elements.Element cell, HultUI.Core.Elements.Element text) FirstLineRightCell()
+        {
+            var cell = FirstRow().Children[4];
             return (cell, cell.Children[0]);
         }
 
