@@ -263,6 +263,7 @@ public partial class JunctionApp : Component, IDisposable
         // The diff's sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
         _settings.Normalize();
+        _diffWrap = _settings.DiffWrap;
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
         _activeRepoPath = _settings.ActiveRepoPath ?? ActiveWorkspace?.RepoPaths.FirstOrDefault() ?? "";
@@ -776,6 +777,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         _settings.ActiveWorkspaceId = _activeWorkspaceId;
         _settings.ActiveRepoPath = _activeRepoPath;
+        _settings.DiffWrap = _diffWrap;
         JunctionSettings.Save(_settings);
     }
 

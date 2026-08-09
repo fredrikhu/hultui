@@ -167,6 +167,7 @@ public partial class JunctionApp
     {
         _diffWrap = !_diffWrap;
         _diffPan.Reset();   // the other mode's sideways offset means nothing in this one
+        Persist();
         MarkDirty();
     }
 

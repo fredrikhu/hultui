@@ -56,6 +56,26 @@ public class DiffWrapTests
         });
     }
 
+    // A reading preference, not a per-file decision — someone who wants wrapping wants it for
+    // every diff, and pressing w on each one is the friction that makes a feature go unused.
+    [Fact]
+    public void TheWrapChoiceIsWrittenToSettingsAndReadBackOnStart()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var settings = Field<JunctionSettingsData>(app, "_settings");
+            Assert.False(settings.DiffWrap);
+
+            Press(session, app, KeyCode.W);
+
+            Assert.True(settings.DiffWrap, "toggling wrap did not reach the settings");
+
+            // A fresh app over those settings starts wrapped.
+            var revived = new JunctionApp(session.Application, session.Window.Window, settings);
+            Assert.True(Wrap(revived));
+        });
+    }
+
     [Fact]
     public void AWrappedLineGetsARowTallerThanOneLine()
     {

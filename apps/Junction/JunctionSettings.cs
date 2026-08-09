@@ -15,6 +15,12 @@ public sealed class JunctionSettingsData
     public string? ActiveWorkspaceId { get; set; }
     public string? ActiveRepoPath { get; set; }
 
+    /// <summary>Whether the diff wraps long lines rather than scrolling sideways to them.
+    /// Remembered because it is a reading preference, not a per-file decision: someone who
+    /// wants wrapping wants it for every diff they open, and having to press w each time is
+    /// the kind of small friction that makes a feature go unused.</summary>
+    public bool DiffWrap { get; set; }
+
     // Junction: per-repo badge swatch id (path → swatch id), driving the repo's
     // initial tile everywhere. Missing entries fall back to a deterministic seed.
     public Dictionary<string, string> RepoBadges { get; set; } = new();
