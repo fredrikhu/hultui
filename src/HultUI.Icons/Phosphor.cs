@@ -53,18 +53,28 @@ public static partial class Phosphor
     public static IImageSource? Source(string name, float size, Color color, float scale = 1f) =>
         Paths.ContainsKey(name) ? Rasterize(name, color, size, scale) : null;
 
-    /// <summary>Drops every cached raster. Call after a palette change.</summary>
+    /// <summary>
+    /// Drops every cached raster, so the next draw re-cuts at the current scale/palette.
+    ///
+    /// <para>Retires rather than disposes: elements already in the tree hold the sources
+    /// handed out before this call, and freeing the bitmaps underneath them makes every
+    /// icon vanish until something rebuilds. The retired batch is released on the next
+    /// invalidation, by which time a rebuild has long replaced the references.</para>
+    /// </summary>
     public static void InvalidateCache()
     {
         lock (Gate)
         {
-            foreach (var v in Cache.Values) v.Dispose();
+            foreach (var v in Retired) v.Dispose();
+            Retired.Clear();
+            Retired.AddRange(Cache.Values);
             Cache.Clear();
         }
     }
 
     private static readonly object Gate = new();
     private static readonly Dictionary<(string, uint, int), SkiaImageSource> Cache = new();
+    private static readonly List<SkiaImageSource> Retired = [];
 
     private static SkiaImageSource Rasterize(string name, Color color, float size, float scale)
     {

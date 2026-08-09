@@ -59,9 +59,10 @@ public static class FileIcons
     /// An image element showing <paramref name="kind"/>. A <paramref name="tint"/> overrides
     /// every part's colour (a marked row goes red); otherwise each part uses its palette colour.
     /// </summary>
-    public static Element Draw(FileIconKind kind, FileIconPalette palette, Color? tint = null, float size = 16f)
+    public static Element Draw(FileIconKind kind, FileIconPalette palette, Color? tint = null, float size = 16f,
+        float scale = 1f)
     {
-        var img = Image.New(Rasterize(kind, palette, tint));
+        var img = Image.New(Rasterize(kind, palette, tint, size, scale));
         img.Fit = ImageFit.Contain;
         return img.Width(size).Height(size).FlexShrink(0);
     }
@@ -71,35 +72,43 @@ public static class FileIcons
     {
         lock (Gate)
         {
-            foreach (var v in Cache.Values) v.Dispose();
+            // Retired rather than disposed — see Phosphor.InvalidateCache.
+            foreach (var v in Retired) v.Dispose();
+            Retired.Clear();
+            Retired.AddRange(Cache.Values);
             Cache.Clear();
         }
     }
 
     private static readonly object Gate = new();
-    private static readonly Dictionary<(FileIconKind, FileIconPalette, uint), SkiaImageSource> Cache = new();
-    private const int Supersample = 32;   // rendered at 2x for a 16px display
+    private static readonly Dictionary<(FileIconKind, FileIconPalette, uint, int), SkiaImageSource> Cache = new();
+    private static readonly List<SkiaImageSource> Retired = [];
+    private const float AuthoringBox = 16f;   // every glyph below is drawn in a 16-unit box
 
-    private static SkiaImageSource Rasterize(FileIconKind kind, FileIconPalette palette, Color? tint)
+    private static SkiaImageSource Rasterize(FileIconKind kind, FileIconPalette palette, Color? tint,
+        float size, float scale)
     {
-        var key = (kind, palette, tint is { } t ? Pack(t) : 0xFFFF_FFFFu);
+        // Cut at the size it will occupy in device pixels, so the renderer resamples
+        // nothing. A fixed raster looked soft at 100% and coarse at fractional scales.
+        int px = Math.Clamp((int)MathF.Ceiling(size * scale), 8, 512);
+        var key = (kind, palette, tint is { } t ? Pack(t) : 0xFFFF_FFFFu, px);
         lock (Gate)
         {
             if (Cache.TryGetValue(key, out var cached)) return cached;
 
-            var src = new SkiaImageSource(RenderBitmap(kind, palette, tint));
+            var src = new SkiaImageSource(RenderBitmap(kind, palette, tint, px));
             Cache[key] = src;
             return src;
         }
     }
 
     /// <summary>Draws one glyph into a fresh supersampled bitmap.</summary>
-    internal static SKBitmap RenderBitmap(FileIconKind kind, FileIconPalette palette, Color? tint = null)
+    internal static SKBitmap RenderBitmap(FileIconKind kind, FileIconPalette palette, Color? tint = null, int px = 32)
     {
-        var bmp = new SKBitmap(Supersample, Supersample, SKColorType.Rgba8888, SKAlphaType.Premul);
+        var bmp = new SKBitmap(px, px, SKColorType.Rgba8888, SKAlphaType.Premul);
         using var canvas = new SKCanvas(bmp);
         canvas.Clear(SKColors.Transparent);
-        canvas.Scale(Supersample / 16f);   // author in a 16-unit box
+        canvas.Scale(px / AuthoringBox);
         foreach (var (path, fill, stroke, color) in Parts(kind, palette))
         {
             using var _ = path;

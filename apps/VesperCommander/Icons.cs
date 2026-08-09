@@ -21,6 +21,24 @@ public enum IconKind { Folder, Parent, File, Code, Image, Archive, Solution, Pro
 /// </summary>
 public static class Icons
 {
+    /// <summary>
+    /// Device pixels per layout unit, kept in step with the window by
+    /// <see cref="CommanderApp"/>. Icons rasterize at this scale so the renderer never
+    /// resamples them — the same treatment Junction's Phosphor glyphs get, so the two
+    /// apps render shared artwork identically.
+    /// </summary>
+    public static float DisplayScale
+    {
+        get => _displayScale;
+        set
+        {
+            if (MathF.Abs(_displayScale - value) < 0.001f) return;
+            _displayScale = value;
+            InvalidateCache();   // every cached raster was cut for the old scale
+        }
+    }
+    private static float _displayScale = 1f;
+
     /// <summary>The app's Nocturne ramp, handed to the shared icon library.</summary>
     public static FileIconPalette Palette => new(
         Theme.Nocturne.Accent400, Theme.Nocturne.Accent500, Theme.Nocturne.Accent600,
@@ -58,7 +76,7 @@ public static class Icons
 
     public static Element Draw(IconKind kind, Color? tint = null, float size = 16f)
     {
-        if (SharedKind(kind) is { } shared) return FileIcons.Draw(shared, Palette, tint, size);
+        if (SharedKind(kind) is { } shared) return FileIcons.Draw(shared, Palette, tint, size, DisplayScale);
 
         var img = Image.New(Rasterize(kind, tint));
         img.Fit = ImageFit.Contain;

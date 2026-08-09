@@ -282,10 +282,15 @@ public partial class JunctionApp : Component, IDisposable
     // the build every frame of a drag.
     private void OnWindowResize()
     {
-        // Resize is also when a window can land on a monitor with a different scale, so
-        // this is where icon rasters get re-cut for the new device resolution.
-        Ui.DisplayScale = _window.DisplayScale;
-        if (RecomputeResponsive()) Rerender();
+        // Dragging to a monitor with different scaling arrives as a resize. The rasters
+        // cached for the old scale are retired here, so a rebuild has to follow
+        // unconditionally: without it the tree keeps holding retired sources and every
+        // icon disappears until something else happens to rebuild — which is why the
+        // icons only came back on crossing the responsive breakpoint.
+        float scale = _window.DisplayScale;
+        bool scaleChanged = MathF.Abs(Ui.DisplayScale - scale) >= 0.001f;
+        Ui.DisplayScale = scale;
+        if (RecomputeResponsive() || scaleChanged) Rerender();
     }
 
     // Recompute the responsive flags from the current content width; returns true

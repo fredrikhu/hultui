@@ -1906,6 +1906,12 @@ public sealed class Window : IOverlayHost, IDisposable
         {
             if (FindMaximizeButton() is not BoxElement btn || ReferenceEquals(btn, _maxButtonHovered)) return;
             _maxButtonHovered = btn;
+            btn.SetInteractionHovered(true);
+            // Both, and in this order. Declarative hover styling (.OnHover, which is what
+            // HoverBg compiles to) is applied by the interaction state, not by handlers,
+            // so dispatching the event alone silently stopped highlighting this button
+            // when HoverBg went declarative. Apps with imperative OnPointerEnter handlers
+            // still need the event.
             EventDispatcher.DispatchDirect(new PointerEnterEvent { Position = default, Modifiers = KeyModifiers.None }, btn);
             // Capture the colour the app's hover styling just applied so we can
             // re-assert it after rebuilds (see ReassertMaximizeButtonHover).
@@ -1916,6 +1922,7 @@ public sealed class Window : IOverlayHost, IDisposable
             if (_maxButtonHovered is not { } old) return;
             _maxButtonHovered = null;
             _maxButtonHoverBg = null;
+            old.SetInteractionHovered(false);
             EventDispatcher.DispatchDirect(new PointerLeaveEvent { Position = default, Modifiers = KeyModifiers.None }, old);
         }
         _root?.MarkPaintDirty();

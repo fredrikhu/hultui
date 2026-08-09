@@ -300,6 +300,10 @@ public partial class CommanderApp : Component, IDisposable
     {
         _app = app;
         _window = window;
+        // Icons rasterize at the display scale, so keep it current — including when the
+        // window is dragged to a monitor with different scaling, which arrives as a resize.
+        Icons.DisplayScale = window.DisplayScale;
+        window.Resized += OnWindowResized;
         _settings = SettingsStore.Load();
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
@@ -2121,8 +2125,19 @@ public partial class CommanderApp : Component, IDisposable
         ? (_active == 'L' ? _loadedL : _loadedR)
         : _loadedL && _loadedR;
 
+    private void OnWindowResized()
+    {
+        // A scale change retires the cached rasters; rebuild so every element picks up
+        // sources cut for the new resolution instead of holding retired ones.
+        float scale = _window.DisplayScale;
+        if (MathF.Abs(Icons.DisplayScale - scale) < 0.001f) return;
+        Icons.DisplayScale = scale;
+        MarkDirty();
+    }
+
     public void Dispose()
     {
+        _window.Resized -= OnWindowResized;
         SaveSession();
         (_lastImage as IDisposable)?.Dispose();
         _thumbsCache?.Dispose();
