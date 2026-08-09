@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -28,7 +29,10 @@ public sealed class FixedMetricsMeasureContext(
     float charWidthRatio = 0.5f,
     float lineHeightRatio = 1.2f) : IMeasureContext
 {
-    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    // The overflow mode is accepted and ignored: this context exists to give render-log
+    // baselines identical metrics on every OS, and both modes truncate to the same box.
+    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow = TextOverflow.Clip)
     {
         if (string.IsNullOrEmpty(text))
             return Size.Zero;

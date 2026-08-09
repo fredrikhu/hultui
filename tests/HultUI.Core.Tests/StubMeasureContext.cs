@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -10,7 +11,10 @@ namespace HultUI.Core.Tests;
 /// </summary>
 public sealed class StubMeasureContext(float charWidth = 7f, float lineHeight = 14f) : IMeasureContext
 {
-    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    // Overflow is accepted and ignored: both modes truncate to the same box, and this
+    // stub reports geometry, not which characters survive.
+    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow = TextOverflow.Clip)
     {
         if (string.IsNullOrEmpty(text))
             return Size.Zero;

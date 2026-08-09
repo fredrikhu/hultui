@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -16,12 +17,13 @@ public sealed class SkiaMeasureContext : IMeasureContext
         _pipeline = pipeline;
     }
 
-    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow = TextOverflow.Clip)
     {
         if (string.IsNullOrEmpty(text))
             return Size.Zero;
 
-        var layout = _pipeline.Layout(text, style, maxWidth, maxLines);
+        var layout = _pipeline.Layout(text, style, maxWidth, maxLines, overflow);
         return layout.Size;
     }
 }

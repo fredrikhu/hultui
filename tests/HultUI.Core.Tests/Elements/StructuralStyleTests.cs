@@ -22,7 +22,8 @@ public class StructuralStyleTests
     // (font size 0) measures zero height — exactly the symptom under test.
     private sealed class FontSizeMeasureContext : IMeasureContext
     {
-        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip)
             => string.IsNullOrEmpty(text) ? Size.Zero : new Size(text.Length * 7f, style.FontSize);
     }
 

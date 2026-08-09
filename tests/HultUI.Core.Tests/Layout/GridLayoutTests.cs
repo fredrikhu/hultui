@@ -283,10 +283,11 @@ public class GridLayoutTests
     {
         private readonly StubMeasureContext _inner = new();
         public int Count;
-        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+        public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+            TextOverflow overflow = TextOverflow.Clip)
         {
             Count++;
-            return _inner.MeasureText(text, style, maxWidth, maxLines);
+            return _inner.MeasureText(text, style, maxWidth, maxLines, overflow);
         }
     }
 }

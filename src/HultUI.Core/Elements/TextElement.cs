@@ -314,8 +314,12 @@ public class TextElement : Element
         }
     }
 
+    // Measured under the mode it will be drawn with. Clip and Ellipsis truncate
+    // differently, so measuring under one and painting under the other reports a width
+    // the element never occupies — and couples every Ellipsis label to changes in the
+    // Clip path, which is how a clipping fix once resized cards that never clip.
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
-        ctx.MeasureText(Content, ResolvedInherited, availableWidth, MaxLines);
+        ctx.MeasureText(Content, ResolvedInherited, availableWidth, MaxLines, Overflow);
 
     public override void Render(IRenderContext ctx)
     {
