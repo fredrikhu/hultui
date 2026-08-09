@@ -3,6 +3,8 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using Junction.Git;
 using Junction.Theme;
@@ -19,6 +21,28 @@ public partial class JunctionApp
     private readonly object _diffGroupUnified = new();
     private readonly object _diffGroupLeft = new();
     private readonly object _diffGroupRight = new();
+
+    // ── Horizontal position ──────────────────────────────────────────────
+    //
+    // App state, applied as a negative left margin on the code label inside a cell that
+    // clips. Not the list's own ScrollOffsetX: VirtualListElement pins its content width to
+    // the viewport (UpdateContentSize), so that offset can never leave zero. Going through
+    // the margin instead means virtualization is no obstacle — a recycled row simply renders
+    // at the current offset — and the line-number columns stay put while the code moves.
+    private float _diffScrollX;
+    // Width of the longest line in the diff on screen, and the path it was measured for.
+    private float _diffLongestPx;
+    private string _diffLongestFor = "";
+
+    /// <summary>One press of ← / →. Roughly four monospace characters.</summary>
+    private const float DiffHStep = 28f;
+    private const float DiffBarH = 10f;
+    private const float DiffThumbMin = 30f;
+
+    private readonly Ref<BoxElement> _diffHTrackRef = new();
+    private readonly Ref<Element> _diffBodyRef = new();
+    private bool _diffHDragging;
+    private float _diffHGrab;
 
     private Element BuildDiffPane(string path, GitFileDiff? diff, DiffInteract? interact = null)
     {
@@ -170,6 +194,15 @@ public partial class JunctionApp
 
         var hl = HighlightForCurrent(diff.Path);
         var rows = _diffSplit ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
+
+        // Decided before the list is built, and that ordering is load-bearing: WithRef points
+        // the Ref at the element being *built*, which has no layout yet, and only PatchFrom
+        // repoints it to the live one. Ask afterwards and DiffCodeWidth reads zero, falls
+        // back to the window — several times this pane's width — and concludes there is
+        // nothing to scroll, on every build forever.
+        MeasureLongestDiffLine(diff, rows);
+        _diffBarBuilt = DiffMaxScrollX() > 0;
+
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
             .Items(rows)
@@ -186,19 +219,178 @@ public partial class JunctionApp
         list.TabIndex = 0;
         list.KeyboardScroll();
         list.On<KeyDownEvent>(DiffPaneKey);
-        return list;
+        list.WithRef(_diffBodyRef);
+        // A trackpad's sideways swipe arrives as DeltaX, a mouse's as Shift+DeltaY. The
+        // list's own handler sees them first and clamps them to nothing, since its content
+        // is exactly as wide as its viewport.
+        list.On<ScrollEvent>(ev =>
+        {
+            float dx = ev.DeltaX != 0 ? ev.DeltaX
+                : ev.Modifiers.HasFlag(KeyModifiers.Shift) ? ev.DeltaY : 0;
+            if (dx != 0) DiffScrollH(-dx * DiffHStep);
+        });
+
+        if (!_diffBarBuilt) return list;
+
+        var col = Flex.Column(gap: 0).FlexGrow(1);
+        col.AddChild(list);
+        col.AddChild(BuildDiffHScrollbar());
+        return col;
     }
 
-    // Scrolling is the list's own (KeyboardScroll); this only adds the app-level
-    // key the diff pane owns.
+    // Whether the last build included the scrollbar.
+    private bool _diffBarBuilt;
+
+    /// <summary>
+    /// Ask for one more build when the scrollbar's presence was decided on a guess.
+    ///
+    /// <para>Whether there is anything to scroll to depends on how wide the diff pane is,
+    /// and the first build after opening a file runs before any layout — so
+    /// <see cref="DiffCodeWidth"/> falls back to the window, which here is several times
+    /// the pane. Once the body has a real width the answer can flip, and nothing else would
+    /// mark the tree dirty to act on it. Rebuilds at most once: after it, the two agree.</para>
+    /// </summary>
+    private void SettleDiffScrollbar()
+    {
+        if (_diffBodyRef.Current is null) return;
+        // Read after the frame has been laid out. OnAfterBuild is too early — the list has
+        // no box for this frame yet, and on the first build it is a brand new element with
+        // no prior layout at all, so the width DiffCodeWidth needs is simply not knowable
+        // here. Same reason ScrollRowIntoView defers.
+        _window.RequestPostFrameCallback(() =>
+        {
+            if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 }) return;
+            if (_diffBarBuilt == DiffMaxScrollX() > 0) return;
+            MarkDirty();   // settles: after the rebuild the two agree
+        });
+    }
+
+    /// <summary>The width of the widest line on screen, which is how far right the view can
+    /// scroll. Monospace, so the line with the most characters is the widest and one
+    /// measurement settles it. Recomputed only when the file changes — the rows are the same
+    /// objects across a rebuild, and measuring is a shaping call.</summary>
+    private void MeasureLongestDiffLine(GitFileDiff diff, List<DiffRow> rows)
+    {
+        var key = diff.Path + "#" + (_diffSplit ? "s" : "u") + "#" + rows.Count;
+        if (_diffLongestFor == key) return;
+        _diffLongestFor = key;
+
+        var longest = "";
+        foreach (var r in rows)
+        {
+            Consider(r.Line?.Content);
+            Consider(r.Left?.Content);
+            Consider(r.Right?.Content);
+        }
+        _diffLongestPx = TextMeasure.MeasureWidth(longest, 12f, Fonts.Mono);
+
+        void Consider(string? s) { if (s != null && s.Length > longest.Length) longest = s; }
+    }
+
+    /// <summary>Width of one code column: what the fixed number and sign columns leave over,
+    /// halved in split mode. Taken from the laid-out body when there is one, and from the
+    /// window before that — the first build after opening a file runs before any layout and
+    /// still has to decide whether there is a scrollbar.</summary>
+    private float DiffCodeWidth()
+    {
+        float body = _diffBodyRef.Current is { Layout.AbsoluteContentBox.Width: > 0 } b
+            ? b.Layout.AbsoluteContentBox.Width
+            : _window.LayoutWidth;
+        float fixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f;
+        float code = body - fixedCols;
+        return Math.Max(0, _diffSplit ? code / 2 : code);
+    }
+
+    private float DiffMaxScrollX() => Math.Max(0, _diffLongestPx - DiffCodeWidth());
+
+    /// <summary>Move the view sideways. Unlike a ScrollView's own offset this is app state,
+    /// so it needs a rebuild to reach the rows.</summary>
+    private void DiffScrollH(float delta, float? to = null)
+    {
+        float next = Math.Clamp(to ?? _diffScrollX + delta, 0, DiffMaxScrollX());
+        if (next == _diffScrollX) return;
+        _diffScrollX = next;
+        MarkDirty();
+    }
+
+    /// <summary>Wraps a code label in a cell that clips, and shifts it by the current offset.
+    /// The negative margin moves the line left and — because the stretch that sizes it
+    /// subtracts the horizontal margin — widens it by the same amount, so the text arriving
+    /// from the right is actually laid out rather than leaving a hole.</summary>
+    private Element DiffCodeCell(TextElement mono)
+    {
+        if (_diffScrollX > 0) mono.Margin(new Thickness(0, 0, 0, -_diffScrollX));
+        return Box.New().FlexGrow(1).FlexShrink(1).OverflowX(Overflow.Hidden).Children(mono);
+    }
+
+    // Vertical scrolling is the list's own (KeyboardScroll); sideways is not, because the
+    // list cannot do it — see _diffScrollX.
     private void DiffPaneKey(KeyDownEvent e)
     {
-        if (e.Key == KeyCode.Escape && _diffFull)
+        bool ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        switch (e.Key)
         {
-            _diffFull = false;
-            MarkDirty();
-            e.StopPropagation = true;
+            case KeyCode.Escape when _diffFull:
+                _diffFull = false;
+                MarkDirty();
+                e.StopPropagation = true;
+                break;
+            case KeyCode.Left when ctrl: DiffScrollH(0, to: 0); e.StopPropagation = true; break;
+            case KeyCode.Right when ctrl: DiffScrollH(0, to: float.MaxValue); e.StopPropagation = true; break;
+            case KeyCode.Left: DiffScrollH(-DiffHStep); e.StopPropagation = true; break;
+            case KeyCode.Right: DiffScrollH(DiffHStep); e.StopPropagation = true; break;
         }
+    }
+
+    // ── Horizontal scrollbar ─────────────────────────────────────────────
+    // Hand-built, for the same reason the offset is: the list has no horizontal scroll of
+    // its own to draw one from.
+    private (float x, float width, float thumb) DiffBarGeometry()
+    {
+        var box = _diffHTrackRef.Current?.Layout.AbsoluteContentBox;
+        float x = box?.X ?? 0;
+        float width = box is { Width: > 0 } ? box.Value.Width : _window.LayoutWidth;
+        float code = DiffCodeWidth();
+        float content = code + DiffMaxScrollX();
+        float thumb = content > 0 ? Math.Clamp(width * (code / content), DiffThumbMin, width) : width;
+        return (x, width, thumb);
+    }
+
+    private Element BuildDiffHScrollbar()
+    {
+        var (_, width, thumb) = DiffBarGeometry();
+        float max = DiffMaxScrollX();
+        float offset = max > 0 ? (width - thumb) * (_diffScrollX / max) : 0;
+
+        var track = Box.New().Height(DiffBarH).FlexShrink(0)
+            .Background(Nocturne.Surface)
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
+            .WithRef(_diffHTrackRef);
+
+        track.AddChild(Box.New()
+            .Height(DiffBarH - 4).Width(thumb).Margin(new Thickness(1, 0, 0, offset))
+            .CornerRadius(3f).Background(Nocturne.Neutral700).Cursor(CursorType.Pointer));
+
+        track.On<PointerDownEvent>(ev =>
+        {
+            var (tx, w, th) = DiffBarGeometry();
+            float local = ev.Position.X - tx;
+            float thumbAt = max > 0 ? (w - th) * (_diffScrollX / max) : 0;
+            _diffHGrab = local >= thumbAt && local <= thumbAt + th ? local - thumbAt : th / 2;
+            _diffHDragging = true;
+            DragDiffBarTo(ev.Position.X);
+            ev.StopPropagation = true;
+        });
+        return track;
+    }
+
+    private void DragDiffBarTo(float pointerX)
+    {
+        var (x, width, thumb) = DiffBarGeometry();
+        float travel = width - thumb;
+        if (travel <= 0) return;
+        float thumbAt = Math.Clamp(pointerX - x - _diffHGrab, 0, travel);
+        DiffScrollH(0, to: thumbAt / travel * DiffMaxScrollX());
     }
 
     private static List<DiffRow> FlattenUnified(GitFileDiff diff, FileHighlight? hl)
@@ -368,11 +560,14 @@ public partial class JunctionApp
         row.AddChild(NumCell(line.NewLineNumber, 46f));
         row.AddChild(Box.New().Width(16).JustifyContent(JustifyContent.Center)
             .Children(Ui.Mono(sign, 12f, signColor)));
-        row.AddChild(Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
-            .Selectable().SelectionGroup(_diffGroupUnified)
-            .Spans(spans)
-            .FlexGrow(1).Padding(new Thickness(2, 14, 2, 0))
-            .MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
+        // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
+        // says "there is more that way", where an ellipsis says "this is all there is".
+        row.AddChild(DiffCodeCell(
+            Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
+                .Selectable().SelectionGroup(_diffGroupUnified)
+                .Spans(spans)
+                .Padding(new Thickness(2, 14, 2, 0))
+                .MaxLines(1).OverflowMode(TextOverflow.Clip)));
 
         if (selectable)
         {
@@ -429,10 +624,12 @@ public partial class JunctionApp
             .Background(bg);
         if (isLeft) half.BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         half.AddChild(NumCell(num, 44f));
-        half.AddChild(Ui.Mono(text, 12f, code).Selectable()
-            .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight)
-            .Spans(spans).FlexGrow(1).FlexShrink(1)
-            .Padding(new Thickness(2, 10, 2, 0)).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
+        // Both halves share one offset, so the two files stay aligned as they move.
+        half.AddChild(DiffCodeCell(
+            Ui.Mono(text, 12f, code).Selectable()
+                .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight)
+                .Spans(spans)
+                .Padding(new Thickness(2, 10, 2, 0)).MaxLines(1).OverflowMode(TextOverflow.Clip)));
         return half;
     }
 

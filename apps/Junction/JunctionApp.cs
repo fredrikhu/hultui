@@ -477,6 +477,11 @@ public partial class JunctionApp : Component, IDisposable
             .FontSize(13f)
             .Children(titleBar, body);
 
+        // A scrollbar drag ends wherever the button comes up, which is routinely off the
+        // thumb — so the move and the release are tracked at the root, not on the track.
+        root.On<PointerMoveEvent>(ev => { if (_diffHDragging) DragDiffBarTo(ev.Position.X); });
+        root.On<PointerUpEvent>(_ => _diffHDragging = false);
+
         void Overlay(string key, Element el) { el.Key = key; root.AddChild(el); }
 
         if (_diffFull) Overlay("fullscreen-diff", BuildFullscreenDiff());
@@ -537,6 +542,8 @@ public partial class JunctionApp : Component, IDisposable
 
     protected override void OnAfterBuild()
     {
+        SettleDiffScrollbar();
+
         if (_pendingPaletteFocus)
         {
             _pendingPaletteFocus = false;
