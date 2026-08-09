@@ -90,6 +90,7 @@ public static class Icons
         foreach (var v in _cache.Values) v.Dispose();
         _cache.Clear();
         FileIcons.InvalidateCache();   // the shared glyphs read the same live ramp
+        Phosphor.InvalidateCache();    // …as do the chrome and dialog glyphs
     }
 
     private static readonly Dictionary<long, SkiaImageSource> _cache = new();

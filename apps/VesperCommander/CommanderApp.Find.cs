@@ -219,12 +219,12 @@ public partial class CommanderApp
         // Collapse the path breadcrumb-style ("C:\…\a\b\c") so a deep folder can't wrap the
         // header onto a second line. Budget = card width minus the title, close ✕ and paddings.
         float pathBudget = _findW - 28f - EstTextWidth("Find files", mono: false) - 8f - 30f;
-        var card = Card(_findW, "Find files", CollapsePath(Dir(_findSide), pathBudget), "⌕");
+        var card = Card(_findW, "Find files", CollapsePath(Dir(_findSide), pathBudget), Glyphs.Search);
 
         // Pattern + optional "containing text" inputs.
-        card.AddChild(FindInputRow("⌕", _findPattern, "*.rs, name fragment, or /regex/…",
+        card.AddChild(FindInputRow(Glyphs.Search, _findPattern, "*.rs, name fragment, or /regex/…",
             _findPatternRef, v => { _findPattern = v; RunFind(); }));
-        card.AddChild(FindInputRow("≡", _findContains, "Containing text (optional)…",
+        card.AddChild(FindInputRow(Glyphs.TextContent, _findContains, "Containing text (optional)…",
             null, v => { _findContains = v; RunFind(); }));
 
         // Scope + option toggles.
@@ -246,13 +246,13 @@ public partial class CommanderApp
         return Backdrop(card, topAligned: true, topPad: 70f);
     }
 
-    private Element FindInputRow(string glyph, string value, string placeholder,
+    private Element FindInputRow(string icon, string value, string placeholder,
         Ref<TextInputElement>? refBox, Action<string> onChange)
     {
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(8, 14, 8, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        row.AddChild(Ui.Icon(glyph, 14f, Nocturne.On(0.45)));
+        row.AddChild(Ui.Icon(icon, 14f, Nocturne.On(0.45)));
         // Explicit height: a flex-only TextInput collapses its content box and paints
         // neither text nor placeholder (known HultUI gotcha). 30 clears the 13.5px field
         // font's ascenders/descenders — 22 clipped them top and bottom.
@@ -271,7 +271,7 @@ public partial class CommanderApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .BorderColor(on ? Nocturne.Accent : Nocturne.Neutral600).BorderWidth(1.5f)
             .Background(on ? Nocturne.Accent : Color.Transparent);
-        if (on) box.AddChild(Ui.Icon("✓", 9f, Nocturne.Accent100));
+        if (on) box.AddChild(Ui.Icon(Glyphs.Check, 9f, Nocturne.Accent100));
         row.AddChild(box);
         row.AddChild(Text.New(label).FontSize(11.5f).TextColor(Nocturne.Neutral300));
         row.OnClick(_ => toggle());
@@ -425,7 +425,7 @@ public partial class CommanderApp
 
         if (_findSearching)
         {
-            footer.AddChild(Ui.Icon("◜", 12f, Nocturne.Accent));   // spinner stand-in
+            footer.AddChild(Ui.Icon(Glyphs.Spinner, 12f, Nocturne.Accent));   // spinner stand-in
             footer.AddChild(Ui.Mono($"Searching… {_findScanned} of ~{_findApproxTotal} folders · {_findResults.Count} found",
                 10.5f, Nocturne.On(0.55)));
             footer.AddChild(Box.New().FlexGrow(1));
@@ -453,7 +453,7 @@ public partial class CommanderApp
         if (_findDenied > 0)
         {
             var banner = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
-            banner.AddChild(Ui.Icon("⚠", 11f, Nocturne.MarkRed));
+            banner.AddChild(Ui.Icon(Glyphs.Warning, 11f, Nocturne.MarkRed));
             banner.AddChild(Ui.Mono($"{_findDenied} folder{(_findDenied == 1 ? "" : "s")} skipped — access denied",
                 10f, Nocturne.MarkRed));
             footer.AddChild(banner);
@@ -470,7 +470,7 @@ public partial class CommanderApp
         // into an odd crescent. Big top/left padding keeps a comfortable hit target.
         var grip = Box.New().Cursor(CursorType.ResizeNWSE)
             .Padding(new Thickness(6, 0, 0, 9))
-            .Children(Ui.Icon("◢", 14f, Nocturne.On(0.50)))
+            .Children(Ui.Icon(Glyphs.ResizeGrip, 14f, Nocturne.On(0.50)))
             .Tooltip("Drag to resize");
         grip.Position.Type = PositionType.Absolute;
         grip.Position.Right = Dimension.Px(1);

@@ -34,20 +34,20 @@ public partial class CommanderApp
     }
 
     /// <summary>A Nocturne card shell: the shared <see cref="DialogCard"/> frame plus a
-    /// header. With a <paramref name="glyph"/> it's Junction's accent app-mark tile +
+    /// header. With a <paramref name="icon"/> it's Junction's accent app-mark tile +
     /// stacked title/subtitle + bordered close (the family look for titled dialogs);
     /// without one it falls back to the compact title-row header.</summary>
-    private BoxElement Card(float width, string title, string? subtitle, string? glyph = null)
+    private BoxElement Card(float width, string title, string? subtitle, string? icon = null)
     {
         var card = DialogCard(width);
 
-        var header = Flex.Row(gap: glyph != null ? 12 : 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(glyph != null ? 12 : 10, 14, glyph != null ? 12 : 10, 14))
+        var header = Flex.Row(gap: icon != null ? 12 : 8).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(icon != null ? 12 : 10, 14, icon != null ? 12 : 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        if (glyph != null)
+        if (icon != null)
         {
-            header.AddChild(Ui.HeaderTile(glyph));
+            header.AddChild(Ui.HeaderTile(icon));
             var titleCol = Flex.Column(gap: 2).FlexShrink(1).FlexGrow(1);
             titleCol.AddChild(Text.New(title).FontSize(15f).FontWeight(FontWeight.Medium)
                 .TextColor(Nocturne.Text).MaxLines(1));
@@ -55,7 +55,7 @@ public partial class CommanderApp
                 titleCol.AddChild(Ui.Mono(subtitle, 11f, Nocturne.On(0.5))
                     .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
             header.AddChild(titleCol);
-            header.AddChild(Ui.IconButton("✕", CloseOverlays, "Close", 28f));
+            header.AddChild(Ui.IconButton(Glyphs.Close, CloseOverlays, "Close", 28f));
         }
         else
         {
@@ -69,7 +69,7 @@ public partial class CommanderApp
             header.AddChild(Box.New().FlexGrow(1));
             var close = Box.New().Cursor(CursorType.Pointer)
                 .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f)
-                .Children(Ui.Icon("✕", 12f, Nocturne.Neutral600));
+                .Children(Ui.Icon(Glyphs.Close, 12f, Nocturne.Neutral600));
             close.OnClick(_ => CloseOverlays());
             header.AddChild(close.HoverBg(Nocturne.Neutral900, Color.Transparent));
         }
@@ -80,7 +80,7 @@ public partial class CommanderApp
     // ── Drive picker (Alt+F1 / Alt+F2 or the breadcrumb drive crumb) ─────
     private Element BuildDrivePicker(char side)
     {
-        var card = Card(420, "Select drive", side == 'L' ? "left pane" : "right pane", "▤");
+        var card = Card(420, "Select drive", side == 'L' ? "left pane" : "right pane", Glyphs.Drives);
 
         var listBox = Flex.Column(gap: 0).Padding(new Thickness(6, 6, 6, 6));
         for (int i = 0; i < _drives.Count; i++)
@@ -138,7 +138,7 @@ public partial class CommanderApp
         var queryRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        queryRow.AddChild(Ui.Icon("⌕", 15f, Nocturne.On(0.45)));
+        queryRow.AddChild(Ui.Icon(Glyphs.Search, 15f, Nocturne.On(0.45)));
         var input = Ui.Field(TextInput.New(_paletteQuery));
         input.PlaceholderText("Type a command…");
         input.OnTextChanged(q => { _paletteQuery = q; _paletteSel = 0; MarkDirty(); });
@@ -353,7 +353,7 @@ public partial class CommanderApp
     {
         int processed = op.Done + op.Skipped + op.Failed;
         var card = Card(560, op.IsMove ? "Moving" : "Copying", $"{processed} of {op.Items.Count}",
-            op.IsMove ? "⇄" : "⧉");
+            op.IsMove ? Glyphs.Swap : Glyphs.Copy);
 
         var body = Flex.Column(gap: 12).Padding(new Thickness(12, 16, 12, 16));
 
@@ -422,17 +422,19 @@ public partial class CommanderApp
     {
         var e = op.Items[i];
         byte st = op.Status[i];
-        (string glyph, Color color, string text) = st switch
+        (string icon, Color color, string text) = st switch
         {
-            1 => ("▶", Nocturne.Accent, "copying"),
-            2 => ("✓", DoneGreen, "done"),
-            3 => ("–", Nocturne.On(0.35), "skipped"),
-            4 => ("✕", Nocturne.MarkRed, "failed"),
-            _ => ("·", Nocturne.On(0.35), "queued"),
+            1 => (Glyphs.Play, Nocturne.Accent, "copying"),
+            2 => (Glyphs.Check, DoneGreen, "done"),
+            3 => (Glyphs.Minus, Nocturne.On(0.35), "skipped"),
+            4 => (Glyphs.Close, Nocturne.MarkRed, "failed"),
+            _ => (Glyphs.Dot, Nocturne.On(0.35), "queued"),
         };
         var row = Grid.Of("14px 1fr 64px 96px", gap: 10).Height(22)
             .AlignItems(AlignItems.Center).Padding(new Thickness(0, 10, 0, 10));
-        row.AddChild(Ui.Icon(glyph, 10f, color).TextAlign(TextAlign.Center).GridCell(0, 0));
+        // JustifySelf rather than TextAlign: the status mark is artwork now, and an image
+        // fills the box it is given instead of centring text inside a wider one.
+        row.AddChild(Ui.Icon(icon, 10f, color).JustifySelf(JustifySelf.Center).GridCell(0, 0));
         row.AddChild(Ui.Mono(e.Name, 11f, st == 1 ? Nocturne.Text : Nocturne.On(0.70))
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridCell(0, 1));
         row.AddChild(Ui.Mono(FileSystem.ByteLabel(op.ItemBytes[i]), 10.5f, Nocturne.On(0.45))
@@ -445,7 +447,7 @@ public partial class CommanderApp
     private Element BuildBookmarks()
     {
         if (_bookmarkSel >= _bookmarks.Count) _bookmarkSel = Math.Max(0, _bookmarks.Count - 1);
-        var card = Card(900, "Bookmarks", "Hotkeys jump the active pane", "★");
+        var card = Card(900, "Bookmarks", "Hotkeys jump the active pane", Glyphs.Bookmarks);
 
         var body = Grid.Of("260px 1fr").MinHeight(240);
 
@@ -484,7 +486,7 @@ public partial class CommanderApp
         if (selected)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13))
                .BorderColor(Nocturne.Accent600).BorderWidth(1f);
-        row.AddChild(Ui.Icon("▸", 11f, Nocturne.DirText));
+        row.AddChild(Ui.Icon(Glyphs.CaretRight, 11f, Nocturne.DirText));
         row.AddChild(Ui.Mono(b.Name, 11.5f, selected ? Nocturne.Text : Nocturne.On(0.80))
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         row.OnClick(_ => { _bookmarkSel = index; MarkDirty(); });

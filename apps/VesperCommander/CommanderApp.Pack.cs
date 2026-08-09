@@ -170,7 +170,7 @@ public partial class CommanderApp
     private Element BuildPack()
     {
         long bytes = _packItems.Sum(e => e.IsDir ? 0 : e.Size);
-        var card = Card(520, "Pack", $"{_packItems.Count} item{(_packItems.Count == 1 ? "" : "s")} · {FileSystem.ByteLabel(bytes)}", "⊞");
+        var card = Card(520, "Pack", $"{_packItems.Count} item{(_packItems.Count == 1 ? "" : "s")} · {FileSystem.ByteLabel(bytes)}", Glyphs.Pack);
 
         // Archive name.
         var nameRow = PackSection("ARCHIVE NAME");

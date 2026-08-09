@@ -3,7 +3,9 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Icons;
 using VesperCommander.Theme;
 
 namespace VesperCommander;
@@ -51,7 +53,7 @@ public partial class CommanderApp
             .CornerRadius(Nocturne.RadiusMd)
             .Cursor(CursorType.Pointer)
             .Tooltip("Search & commands (Ctrl P)");
-        search.AddChild(Ui.Icon("⌕", 13f, Nocturne.On(0.55)));
+        search.AddChild(Ui.Icon(Glyphs.Search, 13f, Nocturne.On(0.55)));
         search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
         search.AddChild(Ui.Kbd("Ctrl P"));
         search.OnClick(_ => TogglePalette());
@@ -61,17 +63,17 @@ public partial class CommanderApp
         right.AddChild(Box.New().Width(10));
 
         var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
-        controls.AddChild(WinButton("—", "Minimize", () => _window.Minimize(), Nocturne.Neutral800));
-        controls.AddChild(WinButton("▢", "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800)
+        controls.AddChild(WinButton(Glyphs.WinMinimize, "Minimize", () => _window.Minimize(), Nocturne.Neutral800));
+        controls.AddChild(WinButton(Glyphs.WinMaximize, "Maximize", () => _window.ToggleMaximize(), Nocturne.Neutral800)
             .WindowMaximizeButton());
-        controls.AddChild(WinButton("✕", "Close", () => _window.Close(), new Color(232, 17, 35)));
+        controls.AddChild(WinButton(Glyphs.WinClose, "Close", () => _window.Close(), new Color(232, 17, 35)));
         right.AddChild(controls);
 
         bar.AddChild(right);
         return bar;
     }
 
-    private BoxElement WinButton(string glyph, string tooltip, Action onClick, Color hoverBg)
+    private BoxElement WinButton(string icon, string tooltip, Action onClick, Color hoverBg)
     {
         // No pointer cursor: Windows caption buttons keep the arrow, and the maximize
         // button here has to anyway — it is non-client so Snap Layouts works, which puts
@@ -80,7 +82,9 @@ public partial class CommanderApp
         var b = Flex.Row(gap: 0).Width(46).Height(40)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Tooltip(tooltip);
-        b.AddChild(Ui.Icon(glyph, 11f, Nocturne.On(0.75)));
+        // 13 rather than 11: the caption marks are hairlines, and below this the bar in
+        // the minimize glyph lands under one device pixel and washes out.
+        b.AddChild(Ui.Icon(icon, 13f, Nocturne.On(0.75)));
         b.OnClick(_ => onClick());
         return b.HoverBg(hoverBg, Color.Transparent);
     }
@@ -114,13 +118,20 @@ public partial class CommanderApp
             rail.AddChild(RailButton(b.Name[..1].ToUpperInvariant(),
                 $"{b.Name} ({HotkeyLabel(idx)})", () => JumpBookmark(idx)));
         }
-        rail.AddChild(RailButton("+", "Bookmarks (Ctrl+D)", OpenBookmarks));
+        rail.AddChild(RailTile(Ui.Icon(Glyphs.Plus, 13f, Nocturne.Neutral300),
+            "Bookmarks (Ctrl+D)", OpenBookmarks));
         return rail;
     }
 
+    // A bookmark's initial letter. Text, not an icon — it is the bookmark's name, and
+    // there is no glyph for "D".
+    private BoxElement RailButton(string letter, string tooltip, Action onClick) =>
+        RailTile(Text.New(letter).FontSize(12f).FontWeight(FontWeight.SemiBold)
+            .TextColor(Nocturne.Neutral300), tooltip, onClick);
+
     // A rail action as a Junction-style tile: a rounded neutral square with a
-    // hairline border and a semibold glyph, sized to match the accent app-mark.
-    private BoxElement RailButton(string glyph, string tooltip, Action onClick)
+    // hairline border, sized to match the accent app-mark.
+    private BoxElement RailTile(Element content, string tooltip, Action onClick)
     {
         var b = Box.New().Width(26).Height(26).FlexShrink(0)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -128,8 +139,7 @@ public partial class CommanderApp
             .Background(Nocturne.Neutral900)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .Cursor(CursorType.Pointer).Tooltip(tooltip)
-            .Children(Text.New(glyph).FontSize(12f).FontWeight(FontWeight.SemiBold)
-                .TextColor(Nocturne.Neutral300));
+            .Children(content);
         b.OnClick(_ => onClick());
         return b.HoverBg(Nocturne.Neutral800, Nocturne.Neutral900);
     }
@@ -216,7 +226,7 @@ public partial class CommanderApp
         var plus = Box.New()
             .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(new CornerRadius(6, 6, 0, 0))
             .Cursor(CursorType.Pointer).Tooltip("New tab (Ctrl+T)")
-            .Children(Ui.Icon("+", 13f, Nocturne.On(0.45)));
+            .Children(Ui.Icon(Glyphs.Plus, 13f, Nocturne.On(0.45)));
         plus.OnClick(_ => NewTab(side));
         strip.AddChild(plus.HoverBg(Nocturne.Neutral900, Color.Transparent));
 
@@ -369,7 +379,7 @@ public partial class CommanderApp
         row.AddChild(Ui.Mono(CollapsePath(path, budget), 11.5f, active ? Nocturne.Accent200 : Nocturne.On(0.80))
             .FlexGrow(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         if (active)
-            row.AddChild(Ui.Icon("●", 9f, Nocturne.Accent));
+            row.AddChild(Ui.Icon(Glyphs.Dot, 9f, Nocturne.Accent));
         else
         {
             row.OnClick(_ => { CloseHistoryPopover(); _active = side; NavigateTo(side, path); });
@@ -391,7 +401,7 @@ public partial class CommanderApp
         if (on) chip.Background(Nocturne.Bg);
 
         if (tab.Locked)
-            chip.AddChild(Ui.Icon("⚿", 10f, on ? Nocturne.Accent300 : Nocturne.On(0.40)));
+            chip.AddChild(Ui.Icon(Glyphs.Lock, 10f, on ? Nocturne.Accent300 : Nocturne.On(0.40)));
         chip.AddChild(Text.New(TabLabel(tab.Dir)).FontSize(11.5f)
             .FontWeight(on ? FontWeight.Medium : FontWeight.Regular)
             .TextColor(on ? Nocturne.Text : Nocturne.Neutral500));
@@ -404,15 +414,20 @@ public partial class CommanderApp
         return chip;
     }
 
+    /// <summary>Phosphor artwork for a menu row, tinted to whatever colour the menu
+    /// resolved for that item's state (normal, disabled, danger).</summary>
+    private static Func<Color, IImageSource?> MenuIcon(string name) =>
+        color => Phosphor.Source(name, Ui.IconBox(14f), color, Icons.DisplayScale);
+
     private IReadOnlyList<ContextMenuItem> TabMenu(char side, int index)
     {
         var tab = Tabs(side)[index];
         var canClose = Tabs(side).Count > 1;
         return
         [
-            new() { Glyph = "⧉", Label = "Duplicate tab", Action = () => DuplicateTab(side, index) },
-            new() { Glyph = "⇄", Label = "Open in other pane", Action = () => OpenTabInOtherPane(side, index) },
-            new() { Glyph = tab.Locked ? "⚿" : "⚿", Label = tab.Locked ? "Unlock tab" : "Lock tab (read-only)", Action = () => ToggleTabLock(side, index) },
+            new() { Icon = MenuIcon(Glyphs.Copy), Label = "Duplicate tab", Action = () => DuplicateTab(side, index) },
+            new() { Icon = MenuIcon(Glyphs.Swap), Label = "Open in other pane", Action = () => OpenTabInOtherPane(side, index) },
+            new() { Icon = MenuIcon(Glyphs.Lock), Label = tab.Locked ? "Unlock tab" : "Lock tab (read-only)", Action = () => ToggleTabLock(side, index) },
             ContextMenuItem.Separator(),
             new() { Label = "Close tab", ShortcutHint = "Ctrl+W", Action = () => CloseTab(side, index), IsDisabled = !canClose },
             new() { Label = "Close others", Action = () => CloseOtherTabs(side, index), IsDisabled = !canClose },
@@ -615,7 +630,7 @@ public partial class CommanderApp
         // Reserve the triangle on every header; colour it accent (active), a dim ghost
         // (hover), or transparent (idle) so hovering never shifts the label.
         Color tri = active ? Nocturne.Accent : hover ? Nocturne.Neutral500 : Color.Transparent;
-        row.AddChild(Ui.Icon(active && SortDescOf(side) ? "▾" : "▴", 9f, tri));
+        row.AddChild(Ui.Icon(active && SortDescOf(side) ? Glyphs.CaretDown : Glyphs.CaretUp, 9f, tri));
         row.OnClick(_ => SetSort(side, col));
         row.OnPointerEnter(_ => { if (_hoverSort != (side, col)) { _hoverSort = (side, col); MarkDirty(); } });
         row.OnPointerLeave(_ => { if (_hoverSort == (side, col)) { _hoverSort = null; MarkDirty(); } });
@@ -763,7 +778,7 @@ public partial class CommanderApp
     {
         var wrap = Flex.Column(gap: 8).FlexGrow(1)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
-        wrap.AddChild(Ui.Icon("⌕", 22f, Nocturne.Neutral500));
+        wrap.AddChild(Ui.Icon(Glyphs.Search, 22f, Nocturne.Neutral500));
         wrap.AddChild(Text.New($"No matches for “{_search}”").FontSize(13f).TextColor(Nocturne.Text));
         wrap.AddChild(Ui.Mono("Backspace to widen · Esc to clear", 10.5f, Nocturne.On(0.40)));
         return wrap;
@@ -788,7 +803,7 @@ public partial class CommanderApp
                 break;
 
             case PaneState.Offline:
-                block.AddChild(Ui.Icon("⊘", 20f, Nocturne.Neutral600));
+                block.AddChild(Ui.Icon(Glyphs.Prohibit, 20f, Nocturne.Neutral600));
                 var drive = (System.IO.Path.GetPathRoot(Dir(side)) ?? Dir(side))
                     .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
                 var line = Flex.Row(gap: 5).AlignItems(AlignItems.Center);
@@ -799,7 +814,7 @@ public partial class CommanderApp
                 break;
 
             case PaneState.Denied:
-                block.AddChild(Ui.Icon("⚿", 20f, Nocturne.Neutral600));
+                block.AddChild(Ui.Icon(Glyphs.Lock, 20f, Nocturne.Neutral600));
                 block.AddChild(Text.New("Access denied").FontSize(12f).TextColor(Nocturne.Neutral400));
                 block.AddChild(Ui.Mono(Dir(side), 10.5f, Nocturne.On(0.35))
                     .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
@@ -973,7 +988,7 @@ public partial class CommanderApp
         // A transient notice (e.g. a locked-tab write block) takes the line briefly.
         if (_notice != null)
         {
-            row.AddChild(Ui.Icon("⚿", 12f, Nocturne.MarkRed));
+            row.AddChild(Ui.Icon(Glyphs.Lock, 12f, Nocturne.MarkRed));
             row.AddChild(Ui.Mono(_notice, 11.5f, Nocturne.MarkRed));
         }
         // A backgrounded transfer shows a compact indicator here.

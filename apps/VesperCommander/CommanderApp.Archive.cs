@@ -129,11 +129,11 @@ public partial class CommanderApp
 
     private Element BuildPasswordPrompt()
     {
-        var card = Card(420, "Password required", System.IO.Path.GetFileName(_pwArchive), "⚿");
+        var card = Card(420, "Password required", System.IO.Path.GetFileName(_pwArchive), Glyphs.Key);
         var body = Flex.Column(gap: 8).Padding(new Thickness(10, 14, 10, 14));
 
         var fieldRow = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
-        fieldRow.AddChild(Ui.Icon("⚿", 13f, _pwWrong ? Nocturne.MarkRed : ArchiveAmber));
+        fieldRow.AddChild(Ui.Icon(Glyphs.Key, 13f, _pwWrong ? Nocturne.MarkRed : ArchiveAmber));
         var input = Ui.Field(TextInput.New(_pwValue));
         input.Masked = true;
         input.PlaceholderText("password");
@@ -170,7 +170,7 @@ public partial class CommanderApp
         switch (status)
         {
             case ArchiveStatus.Encrypted:
-                block.AddChild(Ui.Icon("⚿", 24f, ArchiveAmber));
+                block.AddChild(Ui.Icon(Glyphs.Key, 24f, ArchiveAmber));
                 block.AddChild(Text.New("This archive is encrypted").FontSize(13f).TextColor(Nocturne.Text));
                 block.AddChild(Ui.Mono(archive, 10.5f, Nocturne.On(0.45)));
                 var unlock = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(5, 12, 5, 12))
@@ -186,7 +186,7 @@ public partial class CommanderApp
                 block.AddChild(Ui.Mono("Set the path in Tools → Archiver, or install 7-Zip", 10.5f, Nocturne.On(0.45)));
                 break;
             default: // Corrupt / NotFound
-                block.AddChild(Ui.Icon("⚠", 22f, Nocturne.MarkRed));
+                block.AddChild(Ui.Icon(Glyphs.Warning, 22f, Nocturne.MarkRed));
                 block.AddChild(Text.New("Can't open this archive — it may be corrupt").FontSize(13f).TextColor(Nocturne.Text));
                 block.AddChild(Ui.Mono(archive, 10.5f, Nocturne.On(0.45)));
                 break;

@@ -166,9 +166,9 @@ public partial class CommanderApp
         col.AddChild(_diffState switch
         {
             DiffViewState.Ok => BuildDiffBody(),
-            DiffViewState.Identical => DiffMessage("✓", "Files are identical",
+            DiffViewState.Identical => DiffMessage(Glyphs.Check, "Files are identical",
                 $"{(_diffResult?.Lines.Count ?? 0)} lines · same content"),
-            DiffViewState.Binary => DiffMessage("◫", "Can't show a text diff",
+            DiffViewState.Binary => DiffMessage(Glyphs.BinaryFile, "Can't show a text diff",
                 "One side is binary or larger than 4 MB."),
             _ => DiffMissingBody(),
         });
@@ -184,11 +184,11 @@ public partial class CommanderApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
         var back = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(2, 8, 2, 8)).CornerRadius(5f)
-            .Children(Ui.Icon("‹", 16f, Nocturne.Neutral300)).Tooltip("Back · Esc");
+            .Children(Ui.Icon(Glyphs.Back, 16f, Nocturne.Neutral300)).Tooltip("Back · Esc");
         back.OnClick(_ => CloseDiff());
         h.AddChild(back.HoverBg(Nocturne.Neutral900, Color.Transparent));
 
-        h.AddChild(Ui.Icon("⇆", 13f, Nocturne.Accent));
+        h.AddChild(Ui.Icon(Glyphs.Swap, 13f, Nocturne.Accent));
         h.AddChild(Text.New(System.IO.Path.GetFileName(_diffLeftPath)).FontSize(13f)
             .FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
 
@@ -203,8 +203,8 @@ public partial class CommanderApp
         if (_diffChangeRows.Count > 0)
         {
             h.AddChild(Ui.Mono($"change {_diffChangeIdx + 1} / {_diffChangeRows.Count}", 10.5f, Nocturne.On(0.50)));
-            h.AddChild(DiffNavBtn("↑", "p", () => DiffNav(-1)));
-            h.AddChild(DiffNavBtn("↓", "n", () => DiffNav(1)));
+            h.AddChild(DiffNavBtn(Glyphs.ArrowUp, "p", () => DiffNav(-1)));
+            h.AddChild(DiffNavBtn(Glyphs.ArrowDown, "n", () => DiffNav(1)));
         }
         return h;
     }
@@ -214,11 +214,11 @@ public partial class CommanderApp
             .Background(Nocturne.Alpha(c, 0.16))
             .Children(Ui.Mono(text, 10.5f, c));
 
-    private Element DiffNavBtn(string glyph, string tip, Action onClick)
+    private Element DiffNavBtn(string icon, string tip, Action onClick)
     {
         var b = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(2, 7, 2, 7)).CornerRadius(4f)
             .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .Children(Ui.Icon(glyph, 12f, Nocturne.Neutral300)).Tooltip($"{tip}");
+            .Children(Ui.Icon(icon, 12f, Nocturne.Neutral300)).Tooltip($"{tip}");
         b.OnClick(_ => onClick());
         return b.HoverBg(Nocturne.Neutral900, Color.Transparent);
     }
@@ -321,10 +321,10 @@ public partial class CommanderApp
         return box;
     }
 
-    private Element DiffMessage(string glyph, string title, string sub)
+    private Element DiffMessage(string icon, string title, string sub)
     {
         var box = Flex.Column(gap: 8).FlexGrow(1).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
-        box.AddChild(Ui.Icon(glyph, 26f, Nocturne.Accent300));
+        box.AddChild(Ui.Icon(icon, 26f, Nocturne.Accent300));
         box.AddChild(Text.New(title).FontSize(13f).TextColor(Nocturne.Text));
         box.AddChild(Ui.Mono(sub, 11f, Nocturne.On(0.45)));
         return box;
@@ -334,7 +334,7 @@ public partial class CommanderApp
     {
         bool rightMissing = !File.Exists(_diffRightPath);
         var box = Flex.Column(gap: 10).FlexGrow(1).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
-        box.AddChild(Ui.Icon("⊘", 24f, Nocturne.MarkRed));
+        box.AddChild(Ui.Icon(Glyphs.Prohibit, 24f, Nocturne.MarkRed));
         box.AddChild(Text.New(rightMissing ? "Right file missing" : "Left file missing")
             .FontSize(13f).TextColor(Nocturne.Text));
         box.AddChild(Ui.Mono((rightMissing ? _diffRightPath : _diffLeftPath) + " — not found", 10.5f, Nocturne.On(0.45)));

@@ -208,7 +208,7 @@ public partial class CommanderApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
         var back = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(2, 8, 2, 8)).CornerRadius(5f)
-            .Children(Ui.Icon("‹", 16f, Nocturne.Neutral300)).Tooltip("Back · Esc");
+            .Children(Ui.Icon(Glyphs.Back, 16f, Nocturne.Neutral300)).Tooltip("Back · Esc");
         back.OnClick(_ => CloseSync());
         h.AddChild(back.HoverBg(Nocturne.Neutral900, Color.Transparent));
 
@@ -217,7 +217,7 @@ public partial class CommanderApp
         // colliding with the title / toolbar.
         var paths = Flex.Row(gap: 8).FlexGrow(1).AlignItems(AlignItems.Center).Overflow(Overflow.Hidden);
         paths.AddChild(Ui.Mono(_syncLeft, 10.5f, Nocturne.On(0.50)).FlexShrink(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
-        paths.AddChild(Ui.Icon("⇄", 12f, Nocturne.Accent).FlexShrink(0));
+        paths.AddChild(Ui.Icon(Glyphs.Swap, 12f, Nocturne.Accent).FlexShrink(0));
         paths.AddChild(Ui.Mono(_syncRight, 10.5f, Nocturne.On(0.50)).FlexShrink(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         h.AddChild(paths);
 
@@ -238,7 +238,7 @@ public partial class CommanderApp
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .BorderColor(on ? Nocturne.Accent : Nocturne.Neutral600).BorderWidth(1.5f)
             .Background(on ? Nocturne.Accent : Color.Transparent);
-        if (on) box.AddChild(Ui.Icon("✓", 9f, Nocturne.Accent100));
+        if (on) box.AddChild(Ui.Icon(Glyphs.Check, 9f, Nocturne.Accent100));
         row.AddChild(box);
         row.AddChild(Text.New(label).FontSize(11.5f).TextColor(Nocturne.Neutral300));
         row.OnClick(_ => toggle());
@@ -266,7 +266,7 @@ public partial class CommanderApp
     private Element BuildSyncComparing()
     {
         var box = Flex.Column(gap: 10).FlexGrow(1).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
-        box.AddChild(Ui.Icon("◜", 20f, Nocturne.Accent));
+        box.AddChild(Ui.Icon(Glyphs.Spinner, 20f, Nocturne.Accent));
         box.AddChild(Ui.Mono($"Comparing… {_syncScanned} files", 11.5f, Nocturne.On(0.55)));
         if (_syncCurrent.Length > 0)
             box.AddChild(Ui.Mono(_syncCurrent, 10f, Nocturne.On(0.35)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
@@ -278,7 +278,7 @@ public partial class CommanderApp
         var vis = VisibleSyncRows();
         if (vis.Count == 0)
             return Flex.Column(gap: 8).FlexGrow(1).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-                .Children(Ui.Icon("✓", 22f, Nocturne.DiffGreen),
+                .Children(Ui.Icon(Glyphs.Check, 22f, Nocturne.DiffGreen),
                           Text.New("Folders are in sync").FontSize(13f).TextColor(Nocturne.Text));
 
         var scroll = ScrollView.Vertical().FlexGrow(1).Padding(new Thickness(4, 4, 4, 4));

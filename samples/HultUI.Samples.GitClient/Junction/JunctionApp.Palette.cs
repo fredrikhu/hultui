@@ -200,7 +200,7 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));
-        items.Add(new("action", "Action", Icons.ArchiveTray, "Stash changes", "", () => { ClosePalette(); DoStash(includeUntracked: false); }));
+        items.Add(new("action", "Action", Icons.TrayArrowDown, "Stash changes", "", () => { ClosePalette(); DoStash(includeUntracked: false); }));
         items.Add(new("action", "Action", Icons.Stack, "Stash including untracked", "", () => { ClosePalette(); DoStash(includeUntracked: true); }));
         items.Add(new("action", "Action", Icons.FolderPlus, "Add existing repository…", "", () => { ClosePalette(); OpenAddRepo(); }));
         items.Add(new("action", "Action", Icons.DownloadSimple, "Clone repository…", "", () => { ClosePalette(); OpenCloneRepo(); }));

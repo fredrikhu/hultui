@@ -43,7 +43,8 @@ public static class Icons
     public const string ArrowLeft = "arrow-left";
     public const string ArrowRight = "arrow-right";
     public const string ArrowsClockwise = "arrows-clockwise";
-    public const string ArchiveTray = "archive-tray";
+    // Phosphor 1.x called this "archive-tray"; 2.x renamed it. The artwork is unchanged.
+    public const string TrayArrowDown = "tray-arrow-down";
     public const string Plus = "plus";
     public const string MagnifyingGlass = "magnifying-glass";
     public const string FileMagnifier = "file-magnifying-glass";

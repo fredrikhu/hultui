@@ -115,7 +115,17 @@ If you are sizing fresh artwork with no legacy numbers to honour, just pick the 
 
 ## Adding artwork
 
-**Phosphor.** `Phosphor.Paths.g.cs` is generated from the `@phosphor-icons/core` package — one `d` string per icon in the set's native 256-unit box. Treat it as generated: add icons by regenerating, not by hand-editing. *No generator script is committed*; the extraction was done ad hoc. Committing one is worth doing before the next batch.
+**Phosphor.** Add the name to [`scripts/phosphor-icons.txt`](../scripts/phosphor-icons.txt) and regenerate:
+
+```bash
+./scripts/generate-phosphor-icons.ps1
+```
+
+That pulls `@phosphor-icons/core` from the npm registry, extracts one `d` string per listed icon verbatim, and rewrites `Phosphor.Paths.g.cs`. A name ending in a weight suffix comes from that weight — `minus-bold` from bold, `circle-fill` from fill — everything else from regular.
+
+`-Check` regenerates to memory and fails if the result differs from the checked-in file, so you can confirm the bundle is reproducible without writing anything. `-Version` pins a different package version; it is recorded in the generated header, so artwork changing under a version bump shows up in the diff. `-Assets` points at an already-extracted package and skips the download.
+
+A cheaper guard runs in the test suite: `TheBundleIsExactlyWhatTheManifestAsksFor` compares the manifest against `Phosphor.Names`, so hand-editing the generated file or forgetting to regenerate fails without needing pwsh or a network.
 
 **Anything else.** `FileIcons.Parts` shows the shape: path data authored in a fixed box, drawn filled or stroked in a palette colour. Four things to get right:
 
@@ -134,20 +144,37 @@ Guards worth copying, all in `tests/HultUI.Icons.Tests`:
 |---|---|
 | `EveryBundledIconRastersToVisiblePixels` | A malformed `d` — it parses to an empty path and draws nothing, silently |
 | `EveryIconConstantNamesABundledIcon` | A typo or a rename in the generated set |
+| `IconNamesAreNeverRenderedAsText` | Both directions of the icon/text mix-up (below) |
 | `RastersAreCutAtDeviceResolution` | Losing the scale parameter at a call site |
 | `HairlineIconsStaySolidAtWindowControlSize` | Sub-pixel strokes rendering as a ghost |
 | `TheVisualStudioMarkHasBothNotchesCutOut` | The fill-rule trap above |
 
 The first one matters most: a broken icon fails as a blank box, not an exception, so nothing tells you unless a test looks at pixels.
 
+**The icon/text mix-up is the one to guard against by name.** Once icons are named strings, two mistakes compile cleanly and neither throws:
+
+```csharp
+Ui.Icon("✕")           // a character where a name belongs → draws nothing
+Text.New(icon)         // a name where text belongs → prints the word "minus" on screen
+```
+
+Both happened during Vesper's conversion. The convention that makes them checkable is naming: a parameter carrying a Phosphor name is called `icon`, and text that happens to be a symbol — a keycap's `↵`, a sync rail's `+→` — is a `label` or a literal. A test then greps for `Text.New(` applied to anything named `icon`. Write the check so it allows a qualifier (`OptionPages[i].icon`), or it will miss the common case — the first version of that test did.
+
 ---
 
 ## Where the conversion stands
 
-Not everything is converted, so don't take existing code as the pattern:
-
 - **Junction** — fully on Phosphor, including window controls and context menus.
-- **Vesper Commander** — file-list and view-mode icons use `FileIcons`; its chrome, dialogs, and status glyphs are still Unicode (`Ui.Icon("⌕", …)` and friends).
+- **Vesper Commander** — converted. File-list and view-mode icons come from `FileIcons`; chrome, dialogs and status marks are Phosphor, named in its `Glyphs` class.
 - **The framework** — the context menu's submenu arrow is text, and stays that way while `HultUI.Core` has no dependencies.
 
-New UI should use `HultUI.Icons`. Converting the Vesper holdouts is worthwhile but has not been done.
+### What is deliberately still text
+
+Converting everything that *looks* like a symbol is the wrong target. These stay text because they are text:
+
+- **Keycaps** — `Ui.Kbd("↵")`. The chip renders a key's label.
+- **Typographic values** — `…` for a truncated path, `—` for "no value".
+- **Dense status columns** — the sync rail's `+→` / `←+` / `≠` / `∅`, which are two-character combinations no single icon expresses, and the diff gutter's `−` / `+`, which align to a monospace column.
+- **Labels that happen to be short** — a bookmark's initial letter, the rename dialog's `Aa` and `.*` toggles.
+
+Vesper's `IconKind` also keeps a few bespoke vector glyphs — the view-mode toggles and nav chevrons — drawn from its own path data. They are already SVG, so they are not the problem this page is about; folding them into Phosphor would be tidying, not a fix.

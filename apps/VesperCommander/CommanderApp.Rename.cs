@@ -91,13 +91,13 @@ public partial class CommanderApp
     {
         var h = Flex.Row(gap: 12).AlignItems(AlignItems.Center).Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        h.AddChild(Ui.HeaderTile("✎"));
+        h.AddChild(Ui.HeaderTile(Glyphs.Rename));
         h.AddChild(Text.New($"Multi-rename {_renameFiles.Count} file{(_renameFiles.Count == 1 ? "" : "s")}")
             .FontSize(15f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text).FlexShrink(0));
         var dir = System.IO.Path.GetDirectoryName(_renameFiles[0].FullPath) ?? "";
         h.AddChild(Ui.Mono(dir, 11f, Nocturne.On(0.55)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
         h.AddChild(Ui.Kbd("Ctrl+M"));
-        h.AddChild(Ui.IconButton("✕", CloseOverlays, "Close", 28f));
+        h.AddChild(Ui.IconButton(Glyphs.Close, CloseOverlays, "Close", 28f));
         return h;
     }
 
@@ -152,8 +152,8 @@ public partial class CommanderApp
         row.AddChild(FindField(_renFind, _renRegexError != null, v => { _renFind = v; MarkDirty(); }));
         row.AddChild(Text.New("Replace").FontSize(11f).TextColor(Nocturne.On(0.45)));
         row.AddChild(FindField(_renReplace, false, v => { _renReplace = v; MarkDirty(); }));
-        row.AddChild(ToggleIcon("Aa", _renMatchCase, () => { _renMatchCase = !_renMatchCase; MarkDirty(); }));
-        row.AddChild(ToggleIcon(".*", _renRegex, () => { _renRegex = !_renRegex; MarkDirty(); }));
+        row.AddChild(ToggleChip("Aa", _renMatchCase, () => { _renMatchCase = !_renMatchCase; MarkDirty(); }));
+        row.AddChild(ToggleChip(".*", _renRegex, () => { _renRegex = !_renRegex; MarkDirty(); }));
         return row;
     }
 
@@ -170,12 +170,13 @@ public partial class CommanderApp
         return box;
     }
 
-    private Element ToggleIcon(string glyph, bool on, Action toggle)
+    // "Aa" / ".*" are labels, not icons — there is no glyph for "match case".
+    private Element ToggleChip(string label, bool on, Action toggle)
     {
         var b = Box.New().Width(26).Height(26).CornerRadius(5f).Cursor(CursorType.Pointer).FlexShrink(0)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .BorderColor(on ? Nocturne.Accent600 : Nocturne.Neutral700).BorderWidth(1f)
-            .Children(Ui.Mono(glyph, 11f, on ? Nocturne.Accent200 : Nocturne.Neutral400));
+            .Children(Ui.Mono(label, 11f, on ? Nocturne.Accent200 : Nocturne.Neutral400));
         if (on) b.Background(Nocturne.Alpha(Nocturne.Accent500, 0.14));
         b.OnClick(_ => toggle());
         return on ? b : b.HoverBg(Nocturne.Neutral900, Color.Transparent);
@@ -292,7 +293,7 @@ public partial class CommanderApp
         if (conflict) grid.Background(Nocturne.Alpha(Nocturne.MarkRed, 0.06));
         var el = grid;
         el.AddChild(Ui.Mono(r.OldName, 11.5f, Nocturne.On(0.45)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(0));
-        el.AddChild(Ui.Icon("→", 11f, Nocturne.Neutral600).GridColumn(1));
+        el.AddChild(Ui.Icon(Glyphs.ArrowRight, 11f, Nocturne.Neutral600).GridColumn(1));
         Color newFg = conflict ? Nocturne.MarkRed : unchanged ? Nocturne.On(0.40) : Nocturne.Text;
         string newText = r.Status == RenameEngine.Status.Empty ? "(empty)" : r.NewName;
         var newEl = Ui.Mono(newText, 11.5f, newFg).MaxLines(1).TextOverflow(TextOverflow.Ellipsis);
@@ -310,7 +311,7 @@ public partial class CommanderApp
         if (reason.Length > 0)
         {
             var rr = Flex.Row(gap: 4).AlignItems(AlignItems.Center).GridColumn(3);
-            if (conflict) rr.AddChild(Ui.Icon("⚠", 10f, Nocturne.MarkRed));
+            if (conflict) rr.AddChild(Ui.Icon(Glyphs.Warning, 10f, Nocturne.MarkRed));
             rr.AddChild(Ui.Mono(reason, 10f, conflict ? Nocturne.MarkRed : Nocturne.Neutral600));
             el.AddChild(rr);
         }
@@ -334,7 +335,7 @@ public partial class CommanderApp
             .Background(Nocturne.Surface);
         if (p.RegexError != null)
         {
-            bar.AddChild(Ui.Icon("⚠", 11f, Nocturne.MarkRed));
+            bar.AddChild(Ui.Icon(Glyphs.Warning, 11f, Nocturne.MarkRed));
             bar.AddChild(Ui.Mono(p.RegexError, 11f, Nocturne.MarkRed));
             return bar;
         }
@@ -442,7 +443,7 @@ public partial class CommanderApp
         var banner = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Padding(new Thickness(8, 14, 8, 14))
             .Background(Nocturne.Alpha(Nocturne.MarkRed, 0.07))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        banner.AddChild(Ui.Icon("⚠", 12f, Nocturne.MarkRed));
+        banner.AddChild(Ui.Icon(Glyphs.Warning, 12f, Nocturne.MarkRed));
         banner.AddChild(Ui.Mono($"{_renSucceeded} renamed · {fails.Count} failed", 12f, Nocturne.Text));
         banner.AddChild(Ui.Mono("— renamed files keep their new names", 11f, Nocturne.On(0.45)));
         card.AddChild(banner);
@@ -454,7 +455,7 @@ public partial class CommanderApp
             var r = Grid.Of("1fr 16px 1.2fr 1.2fr", gap: 8).Height(24).AlignItems(AlignItems.Center)
                 .Padding(new Thickness(0, 14, 0, 14));
             r.AddChild(Ui.Mono(row.OldName, 11.5f, Nocturne.On(0.55)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(0));
-            r.AddChild(Ui.Icon("→", 11f, Nocturne.Neutral600).GridColumn(1));
+            r.AddChild(Ui.Icon(Glyphs.ArrowRight, 11f, Nocturne.Neutral600).GridColumn(1));
             r.AddChild(Ui.Mono(row.NewName, 11.5f, Nocturne.Text).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(2));
             r.AddChild(Ui.Mono(err, 10f, Nocturne.MarkRed).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(3));
             col.AddChild(r);

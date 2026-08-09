@@ -9,13 +9,13 @@ namespace VesperCommander;
 
 public partial class CommanderApp
 {
-    private static readonly (string id, string label, string glyph)[] OptionPages =
+    private static readonly (string id, string label, string icon)[] OptionPages =
     [
-        ("General", "General", "◇"),
-        ("Panes", "Panes", "▤"),
-        ("Keyboard", "Keyboard", "⌘"),
-        ("Tools", "Tools", "⚒"),
-        ("Colors", "Colors", "◐"),
+        ("General", "General", Glyphs.PageGeneral),
+        ("Panes", "Panes", Glyphs.PagePanes),
+        ("Keyboard", "Keyboard", Glyphs.PageKeyboard),
+        ("Tools", "Tools", Glyphs.PageTools),
+        ("Colors", "Colors", Glyphs.PageColors),
     ];
 
     private static readonly string[] AccentPalette = ["#9184d9", "#7fb2d9", "#8fd0b0", "#d9a06b"];
@@ -30,11 +30,11 @@ public partial class CommanderApp
         var header = Flex.Row(gap: 12).AlignItems(AlignItems.Center)
             .Padding(new Thickness(10, 14, 10, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        header.AddChild(Ui.HeaderTile("⚙"));
+        header.AddChild(Ui.HeaderTile(Glyphs.Settings));
         header.AddChild(Text.New("Options").FontSize(15f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
         header.AddChild(Box.New().FlexGrow(1));
         header.AddChild(OptionsSearchField());
-        header.AddChild(Ui.IconButton("✕", CloseOverlays, "Close", 28f));
+        header.AddChild(Ui.IconButton(Glyphs.Close, CloseOverlays, "Close", 28f));
         card.AddChild(header);
 
         // Body: 184px nav | page content. A fixed height + a 1fr row makes both cells
@@ -76,8 +76,7 @@ public partial class CommanderApp
                 .Padding(new Thickness(6, 14, 6, 14)).Cursor(CursorType.Pointer)
                 .BorderColor(on ? Nocturne.Accent : Color.Transparent).BorderWidth(new Thickness(0, 0, 0, 2));
             if (on) item.Background(Nocturne.Accent900);
-            item.AddChild(Text.New(OptionPages[i].glyph).FontSize(11f).Width(14)
-                .TextAlign(TextAlign.Center).TextColor(on ? Nocturne.Accent200 : Nocturne.Neutral400));
+            item.AddChild(Ui.Icon(OptionPages[i].icon, 13f, on ? Nocturne.Accent200 : Nocturne.Neutral400));
             item.AddChild(Text.New(OptionPages[i].label).FontSize(12f)
                 .TextColor(on ? Nocturne.Accent200 : Nocturne.Neutral400));
             // Picking a page also drops out of a search so you land on the real page.
@@ -99,7 +98,7 @@ public partial class CommanderApp
         var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center).Width(250)
             .Padding(new Thickness(4, 10, 4, 10)).CornerRadius(6f)
             .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral700).BorderWidth(1f);
-        box.AddChild(Ui.Icon("⌕", 13f, Nocturne.On(0.45)));
+        box.AddChild(Ui.Icon(Glyphs.Search, 13f, Nocturne.On(0.45)));
         var input = Ui.Field(TextInput.New(_optSearch));
         input.PlaceholderText("Search settings…");
         input.OnTextChanged(v => { _optSearch = v; MarkDirty(); });
@@ -108,7 +107,7 @@ public partial class CommanderApp
         if (_optSearch.Length > 0)
         {
             var clear = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(0, 3, 0, 3))
-                .Children(Ui.Icon("✕", 10f, Nocturne.Neutral500));
+                .Children(Ui.Icon(Glyphs.Close, 10f, Nocturne.Neutral500));
             clear.OnClick(_ => { _optSearch = ""; MarkDirty(); });
             box.AddChild(clear);
         }
@@ -462,17 +461,17 @@ public partial class CommanderApp
     private static Element Stepper(int value, string unit, Action dec, Action inc)
     {
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
-        row.AddChild(StepBtn("−", dec));
+        row.AddChild(StepBtn(Glyphs.Minus, dec));
         row.AddChild(Ui.Mono($"{value} {unit}", 11.5f, Nocturne.Text).Width(56).TextAlign(TextAlign.Center));
-        row.AddChild(StepBtn("+", inc));
+        row.AddChild(StepBtn(Glyphs.Plus, inc));
         return row;
     }
 
-    private static Element StepBtn(string glyph, Action onClick)
+    private static Element StepBtn(string icon, Action onClick)
     {
         var b = Box.New().Padding(new Thickness(3, 9, 3, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
             .BorderColor(Nocturne.Neutral800).BorderWidth(1f)
-            .Children(Text.New(glyph).FontSize(12f).TextColor(Nocturne.Neutral400));
+            .Children(Ui.Icon(icon, 12f, Nocturne.Neutral400));
         b.OnClick(_ => onClick());
         return b.HoverBg(Nocturne.Neutral900, Color.Transparent);
     }
@@ -492,7 +491,7 @@ public partial class CommanderApp
         var box = Box.New().Width(16).Height(16).CornerRadius(4f)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
             .BorderColor(on ? Nocturne.Accent : Nocturne.On(0.35)).BorderWidth(1f);
-        if (on) box.Background(Nocturne.Accent).Children(Ui.Icon("✓", 10f, Nocturne.Accent100));
+        if (on) box.Background(Nocturne.Accent).Children(Ui.Icon(Glyphs.Check, 10f, Nocturne.Accent100));
         row.AddChild(box);
         row.AddChild(Text.New(label).FontSize(12f).TextColor(onToggle != null ? Nocturne.Text : Nocturne.On(0.55)));
         if (onToggle != null) row.OnClick(_ => onToggle());

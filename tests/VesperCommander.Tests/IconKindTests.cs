@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using HultUI.Icons;
 using SkiaSharp;
 using Xunit;
@@ -110,6 +114,75 @@ public class IconKindTests
         // by the glyph having failed to render at all.
         var body = At(80f, 48f);
         Assert.True(bmp.GetPixel(body.x, body.y).Alpha > 200);
+    }
+
+    [Fact]
+    public void EveryGlyphConstantNamesABundledIcon()
+    {
+        // Vesper names its chrome and dialog icons by Phosphor name in Glyphs. An unknown
+        // name renders an empty box and reports nothing, so nothing at runtime would catch
+        // a typo or an upstream rename — this does.
+        var fields = typeof(Glyphs).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .ToArray();
+
+        Assert.NotEmpty(fields);
+        foreach (var f in fields)
+        {
+            var name = (string)f.GetRawConstantValue()!;
+            Assert.True(Phosphor.Has(name), $"Glyphs.{f.Name} = \"{name}\" is not in the bundled Phosphor set");
+        }
+    }
+
+    [Fact]
+    public void IconNamesAreNeverRenderedAsText()
+    {
+        // Both halves of the conversion's invariant, and both have already been violated
+        // once each:
+        //
+        //   Ui.Icon("✕")      — a character where a Phosphor name belongs. Compiles, and
+        //                       draws nothing, because no icon is named "✕".
+        //   Text.New(icon)    — a Phosphor name where text belongs. Compiles, and prints
+        //                       the literal word "minus" into the UI.
+        //
+        // Neither throws, so only a check like this one catches them. `icon` is the agreed
+        // parameter name for a Phosphor name; text that happens to be a symbol (a keycap's
+        // "↵", the sync rail's "+→") is passed as `label` or a literal and stays text.
+        var appDir = FindAppDirectory();
+        var offenders = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(appDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (line.TrimStart().StartsWith("//", StringComparison.Ordinal)) continue;
+
+                if (Regex.IsMatch(line, @"Ui\.Icon\("""))
+                    offenders.Add($"{Path.GetFileName(file)}:{i + 1}: icon call given a literal — {line.Trim()}");
+
+                // The argument is often a member access — OptionPages[i].icon — so the
+                // pattern has to allow a qualifier before the name. Anchoring at `(` alone
+                // missed exactly the bug that prompted this test.
+                if (Regex.IsMatch(line, @"(Text\.New|Ui\.Mono|Ui\.Kbd)\(\s*[\w\.\[\]]*\b(icon|Glyphs)\b"))
+                    offenders.Add($"{Path.GetFileName(file)}:{i + 1}: icon name rendered as text — {line.Trim()}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0, string.Join("\n  ", offenders.Prepend("Icon/text mix-ups:")));
+    }
+
+    private static string FindAppDirectory()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "apps", "VesperCommander");
+            if (Directory.Exists(candidate)) return candidate;
+            dir = dir.Parent;
+        }
+        throw new DirectoryNotFoundException($"Could not find apps/VesperCommander above {AppContext.BaseDirectory}");
     }
 
     [Fact]

@@ -299,7 +299,7 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusMd)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .Cursor(CursorType.Pointer).Tooltip("Stash…");
-        b.AddChild(Ui.Icon(Icons.ArchiveTray, 15f, Nocturne.Text));
+        b.AddChild(Ui.Icon(Icons.TrayArrowDown, 15f, Nocturne.Text));
         b.On<ClickEvent>(e =>
         {
             e.StopPropagation = true;
@@ -314,7 +314,7 @@ public partial class JunctionApp
 
     private IReadOnlyList<ContextMenuItem> StashMenuItems() =>
     [
-        Item(Icons.ArchiveTray, "Stash changes", () => DoStash(includeUntracked: false)),
+        Item(Icons.TrayArrowDown, "Stash changes", () => DoStash(includeUntracked: false)),
         Item(Icons.Stack, "Stash including untracked", () => DoStash(includeUntracked: true)),
     ];
 
