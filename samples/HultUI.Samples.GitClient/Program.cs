@@ -43,6 +43,13 @@ var settingsTask = System.Threading.Tasks.Task.Run(() =>
 using var app = new Application("Junction", 1440, 900, WindowStyle.Borderless);
 app.Theme = Nocturne.ToHultTheme();
 
+#if !DEBUG
+// No developer surfaces in a shipped build: the element inspector (Ctrl+Shift+I),
+// the performance HUD (F12), and trace recording (F11) all stay dark. Debug builds
+// keep them, and HULTUI_TRACE still drives the trace capture below either way.
+app.DevToolsHotkeysEnabled = false;
+#endif
+
 var window = app.PrimaryWindow;
 // Floor the window size so the chrome never collapses. Below the compact-chrome
 // breakpoint (~930 dip) JunctionApp switches the toolbar/breadcrumb to icon-only,

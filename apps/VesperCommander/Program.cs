@@ -32,6 +32,14 @@ if (single)
 using var app = new Application("Vesper Commander", 1240, 820, WindowStyle.Borderless);
 app.Theme = Nocturne.ToHultTheme();
 
+#if !DEBUG
+// No developer surfaces in a shipped build: the element inspector (Ctrl+Shift+I),
+// the performance HUD (F12), and trace recording (F11) all stay dark. Vesper also
+// owns Ctrl+Shift+C for "copy as path", so leaving the framework's chords live has
+// already cost one binding once. Debug builds keep the lot.
+app.DevToolsHotkeysEnabled = false;
+#endif
+
 var window = app.PrimaryWindow;
 // Floor the window so the two panes + preview never collapse below usability.
 window.SetMinimumSize(880, 560);

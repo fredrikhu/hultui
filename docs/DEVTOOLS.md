@@ -91,11 +91,17 @@ app.CloseInspector();
 bool open = app.IsInspectorOpen;
 ```
 
-If your app already binds `Ctrl+Shift+I`, turn the built-in chord off and route the inspector from wherever suits you:
+`DevToolsHotkeysEnabled` governs every built-in developer chord — `Ctrl+Shift+I`, `F12`, and `F11` — as one switch. Turn it off when your app binds those keys itself, or in shipped builds where a developer surface has no business appearing:
 
 ```csharp
+#if !DEBUG
 app.DevToolsHotkeysEnabled = false;
+#endif
 ```
+
+It suppresses only the chords. `OpenInspector`, `window.DevTools`, and the `HULTUI_TRACE` environment variable keep working, so an app can still offer any of it on its own terms — and benchmark automation, which drives tracing through the environment variable, is unaffected.
+
+Vesper Commander and Junction both do exactly the above, so their release installers ship with no inspector, no HUD, and no trace hotkey.
 
 ---
 

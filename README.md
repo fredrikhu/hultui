@@ -148,10 +148,16 @@ var custom = new Theme
 
 ## DevTools
 
-Press **F12** at runtime to toggle the DevTools overlay:
+Press **F12** at runtime to toggle the performance overlay:
 - Bounding boxes on every element
 - Hover inspector showing element type, name, and dimensions
 - Performance HUD: FPS, style/layout/render/present timing, element count
+
+Press **Ctrl+Shift+I** for the element inspector, which opens in its own window: a live
+element tree, the box model, and every resolved property of the selection.
+
+All of it is one switch — `app.DevToolsHotkeysEnabled = false` keeps developer surfaces
+out of a shipped build. See [DevTools](docs/DEVTOOLS.md).
 
 ## Documentation
 

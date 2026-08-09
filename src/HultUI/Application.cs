@@ -74,9 +74,14 @@ public sealed class Application : IDisposable
     internal InspectorHost? InspectorHost => _inspectorHost;
 
     /// <summary>
-    /// Whether Ctrl+Shift+I / Ctrl+Shift+C open the DevTools inspector. Set false in
-    /// apps that already bind those chords; <see cref="OpenInspector"/> still works,
-    /// so the app can offer the inspector on a chord of its own choosing.
+    /// Whether the framework's built-in developer chords are live: <b>Ctrl+Shift+I</b>
+    /// (element inspector), <b>F12</b> (performance HUD), and <b>F11</b> (trace
+    /// recording). Set false in apps that bind those chords themselves, or in shipped
+    /// builds where a developer surface has no business appearing.
+    ///
+    /// Turning it off suppresses only the chords. <see cref="OpenInspector"/>,
+    /// <see cref="DevTools"/>, and the <c>HULTUI_TRACE</c> environment variable all
+    /// still work, so an app can offer any of it on its own terms.
     /// </summary>
     public bool DevToolsHotkeysEnabled { get; set; } = true;
 

@@ -993,7 +993,7 @@ public sealed class Window : IOverlayHost, IDisposable
             case InputEvent.KeyInput key:
             {
                 // F12 cycles DevTools: enabled → enabled + continuous redraw → disabled
-                if (key.IsDown && key.KeyCode == KeyCode.F12)
+                if (key.IsDown && key.KeyCode == KeyCode.F12 && Application.DevToolsHotkeysEnabled)
                 {
                     if (!_devTools.IsEnabled)
                     {
@@ -1013,7 +1013,10 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
-                if (key.IsDown && key.KeyCode == KeyCode.F11)
+                // Trace recording is a developer surface like the HUD, so the same
+                // switch governs it. The HULTUI_TRACE environment variable still
+                // works either way, which is what benchmark automation uses.
+                if (key.IsDown && key.KeyCode == KeyCode.F11 && Application.DevToolsHotkeysEnabled)
                 {
                     if (!Tracer.IsRecording)
                     {

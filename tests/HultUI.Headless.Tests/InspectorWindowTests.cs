@@ -125,6 +125,38 @@ public class InspectorWindowTests
     }
 
     [Fact]
+    public void TurningTheHotkeysOff_AlsoSilencesTheF12HudAndF11Tracing()
+    {
+        using var session = HeadlessSession.Create(width: 300, height: 200);
+        BuildApp(session);
+        var window = session.Window.Window;
+        session.Application.DevToolsHotkeysEnabled = false;
+
+        session.Window.PressKey(KeyCode.F12);
+        session.Window.PressKey(KeyCode.F11);
+        session.PumpFrame();
+
+        // The whole developer surface goes dark together. Shipped builds set this,
+        // and a HUD or a trace file appearing on a stray function key is exactly
+        // what they are switching off.
+        Assert.False(window.DevTools.IsEnabled);
+        Assert.False(window.Tracer.IsRecording);
+    }
+
+    [Fact]
+    public void F12StillWorksWhenTheHotkeysAreLeftOn()
+    {
+        using var session = HeadlessSession.Create(width: 300, height: 200);
+        BuildApp(session);
+        var window = session.Window.Window;
+
+        session.Window.PressKey(KeyCode.F12);
+        session.PumpFrame();
+
+        Assert.True(window.DevTools.IsEnabled);
+    }
+
+    [Fact]
     public void Picking_PreviewsTheElementUnderThePointer()
     {
         using var session = HeadlessSession.Create(width: 300, height: 200);
