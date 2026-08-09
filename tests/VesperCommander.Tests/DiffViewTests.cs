@@ -681,7 +681,7 @@ public class DiffViewTests
             .Select(i => string.Format(format, i) + "\n"));
 
     // ── harness ──────────────────────────────────────────────────────────
-    private sealed class Fixture : System.IDisposable
+    internal sealed class Fixture : System.IDisposable
     {
         public readonly string Left, Right;
         private HeadlessSession _session = null!;
@@ -914,9 +914,23 @@ public class DiffViewTests
         {
             var rows = Rows(side);
             for (int i = 0; i < rows.Count; i++)
-                if (rows[i].Name == name) { Call("SetCursor", side, i); _session.PumpFrame(); return; }
+                if (rows[i].Name == name)
+                {
+                    // SetCursor is the plain state setter — in the app the cursor only ever
+                    // moves from a key or click handler, which marks dirty on the way out.
+                    // Reaching it directly skips that, so nothing rebuilds and anything
+                    // driven by Build() (the preview's file load, above all) never happens.
+                    Call("SetCursor", side, i);
+                    MarkDirty();
+                    _session.PumpFrame();
+                    return;
+                }
             Assert.Fail($"{name} is not listed in the {side} pane");
         }
+
+        public void MarkDirty() =>
+            typeof(CommanderApp).GetMethod("MarkDirty",
+                BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!.Invoke(_app, null);
 
         public T Field<T>(string name) =>
             (T)typeof(CommanderApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(_app)!;
