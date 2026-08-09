@@ -7,5 +7,5 @@ obj/
 *.DotSettings.user
 
 # Inno Setup compiler output (installer builds)
-samples/HultUI.Samples.GitClient/Installer/Output/
+apps/Junction/Installer/Output/
 apps/VesperCommander/Installer/Output/

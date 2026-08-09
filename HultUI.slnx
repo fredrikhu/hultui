@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/apps/">
+    <Project Path="apps/Junction/Junction.csproj" />
     <Project Path="apps/VesperCommander/VesperCommander.csproj" />
   </Folder>
   <Folder Name="/samples/">
@@ -14,7 +15,6 @@
     <Project Path="samples/HultUI.Samples.DragDrop/HultUI.Samples.DragDrop.csproj" />
     <Project Path="samples/HultUI.Samples.CustomChrome/HultUI.Samples.CustomChrome.csproj" />
     <Project Path="samples/HultUI.Samples.VirtualList/HultUI.Samples.VirtualList.csproj" />
-    <Project Path="samples/HultUI.Samples.GitClient/HultUI.Samples.GitClient.csproj" />
     <Project Path="samples/HultUI.Samples.Grid/HultUI.Samples.Grid.csproj" />
     <Project Path="samples/HultUI.Samples.Accessibility/HultUI.Samples.Accessibility.csproj" />
     <Project Path="samples/HultUI.Samples.Benchmark/HultUI.Samples.Benchmark.csproj" />
@@ -48,5 +48,6 @@
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
+    <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />
   </Folder>
 </Solution>

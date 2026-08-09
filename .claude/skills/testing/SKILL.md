@@ -14,6 +14,8 @@ The framework has three test layers plus ad-hoc verification. Pick the lowest la
 | `tests/HultUI.Core.Tests` | unit | elements, layout, events, reactivity, styling, dialogs, a11y tree — no session, `StubMeasureContext` for text |
 | `tests/HultUI.Headless.Tests` | headless integration | HeadlessSession itself + framework behaviors needing real layout/render (e.g. `ScrollIntoViewTests`, `GeometryQueryTests`) |
 | `tests/HultUI.Samples.TodoList.Tests` | component | sample app logic via direct tree-walk + `EventDispatcher.Dispatch` (no session) |
+| `tests/Junction.Tests` | app | `apps/Junction`: pure logic (diff/conflict/patch/graph parsing), `GitRepository` against real temp repos, plus the whole app hosted headless |
+| `tests/VesperCommander.Tests` | app | `apps/VesperCommander`: engines (find/sync/rename/diff/archive) plus headless hosting |
 | `tests/HultUI.Text.Tests`, `HultUI.Rendering.Skia.Tests`, `HultUI.SourceGenerators.Tests`, `HultUI.Platform.Accessibility.Linux.Tests` | subsystem unit | text pipeline, Skia surfaces, reactive generator, AT-SPI constants |
 | `tests/HultUI.UiTests` | real window (Windows-only, local-only) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients. Excluded from CI |
 
@@ -57,6 +59,7 @@ session.PumpFrame(TimeSpan.FromMilliseconds(600));  // virtual time: tooltips, a
 ```
 
 - Queries (`GetByText`, `FindByRole`, `FindByAutomationId`) read a fresh a11y snapshot — every query doubles as an accessibility check. Re-query after interacting; snapshot props are frozen.
+- **`Find`/`FindByText` silently drop a matching node whose element cannot be resolved** — including the recycled rows of a `VirtualList`. A row visible in `DumpAccessibilityTree()` can still come back null. When asserting on virtualized content, walk `window.AccessibilityTree` yourself (see `JunctionAppHostTests.Contains`). `FindByText` is also exact-match: a row's accessible name is its children concatenated (`"subject, author, hash"`), so substring matching is usually what you want.
 - `PumpUntil`/`PumpUntilCompleted` are the *only* real-time escape — use exactly at async boundaries. **`PumpFrame()` does not wait**, so a `for` loop of them advances almost no wall-clock and background work (git subprocesses, `AsyncLoader` producers) never finishes — a debug probe built that way reported a "permanently stuck loader" that was simply never given time. Wait with `PumpUntil`, or pump with a real sleep.
 - Render regressions: `HeadlessOptions.DeterministicRecording()` → assert on `window.RenderLog` text baselines (readable, git-diffable). `FixedMetricsMeasureContext` makes them cross-OS.
 - `window.CapturePixels()` for pixels, but **never** pixel-exact text asserts across OSes (system fonts differ).

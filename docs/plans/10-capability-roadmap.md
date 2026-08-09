@@ -55,7 +55,7 @@ biggest ergonomic pain the Git client hit (hand-wiring hover handlers everywhere
 
 | # | Feature | Why in spirit | Effort | Impact |
 |---|---------|---------------|--------|--------|
-| 9 | **Interaction-state styling** — `:hover` / `:focus` / `:pressed` the reactive way (e.g. hover/focus signals or `.OnHover(style => …)`) | Reactive, not selector-based. The GitClient wires `PointerEnter`/`Leave` by hand in every widget (see `SplitPane`); this is the fix that stays true to the model. | M | High |
+| 9 | **Interaction-state styling** — `:hover` / `:focus` / `:pressed` the reactive way (e.g. hover/focus signals or `.OnHover(style => …)`) | Reactive, not selector-based. Junction wires `PointerEnter`/`Leave` by hand in every widget (see `SplitPane`); this is the fix that stays true to the model. | M | High |
 | 10 | **Declarative transitions + spring easing** | `AnimationManager`/`Tween` already exist; animate a property when its bound value changes, add a spring `Easing`. | M | Med-High |
 
 ### Tier D — First-class widgets (medium effort, high reuse)
@@ -66,7 +66,7 @@ stay app-level for now — they compose from primitives and vary per app.
 
 | # | Feature | Why in spirit | Effort | Impact |
 |---|---------|---------------|--------|--------|
-| 11 | **Dialog / Modal** primitive on the overlay host | Every GitClient dialog is bespoke; one primitive replaces them all. | M | High |
+| 11 | **Dialog / Modal** primitive on the overlay host | Every Junction dialog is bespoke; one primitive replaces them all. | M | High |
 | 12 | **Dropdown / Select / ComboBox** | Builds on the existing overlay + ContextMenu machinery. Ubiquitous, currently absent. | M | High |
 | 13 | **ProgressBar + Spinner** | Small, self-contained; determinate + indeterminate. | S | Med |
 | 14 | **Tabs / TabView** | Tabbed / multi-pane UIs are hand-built today; a primitive generalizes them. | M | Med |

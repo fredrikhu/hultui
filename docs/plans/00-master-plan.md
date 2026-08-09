@@ -1,7 +1,7 @@
 # Master Plan: Framework Feedback Implementation
 
 Execution plan for addressing feedback from the Git client sample
-(`samples/HultUI.Samples.GitClient/FRAMEWORK_FEEDBACK.md`).
+(`apps/Junction/FRAMEWORK_FEEDBACK.md`).
 
 ## Current Step
 

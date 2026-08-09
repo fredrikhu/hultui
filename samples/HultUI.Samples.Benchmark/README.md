@@ -173,7 +173,7 @@ that. Three columns, one machine:
 > virtual `clear` jitter (20.7 ms) is gone (now 3.4 ms).
 >
 > **GL / present: the ~2× gap the handover chased no longer reproduces.** A 5 s
-> continuous-frame GitClient trace (~15 k frames, `HULTUI_TRACE_MS`) gives
+> continuous-frame Junction trace (~15 k frames, `HULTUI_TRACE_MS`) gives
 > steady-state **Render 0.18 ms** (median; the handover measured 1–1.5 ms),
 > **Flush 0.09 ms**, **Present 0.02 ms** — Present nowhere near a 16.6/8.3 ms
 > vsync wait, so `swapInterval=0` genuinely holds, and Render now matches the

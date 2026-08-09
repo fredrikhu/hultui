@@ -45,7 +45,7 @@ Names are Phosphor's own, kebab-case: `git-branch`, `arrows-clockwise`. **An unk
 static class Icons { public const string Branch = "git-branch"; }
 ```
 
-`JunctionIconNameTests` reflects over exactly such a class and asserts every constant is in the bundle. Copy that pattern rather than sprinkling literals.
+`Junction.Tests.IconNameTests` reflects over exactly such a class and asserts every constant is in the bundle. Copy that pattern rather than sprinkling literals — the check belongs to the app that owns the constants, not to the icon library.
 
 ### File icons
 
@@ -138,7 +138,7 @@ A cheaper guard runs in the test suite: `TheBundleIsExactlyWhatTheManifestAsksFo
 
 ## Testing
 
-Guards worth copying, all in `tests/HultUI.Icons.Tests`:
+Guards worth copying. The library's own live in `tests/HultUI.Icons.Tests`; the per-app checks live with the app, in `tests/Junction.Tests` and `tests/VesperCommander.Tests`:
 
 | Test | Catches |
 |---|---|

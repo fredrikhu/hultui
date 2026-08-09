@@ -29,8 +29,8 @@
 
   <ItemGroup>
     <!-- VS Code TextMate grammars + Dark+ theme for the code preview highlighter
-         (same engine the GitClient/Junction diff uses). AOT-safe: GitClient
-         publishes AOT with this package. -->
+         (same engine the Junction diff uses). AOT-safe: Junction publishes AOT
+         with this package. -->
   </ItemGroup>
 
 </Project>

@@ -18,10 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Library only. The per-app checks — "every icon constant names a bundled icon",
+         "no icon name is rendered as text" — live with the app that owns the constants
+         (Junction.Tests, VesperCommander.Tests), so this project stays a library test. -->
     <ProjectReference Include="..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
-    <!-- Junction is referenced so its icon-name constants can be checked against the
-         bundled set; an unknown name renders an empty box at runtime and says nothing. -->
-    <ProjectReference Include="..\..\samples\HultUI.Samples.GitClient\HultUI.Samples.GitClient.csproj" />
   </ItemGroup>
 
 </Project>

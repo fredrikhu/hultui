@@ -1,0 +1,14 @@
+namespace Junction.Git;
+
+public record GitBranch(
+    string Name,
+    string FullName,
+    bool IsCurrent,
+    bool IsRemote,
+    string? TrackingBranch,
+    int AheadCount,
+    int BehindCount,
+    string Hash,
+    string Subject = "",
+    DateTimeOffset CommitDate = default
+);

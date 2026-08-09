@@ -13,7 +13,7 @@ using Text = HultUI.Core.Builders.Text;
 /// VirtualListElement's opt-in keyboard scrolling. The interesting contract is what it
 /// does NOT take: a chorded key must bubble so application shortcuts still work while
 /// the list has focus (a hand-rolled version of this swallowed Ctrl+arrows and broke
-/// commit stepping in the GitClient sample).
+/// commit stepping in Junction).
 /// </summary>
 public class VirtualListKeyboardScrollTests
 {

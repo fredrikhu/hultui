@@ -180,6 +180,17 @@ out of a shipped build. See [DevTools](docs/DEVTOOLS.md).
 - [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
 
+## Apps
+
+Full applications built on HultUI, each with its own installer workflow and test project.
+They are the framework's real proving ground -- the samples show one feature at a time,
+these two carry a whole product's worth of them.
+
+- [`Junction`](apps/Junction/) -- git client: history graph, staging, diffs, conflicts,
+  rebase, multi-repo workspaces ([tests](tests/Junction.Tests/))
+- [`VesperCommander`](apps/VesperCommander/) -- dual-pane file manager: archives, sync,
+  multi-rename, find ([tests](tests/VesperCommander.Tests/))
+
 ## Samples
 
 - [`HultUI.Samples.Minimal`](samples/HultUI.Samples.Minimal/) -- bare minimum app

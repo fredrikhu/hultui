@@ -1,4 +1,4 @@
-# Builds the Junction (GitClient sample) Windows installer.
+# Builds the Junction Windows installer.
 #
 # Every push to main produces a CI-versioned installer as a workflow artifact.
 # Pushing a tag like `junction-v1.2.0` additionally publishes a GitHub Release
@@ -83,7 +83,7 @@ jobs:
       # Native AOT publish (PublishAot is set in the csproj); the runner image
       # includes the required MSVC toolchain.
       - name: Publish Junction (win-x64, AOT)
-        run: dotnet publish samples/HultUI.Samples.GitClient/HultUI.Samples.GitClient.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+        run: dotnet publish apps/Junction/Junction.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
 
       - name: Compile installer
         shell: pwsh
@@ -92,14 +92,14 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
-          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" samples\HultUI.Samples.GitClient\Installer\junction.iss
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\Junction\Installer\junction.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: Junction-Setup-${{ steps.version.outputs.version }}
-          path: samples/HultUI.Samples.GitClient/Installer/Output/*.exe
+          path: apps/Junction/Installer/Output/*.exe
           if-no-files-found: error
 
       - name: Create GitHub release
@@ -108,7 +108,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $exe = Get-ChildItem samples\HultUI.Samples.GitClient\Installer\Output\*.exe | Select-Object -First 1
+          $exe = Get-ChildItem apps\Junction\Installer\Output\*.exe | Select-Object -First 1
           gh release create $env:GITHUB_REF_NAME $exe.FullName `
             --title "Junction ${{ steps.version.outputs.version }}" `
             --generate-notes
