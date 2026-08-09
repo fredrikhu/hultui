@@ -91,11 +91,56 @@ public sealed class TextPipeline
         if (_cache.TryGet(key, out var cached))
             return cached;
 
-        var layout = ComputeWrapped(text, style, maxWidth, maxLines);
-        if (overflow == TextOverflow.Ellipsis)
-            layout = ApplyEllipsis(text, style, layout, maxWidth);
+        TextLayout layout;
+        if (maxLines == 1 && overflow == TextOverflow.Clip && !shaped.HasNewline)
+        {
+            // One clipped line is the longest prefix that fits, cut at a character.
+            // The wrap path would break it at the last *word* boundary before maxWidth,
+            // which for text with few break opportunities — a path, a URL, a minified
+            // JSON line — ends the line far short of the box and reads as though the
+            // text simply stopped. Clipping is what the caller asked for; breaking is
+            // what Ellipsis does, minus the ellipsis.
+            layout = ClipToWidth(text, style, maxWidth);
+        }
+        else
+        {
+            layout = ComputeWrapped(text, style, maxWidth, maxLines);
+            if (overflow == TextOverflow.Ellipsis)
+                layout = ApplyEllipsis(text, style, layout, maxWidth);
+        }
         _cache.Put(key, layout);
         return layout;
+    }
+
+    // The longest prefix of <paramref name="text"/> that fits <paramref name="maxWidth"/>.
+    // Only whole characters are kept: DrawText does not clip to its bounds, so emitting the
+    // glyph that straddles the edge would let it spill out of the box.
+    private TextLayout ClipToWidth(string text, ResolvedInheritedStyle style, float maxWidth)
+    {
+        if (maxWidth <= 0) return TextLayout.Empty;
+
+        // Gallop out from a short prefix before bisecting, so every string measured stays
+        // within twice the answer. Bisecting from text.Length instead would start by
+        // shaping half of what may be a 25,000-character line to find that ~200 fit.
+        int hi = 1;
+        while (hi < text.Length && MeasureString(text[..hi], style) <= maxWidth)
+            hi <<= 1;
+        int lo = Math.Min(hi >> 1, text.Length);
+        hi = Math.Min(hi, text.Length);
+
+        int best = lo;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (MeasureString(text[..mid], style) <= maxWidth) { best = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+
+        best = SnapPrefix(text, best);   // never split a surrogate pair
+        if (best == 0) return TextLayout.Empty;
+
+        var line = ShapeLineText(text[..best], style, 0);
+        return new TextLayout([line], new Size(line.Width, line.Height));
     }
 
     // Width-independent: itemize + shape the whole string, record its natural

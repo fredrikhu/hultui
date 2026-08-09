@@ -286,16 +286,73 @@ public class TextPipelineTests
     }
 
     [Fact]
-    public void Clip_Overflow_DropsWordsWithoutEllipsis()
+    public void Clip_Overflow_HasNoEllipsisMarker()
     {
         var pipeline = CreatePipeline(charWidth: 10);
-        // The default Clip mode keeps the historical behavior: words that don't fit
-        // are simply dropped, with no ellipsis marker.
         var layout = pipeline.Layout("Hello World Foo Bar", DefaultStyle, 60,
             maxLines: 1, TextOverflow.Clip);
 
         Assert.Single(layout.Lines);
         Assert.DoesNotContain("…", LineText(layout.Lines[0]));
+    }
+
+    [Fact]
+    public void Clip_CutsAtACharacterNotAWordBoundary()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // 60px holds six characters. Breaking at the last word boundary that fits would
+        // stop after "ab" and leave two thirds of the box empty.
+        var layout = pipeline.Layout("ab cdefghijklmnop", DefaultStyle, 60,
+            maxLines: 1, TextOverflow.Clip);
+
+        Assert.Equal("ab cde", LineText(Assert.Single(layout.Lines)));
+    }
+
+    [Fact]
+    public void Clip_FillsTheBoxWhenThereIsNowhereToBreak()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout(new string('x', 5000), DefaultStyle, 95,
+            maxLines: 1, TextOverflow.Clip);
+
+        Assert.Equal(9, LineText(Assert.Single(layout.Lines)).Length);
+    }
+
+    [Fact]
+    public void Clip_NeverDrawsPastTheBox()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // DrawText does not clip to its bounds, so a glyph straddling the edge would
+        // spill out of the element rather than being cut by it.
+        for (float w = 1; w <= 120; w += 7)
+        {
+            var layout = pipeline.Layout("the quick brown fox jumps", DefaultStyle, w,
+                maxLines: 1, TextOverflow.Clip);
+            foreach (var line in layout.Lines)
+                Assert.True(line.Width <= w + 0.01f, $"line is {line.Width}px wide in a {w}px box");
+        }
+    }
+
+    [Fact]
+    public void Clip_TextThatFitsIsUnchanged()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("Hi", DefaultStyle, 200, maxLines: 1, TextOverflow.Clip);
+
+        Assert.Equal("Hi", LineText(Assert.Single(layout.Lines)));
+    }
+
+    [Fact]
+    public void Clip_MultiLineStillWraps()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        // The character-level cut is for a single line only; with room for more, the
+        // text still breaks into words the way it always did.
+        var layout = pipeline.Layout("Hello World", DefaultStyle, 60, maxLines: 2, TextOverflow.Clip);
+
+        Assert.Equal(2, layout.Lines.Count);
+        Assert.Equal("Hello", LineText(layout.Lines[0]));
+        Assert.Equal("World", LineText(layout.Lines[1]));
     }
 
     [Fact]
