@@ -124,28 +124,63 @@ public sealed class TextPipeline
         // collapses whatever contains the text.
         if (maxWidth <= 0) return EmptyLineOfHeight(style);
 
-        // Gallop out from a short prefix before bisecting, so every string measured stays
-        // within twice the answer. Bisecting from text.Length instead would start by
-        // shaping half of what may be a 25,000-character line to find that ~200 fit.
-        int hi = 1;
-        while (hi < text.Length && MeasureString(text[..hi], style) <= maxWidth)
-            hi <<= 1;
-        int lo = Math.Min(hi >> 1, text.Length);
-        hi = Math.Min(hi, text.Length);
-
-        int best = lo;
-        while (lo <= hi)
-        {
-            int mid = (lo + hi) >> 1;
-            if (MeasureString(text[..mid], style) <= maxWidth) { best = mid; lo = mid + 1; }
-            else hi = mid - 1;
-        }
-
-        best = SnapPrefix(text, best);   // never split a surrogate pair
+        int best = FitPrefix(text, 0, text.Length, style, maxWidth);
         if (best == 0) return EmptyLineOfHeight(style);
 
         var line = ShapeLineText(text[..best], style, 0);
         return new TextLayout([line], new Size(line.Width, line.Height));
+    }
+
+    /// <summary>
+    /// The largest <c>i</c> in <c>[from, to]</c> whose slice <c>text[from..i]</c> still fits
+    /// <paramref name="maxWidth"/>. Returns <paramref name="from"/> when not even one
+    /// character does; callers decide what that means.
+    /// </summary>
+    /// <remarks>
+    /// Gallops out from a short slice before bisecting, so every string measured stays within
+    /// twice the answer. Bisecting the whole range instead would start by shaping half of what
+    /// may be a 25,000-character line to discover that ~200 of them fit.
+    /// </remarks>
+    private int FitPrefix(string text, int from, int to, ResolvedInheritedStyle style, float maxWidth)
+    {
+        int span = 1;
+        while (from + span < to && MeasureString(text[from..(from + span)], style) <= maxWidth)
+            span <<= 1;
+
+        int lo = from + Math.Min(span >> 1, to - from);
+        int hi = from + Math.Min(span, to - from);
+        int best = lo;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (MeasureString(text[from..mid], style) <= maxWidth) { best = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+        return SnapPrefix(text, best);   // never split a surrogate pair
+    }
+
+    /// <summary>
+    /// Cuts <c>text[from..to]</c> into lines at character boundaries, appending all but the
+    /// final remainder to <paramref name="lines"/> and returning where that remainder starts.
+    ///
+    /// <para>For a run with no break opportunity in it — a hash, a base64 blob, a path with
+    /// no separators — this is the only thing that can make it fit. Without it the run is
+    /// emitted as a single line wider than the box, and simply runs out of it.</para>
+    /// </summary>
+    private int SplitByCharacter(string text, int from, int to, ResolvedInheritedStyle style,
+        float maxWidth, List<TextLine> lines, int? maxLines)
+    {
+        while (from < to && (!maxLines.HasValue || lines.Count < maxLines.Value))
+        {
+            int fit = FitPrefix(text, from, to, style, maxWidth);
+            // A box too narrow for even one character would otherwise never advance. One
+            // character per line is the sane floor, and what a browser does.
+            if (fit <= from) fit = SnapPrefix(text, from + 1);
+            if (fit >= to) break;             // what is left fits a line of its own
+            lines.Add(ShapeLineText(text[from..fit], style, from));
+            from = fit;
+        }
+        return from;
     }
 
     // A line with no glyphs but the full height of one, taken from the primary font.
@@ -538,15 +573,29 @@ public sealed class TextPipeline
                     break;
             }
 
+            // A segment that overflows a line all by itself offers nowhere to break: cut it
+            // by character rather than let it run out of the box. Only reachable at the start
+            // of a line — anywhere else the block above has just broken.
+            if (lineWidth == 0 && segWidth > maxWidth)
+            {
+                textOffset = SplitByCharacter(text, allBreaks[s - 1], segEnd, style, maxWidth, lines, maxLines);
+                if (maxLines.HasValue && lines.Count >= maxLines.Value)
+                    break;
+                lineWidth = MeasureString(text[textOffset..segEnd], style);
+                continue;
+            }
+
             lineWidth += segWidth;
         }
 
-        // Emit final line
+        // Emit final line. A trailing run with nowhere to break needs the same character-level
+        // treatment as one in the middle: the loop above never sees the last segment overflow,
+        // because there is no following segment to trigger a break.
         if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
         {
-            string lineText = text[textOffset..];
-            if (lineText.Length > 0)
-                lines.Add(ShapeLineText(lineText, style, textOffset));
+            textOffset = SplitByCharacter(text, textOffset, text.Length, style, maxWidth, lines, maxLines);
+            if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
+                lines.Add(ShapeLineText(text[textOffset..], style, textOffset));
         }
 
         // Position lines vertically

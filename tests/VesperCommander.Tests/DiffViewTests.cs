@@ -571,21 +571,23 @@ public class DiffViewTests
     }
 
     [Fact]
-    public void AnUnbreakableRunIsTheOneThingWrapModeCannotHelpWith()
+    public void AnUnbreakableRunWrapsByCharacter()
     {
         using var t = new Fixture();
         // 400 characters with no space and no punctuation — base64, a hash, a hex blob.
-        // ICU offers no break inside a word, so there is nowhere to wrap, and wrap mode
-        // turns horizontal scrolling off. Documented rather than fixed: making this work
-        // needs character-level breaking in the text pipeline.
+        // ICU offers no break inside a word, so this only wraps because the pipeline cuts
+        // it by character; otherwise it would run out of a box that has no sideways scroll.
         t.WriteLeft("a.txt", new string('L', 400) + "\n");
         t.WriteRight("a.txt", new string('R', 400) + "\n");
         t.Open(wrap: true);
 
         t.OpenDiffOn("a.txt");
 
-        Assert.Equal(20f, t.FirstRow().Layout.AbsoluteBorderBox.Height, 1);
-        Assert.Equal(0f, t.MaxScrollX());
+        var (cell, text) = t.FirstLineCell();
+        Assert.True(t.FirstRow().Layout.AbsoluteBorderBox.Height > 3 * 20f,
+            $"the run came out {t.FirstRow().Layout.AbsoluteBorderBox.Height:0}px tall — it did not break");
+        Assert.True(t.DrawnWidth(text) <= cell.Layout.AbsoluteContentBox.Width + 0.5f,
+            "a broken line is still wider than the cell");
     }
 
     [Fact]

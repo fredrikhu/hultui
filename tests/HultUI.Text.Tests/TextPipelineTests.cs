@@ -333,6 +333,66 @@ public class TextPipelineTests
         }
     }
 
+    // ── Character-level breaking ──
+    // A run with no line-break opportunity in it — a hash, a base64 blob, a path with no
+    // separators — used to be emitted as one line wider than the box and simply ran out of it.
+
+    [Fact]
+    public void Wrap_ARunWithNowhereToBreakIsCutByCharacter()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout(new string('x', 25), DefaultStyle, 60, maxLines: null);
+
+        Assert.Equal(5, layout.Lines.Count);          // 6 + 6 + 6 + 6 + 1
+        Assert.All(layout.Lines, l => Assert.True(l.Width <= 60.01f, $"a line is {l.Width}px wide in a 60px box"));
+        Assert.Equal(new string('x', 25), string.Concat(layout.Lines.Select(LineText)));
+    }
+
+    [Fact]
+    public void Wrap_BreaksAtWordsFirstAndOnlyThenAtCharacters()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("ab " + new string('y', 14), DefaultStyle, 60, maxLines: null);
+
+        // "ab" keeps its own line — the long run could not join it — then the run is cut.
+        Assert.Equal("ab", LineText(layout.Lines[0]));
+        Assert.All(layout.Lines, l => Assert.True(l.Width <= 60.01f));
+        Assert.Equal(new string('y', 14), string.Concat(layout.Lines.Skip(1).Select(LineText)));
+    }
+
+    [Fact]
+    public void Wrap_CharacterBreakingStillRespectsMaxLines()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout(new string('x', 100), DefaultStyle, 60, maxLines: 2);
+
+        Assert.Equal(2, layout.Lines.Count);
+    }
+
+    [Fact]
+    public void Wrap_ABoxTooNarrowForOneCharacterGivesOneCharacterPerLine()
+    {
+        // The floor that keeps the split from looping forever. Overflowing by a single
+        // glyph is what a browser does with a box this size.
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("abcd", DefaultStyle, 4, maxLines: null);
+
+        Assert.Equal(4, layout.Lines.Count);
+        Assert.Equal("abcd", string.Concat(layout.Lines.Select(LineText)));
+    }
+
+    [Fact]
+    public void Wrap_TextThatBreaksNormallyIsUntouched()
+    {
+        var pipeline = CreatePipeline(charWidth: 10);
+        var layout = pipeline.Layout("hello world again", DefaultStyle, 60, maxLines: null);
+
+        Assert.Equal(3, layout.Lines.Count);
+        Assert.Equal("hello", LineText(layout.Lines[0]));
+        Assert.Equal("world", LineText(layout.Lines[1]));
+        Assert.Equal("again", LineText(layout.Lines[2]));
+    }
+
     [Fact]
     public void Clip_KeepsTheSameLineHeightAsEveryOtherPath()
     {
