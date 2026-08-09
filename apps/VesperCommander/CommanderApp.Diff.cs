@@ -107,11 +107,85 @@ public partial class CommanderApp
         if (!DiffWrap || _diffRows[index].Line is not { } line) return DiffLineH;
 
         var style = TextMeasure.StyleFor(DiffFontSize, Fonts.Mono);
+        // The text wraps inside the cell's padding, not across the whole column. Measuring
+        // against the column made a line that fits the column but not the padded box report
+        // one line and get a one-line row — then wrap to two when drawn, and be clipped.
+        float inner = width - DiffCellPadX * 2;
         float text = Math.Max(
-            TextMeasure.MeasureWrapped(line.Left ?? "", style, width).Height,
-            TextMeasure.MeasureWrapped(line.Right ?? "", style, width).Height);
-        // The cell adds 2 above and 2 below when wrapped; a blank line still owns a row.
-        return Math.Max(DiffLineH, text + 4f);
+            WrappedHeight(line.Left ?? "", style, inner),
+            WrappedHeight(line.Right ?? "", style, inner));
+        // A blank line still owns a row.
+        return Math.Max(DiffLineH, text + DiffCellPadY * 2);
+    }
+
+    // ── Monospace fast path for row heights ──────────────────────────────
+    //
+    // Measuring every row through the text pipeline means shaping every line of both files
+    // before the first one can be drawn — the single largest cost of opening a wrapped diff.
+    // Almost every line of code, though, is plain ASCII and short enough to fit its column,
+    // and in a monospace face that question is arithmetic: length × advance ≤ width. One
+    // multiplication instead of a shaper call.
+    //
+    // It answers only the case it can answer *exactly* — a line that certainly fits, and so
+    // is certainly one line tall. Everything else falls back to real measurement, because a
+    // height that disagrees with what the row lays out to is not a slow row, it is a clipped
+    // one: the list forces the height it is given.
+    private float _monoAdvance = -1f;   // 0 = proven not uniform, -1 = not yet proven
+    private float _monoLineHeight;
+
+    private float WrappedHeight(string text, ResolvedInheritedStyle style, float width)
+    {
+        if (FitsOnOneLine(text, width)) return _monoLineHeight;
+        return TextMeasure.MeasureWrapped(text, style, width).Height;
+    }
+
+    private bool FitsOnOneLine(string text, float width)
+    {
+        EnsureMonoMetrics();
+        if (_monoAdvance <= 0f || width <= 0f) return false;
+
+        foreach (var c in text)
+        {
+            // Outside the range the advance was proven over — a tab, a combining mark, or
+            // anything needing a fallback face — so the arithmetic says nothing.
+            if (c < ' ' || c > '~') return false;
+        }
+        // A margin of one character, so a line that lands within rounding distance of the
+        // column edge takes the measured path rather than being guessed at.
+        return (text.Length + 1) * _monoAdvance <= width;
+    }
+
+    /// <summary>
+    /// Proves the diff font really is monospace before anything relies on it: every printable
+    /// ASCII character must advance by the same width, and a pair must be exactly twice one,
+    /// which rules out kerning. Anything else disables the fast path for good. Prove, never
+    /// assume — the font is configurable, and a proportional one would silently mis-size rows.
+    /// </summary>
+    private void EnsureMonoMetrics()
+    {
+        if (_monoAdvance >= 0f) return;
+
+        var style = TextMeasure.StyleFor(DiffFontSize, Fonts.Mono);
+        float advance = TextMeasure.MeasureWidth("M", style);
+        if (advance <= 0f) { _monoAdvance = 0f; return; }   // no measure context yet
+
+        foreach (var c in " iMW0(_~lI'")
+        {
+            if (Math.Abs(TextMeasure.MeasureWidth(c.ToString(), style) - advance) > 0.01f)
+            {
+                _monoAdvance = 0f;
+                return;
+            }
+        }
+        if (Math.Abs(TextMeasure.MeasureWidth("MM", style) - advance * 2f) > 0.01f)
+        {
+            _monoAdvance = 0f;
+            return;
+        }
+
+        _monoLineHeight = TextMeasure.MeasureWrapped("M", style, advance * 4f).Height;
+        if (_monoLineHeight <= 0f) { _monoAdvance = 0f; return; }
+        _monoAdvance = advance;
     }
 
     /// <summary>Total height of the body, from the row index.</summary>
@@ -365,6 +439,10 @@ public partial class CommanderApp
     // to work out how much width is left for the two code columns.
     private const float DiffGutterW = 34f;
     private const float DiffMarkerW = 18f;
+    // The code cell's padding, per side. Shared with the row-height calculation: the text
+    // wraps inside this, so a height measured against the bare column is a clipped row.
+    private const float DiffCellPadX = 8f;
+    private const float DiffCellPadY = 2f;
 
     private Element BuildDiff()
     {
@@ -581,7 +659,7 @@ public partial class CommanderApp
         // the content sits at the top rather than centred in a row it no longer defines.
         var box = Box.New().Background(bg)
             .JustifyContent(DiffWrap ? JustifyContent.FlexStart : JustifyContent.Center)
-            .Padding(new Thickness(DiffWrap ? 2 : 0, 8, DiffWrap ? 2 : 0, 8))
+            .Padding(new Thickness(DiffWrap ? DiffCellPadY : 0, DiffCellPadX, DiffWrap ? DiffCellPadY : 0, DiffCellPadX))
             .OverflowX(Overflow.Hidden);
         // Wrapped there is no offset to apply, and the cell already clips.
 

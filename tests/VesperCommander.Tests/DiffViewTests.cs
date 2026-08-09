@@ -676,6 +676,107 @@ public class DiffViewTests
         Assert.Equal("left line 1501", copied[1500]);
     }
 
+    // ── monospace fast path for row heights ──────────────────────────────
+    //
+    // Wrapped rows get their height from a shortcut: in a monospace face a line that is
+    // short enough certainly fits on one line, which is arithmetic rather than a shaper
+    // call. If that ever disagrees with what the row actually lays out to, the row is not
+    // slow — it is clipped, because the list forces the height it was given. So the test is
+    // equality against real layout, across the shapes that sit near the boundary.
+
+    [Fact]
+    public void EveryRowIsExactlyAsTallAsTheTextInIt()
+    {
+        using var t = new Fixture();
+        // Lengths straddling the column width, and packed into the first rows on purpose:
+        // the body is virtualized, so a sweep that put the interesting lengths further down
+        // would never build them and would pass without testing anything.
+        int[] lengths = [40, 60, 72, 78, 80, 82, 84, 86, 90, 96, 104, 120, 140, 160, 200, 300];
+        var left = new System.Text.StringBuilder();
+        var right = new System.Text.StringBuilder();
+        for (int rep = 0; rep < 2; rep++)
+            foreach (var n in lengths)
+            {
+                left.Append(new string('x', n)).Append('\n');
+                right.Append(new string('y', n)).Append('\n');
+            }
+        t.WriteLeft("a.txt", left.ToString());
+        t.WriteRight("a.txt", right.ToString());
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+        t.Session.PumpFrames(2);
+
+        // Every realized row must be at least as tall as the text laid out inside it. The
+        // element box is clamped by the cell, so it can never show the overflow — the line
+        // boxes can, which is what a row shorter than its own text actually looks like.
+        int checkedRows = 0;
+        foreach (var row in t.BodyRows())
+        {
+            if (row.Children.Count < 5) continue;   // a collapse row
+            float rowH = row.Layout.AbsoluteBorderBox.Height;
+            foreach (var cell in new[] { row.Children[1], row.Children[4] })
+            {
+                var label = FirstLabelIn(cell);
+                if (label is null) continue;
+                var (drawn, count) = t.DrawnText(label);
+                checkedRows++;
+                Assert.True(drawn <= rowH + 0.5f,
+                    $"{count} lines of text ({drawn:0}px) sit in a {rowH:0}px row — the row is clipping them");
+            }
+        }
+        Assert.True(checkedRows > 10, $"only {checkedRows} cells were checked — the sweep proves nothing");
+    }
+
+    [Fact]
+    public void AWordThatOnlyJustFitsStillGetsAOneLineRow()
+    {
+        using var t = new Fixture();
+        // Long unbroken runs: no spaces to break at, so the wrap decision is purely the
+        // width comparison the fast path shortcuts.
+        t.WriteLeft("a.txt", new string('a', 40) + "\n" + new string('b', 200) + "\n");
+        t.WriteRight("a.txt", new string('c', 40) + "\n" + new string('d', 200) + "\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+        t.Session.PumpFrames(2);
+
+        var rows = t.BodyRows();
+        // The 40-character line fits its column; the 200-character one cannot.
+        Assert.Equal(20f, rows[0].Layout.AbsoluteBorderBox.Height, 1);
+        Assert.True(rows[1].Layout.AbsoluteBorderBox.Height > 20f,
+            "a 200-character run should have wrapped to more than one line");
+    }
+
+    // Non-ASCII has to leave the fast path: those glyphs come from a fallback face whose
+    // advance the monospace arithmetic knows nothing about.
+    [Fact]
+    public void ALineOfNonAsciiIsMeasuredNotGuessed()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('東', 60) + "\n");
+        t.WriteRight("a.txt", new string('京', 60) + "\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+        t.Session.PumpFrames(2);
+
+        var row = t.BodyRows()[0];
+        var label = FirstLabelIn(row.Children[1]);
+        Assert.NotNull(label);
+        var (drawn, count) = t.DrawnText(label!);
+        Assert.True(drawn <= row.Layout.AbsoluteBorderBox.Height + 0.5f,
+            $"{count} lines of wide glyphs ({drawn:0}px) sit in a {row.Layout.AbsoluteBorderBox.Height:0}px row");
+    }
+
+    private static HultUI.Core.Elements.TextElement? FirstLabelIn(HultUI.Core.Elements.Element cell)
+    {
+        if (cell is HultUI.Core.Elements.TextElement self) return self;
+        foreach (var child in cell.Children)
+            if (FirstLabelIn(child) is { } found) return found;
+        return null;
+    }
+
     private static string Lines(string format, int count) =>
         string.Concat(System.Linq.Enumerable.Range(1, count)
             .Select(i => string.Format(format, i) + "\n"));
@@ -752,6 +853,20 @@ public class DiffViewTests
             float w = 0;
             foreach (var line in lines) w = System.Math.Max(w, line.Width);
             return w;
+        }
+
+        /// <summary>Height of the text actually laid out in a label, and how many lines it
+        /// broke into. Read from the line boxes, not the element box: the box is clamped by
+        /// its cell and so can never report overflowing it — only the laid-out text can.</summary>
+        public (float Height, int LineCount) DrawnText(HultUI.Core.Elements.Element label)
+        {
+            var lines = (HultUI.Core.Rendering.TextLineBox[])
+                typeof(HultUI.Core.Elements.TextElement)
+                    .GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .GetValue(label)!;
+            float bottom = 0;
+            foreach (var line in lines) bottom = System.Math.Max(bottom, line.OffsetY + line.Height);
+            return (bottom, lines.Length);
         }
 
         public HultUI.Core.Elements.Element? TryScrollbarTrack() =>
