@@ -33,6 +33,7 @@ public static class SyntaxHighlighter
     private static Color? _defaultFg;
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
+    private static readonly Dictionary<string, bool> CanHighlightByExt = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Extensions absent from TextMateSharp's bundled language table that are
@@ -106,7 +107,20 @@ public static class SyntaxHighlighter
     /// </summary>
     public static bool CanHighlight(string path)
     {
-        lock (Gate) return GrammarFor(path) != null;
+        var ext = ResolveExtension(path);
+        if (ext is null) return false;
+        lock (Gate)
+        {
+            if (CanHighlightByExt.TryGetValue(ext, out var known)) return known;
+            EnsureRegistry();
+            // Scope lookup only — deliberately NOT LoadGrammar. A file list asks this
+            // once per visible row per frame, and loading a grammar means parsing a
+            // sizeable JSON on the UI thread for a language that may never be shown.
+            // The real load stays deferred to the first tokenize.
+            bool can = _options!.GetScopeByExtension(ext) != null;
+            CanHighlightByExt[ext] = can;
+            return can;
+        }
     }
 
     /// <summary>
@@ -168,23 +182,27 @@ public static class SyntaxHighlighter
     }
 
     /// <summary>
+    /// The canonical extension to look a grammar up by: the file's own extension, its
+    /// alias, or — for extension-less files — the one its name implies. Null when
+    /// nothing maps. Pure string work, so both the predicate and the loader share it
+    /// without either touching the registry.
+    /// </summary>
+    private static string? ResolveExtension(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path);
+        if (ext.Length == 0)
+            return FileNameAliases.TryGetValue(System.IO.Path.GetFileName(path), out var byName) ? byName : null;
+        return ExtensionAliases.TryGetValue(ext, out var alias) ? alias : ext;
+    }
+
+    /// <summary>
     /// The grammar for <paramref name="path"/>, resolved from its extension, then
     /// from an alias, then — for extension-less files — from its name. Null when
     /// nothing bundled parses it.
     /// </summary>
     private static IGrammar? GrammarFor(string path)
     {
-        var ext = System.IO.Path.GetExtension(path);
-        if (ext.Length == 0)
-        {
-            if (!FileNameAliases.TryGetValue(System.IO.Path.GetFileName(path), out var byName)) return null;
-            ext = byName;
-        }
-        else if (ExtensionAliases.TryGetValue(ext, out var alias))
-        {
-            ext = alias;
-        }
-
+        if (ResolveExtension(path) is not { } ext) return null;
         EnsureRegistry();
         // Keyed by the resolved extension, so every alias shares one cached grammar.
         if (GrammarByExt.TryGetValue(ext, out var grammar)) return grammar;
