@@ -92,7 +92,7 @@ internal sealed class InspectorView : Component
             .Background(p.Surface)
             .Border(new Thickness(0, 0, 1, 0), p.Border)
             .Children(
-                ToolButton(p, "⊹ Pick", "Ctrl+Shift+C — click an element in the app to select it",
+                ToolButton(p, "⊹ Pick", "Click an element in the app window to select it",
                     active: _inspector.IsPicking,
                     onClick: () => _inspector.SetPicking(!_inspector.IsPicking)),
                 filter,

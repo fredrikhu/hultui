@@ -163,7 +163,7 @@ Press **F12** at runtime to toggle the DevTools overlay:
 - [Drag and Drop](docs/DRAG-AND-DROP.md) -- internal element drag and OS file/text drops
 - [Custom Window Chrome](docs/CUSTOM-CHROME.md) -- borderless windows with custom title bars
 - [Multi-Window](docs/MULTI-WINDOW.md) -- multiple windows with shared state
-- [DevTools](docs/DEVTOOLS.md) -- element inspector (Ctrl+Shift+C) and performance HUD (F12)
+- [DevTools](docs/DEVTOOLS.md) -- element inspector (Ctrl+Shift+I) and performance HUD (F12)
 - [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
 

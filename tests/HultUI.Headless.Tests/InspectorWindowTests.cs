@@ -95,7 +95,7 @@ public class InspectorWindowTests
     }
 
     [Fact]
-    public void CtrlShiftC_OpensThePanelWithThePickerArmed()
+    public void CtrlShiftC_IsLeftToTheApp()
     {
         using var session = HeadlessSession.Create(width: 300, height: 200);
         BuildApp(session);
@@ -103,7 +103,12 @@ public class InspectorWindowTests
         session.Window.PressKey(KeyCode.C, KeyModifiers.Ctrl | KeyModifiers.Shift);
         session.PumpFrame();
 
-        Assert.True(Inspector(session).IsPicking);
+        // Browsers bind this to "inspect", but a browser is the devtools host. A
+        // framework claiming it takes the chord from the app underneath, before
+        // dispatch and without recourse — which is exactly what it did to Vesper's
+        // "copy as path". OpenInspector(startPicking: true) and the panel's Pick
+        // button arm the picker instead.
+        Assert.False(session.Application.IsInspectorOpen);
     }
 
     [Fact]
@@ -184,7 +189,7 @@ public class InspectorWindowTests
         session.Window.Click(target.X, target.Y);
         session.PumpFrame();
 
-        session.Window.PressKey(KeyCode.C, KeyModifiers.Ctrl | KeyModifiers.Shift);   // re-arm
+        Inspector(session).SetPicking(true);   // re-arm
         session.PumpFrame();
         Assert.True(Inspector(session).IsPicking);
 

@@ -11,10 +11,11 @@ Run any HultUI app and press:
 | Chord | What it does |
 |-------|--------------|
 | `Ctrl+Shift+I` | Open / close the inspector |
-| `Ctrl+Shift+C` | Open the inspector with the picker armed |
 | `F12` | Cycle the performance HUD: on → on + continuous redraw → off |
 
-With the picker armed, moving the pointer over the app outlines the element under it, and clicking selects it. The click never reaches the app — clicking a button selects it rather than pressing it.
+Then press **Pick** in the toolbar to arm the picker. Moving the pointer over the app outlines the element under it, and clicking selects it. The click never reaches the app — clicking a button selects it rather than pressing it.
+
+`Ctrl+Shift+I` is the only chord the framework claims. Browsers also bind `Ctrl+Shift+C` to "inspect", but a browser *is* the devtools host; a general UI framework claiming that chord takes it from the app underneath, before dispatch and with no recourse. It is a commonly-used binding — Explorer's "copy as path", among others — so apps keep it. Arm the picker from code with `app.OpenInspector(startPicking: true)`.
 
 ---
 
@@ -90,7 +91,7 @@ app.CloseInspector();
 bool open = app.IsInspectorOpen;
 ```
 
-If your app already binds `Ctrl+Shift+I` or `Ctrl+Shift+C`, turn the built-in chords off and route the inspector from wherever suits you:
+If your app already binds `Ctrl+Shift+I`, turn the built-in chord off and route the inspector from wherever suits you:
 
 ```csharp
 app.DevToolsHotkeysEnabled = false;

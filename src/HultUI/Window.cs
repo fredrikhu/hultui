@@ -649,16 +649,15 @@ public sealed class Window : IOverlayHost, IDisposable
             && evt is InputEvent.KeyInput { IsDown: true } key
             && key.Modifiers.HasFlag(KeyModifiers.Ctrl) && key.Modifiers.HasFlag(KeyModifiers.Shift))
         {
-            // Ctrl+Shift+I opens the panel, Ctrl+Shift+C opens it already picking —
-            // the arrangement every browser uses, so it needs no learning.
+            // Ctrl+Shift+I only. Browsers also bind Ctrl+Shift+C to "inspect", but a
+            // browser is the devtools host — a general UI framework claiming that
+            // chord takes it from the app underneath, silently and before dispatch.
+            // The first real app this shipped against already owned it ("copy as
+            // path"), so the picker is armed from the panel's Pick button or from
+            // OpenInspector(startPicking: true) instead.
             if (key.KeyCode == KeyCode.I)
             {
                 Application.ToggleInspector(this, startPicking: false);
-                return true;
-            }
-            if (key.KeyCode == KeyCode.C)
-            {
-                Application.ToggleInspector(this, startPicking: true);
                 return true;
             }
         }
