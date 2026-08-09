@@ -676,6 +676,64 @@ public class DiffViewTests
         Assert.Equal("left line 1501", copied[1500]);
     }
 
+    [Fact]
+    public void F8WalksTheChangesAndShiftF8WalksBack()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n");
+        t.WriteRight("a.txt", "1\nX\n3\n4\n5\n6\n7\n8\n9\n10\nY\n12\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        Assert.True(t.ChangeRows.Count >= 2);
+        Assert.Equal(0, t.Field<int>("_diffChangeIdx"));
+
+        t.Press(KeyCode.F8);
+        Assert.Equal(1, t.Field<int>("_diffChangeIdx"));
+
+        t.Press(KeyCode.F8, KeyModifiers.Shift);
+        Assert.Equal(0, t.Field<int>("_diffChangeIdx"));
+    }
+
+    // Opening a comparison put a ring around the first change, which read as a selected row
+    // in a list — an interaction this view does not have. It appears once you jump.
+    [Fact]
+    public void NoChangeIsRingedUntilYouJumpToOne()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "1\n2\n3\n");
+        t.WriteRight("a.txt", "1\nX\n3\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        Assert.All(t.BodyRows(), row => Assert.Equal(0f, ((HultUI.Core.Elements.BoxElement)row).Box.BorderWidth.Top));
+
+        t.Press(KeyCode.F8);
+
+        Assert.Contains(t.BodyRows(), row => ((HultUI.Core.Elements.BoxElement)row).Box.BorderWidth.Top > 0f);
+    }
+
+    // A narrow enough pane used to squeeze the LEFT/RIGHT tag until it folded to two lines.
+    [Fact]
+    public void TheSideTagNeverFoldsOntoASecondLine()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a-file-with-a-fairly-long-name.txt", "one\n");
+        t.WriteRight("a-file-with-a-fairly-long-name.txt", "two\n");
+        t.Open();
+
+        t.OpenDiffOn("a-file-with-a-fairly-long-name.txt");
+
+        // The box, not the line boxes: these labels are not selectable, and a TextElement
+        // only records its laid-out lines when it is. One line of 9.5px type is ~13px tall,
+        // so a folded tag would be nearer 26.
+        var tags = t.SideTags();
+        Assert.Equal(2, tags.Count);
+        foreach (var tag in tags)
+            Assert.True(tag.Layout.AbsoluteBorderBox.Height < 20f,
+                $"the side tag is {tag.Layout.AbsoluteBorderBox.Height:0}px tall — it folded onto a second line");
+    }
+
     // ── comparing off the UI thread, and saying why when it can't ────────
 
     // The comparison used to run inside the F3 handler, so a slow pair froze the window with
@@ -1034,6 +1092,20 @@ public class DiffViewTests
         public HultUI.Core.Primitives.Rect BodyBox() => Body.Layout.AbsoluteContentBox;
 
         public string Clipboard => _session.Window.Clipboard.GetText() ?? "";
+
+        /// <summary>The "LEFT" / "RIGHT" labels in the sub-header.</summary>
+        public IReadOnlyList<HultUI.Core.Elements.Element> SideTags()
+        {
+            var found = new List<HultUI.Core.Elements.Element>();
+            Walk(Body.Parent?.Parent ?? Body);   // up from the body to the view that holds the sub-header
+            return found;
+
+            void Walk(HultUI.Core.Elements.Element e)
+            {
+                if (e is HultUI.Core.Elements.TextElement { Content: "LEFT" or "RIGHT" }) found.Add(e);
+                foreach (var c in e.Children) Walk(c);
+            }
+        }
 
         public HultUI.Core.Elements.TextSelectionGroup LeftGroup =>
             Field<HultUI.Core.Elements.TextSelectionGroup>("_diffGroupLeft");

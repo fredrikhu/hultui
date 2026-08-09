@@ -23,6 +23,9 @@ public partial class CommanderApp
     private List<DiffRow> _diffRows = new();
     private List<int> _diffChangeRows = new();
     private int _diffChangeIdx;
+    // Whether the user has jumped between changes yet. The current-change ring is drawn only
+    // after that, so opening a comparison doesn't look like it has a row selected.
+    private bool _diffNavUsed;
     private bool _pendingDiffScroll;
     private readonly Ref<ScrollViewElement> _diffScrollRef = new();
     // The row holding the change n/p last landed on, so its position can be read rather
@@ -272,6 +275,7 @@ public partial class CommanderApp
         _diffRows = new();
         _diffChangeRows = new();
         _diffChangeIdx = 0;
+        _diffNavUsed = false;
         _diffTops = [];
         _diffPan.Reset();
         _diffPan.ContentWidth = 0;
@@ -385,6 +389,7 @@ public partial class CommanderApp
     private void DiffNav(int dir)
     {
         if (_diffChangeRows.Count == 0) return;
+        _diffNavUsed = true;
         _diffChangeIdx = Math.Clamp(_diffChangeIdx + dir, 0, _diffChangeRows.Count - 1);
         _pendingDiffScroll = true;
         MarkDirty();
@@ -464,6 +469,10 @@ public partial class CommanderApp
             case KeyCode.F3: CloseDiff(); e.StopPropagation = true; break;
             case KeyCode.N: DiffNav(1); e.StopPropagation = true; break;
             case KeyCode.P: DiffNav(-1); e.StopPropagation = true; break;
+            // F8 walks the changes the way most comparison tools do; Shift reverses it.
+            case KeyCode.F8:
+                DiffNav(e.Modifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
+                e.StopPropagation = true; break;
             // The body is read-only, so the arrows scroll it rather than moving a cursor;
             // n / p remain the way to jump between changes.
             case KeyCode.Up: DiffScroll(-DiffLineH); e.StopPropagation = true; break;
@@ -579,7 +588,10 @@ public partial class CommanderApp
     private Element DiffPathCell(string tag, string path)
     {
         var cell = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Padding(new Thickness(5, 12, 5, 12));
-        cell.AddChild(Ui.Mono(tag, 9.5f, Nocturne.On(0.40)));
+        // Same treatment as the timestamp below, and for the same reason: the path between
+        // them is the only thing that should give way. Without it a narrow pane squeezed
+        // the tag until it folded, showing "LEF/T" stacked over two lines.
+        cell.AddChild(Ui.Mono(tag, 9.5f, Nocturne.On(0.40)).MaxLines(1).FlexShrink(0));
         cell.AddChild(Ui.Mono(path, 11f, Nocturne.On(0.60)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
         if (File.Exists(path))
         {
@@ -638,7 +650,7 @@ public partial class CommanderApp
     /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>
     private Element BuildDiffRow(DiffRow r)
     {
-        bool current = _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
+        bool current = _diffNavUsed && _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
             && r.Index == _diffChangeRows[_diffChangeIdx];
         var built = r.CollapseCount is int n ? DiffCollapseRow(n) : DiffLineRow(r.Line!, current, r.Index);
         if (current) built.WithRef(_diffChangeRowRef);
@@ -667,6 +679,9 @@ public partial class CommanderApp
         var row = Grid.Of($"{DiffGutterW}px 1fr {DiffMarkerW}px {DiffGutterW}px 1fr", gap: 0)
             .AlignItems(AlignItems.Stretch);
         if (DiffWrap) row.MinHeight(DiffLineH); else row.Height(DiffLineH);
+        // Only once the user has actually jumped to a change. On opening, the index still
+        // points at the first one, and ringing it made the top row read as a selected row in
+        // a list — an interaction the view doesn't have.
         if (current) row.BorderColor(Nocturne.Accent600).BorderWidth(1f);
 
         // On a changed line, mark only the differing middle — the common prefix/suffix stay
@@ -785,7 +800,7 @@ public partial class CommanderApp
         }
         if (_diffChangeRows.Count > 0)
         {
-            footer.AddChild(Ui.Kbd("n")); footer.AddChild(Ui.Kbd("p"));
+            footer.AddChild(Ui.Kbd("F8")); footer.AddChild(Ui.Kbd("n")); footer.AddChild(Ui.Kbd("p"));
             footer.AddChild(Ui.Mono("change", 10f, Nocturne.On(0.45)));
         }
         footer.AddChild(Ui.Kbd("Esc")); footer.AddChild(Ui.Mono("back", 10f, Nocturne.On(0.45)));
