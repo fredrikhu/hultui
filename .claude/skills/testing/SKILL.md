@@ -112,6 +112,7 @@ Each row shows the last frame's value plus a rolling 5s peak. Reading them:
 6. **Raw-string baselines carry the source file's line endings** (autocrlf ⇒ CRLF on Windows, LF on Linux CI). Normalise with `ReplaceLineEndings("\n")`; `RenderLog.ToString()` and a11y dumps always emit `\n`.
 7. **`PatchFrom` on `TextInputElement`** preserves caret/selection only when text is unchanged — rebuild-heavy UIs rely on this; there are regression tests in `TextInputElementTests`.
 8. **Flex rows inside a scrolled column** need `FlexShrink(0)` in tests only if you built them before 2026-07-18's shrink fix — new tests use `Height(h).FlexShrink(0)` for explicit fixed rows (see `ScrollIntoViewTests.BuildList`).
+9. **A view that replaces (not layers over) the tree can be keyboard-dead.** `Ref<T>.Current` is never cleared on unmount and `Element.Focus()` accepts a detached element, so `myRef.Current?.Focus()` after a rebuild that dropped the element focuses a corpse — keys then dispatch to a one-element parent chain and never reach the root handler. Test any full-screen mode by pressing the key that *leaves* it, and then a plain key to prove the restored tree got the keyboard back (`DiffViewTests`). This is invisible to a test that only asserts the view opened.
 
 ## Polling hides bugs that only an idle app has
 

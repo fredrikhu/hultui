@@ -47,7 +47,7 @@ public partial class CommanderApp
         _syncCts = null;
         _syncComparing = false;
         _syncOpen = false;
-        PaneRef(_active).Current?.Focus();
+        _pendingPaneFocus = _active;   // see CloseDiff — the panes are rebuilt after this
         MarkDirty();
     }
 

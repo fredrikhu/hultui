@@ -28,8 +28,8 @@ public partial class CommanderApp
 
     private sealed record DiffRow(DiffEngine.Line? Line, int? CollapseCount);
 
-    /// <summary>F3 — compare the cursor file in <paramref name="side"/> with the same-named
-    /// file in the other pane. Honors the DiffTool setting (VS Code launches externally;
+    /// <summary>F3 — compare the cursor file in <paramref name="side"/> with its partner in
+    /// the other pane. Honors the DiffTool setting (VS Code launches externally;
     /// Builtin/Junction use this view).</summary>
     private void OpenDiff(char side)
     {
@@ -41,10 +41,10 @@ public partial class CommanderApp
         char other = side == 'L' ? 'R' : 'L';
 
         _diffLeftPath = e.FullPath;
-        _diffRightPath = System.IO.Path.Combine(Dir(other), e.Name);
+        _diffRightPath = DiffPartner(other, e);
         _diffSide = side;
 
-        if (_settings.DiffTool == DiffToolKind.VSCode && FileOps.Exists(_diffRightPath))
+        if (_settings.DiffTool == DiffToolKind.VSCode && File.Exists(_diffRightPath))
         {
             FileOps.LaunchDiff("code", _diffLeftPath, _diffRightPath);
             return;
@@ -55,11 +55,34 @@ public partial class CommanderApp
         MarkDirty();
     }
 
+    /// <summary>The file F3 compares <paramref name="e"/> against. The same-named file in the
+    /// other pane's folder wins — two copies of one file is the common case — and otherwise
+    /// the two cursors pair up, which is what lets F3 compare unrelated names across two
+    /// folders instead of reporting the other side missing. A same-named hit that resolves
+    /// back to the file we started from is no comparison at all, so it defers to the cursor
+    /// too. With nothing to pair against, the same-named path is returned anyway, so the
+    /// missing-file report names the path the user expected.</summary>
+    private string DiffPartner(char other, FileEntry e)
+    {
+        var sameName = System.IO.Path.Combine(Dir(other), e.Name);
+        if (File.Exists(sameName) && !PathEquals(sameName, e.FullPath)) return sameName;
+
+        var list = Rows(other);
+        int cur = Cursor(other);
+        if (cur >= 0 && cur < list.Count && list[cur] is { IsParent: false, IsDir: false } partner
+            && !PathEquals(partner.FullPath, e.FullPath))
+            return partner.FullPath;
+
+        return sameName;
+    }
+
     private void CloseDiff()
     {
         _diffOpen = false;
         _diffResult = null;
-        PaneRef(_diffSide).Current?.Focus();
+        // The panes don't exist yet — this build still shows the diff. Ask for the focus
+        // once they're back; PaneRef still holds the element from before the view opened.
+        _pendingPaneFocus = _diffSide;
         MarkDirty();
     }
 
@@ -141,6 +164,24 @@ public partial class CommanderApp
         MarkDirty();
     }
 
+    /// <summary>Scroll the diff body by <paramref name="delta"/> px (or to <paramref
+    /// name="to"/> when given). The offset survives reconciliation — ScrollViewElement
+    /// deliberately doesn't copy it from the incoming build — so it can be set directly,
+    /// and the setter clamps to the content and repaints. Only the Ok state builds a
+    /// scroll body; without that guard the Ref would still point at the detached
+    /// ScrollView left over from a previous comparison.</summary>
+    private void DiffScroll(float delta, float? to = null)
+    {
+        if (_diffState != DiffViewState.Ok || _diffScrollRef.Current is not { } sv) return;
+        sv.ScrollOffsetY = to ?? sv.ScrollOffsetY + delta;
+    }
+
+    /// <summary>A page is the viewport less one line, so the line you were reading stays
+    /// on screen across a PgUp/PgDn.</summary>
+    private float DiffPage() => _diffScrollRef.Current is { } sv
+        ? Math.Max(DiffLineH, sv.Layout.AbsoluteContentBox.Height - DiffLineH)
+        : DiffLineH;
+
     private void HandleDiffKey(KeyDownEvent e)
     {
         switch (e.Key)
@@ -149,6 +190,14 @@ public partial class CommanderApp
             case KeyCode.F3: CloseDiff(); e.StopPropagation = true; break;
             case KeyCode.N: DiffNav(1); e.StopPropagation = true; break;
             case KeyCode.P: DiffNav(-1); e.StopPropagation = true; break;
+            // The body is read-only, so the arrows scroll it rather than moving a cursor;
+            // n / p remain the way to jump between changes.
+            case KeyCode.Up: DiffScroll(-DiffLineH); e.StopPropagation = true; break;
+            case KeyCode.Down: DiffScroll(DiffLineH); e.StopPropagation = true; break;
+            case KeyCode.PageUp: DiffScroll(-DiffPage()); e.StopPropagation = true; break;
+            case KeyCode.PageDown: DiffScroll(DiffPage()); e.StopPropagation = true; break;
+            case KeyCode.Home: DiffScroll(0, to: 0); e.StopPropagation = true; break;
+            case KeyCode.End: DiffScroll(0, to: float.MaxValue); e.StopPropagation = true; break;
             case KeyCode.F5:
                 if (_diffState == DiffViewState.Missing) { CloseDiff(); StartCopy(); }
                 e.StopPropagation = true; break;
@@ -242,8 +291,11 @@ public partial class CommanderApp
             try
             {
                 var fi = new FileInfo(path);
+                // Fixed size, never wrapped: the path beside it grows and ellipsises, so it
+                // is the one that should give way. Without this the timestamp folded onto a
+                // second line and spilled over the first row of the diff.
                 cell.AddChild(Ui.Mono($"{FileSystem.ByteCount(fi.Length)} · {fi.LastWriteTime:yyyy-MM-dd HH:mm}",
-                    10f, Nocturne.On(0.40)));
+                    10f, Nocturne.On(0.40)).MaxLines(1).FlexShrink(0));
             }
             catch { }
         }
@@ -306,14 +358,20 @@ public partial class CommanderApp
 
     private static Color HatchBg => Nocturne.Alpha(Nocturne.Text, 0.02);
 
+    // A Box lays out as a *column*, so JustifyContent is the vertical axis and AlignItems
+    // the horizontal one — the opposite of the row-shaped cells everywhere else in this
+    // file. Both cells below want "vertically centred, horizontally not centred", which is
+    // JustifyContent.Center; using AlignItems.Center for it centred the text instead.
     private Element DiffGutter(int no) =>
-        Box.New().AlignItems(AlignItems.Center).JustifyContent(JustifyContent.FlexEnd)
+        Box.New().AlignItems(AlignItems.FlexEnd).JustifyContent(JustifyContent.Center)
             .Padding(new Thickness(0, 6, 0, 0))
             .Children(Ui.Mono(no > 0 ? no.ToString() : "", 10.5f, Nocturne.Neutral700));
 
     private Element DiffTextCell(string? text, Color bg, Color fg, (int start, int len)? highlight = null)
     {
-        var box = Box.New().Background(bg).AlignItems(AlignItems.Center).Padding(new Thickness(0, 8, 0, 8));
+        // AlignItems is left at its Stretch default so the line fills the cell and clips at
+        // the cell's own edge rather than at the width of the text.
+        var box = Box.New().Background(bg).JustifyContent(JustifyContent.Center).Padding(new Thickness(0, 8, 0, 8));
         var mono = Ui.Mono(text ?? "", 11.5f, fg).MaxLines(1).TextOverflow(TextOverflow.Clip);
         if (highlight is (var s, var l) && l > 0 && text != null && s + l <= text.Length)
             mono.Spans([new TextSpan(s, l, Nocturne.DiffChangeMark)]);   // the changed run pops
@@ -360,6 +418,11 @@ public partial class CommanderApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
         footer.AddChild(Ui.Mono("read-only", 10f, Nocturne.On(0.40)));
         footer.AddChild(Box.New().FlexGrow(1));
+        if (_diffState == DiffViewState.Ok)
+        {
+            footer.AddChild(Ui.Kbd("↑↓"));
+            footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
+        }
         if (_diffChangeRows.Count > 0)
         {
             footer.AddChild(Ui.Kbd("n")); footer.AddChild(Ui.Kbd("p"));

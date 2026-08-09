@@ -207,6 +207,15 @@ public partial class CommanderApp : Component, IDisposable
     private readonly Ref<BoxElement> _paneRefR = new();
     private Ref<BoxElement> PaneRef(char side) => side == 'L' ? _paneRefL : _paneRefR;
 
+    // The side to focus once the panes are back in the tree, set when a full-shell view
+    // closes. Deferred because the Refs still point at the panes that view replaced.
+    private char? _pendingPaneFocus;
+
+    /// <summary>True while the diff or sync view has replaced the rail and panes. They own
+    /// the whole shell rather than layering over it, so the panes aren't merely covered —
+    /// they're gone from the tree.</summary>
+    private bool FullShellOpen => _diffOpen || _syncOpen;
+
     // Off-thread text excerpt for the preview column, keyed by the focused file's
     // path + mtime + size (so editing a file refreshes its preview).
     private readonly AsyncLoader<string> _previewLoader = new("");
@@ -536,6 +545,13 @@ public partial class CommanderApp : Component, IDisposable
 
     protected override void OnAfterBuild()
     {
+        // Returning from a full-shell view: its Close ran while the diff/sync tree was
+        // still up, so the pane it wants to focus only exists as of this build.
+        if (_pendingPaneFocus is char paneSide)
+        {
+            _pendingPaneFocus = null;
+            PaneRef(paneSide).Current?.Focus();
+        }
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
@@ -565,7 +581,12 @@ public partial class CommanderApp : Component, IDisposable
         // Keep a browsing region focused so Tab traverses panes/preview predictably.
         // The framework consumes Tab for focus traversal; with nothing focused the
         // first Tab would just land on the already-active pane and appear to do nothing.
-        else if (!AnyOverlayOpen && _window.FocusedElement is null)
+        // Skipped while a full-shell view owns the screen: the panes are unmounted there,
+        // and a Ref keeps pointing at the element it last saw, so this would focus a
+        // detached pane. Events dispatched to a detached element reach only that element —
+        // they never bubble to the host's global handler — which left the diff and sync
+        // views unable to see their own Esc.
+        else if (!AnyOverlayOpen && !FullShellOpen && _window.FocusedElement is null)
             PaneRef(_active).Current?.Focus();
     }
 
