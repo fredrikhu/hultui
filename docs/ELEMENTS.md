@@ -76,6 +76,15 @@ You can also call `el.On<TEvent>(handler)` directly for any event type.
 
 Handlers are replaced by each rebuild's versions during reconciliation, so closures stay in sync with what the element displays. One rule: never capture the element variable itself — for hover/press/focus styling use the declarative `.OnHover`/`.OnPressed`/`.OnFocus` overrides (they survive rebuilds and restore the base look automatically), use `e.CurrentTarget` for other self-references (e.g. reading `.Layout`), and `Ref<T>` for cross-element reach. See "Event handlers follow the latest build" in REACTIVITY.md.
 
+### Identity
+
+| Fluent | Type | Purpose |
+|---|---|---|
+| `.Name("ContactCard")` | `string` | A developer-facing label. Shows in the inspector as `#ContactCard` and in frame traces. Duplicates are fine — nothing resolves elements by it. |
+| `.AutomationId("save-btn")` | `string` | A selector for tests and UI Automation. Keep it unique per window and stable across runs; lookups take the first match. |
+
+`Key` (set as a property, not fluent) is a third identity field with a stricter rule: it must be unique **among siblings**, because the reconciler matches children by it across rebuilds. See "Name, AutomationId, Key" in DEVTOOLS.md.
+
 ### Accessibility
 
 | Fluent | Type |
@@ -83,6 +92,8 @@ Handlers are replaced by each rebuild's versions during reconciliation, so closu
 | `.AccessibleRole(role)` | `AccessibilityRole` |
 | `.AccessibleName("label")` | `string` |
 | `.AccessibleDescription("desc")` | `string` |
+
+`AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
 ### Tree
 

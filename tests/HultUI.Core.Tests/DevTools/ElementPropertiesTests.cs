@@ -50,12 +50,12 @@ public class ElementPropertiesTests
     [Fact]
     public void Descriptor_PrefersName_ThenAutomationId_ThenText()
     {
-        var withName = Text.New("content");
-        withName.Name = "greeting";
+        // Written fluently on purpose: `Name` is also a property on Element, so this
+        // only compiles if the extension is reached — see ElementExtensions.Name.
+        var withName = Text.New("content").Name("greeting");
         Assert.Equal("#greeting", ElementProperties.Descriptor(withName));
 
-        var withId = Text.New("content");
-        withId.AutomationId = "greeting-id";
+        var withId = Text.New("content").AutomationId("greeting-id");
         Assert.Equal("#greeting-id", ElementProperties.Descriptor(withId));
 
         Assert.Equal("\"content\"", ElementProperties.Descriptor(Text.New("content")));

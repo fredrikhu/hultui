@@ -53,6 +53,62 @@ This is compiled in for Debug and out for Release. See [Element origins](#elemen
 
 **Filter.** Type in the toolbar box to match type names and descriptors. Matches appear with the ancestors needed to reach them, regardless of what is expanded.
 
+### What a row is called
+
+A row reads as **type + descriptor** — `Button "Save"`, `Grid #file-row`, `Flex`.
+
+The **type** is the element's runtime type, tidied: a trailing `Element` is dropped (`BoxElement` → `Box`) and generics are spelled out (`VirtualListElement<FileRow>` → `VirtualList<FileRow>`). One exception carries most of the value: a `ComponentHost` reports **the component it hosts**, so your tree shows `Sidebar` and `ContactCard` rather than a stack of anonymous boxes.
+
+The **descriptor** is the first of these that exists:
+
+1. `#Name` — `Element.Name`
+2. `#AutomationId`
+3. `"text"` — the content of a `Text`, `Button`, `TextInput`, or `TextArea`
+4. `"AccessibleName"`
+
+…and nothing, when the element has none of them. A plain `Flex.Row()` wrapping three others is just `Flex`, three times over, which is exactly the case where labelling pays.
+
+### Naming your own elements
+
+Two ways, and the first is usually the better one:
+
+**Make it a component.** The type label follows, and so does the structure — the box rows nest underneath it.
+
+```csharp
+sealed class ContactCard : Component
+{
+    public override Element Build() => Flex.Column().Children(/* … */);
+}
+```
+
+**Or set a name**, when you don't want a new type just to label a row:
+
+```csharp
+Flex.Column().Name("ContactCard")     // shows as: Flex #ContactCard
+```
+
+The type stays visible either way — you get `Flex #ContactCard`, never a label masking what the element actually is. `Name` survives reconciliation (`PatchFrom` copies it), so it holds across rebuilds.
+
+There is no label-override hook beyond these two. Nothing can rename `Box` to something it isn't.
+
+### Name, AutomationId, Key
+
+Three string identity fields, easy to confuse, with genuinely different rules:
+
+| Field | Must be unique? | Read by |
+|---|---|---|
+| `Name` | Never | The inspector, frame traces, and — last resort only — the accessible name |
+| `AutomationId` | Per window, in practice | `FindByAutomationId`, UIA / FlaUI selectors, the inspector |
+| `Key` | **Among siblings** | The reconciler, to match children across rebuilds |
+
+**`Name` collisions are fine, and often right.** Twenty rows all named `Directory` read correctly in the tree and filter as a set. Nothing resolves elements by it.
+
+**`AutomationId` duplicates don't crash — they break tests, quietly.** Lookups take the first match in tree order, so a duplicate resolves to the wrong element rather than failing. Keep it unique per window and stable across runs.
+
+**`Key` duplicates lose state.** `ReconcileKeyed` builds a dictionary from one parent's children, so a repeated key among siblings drops the earlier element from the match set and it is rebuilt from scratch — losing scroll position, focus, and any element-held state. The same key under *different* parents is fine.
+
+One sharp edge on `Name`: it is the final fallback in `ResolveName`, so on an element that is already an accessibility node and has no `AccessibleName`, a debug label becomes what a screen reader announces. Elements with no role and no accessible name aren't in the accessibility tree at all — `IsSemantic` ignores `Name` — so a label on a plain `Box` or `Flex` costs nothing. On a `Button`, use `AccessibleName`.
+
 ### Keyboard
 
 | Key | Action |

@@ -138,6 +138,16 @@ public static class ElementExtensions
     // ──── RadioButton properties ────
     public static T OnRadioChanged<T>(this T el, Action<bool> handler) where T : RadioButtonElement { el.OnChanged = handler; return el; }
 
+    // ──── Identity ────
+    /// <summary>
+    /// A developer-facing label for this element. It shows in the inspector as
+    /// <c>#name</c>, in frame traces, and — only when nothing better exists — as the
+    /// element's accessible name. Nothing looks elements up by it, so duplicates are
+    /// fine; a repeated construct naming every instance the same reads correctly.
+    /// Use <see cref="AutomationId"/> instead for something selectors resolve.
+    /// </summary>
+    public static T Name<T>(this T el, string name) where T : Element { el.Name = name; return el; }
+
     // ──── Accessibility ────
     public static T AccessibleRole<T>(this T el, AccessibilityRole role) where T : Element { el.Role = role; return el; }
     public static T AccessibleName<T>(this T el, string name) where T : Element { el.AccessibleName = name; return el; }
