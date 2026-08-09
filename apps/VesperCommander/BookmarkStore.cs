@@ -19,16 +19,7 @@ internal partial class BookmarkJsonContext : JsonSerializerContext;
 /// </summary>
 public static class BookmarkStore
 {
-    private static string FilePath
-    {
-        get
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VesperCommander");
-            return Path.Combine(dir, "bookmarks.json");
-        }
-    }
+    private static string FilePath => Path.Combine(ConfigDir.Path, "bookmarks.json");
 
     public static List<BookmarkData> Load()
     {

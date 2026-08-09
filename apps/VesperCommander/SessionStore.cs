@@ -20,9 +20,7 @@ internal partial class SessionJsonContext : JsonSerializerContext;
 /// Best-effort: any I/O or parse failure is swallowed.</summary>
 public static class SessionStore
 {
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "VesperCommander", "session.json");
+    private static string FilePath => Path.Combine(ConfigDir.Path, "session.json");
 
     public static SessionData? Load()
     {

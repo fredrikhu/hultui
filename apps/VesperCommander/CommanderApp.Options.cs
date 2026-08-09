@@ -201,6 +201,8 @@ public partial class CommanderApp
                     ("Built-in", _draft.DiffTool == DiffToolKind.Builtin, () => SetDraft(() => _draft.DiffTool = DiffToolKind.Builtin)),
                     ("VS Code", _draft.DiffTool == DiffToolKind.VSCode, () => SetDraft(() => _draft.DiffTool = DiffToolKind.VSCode)),
                     ("Junction", _draft.DiffTool == DiffToolKind.Junction, () => SetDraft(() => _draft.DiffTool = DiffToolKind.Junction))))),
+            new(3, "Wrap long lines in the diff", "word wrap break scroll sideways horizontal",
+                () => ToggleRow(_draft.DiffWrap, "Wrap long lines in the diff", () => Flip(ref _draft.DiffWrap))),
             new(3, "Editor", "external text",
                 () => FieldRow("Editor", ReadonlyField(_draft.Editor))),
             new(3, "Image editor", "external",

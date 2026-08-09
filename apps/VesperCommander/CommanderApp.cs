@@ -568,9 +568,16 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingPwFocus) { _pendingPwFocus = false; _pwRef.Current?.Focus(); }
         if (_pendingDiffScroll)
         {
-            _pendingDiffScroll = false;
             if (_diffScrollRef.Current is { } sv && _diffChangeIdx < _diffChangeRows.Count)
-                sv.ScrollOffsetY = Math.Max(0, (_diffChangeRows[_diffChangeIdx] - 2) * DiffLineH);
+            {
+                // Stays pending when the answer isn't available yet — see DiffChangeTop.
+                if (DiffChangeTop(sv) is { } top)
+                {
+                    _pendingDiffScroll = false;
+                    sv.ScrollOffsetY = Math.Max(0, top - 2 * DiffLineH);
+                }
+            }
+            else _pendingDiffScroll = false;
         }
         if (_pendingFindScroll)
         {

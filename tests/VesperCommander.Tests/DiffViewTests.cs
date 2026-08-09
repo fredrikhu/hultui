@@ -460,6 +460,158 @@ public class DiffViewTests
         Assert.All(spans, s => Assert.Equal(default, s.Color));
     }
 
+    // ── Wrap mode ────────────────────────────────────────────────────────
+    [Fact]
+    public void WrappingGrowsTheRowAndKeepsBothSidesOnTheSameBand()
+    {
+        using var t = new Fixture();
+        // One side far longer than the other: the row has to take the taller side's height
+        // and every cell in it — both gutters included — has to share that band, or the two
+        // files stop lining up from this row onward.
+        t.WriteLeft("a.txt", "short\n");
+        t.WriteRight("a.txt", string.Join(" ", System.Linq.Enumerable.Repeat("a long stretch of words", 30)) + "\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+
+        // The content box, not the border box: the current change row draws a 1px ring, and
+        // the cells sit inside it.
+        var row = t.FirstRow().Layout.AbsoluteContentBox;
+        var (leftCell, _) = t.FirstLineCell();
+        var (rightCell, rightText) = t.FirstLineRightCell();
+        var (gutter, _) = t.FirstLineGutter();
+
+        Assert.True(rightText.Layout.AbsoluteBorderBox.Height > 3 * 20f,
+            $"the long side is {rightText.Layout.AbsoluteBorderBox.Height:0}px tall — it did not wrap");
+        // The row takes the taller side, and every cell in it shares that band. Without
+        // this the two files stop lining up from here on.
+        foreach (var cell in new[] { leftCell, rightCell, gutter })
+        {
+            Assert.Equal(row.Y, cell.Layout.AbsoluteBorderBox.Y, 1);
+            Assert.Equal(row.Height, cell.Layout.AbsoluteBorderBox.Height, 1);
+        }
+    }
+
+    [Fact]
+    public void WrappedRowsStackWithoutOverlapping()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "one\n" + string.Join(" ", System.Linq.Enumerable.Repeat("wrap me", 40)) + "\nthree\n");
+        t.WriteRight("a.txt", "ONE\n" + string.Join(" ", System.Linq.Enumerable.Repeat("wrap me", 40)) + "\nTHREE\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+
+        var rows = t.BodyRows();
+        for (int i = 1; i < rows.Count; i++)
+        {
+            var prev = rows[i - 1].Layout.AbsoluteBorderBox;
+            Assert.Equal(prev.Y + prev.Height, rows[i].Layout.AbsoluteBorderBox.Y, 1);
+        }
+    }
+
+    [Fact]
+    public void WrappingLeavesNothingToScrollSidewaysTo()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 400) + "\n");
+        t.WriteRight("a.txt", new string('R', 400) + "\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+
+        Assert.Equal(0f, t.MaxScrollX());
+        Assert.Null(t.TryScrollbarTrack());
+        float atRest = t.FirstLineCell().text.Layout.AbsoluteBorderBox.X;
+        t.Press(KeyCode.Right);
+        Assert.Equal(atRest, t.FirstLineCell().text.Layout.AbsoluteBorderBox.X, 1);
+    }
+
+    [Fact]
+    public void WPutsTheViewIntoWrapModeAndBack()
+    {
+        using var t = new Fixture();
+        var wide = string.Join(" ", System.Linq.Enumerable.Repeat("a long stretch of words", 30));
+        t.WriteLeft("a.txt", wide + " one\n");
+        t.WriteRight("a.txt", wide + " two\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+        Assert.True(t.MaxScrollX() > 0);   // scrolling by default
+
+        t.Press(KeyCode.W);
+        t.Session.PumpFrames(2);   // the rebuild the toggle asked for, then its layout
+        Assert.True(t.Wrap);
+        Assert.Equal(0f, t.MaxScrollX());
+        Assert.True(t.FirstRow().Layout.AbsoluteBorderBox.Height > 20f, "pressing w did not wrap anything");
+
+        t.Press(KeyCode.W);
+        t.Session.PumpFrames(2);
+        Assert.False(t.Wrap);
+        Assert.True(t.MaxScrollX() > 0);
+        Assert.Equal(20f, t.FirstRow().Layout.AbsoluteBorderBox.Height, 1);
+    }
+
+    [Fact]
+    public void AMinifiedLineWrapsBecauseItsPunctuationOffersBreaks()
+    {
+        using var t = new Fixture();
+        // The case this feature was asked for: one enormous line of minified JSON, no
+        // spaces. ICU's line-break rules offer opportunities after its punctuation.
+        var json = "[" + string.Join(",", System.Linq.Enumerable.Range(0, 60)
+            .Select(i => $"{{\"name\":\"thread_{i}\",\"ph\":\"M\",\"pid\":1}}")) + "]\n";
+        t.WriteLeft("a.json", json);
+        t.WriteRight("a.json", json.Replace("\"pid\":1", "\"pid\":9"));
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.json");
+
+        Assert.True(t.FirstRow().Layout.AbsoluteBorderBox.Height > 4 * 20f,
+            $"the minified line came out {t.FirstRow().Layout.AbsoluteBorderBox.Height:0}px tall — it did not wrap");
+    }
+
+    [Fact]
+    public void AnUnbreakableRunIsTheOneThingWrapModeCannotHelpWith()
+    {
+        using var t = new Fixture();
+        // 400 characters with no space and no punctuation — base64, a hash, a hex blob.
+        // ICU offers no break inside a word, so there is nowhere to wrap, and wrap mode
+        // turns horizontal scrolling off. Documented rather than fixed: making this work
+        // needs character-level breaking in the text pipeline.
+        t.WriteLeft("a.txt", new string('L', 400) + "\n");
+        t.WriteRight("a.txt", new string('R', 400) + "\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+
+        Assert.Equal(20f, t.FirstRow().Layout.AbsoluteBorderBox.Height, 1);
+        Assert.Equal(0f, t.MaxScrollX());
+    }
+
+    [Fact]
+    public void NAndPStillLandOnAChangeWhenRowsAreDifferentHeights()
+    {
+        using var t = new Fixture();
+        // A tall wrapped change, a stretch of context, then a second change. If n scrolled
+        // by index × row-height it would land far short of the second one.
+        var filler = string.Join("\n", System.Linq.Enumerable.Range(1, 40).Select(i => $"line {i}"));
+        var wide = string.Join(" ", System.Linq.Enumerable.Repeat("a very long changed line", 40));
+        t.WriteLeft("a.txt", $"{wide} one\n{filler}\ntail one\n");
+        t.WriteRight("a.txt", $"{wide} two\n{filler}\ntail two\n");
+        t.Open(wrap: true);
+
+        t.OpenDiffOn("a.txt");
+        Assert.True(t.ChangeRows.Count >= 2);
+
+        t.Press(KeyCode.N);
+        t.Session.PumpFrames(3);   // the scroll is applied after the row has been laid out
+
+        var target = t.CurrentChangeRow();
+        var body = t.BodyBox();
+        float top = target.Layout.AbsoluteBorderBox.Y - body.Y - t.ScrollY;
+        Assert.InRange(top, 0, body.Height - 1);
+    }
+
     private static string Lines(string format, int count) =>
         string.Concat(System.Linq.Enumerable.Range(1, count)
             .Select(i => string.Format(format, i) + "\n"));
@@ -483,14 +635,16 @@ public class DiffViewTests
         public void WriteLeft(string name, string text) => File.WriteAllText(Path.Combine(Left, name), text);
         public void WriteRight(string name, string text) => File.WriteAllText(Path.Combine(Right, name), text);
 
-        public void Open()
+        public void Open(bool wrap = false)
         {
             _session = HeadlessSession.Create(1240, 820);
             _app = new CommanderApp(_session.Application, _session.Window.Window, Left, Right);
             // The app loads the developer's own settings and session, so pin the two things
             // that would otherwise steer these tests: which folder each pane shows, and the
             // diff tool (VS Code shells out instead of opening the builtin view).
-            Field<Settings>("_settings").DiffTool = DiffToolKind.Builtin;
+            var settings = Field<Settings>("_settings");
+            settings.DiffTool = DiffToolKind.Builtin;
+            settings.DiffWrap = wrap;
             Call("NavigateTo", 'L', Left, null, false);
             Call("NavigateTo", 'R', Right, null, false);
             _session.Application.SetRoot(_app.Mount());
@@ -596,7 +750,17 @@ public class DiffViewTests
             return (gutter, gutter.Children[0]);
         }
 
-        private HultUI.Core.Elements.Element FirstRow() => Body.Children[0].Children[0];
+        public HultUI.Core.Elements.Element FirstRow() => Body.Children[0].Children[0];
+
+        public IReadOnlyList<HultUI.Core.Elements.Element> BodyRows() => Body.Children[0].Children;
+
+        public HultUI.Core.Primitives.Rect BodyBox() => Body.Layout.AbsoluteContentBox;
+
+        public bool Wrap => Field<Settings>("_settings").DiffWrap;
+
+        public HultUI.Core.Elements.Element CurrentChangeRow() =>
+            Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.Element>>("_diffChangeRowRef").Current
+            ?? throw new Xunit.Sdk.XunitException("no row is marked as the current change");
         public string DiffState => Field<object>("_diffState").ToString()!;
         public System.Collections.Generic.List<int> ChangeRows => Field<System.Collections.Generic.List<int>>("_diffChangeRows");
 

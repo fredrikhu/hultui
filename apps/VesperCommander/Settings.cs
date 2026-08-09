@@ -37,6 +37,10 @@ public sealed class Settings
 
     // Tools
     public DiffToolKind DiffTool = DiffToolKind.Builtin;
+    // Built-in diff: wrap a line too wide for its column instead of scrolling sideways.
+    // Off by default — scrolling keeps every line one row tall, which is what makes the
+    // two sides read as a table.
+    public bool DiffWrap;
     public string GitClient = "";
     public string Editor = "code --goto {file}:{line}";
     public string ImageEditor = "mspaint.exe {file}";
@@ -64,13 +68,29 @@ public sealed class Settings
 [JsonSerializable(typeof(Settings))]
 internal partial class SettingsJsonContext : JsonSerializerContext;
 
-/// <summary>Persists <see cref="Settings"/> to
-/// <c>%LOCALAPPDATA%\VesperCommander\settings.json</c> (best-effort, AOT-safe).</summary>
+/// <summary>
+/// Where the app keeps its settings and session: <c>%LOCALAPPDATA%\VesperCommander</c>,
+/// or whatever <c>VESPER_CONFIG_DIR</c> names.
+///
+/// <para>The override exists for tests. They construct the real app, which loads these
+/// files and — since the diff's wrap toggle persists — writes them, so without somewhere
+/// else to point them a test run reads and rewrites the developer's own configuration.</para>
+/// </summary>
+public static class ConfigDir
+{
+    public static string Path =>
+        Environment.GetEnvironmentVariable("VESPER_CONFIG_DIR") is { Length: > 0 } dir
+            ? dir
+            : System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VesperCommander");
+}
+
+/// <summary>Persists <see cref="Settings"/> to <c>settings.json</c> in
+/// <see cref="ConfigDir"/> (best-effort, AOT-safe).</summary>
 public static class SettingsStore
 {
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "VesperCommander", "settings.json");
+    private static string FilePath => Path.Combine(ConfigDir.Path, "settings.json");
 
     public static Settings Load()
     {

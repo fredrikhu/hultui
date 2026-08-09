@@ -25,6 +25,9 @@ public partial class CommanderApp
     private int _diffChangeIdx;
     private bool _pendingDiffScroll;
     private readonly Ref<ScrollViewElement> _diffScrollRef = new();
+    // The row holding the change n/p last landed on, so its position can be read rather
+    // than computed when rows are not all the same height.
+    private readonly Ref<Element> _diffChangeRowRef = new();
 
     // Horizontal position, shared by both sides so they stay aligned, and applied as a
     // negative left margin on the code text inside an overflow-hidden cell rather than by
@@ -236,8 +239,40 @@ public partial class CommanderApp
     }
 
     /// <summary>How far right the view can scroll: the longest line, less what one code
-    /// column shows of it.</summary>
-    private float DiffMaxScrollX() => Math.Max(0, _diffLongestPx - DiffCodeWidth());
+    /// column shows of it. Nowhere, when lines wrap instead.</summary>
+    private float DiffMaxScrollX() => DiffWrap ? 0 : Math.Max(0, _diffLongestPx - DiffCodeWidth());
+
+    /// <summary>Whether a line too wide for its column wraps rather than scrolling sideways.
+    /// The two are alternatives: wrapping means every line is visible in full, so there is
+    /// nothing to scroll to.</summary>
+    private bool DiffWrap => _settings.DiffWrap;
+
+    private void ToggleDiffWrap()
+    {
+        _settings.DiffWrap = !_settings.DiffWrap;
+        SettingsStore.Save(_settings);
+        _diffScrollX = 0;         // the other mode's offset means nothing in this one
+        _pendingDiffScroll = true; // keep the current change in view across the switch
+        MarkDirty();
+    }
+
+    /// <summary>
+    /// Where the current change block starts, in the body's own content space.
+    ///
+    /// <para>With every row the same height that is arithmetic. Wrapped, rows differ, so it
+    /// has to come from the row's laid-out position — and that is only meaningful once the
+    /// row has been through layout. <c>OnAfterBuild</c> runs after reconciliation, which for
+    /// a tree that just changed shape (toggling wrap) can be before layout; a zero height
+    /// says so, and returning null there leaves the scroll pending for the next frame rather
+    /// than acting on a position that isn't real yet.</para>
+    /// </summary>
+    private float? DiffChangeTop(ScrollViewElement sv)
+    {
+        if (!DiffWrap) return _diffChangeRows[_diffChangeIdx] * DiffLineH;
+        if (_diffChangeRowRef.Current is not { } row) return null;
+        var box = row.Layout.AbsoluteBorderBox;
+        return box.Height > 0 ? box.Y - sv.Layout.AbsoluteContentBox.Y + sv.ScrollOffsetY : null;
+    }
 
     /// <summary>Move the view sideways. Unlike the vertical offset this is app state, not
     /// something the ScrollView holds, so it needs a rebuild to take effect.</summary>
@@ -276,6 +311,7 @@ public partial class CommanderApp
             case KeyCode.Right when ctrl: DiffScrollH(0, to: float.MaxValue); e.StopPropagation = true; break;
             case KeyCode.Left: DiffScrollH(-DiffHStep); e.StopPropagation = true; break;
             case KeyCode.Right: DiffScrollH(DiffHStep); e.StopPropagation = true; break;
+            case KeyCode.W: ToggleDiffWrap(); e.StopPropagation = true; break;
             case KeyCode.F5:
                 if (_diffState == DiffViewState.Missing) { CloseDiff(); StartCopy(); }
                 e.StopPropagation = true; break;
@@ -403,9 +439,13 @@ public partial class CommanderApp
         {
             bool current = _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
                 && r == _diffChangeRows[_diffChangeIdx];
-            col.AddChild(_diffRows[r].CollapseCount is int n
+            var built = _diffRows[r].CollapseCount is int n
                 ? DiffCollapseRow(n)
-                : DiffLineRow(_diffRows[r].Line!, current));
+                : DiffLineRow(_diffRows[r].Line!, current);
+            // Wrapped rows have no common height, so n/p can't compute where a change is —
+            // it has to ask the row. See DiffChangeTop.
+            if (current) built.WithRef(_diffChangeRowRef);
+            col.AddChild(built);
         }
         scroll.AddChild(col);
         return scroll;
@@ -427,8 +467,12 @@ public partial class CommanderApp
             _ => (Color.Transparent, Color.Transparent, " ", Color.Transparent),
         };
 
+        // Wrapping needs no alignment work of its own: the row track is auto, so it grows to
+        // whichever side wrapped taller and every cell in it — both gutters included — shares
+        // that band. A minimum keeps a blank line a row tall.
         var row = Grid.Of($"{DiffGutterW}px 1fr {DiffMarkerW}px {DiffGutterW}px 1fr", gap: 0)
-            .Height(DiffLineH).AlignItems(AlignItems.Stretch);
+            .AlignItems(AlignItems.Stretch);
+        if (DiffWrap) row.MinHeight(DiffLineH); else row.Height(DiffLineH);
         if (current) row.BorderColor(Nocturne.Accent600).BorderWidth(1f);
 
         // On a changed line, mark only the differing middle — the common prefix/suffix stay
@@ -459,9 +503,12 @@ public partial class CommanderApp
     // the horizontal one — the opposite of the row-shaped cells everywhere else in this
     // file. Both cells below want "vertically centred, horizontally not centred", which is
     // JustifyContent.Center; using AlignItems.Center for it centred the text instead.
+    // Wrapped, the number belongs beside the *first* of the line's rows rather than floating
+    // in the middle of a five-row block, so it sits at the top instead of centred.
     private Element DiffGutter(int no) =>
-        Box.New().AlignItems(AlignItems.FlexEnd).JustifyContent(JustifyContent.Center)
-            .Padding(new Thickness(0, 6, 0, 0))
+        Box.New().AlignItems(AlignItems.FlexEnd)
+            .JustifyContent(DiffWrap ? JustifyContent.FlexStart : JustifyContent.Center)
+            .Padding(new Thickness(DiffWrap ? 3 : 0, 6, 0, 0))
             .Children(Ui.Mono(no > 0 ? no.ToString() : "", 10.5f, Nocturne.Neutral700));
 
     private Element DiffTextCell(string? text, Color bg, Color fg, object selectionGroup,
@@ -470,17 +517,21 @@ public partial class CommanderApp
         // AlignItems is left at its Stretch default so the line fills the cell and clips at
         // the cell's own edge rather than at the width of the text. OverflowX.Hidden is what
         // makes the horizontal offset below safe: without it the shifted text would spill
-        // left over the line-number gutter.
-        var box = Box.New().Background(bg).JustifyContent(JustifyContent.Center)
-            .Padding(new Thickness(0, 8, 0, 8)).OverflowX(Overflow.Hidden);
+        // left over the line-number gutter. Wrapped, the cell grows instead of clipping, so
+        // the content sits at the top rather than centred in a row it no longer defines.
+        var box = Box.New().Background(bg)
+            .JustifyContent(DiffWrap ? JustifyContent.FlexStart : JustifyContent.Center)
+            .Padding(new Thickness(DiffWrap ? 2 : 0, 8, DiffWrap ? 2 : 0, 8))
+            .OverflowX(Overflow.Hidden);
 
-        var mono = Ui.Mono(text ?? "", DiffFontSize, fg).MaxLines(1).TextOverflow(TextOverflow.Clip);
+        var mono = Ui.Mono(text ?? "", DiffFontSize, fg);
+        if (!DiffWrap) mono.MaxLines(1).TextOverflow(TextOverflow.Clip);
         if (spans is { Count: > 0 }) mono.Spans(spans);
 
         // Horizontal scroll. A negative left margin moves the line left and — because the
         // stretch that sizes it subtracts the horizontal margin — widens it by the same
         // amount, so the text that scrolls in from the right is actually laid out.
-        if (_diffScrollX > 0) mono.Margin(new Thickness(0, 0, 0, -_diffScrollX));
+        if (!DiffWrap && _diffScrollX > 0) mono.Margin(new Thickness(0, 0, 0, -_diffScrollX));
 
         // Selectable, with one group per side: a drag runs down the lines of one file
         // rather than zig-zagging between the two. The window owns the group drag and the
@@ -599,6 +650,8 @@ public partial class CommanderApp
             footer.AddChild(Ui.Kbd("↑↓"));
             if (DiffMaxScrollX() > 0) footer.AddChild(Ui.Kbd("←→"));
             footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
+            footer.AddChild(Ui.Kbd("w"));
+            footer.AddChild(Ui.Mono(DiffWrap ? "no wrap" : "wrap", 10f, Nocturne.On(0.45)));
         }
         if (_diffChangeRows.Count > 0)
         {
