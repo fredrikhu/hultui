@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using HultUI.FileIcons;
 using Xunit;
 
 namespace VesperCommander.Tests;
@@ -61,6 +62,37 @@ public class IconKindTests
     {
         Assert.Equal(IconKind.Folder, Icons.KindFor(Entry("src.csproj", isDir: true)));
         Assert.Equal(IconKind.Parent, Icons.KindFor(Entry("..", isParent: true)));
+    }
+
+    [Fact]
+    public void TheSharedLibraryClassifiesTheSameWayVesperDoes()
+    {
+        // Vesper's IconKind is a projection of FileIconKind; Junction reads FileIconKind
+        // directly. If these two ever disagree the apps are back to showing different
+        // icons for the same file, which is the whole thing this consolidation removed.
+        foreach (var name in new[] { "a.sln", "a.csproj", "a.cs", "build.ps1", "a.png", "a.zip", "a.txt", "Dockerfile" })
+        {
+            var expected = FileIcons.KindFor(name) switch
+            {
+                FileIconKind.Solution => IconKind.Solution,
+                FileIconKind.Project => IconKind.Project,
+                FileIconKind.Code => IconKind.Code,
+                FileIconKind.Image => IconKind.Image,
+                FileIconKind.Archive => IconKind.Archive,
+                _ => IconKind.File,
+            };
+            Assert.Equal(expected, Kind(name));
+        }
+    }
+
+    [Fact]
+    public void EverySharedKindRasterizesWithoutThrowing()
+    {
+        // Guards the SVG path data, including the Visual Studio mark lifted from the
+        // official icon: a malformed `d` parses to an empty path and fails silently as
+        // a blank glyph rather than an exception.
+        foreach (FileIconKind kind in Enum.GetValues<FileIconKind>())
+            Assert.NotNull(FileIcons.Draw(kind, Icons.Palette));
     }
 
     [Fact]

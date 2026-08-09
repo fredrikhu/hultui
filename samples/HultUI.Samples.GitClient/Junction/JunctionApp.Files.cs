@@ -10,10 +10,18 @@ using HultUI.Core.Styling;
 using GitClient.Git;
 using GitClient.Theme;
 
+using HultUI.FileIcons;
+
 namespace GitClient.Junction;
 
 public partial class JunctionApp
 {
+
+    /// <summary>Junction's Nocturne ramp, handed to the shared file-icon library.</summary>
+    private static readonly FileIconPalette JunctionFileIconPalette = new(
+        Nocturne.Accent400, Nocturne.Accent500, Nocturne.Accent600,
+        Nocturne.Neutral400, Nocturne.Neutral500, Nocturne.Neutral600);
+
     // ── Files view: browse the repository as it was at the selected commit ──
     //
     // Left: the commit's full tree (folders collapse/expand). Right: the selected
@@ -257,8 +265,11 @@ public partial class JunctionApp
         else
         {
             row.AddChild(Box.New().Width(10).FlexShrink(0));
-            row.AddChild(Ui.Icon(IsImagePath(node.Path) ? Icons.FileImage : Icons.FileCode, 11f,
-                Nocturne.On(0.45)).FlexShrink(0));
+            // The shared file-type glyphs, same as Vesper's panes: a Unicode stand-in
+            // could only tell images from everything-else, so a .csproj, a .zip and a
+            // .cs all looked alike in a tree that is mostly source files.
+            row.AddChild(FileIcons.Draw(FileIcons.KindFor(node.Name), JunctionFileIconPalette, size: 12f)
+                .FlexShrink(0));
         }
 
         row.AddChild(Text.New(node.Name).FontSize(12f)

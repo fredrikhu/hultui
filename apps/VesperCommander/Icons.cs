@@ -3,7 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Rendering.Skia;
-using HultUI.Syntax;
+using HultUI.FileIcons;
 using SkiaSharp;
 
 namespace VesperCommander;
@@ -21,30 +21,45 @@ public enum IconKind { Folder, Parent, File, Code, Image, Archive, Solution, Pro
 /// </summary>
 public static class Icons
 {
-    public static IconKind KindFor(FileEntry e)
-    {
-        if (e.IsParent) return IconKind.Parent;
-        if (e.IsDir) return IconKind.Folder;
-        // Families with a glyph of their own come first: several are also highlightable
-        // (.svg is XML, .csproj is XML), and the specific icon is the more useful one.
-        return System.IO.Path.GetExtension(e.Name).ToLowerInvariant() switch
-        {
-            ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".svg" or ".webp" or ".ico" or ".tiff" => IconKind.Image,
-            ".zip" or ".7z" or ".rar" or ".gz" or ".tar" or ".bz2" or ".xz" or ".tgz" => IconKind.Archive,
-            ".sln" or ".slnx" or ".slnf" => IconKind.Solution,
-            ".csproj" or ".fsproj" or ".vbproj" or ".vcxproj" or ".shproj" or ".esproj"
-                or ".pyproj" or ".njsproj" or ".props" or ".targets" => IconKind.Project,
+    /// <summary>The app's Nocturne ramp, handed to the shared icon library.</summary>
+    public static FileIconPalette Palette => new(
+        Theme.Nocturne.Accent400, Theme.Nocturne.Accent500, Theme.Nocturne.Accent600,
+        Theme.Nocturne.Neutral400, Theme.Nocturne.Neutral500, Theme.Nocturne.Neutral600);
 
-            // Everything else defers to the highlighter. Keeping a second hand-written
-            // list of "code" extensions here is what made .csproj and .ps1 show a blank
-            // page icon while the preview would happily have coloured them — and it was
-            // this same list the preview gated on, so the two drifted together.
-            _ => SyntaxHighlighter.CanHighlight(e.Name) ? IconKind.Code : IconKind.File,
-        };
-    }
+    /// <summary>
+    /// Which glyph a row gets. Delegates to <see cref="FileIcons.KindFor"/> so Vesper and
+    /// Junction classify files identically — the classification is driven by the syntax
+    /// highlighter, and a second copy of it here is exactly what drifted before.
+    /// </summary>
+    public static IconKind KindFor(FileEntry e) => FileIcons.KindFor(e.Name, e.IsDir, e.IsParent) switch
+    {
+        FileIconKind.Folder => IconKind.Folder,
+        FileIconKind.Parent => IconKind.Parent,
+        FileIconKind.Code => IconKind.Code,
+        FileIconKind.Image => IconKind.Image,
+        FileIconKind.Archive => IconKind.Archive,
+        FileIconKind.Solution => IconKind.Solution,
+        FileIconKind.Project => IconKind.Project,
+        _ => IconKind.File,
+    };
+
+    private static FileIconKind? SharedKind(IconKind kind) => kind switch
+    {
+        IconKind.Folder => FileIconKind.Folder,
+        IconKind.Parent => FileIconKind.Parent,
+        IconKind.File => FileIconKind.File,
+        IconKind.Code => FileIconKind.Code,
+        IconKind.Image => FileIconKind.Image,
+        IconKind.Archive => FileIconKind.Archive,
+        IconKind.Solution => FileIconKind.Solution,
+        IconKind.Project => FileIconKind.Project,
+        _ => null,   // Vesper-only chrome (view toggles, nav chevrons)
+    };
 
     public static Element Draw(IconKind kind, Color? tint = null, float size = 16f)
     {
+        if (SharedKind(kind) is { } shared) return FileIcons.Draw(shared, Palette, tint, size);
+
         var img = Image.New(Rasterize(kind, tint));
         img.Fit = ImageFit.Contain;
         return img.Width(size).Height(size).FlexShrink(0);
@@ -56,6 +71,7 @@ public static class Icons
     {
         foreach (var v in _cache.Values) v.Dispose();
         _cache.Clear();
+        FileIcons.InvalidateCache();   // the shared glyphs read the same live ramp
     }
 
     private static readonly Dictionary<long, SkiaImageSource> _cache = new();
@@ -106,63 +122,8 @@ public static class Icons
     // The design's file-type glyphs (batch-1/2 handoff sprite). Colours read the live ramp.
     private static IEnumerable<(SKPath path, bool fill, float stroke, Color color)> Parts(IconKind kind)
     {
-        const string page = "M4 1.5h5.5L13 5v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z";
-        // The Visual Studio family mark: a folded ribbon, drawn as a stroked lemniscate.
-        // Full size for a solution, inset into the page body for a project.
-        const string ribbon = "M3 8c0-2.2 3-2.2 5 0s5 2.2 5 0-3-2.2-5 0-5 2.2-5 0z";
-        const string ribbonInset = "M4.6 10.2c0-1.5 2-1.5 3.4 0s3.4 1.5 3.4 0-2-1.5-3.4 0-3.4 1.5-3.4 0z";
         switch (kind)
         {
-            case IconKind.Folder:
-                yield return (Svg("M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.6 1.8H13A1.5 1.5 0 0 1 14.5 6v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V4z"),
-                    true, 0, Theme.Nocturne.Accent600);
-                break;
-
-            case IconKind.Parent:
-                yield return (Svg("M8 13V4m0 0L4.5 7.5M8 4l3.5 3.5"), false, 1.4f, Theme.Nocturne.Neutral400);
-                break;
-
-            case IconKind.Code:
-                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Accent500);
-                yield return (Svg("M6.4 8.4L5.2 9.6l1.2 1.2m3.2-2.4l1.2 1.2-1.2 1.2"), false, 1.1f, Theme.Nocturne.Accent400);
-                break;
-
-            case IconKind.Image:
-                var rect = new SKPath();
-                rect.AddRoundRect(new SKRect(2.5f, 3, 13.5f, 13), 1.2f, 1.2f);
-                yield return (rect, false, 1.2f, Theme.Nocturne.Neutral500);
-                var lens = new SKPath();
-                lens.AddCircle(6, 6.4f, 1);
-                yield return (lens, true, 0, Theme.Nocturne.Neutral500);
-                yield return (Svg("M3.4 11.6l3-3 2.4 2.4 1.8-1.6 2 2.2"), false, 1.1f, Theme.Nocturne.Neutral500);
-                break;
-
-            case IconKind.Archive:
-                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Neutral600);
-                yield return (Svg("M7.6 2.5v3.6m1-1.8H7"), false, 1.1f, Theme.Nocturne.Neutral500);
-                break;
-
-            // Visual Studio family — an original glyph in the house style, not a
-            // reproduction of Microsoft's mark. It takes the idea the VS logo is built
-            // on (a ribbon folded into an infinity) and draws it the way every other
-            // icon here is drawn: one stroked path, round caps, no fill.
-            //
-            // The literal silhouette was tried first and abandoned: reduced to two
-            // triangular wings it reads as media transport arrows at 16px, whichever
-            // way the gap and offset are tuned, and being solid it was also the only
-            // filled glyph in a stroke-based set. The ribbon survives the size.
-            //
-            // A solution is a container, so it gets the bare mark the way Folder does;
-            // a project is a document, so it gets the page with the mark set into it.
-            case IconKind.Solution:
-                yield return (Svg(ribbon), false, 1.3f, Theme.Nocturne.Accent400);
-                break;
-
-            case IconKind.Project:
-                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Accent600);
-                yield return (Svg(ribbonInset), false, 1.1f, Theme.Nocturne.Accent400);
-                break;
-
             // View-mode toggle glyphs (rows / two columns / 2×2 grid). Filled rounded
             // rects; the toggle passes a tint so idle/hover/active colours override these.
             case IconKind.ViewDetail:
@@ -199,10 +160,8 @@ public static class Icons
                 yield return (Svg("M5 6.5l3 3 3-3"), false, 1.4f, Theme.Nocturne.Neutral400);
                 break;
 
-            default: // File
-                yield return (Svg(page), false, 1.2f, Theme.Nocturne.Neutral600);
-                yield return (Svg("M9.5 1.5V5H13"), false, 1.2f, Theme.Nocturne.Neutral600);
-                break;
+            default:
+                yield break;   // file-type kinds never reach here (see SharedKind)
         }
     }
 }

@@ -26,6 +26,7 @@
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
     <Project Path="src/HultUI.Syntax/HultUI.Syntax.csproj" />
+    <Project Path="src/HultUI.FileIcons/HultUI.FileIcons.csproj" />
     <Project Path="src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Windows/HultUI.Platform.Accessibility.Windows.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Linux/HultUI.Platform.Accessibility.Linux.csproj" />
