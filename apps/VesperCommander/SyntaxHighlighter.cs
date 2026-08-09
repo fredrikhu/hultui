@@ -31,6 +31,58 @@ public static class SyntaxHighlighter
     private static readonly Dictionary<string, IGrammar?> GrammarByExt = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, Color?> ColorById = new();
 
+    /// <summary>
+    /// Extensions absent from TextMateSharp's bundled language table that are
+    /// nonetheless plain instances of a language it does carry. VS Code resolves most
+    /// of these through language contributions the bundle doesn't ship, so they arrive
+    /// here unhighlighted; pointing them at the grammar that genuinely parses them
+    /// costs one dictionary hit.
+    ///
+    /// <para>Only exact aliases belong here. A format that merely <em>resembles</em> a
+    /// bundled language — TOML against INI, say — would mis-colour more than it
+    /// coloured, so it stays plain instead. Note that <c>.csproj</c>, <c>.targets</c>,
+    /// <c>.props</c>, and the PowerShell extensions need no entry: the bundle already
+    /// lists them.</para>
+    /// </summary>
+    private static readonly Dictionary<string, string> ExtensionAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // XML dialects
+        [".slnx"] = ".xml",            // the XML solution format
+        [".config"] = ".xml",          // app/web/packages/NuGet.config
+        [".resx"] = ".xml",
+        [".manifest"] = ".xml",
+        [".runsettings"] = ".xml",
+        [".ruleset"] = ".xml",
+        [".natvis"] = ".xml",
+        [".vsixmanifest"] = ".xml",
+        [".plist"] = ".xml",
+        [".xliff"] = ".xml",
+
+        // JSON dialects
+        [".slnf"] = ".json",           // solution filter
+        [".jsonl"] = ".json",
+        [".ndjson"] = ".json",
+        [".code-workspace"] = ".jsonc",   // comments permitted
+    };
+
+    /// <summary>
+    /// Files that carry their language in the name rather than an extension. Without
+    /// this a file manager shows <c>Dockerfile</c> and <c>Makefile</c> — two of the
+    /// most-opened files in any repository — as flat grey.
+    /// </summary>
+    private static readonly Dictionary<string, string> FileNameAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Dockerfile"] = ".dockerfile",
+        ["Containerfile"] = ".containerfile",
+        ["Makefile"] = ".mak",
+        ["GNUmakefile"] = ".mak",
+        ["Jenkinsfile"] = ".jenkinsfile",
+        ["Rakefile"] = ".rb",
+        ["Gemfile"] = ".rb",
+        ["Podfile"] = ".rb",
+        ["Vagrantfile"] = ".rb",
+    };
+
     // Guards against pathological inputs (minified bundles, generated code):
     // oversized files skip highlighting entirely, and a file that tokenizes
     // slowly gets whatever lines fit in the budget (the rest stay uncolored).
@@ -50,7 +102,7 @@ public static class SyntaxHighlighter
         if (text.Length > MaxChars) return null;
         lock (Gate)
         {
-            var grammar = GrammarFor(System.IO.Path.GetExtension(path));
+            var grammar = GrammarFor(path);
             return grammar == null ? null : Tokenize(grammar, text);
         }
     }
@@ -97,10 +149,26 @@ public static class SyntaxHighlighter
             _defaultFg = ParseHex(fg);
     }
 
-    private static IGrammar? GrammarFor(string ext)
+    /// <summary>
+    /// The grammar for <paramref name="path"/>, resolved from its extension, then
+    /// from an alias, then — for extension-less files — from its name. Null when
+    /// nothing bundled parses it.
+    /// </summary>
+    private static IGrammar? GrammarFor(string path)
     {
-        if (string.IsNullOrEmpty(ext)) return null;
+        var ext = System.IO.Path.GetExtension(path);
+        if (ext.Length == 0)
+        {
+            if (!FileNameAliases.TryGetValue(System.IO.Path.GetFileName(path), out var byName)) return null;
+            ext = byName;
+        }
+        else if (ExtensionAliases.TryGetValue(ext, out var alias))
+        {
+            ext = alias;
+        }
+
         EnsureRegistry();
+        // Keyed by the resolved extension, so every alias shares one cached grammar.
         if (GrammarByExt.TryGetValue(ext, out var grammar)) return grammar;
         var scope = _options!.GetScopeByExtension(ext);
         grammar = scope == null ? null : _registry!.LoadGrammar(scope);
