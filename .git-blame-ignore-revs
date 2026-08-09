@@ -1,0 +1,13 @@
+# Commits that touched a lot of lines without changing what any of them mean.
+# `git blame` skips these and reports whoever last wrote the code instead.
+#
+# GitHub reads this file automatically. Locally it needs telling once:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only add a commit here if it is genuinely a no-op for the reader — a
+# reformat, a rename, a line-ending pass. Never a commit that also changed
+# behaviour, or the real change becomes invisible to blame.
+
+# Store and check out every text file as LF (.gitattributes, 82 files re-ended).
+216c186ce0f5df5922678e15a1804ba449f4b51d
