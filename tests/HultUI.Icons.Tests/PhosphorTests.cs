@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using HultUI.Core.Primitives;
 using HultUI.Icons;
 using Xunit;
@@ -160,6 +164,55 @@ public class JunctionIconNameTests
         // missing one shows an empty square in the picker rather than failing loudly.
         foreach (var key in GitClient.Junction.Icons.WorkspaceKeys)
             Assert.True(Phosphor.Has(key), key);
+    }
+
+    [Fact]
+    public void IconNamesAreNeverRenderedAsText()
+    {
+        // Junction is clean today; this keeps it that way. Once icons are named strings,
+        // two mistakes compile and neither throws:
+        //
+        //   Ui.Icon("✕")            — a character where a name belongs → draws nothing
+        //   Text.New(Icons.Branch)  — a name where text belongs → prints "git-branch"
+        //
+        // Both happened during Vesper's conversion. The qualifier in the pattern matters:
+        // the argument is usually a member access, and a version anchored at the paren
+        // passed against the real defect.
+        //
+        // Junction keeps genuine text that happens to be a symbol — "—" for a missing
+        // value, "·" between metadata, "↵" in a keycap hint. Those are literals, not
+        // icon names, so they do not match.
+        var offenders = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(FindJunctionDirectory(), "*.cs", SearchOption.AllDirectories))
+        {
+            var lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (line.TrimStart().StartsWith("//", StringComparison.Ordinal)) continue;
+
+                if (Regex.IsMatch(line, @"Ui\.Icon\("""))
+                    offenders.Add($"{Path.GetFileName(file)}:{i + 1}: icon call given a literal — {line.Trim()}");
+
+                if (Regex.IsMatch(line, @"(Text\.New|Ui\.Mono|Kbd)\(\s*[\w\.\[\]]*\bIcons\.\w"))
+                    offenders.Add($"{Path.GetFileName(file)}:{i + 1}: icon name rendered as text — {line.Trim()}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0, string.Join("\n  ", offenders.Prepend("Icon/text mix-ups:")));
+    }
+
+    private static string FindJunctionDirectory()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "samples", "HultUI.Samples.GitClient", "Junction");
+            if (Directory.Exists(candidate)) return candidate;
+            dir = dir.Parent;
+        }
+        throw new DirectoryNotFoundException($"Could not find the Junction sources above {AppContext.BaseDirectory}");
     }
 }
 
