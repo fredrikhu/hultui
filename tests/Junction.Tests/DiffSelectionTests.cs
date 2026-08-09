@@ -21,7 +21,8 @@ public class DiffSelectionTests
     // nothing. The first and last pixel of the row are the ones in question.
     [Theory]
     [InlineData(0.5f)]     // the very top pixel of the row
-    [InlineData(-0.5f)]    // the very bottom pixel (measured back from the bottom edge)
+    [InlineData(-1f)]      // one pixel inside the bottom edge. Half a pixel past it can be
+                           // rounded into the next row, which may be an unselectable header.
     [InlineData(9f)]       // the middle, which always worked
     public void PressingAnywhereOverALineBeginsASelection(float inset)
     {

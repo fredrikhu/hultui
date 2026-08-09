@@ -264,6 +264,7 @@ public partial class JunctionApp : Component, IDisposable
         _diffPan = new HorizontalPan(MarkDirty);
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
+        _diffSplit = _settings.DiffSplit;
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
         _activeRepoPath = _settings.ActiveRepoPath ?? ActiveWorkspace?.RepoPaths.FirstOrDefault() ?? "";
@@ -778,6 +779,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.ActiveWorkspaceId = _activeWorkspaceId;
         _settings.ActiveRepoPath = _activeRepoPath;
         _settings.DiffWrap = _diffWrap;
+        _settings.DiffSplit = _diffSplit;
         JunctionSettings.Save(_settings);
     }
 

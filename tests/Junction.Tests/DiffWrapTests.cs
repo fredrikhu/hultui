@@ -77,6 +77,26 @@ public class DiffWrapTests
     }
 
     [Fact]
+    public void TheSplitChoiceIsRememberedTheSameWay()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var settings = Field<JunctionSettingsData>(app, "_settings");
+            Assert.False(settings.DiffSplit);
+
+            typeof(JunctionApp).GetField("_diffSplit", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(app, true);
+            typeof(JunctionApp).GetMethod("Persist", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, null);
+
+            Assert.True(settings.DiffSplit, "the split choice did not reach the settings");
+
+            var revived = new JunctionApp(session.Application, session.Window.Window, settings);
+            Assert.True(Field<bool>(revived, "_diffSplit"));
+        });
+    }
+
+    [Fact]
     public void AWrappedLineGetsARowTallerThanOneLine()
     {
         DiffScrollTests.Hosted((session, app) =>

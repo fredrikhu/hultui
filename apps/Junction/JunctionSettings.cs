@@ -21,6 +21,11 @@ public sealed class JunctionSettingsData
     /// the kind of small friction that makes a feature go unused.</summary>
     public bool DiffWrap { get; set; }
 
+    /// <summary>Whether the diff shows the two sides side by side rather than as one
+    /// unified column. Remembered alongside the wrap choice: both are how someone prefers
+    /// to read a diff, not decisions about a particular one.</summary>
+    public bool DiffSplit { get; set; }
+
     // Junction: per-repo badge swatch id (path → swatch id), driving the repo's
     // initial tile everywhere. Missing entries fall back to a deterministic seed.
     public Dictionary<string, string> RepoBadges { get; set; } = new();

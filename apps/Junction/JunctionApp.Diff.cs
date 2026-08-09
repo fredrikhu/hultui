@@ -106,8 +106,8 @@ public partial class JunctionApp
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusRow);
-        seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => { _diffSplit = false; MarkDirty(); }));
-        seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => { _diffSplit = true; MarkDirty(); }));
+        seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => { _diffSplit = false; Persist(); MarkDirty(); }));
+        seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => { _diffSplit = true; Persist(); MarkDirty(); }));
         seg.AddChild(DiffModeButton("Wrap", Icons.Rows, _diffWrap, ToggleDiffWrap));
         return seg;
     }
