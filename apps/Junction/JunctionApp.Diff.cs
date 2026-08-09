@@ -108,6 +108,7 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusRow);
         seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => { _diffSplit = false; MarkDirty(); }));
         seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => { _diffSplit = true; MarkDirty(); }));
+        seg.AddChild(DiffModeButton("Wrap", Icons.Rows, _diffWrap, ToggleDiffWrap));
         return seg;
     }
 
@@ -155,6 +156,95 @@ public partial class JunctionApp
     }
 
     private const int DiffRowHeight = 22;
+    private const float DiffCodeSize = 12f;
+
+    /// <summary>Whether a line too wide for its column wraps rather than scrolling sideways.
+    /// The two are alternatives: wrapping means every line is visible in full, so there is
+    /// nothing left to scroll to. Session state, like the split/unified choice beside it.</summary>
+    private bool _diffWrap;
+
+    private void ToggleDiffWrap()
+    {
+        _diffWrap = !_diffWrap;
+        _diffPan.Reset();   // the other mode's sideways offset means nothing in this one
+        MarkDirty();
+    }
+
+    // Row heights for the wrapped body, and the shape they were measured under. Wrapped rows
+    // have no common height, so the list is given a per-row height instead of one number.
+    private float[] _diffHeights = [];
+    private float _diffCodeWidth;   // the code column, which is what wrapped text wraps into
+
+    /// <summary>The code label for a diff line, wrapped or clipped to one line and panned.
+    /// Wrapping and sideways scrolling are alternatives, so a wrapped line takes neither the
+    /// one-line clip nor the panning cell.</summary>
+    private Element DiffCodeCell(TextElement label)
+    {
+        if (_diffWrap) return label.FlexGrow(1);
+        return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
+    }
+    private (bool Wrap, bool Split, float Width, int Rows) _diffHeightShape = (false, false, -1f, -1);
+
+    /// <summary>
+    /// The height of every row at the current width, measured once per change of shape rather
+    /// than per frame. Unwrapped every row is <see cref="DiffRowHeight"/> and the list is told
+    /// so directly; this only runs when wrapping.
+    /// </summary>
+    private void RebuildDiffHeights(List<DiffRow> rows, float codeWidth)
+    {
+        var heights = new float[rows.Count];
+        var style = TextMeasure.StyleFor(DiffCodeSize, Fonts.Mono);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            if (r.Type == DiffRowType.Hunk) { heights[i] = DiffRowHeight; continue; }
+            float text = r.Type == DiffRowType.Split
+                ? Math.Max(WrappedHeight(r.Left?.Content, style, codeWidth),
+                           WrappedHeight(r.Right?.Content, style, codeWidth))
+                : WrappedHeight(r.Line?.Content, style, codeWidth);
+            // The label carries 2px of padding above and below it.
+            heights[i] = Math.Max(DiffRowHeight, text + 4f);
+        }
+        _diffHeights = heights;
+    }
+
+    // Same shortcut Vesper's comparison uses: the code font is monospace, so a short enough
+    // line certainly fits on one line and needs no shaping to find that out. Anything else,
+    // and anything outside printable ASCII, is measured properly — a height that disagrees
+    // with what the row lays out to is a clipped row, not a slow one.
+    private float _diffMonoAdvance = -1f;
+    private float _diffMonoLineHeight;
+
+    private float WrappedHeight(string? text, ResolvedInheritedStyle style, float width)
+    {
+        text ??= "";
+        EnsureDiffMonoMetrics(style);
+        if (_diffMonoAdvance > 0f && width > 0f && IsPlainAscii(text)
+            && (text.Length + 1) * _diffMonoAdvance <= width)
+            return _diffMonoLineHeight;
+        return TextMeasure.MeasureWrapped(text, style, width).Height;
+    }
+
+    private static bool IsPlainAscii(string text)
+    {
+        foreach (var c in text) if (c < ' ' || c > '~') return false;
+        return true;
+    }
+
+    private void EnsureDiffMonoMetrics(ResolvedInheritedStyle style)
+    {
+        if (_diffMonoAdvance >= 0f) return;
+        float advance = TextMeasure.MeasureWidth("M", style);
+        if (advance <= 0f) { _diffMonoAdvance = 0f; return; }
+        foreach (var c in " iMW0(_~lI'")
+            if (Math.Abs(TextMeasure.MeasureWidth(c.ToString(), style) - advance) > 0.01f)
+            { _diffMonoAdvance = 0f; return; }
+        if (Math.Abs(TextMeasure.MeasureWidth("MM", style) - advance * 2f) > 0.01f)
+        { _diffMonoAdvance = 0f; return; }
+        _diffMonoLineHeight = TextMeasure.MeasureWrapped("M", style, advance * 4f).Height;
+        if (_diffMonoLineHeight <= 0f) { _diffMonoAdvance = 0f; return; }
+        _diffMonoAdvance = advance;
+    }
 
     private enum DiffRowType : byte { Hunk, Unified, Split }
 
@@ -199,12 +289,32 @@ public partial class JunctionApp
         UpdateDiffPan(diff, rows, interact != null);
         _diffBarBuilt = _diffPan.CanPan;
 
+        // What a row looks like depends on three things the list cannot see: whether lines
+        // wrap, which layout is showing, and how wide the code column is. When any of them
+        // moves the rows have to be measured again and rebuilt, because a realized row is
+        // otherwise reused exactly as it was.
+        float codeWidth = _diffCodeWidth;
+        var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count);
+        if (_diffHeightShape != shape)
+        {
+            if (_diffWrap) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
+            // Not on the first build: there is nothing realized yet to throw away, and doing
+            // it mid-build disturbs the rows the very first frame lays out.
+            if (_diffHeightShape.Rows >= 0 && _diffBodyRef.Current is VirtualListElement<DiffRow> mounted)
+                mounted.InvalidateRows();
+            _diffHeightShape = shape;
+        }
+
         var list = VirtualListElement<DiffRow>.New()
             .ItemHeight(DiffRowHeight)
             .Items(rows)
             .RenderWith(r => RenderDiffRow(r, interact))
             .FlexGrow(1)
             .Background(Nocturne.Bg);
+        // Unwrapped every row is the same height and the list does its own arithmetic; only
+        // wrapping needs the measured index.
+        if (_diffWrap)
+            list.RowHeights((_, i) => i < _diffHeights.Length ? _diffHeights[i] : DiffRowHeight);
         // Key by file so each file gets its own scroll position instead of one shared
         // offset — switching files reconciles to a fresh list that starts at the top.
         list.Key = "diff:" + diff.Path;
@@ -271,7 +381,13 @@ public partial class JunctionApp
         // and — while staging — a 20px checkbox.
         float fixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f);
         float code = body - fixedCols;
-        _diffPan.ViewportWidth = Math.Max(0, _diffSplit ? code / 2 : code);
+        _diffCodeWidth = Math.Max(0, _diffSplit ? code / 2 : code);
+        // Wrapped, every line is visible in full, so there is nothing left to scroll to. An
+        // unbounded viewport is what says so: it leaves no offset to pan by, so CanPan goes
+        // false and the scrollbar disappears with it. The real column width is kept
+        // separately, because that is still what the text wraps into.
+        _diffPan.ViewportWidth = _diffWrap ? float.MaxValue : _diffCodeWidth;
+        if (_diffWrap) { _diffPan.Reset(); return; }
 
         var key = diff.Path + "#" + (_diffSplit ? "s" : "u") + "#" + rows.Count;
         if (_diffLongestFor == key) return;
@@ -291,6 +407,10 @@ public partial class JunctionApp
             case KeyCode.Escape when _diffFull:
                 _diffFull = false;
                 MarkDirty();
+                e.StopPropagation = true;
+                break;
+            case KeyCode.W:
+                ToggleDiffWrap();
                 e.StopPropagation = true;
                 break;
             default:
@@ -488,13 +608,11 @@ public partial class JunctionApp
             .Children(Ui.Mono(sign, 12f, signColor)));
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
-        row.AddChild(_diffPan.Cell(
-            Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
+        row.AddChild(DiffCodeCell(
+            Ui.Mono(line.Content.Length == 0 ? " " : line.Content, DiffCodeSize, code)
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(spans)
-                .Padding(new Thickness(2, 14, 2, 0))
-                .FlexGrow(1)
-                .MaxLines(1).OverflowMode(TextOverflow.Clip)));
+                .Padding(new Thickness(2, 14, 2, 0))));
 
         if (selectable)
         {
@@ -554,12 +672,11 @@ public partial class JunctionApp
         if (isLeft) half.BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         half.AddChild(NumCell(num, 44f));
         // Both halves share one offset, so the two files stay aligned as they move.
-        half.AddChild(_diffPan.Cell(
-            Ui.Mono(text, 12f, code).Selectable()
+        half.AddChild(DiffCodeCell(
+            Ui.Mono(text, DiffCodeSize, code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(spans)
-                .Padding(new Thickness(2, 10, 2, 0)).FlexGrow(1)
-                .MaxLines(1).OverflowMode(TextOverflow.Clip)));
+                .Padding(new Thickness(2, 10, 2, 0))));
         return half;
     }
 

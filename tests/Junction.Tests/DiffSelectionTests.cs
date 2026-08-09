@@ -27,6 +27,11 @@ public class DiffSelectionTests
     {
         DiffScrollTests.Hosted((session, app) =>
         {
+            // Wait for the rows rather than assuming a frame count. The diff arrives through
+            // git and the list realizes its rows during layout, so under load a fixed number
+            // of pumps can leave nothing on screen — which reads as "the press missed".
+            session.PumpUntil(() => FirstCodeLabel(session) is { Layout.AbsoluteBorderBox.Height: > 0 },
+                System.TimeSpan.FromSeconds(20));
             var label = FirstCodeLabel(session) ?? throw new Xunit.Sdk.XunitException("no code label on screen");
             // The row's box, not the label's: the dead strip is the part of the row the
             // label does not cover, so pressing inside the label proves nothing. The label

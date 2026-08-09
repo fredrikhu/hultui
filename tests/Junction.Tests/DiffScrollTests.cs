@@ -13,6 +13,7 @@ namespace Junction.Tests;
 /// as a negative margin inside a clipping cell instead — these tests are what say that the
 /// arrangement survives virtualization and recycling.
 /// </summary>
+[Collection("JunctionDiff")]
 public class DiffScrollTests
 {
     private const string Wide =
@@ -189,3 +190,12 @@ public class DiffScrollTests
         Pan(app).ScrollbarElement is { Parent: not null } track ? track : null;
 
 }
+
+/// <summary>
+/// Serializes the diff test classes. Each hosts a real app in its own headless session, and
+/// some process-wide state is shared between sessions — the ambient text-measure context
+/// above all, which the newest window installs. Run in parallel they measure and lay out
+/// against each other's windows, which shows up as a hit test missing by a pixel.
+/// </summary>
+[CollectionDefinition("JunctionDiff", DisableParallelization = true)]
+public class JunctionDiffCollection { }
