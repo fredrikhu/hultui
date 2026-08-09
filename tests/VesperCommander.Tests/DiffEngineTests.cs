@@ -76,6 +76,11 @@ public class DiffEngineTests
     public void TooLarge_TrueOnlyForHugePairs()
     {
         Assert.False(DiffEngine.TooLarge(new string[10], new string[10]));
-        Assert.True(DiffEngine.TooLarge(new string[5000], new string[5000]));
+        // 5,000 lines a side used to be refused: the old LCS table multiplied the two
+        // lengths, so it needed 100 million ints. Myers is linear in memory, and the cap is
+        // now a per-side line count guarding against the time a wholly-different pair costs.
+        Assert.False(DiffEngine.TooLarge(new string[5000], new string[5000]));
+        Assert.True(DiffEngine.TooLarge(new string[DiffEngine.MaxLines + 1], new string[10]));
+        Assert.True(DiffEngine.TooLarge(new string[10], new string[DiffEngine.MaxLines + 1]));
     }
 }
