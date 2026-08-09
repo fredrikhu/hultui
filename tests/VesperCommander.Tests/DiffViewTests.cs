@@ -701,6 +701,28 @@ public class DiffViewTests
             "a press at the very start of the line did not begin a selection");
     }
 
+    // The same dead zone, vertically: the cell used to centre its label, so the slack above
+    // and below belonged to the box rather than the line.
+    [Theory]
+    [InlineData(0.08f)]   // just inside the top edge
+    [InlineData(0.92f)]   // just inside the bottom edge
+    public void PressingAtALinesTopOrBottomEdgeStartsASelection(float where)
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", "left line\n");
+        t.WriteRight("a.txt", "right line\n");
+        t.Open();
+
+        t.OpenDiffOn("a.txt");
+
+        var (cell, _) = t.FirstLineCell();
+        var box = cell.Layout.AbsoluteBorderBox;
+        t.PressInBody(box.X + box.Width / 2, box.Y + box.Height * where);
+
+        Assert.True(t.LeftGroup.HasSelection || t.PressedLabelIsDragging(),
+            $"a press {where:P0} down the row did not begin a selection");
+    }
+
     // The row's tint should run the full width of its cell. With padding on the painted box
     // the colour stopped 8px short at each end, which made added and removed rows look
     // unevenly sized next to each other.

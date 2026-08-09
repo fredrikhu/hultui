@@ -722,7 +722,7 @@ public partial class CommanderApp
         // left over the line-number gutter. Wrapped, the cell grows instead of clipping, so
         // the content sits at the top rather than centred in a row it no longer defines.
         var box = Box.New().Background(bg)
-            .JustifyContent(DiffWrap ? JustifyContent.FlexStart : JustifyContent.Center)
+            .JustifyContent(JustifyContent.FlexStart)
             // No padding. It used to sit here, on the box that also paints the row's colour,
             // which cost twice: the line's tinted band stopped short of the text by 8px on
             // each side so added and removed rows looked unevenly sized, and a click in that
@@ -731,7 +731,10 @@ public partial class CommanderApp
             .OverflowX(Overflow.Hidden);
         // Wrapped there is no offset to apply, and the cell already clips.
 
-        var mono = Ui.Mono(text ?? "", DiffFontSize, fg);
+        // Grows on the vertical axis — the main axis of the column boxes it sits in — so the
+        // label is as tall as its row. Without it the label keeps its own text height and the
+        // remainder of the row belongs to the box, which is a strip that swallows presses.
+        var mono = Ui.Mono(text ?? "", DiffFontSize, fg).FlexGrow(1);
         if (!DiffWrap) mono.MaxLines(1).TextOverflow(TextOverflow.Clip);
         if (spans is { Count: > 0 }) mono.Spans(spans);
 
@@ -744,7 +747,11 @@ public partial class CommanderApp
         // Ctrl+C that copies it.
         mono.Selectable().SelectionGroup(selectionGroup, rowIndex);
 
-        box.AddChild(DiffWrap ? mono : _diffPan.Cell(mono));
+        // Filling the cell rather than sitting centred in it. Centring left a few pixels of
+        // slack above and below that belonged to the box, not the line — so a press near the
+        // top or bottom edge of a row selected nothing, the same dead strip the horizontal
+        // padding used to leave at each end.
+        box.AddChild((DiffWrap ? mono : _diffPan.Cell(mono)).FlexGrow(1));
         return box;
     }
 

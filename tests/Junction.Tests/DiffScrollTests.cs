@@ -109,7 +109,7 @@ public class DiffScrollTests
     }
 
     // ── harness ──────────────────────────────────────────────────────────
-    private static void Hosted(Action<HeadlessSession, JunctionApp> body, string? content = null)
+    internal static void Hosted(Action<HeadlessSession, JunctionApp> body, string? content = null)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         repo.Write("wide.txt", content ?? string.Join("\n", Enumerable.Range(0, 60).Select(i => Wide + " " + i)) + "\n");

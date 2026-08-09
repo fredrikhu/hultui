@@ -1,0 +1,76 @@
+using System.Reflection;
+using HultUI.Core.Elements;
+using HultUI.Headless;
+using Xunit;
+
+namespace Junction.Tests;
+
+/// <summary>
+/// Selecting a line in the diff by pressing anywhere over it.
+/// <para>
+/// The rows used to centre their code label, so the label was only as tall as its own text
+/// and the few pixels above and below it belonged to the row. A press landing there hit the
+/// row, not the label, and began no selection — a thin dead strip along every line, most
+/// often met when aiming at the first or last line of a hunk.
+/// </para>
+/// </summary>
+public class DiffSelectionTests
+{
+    [Theory]
+    [InlineData(0.10f)]   // just inside the top edge of a line
+    [InlineData(0.50f)]   // the middle, which always worked
+    [InlineData(0.90f)]   // just inside the bottom edge
+    public void PressingAnywhereOverALineBeginsASelection(float where)
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var label = FirstCodeLabel(session) ?? throw new Xunit.Sdk.XunitException("no code label on screen");
+            // The row's box, not the label's: the dead strip is the part of the row the
+            // label does not cover, so pressing inside the label proves nothing. The label
+            // sits in the pan cell, which sits in the row.
+            var row = label.Parent?.Parent ?? throw new Xunit.Sdk.XunitException("the label has no row");
+            var box = row.Layout.AbsoluteBorderBox;
+            Assert.True(box.Height > 0, "the row has no height");
+
+            session.Window.MouseDown(box.X + box.Width / 2, box.Y + box.Height * where);
+            session.PumpFrame();
+
+            Assert.True(AnyLabelDragging(session),
+                $"a press {where:P0} down the line began no selection");
+        });
+    }
+
+    /// <summary>The first selectable code label the diff has realized.</summary>
+    private static TextElement? FirstCodeLabel(HeadlessSession session)
+    {
+        TextElement? found = null;
+        Walk(Root(session));
+        return found;
+
+        void Walk(Element? e)
+        {
+            if (found != null || e is null) return;
+            if (e is TextElement { Selectable: true, SelectionIndex: >= 0 } te) { found = te; return; }
+            foreach (var c in e.Children) Walk(c);
+        }
+    }
+
+    private static bool AnyLabelDragging(HeadlessSession session)
+    {
+        bool dragging = false;
+        Walk(Root(session));
+        return dragging;
+
+        void Walk(Element? e)
+        {
+            if (dragging || e is null) return;
+            if (e is TextElement { IsDragging: true }) { dragging = true; return; }
+            foreach (var c in e.Children) Walk(c);
+        }
+    }
+
+    private static Element? Root(HeadlessSession session) =>
+        (Element?)typeof(HultUI.Window)
+            .GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(session.Window.Window);
+}
