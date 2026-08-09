@@ -73,9 +73,13 @@ public partial class CommanderApp
 
     private BoxElement WinButton(string glyph, string tooltip, Action onClick, Color hoverBg)
     {
+        // No pointer cursor: Windows caption buttons keep the arrow, and the maximize
+        // button here has to anyway — it is non-client so Snap Layouts works, which puts
+        // the cursor under the OS. Setting it on the other two only made the trio
+        // inconsistent with each other and with every other window on the desktop.
         var b = Flex.Row(gap: 0).Width(46).Height(40)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Cursor(CursorType.Pointer).Tooltip(tooltip);
+            .Tooltip(tooltip);
         b.AddChild(Ui.Icon(glyph, 11f, Nocturne.On(0.75)));
         b.OnClick(_ => onClick());
         return b.HoverBg(hoverBg, Color.Transparent);

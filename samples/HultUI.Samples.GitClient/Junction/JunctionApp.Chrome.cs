@@ -102,9 +102,13 @@ public partial class JunctionApp
 
     private BoxElement WinButton(string glyph, string tooltip, Action onClick, Color hoverBg)
     {
+        // No pointer cursor: Windows caption buttons keep the arrow, and the maximize
+        // button here has to anyway — it is non-client so Snap Layouts works, which puts
+        // the cursor under the OS. Setting it on the other two only made the trio
+        // inconsistent with each other and with every other window on the desktop.
         var b = Flex.Row(gap: 0).Width(46).Height(40)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Cursor(CursorType.Pointer).Tooltip(tooltip);
+            .Tooltip(tooltip);
         // 13 rather than 11: the caption marks are hairlines, and below this the bar
         // in the minimize glyph lands under one device pixel and washes out.
         b.AddChild(Ui.Icon(glyph, 13f, Nocturne.On(0.75)));
