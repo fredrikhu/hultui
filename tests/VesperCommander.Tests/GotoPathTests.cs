@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
 using Xunit;
@@ -82,18 +83,14 @@ public class GotoPathTests
     [Fact]
     public void ClickingEmptyBreadcrumbStrip_OpensGotoPrompt()
     {
-        using var fx = new Fixture();
-
         // The affordance is the run of empty strip after the last crumb, and the handler
         // only fires when the strip itself is the hit target. How much of the strip the
         // crumbs occupy depends on the path's rendered width, which varies with the
         // machine's fonts and the length of its temp directory — a fixed offset from the
         // right edge landed on a crumb on the CI runner and quietly navigated instead.
-        // Park the pane at the volume root so the trail is a single short crumb, then
-        // aim at the middle of the gap that actually exists.
-        var driveRoot = System.IO.Path.GetPathRoot(fx.Root)!;
-        fx.Invoke("NavigateTo", 'L', driveRoot, null, false);
-        fx.Session.PumpFrame();
+        // A wide window leaves room for the trail whatever the fonts do; the click then
+        // aims at the middle of the gap that actually exists rather than assuming one.
+        using var fx = new Fixture(width: 2400);
 
         var strip = fx.Session.Window.FindByAutomationId("crumb-strip-L");
         Assert.NotNull(strip);
@@ -106,7 +103,7 @@ public class GotoPathTests
         fx.Session.PumpFrame();
 
         Assert.True(fx.PromptOpen);
-        Assert.Equal(driveRoot, fx.Dir('L'));   // the click itself didn't navigate
+        Assert.Equal(fx.Root, fx.Dir('L'));   // the click itself didn't navigate
     }
 
     [Fact]
@@ -128,7 +125,13 @@ public class GotoPathTests
     {
         using var fx = new Fixture();
         fx.Invoke("OpenCommandLine", 'L');
-        fx.Session.PumpFrame();
+
+        // OpenCommandLine only requests focus (_pendingCmdFocus); the field is created
+        // and focused on a later build. A pane listing finishing in between rebuilds the
+        // field and drops focus, and typed text then goes nowhere — which is how this
+        // failed under the whole-solution run and not on its own. Wait for the field.
+        fx.Session.PumpUntil(() => fx.Session.Window.Window.FocusedElement is TextInputElement);
+
         fx.Session.Window.TypeText("cd sub");
         fx.Session.Window.KeyDown(KeyCode.Enter);
         fx.Session.PumpFrame();
@@ -143,7 +146,7 @@ public class GotoPathTests
         public readonly HeadlessSession Session;
         private readonly CommanderApp _app;
 
-        public Fixture(bool startInSub = false)
+        public Fixture(bool startInSub = false, int width = 1240)
         {
             Root = Path.Combine(Path.GetTempPath(), "vesper-goto-" + System.Guid.NewGuid().ToString("N"));
             Sub = Path.Combine(Root, "sub");
@@ -151,13 +154,15 @@ public class GotoPathTests
             FileInSub = Path.Combine(Sub, "file.txt");
             File.WriteAllText(FileInSub, "x");
 
-            Session = HeadlessSession.Create(1240, 820);
+            Session = HeadlessSession.Create(width, 820);
             _app = new CommanderApp(Session.Application, Session.Window.Window, Root);
             Session.Application.SetRoot(_app.Mount());
             Session.PumpFrame();
             // Deterministic start regardless of any restored session.
             Invoke("NavigateTo", 'L', startInSub ? Sub : Root, null, false);
-            Session.PumpFrame();
+            // The listing runs off-thread and posts back; drain it here so a later
+            // rebuild cannot land in the middle of what a test is doing.
+            Session.PumpFrames(3);
         }
 
         public void OpenPrompt()
