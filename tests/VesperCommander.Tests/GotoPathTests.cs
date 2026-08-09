@@ -83,16 +83,30 @@ public class GotoPathTests
     public void ClickingEmptyBreadcrumbStrip_OpensGotoPrompt()
     {
         using var fx = new Fixture();
-        // The crumb row grows to fill the strip, so a point near its right edge lands past
-        // the last crumb — the address-bar affordance, not a crumb navigation.
+
+        // The affordance is the run of empty strip after the last crumb, and the handler
+        // only fires when the strip itself is the hit target. How much of the strip the
+        // crumbs occupy depends on the path's rendered width, which varies with the
+        // machine's fonts and the length of its temp directory — a fixed offset from the
+        // right edge landed on a crumb on the CI runner and quietly navigated instead.
+        // Park the pane at the volume root so the trail is a single short crumb, then
+        // aim at the middle of the gap that actually exists.
+        var driveRoot = System.IO.Path.GetPathRoot(fx.Root)!;
+        fx.Invoke("NavigateTo", 'L', driveRoot, null, false);
+        fx.Session.PumpFrame();
+
         var strip = fx.Session.Window.FindByAutomationId("crumb-strip-L");
         Assert.NotNull(strip);
         var box = strip!.Element.Layout.AbsoluteBorderBox;
-        fx.Session.Window.Click(box.X + box.Width - 4, box.Y + box.Height / 2);
+        var lastCrumb = strip.Element.Children[^1].Layout.AbsoluteBorderBox;
+        Assert.True(lastCrumb.Right < box.Right - 2,
+            $"no empty run to click: crumbs reach {lastCrumb.Right} of a strip ending at {box.Right}");
+
+        fx.Session.Window.Click((lastCrumb.Right + box.Right) / 2, box.Y + box.Height / 2);
         fx.Session.PumpFrame();
 
         Assert.True(fx.PromptOpen);
-        Assert.Equal(fx.Root, fx.Dir('L'));   // the click itself didn't navigate
+        Assert.Equal(driveRoot, fx.Dir('L'));   // the click itself didn't navigate
     }
 
     [Fact]
