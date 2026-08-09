@@ -16,13 +16,17 @@ namespace Junction.Tests;
 /// </summary>
 public class DiffSelectionTests
 {
-    // In pixels from the row's edges, not fractions of it: the strip is only a pixel or two
-    // deep, so 90% of the way down a 20px row is still comfortably inside the label and says
-    // nothing. The first and last pixel of the row are the ones in question.
+    // Measured in pixels from the row's edges rather than fractions of it: the strip a
+    // centred label leaves is only a pixel or two deep, so 90% of the way down a 22px row is
+    // still well inside the label and says nothing about it.
+    //
+    // 1.5px in, not 0.5px: half a pixel from the edge can be rounded into the neighbouring
+    // row, which makes the test a coin toss under load rather than a statement about this
+    // row. 1.5px is unambiguously inside the row and still inside the old dead strip, which
+    // ran from the row's edge to roughly 2px in.
     [Theory]
-    [InlineData(0.5f)]     // the very top pixel of the row
-    [InlineData(-1f)]      // one pixel inside the bottom edge. Half a pixel past it can be
-                           // rounded into the next row, which may be an unselectable header.
+    [InlineData(1.5f)]     // near the top edge, inside the strip a centred label left
+    [InlineData(-1.5f)]    // near the bottom edge, likewise
     [InlineData(9f)]       // the middle, which always worked
     public void PressingAnywhereOverALineBeginsASelection(float inset)
     {
@@ -45,8 +49,13 @@ public class DiffSelectionTests
             session.Window.MouseDown(box.X + box.Width / 2, y);
             session.PumpFrame();
 
-            Assert.True(AnyLabelDragging(session),
-                $"a press {y - box.Y:0.0}px into a {box.Height:0}px row began no selection");
+            // That *this* label began the drag, not merely that something did. "Any label"
+            // is satisfied by a neighbouring row picking the press up, which is exactly what
+            // happens at a row boundary — so it cannot tell a working row from a press that
+            // slid off it.
+            Assert.True(label.IsDragging,
+                $"a press {y - box.Y:0.0}px into a {box.Height:0}px row went somewhere other than its own line"
+                + (AnyLabelDragging(session) ? " (a different line took it)" : " (no line took it)"));
         });
     }
 
