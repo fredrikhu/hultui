@@ -29,16 +29,11 @@ public partial class CommanderApp
     // than computed when rows are not all the same height.
     private readonly Ref<Element> _diffChangeRowRef = new();
 
-    // Horizontal position, shared by both sides so they stay aligned, and applied as a
-    // negative left margin on the code text inside an overflow-hidden cell rather than by
-    // a real horizontal ScrollView. A nested ScrollView would swallow the wheel (its
-    // OnScroll always stops propagation), which would cost the outer vertical scroll its
-    // wheel; and scrolling the *outer* view instead would drag the line-number gutters off
-    // screen and push the right-hand side out of view entirely.
-    private float _diffScrollX;
-    // Width of the longest line in the comparison, measured once per comparison. Zero when
-    // no measure context is installed yet, which just means no horizontal scrolling.
-    private float _diffLongestPx;
+    // Sideways position, shared by both sides so they stay aligned. See HorizontalPan for
+    // why this is not a horizontal ScrollView: a nested one would swallow the wheel the
+    // outer vertical scroll needs, and scrolling the outer view would drag the line-number
+    // gutters off screen and push the right-hand side out of view entirely.
+    private readonly HorizontalPan _diffPan;
 
     // Selection scopes, one per side. The tokens only need identity, and they live for the
     // app's lifetime so a rebuild mid-drag doesn't break the group the window is tracking.
@@ -115,8 +110,8 @@ public partial class CommanderApp
         _diffRows = new();
         _diffChangeRows = new();
         _diffChangeIdx = 0;
-        _diffScrollX = 0;
-        _diffLongestPx = 0;
+        _diffPan.Reset();
+        _diffPan.ContentWidth = 0;
 
         if (!File.Exists(_diffLeftPath) || !File.Exists(_diffRightPath)) { _diffState = DiffViewState.Missing; return; }
         var (la, lbin) = LoadForDiff(_diffLeftPath);
@@ -129,23 +124,10 @@ public partial class CommanderApp
         if (_diffState == DiffViewState.Ok)
         {
             BuildDiffRowModel();
-            _diffLongestPx = MeasureLongestLine(la, ra);
+            _diffPan.ContentWidth = HorizontalPan.MeasureWidest(la.Concat(ra), DiffFontSize, Fonts.Mono);
             _diffGen++;
             StartDiffHighlight(la, ra);
         }
-    }
-
-    /// <summary>How wide the widest line renders, which is how far right the view can
-    /// scroll. The font is monospace, so the line with the most characters is the widest
-    /// one and a single measurement settles it — measuring every line of a 4 MB file would
-    /// not. A proportional fallback font would make this an estimate, and the only cost of
-    /// being wrong is scrolling slightly too far or not quite far enough.</summary>
-    private static float MeasureLongestLine(string[] left, string[] right)
-    {
-        var longest = "";
-        foreach (var line in left) if (line.Length > longest.Length) longest = line;
-        foreach (var line in right) if (line.Length > longest.Length) longest = line;
-        return TextMeasure.MeasureWidth(longest, DiffFontSize, Fonts.Mono);
     }
 
     private static (string[]? lines, bool binary) LoadForDiff(string path)
@@ -240,7 +222,9 @@ public partial class CommanderApp
 
     /// <summary>How far right the view can scroll: the longest line, less what one code
     /// column shows of it. Nowhere, when lines wrap instead.</summary>
-    private float DiffMaxScrollX() => DiffWrap ? 0 : Math.Max(0, _diffLongestPx - DiffCodeWidth());
+    /// <summary>Tell the pan how much of a line one code column shows. Wrapped, nothing
+    /// scrolls sideways, so the two modes cannot both be on.</summary>
+    private void UpdateDiffPan() => _diffPan.ViewportWidth = DiffWrap ? float.MaxValue : DiffCodeWidth();
 
     /// <summary>Whether a line too wide for its column wraps rather than scrolling sideways.
     /// The two are alternatives: wrapping means every line is visible in full, so there is
@@ -251,7 +235,7 @@ public partial class CommanderApp
     {
         _settings.DiffWrap = !_settings.DiffWrap;
         SettingsStore.Save(_settings);
-        _diffScrollX = 0;         // the other mode's offset means nothing in this one
+        _diffPan.Reset();         // the other mode's offset means nothing in this one
         _pendingDiffScroll = true; // keep the current change in view across the switch
         MarkDirty();
     }
@@ -274,21 +258,6 @@ public partial class CommanderApp
         return box.Height > 0 ? box.Y - sv.Layout.AbsoluteContentBox.Y + sv.ScrollOffsetY : null;
     }
 
-    /// <summary>Move the view sideways. Unlike the vertical offset this is app state, not
-    /// something the ScrollView holds, so it needs a rebuild to take effect.</summary>
-    private void DiffScrollH(float delta, float? to = null)
-    {
-        if (_diffState != DiffViewState.Ok) return;
-        float next = Math.Clamp(to ?? _diffScrollX + delta, 0, DiffMaxScrollX());
-        if (next == _diffScrollX) return;
-        _diffScrollX = next;
-        MarkDirty();
-    }
-
-    /// <summary>One press of ← / →. Roughly four monospace characters — small enough to
-    /// line something up, large enough to cross a long line without wearing out the key.</summary>
-    private const float DiffHStep = 28f;
-
     private void HandleDiffKey(KeyDownEvent e)
     {
         bool ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
@@ -307,10 +276,8 @@ public partial class CommanderApp
             case KeyCode.Home: DiffScroll(0, to: 0); e.StopPropagation = true; break;
             case KeyCode.End: DiffScroll(0, to: float.MaxValue); e.StopPropagation = true; break;
             // Sideways, for lines wider than the pane. Ctrl jumps to either margin.
-            case KeyCode.Left when ctrl: DiffScrollH(0, to: 0); e.StopPropagation = true; break;
-            case KeyCode.Right when ctrl: DiffScrollH(0, to: float.MaxValue); e.StopPropagation = true; break;
-            case KeyCode.Left: DiffScrollH(-DiffHStep); e.StopPropagation = true; break;
-            case KeyCode.Right: DiffScrollH(DiffHStep); e.StopPropagation = true; break;
+            case KeyCode.Left or KeyCode.Right:
+                _diffPan.HandleKey(e); e.StopPropagation = true; break;
             case KeyCode.W: ToggleDiffWrap(); e.StopPropagation = true; break;
             case KeyCode.F5:
                 if (_diffState == DiffViewState.Missing) { CloseDiff(); StartCopy(); }
@@ -340,7 +307,8 @@ public partial class CommanderApp
                 "One side is binary or larger than 4 MB."),
             _ => DiffMissingBody(),
         });
-        if (_diffState == DiffViewState.Ok && DiffMaxScrollX() > 0) col.AddChild(BuildDiffHScrollbar());
+        if (_diffState == DiffViewState.Ok && _diffPan.CanPan)
+            col.AddChild(_diffPan.Scrollbar(Nocturne.Surface, Nocturne.Neutral700, Nocturne.Divider));
         col.AddChild(BuildDiffFooter());
         return col;
     }
@@ -424,15 +392,14 @@ public partial class CommanderApp
 
     private Element BuildDiffBody()
     {
+        UpdateDiffPan();
         var scroll = ScrollView.Vertical().FlexGrow(1).WithRef(_diffScrollRef);
         // A trackpad's sideways swipe arrives as DeltaX; a mouse reports Shift+wheel as
         // DeltaY. The ScrollView's own handler sees both first, but its content is exactly
         // as wide as its viewport, so it clamps them to nothing and leaves them to us.
         scroll.On<ScrollEvent>(ev =>
         {
-            float dx = ev.DeltaX != 0 ? ev.DeltaX
-                : ev.Modifiers.HasFlag(KeyModifiers.Shift) ? ev.DeltaY : 0;
-            if (dx != 0) DiffScrollH(-dx * DiffHStep);
+            _diffPan.HandleScroll(ev);
         });
         var col = Flex.Column(gap: 0);
         for (int r = 0; r < _diffRows.Count; r++)
@@ -523,6 +490,7 @@ public partial class CommanderApp
             .JustifyContent(DiffWrap ? JustifyContent.FlexStart : JustifyContent.Center)
             .Padding(new Thickness(DiffWrap ? 2 : 0, 8, DiffWrap ? 2 : 0, 8))
             .OverflowX(Overflow.Hidden);
+        // Wrapped there is no offset to apply, and the cell already clips.
 
         var mono = Ui.Mono(text ?? "", DiffFontSize, fg);
         if (!DiffWrap) mono.MaxLines(1).TextOverflow(TextOverflow.Clip);
@@ -531,14 +499,13 @@ public partial class CommanderApp
         // Horizontal scroll. A negative left margin moves the line left and — because the
         // stretch that sizes it subtracts the horizontal margin — widens it by the same
         // amount, so the text that scrolls in from the right is actually laid out.
-        if (!DiffWrap && _diffScrollX > 0) mono.Margin(new Thickness(0, 0, 0, -_diffScrollX));
 
         // Selectable, with one group per side: a drag runs down the lines of one file
         // rather than zig-zagging between the two. The window owns the group drag and the
         // Ctrl+C that copies it.
         mono.Selectable().SelectionGroup(selectionGroup);
 
-        box.AddChild(mono);
+        box.AddChild(DiffWrap ? mono : _diffPan.Cell(mono));
         return box;
     }
 
@@ -573,70 +540,6 @@ public partial class CommanderApp
         return box;
     }
 
-    // ── Horizontal scrollbar ─────────────────────────────────────────────
-    // Hand-built, because the horizontal offset is app state rather than a ScrollView's
-    // (see _diffScrollX). It spans the whole body: both code columns move together, so one
-    // bar describes both.
-    private const float DiffBarH = 10f;
-    private const float DiffThumbMin = 30f;
-
-    private readonly Ref<BoxElement> _diffHTrackRef = new();
-    private bool _diffHDragging;
-    private float _diffHGrab;   // where in the thumb the drag took hold
-
-    /// <summary>Track geometry, from the laid-out track when there is one. Build and drag
-    /// both go through this so the thumb lands where the pointer left it.</summary>
-    private (float x, float width, float thumb) DiffBarGeometry()
-    {
-        var box = _diffHTrackRef.Current?.Layout.AbsoluteContentBox;
-        float x = box?.X ?? 0;
-        float width = box is { Width: > 0 } ? box.Value.Width : _window.LayoutWidth;
-        float code = DiffCodeWidth();
-        float content = code + DiffMaxScrollX();
-        float thumb = content > 0 ? Math.Clamp(width * (code / content), DiffThumbMin, width) : width;
-        return (x, width, thumb);
-    }
-
-    private Element BuildDiffHScrollbar()
-    {
-        var (_, width, thumb) = DiffBarGeometry();
-        float max = DiffMaxScrollX();
-        float offset = max > 0 ? (width - thumb) * (_diffScrollX / max) : 0;
-
-        var track = Box.New().Height(DiffBarH).FlexShrink(0)
-            .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0))
-            .WithRef(_diffHTrackRef);
-
-        track.AddChild(Box.New()
-            .Height(DiffBarH - 4).Width(thumb).Margin(new Thickness(1, 0, 0, offset))
-            .CornerRadius(3f).Background(Nocturne.Neutral700).Cursor(CursorType.Pointer));
-
-        // Press anywhere on the track: on the thumb it grabs, off it the thumb jumps under
-        // the pointer first — the same thing either way once the grab offset is worked out.
-        track.On<PointerDownEvent>(ev =>
-        {
-            var (tx, w, th) = DiffBarGeometry();
-            float local = ev.Position.X - tx;
-            float thumbAt = max > 0 ? (w - th) * (_diffScrollX / max) : 0;
-            _diffHGrab = local >= thumbAt && local <= thumbAt + th ? local - thumbAt : th / 2;
-            _diffHDragging = true;
-            DragDiffBarTo(ev.Position.X);
-            ev.StopPropagation = true;
-        });
-        return track;
-    }
-
-    /// <summary>Map a pointer x onto the horizontal offset, for a scrollbar drag.</summary>
-    private void DragDiffBarTo(float pointerX)
-    {
-        var (x, width, thumb) = DiffBarGeometry();
-        float travel = width - thumb;
-        if (travel <= 0) return;
-        float thumbAt = Math.Clamp(pointerX - x - _diffHGrab, 0, travel);
-        DiffScrollH(0, to: thumbAt / travel * DiffMaxScrollX());
-    }
-
     private Element BuildDiffFooter()
     {
         var footer = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
@@ -648,7 +551,7 @@ public partial class CommanderApp
         if (_diffState == DiffViewState.Ok)
         {
             footer.AddChild(Ui.Kbd("↑↓"));
-            if (DiffMaxScrollX() > 0) footer.AddChild(Ui.Kbd("←→"));
+            if (_diffPan.CanPan) footer.AddChild(Ui.Kbd("←→"));
             footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("w"));
             footer.AddChild(Ui.Mono(DiffWrap ? "no wrap" : "wrap", 10f, Nocturne.On(0.45)));

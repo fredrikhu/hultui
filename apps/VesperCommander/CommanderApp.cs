@@ -314,8 +314,11 @@ public partial class CommanderApp : Component, IDisposable
         Icons.DisplayScale = window.DisplayScale;
         window.Resized += OnWindowResized;
         _settings = SettingsStore.Load();
+        // The diff's sideways offset is app state, so moving it has to rebuild the rows.
+        _diffPan = new HorizontalPan(MarkDirty);
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
+        _diffPan = new HorizontalPan(MarkDirty);
         RebuildKeymap();
         SevenZip.ExePath = _settings.SevenZipPath;
         _sevenZip = SevenZip.Available();   // probed once — the probe spawns a process
@@ -481,14 +484,14 @@ public partial class CommanderApp : Component, IDisposable
         root.On<PointerMoveEvent>(ev =>
         {
             if (_findResizing) UpdateFindResize(ev.Position.X, ev.Position.Y);
-            if (_diffHDragging) DragDiffBarTo(ev.Position.X);
         });
         root.On<PointerUpEvent>(ev =>
         {
             if (ev.Button == 2) EndRightMark();
             if (_findResizing) _findResizing = false;
-            _diffHDragging = false;
         });
+        // The diff's sideways scrollbar: a drag ends wherever the button comes up.
+        _diffPan.AttachDrag(root);
 
         // Overlays render above the shell, each keyed so conditional presence
         // reconciles by identity (a keyless swap would bleed retained state — focus,

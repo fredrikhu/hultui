@@ -260,6 +260,8 @@ public partial class JunctionApp : Component, IDisposable
         _settings = settings;
         _folderPicker = folderPicker ?? new NativeFolderPicker();
         _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
+        // The diff's sideways offset is app state, so moving it has to rebuild the rows.
+        _diffPan = new HorizontalPan(MarkDirty);
         _settings.Normalize();
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
@@ -478,9 +480,8 @@ public partial class JunctionApp : Component, IDisposable
             .Children(titleBar, body);
 
         // A scrollbar drag ends wherever the button comes up, which is routinely off the
-        // thumb — so the move and the release are tracked at the root, not on the track.
-        root.On<PointerMoveEvent>(ev => { if (_diffHDragging) DragDiffBarTo(ev.Position.X); });
-        root.On<PointerUpEvent>(_ => _diffHDragging = false);
+        // thumb, so the move and release are heard at the root rather than on the track.
+        _diffPan.AttachDrag(root);
 
         void Overlay(string key, Element el) { el.Key = key; root.AddChild(el); }
 

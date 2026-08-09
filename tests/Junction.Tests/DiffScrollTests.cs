@@ -16,14 +16,16 @@ namespace Junction.Tests;
 public class DiffScrollTests
 {
     private const string Wide =
-        "                    a line indented far enough that its content starts well past the right hand edge of any pane";
+        "                    a line indented far enough that its content starts well past the right hand edge of any pane "
+        + "and then continues for a good while longer still, so that no plausible pane width could ever contain all of it";
 
     [Fact]
     public void ALongLineCanBeScrolledIntoView()
     {
         Hosted((session, app) =>
         {
-            Assert.True(MaxScrollX(app) > 0, "a 110-character line left nothing to scroll");
+            Assert.True(MaxScrollX(app) > 0,
+                $"nothing to scroll: content={Pan(app).ContentWidth:0} viewport={Pan(app).ViewportWidth:0}");
             Assert.Equal(0f, Offset(app), 1);
 
             Press(session, app, KeyCode.Right);
@@ -177,13 +179,13 @@ public class DiffScrollTests
     private static Element FirstCodeRow(JunctionApp app) =>
         FindList(app).Children.First(c => c.Children.Count >= 4);
 
-    private static float MaxScrollX(JunctionApp app) =>
-        (float)typeof(JunctionApp).GetMethod("DiffMaxScrollX", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(app, null)!;
+    private static HultUI.Core.Builders.HorizontalPan Pan(JunctionApp app) =>
+        (HultUI.Core.Builders.HorizontalPan)typeof(JunctionApp)
+            .GetField("_diffPan", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+
+    private static float MaxScrollX(JunctionApp app) => Pan(app).MaxOffset;
 
     private static Element? TrackOrNull(JunctionApp app) =>
-        ((HultUI.Core.Reactivity.Ref<BoxElement>)typeof(JunctionApp)
-            .GetField("_diffHTrackRef", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(app)!).Current is { Parent: not null } track ? track : null;
+        Pan(app).ScrollbarElement is { Parent: not null } track ? track : null;
 
 }

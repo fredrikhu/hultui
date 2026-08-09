@@ -199,6 +199,11 @@ public class DiffViewTests
         t.Open();
 
         t.OpenDiffOn("a.txt");
+        // The first build runs before any layout, so it sizes the code column from the
+        // window; give it the frame it needs to learn the real width before asking the
+        // scrollbar to be exactly at either end.
+        t.Session.PumpFrames(2);
+
         var (track, thumb) = t.ScrollbarParts();
         Assert.True(thumb.Layout.AbsoluteBorderBox.Width < track.Layout.AbsoluteContentBox.Width,
             "a thumb that fills the track says there is nothing to scroll");
@@ -673,7 +678,10 @@ public class DiffViewTests
             _session.PumpFrame();
         }
 
-        public float MaxScrollX() => (float)Call("DiffMaxScrollX")!;
+        public HultUI.Core.Builders.HorizontalPan Pan =>
+            Field<HultUI.Core.Builders.HorizontalPan>("_diffPan");
+
+        public float MaxScrollX() => Pan.MaxOffset;
 
         /// <summary>How wide the text a label actually painted is — not its element box,
         /// which always stretches to the cell. A selectable TextElement keeps the lines it
@@ -689,14 +697,14 @@ public class DiffViewTests
             return w;
         }
 
-        public HultUI.Core.Elements.BoxElement? TryScrollbarTrack() =>
-            Field<HultUI.Core.Reactivity.Ref<HultUI.Core.Elements.BoxElement>>("_diffHTrackRef").Current is { Parent: not null } track
-                ? track : null;
+        public HultUI.Core.Elements.Element? TryScrollbarTrack() =>
+            Pan.ScrollbarElement is { Parent: not null } track ? track : null;
 
         public (HultUI.Core.Elements.Element track, HultUI.Core.Elements.Element thumb) ScrollbarParts()
         {
             var track = TryScrollbarTrack() ?? throw new Xunit.Sdk.XunitException("there is no horizontal scrollbar");
-            return (track, track.Children[0]);
+            // Children: [travel before, thumb, travel after].
+            return (track, track.Children[1]);
         }
 
         public void DragScrollbar(float from, float to)
@@ -736,14 +744,32 @@ public class DiffViewTests
         public (HultUI.Core.Elements.Element cell, HultUI.Core.Elements.Element text) FirstLineCell()
         {
             var cell = FirstRow().Children[1];
-            return (cell, cell.Children[0]);
+            return (cell, FirstLabel(cell));
+        }
+
+        /// <summary>The label inside a code cell. Scrolling wraps it in the pan's clipping
+        /// cell, wrapping does not, so it is found by descent rather than by index.</summary>
+        private static HultUI.Core.Elements.Element FirstLabel(HultUI.Core.Elements.Element cell)
+        {
+            foreach (var d in Descend(cell))
+                if (d is HultUI.Core.Elements.TextElement) return d;
+            throw new Xunit.Sdk.XunitException("the cell holds no label");
+        }
+
+        private static IEnumerable<HultUI.Core.Elements.Element> Descend(HultUI.Core.Elements.Element e)
+        {
+            foreach (var c in e.Children)
+            {
+                yield return c;
+                foreach (var d in Descend(c)) yield return d;
+            }
         }
 
         /// <summary>The right-hand code cell of the first line — grid column 4.</summary>
         public (HultUI.Core.Elements.Element cell, HultUI.Core.Elements.Element text) FirstLineRightCell()
         {
             var cell = FirstRow().Children[4];
-            return (cell, cell.Children[0]);
+            return (cell, FirstLabel(cell));
         }
 
         public (HultUI.Core.Elements.Element gutter, HultUI.Core.Elements.Element number) FirstLineGutter()
