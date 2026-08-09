@@ -1,5 +1,7 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using Xunit;
 
@@ -17,15 +19,17 @@ public class GroupSelectionDragTests
 {
     private const float RowH = 20f;
 
-    private static (ScrollViewElement scroll, TextElement[] rows, object group) Build(HeadlessSession session)
+    private static (ScrollViewElement scroll, TextElement[] rows, TextSelectionGroup group) Build(HeadlessSession session)
     {
-        var group = new object();
+        var group = new TextSelectionGroup();
+        group.Bind("rows", 10, i => $"line number {i}");
         var rows = new TextElement[10];
         for (int i = 0; i < rows.Length; i++)
         {
             var el = TextElement.New($"line number {i}");
             el.Selectable = true;
             el.SelectionGroup = group;
+            el.SelectionIndex = i;
             el.Box.Height = RowH;
             el.Flex.FlexShrink = 0;
             rows[i] = el;
@@ -93,17 +97,20 @@ public class GroupSelectionDragTests
     public void SeparateGroups_DoNotSelectAcross()
     {
         using var session = HeadlessSession.Create(width: 200, height: 200);
-        var groupA = new object();
-        var groupB = new object();
-        TextElement Row(string t, object g)
+        var groupA = new TextSelectionGroup();
+        var groupB = new TextSelectionGroup();
+        groupA.Bind("a", 2, i => i == 0 ? "alpha zero" : "alpha one");
+        groupB.Bind("b", 1, _ => "beta zero");
+        TextElement Row(string t, TextSelectionGroup g, int index)
         {
             var el = TextElement.New(t);
-            el.Selectable = true; el.SelectionGroup = g; el.Box.Height = RowH; el.Flex.FlexShrink = 0;
+            el.Selectable = true; el.SelectionGroup = g; el.SelectionIndex = index;
+            el.Box.Height = RowH; el.Flex.FlexShrink = 0;
             return el;
         }
-        var a0 = Row("alpha zero", groupA);
-        var a1 = Row("alpha one", groupA);
-        var b0 = Row("beta zero", groupB);
+        var a0 = Row("alpha zero", groupA, 0);
+        var a1 = Row("alpha one", groupA, 1);
+        var b0 = Row("beta zero", groupB, 0);
         var scroll = ScrollView.New().Width(200).Height(100)
             .Children(Flex.Column().Children(a0, a1, b0));
         session.Window.SetRoot(scroll);
@@ -118,5 +125,61 @@ public class GroupSelectionDragTests
         Assert.True(a0.HasSelection);
         Assert.True(a1.HasSelection);
         Assert.False(b0.HasSelection);            // different group is never roped in
+    }
+
+    // The case the model-indexed selection exists for. A virtualized list destroys the label
+    // the press landed in as soon as it scrolls out of view. With the anchor held as an
+    // element that ended the drag — the window could no longer find it, so extending stopped
+    // and the copy was truncated to whatever was still on screen. Held as a line number, the
+    // anchor cannot be invalidated by recycling.
+    [Fact]
+    public void ADragSurvivesTheAnchorRowBeingDestroyed()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        session.Window.MouseDown(40f, ScreenMidY(scroll, rows[0]));
+        session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[1]));
+
+        // Row 1 is torn out of the tree mid-drag, exactly as recycling does. It ends up in
+        // the middle of the finished span, so it should copy whole despite having no element.
+        var column = scroll.Children[0];
+        column.RemoveChild(rows[1]);
+        session.PumpFrame();
+
+        // The drag keeps extending over the rows that remain. (Row 4 is the last one inside
+        // the 100-tall viewport; below that there is nothing to hit-test against.)
+        session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[4]));
+        session.Window.MouseUp(40f, ScreenMidY(scroll, rows[4]));
+
+        Assert.True(group.HasSelection);
+        Assert.True(rows[4].HasSelection);
+        // The destroyed line is in the copy, because the copy comes from the model.
+        Assert.Contains("line number 1", group.SelectedText);
+        Assert.Contains("line number 3", group.SelectedText);
+    }
+
+    // Copy is keyed off the group holding the selection, not off the focused element, so it
+    // works even when the label that had focus has since been recycled away.
+    [Fact]
+    public void CopyingWorksAfterTheFocusedLabelIsGone()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        session.Window.MouseDown(40f, ScreenMidY(scroll, rows[0]));
+        session.Window.MoveMouse(40f, ScreenMidY(scroll, rows[4]));
+        session.Window.MouseUp(40f, ScreenMidY(scroll, rows[4]));
+        Assert.True(group.HasSelection, "drag should have produced a selection");
+
+        var column = scroll.Children[0];
+        column.RemoveChild(rows[0]);      // the pressed (and focused) label goes away
+        session.PumpFrame();
+
+        session.Window.KeyDown(KeyCode.C, KeyModifiers.Ctrl);
+
+        var copied = session.Window.Clipboard.GetText() ?? "";
+        Assert.Contains("line number 1", copied);
+        Assert.Contains("line number 3", copied);
     }
 }

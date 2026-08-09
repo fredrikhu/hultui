@@ -619,6 +619,63 @@ public class DiffViewTests
         Assert.InRange(top, 0, body.Height - 1);
     }
 
+    // ── virtualization ───────────────────────────────────────────────────
+
+    [Fact]
+    public void ALongComparisonBuildsOnlyTheRowsNearTheViewport()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("big.txt", Lines("left line {0}", 2000));
+        t.WriteRight("big.txt", Lines("right line {0}", 2000));
+        t.Open();
+
+        t.OpenDiffOn("big.txt");
+
+        // An 820-tall window over 20px rows shows about 40. Building all 2000 was the cost
+        // virtualizing removed, so the row count is the assertion, not the wall clock.
+        Assert.InRange(t.BodyRows().Count, 1, 80);
+    }
+
+    [Fact]
+    public void ScrollingToTheEndDoesNotBuildEverythingInBetween()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("big.txt", Lines("left line {0}", 2000));
+        t.WriteRight("big.txt", Lines("right line {0}", 2000));
+        t.Open();
+        t.OpenDiffOn("big.txt");
+
+        t.Press(KeyCode.End);
+        t.Session.PumpFrames(2);
+
+        Assert.InRange(t.BodyRows().Count, 1, 80);
+        // And it really is at the bottom, not merely cheap.
+        Assert.True(t.ScrollY > 30000f, $"expected to be near the end, was at {t.ScrollY}");
+    }
+
+    // Virtualization destroys the label a drag started in as soon as it scrolls away. The
+    // selection is anchored to line numbers instead, and the copy is read from the file's
+    // lines rather than from the labels, so it survives both.
+    [Fact]
+    public void CopyingASelectionThatRunsPastTheViewportGetsEveryLine()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("big.txt", Lines("left line {0}", 2000));
+        t.WriteRight("big.txt", Lines("right line {0}", 2000));
+        t.Open();
+        t.OpenDiffOn("big.txt");
+
+        t.SelectLeftFromTo("left line 1", "left line 1501");
+        Assert.True(t.LeftGroup.HasSelection, "the drag left no selection in the group");
+        t.Press(KeyCode.C, KeyModifiers.Ctrl);
+
+        var copied = t.Clipboard.Split('\n');
+        Assert.Equal(1501, copied.Length);
+        Assert.Equal("left line 1", copied[0]);
+        Assert.Equal("left line 1000", copied[999]);   // recycled away long before the copy
+        Assert.Equal("left line 1501", copied[1500]);
+    }
+
     private static string Lines(string format, int count) =>
         string.Concat(System.Linq.Enumerable.Range(1, count)
             .Select(i => string.Format(format, i) + "\n"));
@@ -778,11 +835,69 @@ public class DiffViewTests
             return (gutter, gutter.Children[0]);
         }
 
-        public HultUI.Core.Elements.Element FirstRow() => Body.Children[0].Children[0];
+        public HultUI.Core.Elements.Element FirstRow() => BodyRows()[0];
 
-        public IReadOnlyList<HultUI.Core.Elements.Element> BodyRows() => Body.Children[0].Children;
+        /// <summary>The rows the body has actually built. Virtualized, that is the ones near
+        /// the viewport rather than every row in the file — the list's first child is the
+        /// spacer standing in for everything scrolled past above.</summary>
+        public IReadOnlyList<HultUI.Core.Elements.Element> BodyRows() =>
+            Body.Children.Skip(1).ToList();
 
         public HultUI.Core.Primitives.Rect BodyBox() => Body.Layout.AbsoluteContentBox;
+
+        public string Clipboard => _session.Window.Clipboard.GetText() ?? "";
+
+        public HultUI.Core.Elements.TextSelectionGroup LeftGroup =>
+            Field<HultUI.Core.Elements.TextSelectionGroup>("_diffGroupLeft");
+
+        /// <summary>The realized left-hand label showing <paramref name="text"/>, or null if
+        /// that line is not currently built.</summary>
+        private HultUI.Core.Elements.TextElement? LeftLabel(string text)
+        {
+            foreach (var row in BodyRows())
+            {
+                if (row.Children.Count < 5) continue;             // a collapse row
+                if (FirstLabel(row.Children[1]) is HultUI.Core.Elements.TextElement label
+                    && label.Content == text)
+                    return label;
+            }
+            return null;
+        }
+
+        /// <summary>Drags a selection down the left-hand side from one line to another,
+        /// scrolling on the way — which recycles away the row the drag started in, exactly as
+        /// it does for a user dragging past the bottom of a long diff.</summary>
+        public void SelectLeftFromTo(string fromText, string toText)
+        {
+            var start = LeftLabel(fromText)
+                ?? throw new Xunit.Sdk.XunitException($"'{fromText}' is not on screen to start from");
+            var s = start.Layout.AbsoluteBorderBox;
+            _session.Window.MouseDown(s.X, ScreenY(s));
+
+            // Scroll until the far end is built. The anchor is long gone by then.
+            for (int guard = 0; LeftLabel(toText) is null; guard++)
+            {
+                if (guard > 500) throw new Xunit.Sdk.XunitException($"never reached '{toText}'");
+                Body.ScrollOffsetY += 400f;
+                _session.PumpFrames(1);
+            }
+
+            var end = LeftLabel(toText)!;
+            var e = end.Layout.AbsoluteBorderBox;
+            // Past the end of the text but well inside the body, so the drag takes the whole
+            // last line without the point falling outside the viewport and missing the hit test.
+            float x = System.Math.Min(e.X + e.Width - 1, BodyBox().X + BodyBox().Width - 2);
+            float y = ScreenY(e);
+            _session.Window.MoveMouse(x, y);
+            _session.Window.MouseUp(x, y);
+            _session.PumpFrame();
+        }
+
+        /// <summary>Screen Y of a row's middle. Rows are laid out in the body's *content*
+        /// space — the renderer applies the scroll offset — so a pointer coordinate has to
+        /// subtract it or the click lands wherever that row would be if nothing had scrolled.</summary>
+        private float ScreenY(HultUI.Core.Primitives.Rect box) =>
+            box.Y - Body.ScrollOffsetY + box.Height / 2;
 
         public bool Wrap => Field<Settings>("_settings").DiffWrap;
 

@@ -35,16 +35,87 @@ public partial class CommanderApp
     // gutters off screen and push the right-hand side out of view entirely.
     private readonly HorizontalPan _diffPan;
 
-    // Selection scopes, one per side. The tokens only need identity, and they live for the
-    // app's lifetime so a rebuild mid-drag doesn't break the group the window is tracking.
-    private readonly object _diffGroupLeft = new();
-    private readonly object _diffGroupRight = new();
+    // Selection scopes, one per side. They live for the app's lifetime so a rebuild mid-drag
+    // doesn't break the group the window is tracking, and they hold the selection as line
+    // numbers into _diffRows rather than as references to the labels showing those lines —
+    // so a copy spans the whole selection whether or not it is all on screen.
+    private readonly TextSelectionGroup _diffGroupLeft = new();
+    private readonly TextSelectionGroup _diffGroupRight = new();
+
+    /// <summary>Points both side groups at the current comparison. Rebinding a different
+    /// model key drops a stale selection, since offsets into the old file mean nothing here.</summary>
+    private void BindDiffSelection()
+    {
+        var key = (_diffLeftPath, _diffRightPath, _diffGen);
+        _diffGroupLeft.Bind(key, _diffRows.Count, i => LineTextAt(i, leftSide: true));
+        _diffGroupRight.Bind(key, _diffRows.Count, i => LineTextAt(i, leftSide: false));
+    }
+
+    // null where the model has no line — a collapsed run, or the blank half opposite an
+    // add/delete. Those take no highlight and contribute nothing to a copy; a genuinely
+    // empty line returns "" and copies as the blank line it is.
+    private string? LineTextAt(int row, bool leftSide)
+    {
+        if (row < 0 || row >= _diffRows.Count) return null;
+        if (_diffRows[row].Line is not { } line) return null;
+        return leftSide ? line.Left : line.Right;
+    }
 
     // Bumped per comparison, so a syntax tokenize that finishes after the user has moved on
     // can tell that it has.
     private int _diffGen;
 
-    private sealed record DiffRow(DiffEngine.Line? Line, int? CollapseCount);
+    private sealed record DiffRow(DiffEngine.Line? Line, int? CollapseCount)
+    {
+        /// <summary>Position in <c>_diffRows</c> — the row's identity for selection and for
+        /// the height index, neither of which can rely on where the element sits.</summary>
+        public int Index { get; init; }
+    }
+
+    // Row heights and their running total, for the virtualized body. Wrapped rows differ in
+    // height, so the list cannot multiply its way to a row's position; this is the index it
+    // asks instead. _diffTops[i] is the Y of row i, _diffTops[^1] the whole body's height.
+    private float[] _diffTops = [];
+    private float _diffHeightsWidth = -1f;   // code-column width the heights were measured at
+    // Wrap mode, pan offset and column width as the last build saw them — the inputs that
+    // change what a row looks like without changing which rows there are.
+    private (bool Wrap, float Pan, float Width) _diffRowShape = (false, -1f, -1f);
+
+    /// <summary>
+    /// Measures every row once, at the current column width. Wrapped, a row is as tall as
+    /// whichever side wrapped further; unwrapped, every row is one line and the whole thing is
+    /// arithmetic. Called when the comparison, the wrap mode, or the width changes — not per
+    /// frame, and never per row per frame.
+    /// </summary>
+    private void RebuildDiffHeights()
+    {
+        float width = DiffCodeWidth();
+        _diffHeightsWidth = width;
+        var tops = new float[_diffRows.Count + 1];
+        float y = 0f;
+        for (int i = 0; i < _diffRows.Count; i++)
+        {
+            tops[i] = y;
+            y += DiffRowHeight(i, width);
+        }
+        tops[_diffRows.Count] = y;
+        _diffTops = tops;
+    }
+
+    private float DiffRowHeight(int index, float width)
+    {
+        if (!DiffWrap || _diffRows[index].Line is not { } line) return DiffLineH;
+
+        var style = TextMeasure.StyleFor(DiffFontSize, Fonts.Mono);
+        float text = Math.Max(
+            TextMeasure.MeasureWrapped(line.Left ?? "", style, width).Height,
+            TextMeasure.MeasureWrapped(line.Right ?? "", style, width).Height);
+        // The cell adds 2 above and 2 below when wrapped; a blank line still owns a row.
+        return Math.Max(DiffLineH, text + 4f);
+    }
+
+    /// <summary>Total height of the body, from the row index.</summary>
+    private float DiffContentHeight => _diffTops.Length > 0 ? _diffTops[^1] : 0f;
 
     /// <summary>F3 — compare the cursor file in <paramref name="side"/> with its partner in
     /// the other pane. Honors the DiffTool setting (VS Code launches externally;
@@ -177,8 +248,13 @@ public partial class CommanderApp
             bool changed = rows[r].Line is { Op: not DiffEngine.Op.Equal };
             bool prevChanged = r > 0 && rows[r - 1].Line is { Op: not DiffEngine.Op.Equal };
             if (changed && !prevChanged) changeRows.Add(r);
+            // Each row carries its own position: the virtualized body hands the template a
+            // row, not an index, and both selection and height lookups need one.
+            rows[r] = rows[r] with { Index = r };
         }
         _diffRows = rows;
+        _diffTops = [];              // remeasured on the next build, at the current width
+        BindDiffSelection();
         _diffChangeRows = changeRows;
     }
 
@@ -243,19 +319,16 @@ public partial class CommanderApp
     /// <summary>
     /// Where the current change block starts, in the body's own content space.
     ///
-    /// <para>With every row the same height that is arithmetic. Wrapped, rows differ, so it
-    /// has to come from the row's laid-out position — and that is only meaningful once the
-    /// row has been through layout. <c>OnAfterBuild</c> runs after reconciliation, which for
-    /// a tree that just changed shape (toggling wrap) can be before layout; a zero height
-    /// says so, and returning null there leaves the scroll pending for the next frame rather
-    /// than acting on a position that isn't real yet.</para>
+    /// <para>Read straight out of the row index, which knows every row's position whether or
+    /// not it has been realized — so this answers for a change a thousand rows below the
+    /// viewport, and answers before layout. It used to have to ask the row element for its
+    /// laid-out Y, which meant returning null until the row had been through a layout pass.</para>
     /// </summary>
     private float? DiffChangeTop(ScrollViewElement sv)
     {
-        if (!DiffWrap) return _diffChangeRows[_diffChangeIdx] * DiffLineH;
-        if (_diffChangeRowRef.Current is not { } row) return null;
-        var box = row.Layout.AbsoluteBorderBox;
-        return box.Height > 0 ? box.Y - sv.Layout.AbsoluteContentBox.Y + sv.ScrollOffsetY : null;
+        int row = _diffChangeRows[_diffChangeIdx];
+        if (row < 0 || row >= _diffTops.Length - 1) return null;
+        return _diffTops[row];
     }
 
     private void HandleDiffKey(KeyDownEvent e)
@@ -393,29 +466,49 @@ public partial class CommanderApp
     private Element BuildDiffBody()
     {
         UpdateDiffPan();
-        var scroll = ScrollView.Vertical().FlexGrow(1).WithRef(_diffScrollRef);
-        // A trackpad's sideways swipe arrives as DeltaX; a mouse reports Shift+wheel as
-        // DeltaY. The ScrollView's own handler sees both first, but its content is exactly
-        // as wide as its viewport, so it clamps them to nothing and leaves them to us.
-        scroll.On<ScrollEvent>(ev =>
+
+        // What a row looks like depends on three things the list cannot see: the wrap mode,
+        // how far the view is panned sideways, and the column width the text wraps into. A
+        // realized row is reused as-is across a patch, so when any of them moves the rows have
+        // to be thrown away and rebuilt — and the heights remeasured, since two of the three
+        // change how tall a row is.
+        var shape = (DiffWrap, _diffPan.Offset, DiffCodeWidth());
+        if (_diffTops.Length != _diffRows.Count + 1 || _diffRowShape != shape)
         {
-            _diffPan.HandleScroll(ev);
-        });
-        var col = Flex.Column(gap: 0);
-        for (int r = 0; r < _diffRows.Count; r++)
-        {
-            bool current = _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
-                && r == _diffChangeRows[_diffChangeIdx];
-            var built = _diffRows[r].CollapseCount is int n
-                ? DiffCollapseRow(n)
-                : DiffLineRow(_diffRows[r].Line!, current);
-            // Wrapped rows have no common height, so n/p can't compute where a change is —
-            // it has to ask the row. See DiffChangeTop.
-            if (current) built.WithRef(_diffChangeRowRef);
-            col.AddChild(built);
+            if (_diffRowShape.Item1 != shape.Item1 || _diffHeightsWidth != shape.Item3
+                || _diffTops.Length != _diffRows.Count + 1)
+                RebuildDiffHeights();
+            if (_diffScrollRef.Current is VirtualListElement<DiffRow> mounted)
+                mounted.InvalidateRows();
+            _diffRowShape = shape;
         }
-        scroll.AddChild(col);
-        return scroll;
+
+        var list = VirtualListElement<DiffRow>.New()
+            .ItemHeight(DiffLineH)
+            .RowHeights((_, row) => row + 1 < _diffTops.Length ? _diffTops[row + 1] - _diffTops[row] : DiffLineH)
+            .Items(_diffRows)
+            .RenderWith(BuildDiffRow)
+            .FlexGrow(1)
+            .Background(Nocturne.Bg);
+        // Keyed by comparison so each file pair starts at the top instead of inheriting the
+        // previous one's offset, and so toggling wrap reconciles rather than rebuilding.
+        list.Key = $"diff:{_diffLeftPath}|{_diffRightPath}|{_diffGen}";
+        list.WithRef(_diffScrollRef);
+        // A trackpad's sideways swipe arrives as DeltaX; a mouse reports Shift+wheel as
+        // DeltaY. The list's own handler sees both first, but its content is exactly as wide
+        // as its viewport, so it clamps them to nothing and leaves them to us.
+        list.On<ScrollEvent>(ev => _diffPan.HandleScroll(ev));
+        return list;
+    }
+
+    /// <summary>One row of the virtualized body. Called only for rows near the viewport.</summary>
+    private Element BuildDiffRow(DiffRow r)
+    {
+        bool current = _diffChangeRows.Count > 0 && _diffChangeIdx < _diffChangeRows.Count
+            && r.Index == _diffChangeRows[_diffChangeIdx];
+        var built = r.CollapseCount is int n ? DiffCollapseRow(n) : DiffLineRow(r.Line!, current, r.Index);
+        if (current) built.WithRef(_diffChangeRowRef);
+        return built;
     }
 
     private Element DiffCollapseRow(int n) =>
@@ -424,7 +517,7 @@ public partial class CommanderApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 1, 0))
             .Children(Ui.Mono($"⋯ {n} unchanged line{(n == 1 ? "" : "s")} ⋯", 10f, Nocturne.On(0.35)));
 
-    private Element DiffLineRow(DiffEngine.Line line, bool current)
+    private Element DiffLineRow(DiffEngine.Line line, bool current, int rowIndex)
     {
         var (leftBg, rightBg, marker, markColor) = line.Op switch
         {
@@ -456,11 +549,11 @@ public partial class CommanderApp
         var spansR = MergeDiffSpans(SyntaxFor(leftSide: false, line.RightNo), hiR, line.Right?.Length ?? 0);
 
         row.AddChild(DiffGutter(line.LeftNo).GridColumn(0));
-        row.AddChild(DiffTextCell(line.Left, leftBg, line.Op is DiffEngine.Op.Del ? Nocturne.MarkRed : Nocturne.On(0.78), _diffGroupLeft, spansL).GridColumn(1));
+        row.AddChild(DiffTextCell(line.Left, leftBg, line.Op is DiffEngine.Op.Del ? Nocturne.MarkRed : Nocturne.On(0.78), _diffGroupLeft, rowIndex, spansL).GridColumn(1));
         row.AddChild(Box.New().AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Children(Ui.Mono(marker, 11f, markColor)).GridColumn(2));
         row.AddChild(DiffGutter(line.RightNo).GridColumn(3));
-        row.AddChild(DiffTextCell(line.Right, rightBg, line.Op is DiffEngine.Op.Add ? Nocturne.DiffGreenText : Nocturne.On(0.78), _diffGroupRight, spansR).GridColumn(4));
+        row.AddChild(DiffTextCell(line.Right, rightBg, line.Op is DiffEngine.Op.Add ? Nocturne.DiffGreenText : Nocturne.On(0.78), _diffGroupRight, rowIndex, spansR).GridColumn(4));
         return row;
     }
 
@@ -478,8 +571,8 @@ public partial class CommanderApp
             .Padding(new Thickness(DiffWrap ? 3 : 0, 6, 0, 0))
             .Children(Ui.Mono(no > 0 ? no.ToString() : "", 10.5f, Nocturne.Neutral700));
 
-    private Element DiffTextCell(string? text, Color bg, Color fg, object selectionGroup,
-        IReadOnlyList<TextSpan>? spans = null)
+    private Element DiffTextCell(string? text, Color bg, Color fg, TextSelectionGroup selectionGroup,
+        int rowIndex, IReadOnlyList<TextSpan>? spans = null)
     {
         // AlignItems is left at its Stretch default so the line fills the cell and clips at
         // the cell's own edge rather than at the width of the text. OverflowX.Hidden is what
@@ -503,7 +596,7 @@ public partial class CommanderApp
         // Selectable, with one group per side: a drag runs down the lines of one file
         // rather than zig-zagging between the two. The window owns the group drag and the
         // Ctrl+C that copies it.
-        mono.Selectable().SelectionGroup(selectionGroup);
+        mono.Selectable().SelectionGroup(selectionGroup, rowIndex);
 
         box.AddChild(DiffWrap ? mono : _diffPan.Cell(mono));
         return box;

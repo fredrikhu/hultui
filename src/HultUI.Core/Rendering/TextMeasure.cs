@@ -38,6 +38,24 @@ public static class TextMeasure
         Measure(text, style).Width;
 
     /// <summary>
+    /// Size of <paramref name="text"/> wrapped into <paramref name="maxWidth"/> — the height
+    /// covers every line the text breaks into. Lets a caller know how tall a label will be
+    /// before it is built, which is what a virtualized list of wrapped rows needs in order to
+    /// place rows it has not realized.
+    /// <para>
+    /// Measured through the same pipeline that will draw it — an unlimited line count, which
+    /// is what makes text wrap — so the answer is the height the label actually occupies
+    /// rather than an estimate. Returns <see cref="Size.Zero"/> when no context is installed
+    /// or the width is unusable; treat that as "unknown" and fall back.
+    /// </para>
+    /// </summary>
+    public static Size MeasureWrapped(string text, ResolvedInheritedStyle style, float maxWidth)
+    {
+        if (Context is null || maxWidth <= 0) return Size.Zero;
+        return Context.MeasureText(text ?? "", style, maxWidth, null);
+    }
+
+    /// <summary>
     /// Width of <paramref name="text"/> at a font size/family, without building a full
     /// style. Fills the fields that don't affect width from the resolver defaults.
     /// </summary>

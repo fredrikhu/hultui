@@ -102,8 +102,11 @@ public static class ElementExtensions
     public static T Selectable<T>(this T el, bool value = true) where T : TextElement { el.Selectable = value; return el; }
 
     /// <summary>Lets a mouse drag select across every label sharing the same <paramref name="group"/>
-    /// token (e.g. a diff's code lines); Ctrl+C copies the whole span. See <see cref="TextElement.SelectionGroup"/>.</summary>
-    public static T SelectionGroup<T>(this T el, object? group) where T : TextElement { el.SelectionGroup = group; return el; }
+    /// (e.g. a diff's code lines); Ctrl+C copies the whole span. <paramref name="index"/> is the
+    /// label's line number in the group's model, which is what the selection is anchored to — so it
+    /// survives the label being rebuilt or recycled. See <see cref="TextSelectionGroup"/>.</summary>
+    public static T SelectionGroup<T>(this T el, TextSelectionGroup? group, int index) where T : TextElement
+    { el.SelectionGroup = group; el.SelectionIndex = index; return el; }
 
     /// <summary>Per-range text colors (syntax highlighting); see <see cref="TextElement.Spans"/>.</summary>
     public static T Spans<T>(this T el, IReadOnlyList<Rendering.TextSpan>? spans) where T : TextElement { el.Spans = spans; return el; }
@@ -214,6 +217,11 @@ public static class ElementExtensions
 
     // ──── VirtualList properties ────
     public static VirtualListElement<T> ItemHeight<T>(this VirtualListElement<T> el, float height) { el.ItemHeight = height; return el; }
+
+    /// <summary>Per-row height for a list whose rows differ in size; see <see cref="VirtualListElement{T}.ItemHeightFor"/>.
+    /// Named unlike the property it sets: a same-named extension would be unreachable, because
+    /// <c>list.ItemHeightFor(f)</c> binds to invoking the delegate property instead.</summary>
+    public static VirtualListElement<T> RowHeights<T>(this VirtualListElement<T> el, Func<T, int, float>? height) { el.ItemHeightFor = height; return el; }
     public static VirtualListElement<T> Items<T>(this VirtualListElement<T> el, IReadOnlyList<T> items) { el.Items = items; return el; }
     public static VirtualListElement<T> RenderWith<T>(this VirtualListElement<T> el, Func<T, Element> template) { el.ItemTemplate = template; return el; }
     public static VirtualListElement<T> AccessibleItemLabel<T>(this VirtualListElement<T> el, Func<T, string?> label) { el.AccessibleLabel = label; return el; }

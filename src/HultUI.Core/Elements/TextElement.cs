@@ -118,19 +118,35 @@ public class TextElement : Element
     public IClipboard? Clipboard { get; set; }
 
     /// <summary>
-    /// Opt-in token that lets a mouse drag select across several labels at once. Give
-    /// every label that should share one selection the <b>same</b> (stable, non-null)
-    /// reference — e.g. all the code-line labels of a diff. A drag then spans from the
-    /// pressed label to the one under the pointer, and Ctrl+C / Copy yields every
-    /// covered label's text joined by newlines. Null (the default) keeps a label's
-    /// selection self-contained.
+    /// Opt-in group that lets a mouse drag select across several labels at once. Give every
+    /// label that should share one selection the <b>same</b> group and its own
+    /// <see cref="SelectionIndex"/> — e.g. all the code-line labels of a diff. A drag then
+    /// spans from the pressed label to the one under the pointer, and Ctrl+C / Copy yields
+    /// the whole span. Null (the default) keeps a label's selection self-contained.
     /// </summary>
-    public object? SelectionGroup { get; set; }
+    public TextSelectionGroup? SelectionGroup { get; set; }
 
-    private int SelectionStart => Math.Min(_anchor, _caret);
-    private int SelectionEnd => Math.Max(_anchor, _caret);
-    public bool HasSelection => _anchor != _caret;
-    public string SelectedText => HasSelection ? _content[SelectionStart..SelectionEnd] : "";
+    /// <summary>
+    /// This label's line number within its <see cref="SelectionGroup"/>. Ordering comes from
+    /// this, not from tree order, so the label can be rebuilt or recycled freely. -1 (the
+    /// default) means the label takes no part in a group selection.
+    /// </summary>
+    public int SelectionIndex { get; set; } = -1;
+
+    private bool InGroup => SelectionGroup is not null && SelectionIndex >= 0;
+
+    // The selection is *derived* when the label belongs to a group: the group holds it in
+    // model coordinates and the label works out its own share on demand. Nothing has to be
+    // pushed back into the element, so a row recycled off-screen and later rebuilt shows the
+    // right highlight the moment it is drawn, with no re-apply pass anywhere.
+    private (int Anchor, int Caret) Sel =>
+        InGroup ? SelectionGroup!.RangeFor(SelectionIndex, _content.Length) : (_anchor, _caret);
+
+    private int SelectionStart { get { var (a, c) = Sel; return Math.Min(a, c); } }
+    private int SelectionEnd { get { var (a, c) = Sel; return Math.Max(a, c); } }
+    public bool HasSelection { get { var (a, c) = Sel; return a != c; } }
+    public string SelectedText =>
+        HasSelection ? _content[Math.Clamp(SelectionStart, 0, _content.Length)..Math.Clamp(SelectionEnd, 0, _content.Length)] : "";
 
     /// <summary>True while the user is dragging to select. Used by the window for pointer capture.</summary>
     public bool IsDragging => _isDragging;
@@ -165,22 +181,49 @@ public class TextElement : Element
         OnOwn<PointerUpEvent>(OnPointerUp);
         OnOwn<ClickEvent>(OnClick);
         OnOwn<KeyDownEvent>(OnKeyDown);
-        OnOwn<BlurEvent>(_ => { if (HasSelection) { ClearSelection(); MarkPaintDirty(); } });
+        // A grouped label keeps its selection on blur: focus moves between the group's own
+        // labels during a drag, and a virtualized row loses focus merely by scrolling out of
+        // view. The window clears the group when the user presses outside it.
+        OnOwn<BlurEvent>(_ => { if (!InGroup && HasSelection) { ClearSelection(); MarkPaintDirty(); } });
 
         ContextMenuItems = BuildContextMenuItems;
     }
 
     private void ClearSelection() => _anchor = _caret = 0;
 
+    /// <summary>The text a copy should yield: the whole group span when grouped, else this label's.</summary>
+    private string GroupAwareSelectedText() =>
+        InGroup ? SelectionGroup!.SelectedText : (HasSelection ? SelectedText : "");
+
+    /// <summary>Select-all: the whole group when grouped, else this label's own text.</summary>
+    private void SelectAll()
+    {
+        if (InGroup) SelectionGroup!.SelectAll();
+        else { _anchor = 0; _caret = _content.Length; }
+    }
+
+    /// <summary>Sets a selection within this one label, routed through the group if there is one.</summary>
+    private void SelectLocalRange(int from, int to)
+    {
+        if (InGroup)
+        {
+            SelectionGroup!.Anchor(SelectionIndex, from);
+            SelectionGroup!.ExtendTo(SelectionIndex, to);
+        }
+        else { _anchor = from; _caret = to; }
+    }
+
     private IReadOnlyList<ContextMenuItem> BuildContextMenuItems()
     {
-        bool hasSelection = HasSelection;
+        // In a group both commands act on the whole span, not just this line.
+        bool hasSelection = InGroup ? SelectionGroup!.HasSelection : HasSelection;
         return
         [
             new ContextMenuItem { Label = "Copy", ShortcutHint = "Ctrl+C", IsDisabled = !hasSelection,
-                Action = () => { if (HasSelection) Clipboard?.SetText(SelectedText); } },
-            new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _content.Length == 0,
-                Action = () => { _anchor = 0; _caret = _content.Length; MarkPaintDirty(); } },
+                Action = () => { if (GroupAwareSelectedText() is { Length: > 0 } t) Clipboard?.SetText(t); } },
+            new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A",
+                IsDisabled = InGroup ? SelectionGroup!.Count == 0 : _content.Length == 0,
+                Action = () => { SelectAll(); MarkPaintDirty(); } },
         ];
     }
 
@@ -213,14 +256,12 @@ public class TextElement : Element
             int start = pos, end = pos;
             while (start > 0 && !char.IsWhiteSpace(_content[start - 1])) start--;
             while (end < _content.Length && !char.IsWhiteSpace(_content[end])) end++;
-            _anchor = start;
-            _caret = end;
+            SelectLocalRange(start, end);
             MarkPaintDirty();
         }
         else if (evt.ClickCount >= 3)
         {
-            _anchor = 0;
-            _caret = _content.Length;
+            SelectLocalRange(0, _content.Length);
             MarkPaintDirty();
         }
     }
@@ -232,13 +273,13 @@ public class TextElement : Element
         switch (evt.Key)
         {
             case KeyCode.C when ctrl:
-                // A grouped label's copy spans the whole group; the window handles it
-                // (it knows the sibling labels), so don't also copy just this line.
-                if (SelectionGroup is null && HasSelection) Clipboard?.SetText(SelectedText);
+                // A grouped label's copy spans the whole group; the window handles it (it
+                // tracks the group holding the live selection, which outlives any one
+                // label), so don't also copy just this line.
+                if (!InGroup && HasSelection) Clipboard?.SetText(SelectedText);
                 break;
             case KeyCode.A when ctrl:
-                _anchor = 0;
-                _caret = _content.Length;
+                SelectAll();
                 MarkPaintDirty();
                 break;
         }
@@ -311,6 +352,7 @@ public class TextElement : Element
             Selectable = text.Selectable;
             SelectionColor = text.SelectionColor;
             SelectionGroup = text.SelectionGroup;
+            SelectionIndex = text.SelectionIndex;
         }
     }
 

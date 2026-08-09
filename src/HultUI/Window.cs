@@ -29,10 +29,12 @@ public sealed class Window : IOverlayHost, IDisposable
     private TextElement? _textElementDragTarget;
     // Cross-label (group) text selection: a drag that spans several selectable labels
     // sharing a SelectionGroup token (e.g. a diff's per-line code labels).
-    private object? _groupDragToken;     // non-null while a group drag is in progress
-    private TextElement? _groupAnchorEl; // label the drag started in
-    private int _groupAnchorOff;         // caret offset within the anchor label at press
-    private object? _activeTextGroup;    // group holding a live selection (cleared on outside press)
+    // The anchor lives in the group, in model coordinates, not as a reference to the label
+    // the press landed in — a virtualized list recycles that label the moment it scrolls out
+    // of view, and an element-anchored drag stops extending when it does.
+    private TextSelectionGroup? _groupDragToken;   // non-null while a group drag is in progress
+    private TextSelectionGroup? _activeTextGroup;  // group holding a live selection (cleared on outside press)
+    private float _groupDragX;                     // X the drag started at, for the gutter re-probe
     private bool _disposed;
 
     // ──── Post-frame callbacks ────
@@ -874,9 +876,9 @@ public sealed class Window : IOverlayHost, IDisposable
                 // extending the selection on a plain hover after the button is released.
                 if (!button.IsDown && _groupDragToken is not null)
                 {
-                    _groupAnchorEl?.EndDrag();
+                    foreach (var label in CollectGroupLabels(_groupDragToken))
+                        label.EndDrag();
                     _groupDragToken = null;
-                    _groupAnchorEl = null;
                 }
 
                 // Check overlays first, then main tree
@@ -927,7 +929,8 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (_activeTextGroup is not null &&
                         !(target is TextElement at && ReferenceEquals(at.SelectionGroup, _activeTextGroup)))
                     {
-                        TextGroupSelection.Clear(CollectGroupLabels(_activeTextGroup));
+                        _activeTextGroup.Clear();
+                        RepaintGroup(_activeTextGroup);
                         _activeTextGroup = null;
                     }
 
@@ -938,16 +941,15 @@ public sealed class Window : IOverlayHost, IDisposable
                         _textAreaDragTarget = dragArea;
                     else if (!isOverlayHit && button.Button == 0 && target is TextElement dragLabel && dragLabel.IsDragging)
                     {
-                        if (dragLabel.SelectionGroup is { } grp)
+                        if (dragLabel.SelectionGroup is { } grp && dragLabel.SelectionIndex >= 0)
                         {
                             // Group drag: the window drives selection across every label
                             // sharing this token, so the highlight and copy span lines.
                             _groupDragToken = grp;
-                            _groupAnchorEl = dragLabel;
-                            _groupAnchorOff = dragLabel.CaretOffset;
                             _activeTextGroup = grp;
-                            TextGroupSelection.Apply(CollectGroupLabels(grp),
-                                dragLabel, _groupAnchorOff, dragLabel, _groupAnchorOff);
+                            _groupDragX = dragLabel.Layout.AbsoluteContentBox.X + 2f;
+                            grp.Anchor(dragLabel.SelectionIndex, dragLabel.CaretOffset);
+                            RepaintGroup(grp);
                         }
                         else
                         {
@@ -1112,11 +1114,16 @@ public sealed class Window : IOverlayHost, IDisposable
                 var target = _focusManager.FocusedElement ?? _root;
                 // Ctrl/Cmd+C over a grouped label copies the whole cross-label selection
                 // (the label's own handler skips grouped copy, so there's no double).
+                // Keyed off the group holding the selection rather than off the focused
+                // element: in a virtualized list the label the user pressed in may have been
+                // recycled by the time they hit Ctrl+C, and the copy has to work anyway.
+                // The text comes from the group's model, so it spans lines that were never
+                // realized — copying 900 lines does not need 900 live labels.
                 if (key.IsDown && key.KeyCode == KeyCode.C
                     && (key.Modifiers.HasFlag(KeyModifiers.Ctrl) || key.Modifiers.HasFlag(KeyModifiers.Super))
-                    && target is TextElement copyLabel && copyLabel.SelectionGroup is { } copyGroup)
+                    && _activeTextGroup is { HasSelection: true } copyGroup)
                 {
-                    var text = TextGroupSelection.GatherText(CollectGroupLabels(copyGroup));
+                    var text = copyGroup.SelectedText;
                     if (text.Length > 0) Clipboard?.SetText(text);
                 }
                 if (key.IsDown)
@@ -1220,15 +1227,27 @@ public sealed class Window : IOverlayHost, IDisposable
     /// <summary>Extends the active group selection to the pointer position.</summary>
     private void UpdateGroupDrag(Point pos)
     {
-        if (_groupAnchorEl is null || _groupDragToken is null) return;
+        if (_groupDragToken is null) return;
         var focus = FindGroupLabelAt(pos, _groupDragToken);
-        if (focus is not null)
-            TextGroupSelection.Apply(CollectGroupLabels(_groupDragToken),
-                _groupAnchorEl, _groupAnchorOff, focus, focus.OffsetAt(pos));
+        if (focus is null || focus.SelectionIndex < 0) return;
+        _groupDragToken.ExtendTo(focus.SelectionIndex, focus.OffsetAt(pos));
+        RepaintGroup(_groupDragToken);
     }
 
-    /// <summary>Every selectable label sharing <paramref name="token"/>, in document order.</summary>
-    private List<TextElement> CollectGroupLabels(object token)
+    /// <summary>
+    /// Marks every realized label of a group for repaint. The labels derive their highlight
+    /// from the group, so this is all that is needed after the selection moves — and the
+    /// labels that are not realized need nothing, which is the point.
+    /// </summary>
+    private void RepaintGroup(TextSelectionGroup group)
+    {
+        foreach (var label in CollectGroupLabels(group))
+            label.MarkPaintDirty();
+    }
+
+    /// <summary>Every realized label of <paramref name="token"/>. Order does not matter: each
+    /// label knows its own model index, so the highlight no longer depends on tree order.</summary>
+    private List<TextElement> CollectGroupLabels(TextSelectionGroup token)
     {
         var result = new List<TextElement>();
         Collect(_root);
@@ -1248,20 +1267,20 @@ public sealed class Window : IOverlayHost, IDisposable
     /// scroll offset, so raw layout coordinates can't be compared to the screen point). If the
     /// pointer is over the gutter/gap beside the code, it re-probes the code column (the anchor's
     /// X) at the pointer's Y so the drag still lands on the right line.</summary>
-    private TextElement? FindGroupLabelAt(Point pos, object token)
+    private TextElement? FindGroupLabelAt(Point pos, TextSelectionGroup token)
     {
         if (_root is null) return null;
         if (GroupLabelFromHit(HitTester.HitTest(_root, pos), token) is { } direct)
             return direct;
-        if (_groupAnchorEl is { } anchor)
-        {
-            float x = anchor.Layout.AbsoluteContentBox.X + 2f;
-            return GroupLabelFromHit(HitTester.HitTest(_root, new Point(x, pos.Y)), token);
-        }
-        return null;
+        // Re-probe at the X the drag started from — remembered as a coordinate rather than as
+        // the anchor label, which a virtualized list may already have recycled. The column
+        // does not move, so the coordinate stays good for the life of the drag.
+        return _groupDragX > 0
+            ? GroupLabelFromHit(HitTester.HitTest(_root, new Point(_groupDragX, pos.Y)), token)
+            : null;
     }
 
-    private static TextElement? GroupLabelFromHit(Element? hit, object token)
+    private static TextElement? GroupLabelFromHit(Element? hit, TextSelectionGroup token)
     {
         for (var e = hit; e is not null; e = e.Parent)
             if (e is TextElement te && te.Selectable && ReferenceEquals(te.SelectionGroup, token))

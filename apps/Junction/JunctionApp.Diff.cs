@@ -18,9 +18,12 @@ public partial class JunctionApp
     // Stable tokens that let a drag select across the diff's per-line code labels
     // (Ctrl+C copies the span). Unified is one column; split keeps its two columns
     // separate so a drag down one side doesn't rope in the other.
-    private readonly object _diffGroupUnified = new();
-    private readonly object _diffGroupLeft = new();
-    private readonly object _diffGroupRight = new();
+    // The selection is held as row numbers into the flattened diff, not as references to the
+    // labels showing those rows — the list recycles a label as soon as it scrolls out of
+    // view, which used to end the drag and truncate the copy to whatever was on screen.
+    private readonly TextSelectionGroup _diffGroupUnified = new();
+    private readonly TextSelectionGroup _diffGroupLeft = new();
+    private readonly TextSelectionGroup _diffGroupRight = new();
 
     // ── Horizontal position ──────────────────────────────────────────────
     // The list cannot provide this itself: VirtualListElement pins its content width to the
@@ -158,6 +161,8 @@ public partial class JunctionApp
     private sealed record DiffRow
     {
         public DiffRowType Type { get; init; }
+        /// <summary>Position in the flattened list — what a cross-line selection is anchored to.</summary>
+        public int Index { get; init; }
         public string Hunk { get; init; } = "";
         public GitDiffHunk? HunkRef { get; init; }   // set on Hunk rows, for hunk-level staging
         public GitDiffLine? Line { get; init; }   // unified
@@ -183,6 +188,8 @@ public partial class JunctionApp
 
         var hl = HighlightForCurrent(diff.Path);
         var rows = _diffSplit ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
+        for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
+        BindDiffSelection(diff, rows);
 
         // Decided before the list is built, and that ordering is load-bearing: WithRef points
         // the Ref at the element being *built*, which has no layout yet, and only PatchFrom
@@ -408,9 +415,23 @@ public partial class JunctionApp
     private Element RenderDiffRow(DiffRow r, DiffInteract? interact) => r.Type switch
     {
         DiffRowType.Hunk => HunkHeaderRow(r.Hunk, r.HunkRef, interact),
-        DiffRowType.Split => SplitRow(r.Left, r.Right, r.LeftSpans, r.RightSpans),
-        _ => UnifiedRow(r.Line!, r.Spans, interact),
+        DiffRowType.Split => SplitRow(r.Left, r.Right, r.LeftSpans, r.RightSpans, r.Index),
+        _ => UnifiedRow(r.Line!, r.Spans, interact, r.Index),
     };
+
+    /// <summary>Points the selection groups at the rows currently on display. A different
+    /// file or layout rebinds under a new key, which drops a selection that no longer maps.</summary>
+    private void BindDiffSelection(GitFileDiff diff, List<DiffRow> rows)
+    {
+        // null where a row carries no text of that side: a hunk header, or the blank half
+        // opposite an add/delete. Those contribute nothing to a copy.
+        var key = (diff.Path, _diffSplit, rows.Count);
+        _diffGroupUnified.Bind(key, rows.Count, i => At(i)?.Line?.Content);
+        _diffGroupLeft.Bind(key, rows.Count, i => At(i)?.Left?.Content);
+        _diffGroupRight.Bind(key, rows.Count, i => At(i)?.Right?.Content);
+
+        DiffRow? At(int i) => i >= 0 && i < rows.Count ? rows[i] : null;
+    }
 
     private Element HunkHeaderRow(string header, GitDiffHunk? hunk, DiffInteract? interact)
     {
@@ -430,7 +451,7 @@ public partial class JunctionApp
     }
 
     private Element UnifiedRow(GitDiffLine line, IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans,
-        DiffInteract? interact)
+        DiffInteract? interact, int rowIndex)
     {
         var (bg, code, sign, signColor) = line.Kind switch
         {
@@ -464,7 +485,7 @@ public partial class JunctionApp
         // says "there is more that way", where an ellipsis says "this is all there is".
         row.AddChild(_diffPan.Cell(
             Ui.Mono(line.Content.Length == 0 ? " " : line.Content, 12f, code)
-                .Selectable().SelectionGroup(_diffGroupUnified)
+                .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(spans)
                 .Padding(new Thickness(2, 14, 2, 0))
                 .MaxLines(1).OverflowMode(TextOverflow.Clip)));
@@ -501,14 +522,14 @@ public partial class JunctionApp
 
     private Element SplitRow(GitDiffLine? left, GitDiffLine? right,
         IReadOnlyList<HultUI.Core.Rendering.TextSpan>? leftSpans,
-        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? rightSpans) =>
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? rightSpans, int rowIndex) =>
         Flex.Row(gap: 0).AlignItems(AlignItems.Stretch)
             .Children(
-                SplitHalf(left, isLeft: true, leftSpans),
-                SplitHalf(right, isLeft: false, rightSpans));
+                SplitHalf(left, isLeft: true, leftSpans, rowIndex),
+                SplitHalf(right, isLeft: false, rightSpans, rowIndex));
 
     private Element SplitHalf(GitDiffLine? line, bool isLeft,
-        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans)
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans, int rowIndex)
     {
         var (bg, code) = line?.Kind switch
         {
@@ -527,7 +548,7 @@ public partial class JunctionApp
         // Both halves share one offset, so the two files stay aligned as they move.
         half.AddChild(_diffPan.Cell(
             Ui.Mono(text, 12f, code).Selectable()
-                .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight)
+                .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(spans)
                 .Padding(new Thickness(2, 10, 2, 0)).MaxLines(1).OverflowMode(TextOverflow.Clip)));
         return half;

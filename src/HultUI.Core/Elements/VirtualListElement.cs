@@ -18,6 +18,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private float _itemHeight = 40f;
     private Func<T, Element>? _itemTemplate;
 
+    // Variable row heights, opt-in. Null means every row is _itemHeight and every path below
+    // takes the original uniform arithmetic — existing lists are untouched.
+    private Func<T, int, float>? _itemHeightFor;
+    // Prefix sums: _offsets[i] is the Y of row i, _offsets[Count] the total height. One O(n)
+    // pass per invalidation buys O(log n) scroll-offset lookups and O(1) row positions, which
+    // is what lets a list of unequal rows stay as cheap to scroll as a uniform one.
+    private float[]? _offsets;
+
     /// <summary>
     /// Optional accessible label for an item, used by assistive tech to name each
     /// row. Should read cheaply from item data — it may be called for every item.
@@ -155,12 +163,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (!KeyboardScrollEnabled) return;
         if ((e.Modifiers & ChordModifiers) != 0) return;   // someone else's shortcut
 
-        // A page keeps one row of context, matching how editors page.
-        float page = Math.Max(_itemHeight, Layout.AbsoluteContentBox.Height - _itemHeight);
+        // A page keeps one row of context, matching how editors page. With unequal rows the
+        // step follows whichever row is at the top, so a line-at-a-time key moves a line.
+        float step = _offsets is null ? _itemHeight : HeightOf(IndexAt(_scrollOffsetY));
+        float page = Math.Max(step, Layout.AbsoluteContentBox.Height - step);
         switch (e.Key)
         {
-            case KeyCode.Down: ScrollOffsetY += _itemHeight; break;
-            case KeyCode.Up: ScrollOffsetY -= _itemHeight; break;
+            case KeyCode.Down: ScrollOffsetY += step; break;
+            case KeyCode.Up: ScrollOffsetY -= step; break;
             case KeyCode.PageDown: ScrollOffsetY += page; break;
             case KeyCode.PageUp: ScrollOffsetY -= page; break;
             case KeyCode.Home: ScrollOffsetY = 0; break;
@@ -216,8 +226,48 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         }
     }
 
+    /// <summary>
+    /// Per-row height, for lists whose rows are not all the same size — a wrapped diff, say,
+    /// where a long line occupies several rows' worth. Called once per row per invalidation
+    /// (not per frame), so it must be cheap but need not be free. Leave it null and the list
+    /// keeps its uniform <see cref="ItemHeight"/> behaviour exactly.
+    /// <para>
+    /// The height returned is the height the row is <b>given</b> — the list forces it, as it
+    /// does with <see cref="ItemHeight"/>. It has to match what the row would lay out to, or
+    /// the row is clipped or leaves a gap.
+    /// </para>
+    /// </summary>
+    public Func<T, int, float>? ItemHeightFor
+    {
+        get => _itemHeightFor;
+        set { _itemHeightFor = value; InvalidateItems(); }
+    }
+
+    /// <summary>
+    /// Recomputes row heights when they change without the items changing — the usual cause
+    /// being a resize, which re-wraps every row. Cheaper than reassigning Items, and it keeps
+    /// the scroll position.
+    /// </summary>
+    public void InvalidateHeights()
+    {
+        _offsets = null;
+        _visibleStart = -1;
+        _visibleEnd = -1;
+        MarkLayoutDirty();
+        MarkPaintDirty();
+    }
+
+    /// <summary>
+    /// Throws away the realized rows so the next frame rebuilds them from the template. Use
+    /// it when the rows' <i>appearance</i> depends on state the list cannot see — a shared
+    /// horizontal offset, say — since a recycled row is otherwise reused as-is. The scroll
+    /// position is kept.
+    /// </summary>
+    public void InvalidateRows() => InvalidateItems();
+
     private void InvalidateItems()
     {
+        _offsets = null;
         _visibleStart = -1;
         _visibleEnd = -1;
         _activeElements.Clear();
@@ -226,10 +276,57 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         MarkPaintDirty();
     }
 
+    // ── Row geometry. With no height function these all reduce to the uniform arithmetic. ──
+
+    private void EnsureOffsets()
+    {
+        if (_itemHeightFor is null) { _offsets = null; return; }
+        if (_offsets is not null && _offsets.Length == _items.Count + 1) return;
+
+        var offsets = new float[_items.Count + 1];
+        float y = 0f;
+        for (int i = 0; i < _items.Count; i++)
+        {
+            offsets[i] = y;
+            // A row of zero height would make scroll-offset lookups ambiguous and let an item
+            // hide behind its neighbour, so every row occupies at least a pixel.
+            y += Math.Max(1f, _itemHeightFor(_items[i], i));
+        }
+        offsets[_items.Count] = y;
+        _offsets = offsets;
+    }
+
+    private float HeightOf(int index) =>
+        _offsets is { } o && index >= 0 && index < _items.Count
+            ? o[index + 1] - o[index]
+            : _itemHeight;
+
+    private float OffsetOf(int index) =>
+        _offsets is { } o
+            ? o[Math.Clamp(index, 0, _items.Count)]
+            : index * _itemHeight;
+
+    private float TotalHeight =>
+        _offsets is { } o ? o[^1] : _items.Count * _itemHeight;
+
+    /// <summary>The row containing <paramref name="y"/> in content coordinates.</summary>
+    private int IndexAt(float y)
+    {
+        if (_offsets is not { } o) return (int)(y / _itemHeight);
+        int lo = 0, hi = _items.Count - 1;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) / 2;
+            if (o[mid] <= y) lo = mid; else hi = mid - 1;
+        }
+        return lo;
+    }
+
     internal override void UpdateContentSize()
     {
-        // Set virtual content height from total item count
-        _contentHeight = _items.Count * _itemHeight;
+        // Set virtual content height from the row geometry (uniform or measured)
+        EnsureOffsets();
+        _contentHeight = TotalHeight;
         _contentWidth = Layout.AbsoluteContentBox.Width;
 
         // Re-clamp scroll offset
@@ -258,8 +355,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
         // Style-resolve and layout only newly created children (those still dirty).
         // Reused elements already have valid internal layout from a prior frame.
-        foreach (var child in Children)
+        for (int i = 0; i < Children.Count; i++)
         {
+            var child = Children[i];
             if ((child.DirtyFlags & DirtyFlags.Style) != 0)
             {
                 if (_activeTheme is not null)
@@ -268,8 +366,10 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                     StyleResolver.Resolve(child);
             }
 
+            // Children[0] is the spacer; item k sits at Children[1 + k].
             if ((child.DirtyFlags & DirtyFlags.Layout) != 0)
-                _childLayoutEngine.PerformLayout(child, viewportWidth, _itemHeight);
+                _childLayoutEngine.PerformLayout(child, viewportWidth,
+                    child == _spacer ? _itemHeight : HeightOf(_visibleStart + (i - 1)));
         }
 
         // Position every child at its exact virtual Y coordinate.
@@ -281,7 +381,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             var child = Children[i];
             float targetY = child == _spacer
                 ? contentBox.Y
-                : contentBox.Y + (_visibleStart + (i - 1)) * _itemHeight;
+                : contentBox.Y + OffsetOf(_visibleStart + (i - 1));
 
             SetAbsolutePosition(child, contentBox.X, targetY);
         }
@@ -330,9 +430,23 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         if (viewport.Height <= 0) return;
 
         // Calculate visible range with 1-item overscan on each side
-        int newStart = Math.Max(0, (int)(_scrollOffsetY / _itemHeight) - 1);
-        int maxVisible = (int)Math.Ceiling(viewport.Height / _itemHeight) + 3;
-        int newEnd = Math.Min(_items.Count, newStart + maxVisible);
+        int newStart, newEnd;
+        if (_offsets is null)
+        {
+            newStart = Math.Max(0, (int)(_scrollOffsetY / _itemHeight) - 1);
+            int maxVisible = (int)Math.Ceiling(viewport.Height / _itemHeight) + 3;
+            newEnd = Math.Min(_items.Count, newStart + maxVisible);
+        }
+        else
+        {
+            // Unequal rows: find the first by binary search, then walk to the viewport's
+            // bottom. Walking costs one step per visible row, not per row in the list.
+            newStart = Math.Max(0, IndexAt(_scrollOffsetY) - 1);
+            float bottom = _scrollOffsetY + viewport.Height;
+            newEnd = newStart;
+            while (newEnd < _items.Count && OffsetOf(newEnd) < bottom) newEnd++;
+            newEnd = Math.Min(_items.Count, newEnd + 2);   // overscan below
+        }
 
         if (newStart == _visibleStart && newEnd == _visibleEnd)
             return;
@@ -373,15 +487,15 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
                 element = _itemTemplate(_items[i]);
             }
 
-            // Force item to fixed height, full width
-            element.Box.Height = _itemHeight;
+            // Force item to its row height, full width
+            element.Box.Height = HeightOf(i);
             element.Flex.FlexShrink = 0;
 
             _activeElements[i] = element;
         }
 
         // Update spacer height to push items to correct virtual positions
-        _spacer.Box.Height = newStart * _itemHeight;
+        _spacer.Box.Height = OffsetOf(newStart);
         _spacer.Flex.FlexShrink = 0;
         _spacer.BackgroundColor = Color.Transparent;
 
@@ -404,6 +518,14 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         {
             _itemTemplate = vl._itemTemplate;
             _itemHeight = vl._itemHeight;
+            // The height function closes over the freshly built row model, so it must ride
+            // across the patch like the template does — keeping the old one would measure
+            // the previous render's rows. Its offsets are dropped so they rebuild.
+            if (!ReferenceEquals(_itemHeightFor, vl._itemHeightFor))
+            {
+                _itemHeightFor = vl._itemHeightFor;
+                _offsets = null;
+            }
 
             // Accessibility state is rebuilt fresh each render in declarative UIs,
             // so it must ride across the patch — otherwise the a11y selection and
