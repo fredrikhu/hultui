@@ -33,13 +33,32 @@ public static class Ui
     public static float IconBox(float nominal) => MathF.Round(nominal * 0.88f * 2f) / 2f;
 
     /// <summary>
+    /// Device pixels per layout unit, kept in step with the window by
+    /// <see cref="JunctionApp"/>. Icons rasterize at this scale so the renderer never
+    /// resamples them; at 1.0 that is layout size, at 1.5 it is half again as many
+    /// pixels for the same on-screen size.
+    /// </summary>
+    public static float DisplayScale
+    {
+        get => _displayScale;
+        set
+        {
+            if (MathF.Abs(_displayScale - value) < 0.001f) return;
+            _displayScale = value;
+            // Every cached raster was built for the old scale and would now be resampled.
+            Phosphor.InvalidateCache();
+        }
+    }
+    private static float _displayScale = 1f;
+
+    /// <summary>
     /// A Phosphor glyph as real vector artwork. <paramref name="name"/> is a Phosphor
     /// icon name — use the constants in <see cref="Icons"/> rather than a literal, so a
     /// typo is caught by JunctionIconNameTests instead of silently rendering an empty box.
     /// <paramref name="size"/> is nominal; see <see cref="IconBox"/>.
     /// </summary>
     public static Element Icon(string name, float size, Color color) =>
-        Phosphor.Draw(name, IconBox(size), color);
+        Phosphor.Draw(name, IconBox(size), color, DisplayScale);
 
     public static TextElement Mono(string text, float size, Color color) =>
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);

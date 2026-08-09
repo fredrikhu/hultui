@@ -46,6 +46,45 @@ public class PhosphorTests
     }
 
     [Fact]
+    public void RastersAreCutAtDeviceResolution()
+    {
+        // A bitmap produced at layout size gets resampled on the way to the screen, and
+        // the visible result is a soft or aliased icon. Asking for the device size means
+        // the renderer scales nothing.
+        Assert.Equal(13, Phosphor.Source("git-branch", 13f, Color.White, 1f)!.IntrinsicSize.Width);
+        Assert.Equal(20, Phosphor.Source("git-branch", 13f, Color.White, 1.5f)!.IntrinsicSize.Width);
+        Assert.Equal(26, Phosphor.Source("git-branch", 13f, Color.White, 2f)!.IntrinsicSize.Width);
+    }
+
+    [Fact]
+    public void HairlineIconsStaySolidAtWindowControlSize()
+    {
+        // Phosphor's regular `minus` is a bar 6% of its box — 0.6px at the size the
+        // window controls were using, straddling two pixel rows at ~25% each. That is
+        // why the minimize button appeared to render nothing at all. The bold weight is
+        // 9.4%, and the button is drawn larger, so the bar now clears a device pixel.
+        // The caption glyphs: bold weight at the 11.5 box WinButton now uses.
+        var src = Phosphor.Source("minus-bold", 11.5f, Color.White, 1f)!;
+
+        // Peak alpha is the honest measure: the bar is sub-pixel, so it should render as
+        // a partially transparent line rather than nothing at all.
+        int peak = PeakAlpha(src);
+        Assert.True(peak > 100, $"minus rendered with peak alpha {peak}; it is invisible");
+    }
+
+    private static int PeakAlpha(HultUI.Core.Rendering.IImageSource src)
+    {
+        var bmp = (SkiaSharp.SKBitmap)src.GetType()
+            .GetProperty("Bitmap", System.Reflection.BindingFlags.NonPublic
+                                   | System.Reflection.BindingFlags.Instance)!.GetValue(src)!;
+        int peak = 0;
+        for (int y = 0; y < bmp.Height; y++)
+        for (int x = 0; x < bmp.Width; x++)
+            peak = Math.Max(peak, bmp.GetPixel(x, y).Alpha);
+        return peak;
+    }
+
+    [Fact]
     public void RastersAreCachedPerNameColourAndSize()
     {
         var a = Phosphor.Source("git-branch", 16f, Color.White);

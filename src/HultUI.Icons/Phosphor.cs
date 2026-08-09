@@ -35,12 +35,12 @@ public static partial class Phosphor
     /// <paramref name="color"/>. Returns an empty, correctly-sized box for an unknown
     /// name so layout does not shift.
     /// </summary>
-    public static Element Draw(string name, float size, Color color)
+    public static Element Draw(string name, float size, Color color, float scale = 1f)
     {
         if (!Paths.ContainsKey(name))
             return Box.New().Width(size).Height(size).FlexShrink(0);
 
-        var img = Image.New(Rasterize(name, color, size));
+        var img = Image.New(Rasterize(name, color, size, scale));
         img.Fit = ImageFit.Contain;
         return img.Width(size).Height(size).FlexShrink(0);
     }
@@ -50,8 +50,8 @@ public static partial class Phosphor
     /// rather than an element — the framework's context menu, which paints its own rows.
     /// Null for an unknown name.
     /// </summary>
-    public static IImageSource? Source(string name, float size, Color color) =>
-        Paths.ContainsKey(name) ? Rasterize(name, color, size) : null;
+    public static IImageSource? Source(string name, float size, Color color, float scale = 1f) =>
+        Paths.ContainsKey(name) ? Rasterize(name, color, size, scale) : null;
 
     /// <summary>Drops every cached raster. Call after a palette change.</summary>
     public static void InvalidateCache()
@@ -66,12 +66,17 @@ public static partial class Phosphor
     private static readonly object Gate = new();
     private static readonly Dictionary<(string, uint, int), SkiaImageSource> Cache = new();
 
-    private static SkiaImageSource Rasterize(string name, Color color, float size)
+    private static SkiaImageSource Rasterize(string name, Color color, float size, float scale)
     {
-        // Rastered at 2x the requested size: these are drawn at anything from 9 to 15
-        // units across the app, and a single fixed raster would either blur when scaled
-        // up or waste memory on every small one.
-        int px = Math.Max(8, (int)MathF.Ceiling(size * 2f));
+        // Rastered at the size it will actually occupy on screen — layout size times the
+        // display scale — so the renderer resamples nothing. Anything else is a resample
+        // on the way to the screen: a fixed 2x raster looked soft at 100% and chunky at
+        // 150%, and hairlines (Phosphor's `minus` bar is 6% of its box) could fall
+        // between samples and disappear.
+        //
+        // The floor keeps a legible raster for very small nominal sizes; the ceiling
+        // stops an absurd scale from allocating something huge.
+        int px = Math.Clamp((int)MathF.Ceiling(size * scale), 8, 512);
         var key = (name, Pack(color), px);
 
         lock (Gate)

@@ -269,6 +269,7 @@ public partial class JunctionApp : Component, IDisposable
 
         _compactChrome = ContentWidth < CompactChromeContentWidth;
         _hideDiff = ContentWidth < HideDiffContentWidth;
+        Ui.DisplayScale = _window.DisplayScale;
         _window.Resized += OnWindowResize;
 
         // Global keys land on the host when nothing is focused (see App.cs for
@@ -281,6 +282,9 @@ public partial class JunctionApp : Component, IDisposable
     // the build every frame of a drag.
     private void OnWindowResize()
     {
+        // Resize is also when a window can land on a monitor with a different scale, so
+        // this is where icon rasters get re-cut for the new device resolution.
+        Ui.DisplayScale = _window.DisplayScale;
         if (RecomputeResponsive()) Rerender();
     }
 

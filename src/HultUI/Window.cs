@@ -152,6 +152,13 @@ public sealed class Window : IOverlayHost, IDisposable
     public float LayoutHeight => PlatformWindow.LayoutHeight;
 
     /// <summary>
+    /// Device pixels per layout unit (1.0 at 100%, 1.5 at 150%). Apps that rasterize
+    /// their own artwork need this: a bitmap produced at layout size is resampled on the
+    /// way to the screen, and the visible result is a soft or aliased icon.
+    /// </summary>
+    public float DisplayScale => PlatformWindow.DisplayScale;
+
+    /// <summary>
     /// Raised after the window's size changes (during and after an interactive
     /// resize). Fires on the UI thread; handlers see the updated
     /// <see cref="LayoutWidth"/>/<see cref="LayoutHeight"/>. Used by apps whose

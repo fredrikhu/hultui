@@ -105,7 +105,9 @@ public partial class JunctionApp
         var b = Flex.Row(gap: 0).Width(46).Height(40)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Cursor(CursorType.Pointer).Tooltip(tooltip);
-        b.AddChild(Ui.Icon(glyph, 11f, Nocturne.On(0.75)));
+        // 13 rather than 11: the caption marks are hairlines, and below this the bar
+        // in the minimize glyph lands under one device pixel and washes out.
+        b.AddChild(Ui.Icon(glyph, 13f, Nocturne.On(0.75)));
         b.OnClick(_ => onClick());
         return b.HoverBg(hoverBg, Color.Transparent);
     }

@@ -7,6 +7,7 @@ namespace HultUI.Rendering.Skia;
 public sealed class SkiaImageSource : IImageSource, IDisposable
 {
     private SKBitmap? _bitmap;
+    private SKImage? _image;
 
     public Size IntrinsicSize => _bitmap is not null
         ? new Size(_bitmap.Width, _bitmap.Height)
@@ -16,6 +17,13 @@ public sealed class SkiaImageSource : IImageSource, IDisposable
     public string? AlternateText { get; set; }
 
     internal SKBitmap? Bitmap => _bitmap;
+
+    /// <summary>
+    /// The bitmap as an <see cref="SKImage"/>, created once on first draw. Sampling
+    /// options — which is what stops a downscaled image being point-sampled — are only
+    /// available on the SKImage draw overloads in SkiaSharp 3.
+    /// </summary>
+    internal SKImage? Image => _image ??= _bitmap is null ? null : SKImage.FromBitmap(_bitmap);
 
     public SkiaImageSource(SKBitmap bitmap, string? alternateText = null)
     {
@@ -39,6 +47,8 @@ public sealed class SkiaImageSource : IImageSource, IDisposable
 
     public void Dispose()
     {
+        _image?.Dispose();
+        _image = null;
         _bitmap?.Dispose();
         _bitmap = null;
     }

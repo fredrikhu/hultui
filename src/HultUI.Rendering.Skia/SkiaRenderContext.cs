@@ -417,9 +417,18 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         }
     }
 
+    /// <summary>
+    /// Linear filtering with mipmaps: images here are usually drawn smaller than their
+    /// source (icons rasterized above their display size, thumbnails), which is exactly
+    /// the case point sampling handles worst.
+    /// </summary>
+    private static readonly SKSamplingOptions DownscaleSampling =
+        new(SKFilterMode.Linear, SKMipmapMode.Linear);
+
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
     {
-        if (source is not SkiaImageSource skiaSource || skiaSource.Bitmap is not { } bitmap)
+        if (source is not SkiaImageSource skiaSource || skiaSource.Bitmap is not { } bitmap
+            || skiaSource.Image is not { } image)
             return;
 
         var srcW = (float)bitmap.Width;
@@ -431,7 +440,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
-        Canvas.DrawBitmap(bitmap, srcRect, ToSkRect(drawRect), _pooledPaint);
+        // IsAntialias smooths the destination rect's edges; it says nothing about how
+        // the source is resampled, and Skia's default for that is nearest-neighbour.
+        // Every downscaled image was therefore point-sampled — icons came out visibly
+        // aliased, and geometry thinner than a destination pixel (Phosphor's `minus`
+        // bar is 6% of its box) could land between samples and vanish outright.
+        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
     }
 
     private static (Rect drawRect, SKRect srcRect) ComputeImageFit(

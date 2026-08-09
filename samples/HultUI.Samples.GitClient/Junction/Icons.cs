@@ -78,9 +78,9 @@ public static class Icons
     public const string Broom = "broom";
 
     // Window controls (Windows/Linux style)
-    public const string WinMinimize = "minus";   // window controls map to the plain marks
-    public const string WinMaximize = "square";   // window controls map to the plain marks
-    public const string WinClose = "x";   // window controls map to the plain marks
+    public const string WinMinimize = "minus-bold";   // bold: the regular bar is thinner than a device pixel at caption size
+    public const string WinMaximize = "square-bold";
+    public const string WinClose = "x-bold";
 
     // Interactive rebase actions
     public const string Check = "check";
