@@ -51,6 +51,7 @@ public partial class CommanderApp
             case Cmd.Delete: StartDelete(); break;
             case Cmd.NewFolder: OpenNewFolderPrompt(side); break;
             case Cmd.Edit: EditFocused(side); break;
+            case Cmd.View: OpenViewer(side); break;
             case Cmd.Diff: OpenDiff(side); break;
             case Cmd.Sync: OpenSync(); break;
             case Cmd.Find: OpenFind(side); break;

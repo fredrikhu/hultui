@@ -211,10 +211,10 @@ public partial class CommanderApp : Component, IDisposable
     // closes. Deferred because the Refs still point at the panes that view replaced.
     private char? _pendingPaneFocus;
 
-    /// <summary>True while the diff or sync view has replaced the rail and panes. They own
-    /// the whole shell rather than layering over it, so the panes aren't merely covered —
-    /// they're gone from the tree.</summary>
-    private bool FullShellOpen => _diffOpen || _syncOpen;
+    /// <summary>True while the diff, sync or file viewer has replaced the rail and panes.
+    /// They own the whole shell rather than layering over it, so the panes aren't merely
+    /// covered — they're gone from the tree.</summary>
+    private bool FullShellOpen => _diffOpen || _syncOpen || _viewerOpen;
 
     // Off-thread text excerpt for the preview column, keyed by the focused file's
     // path + mtime + size (so editing a file refreshes its preview).
@@ -262,13 +262,16 @@ public partial class CommanderApp : Component, IDisposable
 
     /// <summary>Read a bounded copy of an archive member's bytes (for preview), or null when
     /// oversized / unreadable. The member stream may be non-seekable, so we copy.</summary>
-    private byte[]? ReadMemberBytes(FileEntry e, long maxBytes)
+    private byte[]? ReadMemberBytes(FileEntry e, long maxBytes, string? password = null)
     {
         if (e.Size <= 0 || e.Size > maxBytes) return null;
         if (ArchivePath.TryParse(e.FullPath) is not { } ap) return null;
         try
         {
-            using var s = ArchiveVfs.OpenEntry(ap.ArchiveFile, ap.Internal, PasswordFor(e.FullPath), _sevenZip);
+            // The password is passed in when the caller reads off the UI thread — it takes
+            // the lookup on the UI thread first rather than racing the dictionary the
+            // password prompt writes to.
+            using var s = ArchiveVfs.OpenEntry(ap.ArchiveFile, ap.Internal, password ?? PasswordFor(e.FullPath), _sevenZip);
             if (s == null) return null;
             using var ms = new MemoryStream();
             var buf = new byte[16 * 1024];
@@ -314,11 +317,11 @@ public partial class CommanderApp : Component, IDisposable
         Icons.DisplayScale = window.DisplayScale;
         window.Resized += OnWindowResized;
         _settings = SettingsStore.Load();
-        // The diff's sideways offset is app state, so moving it has to rebuild the rows.
+        // A sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
+        _viewerPan = new HorizontalPan(MarkDirty);
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
-        _diffPan = new HorizontalPan(MarkDirty);
         RebuildKeymap();
         SevenZip.ExePath = _settings.SevenZipPath;
         _sevenZip = SevenZip.Available();   // probed once — the probe spawns a process
@@ -432,11 +435,11 @@ public partial class CommanderApp : Component, IDisposable
     {
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
 
-        // Full-shell views (diff / sync) replace the rail + panes entirely.
-        if (_diffOpen || _syncOpen)
+        // Full-shell views (diff / sync / viewer) replace the rail + panes entirely.
+        if (FullShellOpen)
         {
-            var view = _diffOpen ? BuildDiff() : BuildSync();
-            view.Key = _diffOpen ? "diff" : "sync";
+            var view = _diffOpen ? BuildDiff() : _syncOpen ? BuildSync() : BuildViewer();
+            view.Key = _diffOpen ? "diff" : _syncOpen ? "sync" : "viewer";
             body.AddChild(view);
         }
         else
@@ -490,8 +493,10 @@ public partial class CommanderApp : Component, IDisposable
             if (ev.Button == 2) EndRightMark();
             if (_findResizing) _findResizing = false;
         });
-        // The diff's sideways scrollbar: a drag ends wherever the button comes up.
+        // The sideways scrollbars of the diff and the viewer: a drag ends wherever the button
+        // comes up, which is routinely off the thumb.
         _diffPan.AttachDrag(root);
+        _viewerPan.AttachDrag(root);
 
         // Overlays render above the shell, each keyed so conditional presence
         // reconciles by identity (a keyless swap would bleed retained state — focus,
@@ -582,6 +587,15 @@ public partial class CommanderApp : Component, IDisposable
             }
             else _pendingDiffScroll = false;
         }
+        if (_pendingVfindFocus) { _pendingVfindFocus = false; _vfindRef.Current?.Focus(); }
+        // Only once the bar is gone from the tree — focusing the body while the field is
+        // still mounted would take the keyboard away from what the user just opened.
+        if (_pendingViewerBodyFocus && !_vfindOpen)
+        {
+            _pendingViewerBodyFocus = false;
+            _viewerScrollRef.Current?.Focus();
+        }
+        if (_pendingVfindScroll) { _pendingVfindScroll = false; RevealViewerHit(); }
         if (_pendingFindScroll)
         {
             _pendingFindScroll = false;
@@ -1559,6 +1573,7 @@ public partial class CommanderApp : Component, IDisposable
             new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
             new("Find files…", "Alt+F7", () => OpenFind(side)),
             new("Compare files (diff)", "F3", () => OpenDiff(side)),
+            new("View file", "Shift+F3", () => OpenViewer(side)),
             new("Synchronize folders", "F9", OpenSync),
             new("Open terminal here", null, OpenTerminalHere),
             new("Open in git client", null, OpenGitClientHere),
@@ -2024,9 +2039,10 @@ public partial class CommanderApp : Component, IDisposable
             HandleDrivePickerKey(dpKey, e); e.StopPropagation = true; return;
         }
 
-        // Full-shell views (diff / sync) capture the keyboard while open.
+        // Full-shell views (diff / sync / viewer) capture the keyboard while open.
         if (_diffOpen) { HandleDiffKey(e); return; }
         if (_syncOpen) { HandleSyncKey(e); return; }
+        if (_viewerOpen) { HandleViewerKey(e); return; }
 
         // The command line owns Enter/Esc while active; text falls through to its field.
         if (_cmdActive) { HandleCommandKey(e); return; }

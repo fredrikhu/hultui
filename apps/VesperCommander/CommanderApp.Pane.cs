@@ -645,6 +645,10 @@ public partial class CommanderApp
         string? cursorName = active && list.Count > 0 && cur < list.Count ? list[cur].Name : null;
         var marks = Marks(side);
 
+        // The row F3 would compare the active pane's cursor against. Only in the inactive
+        // pane — the active one already draws a cursor, and the answer is always over here.
+        string? partnerPath = active ? null : DiffTargetPath();
+
         // VirtualListElement re-realizes its ~viewport rows on every rebuild now, so a
         // mark/cursor/search change repaints against current state even when the cached
         // listing keeps the same reference. (It used to only re-realize on an Items
@@ -652,14 +656,19 @@ public partial class CommanderApp
         return VirtualListElement<FileEntry>.New()
             .ItemHeight((int)RowHeight)
             .Items(list)
-            .RenderWith(e => FileRow(side, e, cursorName, marks.Contains(e.Name)))
+            .RenderWith(e => FileRow(side, e, cursorName, marks.Contains(e.Name), partnerPath))
             .WithRef(VList(side))
             .FlexGrow(1);
     }
 
-    private Element FileRow(char side, FileEntry e, string? cursorName, bool marked)
+    private Element FileRow(char side, FileEntry e, string? cursorName, bool marked,
+        string? partnerPath = null)
     {
         bool cursor = e.Name == cursorName;
+        // The other pane's F3 operand. Matched on the full path rather than the name, because
+        // this one comes from DiffPartner as a path and a name could collide with a row in a
+        // folder the answer isn't about.
+        bool partner = !cursor && partnerPath != null && PathEquals(e.FullPath, partnerPath);
         // Marked (red) overrides the dir/file colour; metadata dims to the red tint.
         Color fg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
         Color metaFg = marked ? Nocturne.MarkRedDim : Nocturne.On(0.50);
@@ -669,13 +678,21 @@ public partial class CommanderApp
         if (cut) { fg = Nocturne.Alpha(fg, 0.45); metaFg = Nocturne.Neutral700; }
         var (cols, sizeCol, ratioCol, dateCol) = ListLayout(InArchive(side));
 
-        // Every row reserves a 1px border so the cursor ring never shifts siblings.
+        // Every row reserves a 1px border so the cursor ring never shifts siblings — which is
+        // also why the partner marking is a colour on that same reserved ring rather than a
+        // thicker or one-sided border, either of which would nudge the row's contents.
         var row = Grid.Of(cols, gap: 10).Height(RowHeight)
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 10, 0, 10))
-            .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
+            .BorderWidth(1f)
+            .BorderColor(cursor ? Nocturne.Accent600 : partner ? Nocturne.Accent700 : Color.Transparent)
             .Cursor(CursorType.Default);
 
+        // Filled for the cursor, outline-only for the partner. The two differ by more than
+        // brightness on purpose: a dimmer ring alone reads as the same thing rendered faintly,
+        // whereas filled-versus-hollow is a difference in kind, and the missing fill is what
+        // says "this pane doesn't have the keyboard". The hue stays in the accent family
+        // because the mark is about what the cursor opposite pairs with.
         if (cursor)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
         else if (_settings.Zebra && !marked && !e.IsParent

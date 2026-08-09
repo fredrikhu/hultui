@@ -8,7 +8,7 @@ namespace VesperCommander;
 /// combos, the pane drive pickers — stay fixed and aren't part of this set.</summary>
 public enum Cmd
 {
-    Copy, Move, Rename, Delete, NewFolder, Edit, Diff, Sync, Find, MeasureAll,
+    Copy, Move, Rename, Delete, NewFolder, Edit, View, Diff, Sync, Find, MeasureAll,
     Palette, Bookmarks, Options, NewTab, CloseTab, GoUpFolder, IntoFolder,
     Preview, Refresh, ToggleHidden, Swap, OpenInOther, Pack, Extract,
     ViewDetail, ViewBrief, ViewThumbnails, MultiRename, GotoPath,
@@ -31,6 +31,7 @@ public static class Keybindings
         [Cmd.NewFolder] = new(KeyCode.F7, false, false, false),
         [Cmd.Edit] = new(KeyCode.F4, false, false, false),
         [Cmd.Diff] = new(KeyCode.F3, false, false, false),
+        [Cmd.View] = new(KeyCode.F3, false, false, true),             // Shift+F3
         [Cmd.Sync] = new(KeyCode.F9, false, false, false),
         [Cmd.Find] = new(KeyCode.F7, false, true, false),             // Alt+F7
         [Cmd.MeasureAll] = new(KeyCode.Enter, false, true, true),     // Alt+Shift+Enter
@@ -59,7 +60,8 @@ public static class Keybindings
     public static readonly (Cmd cmd, string label)[] Order =
     [
         (Cmd.Copy, "Copy"), (Cmd.Move, "Move"), (Cmd.Rename, "Rename"), (Cmd.Delete, "Delete"),
-        (Cmd.NewFolder, "New folder"), (Cmd.Edit, "Edit file"), (Cmd.Diff, "Diff"), (Cmd.Sync, "Synchronize"),
+        (Cmd.NewFolder, "New folder"), (Cmd.Edit, "Edit file"), (Cmd.View, "View file"),
+        (Cmd.Diff, "Diff"), (Cmd.Sync, "Synchronize"),
         (Cmd.Find, "Find files"), (Cmd.MeasureAll, "Measure all folders"),
         (Cmd.Palette, "Command palette"), (Cmd.Bookmarks, "Bookmark manager"), (Cmd.Options, "Options"),
         (Cmd.NewTab, "New tab"), (Cmd.CloseTab, "Close tab"),

@@ -119,6 +119,15 @@ public static class Nocturne
     public static Color DiffChangeBg => Alpha(Accent500, 0.09);
     public static Color DiffChangeMark => Alpha(Accent500, 0.28);   // intra-line highlight
 
+    // ── Find-in-file highlight ───────────────────────────────────────────
+    // Amber rather than the accent: a search hit lands on top of the same code the diff
+    // tints with the accent, and two accent-coloured backgrounds over each other say
+    // nothing about which is which. Every hit takes the dim tint; the one the cursor is
+    // on takes the bright one, so it is findable in a screenful of matches.
+    public static readonly Color MarkAmber = Hex("#e3b341");
+    public static Color FindHitBg => Alpha(MarkAmber, 0.24);
+    public static Color FindCurrentBg => Alpha(MarkAmber, 0.62);
+
     // ── Radii ────────────────────────────────────────────────────────────
     public const float RadiusSm = 4f;
     public const float RadiusMd = 8f;

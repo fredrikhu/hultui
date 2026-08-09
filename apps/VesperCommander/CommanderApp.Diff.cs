@@ -239,6 +239,31 @@ public partial class CommanderApp
         return sameName;
     }
 
+    /// <summary>
+    /// The file F3 would compare the active pane's cursor against right now, or null when F3
+    /// would do nothing (the cursor is on a folder or on "..").
+    ///
+    /// <para>Routed through <see cref="DiffPartner"/> rather than reproducing its rule, so the
+    /// row the inactive pane rings is the row F3 actually opens. Pairing prefers the
+    /// same-named file over the other pane's cursor, so "the other cursor" is only sometimes
+    /// the answer — marking that instead would be wrong exactly when it matters most, with two
+    /// copies of one file open side by side.</para>
+    ///
+    /// <para>One <c>File.Exists</c> per pane build, not per row: the panes already stat every
+    /// entry they list, and paying it once keeps the indicator and the action from ever
+    /// disagreeing.</para>
+    /// </summary>
+    private string? DiffTargetPath()
+    {
+        char side = _active;
+        var list = Rows(side);
+        int cur = Cursor(side);
+        if (cur < 0 || cur >= list.Count) return null;
+        var e = list[cur];
+        if (e.IsParent || e.IsDir) return null;
+        return DiffPartner(side == 'L' ? 'R' : 'L', e);
+    }
+
     private void CloseDiff()
     {
         _diffOpen = false;
@@ -326,18 +351,31 @@ public partial class CommanderApp
         StartDiffHighlight(outcome.Left, outcome.Right);
     }
 
+    /// <summary>The largest file either the diff or the viewer will read. Past this the text
+    /// pipeline is not the bottleneck — decoding and splitting are — and the wait stops being
+    /// worth it.</summary>
+    internal const long ViewMaxBytes = 4L * 1024 * 1024;
+
     private static (string[]? lines, bool binary) LoadForDiff(string path)
     {
         try
         {
             var fi = new FileInfo(path);
-            if (fi.Length > 4L * 1024 * 1024) return (null, true);
-            byte[] bytes = File.ReadAllBytes(path);
-            int scan = Math.Min(bytes.Length, 8192);
-            for (int i = 0; i < scan; i++) if (bytes[i] == 0) return (null, true);
-            return (System.Text.Encoding.UTF8.GetString(bytes).Replace("\r\n", "\n").Split('\n'), false);
+            if (fi.Length > ViewMaxBytes) return (null, true);
+            return LinesFromBytes(File.ReadAllBytes(path));
         }
         catch { return (null, true); }
+    }
+
+    /// <summary>Decodes a whole file's bytes into lines, or reports it binary. Shared with the
+    /// viewer, which reads archive members through the VFS and so has bytes rather than a
+    /// path — splitting them the same way here is what makes the two views agree about what a
+    /// line is.</summary>
+    private static (string[]? lines, bool binary) LinesFromBytes(byte[] bytes)
+    {
+        int scan = Math.Min(bytes.Length, 8192);
+        for (int i = 0; i < scan; i++) if (bytes[i] == 0) return (null, true);
+        return (System.Text.Encoding.UTF8.GetString(bytes).Replace("\r\n", "\n").Split('\n'), false);
     }
 
     /// <summary>Flatten the diff into rendered rows, collapsing long unchanged runs to
