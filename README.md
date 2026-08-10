@@ -178,6 +178,7 @@ out of a shipped build. See [DevTools](docs/DEVTOOLS.md).
 - [Icons](docs/ICONS.md) -- SVG icon rendering, the bundled Phosphor set, and file-type glyphs
 - [DevTools](docs/DEVTOOLS.md) -- element inspector (Ctrl+Shift+I) and performance HUD (F12)
 - [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
+- [Self-Hosted Runners](docs/SELF-HOSTED-RUNNERS.md) -- optional Windows and Proxmox build hosts
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
 
 ## Apps

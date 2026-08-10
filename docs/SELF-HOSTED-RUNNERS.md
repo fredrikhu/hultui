@@ -1,0 +1,258 @@
+# Self-hosted build hosts
+
+Optional. The installer workflows run on GitHub-hosted runners and only fire on release
+tags, which fits comfortably inside the free allowance. Self-hosted runners buy independence
+from that allowance and faster builds (warm NuGet caches, no image provisioning), at the cost
+of two machines to keep alive.
+
+Minutes on a self-hosted runner are not metered at all, on any plan.
+
+## Why the workflows are tags-only
+
+Both installer workflows used to run on every push to `main`. They use `windows-latest`, which
+bills at **twice** the minute rate, and two apps building per push exhausted a month's free
+2,000 minutes in nine days. They now trigger only on `vesper-v*` / `junction-v*`, with
+`workflow_dispatch` for a deliberate off-tag build.
+
+If you add self-hosted runners you *could* put per-push CI back, since those minutes are free.
+Weigh that against the machines needing to be awake for a queued job to start.
+
+## Windows runner (the development machine)
+
+This covers the `test` and `installer` jobs of both workflows.
+
+1. Repo → Settings → Actions → Runners → **New self-hosted runner** → Windows x64.
+2. Run the commands GitHub shows. They embed a short-lived registration token and the current
+   runner version, so use them as given rather than from a copy kept here.
+3. When `config.cmd` asks whether to run as a service, say yes — otherwise the runner only
+   exists while a console window is open.
+4. Point the jobs at it:
+
+   ```yaml
+   runs-on: [self-hosted, windows, x64]
+   ```
+
+   in place of `runs-on: windows-latest`, in the `test` and `installer` jobs of both
+   `.github/workflows/vesper-installer.yml` and `.github/workflows/junction-installer.yml`.
+
+### What the host needs
+
+The hosted `windows-latest` image bundles a lot that a developer machine may not.
+
+| Needed for | Check | If missing |
+|---|---|---|
+| Build and test | `dotnet --version` (10.0.x) | Install the .NET 10 SDK |
+| Native AOT publish | VS Build Tools with the **Desktop development with C++** workload | Visual Studio Installer |
+| `Compile installer` | Inno Setup 6 | The workflow falls back to `choco install innosetup`, so Chocolatey is enough |
+| `Create GitHub release` | `gh --version` | `choco install gh -y` |
+
+The GitHub CLI is the one that bites: hosted images ship `gh`, most desktops don't, and the
+release step is the *last* thing in a tag build — so a missing `gh` wastes the whole run.
+Note that GitHub **Desktop** is a different product and does not provide `gh`.
+
+You can drop the `actions/setup-dotnet` steps on a self-hosted runner if the SDK is already
+installed, though leaving them costs little.
+
+## Ubuntu runner in a Proxmox container
+
+This covers Junction's `test-linux` job, which exists to prove the framework is display-free:
+it runs full app scenarios with no X11/Wayland and no GPU. An unprivileged LXC container is
+therefore exactly the right host — if the suite passes there, the claim holds.
+
+### Create the container
+
+On the Proxmox host:
+
+```bash
+pveam update && pveam available --section system | grep ubuntu-24
+```
+
+Download whichever 24.04 template that lists, then create the container. Adjust the storage
+names (`local-lvm`, `vmbr0`) to your node:
+
+```bash
+pveam download local ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+```
+
+```bash
+pct create 210 local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst --hostname hultui-build --cores 4 --memory 4096 --swap 1024 --rootfs local-lvm:32 --net0 name=eth0,bridge=vmbr0,ip=dhcp --unprivileged 1 --features nesting=1 --onboot 1 --password
+```
+
+`--onboot 1` brings it back after a host reboot. 32 GB of disk is comfortable: the NuGet cache
+and Release build outputs for the whole solution are several gigabytes, and 16 GB gets tight.
+Then:
+
+```bash
+pct start 210 && pct enter 210
+```
+
+### About `nesting=1`
+
+It is **not required** for this. Proxmox's Ubuntu template runs systemd as PID 1 in an
+unprivileged container on its own, so the runner's service works without it. It is worth
+having anyway as cheap insurance: it permits nested namespaces, which is what you need the day
+you want to run Docker or `buildx` inside this container, and it removes some AppArmor
+friction. Enable it or don't — nothing here depends on it.
+
+To set it on a container that already exists:
+
+```bash
+pct set 210 --features nesting=1
+```
+
+Or in the web UI: select the container → Options → Features → tick **Nesting**. Either way the
+container has to be restarted before it takes effect.
+
+One trap: `--features` replaces the whole feature string rather than adding to it. If the
+container already has others, name them all in the same command or you will silently drop
+them — `pct config 210 | grep features` first, then for example:
+
+```bash
+pct set 210 --features nesting=1,keyctl=1
+```
+
+### Provision it
+
+Inside the container, as root:
+
+```bash
+apt update && apt install -y curl git ca-certificates libicu74 libssl3 zlib1g libfontconfig1
+```
+
+`libfontconfig1` is the non-obvious one. The renderer references
+`SkiaSharp.NativeAssets.Linux`, whose native `libSkiaSharp.so` links against fontconfig — the
+Skia render tests fail to load it otherwise. The hosted `ubuntu-latest` image has it already,
+which is why this only shows up on a lean container.
+
+Install the SDK by channel rather than by distro package, so the runner tracks the same line
+as the workflows:
+
+```bash
+curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 10.0 --install-dir /opt/dotnet
+```
+
+#### Which version to ask for
+
+`--channel 10.0` is the right answer for this repository, and the reason is worth stating: the
+workflows pin `dotnet-version: 10.0.x` and there is **no `global.json`**, so nothing here
+demands an exact SDK. `--channel 10.0` floats to the newest 10.0 patch, which is what
+`10.0.x` resolves to on a hosted runner — the two stay in step by construction.
+
+The alternatives, if you ever want them:
+
+| Ask for | Gets you | Use when |
+|---|---|---|
+| `--channel 10.0` | newest 10.0 patch | matches the workflows — the default choice |
+| `--channel 10.0.3xx` | newest patch of one feature band | you want to track the dev machine's band (currently 10.0.300) |
+| `--version 10.0.300` | exactly that build | you add a `global.json` pin and want the runner to match it exactly |
+
+A pinned `--version` stops floating entirely, so it becomes something you have to remember to
+bump. Only take that on if a `global.json` makes it necessary.
+
+Put it on the path for all users:
+
+```bash
+printf 'export DOTNET_ROOT=/opt/dotnet\nexport PATH=$PATH:/opt/dotnet\n' > /etc/profile.d/dotnet.sh
+```
+
+### Register the runner
+
+Two things differ from the Windows host, and both surprise people:
+
+- **`config.sh` will refuse to run as root** ("Must not run with sudo"), and `pct enter` drops
+  you in as root. So the runner needs its own unprivileged account.
+- **`config.sh` never offers to install the service.** The Windows `config.cmd` asks; the
+  Linux one does not, by design — `svc.sh` is a separate step, always. If you were waiting for
+  a prompt, it is not coming.
+
+Also note that `sudo` may not be installed in the Proxmox template, and you do not need it:
+inside `pct enter` you are already root. Commands below are written accordingly.
+
+#### Create the account
+
+```bash
+adduser --disabled-password --gecos "" runner
+```
+
+#### Configure as that user
+
+Get the download URL, version and registration token from Settings → Actions → Runners → New
+self-hosted runner → Linux x64 — the token is short-lived, so take it fresh. Then:
+
+```bash
+su - runner
+```
+
+```bash
+mkdir -p ~/actions-runner && cd ~/actions-runner && curl -o runner.tar.gz -L <the URL GitHub shows> && tar xzf runner.tar.gz
+```
+
+```bash
+./config.sh --url https://github.com/fredrikhu/hului-revamped --token <TOKEN> --name hultui-build --labels self-hosted,linux,x64 --unattended
+```
+
+`--unattended` accepts the defaults instead of prompting. The labels are what
+`runs-on: [self-hosted, linux, x64]` matches; the defaults would give you the same three, so
+this is just being explicit. Then leave the account:
+
+```bash
+exit
+```
+
+#### Install the service as root
+
+`svc.sh` writes a systemd unit, so it runs as root and takes the account the service should
+run *under* as its argument:
+
+```bash
+cd /home/runner/actions-runner && ./svc.sh install runner && ./svc.sh start
+```
+
+Check it, and confirm it is enabled so a container restart brings it back:
+
+```bash
+./svc.sh status
+```
+
+The unit is named `actions.runner.<owner>-<repo>.<runner-name>.service`, so ordinary systemd
+tooling works on it too — useful when `svc.sh status` is not saying enough:
+
+```bash
+journalctl -u 'actions.runner.*' -f
+```
+
+The runner should appear as **Idle** on the repository's Runners page within a few seconds. If
+it does not, the token had probably expired before `config.sh` ran; generate a new one and
+re-run the configure step.
+
+### Point the job at it
+
+In `.github/workflows/junction-installer.yml`:
+
+```yaml
+  test-linux:
+    runs-on: [self-hosted, linux, x64]
+```
+
+Leaving it on `ubuntu-latest` is also defensible: Linux is the 1× tier and, with tags-only
+triggers, that job runs a couple of times a month.
+
+### First-run expectations
+
+The package list above is a starting point, not a proof. The hosted Ubuntu image is fat and
+carries plenty this container will not, so expect the first run to name something missing —
+the AT-SPI accessibility tests in particular may want `dbus` present. Read the failure and add
+the package; the second run is usually clean.
+
+## Caveats for both
+
+- **The machine must be awake and online.** A queued job waits rather than failing, which is
+  easy to mistake for a broken workflow.
+- **The workspace is not a fresh VM.** `actions/checkout` cleans the repo, but caches and
+  installed tools persist. Mostly a speed win, occasionally the reason something passes here
+  and fails on a hosted runner.
+- **Security.** The usual warning about self-hosted runners concerns *public* repositories,
+  where a pull request from a fork would execute arbitrary code on your machine. This
+  repository is private, so that exposure does not apply. Reconsider before making it public.
+- **One job at a time** per runner by default. The workflows are sequenced (`installer` needs
+  `test`), so this only matters if two tags are pushed at once.
