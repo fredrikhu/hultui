@@ -40,6 +40,10 @@ public partial class JunctionApp
     private string? _filesCursorPath;
     private readonly List<(TreeNode node, int depth)> _filesFlat = [];
     private readonly Ref<ScrollViewElement> _filesTreeScrollRef = new();
+    // Find in the open file. The body is one TextArea rather than a row list, so matches
+    // become spans at absolute offsets into the flattened text — see FileBodyTextAndSpans.
+    private readonly FindBarState _filesFind;
+    private readonly Ref<TextAreaElement> _fileBodyRef = new();
     private bool _pendingFilesTreeScroll;
 
     // Bounded: browsing walks a new commit tree and a new file body per selection,
@@ -452,6 +456,14 @@ public partial class JunctionApp
             header.AddChild(Text.New($"{l.Length} lines").FontSize(11f)
                 .TextColor(Nocturne.On(0.45)).FlexShrink(0));
         pane.AddChild(header);
+        if (_filesFind.Open)
+        {
+            var bar = BuildFindBar(_filesFind, "Find in file…");
+            // Keyed so it reconciles as itself across rebuilds rather than inheriting the
+            // caret and focus of whatever last held its slot.
+            bar.Key = "files-find";
+            pane.AddChild(bar);
+        }
 
         pane.AddChild(BuildFileBody(loader, content));
         return pane;
@@ -485,7 +497,9 @@ public partial class JunctionApp
         // Ctrl+C / right-click Copy work (the framework wires the clipboard on focus).
         // The TextArea only paints its visible lines, so large files stay cheap. Keyed
         // per file so scroll/selection reset when the selection changes.
+        BindFilesSearch(content, lines);
         var (text, spans) = FileBodyTextAndSpans(content, lines);
+        spans = DecorateFileBody(lines, spans);
         var wrap = Box.New().FlexGrow(1).Overflow(Overflow.Hidden).Background(Nocturne.Bg)
             .Padding(new Thickness(6, 12, 6, 12));
         var area = TextArea.New(text).ReadOnly().FlexGrow(1)
@@ -495,6 +509,7 @@ public partial class JunctionApp
         area.Key = "filebody:" + (_filesSelPath ?? "");
         area.IsFocusable = true;
         area.TabIndex = 0;
+        area.WithRef(_fileBodyRef);
         wrap.AddChild(area);
         return wrap;
     }
@@ -528,5 +543,86 @@ public partial class JunctionApp
         _fileBodyText = text;
         _fileBodySpans = flat;
         return (text, flat);
+    }
+}
+
+public partial class JunctionApp
+{
+    // ── Find in the Files view's open file ───────────────────────────────
+    //
+    // The body is a single read-only TextArea, not a list of rows, so everything here is
+    // about the one conversion that costs: the search works in lines and columns, and the
+    // TextArea works in absolute offsets into the joined text.
+
+    /// <summary>What the search was last pointed at. The Files pane rebuilds on every repaint,
+    /// so without this the file would be rescanned every frame.</summary>
+    private object? _filesSearchKey;
+
+    private void BindFilesSearch(FileContent content, string[] lines)
+    {
+        var key = (content, lines.Length);
+        if (Equals(_filesSearchKey, key)) return;
+        _filesSearchKey = key;
+        _filesFind.Search.Bind(lines.Length, lanes: 1,
+            (line, _) => line >= 0 && line < lines.Length ? lines[line] : null);
+    }
+
+    /// <summary>
+    /// Start offsets of every line in the flattened text, memoized alongside it. Rebuilt only
+    /// when the file changes — a search re-runs on every keystroke, and recomputing this each
+    /// time would make a large file's find field lag behind the typing.
+    /// </summary>
+    private string[]? _fileLineStartsFor;
+    private int[] _fileLineStarts = [];
+
+    private int[] LineStarts(string[] lines)
+    {
+        if (ReferenceEquals(_fileLineStartsFor, lines)) return _fileLineStarts;
+        var starts = new int[lines.Length];
+        int offset = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            starts[i] = offset;
+            offset += lines[i].Length + 1;   // +1 for the newline the join puts back
+        }
+        _fileLineStartsFor = lines;
+        _fileLineStarts = starts;
+        return starts;
+    }
+
+    /// <summary>
+    /// Adds the search's tinting to the file's syntax spans, both in absolute offsets.
+    ///
+    /// <para>Not <see cref="TextSearch.Decorate"/>: that answers per line, against
+    /// line-relative syntax spans, which is what a row-per-line view has. Here there is one
+    /// span list over the whole file, so the matches are translated to absolute offsets and
+    /// appended. A match carries only a background, so it layers over the syntax colour
+    /// already there rather than replacing it.</para>
+    /// </summary>
+    private IReadOnlyList<TextSpan>? DecorateFileBody(string[] lines, IReadOnlyList<TextSpan>? syntax)
+    {
+        var search = _filesFind.Search;
+        if (!search.HasHits) return syntax;
+
+        var starts = LineStarts(lines);
+        var current = search.Current;
+        var merged = syntax is null ? new List<TextSpan>() : new List<TextSpan>(syntax);
+        foreach (var hit in search.Hits)
+        {
+            if (hit.Length <= 0 || hit.Line >= starts.Length) continue;   // nothing to tint
+            bool isCurrent = current is { } c && c.Line == hit.Line && c.Start == hit.Start;
+            merged.Add(new TextSpan(starts[hit.Line] + hit.Start, hit.Length, default,
+                isCurrent ? Nocturne.FindCurrentBg : Nocturne.FindHitBg));
+        }
+        return merged;
+    }
+
+    /// <summary>Brings the current match on screen. The TextArea scrolls by line, and the
+    /// search already answers in lines, so no offset arithmetic is needed here.</summary>
+    private void RevealFilesHit()
+    {
+        if (_fileBodyRef.Current is not { } area) return;
+        if (_filesFind.Search.Current is not { } hit) return;
+        area.ScrollLineIntoView(hit.Line);
     }
 }

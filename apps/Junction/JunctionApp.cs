@@ -262,6 +262,8 @@ public partial class JunctionApp : Component, IDisposable
         _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
         // The diff's sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
+        _diffFind = new FindBarState(MarkDirty);
+        _filesFind = new FindBarState(MarkDirty);
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
@@ -595,6 +597,9 @@ public partial class JunctionApp : Component, IDisposable
             _modalNameRef.Current?.Focus();
         }
 
+        ServiceFindBar(_diffFind, () => _diffBodyRef.Current, RevealDiffHit);
+        ServiceFindBar(_filesFind, () => _fileBodyRef.Current, RevealFilesHit);
+
         if (_pendingFilesTreeScroll)
         {
             _pendingFilesTreeScroll = false;
@@ -896,6 +901,15 @@ public partial class JunctionApp : Component, IDisposable
         if (_remotesOpen)
         {
             if (e.Key == KeyCode.Escape) { CloseRemotes(); e.StopPropagation = true; }
+            return;
+        }
+
+        // Find-in-text, before the typing guard and before Esc leaves fullscreen: the bar's
+        // own keys have to reach it while its field has the keyboard, and Esc backs out of
+        // the search before it backs out of the view.
+        if (ActiveFindBar() is { } findBar && HandleFindBarKey(e, findBar))
+        {
+            e.StopPropagation = true;
             return;
         }
 

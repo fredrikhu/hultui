@@ -629,6 +629,33 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
     /// <summary>Largest valid vertical scroll offset (content height minus viewport).</summary>
     private float MaxScrollY() => Math.Max(0, TotalContentHeight() - Layout.AbsoluteContentBox.Height);
 
+    /// <summary>
+    /// Brings a text line into view, scrolling only when it is not already there — so walking
+    /// matches down a file does not yank the viewport on every step.
+    ///
+    /// <para>Counted in <i>logical</i> lines, which is what a caller searching the text has.
+    /// With wrapping on, a logical line can occupy several drawn rows, so the position is an
+    /// estimate that lands on the right screenful rather than the exact row; without wrapping
+    /// the two are the same thing.</para>
+    /// </summary>
+    public void ScrollLineIntoView(int line)
+    {
+        float lh = GetLineHeight(ResolvedInherited);
+        if (lh <= 0) return;
+        float viewport = Layout.AbsoluteContentBox.Height;
+        float top = line * lh;
+
+        if (top < _scrollOffsetY)
+            _scrollOffsetY = top;
+        else if (top + lh > _scrollOffsetY + viewport)
+            _scrollOffsetY = top + lh - viewport;
+        else
+            return;   // already on screen — leave the viewport where the reader put it
+
+        _scrollOffsetY = Math.Clamp(_scrollOffsetY, 0, MaxScrollY());
+        MarkPaintDirty();
+    }
+
     /// <summary>Scrolls the viewport by <paramref name="lines"/> text lines (read-only pager nav).</summary>
     private void ScrollLines(int lines) =>
         _scrollOffsetY = Math.Clamp(_scrollOffsetY + lines * GetLineHeight(ResolvedInherited), 0, MaxScrollY());

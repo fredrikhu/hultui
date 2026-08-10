@@ -133,9 +133,9 @@ public partial class CommanderApp
         _viewerPan.Reset();
         _viewerPan.ContentWidth = 0;
         _viewerState = ViewerState.Loading;
-        // Hits index into the file that is being replaced. The query itself is kept, so
-        // opening the next file and pressing Enter searches it for the same thing.
-        ClearViewerFind();
+        // The matches index into the file being replaced. The query itself is kept, so
+        // opening the next file searches it for the same thing.
+        _viewerFind.Search.Unbind();
 
         string path = _viewerPath;
         var member = _viewerMember;
@@ -197,9 +197,7 @@ public partial class CommanderApp
             i => i >= 0 && i < _viewerLines.Length ? _viewerLines[i] : null);
         _viewerPan.ContentWidth = HorizontalPan.MeasureWidest(lines, ViewerFontSize, Fonts.Mono);
         StartViewerHighlight(lines);
-        // A query typed before the file landed — or carried over from the last one — searches
-        // this file now that there is one to search.
-        if (_vfindQuery.Length > 0) RunViewerFind();
+        BindViewerSearch();
     }
 
     /// <summary>Tokenize the whole file off the UI thread, exactly as the diff does — a
@@ -334,38 +332,25 @@ public partial class CommanderApp
 
     private void HandleViewerKey(KeyDownEvent e)
     {
-        bool ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
-        bool shift = e.Modifiers.HasFlag(KeyModifiers.Shift);
         // The find field, when it has the keyboard. Its own keys have to reach it — a letter
-        // is a letter and Home is the start of the query — so only the handful below are
-        // taken from it, and everything that moves the body is skipped entirely.
+        // is a letter and Home is the start of the query — so the bar takes only the handful
+        // it owns, and everything that moves the body is skipped entirely while typing.
         bool typing = e.Target is TextInputElement;
 
-        if (ctrl && e.Key == KeyCode.F) { OpenViewerFind(); e.StopPropagation = true; return; }
-
-        switch (e.Key)
-        {
-            // Esc backs out of the search first, then out of the view — the same two-step
-            // the Options dialog uses for its own search field.
-            case KeyCode.Escape:
-                if (_vfindOpen) CloseViewerFind(); else CloseViewer();
-                e.StopPropagation = true; return;
-            // A function key is never text, so it closes the view whether or not the field
-            // has the keyboard.
-            case KeyCode.F3: CloseViewer(); e.StopPropagation = true; return;
-            case KeyCode.Enter when _vfindOpen:
-                ViewerFindNav(shift ? -1 : 1); e.StopPropagation = true; return;
-            case KeyCode.C when _vfindOpen && e.Modifiers.HasFlag(KeyModifiers.Alt):
-                ToggleViewerFindCase(); e.StopPropagation = true; return;
-        }
+        if (HandleFindBarKey(e, _viewerFind, CloseViewer)) { e.StopPropagation = true; return; }
+        // Nothing else claimed Esc, so it leaves the view.
+        if (e.Key == KeyCode.Escape) { CloseViewer(); e.StopPropagation = true; return; }
+        // A function key is never text, so it closes the view whether or not the field has
+        // the keyboard.
+        if (e.Key == KeyCode.F3) { CloseViewer(); e.StopPropagation = true; return; }
 
         if (typing) return;
 
         switch (e.Key)
         {
-            // n / p walk the hits, the same pair the diff uses to walk its changes.
-            case KeyCode.N when _vfindOpen: ViewerFindNav(1); e.StopPropagation = true; break;
-            case KeyCode.P when _vfindOpen: ViewerFindNav(-1); e.StopPropagation = true; break;
+            // n / p walk the matches, the same pair the diff uses to walk its changes.
+            case KeyCode.N when _viewerFind.Open: FindNav(_viewerFind, 1); e.StopPropagation = true; break;
+            case KeyCode.P when _viewerFind.Open: FindNav(_viewerFind, -1); e.StopPropagation = true; break;
             // The body is read-only, so the arrows scroll it rather than moving a cursor.
             case KeyCode.Up: ViewerScroll(-DiffLineH); e.StopPropagation = true; break;
             case KeyCode.Down: ViewerScroll(DiffLineH); e.StopPropagation = true; break;
@@ -386,9 +371,9 @@ public partial class CommanderApp
     {
         var col = Flex.Column(gap: 0).FlexGrow(1).Background(Nocturne.Bg);
         col.AddChild(BuildViewerHeader());
-        if (_vfindOpen)
+        if (_viewerFind.Open)
         {
-            var bar = BuildViewerFindBar();
+            var bar = BuildFindBar(_viewerFind, "Find in file…");
             // Keyed so the bar reconciles as itself across rebuilds — a keyless element that
             // comes and goes takes the retained caret and focus of whatever was in its slot.
             bar.Key = "viewer-find";
@@ -542,7 +527,7 @@ public partial class CommanderApp
             footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("w"));
             footer.AddChild(Ui.Mono(ViewerWrap ? "no wrap" : "wrap", 10f, Nocturne.On(0.45)));
-            if (_vfindOpen)
+            if (_viewerFind.Open)
             {
                 footer.AddChild(Ui.Kbd("n")); footer.AddChild(Ui.Kbd("p"));
                 footer.AddChild(Ui.Mono("match", 10f, Nocturne.On(0.45)));

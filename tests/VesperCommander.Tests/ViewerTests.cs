@@ -551,6 +551,42 @@ public class ViewerTests
             Assert.Contains(after, a => a.Color == s.Color);
     }
 
+    /// <summary>Alt+R reads the query as a pattern rather than as text to find literally.</summary>
+    [Fact]
+    public void TheRegexToggleChangesWhatTheQueryMeans()
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "value = 42\nvalue = abc\nvalue = 7\n");
+        t.Open();
+        t.ViewFile("a.txt");
+
+        t.Find(@"\d+");
+        Assert.Empty(t.Hits);                 // no literal backslash-d anywhere in the file
+
+        t.Press(KeyCode.R, KeyModifiers.Alt);
+        Assert.Equal(2, t.Hits.Count);
+        Assert.Equal(new[] { 0, 2 }, t.Hits.Select(h => h.Line).ToArray());
+    }
+
+    /// <summary>A pattern that will not compile says so rather than reporting no matches,
+    /// which would send you looking for the text instead of at what you typed.</summary>
+    [Fact]
+    public void AnUnparseablePatternIsReportedInTheBar()
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "alpha\n");
+        t.Open();
+        t.ViewFile("a.txt");
+
+        // The query first, then the toggle — Alt+R belongs to the bar, so it does nothing
+        // until the bar is open, and flipping it re-runs whatever is already typed.
+        t.Find("([unclosed");
+        t.Press(KeyCode.R, KeyModifiers.Alt);
+
+        Assert.Equal("bad pattern", t.Search.Error);
+        Assert.Empty(t.Hits);
+    }
+
     [Fact]
     public void EscapeClosesTheBarFirstAndTheViewSecond()
     {
@@ -732,9 +768,18 @@ public class ViewerTests
         public Settings Settings => Field<Settings>("_settings");
 
         // ── Find in file ─────────────────────────────────────────────────
-        public bool FindOpen => Field<bool>("_vfindOpen");
-        public List<(int Line, int Start)> Hits => Field<List<(int Line, int Start)>>("_vfindHits");
-        public int HitIndex => Field<int>("_vfindIdx");
+        // The bar's state is a private nested type shared with the diff view, so it is read
+        // through its (public) members rather than by naming the type here.
+        private object FindState => Field<object>("_viewerFind");
+
+        private static object Member(object owner, string name) =>
+            owner.GetType().GetField(name, BindingFlags.Public | BindingFlags.Instance)!.GetValue(owner)!;
+
+        public bool FindOpen => (bool)Member(FindState, "Open");
+        public HultUI.Core.Builders.TextSearch Search =>
+            (HultUI.Core.Builders.TextSearch)Member(FindState, "Search");
+        public IReadOnlyList<HultUI.Core.Builders.TextSearch.Hit> Hits => Search.Hits;
+        public int HitIndex => Search.Index;
         public Element? Focused => _session.Window.Window.FocusedElement;
 
         /// <summary>Opens the find bar and types a query the way a user does — real text

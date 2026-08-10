@@ -36,6 +36,9 @@ public partial class JunctionApp
 
     private readonly Ref<Element> _diffBodyRef = new();
 
+    // Find in the diff. Two lanes in split mode, one in unified — see BindDiffSearch.
+    private readonly FindBarState _diffFind;
+
     private Element BuildDiffPane(string path, GitFileDiff? diff, DiffInteract? interact = null)
     {
         var col = Flex.Column(gap: 0).FlexGrow(1);
@@ -50,6 +53,14 @@ public partial class JunctionApp
         header.AddChild(Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)").FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
         col.AddChild(header);
+        if (_diffFind.Open)
+        {
+            var bar = BuildFindBar(_diffFind, "Find in diff…");
+            // Keyed so it reconciles as itself: a keyless element that comes and goes
+            // inherits the retained caret and focus of whatever last held its slot.
+            bar.Key = "diff-find";
+            col.AddChild(bar);
+        }
 
         // Interactive staging: an action bar appears while lines are selected, plus
         // a one-line hint when nothing is selected yet (so the affordance is discoverable).
@@ -281,6 +292,7 @@ public partial class JunctionApp
         var rows = _diffSplit ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
         for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
         BindDiffSelection(diff, rows);
+        BindDiffSearch(diff, rows);
 
         // Decided before the list is built, and that ordering is load-bearing: WithRef points
         // the Ref at the element being *built*, which has no layout yet, and only PatchFrom
@@ -536,9 +548,64 @@ public partial class JunctionApp
     private Element RenderDiffRow(DiffRow r, DiffInteract? interact) => r.Type switch
     {
         DiffRowType.Hunk => HunkHeaderRow(r.Hunk, r.HunkRef, interact),
-        DiffRowType.Split => SplitRow(r.Left, r.Right, r.LeftSpans, r.RightSpans, r.Index),
-        _ => UnifiedRow(r.Line!, r.Spans, interact, r.Index),
+        DiffRowType.Split => SplitRow(r.Left, r.Right,
+            FoundIn(r.LeftSpans, r.Index, 0, r.Left?.Content),
+            FoundIn(r.RightSpans, r.Index, 1, r.Right?.Content), r.Index),
+        _ => UnifiedRow(r.Line!, FoundIn(r.Spans, r.Index, 0, r.Line?.Content), interact, r.Index),
     };
+
+    /// <summary>A code cell's syntax spans with any search matches tinted over them. A match
+    /// takes a background and never a foreground, so it stacks on the add/delete tint and the
+    /// intra-line emphasis instead of replacing either.</summary>
+    private IReadOnlyList<HultUI.Core.Rendering.TextSpan>? FoundIn(
+        IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans, int row, int lane, string? content) =>
+        _diffFind.Search.Decorate(spans, row, lane, content?.Length ?? 0,
+            Nocturne.FindHitBg, Nocturne.FindCurrentBg);
+
+    /// <summary>
+    /// Points the search at the rows on display. Guarded by a key because this runs inside
+    /// Build, which reflattens the diff on every repaint — rebinding unguarded would rescan
+    /// the whole file every frame.
+    /// <para>Split mode is two lanes over one set of row numbers, so a match knows which
+    /// column it is in; unified is one. Rows carrying no text of that lane — a hunk header, or
+    /// the blank half opposite an add — return null and are skipped.</para>
+    /// </summary>
+    private void BindDiffSearch(GitFileDiff diff, List<DiffRow> rows)
+    {
+        var key = (diff, _diffSplit, rows.Count);
+        if (Equals(_diffFind.BoundKey, key)) return;
+        _diffFind.BoundKey = key;
+        _diffFind.Search.Bind(rows.Count, _diffSplit ? 2 : 1, (row, lane) =>
+        {
+            if (row < 0 || row >= rows.Count) return null;
+            var r = rows[row];
+            return r.Type switch
+            {
+                DiffRowType.Split => (lane == 0 ? r.Left : r.Right)?.Content,
+                DiffRowType.Unified => r.Line?.Content,
+                _ => null,
+            };
+        });
+    }
+
+    /// <summary>Brings the current match on screen. Row tops are summed rather than stored:
+    /// unwrapped every row is the same height, and wrapped this runs once per keystroke
+    /// rather than once per row per frame.</summary>
+    private void RevealDiffHit()
+    {
+        if (_diffBodyRef.Current is not ScrollViewElement sv) return;
+        if (_diffFind.Search.Current is not { } hit) return;
+
+        float top = 0f, height = DiffRowHeight;
+        if (_diffWrap && _diffHeights.Length > 0)
+        {
+            for (int i = 0; i < hit.Line && i < _diffHeights.Length; i++) top += _diffHeights[i];
+            if (hit.Line < _diffHeights.Length) height = _diffHeights[hit.Line];
+        }
+        else top = hit.Line * DiffRowHeight;
+
+        sv.ScrollRangeIntoView(top, height);
+    }
 
     /// <summary>Points the selection groups at the rows currently on display. A different
     /// file or layout rebinds under a new key, which drops a selection that no longer maps.</summary>

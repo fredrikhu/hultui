@@ -79,6 +79,15 @@ public static class Nocturne
     public static readonly Color DiffAddHl = new(120, 178, 116, 72);   // rgba(120,178,116,0.28)
     public static readonly Color DiffDelHl = new(200, 120, 120, 72);
 
+    // ── Find-in-text highlight ───────────────────────────────────────────
+    // Amber rather than the accent or either diff colour: a search hit lands on top of a line
+    // that is already tinted green, red or accent, and a fourth colour drawn from those three
+    // says nothing about which is which. Every hit takes the dim tint; the one the cursor is
+    // on takes the bright one, so it is findable in a screenful of matches.
+    public static readonly Color MarkAmber = Hex("#e3b341");
+    public static readonly Color FindHitBg = Alpha(MarkAmber, 0.24);
+    public static readonly Color FindCurrentBg = Alpha(MarkAmber, 0.62);
+
     public static readonly Color DangerText = Hex("#e39a9a");   // destructive menu items
     public static readonly Color DangerIcon = Hex("#cf8f8f");
     public static readonly Color AddCount = Hex("#93c98d");     // +additions

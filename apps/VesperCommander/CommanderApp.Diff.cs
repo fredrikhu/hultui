@@ -45,6 +45,10 @@ public partial class CommanderApp
     private readonly TextSelectionGroup _diffGroupLeft = new();
     private readonly TextSelectionGroup _diffGroupRight = new();
 
+    // Find in the comparison. Two lanes over one set of row numbers — lane 0 is the left
+    // column, lane 1 the right — so a match knows which side it is on.
+    private readonly FindBarState _diffFind;
+
     /// <summary>Points both side groups at the current comparison. Rebinding a different
     /// model key drops a stale selection, since offsets into the old file mean nothing here.</summary>
     private void BindDiffSelection()
@@ -52,6 +56,11 @@ public partial class CommanderApp
         var key = (_diffLeftPath, _diffRightPath, _diffGen);
         _diffGroupLeft.Bind(key, _diffRows.Count, i => LineTextAt(i, leftSide: true));
         _diffGroupRight.Bind(key, _diffRows.Count, i => LineTextAt(i, leftSide: false));
+        // The same model the two groups use, searched across both columns at once. Bound here
+        // rather than in Build: the rows change only when a comparison lands, and rebinding
+        // per frame would rescan both files on every repaint.
+        _diffFind.Search.Bind(_diffRows.Count, lanes: 2,
+            (row, lane) => LineTextAt(row, leftSide: lane == 0));
     }
 
     // null where the model has no line — a collapsed run, or the blank half opposite an
@@ -495,13 +504,34 @@ public partial class CommanderApp
         return _diffTops[row];
     }
 
+    /// <summary>Brings the current match on screen. Read from the row index, which knows
+    /// every row's position whether or not it has been realized.</summary>
+    private void RevealDiffHit()
+    {
+        if (_diffScrollRef.Current is not { } sv) return;
+        if (_diffFind.Search.Current is not { } hit) return;
+        if (hit.Line < 0 || hit.Line + 1 >= _diffTops.Length) return;
+        sv.ScrollRangeIntoView(_diffTops[hit.Line], _diffTops[hit.Line + 1] - _diffTops[hit.Line]);
+    }
+
     private void HandleDiffKey(KeyDownEvent e)
     {
-        bool ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
+        // The find field, when it has the keyboard. The view's keys are routed ahead of it, so
+        // the bar takes the handful it owns and everything else is skipped while typing —
+        // otherwise "w" typed into a query would toggle wrapping.
+        bool typing = e.Target is TextInputElement;
+
+        if (HandleFindBarKey(e, _diffFind, CloseDiff)) { e.StopPropagation = true; return; }
+        if (typing) return;
+
         switch (e.Key)
         {
             case KeyCode.Escape:
             case KeyCode.F3: CloseDiff(); e.StopPropagation = true; break;
+            // n / p walk the search when one is running, and the changes otherwise: while a
+            // query is up, stepping through its matches is what those keys plainly mean.
+            case KeyCode.N when _diffFind.Open: FindNav(_diffFind, 1); e.StopPropagation = true; break;
+            case KeyCode.P when _diffFind.Open: FindNav(_diffFind, -1); e.StopPropagation = true; break;
             case KeyCode.N: DiffNav(1); e.StopPropagation = true; break;
             case KeyCode.P: DiffNav(-1); e.StopPropagation = true; break;
             // F8 walks the changes the way most comparison tools do; Shift reverses it.
@@ -538,6 +568,14 @@ public partial class CommanderApp
     {
         var col = Flex.Column(gap: 0).FlexGrow(1).Background(Nocturne.Bg);
         col.AddChild(BuildDiffHeader());
+        if (_diffFind.Open)
+        {
+            var bar = BuildFindBar(_diffFind, "Find in comparison…");
+            // Keyed so it reconciles as itself: a keyless element that comes and goes takes
+            // the retained caret and focus of whatever last held its slot.
+            bar.Key = "diff-find";
+            col.AddChild(bar);
+        }
         col.AddChild(BuildDiffSubHeader());
         col.AddChild(_diffState switch
         {
@@ -725,8 +763,15 @@ public partial class CommanderApp
             hiR = (pre, Math.Max(0, line.Right.Length - suf - pre));
         }
 
-        var spansL = MergeDiffSpans(SyntaxFor(leftSide: true, line.LeftNo), hiL, line.Left?.Length ?? 0);
-        var spansR = MergeDiffSpans(SyntaxFor(leftSide: false, line.RightNo), hiR, line.Right?.Length ?? 0);
+        // Syntax, then the intra-line change marker, then any search matches on top. All
+        // three ride as backgrounds except the syntax colour, so they stack rather than
+        // replace one another.
+        var spansL = _diffFind.Search.Decorate(
+            MergeDiffSpans(SyntaxFor(leftSide: true, line.LeftNo), hiL, line.Left?.Length ?? 0),
+            rowIndex, lane: 0, line.Left?.Length ?? 0, Nocturne.FindHitBg, Nocturne.FindCurrentBg);
+        var spansR = _diffFind.Search.Decorate(
+            MergeDiffSpans(SyntaxFor(leftSide: false, line.RightNo), hiR, line.Right?.Length ?? 0),
+            rowIndex, lane: 1, line.Right?.Length ?? 0, Nocturne.FindHitBg, Nocturne.FindCurrentBg);
 
         row.AddChild(DiffGutter(line.LeftNo).GridColumn(0));
         row.AddChild(DiffTextCell(line.Left, leftBg, line.Op is DiffEngine.Op.Del ? Nocturne.MarkRed : Nocturne.On(0.78), _diffGroupLeft, rowIndex, spansL).GridColumn(1));
@@ -839,6 +884,11 @@ public partial class CommanderApp
             footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("w"));
             footer.AddChild(Ui.Mono(DiffWrap ? "no wrap" : "wrap", 10f, Nocturne.On(0.45)));
+            if (!_diffFind.Open)
+            {
+                footer.AddChild(Ui.Kbd("Ctrl+F"));
+                footer.AddChild(Ui.Mono("find", 10f, Nocturne.On(0.45)));
+            }
         }
         if (_diffChangeRows.Count > 0)
         {

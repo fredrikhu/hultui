@@ -320,6 +320,8 @@ public partial class CommanderApp : Component, IDisposable
         // A sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
         _viewerPan = new HorizontalPan(MarkDirty);
+        _viewerFind = new FindBarState(MarkDirty);
+        _diffFind = new FindBarState(MarkDirty);
         Nocturne.SetAccent(_settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
         RebuildKeymap();
@@ -587,15 +589,8 @@ public partial class CommanderApp : Component, IDisposable
             }
             else _pendingDiffScroll = false;
         }
-        if (_pendingVfindFocus) { _pendingVfindFocus = false; _vfindRef.Current?.Focus(); }
-        // Only once the bar is gone from the tree — focusing the body while the field is
-        // still mounted would take the keyboard away from what the user just opened.
-        if (_pendingViewerBodyFocus && !_vfindOpen)
-        {
-            _pendingViewerBodyFocus = false;
-            _viewerScrollRef.Current?.Focus();
-        }
-        if (_pendingVfindScroll) { _pendingVfindScroll = false; RevealViewerHit(); }
+        ServiceFindBar(_viewerFind, _viewerScrollRef, RevealViewerHit);
+        ServiceFindBar(_diffFind, _diffScrollRef, RevealDiffHit);
         if (_pendingFindScroll)
         {
             _pendingFindScroll = false;
