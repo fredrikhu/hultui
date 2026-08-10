@@ -124,36 +124,50 @@ apt update && apt install -y curl git ca-certificates libicu74 libssl3 zlib1g li
 Skia render tests fail to load it otherwise. The hosted `ubuntu-latest` image has it already,
 which is why this only shows up on a lean container.
 
-Install the SDK by channel rather than by distro package, so the runner tracks the same line
-as the workflows:
+Install the SDK from the Ubuntu archive:
+
+```bash
+apt install -y dotnet-sdk-10.0
+```
+
+That is all this needs. Nothing here pins an exact SDK — the workflows ask for
+`dotnet-version: 10.0.x` and there is **no `global.json`** — so any 10.0 SDK builds the
+solution, and the packaged one lands on the path with no profile scripts to maintain.
+
+Do **not** add the packages.microsoft.com feed on top. Noble carries `dotnet-sdk-10.0`
+natively, and having both sources configured has a long history of producing conflicting
+`dotnet-*` packages. Pick one, and here the distro's is the easy one.
+
+#### If you would rather use the install script
+
+The packaged SDK tracks Ubuntu's own updates, currently the 10.0.1xx feature band, while the
+Windows development machine is on 10.0.300 and a hosted runner's `10.0.x` resolves to the
+newest. Same major version, same language version, same target framework, so this does not
+matter for building this repository — but it does mean the container sits a feature band
+behind, and if the build ever starts depending on something newer, it fails *here* while
+passing everywhere else. That is a confusing way to find out.
+
+If you want the container in lock-step with CI instead, skip the apt package and use the
+script:
 
 ```bash
 curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 10.0 --install-dir /opt/dotnet
 ```
 
-#### Which version to ask for
-
-`--channel 10.0` is the right answer for this repository, and the reason is worth stating: the
-workflows pin `dotnet-version: 10.0.x` and there is **no `global.json`**, so nothing here
-demands an exact SDK. `--channel 10.0` floats to the newest 10.0 patch, which is what
-`10.0.x` resolves to on a hosted runner — the two stay in step by construction.
-
-The alternatives, if you ever want them:
-
-| Ask for | Gets you | Use when |
-|---|---|---|
-| `--channel 10.0` | newest 10.0 patch | matches the workflows — the default choice |
-| `--channel 10.0.3xx` | newest patch of one feature band | you want to track the dev machine's band (currently 10.0.300) |
-| `--version 10.0.300` | exactly that build | you add a `global.json` pin and want the runner to match it exactly |
-
-A pinned `--version` stops floating entirely, so it becomes something you have to remember to
-bump. Only take that on if a `global.json` makes it necessary.
-
-Put it on the path for all users:
-
 ```bash
 printf 'export DOTNET_ROOT=/opt/dotnet\nexport PATH=$PATH:/opt/dotnet\n' > /etc/profile.d/dotnet.sh
 ```
+
+| Ask for | Gets you | Use when |
+|---|---|---|
+| `apt install dotnet-sdk-10.0` | whatever Ubuntu ships, security-patched for you | the default — nothing here needs more |
+| `--channel 10.0` | newest 10.0 patch | you want to match the hosted runners exactly |
+| `--channel 10.0.3xx` | newest patch of one feature band | you want to track the development machine's band |
+| `--version 10.0.300` | exactly that build | you add a `global.json` pin and must match it |
+
+The script's versions stop floating the moment you pin one, so they become yours to remember
+to bump; the apt package updates itself. That trade is why the packaged SDK is the default
+here and the script is the exception.
 
 ### Register the runner
 
