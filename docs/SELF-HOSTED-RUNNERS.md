@@ -42,13 +42,104 @@ The hosted `windows-latest` image bundles a lot that a developer machine may not
 | Needed for | Check | If missing |
 |---|---|---|
 | Build and test | `dotnet --version` (10.0.x) | Install the .NET 10 SDK |
+| Every `run:` step | `pwsh` on the **machine** `Path` | See below — this one is a trap |
 | Native AOT publish | VS Build Tools with the **Desktop development with C++** workload | Visual Studio Installer |
 | `Compile installer` | Inno Setup 6 | The workflow falls back to `choco install innosetup`, so Chocolatey is enough |
 | `Create GitHub release` | `gh --version` | `choco install gh -y` |
 
+Every check has to be made **for the service account**, not in your own shell. A tool you can
+run is not necessarily a tool the runner can run, and the two ways that goes wrong are below.
+
+### PowerShell 7 has to be the MSI, not the Store build
+
+Install it machine-wide:
+
+```powershell
+choco install powershell-core -y
+```
+
+Then **restart the runner service**, because a service caches its environment at start and will
+not see the new `Path` otherwise.
+
+Two separate failures hide behind this, and fixing either alone still leaves a broken build.
+
+**The Store build is invisible to the service.** A `pwsh` installed from the Microsoft Store
+lives under `C:\Program Files\WindowsApps\...` and is reached through a *per-user* App
+Execution Alias in `%LOCALAPPDATA%\Microsoft\WindowsApps`. It works perfectly in your shell and
+does not exist as far as another account is concerned. The runner logs `pwsh: command not
+found` and quietly falls back to Windows PowerShell 5.1. Worse, the workflows name `shell:
+pwsh` explicitly in six steps — version stamping, installer compilation, release creation —
+and an explicit shell does not fall back. It fails outright.
+
+**Windows PowerShell 5.1 then blocks the script.** A `run:` step is written to a temporary
+`.ps1` and dot-sourced, and 5.1's `LocalMachine` execution policy is unset, which means
+`Restricted`. The step dies in half a second with *"running scripts is disabled on this
+system"*, before any build work starts, so the log looks like the build itself exploded.
+
+Note that PowerShell 5.1 and PowerShell 7 keep their execution policies in **different registry
+keys**, so `Get-ExecutionPolicy -List` in `pwsh` reports 7's policy — `RemoteSigned` by default
+on Windows — and tells you nothing about the shell the runner actually fell back to. Query
+5.1's directly:
+
+```powershell
+powershell.exe -Command "Get-ExecutionPolicy -List"
+```
+
+Installing pwsh machine-wide fixes both, because the runner then prefers it and 7's default
+policy already allows local scripts. If you want the fallback path to work too:
+
+```powershell
+powershell.exe -Command "Set-ExecutionPolicy RemoteSigned -Scope LocalMachine"
+```
+
+`RemoteSigned` is what Windows Server ships with: locally-authored scripts run, downloaded ones
+still need a signature. It is not a meaningful loosening, and it turns a baffling failure into
+a working fallback.
+
 The GitHub CLI is the one that bites: hosted images ship `gh`, most desktops don't, and the
 release step is the *last* thing in a tag build — so a missing `gh` wastes the whole run.
 Note that GitHub **Desktop** is a different product and does not provide `gh`.
+
+### Give the service its own account
+
+`config.cmd` installs the service as `NT AUTHORITY\NETWORK SERVICE`, which is a poor fit for a
+build agent — no real user profile, and not a member of the groups that grant read access to
+Program Files. Running it as *your* account fixes that but hands every workflow read access to
+your home folder, which is a bad trade on a machine with anything personal on it.
+
+A dedicated standard account gets both. It needs no deny rules to stay out of your documents:
+`C:\Users\<you>` already grants only you, SYSTEM and Administrators, so simply not being an
+administrator is the isolation.
+
+```powershell
+$pw = Read-Host -AsSecureString "Password for ghrunner"
+New-LocalUser -Name ghrunner -Password $pw -FullName "GitHub Actions runner" -PasswordNeverExpires -UserMayNotChangePassword
+Add-LocalGroupMember -Group Users -Member ghrunner
+```
+
+`New-LocalUser` joins no group at all, so the second line matters: membership of `Users` is
+what grants read and execute on Program Files, where the SDK, the MSVC toolchain, Inno Setup
+and `gh` all live. Then give it the runner directory and nothing else:
+
+```powershell
+icacls C:\actions-runner /grant "ghrunner:(OI)(CI)F" /T
+```
+
+Point the service at it through **Services.msc** → the runner service → Properties → **Log
+On** → This account → `.\ghrunner`. Use the GUI rather than `sc.exe config`: it grants the "Log
+on as a service" right as a side effect, which `sc.exe` does not, and without that right the
+service simply fails to start.
+
+For a little more, add the account to **Deny log on locally** and **Deny log on through Remote
+Desktop Services** in `secpol.msc`. It then exists only to run the service — nobody can sign in
+as it, whatever happens to the password.
+
+Keeping the build's caches inside the runner directory avoids depending on whatever profile the
+service account gets. The runner applies a `.env` file in its root to every job:
+
+```powershell
+Set-Content C:\actions-runner\.env "DOTNET_CLI_HOME=C:\actions-runner\home`nNUGET_PACKAGES=C:\actions-runner\home\.nuget\packages`nDOTNET_CLI_TELEMETRY_OPTOUT=1"
+```
 
 ### `actions/setup-dotnet` has to go
 
