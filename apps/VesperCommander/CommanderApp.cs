@@ -256,8 +256,10 @@ public partial class CommanderApp : Component, IDisposable
     private static HultUI.Core.Rendering.IImageSource? LoadImage(string path, long size)
     {
         if (size > 24 * 1024 * 1024) return null;   // don't decode very large images
-        try { return HultUI.Rendering.Skia.SkiaImageSource.FromFile(path); }
-        catch { return null; }
+        // Bytes on disk say nothing about pixels: see ImageDecode. Null (an unreadable image,
+        // or one whose frame is past the pixel budget) renders as "Cannot preview".
+        var bmp = ImageDecode.Bounded(path, ImageDecode.PreviewTargetPx);
+        return bmp == null ? null : new HultUI.Rendering.Skia.SkiaImageSource(bmp);
     }
 
     /// <summary>Read a bounded copy of an archive member's bytes (for preview), or null when
@@ -296,12 +298,8 @@ public partial class CommanderApp : Component, IDisposable
     {
         var bytes = ReadMemberBytes(e, 24 * 1024 * 1024);
         if (bytes == null) return null;
-        try
-        {
-            var bmp = SkiaSharp.SKBitmap.Decode(bytes);
-            return bmp == null ? null : new HultUI.Rendering.Skia.SkiaImageSource(bmp);
-        }
-        catch { return null; }
+        var bmp = ImageDecode.Bounded(bytes, ImageDecode.PreviewTargetPx);
+        return bmp == null ? null : new HultUI.Rendering.Skia.SkiaImageSource(bmp);
     }
 
     private const float RailWidth = 44f;

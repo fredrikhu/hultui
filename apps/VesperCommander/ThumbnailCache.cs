@@ -29,6 +29,10 @@ public sealed class ThumbnailCache : IDisposable
     private readonly int _cap;
     private bool _disposed;
 
+    // How many decodes may run at once. Half the cores, at least two: the work is CPU-bound
+    // and each one holds a bitmap, so the cap bounds peak memory as much as it does CPU.
+    private readonly SemaphoreSlim _slots = new(Math.Max(2, Environment.ProcessorCount / 2));
+
     public ThumbnailCache(Action onDecoded, int capacity = 512)
     {
         _onDecoded = onDecoded;
@@ -50,8 +54,19 @@ public sealed class ThumbnailCache : IDisposable
             if (_map.TryGetValue(key, out var e)) { Touch(key); return (e.Image, e.Status); }
             if (!_inFlight.Add(key)) return (null, Status.Pending);
         }
-        Task.Run(() => Decode(key, path, size, targetPx));
+        _ = DecodeQueued(key, path, size, targetPx);
         return (null, Status.Pending);
+    }
+
+    /// <summary>Waits for a decode slot before taking a thread. Every visible tile calls
+    /// <see cref="Get"/> on the same frame, so without this a screenful of images is a
+    /// screenful of simultaneous decodes — and even a bounded one is megabytes. Awaited
+    /// rather than blocked so queued work doesn't hold thread-pool threads while it waits.</summary>
+    private async Task DecodeQueued(string key, string path, long size, int targetPx)
+    {
+        await _slots.WaitAsync().ConfigureAwait(false);
+        try { await Task.Run(() => Decode(key, path, size, targetPx)).ConfigureAwait(false); }
+        finally { _slots.Release(); }
     }
 
     private void Decode(string key, string path, long size, int targetPx)
@@ -62,7 +77,10 @@ public sealed class ThumbnailCache : IDisposable
         {
             if (size > 0 && size <= MaxBytes)
             {
-                using var full = SKBitmap.Decode(path);
+                // Decoded straight to (about) the tile size where the format allows it, and
+                // refused outright when the full frame would be enormous — a 1.5 MB PNG can
+                // still be 1.6 GB of pixels. Failed here shows the image-kind icon.
+                using var full = ImageDecode.Bounded(path, targetPx);
                 if (full != null)
                 {
                     var scaled = Downscale(full, targetPx);
@@ -119,5 +137,9 @@ public sealed class ThumbnailCache : IDisposable
             _map.Clear();
             _lru.Clear();
         }
+        // _slots is deliberately not disposed. Disposing a SemaphoreSlim with waiters can
+        // leave them never completing, and a decode queued behind one would then never see
+        // the _disposed flag that tells it to free its own bitmap. It holds no unmanaged
+        // handle — that is allocated only by AvailableWaitHandle, which nothing here uses.
     }
 }
