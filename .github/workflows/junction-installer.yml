@@ -32,9 +32,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.x
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
+      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
+      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
+      # try to install into that same Program Files directory, which the
+      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
+      # every step after it is skipped.
 
       - name: Build solution
         run: dotnet build HultUI.slnx -c Release
@@ -55,9 +58,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.x
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
+      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
+      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
+      # try to install into that same Program Files directory, which the
+      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
+      # every step after it is skipped.
 
       - name: Run tests
         run: dotnet test HultUI.CrossPlatform.slnf -c Release
@@ -70,9 +76,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.x
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
+      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
+      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
+      # try to install into that same Program Files directory, which the
+      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
+      # every step after it is skipped.
 
       # Tag junction-v1.2.0 -> 1.2.0; other builds get a CI prerelease version.
       - name: Determine version

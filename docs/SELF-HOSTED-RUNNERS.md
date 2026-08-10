@@ -50,8 +50,25 @@ The GitHub CLI is the one that bites: hosted images ship `gh`, most desktops don
 release step is the *last* thing in a tag build — so a missing `gh` wastes the whole run.
 Note that GitHub **Desktop** is a different product and does not provide `gh`.
 
-You can drop the `actions/setup-dotnet` steps on a self-hosted runner if the SDK is already
-installed, though leaving them costs little.
+### `actions/setup-dotnet` has to go
+
+Not an optimisation — leaving it in **fails the build**. `config.cmd` installs the service as
+`NT AUTHORITY\NETWORK SERVICE` by default, which is not an administrator, and the action
+installs the SDK into `C:\Program Files\dotnet`. It cannot write there, exits 1 about three
+seconds in, and every step after it is skipped by the `success()` condition — so the log shows
+a job that "did nothing" rather than one that failed at a build.
+
+Provision the SDK on the host instead and let the workflow use it: `dotnet --list-sdks` should
+report a 10.0 SDK, and `C:\Program Files\dotnet\` must be on the **machine** `Path`, not just
+your user one, or the service will not see it.
+
+The same applies in the container, where the apt-installed SDK lands on the path for every
+user including `runner`. If `test-linux` reports `dotnet: command not found`, that package is
+what is missing.
+
+If you would rather keep the action, the alternatives are to point it somewhere writable with
+`DOTNET_INSTALL_DIR`, or to run the service under an administrator account. Both are more
+moving parts than provisioning the SDK once.
 
 ## Ubuntu runner in a Proxmox container
 
