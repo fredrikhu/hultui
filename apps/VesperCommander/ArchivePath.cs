@@ -38,6 +38,43 @@ public static class ArchivePath
     public static string Combine(string archiveFile, string inner) =>
         inner.Length == 0 ? archiveFile : archiveFile + Path.DirectorySeparatorChar + inner;
 
+    /// <summary>
+    /// An archive member's stored path, cleaned into a relative path we are willing to use —
+    /// or null when it is one we are not.
+    ///
+    /// <para>Nothing constrains what a zip puts in its name field. A member called
+    /// <c>../../evil.txt</c> is a valid archive and a well-known attack ("zip slip"): listed
+    /// naively it becomes a folder called "..", and extracting that folder walks the
+    /// destination path back out of itself and writes wherever the archive chose. The BCL's
+    /// <c>ZipFile.ExtractToDirectory</c> refuses such an entry; we don't use it — we enumerate
+    /// members and join paths ourselves — so the check has to live here.</para>
+    ///
+    /// <para>Rejected: any <c>..</c> segment, and anything rooted — a leading slash, a UNC
+    /// <c>\\server\share</c>, or a drive prefix, including the drive-<i>relative</i>
+    /// <c>C:evil.txt</c> that resolves against the process's current directory on that drive.
+    /// Accepted and normalized away: <c>.</c> segments and doubled slashes, which ordinary tar
+    /// archives really do contain. A trailing slash is kept, since it is how a zip marks a
+    /// directory entry.</para>
+    /// </summary>
+    public static string? SafeMemberPath(string? stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return null;
+        var s = stored.Replace('\\', '/');
+        if (s[0] == '/') return null;                       // "/etc/x", and "//server/share/x"
+        if (s.Length >= 2 && s[1] == ':') return null;      // "C:/x" and the drive-relative "C:x"
+
+        bool directory = s[^1] == '/';
+        var kept = new List<string>();
+        foreach (var segment in s.Split('/'))
+        {
+            if (segment.Length == 0 || segment == ".") continue;
+            if (segment == "..") return null;
+            kept.Add(segment);
+        }
+        if (kept.Count == 0) return null;
+        return string.Join('/', kept) + (directory ? "/" : "");
+    }
+
     /// <summary>The parent of an archive location: the containing real folder at the
     /// archive root, else the enclosing internal folder.</summary>
     public static string ParentOf(string archiveFile, string internalPath)

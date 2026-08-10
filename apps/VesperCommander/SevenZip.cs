@@ -41,7 +41,7 @@ public static class SevenZip
 
     public static ArchiveListing List(string archiveFile, string internalPath, string? password)
     {
-        var (ok, stdout, wrongPassword) = Run(["l", "-slt", PwdArg(password), archiveFile], readAll: true);
+        var (ok, stdout, wrongPassword) = Run(ListArgs(archiveFile, password), readAll: true);
         if (wrongPassword) return new(ArchiveStatus.Encrypted, []);
         if (!ok) return new(ArchiveStatus.Corrupt, []);
 
@@ -51,10 +51,13 @@ public static class SevenZip
         var dirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var files = new List<FileEntry>();
         long totalSize = 0, totalPacked = 0;
+        int unsafeCount = 0;
 
         foreach (var m in members)
         {
-            string full = m.Path.Replace('\\', '/');
+            // Same guard as the built-in zip reader: 7-Zip reports whatever the archive
+            // stored, including a path that walks out of the destination on extraction.
+            if (ArchivePath.SafeMemberPath(m.Path) is not { } full) { unsafeCount++; continue; }
             if (prefix.Length > 0 && !full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             string rest = full[prefix.Length..];
             if (rest.Length == 0) continue;
@@ -80,7 +83,7 @@ public static class SevenZip
         }
         result.AddRange(files);
         var status = dirs.Count == 0 && files.Count == 0 ? ArchiveStatus.Empty : ArchiveStatus.Ok;
-        return new ArchiveListing(status, result, totalSize, totalPacked);
+        return new ArchiveListing(status, result, totalSize, totalPacked, unsafeCount);
     }
 
     /// <summary>Extract one member to a stream (<c>7z x -so</c>, member bytes on stdout).</summary>
@@ -88,7 +91,7 @@ public static class SevenZip
     {
         try
         {
-            var psi = Psi(["x", "-so", PwdArg(password), archiveFile, internalPath.Replace('\\', '/')]);
+            var psi = Psi(ExtractArgs(archiveFile, internalPath, password));
             if (psi is null) return null;
             psi.RedirectStandardOutput = true;
             var p = Process.Start(psi);
@@ -100,12 +103,36 @@ public static class SevenZip
     public static string? Create(IReadOnlyList<(string Source, string Entry)> items, string archivePath,
         CompressionLevel level, string? password)
     {
+        var (ok, _, _) = Run(CreateArgs(items, archivePath, level, password), readAll: false);
+        return ok ? null : "7-Zip failed to create the archive";
+    }
+
+    // ── Command lines ────────────────────────────────────────────────────
+    //
+    // Everything positional goes after "--". 7-Zip reads any argument starting with "-" as a
+    // switch wherever it appears, and one of the positional arguments here is a *member path
+    // read out of the archive* — so an archive holding a member called "-y" or "-r" would be
+    // choosing 7-Zip's switches for us. "--" ends switch parsing; what follows is data.
+    //
+    // Built here rather than inline so the shape can be asserted in tests: this machine has no
+    // 7-Zip to run, and "did we put -- in the right place" is exactly the kind of thing that
+    // silently stops being true.
+    private const string EndOfSwitches = "--";
+
+    internal static string[] ListArgs(string archiveFile, string? password) =>
+        ["l", "-slt", PwdArg(password), EndOfSwitches, archiveFile];
+
+    internal static string[] ExtractArgs(string archiveFile, string internalPath, string? password) =>
+        ["x", "-so", PwdArg(password), EndOfSwitches, archiveFile, internalPath.Replace('\\', '/')];
+
+    internal static string[] CreateArgs(IReadOnlyList<(string Source, string Entry)> items,
+        string archivePath, CompressionLevel level, string? password)
+    {
         // 7-Zip packs by source path; entry-name remapping isn't expressed on the CLI, so
         // v1 adds the sources as-is (flat/relative names preserved by 7z).
-        var args = new List<string> { "a", $"-mx={Level(level)}", PwdArg(password), archivePath };
+        var args = new List<string> { "a", $"-mx={Level(level)}", PwdArg(password), EndOfSwitches, archivePath };
         args.AddRange(items.Select(i => i.Source));
-        var (ok, _, _) = Run(args.Where(a => a.Length > 0).ToArray(), readAll: false);
-        return ok ? null : "7-Zip failed to create the archive";
+        return [.. args];
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────

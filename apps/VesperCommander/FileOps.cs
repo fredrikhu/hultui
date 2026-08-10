@@ -15,6 +15,38 @@ public static class FileOps
     /// <summary>True when <paramref name="path"/> already exists as a file or folder.</summary>
     public static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
 
+    /// <summary>
+    /// The full path of <paramref name="name"/> inside <paramref name="destDir"/>, or null
+    /// when joining the two would land outside it.
+    ///
+    /// <para>Every write in this file goes through here. A name is usually just a file name,
+    /// but not always — the sync commit deliberately passes a path relative to the
+    /// destination, so a plain "no separators" rule would break it. What actually matters is
+    /// where the join <i>resolves</i>, which is what this checks.</para>
+    ///
+    /// <para>The archive reader already refuses a traversing member
+    /// (<see cref="ArchivePath.SafeMemberPath"/>); this is the second line, so that a future
+    /// caller inventing a new way to reach the transfer body cannot reopen the hole.</para>
+    /// </summary>
+    public static string? ContainedPath(string destDir, string name)
+    {
+        try
+        {
+            var root = Path.GetFullPath(destDir);
+            // Combine, not concatenate: a rooted name replaces the root outright, and
+            // GetFullPath then puts it somewhere the prefix test will reject.
+            var full = Path.GetFullPath(Path.Combine(root, name));
+            var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            return full.StartsWith(prefix, comparison) ? full : null;
+        }
+        catch { return null; }   // an unusable name — refuse it rather than guess
+    }
+
+    /// <summary>The message shown when a write is refused for leaving its destination. Short
+    /// on purpose: it lands in a per-item error column.</summary>
+    private const string EscapesDest = "refused — it would be written outside the destination";
+
     // ── Access-denied tagging ────────────────────────────────────────────
     // Ops report failure as a message string, and callers need to tell "you lack the
     // rights" (offer elevation) from "the disk is full" (don't). Rather than widen every
@@ -249,9 +281,9 @@ public static class FileOps
     /// <summary>Copy an entry into <paramref name="destDir"/> (recursively for folders).</summary>
     public static string? Copy(FileEntry e, string destDir, bool overwrite)
     {
+        if (ContainedPath(destDir, e.Name) is not { } dest) return EscapesDest;
         try
         {
-            var dest = Path.Combine(destDir, e.Name);
             if (e.IsDir) CopyDirectory(e.FullPath, dest, overwrite);
             else File.Copy(e.FullPath, dest, overwrite);
             return null;
@@ -273,9 +305,9 @@ public static class FileOps
     /// <paramref name="overwrite"/> and the target exists, it is recycled first.</summary>
     public static string? Move(FileEntry e, string destDir, bool overwrite)
     {
+        if (ContainedPath(destDir, e.Name) is not { } dest) return EscapesDest;
         try
         {
-            var dest = Path.Combine(destDir, e.Name);
             if (Exists(dest))
             {
                 if (!overwrite) return "target exists";
@@ -383,7 +415,7 @@ public static class FileOps
     public static string? CopyStreamed(FileEntry e, string destDir, bool overwrite,
         Action<long> onBytes, Func<bool> cancelled, bool sevenZip = false, string? password = null)
     {
-        var dest = Path.Combine(destDir, e.Name);
+        if (ContainedPath(destDir, e.Name) is not { } dest) return EscapesDest;
         return e.IsDir
             ? CopyDirStreamed(e.FullPath, dest, overwrite, onBytes, cancelled, sevenZip, password)
             : CopyFileStreamed(e.FullPath, dest, overwrite, onBytes, cancelled, sevenZip, password);
@@ -462,7 +494,7 @@ public static class FileOps
             {
                 if (entry.IsParent) continue;
                 if (cancelled()) return "cancelled";
-                string target = Path.Combine(dest, entry.Name);
+                if (ContainedPath(dest, entry.Name) is not { } target) return EscapesDest;
                 string? err = entry.IsDir
                     ? CopyDirStreamed(entry.FullPath, target, overwrite, onBytes, cancelled, sevenZip, password)
                     : CopyFileStreamed(entry.FullPath, target, overwrite, onBytes, cancelled, sevenZip, password);

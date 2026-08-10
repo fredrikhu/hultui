@@ -787,6 +787,19 @@ public partial class CommanderApp
         var tail = decoding > 0 ? $"decoding {decoding}…" : free;
         var label = $"{files} files, {dirs} dirs, {sizeLabel}" + (tail.Length > 0 ? $" · {tail}" : "");
         footer.AddChild(Ui.Mono(label, 10.5f, decoding > 0 ? Nocturne.Accent300 : Nocturne.On(0.50)));
+
+        // An archive whose members point outside itself is listed short. Say so — a listing
+        // that quietly omits files is worse than one that explains why, and the omission is
+        // itself worth knowing about.
+        int hidden = Loader(side).Value.Unsafe;
+        if (hidden > 0)
+        {
+            footer.AddChild(Ui.Mono("·", 10.5f, Nocturne.On(0.30)));
+            footer.AddChild(Ui.Icon(Glyphs.Warning, 11f, Nocturne.MarkRed));
+            footer.AddChild(Ui.Mono(
+                $"{hidden} unsafe {(hidden == 1 ? "entry" : "entries")} hidden", 10.5f, Nocturne.MarkRed)
+                .Tooltip("Their stored paths point outside the archive, so they were not listed"));
+        }
         return footer;
     }
 

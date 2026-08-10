@@ -102,6 +102,10 @@ public partial class CommanderApp
         };
         string? password = _packEncrypt && _packPassword.Length > 0 ? _packPassword : null;
         bool move = _packMove;
+        // Only meaningful for the single-archive job: "one archive per item" never offers the
+        // collision prompt that sets the flag. Captured here rather than read in the worker,
+        // like `move`, so a later dialog interaction can't change it mid-pack.
+        bool addToExisting = _packAddToExisting && !_packEachOwn;
         var sources = _packItems.Select(e => (e.FullPath, e.IsDir)).ToList();
 
         // Build the pack jobs: one archive, or one per item.
@@ -134,7 +138,7 @@ public partial class CommanderApp
             string? err = null;
             foreach (var (archivePath, items) in jobs)
             {
-                err = ArchiveVfs.Create(items, archivePath, level, password, needs7z);
+                err = ArchiveVfs.Create(items, archivePath, level, password, needs7z, addToExisting);
                 if (err != null) break;
             }
             if (err == null && move)

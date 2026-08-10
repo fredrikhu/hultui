@@ -4,9 +4,13 @@ namespace VesperCommander;
 
 public enum ArchiveStatus { Ok, Empty, Corrupt, NeedsSevenZip, Encrypted, NotFound }
 
-/// <summary>A listing of one level inside an archive, plus its status and roll-up sizes.</summary>
+/// <summary>A listing of one level inside an archive, plus its status and roll-up sizes.
+/// <paramref name="Unsafe"/> counts members left out because their stored path was not one we
+/// would write (see <see cref="ArchivePath.SafeMemberPath"/>) — surfaced rather than silently
+/// dropped, because an archive containing one is telling you something.</summary>
 public sealed record ArchiveListing(
-    ArchiveStatus Status, IReadOnlyList<FileEntry> Entries, long TotalSize = 0, long TotalPacked = 0);
+    ArchiveStatus Status, IReadOnlyList<FileEntry> Entries, long TotalSize = 0, long TotalPacked = 0,
+    int Unsafe = 0);
 
 /// <summary>What a backend can do with a given format.</summary>
 public readonly record struct ArchiveCaps(bool Read, bool Write, bool Encrypt);
@@ -70,16 +74,19 @@ public static class ArchiveVfs
         var dirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var files = new List<FileEntry>();
         long totalSize = 0, totalPacked = 0;
+        int unsafeCount = 0;
 
         foreach (var entry in zip.Entries)
         {
-            string full = entry.FullName.Replace('\\', '/');
+            // Before anything else: a member whose stored path escapes the archive is dropped
+            // here, so it never reaches a listing, a mark, or an extraction.
+            if (ArchivePath.SafeMemberPath(entry.FullName) is not { } full) { unsafeCount++; continue; }
             if (prefix.Length > 0 && !full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             string rest = full[prefix.Length..];
             if (rest.Length == 0) continue;
             int slash = rest.IndexOf('/');
             if (slash >= 0) { dirs.Add(rest[..slash]); continue; }
-            if (entry.FullName.EndsWith("/")) continue;   // a directory marker entry
+            if (full.EndsWith('/')) continue;   // a directory marker entry
 
             string inner = virtInternal.Length == 0 ? rest : virtInternal + Path.DirectorySeparatorChar + rest;
             files.Add(new FileEntry(rest, ArchivePath.Combine(virtArchive, inner),
@@ -100,7 +107,7 @@ public static class ArchiveVfs
         result.AddRange(files);
 
         var status = dirs.Count == 0 && files.Count == 0 ? ArchiveStatus.Empty : ArchiveStatus.Ok;
-        return new ArchiveListing(status, result, totalSize, totalPacked);
+        return new ArchiveListing(status, result, totalSize, totalPacked, unsafeCount);
     }
 
     /// <summary>Open a member's bytes for reading (extract / preview). Caller disposes.</summary>
@@ -176,25 +183,45 @@ public static class ArchiveVfs
         _nestedTemp.Clear();
     }
 
-    /// <summary>Create <paramref name="archivePath"/> from <paramref name="items"/>
-    /// (source path → entry name). Built-in zip, or 7-Zip for other formats / encryption.
-    /// Returns an error message or null.</summary>
+    /// <summary>
+    /// Create <paramref name="archivePath"/> from <paramref name="items"/> (source path →
+    /// entry name). Built-in zip, or 7-Zip for other formats / encryption. Returns an error
+    /// message or null.
+    ///
+    /// <para><paramref name="addToExisting"/> is the Pack dialog's "Add to it": the new items
+    /// join what is already in the archive. Without it the archive is replaced. The built-in
+    /// zip writer used to replace either way, so the button labelled "Add to it" deleted the
+    /// very archive it offered to add to — <c>ZipArchiveMode.Create</c> starts an empty
+    /// archive, and nothing told it not to.</para>
+    /// </summary>
     public static string? Create(IReadOnlyList<(string Source, string Entry)> items, string archivePath,
-        CompressionLevel level, string? password, bool sevenZip)
+        CompressionLevel level, string? password, bool sevenZip, bool addToExisting = false)
     {
         string ext = Path.GetExtension(archivePath).ToLowerInvariant();
+        bool append = addToExisting && File.Exists(archivePath);
         try
         {
+            // Replacing: clear the old archive first. Done for both writers, because 7-Zip's
+            // "a" command appends by default — so without this, "create" would mean replace
+            // through one writer and merge through the other.
+            if (!append && File.Exists(archivePath)) File.Delete(archivePath);
+
             if (ext is ".zip" && password is null && !sevenZip)
             {
-                if (File.Exists(archivePath)) File.Delete(archivePath);
-                using var zip = ZipFile.Open(archivePath, ZipArchiveMode.Create);
+                using var zip = ZipFile.Open(archivePath, append ? ZipArchiveMode.Update : ZipArchiveMode.Create);
                 foreach (var (src, entry) in items)
-                    if (File.Exists(src)) zip.CreateEntryFromFile(src, entry.Replace('\\', '/'), level);
+                {
+                    if (!File.Exists(src)) continue;
+                    var name = entry.Replace('\\', '/');
+                    // Update keeps what is already there, so a same-named entry has to be
+                    // removed explicitly or the archive ends up holding two of it.
+                    if (append) zip.GetEntry(name)?.Delete();
+                    zip.CreateEntryFromFile(src, name, level);
+                }
                 return null;
             }
             return sevenZip
-                ? SevenZip.Create(items, archivePath, level, password)
+                ? SevenZip.Create(items, archivePath, level, password)   // "a" appends to what survives above
                 : "This format needs 7-Zip — set it in Tools → Archiver";
         }
         catch (Exception ex) { return ex.Message; }

@@ -23,7 +23,11 @@ public enum PaneState { Ok, Empty, Offline, Denied }
 /// <summary>A directory listing plus the state it resolved to. <see cref="Archive"/> is
 /// set (to a non-Ok status) when a browsed archive couldn't be read — encrypted, corrupt,
 /// or needing 7-Zip — so the pane can show the right message.</summary>
-public sealed record DirListing(PaneState State, IReadOnlyList<FileEntry> Entries, ArchiveStatus? Archive = null)
+/// <param name="Unsafe">Archive members left out because their stored path pointed outside
+/// the archive — see <see cref="ArchivePath.SafeMemberPath"/>. The pane footer says so rather
+/// than quietly showing a short listing.</param>
+public sealed record DirListing(PaneState State, IReadOnlyList<FileEntry> Entries, ArchiveStatus? Archive = null,
+    int Unsafe = 0)
 {
     public static readonly DirListing Loading = new(PaneState.Ok, []);
 }
@@ -190,7 +194,7 @@ public static class FileSystem
         if (al.Status is not (ArchiveStatus.Ok or ArchiveStatus.Empty))
             return new(PaneState.Denied, al.Entries, al.Status);   // pane renders the specific message
         if (al.Status == ArchiveStatus.Empty)
-            return new(PaneState.Empty, al.Entries, ArchiveStatus.Empty);
+            return new(PaneState.Empty, al.Entries, ArchiveStatus.Empty, al.Unsafe);
 
         var cmp = Comparator(sort, descending);
         var parent = al.Entries.Where(e => e.IsParent).ToList();
@@ -200,7 +204,7 @@ public static class FileSystem
         result.AddRange(parent);
         if (dirsFirst) { dirs.Sort(cmp); files.Sort(cmp); result.AddRange(dirs); result.AddRange(files); }
         else { var all = dirs.Concat(files).ToList(); all.Sort(cmp); result.AddRange(all); }
-        return new(PaneState.Ok, result);
+        return new(PaneState.Ok, result, null, al.Unsafe);
     }
 
     /// <summary>Human-readable size for the 60px size column; directories read "&lt;DIR&gt;".</summary>
