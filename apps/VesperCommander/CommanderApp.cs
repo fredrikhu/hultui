@@ -1939,7 +1939,25 @@ public partial class CommanderApp : Component, IDisposable
             case KeyCode.Home: _driveCur = 0; MarkDirty(); break;
             case KeyCode.End: _driveCur = _drives.Count - 1; MarkDirty(); break;
             case KeyCode.Enter: SelectDrive(target, _driveCur); break;
+            // A letter picks its drive outright, the way Total Commander's drive list does —
+            // Alt+F1 then "c" is two keystrokes, not a walk down the list.
+            case >= KeyCode.A and <= KeyCode.Z:
+                int hit = IndexOfDriveLetter((char)('A' + (e.Key - KeyCode.A)));
+                if (hit >= 0) { _driveCur = hit; SelectDrive(target, hit); }
+                break;
         }
+    }
+
+    /// <summary>The drive whose root starts with <paramref name="letter"/>, or -1. Roots that
+    /// aren't drive letters at all (a UNC mount) simply never match.</summary>
+    private int IndexOfDriveLetter(char letter)
+    {
+        for (int i = 0; i < _drives.Count; i++)
+        {
+            var root = _drives[i].Root;
+            if (root.Length >= 2 && root[1] == ':' && char.ToUpperInvariant(root[0]) == letter) return i;
+        }
+        return -1;
     }
 
     private void SelectDrive(char target, int index)
@@ -1949,10 +1967,20 @@ public partial class CommanderApp : Component, IDisposable
             _active = target;
             var root = _drives[index].Root;
             CloseOverlays();
-            NavigateTo(target, root);
+            NavigateTo(target, SameDriveTargetFor(target, root));
         }
     }
 
+    /// <summary>Where picking <paramref name="root"/> for <paramref name="target"/> should
+    /// actually land. When the other pane is already on that volume, Total Commander opens the
+    /// folder it is showing rather than the bare root — switching a pane to a drive is nearly
+    /// always about catching up with the other side, and the root is one Backspace away when
+    /// it isn't.</summary>
+    private string SameDriveTargetFor(char target, string root)
+    {
+        var otherDir = Dir(target == 'L' ? 'R' : 'L');
+        return PathEquals(System.IO.Path.GetPathRoot(otherDir), root) ? otherDir : root;
+    }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
     private void HandleKeyDown(KeyDownEvent e)
