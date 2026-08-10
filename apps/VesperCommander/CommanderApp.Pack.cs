@@ -26,6 +26,8 @@ public partial class CommanderApp
     private string _packPassword = "";
     private bool _packOther = true;          // destination: other pane (else this pane)
     private bool _packAddToExisting;
+    private bool _packAutoRename;            // "one archive per item": rename around collisions
+    private bool _packClash;                 // _packError is a collision, so offer the two ways out
     private string? _packError;
     private bool _pendingPackFocus;
     private readonly Ref<TextInputElement> _packNameRef = new();
@@ -46,22 +48,29 @@ public partial class CommanderApp
         _packName = SeedPackName(items) + ".zip";
         _packLevel = 2;
         _packMove = _packEachOwn = _packEncrypt = false;
-        _packPassword = ""; _packOther = true; _packAddToExisting = false; _packError = null;
+        _packPassword = ""; _packOther = true; _packError = null;
+        _packAddToExisting = _packAutoRename = _packClash = false;
         _packOpen = true; _pendingPackFocus = true;
         MarkDirty();
     }
 
     private string SeedPackName(List<FileEntry> items) =>
-        items.Count == 1 ? System.IO.Path.GetFileNameWithoutExtension(items[0].Name)
+        items.Count == 1 ? StemOf(items[0].Name)
                          : new System.IO.DirectoryInfo(Dir(_packSource)).Name;
+
+    /// <summary>The name without its archive extension. <c>.tar.gz</c> is two extensions as
+    /// far as the BCL is concerned, so it needs saying explicitly or the stem keeps a
+    /// <c>.tar</c> that the next call adds a second extension behind.</summary>
+    private static string StemOf(string name) =>
+        name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
+            ? name[..^7] : System.IO.Path.GetFileNameWithoutExtension(name);
 
     private void ClosePack() { _packOpen = false; PaneRef(_packSource).Current?.Focus(); MarkDirty(); }
 
     private void SetPackFormat(PackFmt fmt)
     {
         // Preserve the stem, swap the extension.
-        string stem = _packName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
-            ? _packName[..^7] : System.IO.Path.GetFileNameWithoutExtension(_packName);
+        string stem = StemOf(_packName);
         _packFmt = fmt;
         _packName = stem + PackExt(fmt);
         _packError = null;
@@ -80,12 +89,11 @@ public partial class CommanderApp
     private void CommitPack()
     {
         string ext = PackExt(_packFmt);
-        string stem = _packName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
-            ? _packName[..^7] : System.IO.Path.GetFileNameWithoutExtension(_packName);
+        string stem = StemOf(_packName);
+        _packClash = false;
         if (stem.Length == 0) { _packError = "Enter an archive name"; MarkDirty(); return; }
 
-        char other = _packSource == 'L' ? 'R' : 'L';
-        string destDir = _packOther ? Dir(other) : Dir(_packSource);
+        string destDir = PackDestDir();
         bool needs7z = _packFmt != PackFmt.Zip || _packEncrypt;
         if (needs7z && !_sevenZip)
         {
@@ -102,31 +110,23 @@ public partial class CommanderApp
         };
         string? password = _packEncrypt && _packPassword.Length > 0 ? _packPassword : null;
         bool move = _packMove;
-        // Only meaningful for the single-archive job: "one archive per item" never offers the
-        // collision prompt that sets the flag. Captured here rather than read in the worker,
-        // like `move`, so a later dialog interaction can't change it mid-pack.
-        bool addToExisting = _packAddToExisting && !_packEachOwn;
+        // Captured here rather than read in the worker, like `move`, so a later dialog
+        // interaction can't change it mid-pack.
+        bool addToExisting = _packAddToExisting;
         var sources = _packItems.Select(e => (e.FullPath, e.IsDir)).ToList();
 
         // Build the pack jobs: one archive, or one per item.
         var jobs = new List<(string archivePath, List<(string Source, string Entry)> items)>();
         if (_packEachOwn)
-        {
             foreach (var it in _packItems)
-            {
-                string n = System.IO.Path.GetFileNameWithoutExtension(it.Name) + ext;
-                jobs.Add((System.IO.Path.Combine(destDir, n), PackItemsFor([it], needs7z)));
-            }
-        }
+                jobs.Add((System.IO.Path.Combine(destDir, StemOf(it.Name) + ext), PackItemsFor([it], needs7z)));
         else
+            jobs.Add((System.IO.Path.Combine(destDir, stem + ext), PackItemsFor(_packItems, needs7z)));
+
+        if (ResolveCollisions(jobs, destDir) is { } clash)
         {
-            string archivePath = System.IO.Path.Combine(destDir, stem + ext);
-            if (System.IO.File.Exists(archivePath) && !_packAddToExisting)
-            {
-                _packError = $"{stem + ext} already exists in {destDir}";
-                MarkDirty(); return;
-            }
-            jobs.Add((archivePath, PackItemsFor(_packItems, needs7z)));
+            _packError = clash; _packClash = true;
+            MarkDirty(); return;
         }
 
         _packOpen = false;
@@ -153,6 +153,49 @@ public partial class CommanderApp
                 MarkDirty();
             });
         });
+    }
+
+    /// <summary>Apply the overwrite rule to every job. Returns the message to put in front of
+    /// the user, or null when the jobs are clear to run — "Auto-rename" having rewritten the
+    /// paths that needed it.
+    /// <para>"Put each item in its own archive" used to skip this: it wrote straight over any
+    /// archive of that name, silently, which is the same overwrite the single-archive path has
+    /// always stopped to ask about.</para></summary>
+    private string? ResolveCollisions(
+        List<(string archivePath, List<(string Source, string Entry)> items)> jobs, string destDir)
+    {
+        if (_packAddToExisting) return null;   // already answered: merge into whatever is there
+
+        // Names claimed earlier in this same run count as taken alongside what is on disk.
+        // Two items called "notes.txt" and "notes.md" both pack to "notes.zip", so the second
+        // job would otherwise overwrite the first before anyone could see either.
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var clashes = new List<string>();
+
+        bool Free(string name) =>
+            !FileOps.Exists(System.IO.Path.Combine(destDir, name))
+            && !taken.Contains(System.IO.Path.Combine(destDir, name));
+
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            string name = System.IO.Path.GetFileName(jobs[i].archivePath);
+            if (Free(name)) { taken.Add(jobs[i].archivePath); continue; }
+            if (!_packAutoRename) { clashes.Add(name); continue; }
+
+            // FileOps.UniqueName only consults the disk, and the disk doesn't yet know about
+            // the archives this run is about to write.
+            string stem = StemOf(name), ext = name[stem.Length..];
+            string renamed = name;
+            for (int n = 2; !Free(renamed); n++) renamed = $"{stem} ({n}){ext}";
+            var path = System.IO.Path.Combine(destDir, renamed);
+            jobs[i] = (path, jobs[i].items);
+            taken.Add(path);
+        }
+
+        if (clashes.Count == 0) return null;
+        return clashes.Count == 1
+            ? $"{clashes[0]} already exists in {destDir}"
+            : $"{clashes.Count} of these archives already exist in {destDir}";
     }
 
     /// <summary>Expand the selection into (source, entry-name) pairs. Built-in zip needs
@@ -187,7 +230,7 @@ public partial class CommanderApp
         if (_packEachOwn)
             card.AddChild(PackHint("One archive per item — names come from each item"));
         if (_packError != null)
-            card.AddChild(PackCollision());
+            card.AddChild(_packClash ? PackCollision() : PackProblem(_packError));
 
         // Format.
         var fmt = PackSection("FORMAT");
@@ -234,7 +277,7 @@ public partial class CommanderApp
         dst.AddChild(Seg(
             ("This pane", !_packOther, () => { _packOther = false; _packError = null; MarkDirty(); }),
             ("Other pane", _packOther, () => { _packOther = true; _packError = null; MarkDirty(); })));
-        dst.AddChild(Ui.Mono(_packOther ? Dir(_packSource == 'L' ? 'R' : 'L') : Dir(_packSource), 10.5f, Nocturne.On(0.45))
+        dst.AddChild(Ui.Mono(PackDestDir(), 10.5f, Nocturne.On(0.45))
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         card.AddChild(dst);
 
@@ -264,22 +307,54 @@ public partial class CommanderApp
         Box.New().Padding(new Thickness(0, 14, 6, 14))
             .Children(Ui.Mono(text, 10f, Nocturne.On(0.42)));
 
+    /// <summary>A problem that has no way out but changing something — an empty name, a
+    /// format with no 7-Zip behind it. Said in red, without the collision dialog's buttons:
+    /// "Add to it" answers a question this message never asked.</summary>
+    private static Element PackProblem(string message) =>
+        Box.New().Padding(new Thickness(2, 14, 8, 14))
+            .Children(Ui.Mono(message, 10.5f, Nocturne.MarkRed));
+
     private Element PackCollision()
     {
         var box = Flex.Column(gap: 6).Padding(new Thickness(2, 14, 8, 14));
         box.AddChild(Ui.Mono(_packError!, 10.5f, Nocturne.MarkRed));
         var actions = Flex.Row(gap: 8);
-        actions.AddChild(GhostButton("Add to it", () => { _packAddToExisting = true; _packError = null; CommitPack(); }));
-        actions.AddChild(GhostButton("Auto-rename", () =>
+
+        // One archive per item has no single name to rewrite, so both ways out re-run the
+        // pack with the answer set. The single-archive prompt keeps putting the new name in
+        // the field instead, where it can be read and edited before committing to it.
+        if (_packEachOwn)
         {
-            string ext = PackExt(_packFmt);
-            string stem = System.IO.Path.GetFileNameWithoutExtension(_packName);
-            char other = _packSource == 'L' ? 'R' : 'L';
-            string destDir = _packOther ? Dir(other) : Dir(_packSource);
-            _packName = FileOps.UniqueName(destDir, stem + ext);
-            _packError = null; MarkDirty();
-        }));
+            actions.AddChild(ClashButton("pack-add-existing", "Add to them",
+                () => { _packAddToExisting = true; _packError = null; CommitPack(); }));
+            actions.AddChild(ClashButton("pack-auto-rename", "Auto-rename",
+                () => { _packAutoRename = true; _packError = null; CommitPack(); }));
+        }
+        else
+        {
+            actions.AddChild(ClashButton("pack-add-existing", "Add to it",
+                () => { _packAddToExisting = true; _packError = null; CommitPack(); }));
+            actions.AddChild(ClashButton("pack-auto-rename", "Auto-rename", () =>
+            {
+                _packName = FileOps.UniqueName(PackDestDir(), StemOf(_packName) + PackExt(_packFmt));
+                _packError = null; MarkDirty();
+            }));
+        }
         box.AddChild(actions);
         return box;
     }
+
+    /// <summary>A way out of a collision, named so assistive tech (and the tests) can reach
+    /// it — the two are the only controls in this dialog that decide what happens to a file
+    /// that is already on disk.</summary>
+    private static Element ClashButton(string id, string label, Action onClick)
+    {
+        var b = GhostButton(label, onClick);
+        b.AutomationId = id;
+        b.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        b.AccessibleName = label;
+        return b;
+    }
+
+    private string PackDestDir() => _packOther ? Dir(_packSource == 'L' ? 'R' : 'L') : Dir(_packSource);
 }
