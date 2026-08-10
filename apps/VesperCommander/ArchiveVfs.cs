@@ -136,7 +136,19 @@ public static class ArchiveVfs
     // temp file, and returns the real on-disk archive + the remaining internal path. Entry
     // FullPaths stay virtual (the outer chain), so the breadcrumb and navigation are seamless
     // for zip-in-zip. Extractions are cached for the session and cleaned up on exit.
+    //
+    // Both panes list on their own background threads, and either can land here — so the
+    // cache is guarded. A lock rather than a ConcurrentDictionary because the extraction
+    // itself must not be duplicated: two threads that both miss on the same member each copy
+    // it out to a temp file of their own, and the one that loses the race to the dictionary
+    // leaves its copy in %TEMP% until the app exits. Serializing costs a wait on the rare
+    // occasion both panes open the same nested archive at once, on threads that are already
+    // off the UI.
+    private static readonly object _nestedLock = new();
     private static readonly Dictionary<string, string> _nestedTemp = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Where nested archives are unpacked for the session.</summary>
+    internal static string NestedTempDir => Path.Combine(Path.GetTempPath(), "vesper-nested");
 
     private static (string disk, string inner)? Resolve(string archiveFile, string internalPath, string? password, bool sevenZip)
     {
@@ -160,27 +172,32 @@ public static class ArchiveVfs
     private static string? ExtractNested(string diskArchive, string memberInternal, string? password, bool sevenZip)
     {
         string key = diskArchive + "|" + memberInternal;
-        if (_nestedTemp.TryGetValue(key, out var cached) && File.Exists(cached)) return cached;
-        try
+        lock (_nestedLock)
         {
-            using var s = OpenEntryDirect(diskArchive, memberInternal, password, sevenZip);
-            if (s == null) return null;
-            var dir = Path.Combine(Path.GetTempPath(), "vesper-nested");
-            Directory.CreateDirectory(dir);
-            var temp = Path.Combine(dir, Guid.NewGuid().ToString("N") + Path.GetExtension(memberInternal));
-            using (var fs = File.Create(temp)) s.CopyTo(fs);
-            _nestedTemp[key] = temp;
-            return temp;
+            if (_nestedTemp.TryGetValue(key, out var cached) && File.Exists(cached)) return cached;
+            try
+            {
+                using var s = OpenEntryDirect(diskArchive, memberInternal, password, sevenZip);
+                if (s == null) return null;
+                Directory.CreateDirectory(NestedTempDir);
+                var temp = Path.Combine(NestedTempDir, Guid.NewGuid().ToString("N") + Path.GetExtension(memberInternal));
+                using (var fs = File.Create(temp)) s.CopyTo(fs);
+                _nestedTemp[key] = temp;
+                return temp;
+            }
+            catch { return null; }
         }
-        catch { return null; }
     }
 
     /// <summary>Delete the temp files created for nested-archive browsing (app exit).</summary>
     public static void CleanupTemp()
     {
-        try { var d = Path.Combine(Path.GetTempPath(), "vesper-nested"); if (Directory.Exists(d)) Directory.Delete(d, true); }
-        catch { }
-        _nestedTemp.Clear();
+        lock (_nestedLock)
+        {
+            try { if (Directory.Exists(NestedTempDir)) Directory.Delete(NestedTempDir, true); }
+            catch { }
+            _nestedTemp.Clear();
+        }
     }
 
     /// <summary>
