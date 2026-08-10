@@ -9,6 +9,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>VesperCommander</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- The shell context menu is reached through raw COM vtables and installs a window
+         procedure while the menu is up (ShellContextMenu.cs). Both need function pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Speed</OptimizationPreference>
     <!-- Embedded as a Win32 resource: the taskbar / Explorer / Alt-Tab icon.

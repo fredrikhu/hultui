@@ -11,7 +11,7 @@ public enum Cmd
     Copy, Move, Rename, Delete, NewFolder, Edit, View, Diff, Sync, Find, MeasureAll,
     Palette, Bookmarks, Options, NewTab, CloseTab, GoUpFolder, IntoFolder,
     Preview, Refresh, ToggleHidden, Swap, OpenInOther, Pack, Extract,
-    ViewDetail, ViewBrief, ViewThumbnails, MultiRename, GotoPath, Properties,
+    ViewDetail, ViewBrief, ViewThumbnails, MultiRename, GotoPath, Properties, ContextMenu,
 }
 
 /// <summary>A key plus its modifiers — one per command.</summary>
@@ -55,6 +55,7 @@ public static class Keybindings
         [Cmd.MultiRename] = new(KeyCode.M, true, false, false),      // Ctrl+M
         [Cmd.GotoPath] = new(KeyCode.G, true, false, false),         // Ctrl+G
         [Cmd.Properties] = new(KeyCode.Enter, false, true, false),   // Alt+Enter (Explorer's)
+        [Cmd.ContextMenu] = new(KeyCode.Menu, false, false, false),  // the context-menu key
     };
 
     /// <summary>Commands in display order, with their Keyboard-page labels.</summary>
@@ -62,7 +63,8 @@ public static class Keybindings
     [
         (Cmd.Copy, "Copy"), (Cmd.Move, "Move"), (Cmd.Rename, "Rename"), (Cmd.Delete, "Delete"),
         (Cmd.NewFolder, "New folder"), (Cmd.Edit, "Edit file"), (Cmd.View, "View file"),
-        (Cmd.Diff, "Diff"), (Cmd.Sync, "Synchronize"), (Cmd.Properties, "Properties"),
+        (Cmd.Diff, "Diff"), (Cmd.Sync, "Synchronize"),
+        (Cmd.Properties, "Properties"), (Cmd.ContextMenu, "Context menu"),
         (Cmd.Find, "Find files"), (Cmd.MeasureAll, "Measure all folders"),
         (Cmd.Palette, "Command palette"), (Cmd.Bookmarks, "Bookmark manager"), (Cmd.Options, "Options"),
         (Cmd.NewTab, "New tab"), (Cmd.CloseTab, "Close tab"),

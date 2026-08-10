@@ -730,7 +730,7 @@ public partial class CommanderApp
         // with brief cells and thumbnail tiles. (Double-press rather than DoubleClickEvent
         // because the VirtualList recycles rows with fresh identities between the presses,
         // so the framework's down==up click synthesis never fires for a recycled row.)
-        AttachEntryPointer(row, side, e);
+        AttachEntryPointer(row, side, e, cursor);
         return row;
     }
 

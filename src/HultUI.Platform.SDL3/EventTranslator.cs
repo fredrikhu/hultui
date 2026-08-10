@@ -229,6 +229,10 @@ public sealed unsafe class EventTranslator
         SDL_Scancode.SDL_SCANCODE_EQUALS => KeyCode.Equals,
         SDL_Scancode.SDL_SCANCODE_GRAVE => KeyCode.Backtick,
         SDL_Scancode.SDL_SCANCODE_MENU => KeyCode.Menu,
+        // The context-menu key beside the right Ctrl. SDL calls it APPLICATION and reserves
+        // MENU for the HID "Menu" usage, which no PC keyboard carries — so without this the
+        // key everyone actually presses arrived as Unknown.
+        SDL_Scancode.SDL_SCANCODE_APPLICATION => KeyCode.Menu,
         _ => KeyCode.Unknown
     };
 }

@@ -180,7 +180,7 @@ public partial class CommanderApp
 
         if (cut) tile.Opacity = 0.45f;                 // whole-tile ghost
         else if (!cursor) tile.HoverBg(Nocturne.Alpha(Nocturne.Accent500, 0.06), Color.Transparent);
-        AttachEntryPointer(tile, side, e);
+        AttachEntryPointer(tile, side, e, cursor);
         return tile;
     }
 
@@ -340,7 +340,7 @@ public partial class CommanderApp
         if (cut) icon.Opacity = 0.45f;
         cell.AddChild(icon);
         cell.AddChild(Ui.Mono(e.Name, 11.5f, fg).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
-        AttachEntryPointer(cell, side, e);
+        AttachEntryPointer(cell, side, e, cursor);
         return cell;
     }
 
@@ -395,11 +395,23 @@ public partial class CommanderApp
     }
 
     // ── Shared entry pointer interaction (rows, brief cells, tiles) ───────
-    private void AttachEntryPointer(BoxElement el, char side, FileEntry e)
+    private void AttachEntryPointer(BoxElement el, char side, FileEntry e, bool cursor)
     {
+        // The context-menu key has no pointer to anchor to, so the cursor row keeps a Ref for
+        // the menu to open under. Set here rather than in each view builder — all three call
+        // through this one place.
+        if (cursor) el.WithRef(CursorRowRef(side));
+
         el.On<PointerDownEvent>(ev =>
         {
-            if (ev.Button == 2) { BeginRightMark(side, e); return; }   // right-drag marking
+            // A right press starts marking straight away — but held still, it becomes the
+            // context menu instead, and the mark it applied is taken back (see FireContextHold).
+            if (ev.Button == 2)
+            {
+                BeginRightMark(side, e);
+                ArmContextHold(side, ev.Position.X, ev.Position.Y);
+                return;
+            }
             if (ev.Button != 0) return;
             _active = side;
             int idx = IndexOfName(Rows(side), e.Name);

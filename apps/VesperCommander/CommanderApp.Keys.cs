@@ -76,6 +76,7 @@ public partial class CommanderApp
             case Cmd.MultiRename: OpenRename(); break;
             case Cmd.GotoPath: OpenGotoPrompt(side); break;
             case Cmd.Properties: ShowProperties(side); break;
+            case Cmd.ContextMenu: ShowContextMenuAtCursor(side); break;
         }
     }
 

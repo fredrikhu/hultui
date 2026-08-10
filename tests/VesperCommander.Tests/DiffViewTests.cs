@@ -1270,6 +1270,16 @@ public class DiffViewTests
         public T Field<T>(string name) =>
             (T)typeof(CommanderApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(_app)!;
 
+        public void SetField(string name, object? value) =>
+            typeof(CommanderApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(_app, value);
+
+        /// <summary>The folder a pane is showing.</summary>
+        public string Dir(char side) => (string)Call("Dir", side)!;
+
+        /// <summary>Reach a private method on the app under test. Public counterpart of
+        /// <see cref="Call"/>, for tests whose subject has no UI surface to drive.</summary>
+        public object? Invoke(string method, params object?[] args) => Call(method, args);
+
         private object? Call(string method, params object?[] args) =>
             typeof(CommanderApp).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!
                 .Invoke(_app, args);
