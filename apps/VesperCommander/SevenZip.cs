@@ -12,18 +12,25 @@ public static class SevenZip
     /// <summary>Set from the SevenZipPath setting at startup; empty ⇒ try "7z" on PATH.</summary>
     public static string ExePath = "";
 
-    private static string? Resolve()
-    {
-        if (!string.IsNullOrWhiteSpace(ExePath) && File.Exists(ExePath)) return ExePath;
-        // Bare "7z" resolves via PATH under UseShellExecute=false when present.
-        return OperatingSystem.IsWindows() ? "7z.exe" : "7z";
-    }
+    /// <summary>The full path of the 7-Zip executable, or null when it isn't installed.
+    /// <para>Never a bare name: <c>CreateProcess</c> searches the current directory before
+    /// <c>PATH</c>, and this probe runs at startup, so a <c>7z.exe</c> left in the folder
+    /// Vesper was launched from would otherwise be executed. See
+    /// <see cref="ProgramPath"/>.</para></summary>
+    /// <remarks>A configured path wins, but a stale one still falls back to whatever is on
+    /// PATH — the same behaviour as before, minus the bare name.</remarks>
+    public static string? ResolvePath() =>
+        (string.IsNullOrWhiteSpace(ExePath) ? null : ProgramPath.Resolve(ExePath))
+        ?? ProgramPath.Resolve("7z");
 
     public static bool Available()
     {
+        if (ResolvePath() is null) return false;
         try
         {
-            var psi = new ProcessStartInfo(Resolve()!) { RedirectStandardOutput = true, UseShellExecute = false };
+            var psi = Psi([]);
+            if (psi is null) return false;
+            psi.RedirectStandardOutput = true;
             using var p = Process.Start(psi);
             if (p is null) return false;
             p.WaitForExit(2000);
@@ -82,6 +89,7 @@ public static class SevenZip
         try
         {
             var psi = Psi(["x", "-so", PwdArg(password), archiveFile, internalPath.Replace('\\', '/')]);
+            if (psi is null) return null;
             psi.RedirectStandardOutput = true;
             var p = Process.Start(psi);
             return p is null ? null : new ProcessStdoutStream(p);
@@ -110,9 +118,12 @@ public static class SevenZip
         _ => 6,
     };
 
-    private static ProcessStartInfo Psi(string[] args)
+    /// <summary>Null when 7-Zip can't be located — callers surface that as "not available"
+    /// rather than falling back to a name the OS would resolve for us.</summary>
+    private static ProcessStartInfo? Psi(string[] args)
     {
-        var psi = new ProcessStartInfo(Resolve()!) { UseShellExecute = false, CreateNoWindow = true };
+        if (ResolvePath() is not { } exe) return null;
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args) if (a.Length > 0) psi.ArgumentList.Add(a);
         return psi;
     }
@@ -122,6 +133,7 @@ public static class SevenZip
         try
         {
             var psi = Psi(args);
+            if (psi is null) return (false, "", false);
             psi.RedirectStandardOutput = readAll;
             psi.RedirectStandardError = true;
             using var p = Process.Start(psi);

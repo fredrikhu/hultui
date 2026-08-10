@@ -89,7 +89,7 @@ public static class Elevation
         {
             if (IsElevated) return false;
             if (OperatingSystem.IsWindows()) return true;
-            if (OperatingSystem.IsLinux()) return FindOnPath("pkexec") != null;
+            if (OperatingSystem.IsLinux()) return ProgramPath.Resolve("pkexec") != null;
             return false;
         }
     }
@@ -115,10 +115,18 @@ public static class Elevation
         {
             File.WriteAllText(jobPath, JsonSerializer.Serialize(job, ElevationJsonContext.Default.ElevatedJob));
 
-            var psi = OperatingSystem.IsWindows()
-                ? new ProcessStartInfo(exe) { UseShellExecute = true, Verb = "runas", CreateNoWindow = true }
-                : new ProcessStartInfo("pkexec") { UseShellExecute = false };
-            if (!OperatingSystem.IsWindows()) psi.ArgumentList.Add(exe);
+            ProcessStartInfo psi;
+            if (OperatingSystem.IsWindows())
+                psi = new ProcessStartInfo(exe) { UseShellExecute = true, Verb = "runas", CreateNoWindow = true };
+            else
+            {
+                // A full path, never the bare name: this one launches the batch with root
+                // rights, so what "pkexec" resolves to is not a lookup to leave to the OS.
+                if (ProgramPath.Resolve("pkexec") is not { } pkexec)
+                { error = "pkexec isn't installed"; return null; }
+                psi = new ProcessStartInfo(pkexec) { UseShellExecute = false };
+                psi.ArgumentList.Add(exe);
+            }
             psi.ArgumentList.Add(WorkerFlag);
             psi.ArgumentList.Add(jobPath);
 
@@ -262,17 +270,6 @@ public static class Elevation
 
     [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "geteuid")]
     private static extern uint geteuid();
-
-    private static string? FindOnPath(string exe)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            try { var full = Path.Combine(dir, exe); if (File.Exists(full)) return full; }
-            catch { /* unreadable PATH entry */ }
-        }
-        return null;
-    }
 
     private static void TryDelete(string path)
     {

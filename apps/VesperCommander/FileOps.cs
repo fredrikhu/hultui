@@ -73,10 +73,8 @@ public static class FileOps
         {
             if (OperatingSystem.IsWindows())
                 Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-            else if (OperatingSystem.IsMacOS())
-                Process.Start("open", [path]);
-            else
-                Process.Start("xdg-open", [path]);
+            else if (ProgramPath.Resolve(OperatingSystem.IsMacOS() ? "open" : "xdg-open") is { } opener)
+                Process.Start(opener, [path]);
         }
         catch { /* no handler / launch failed — nothing sensible to do */ }
     }
@@ -96,9 +94,13 @@ public static class FileOps
             OpenInShell(filePath);
             return;
         }
-        // UseShellExecute resolves PATH and runs launchers like VS Code's code.cmd; the
-        // ArgumentList quotes each arg, so a token like {file} with spaces stays intact.
-        var psi = new ProcessStartInfo(exe) { UseShellExecute = true };
+        // Resolved to a full path first: ShellExecute searches the current directory, so a
+        // bare "code" would run a code.exe left in the folder Vesper was launched from.
+        // ProgramPath still finds launchers like VS Code's code.cmd, via PATHEXT.
+        if (ProgramPath.Resolve(exe) is not { } program) { OpenInShell(filePath); return; }
+        // UseShellExecute so a .cmd launcher still runs; the ArgumentList quotes each arg, so
+        // a token like {file} with spaces stays intact.
+        var psi = new ProcessStartInfo(program) { UseShellExecute = true };
         foreach (var a in args) psi.ArgumentList.Add(a);
         try { Process.Start(psi); }
         catch { OpenInShell(filePath); }
@@ -111,14 +113,23 @@ public static class FileOps
         try
         {
             if (OperatingSystem.IsWindows())
-                Process.Start(new ProcessStartInfo("cmd.exe", "/k " + command)
+            {
+                if (Comspec() is not { } shell) return;
+                Process.Start(new ProcessStartInfo(shell, "/k " + command)
                 { UseShellExecute = true, WorkingDirectory = dir });
+            }
             else
                 Process.Start(new ProcessStartInfo("/bin/sh", "-c \"" + command.Replace("\"", "\\\"") + "; exec $SHELL\"")
                 { UseShellExecute = false, WorkingDirectory = dir });
         }
         catch { /* best-effort */ }
     }
+
+    /// <summary>The full path of the Windows command interpreter — <c>COMSPEC</c> when it
+    /// resolves, else <c>cmd.exe</c> found on PATH. Never the bare name: ShellExecute would
+    /// search the current directory for it first (see <see cref="ProgramPath"/>).</summary>
+    private static string? Comspec() =>
+        ProgramPath.Resolve(Environment.GetEnvironmentVariable("COMSPEC")) ?? ProgramPath.Resolve("cmd.exe");
 
     /// <summary>Open a terminal at <paramref name="dir"/> using the configured template
     /// (e.g. <c>wt.exe -d {dir}</c>); falls back to the OS default shell.</summary>
@@ -127,12 +138,11 @@ public static class FileOps
         if (!string.IsNullOrWhiteSpace(template))
         {
             var tokens = Tokenize(template);
-            if (tokens.Count > 0)
+            if (tokens.Count > 0 && ProgramPath.Resolve(tokens[0].Replace("{dir}", dir)) is { } program)
             {
                 try
                 {
-                    var psi = new ProcessStartInfo(tokens[0].Replace("{dir}", dir))
-                    { UseShellExecute = true, WorkingDirectory = dir };
+                    var psi = new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = dir };
                     for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i].Replace("{dir}", dir));
                     Process.Start(psi);
                     return;
@@ -143,11 +153,17 @@ public static class FileOps
         try
         {
             if (OperatingSystem.IsWindows())
-                Process.Start(new ProcessStartInfo("cmd.exe") { UseShellExecute = true, WorkingDirectory = dir });
+            {
+                if (Comspec() is { } shell)
+                    Process.Start(new ProcessStartInfo(shell) { UseShellExecute = true, WorkingDirectory = dir });
+            }
             else if (OperatingSystem.IsMacOS())
-                Process.Start(new ProcessStartInfo("open", ["-a", "Terminal", dir]));
-            else
-                Process.Start(new ProcessStartInfo("x-terminal-emulator") { UseShellExecute = false, WorkingDirectory = dir });
+            {
+                if (ProgramPath.Resolve("open") is { } open)
+                    Process.Start(new ProcessStartInfo(open, ["-a", "Terminal", dir]));
+            }
+            else if (ProgramPath.Resolve("x-terminal-emulator") is { } term)
+                Process.Start(new ProcessStartInfo(term) { UseShellExecute = false, WorkingDirectory = dir });
         }
         catch { /* best-effort */ }
     }
@@ -160,10 +176,10 @@ public static class FileOps
         if (string.IsNullOrWhiteSpace(template)) return;
         var tokens = Tokenize(template);
         if (tokens.Count == 0) return;
+        if (ProgramPath.Resolve(tokens[0].Replace("{dir}", dir)) is not { } program) return;
         try
         {
-            var psi = new ProcessStartInfo(tokens[0].Replace("{dir}", dir))
-            { UseShellExecute = true, WorkingDirectory = dir };
+            var psi = new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = dir };
             for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i].Replace("{dir}", dir));
             Process.Start(psi);
         }
@@ -174,9 +190,10 @@ public static class FileOps
     /// VS Code DiffTool option. Best-effort; failures are swallowed.</summary>
     public static void LaunchDiff(string exe, string left, string right)
     {
+        if (ProgramPath.Resolve(exe) is not { } program) return;
         try
         {
-            var psi = new ProcessStartInfo(exe) { UseShellExecute = true };
+            var psi = new ProcessStartInfo(program) { UseShellExecute = true };
             psi.ArgumentList.Add("--diff");
             psi.ArgumentList.Add(left);
             psi.ArgumentList.Add(right);
