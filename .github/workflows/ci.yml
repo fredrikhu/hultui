@@ -1,0 +1,48 @@
+# Tests every push to main.
+#
+# The installer workflows gate each release on the same suites, but they only
+# run on a tag — so between releases nothing was checking main at all. That gap
+# existed because hosted Windows minutes were scarce; on self-hosted runners the
+# builds are unmetered, so the net is back.
+#
+# Deliberately no packaging here: this answers "does main still work", and the
+# installer workflows answer "can we ship it".
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # The opposite of the release workflows: a newer push supersedes an older one,
+  # because only the tip of main is interesting.
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: [self-hosted, windows, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build solution
+        run: dotnet build HultUI.slnx -c Release
+
+      # The UI-automation tests (FlaUI) launch real sample windows and need a GPU
+      # context, so they stay out of the automated pass — same exclusion the
+      # release workflow uses.
+      - name: Run tests
+        run: dotnet test HultUI.slnx -c Release --no-build --filter "FullyQualifiedName!~HultUI.UiTests"
+
+  test-linux:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run tests
+        run: dotnet test HultUI.CrossPlatform.slnf -c Release
