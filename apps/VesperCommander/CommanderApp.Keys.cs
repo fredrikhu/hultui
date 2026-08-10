@@ -75,6 +75,7 @@ public partial class CommanderApp
             case Cmd.ViewThumbnails: SetView(side, ViewMode.Thumbnails); break;
             case Cmd.MultiRename: OpenRename(); break;
             case Cmd.GotoPath: OpenGotoPrompt(side); break;
+            case Cmd.Properties: ShowProperties(side); break;
         }
     }
 

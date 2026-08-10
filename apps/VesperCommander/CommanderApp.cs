@@ -788,6 +788,33 @@ public partial class CommanderApp : Component, IDisposable
         FileOps.LaunchEditor(template, e.FullPath);
     }
 
+    /// <summary>Alt+Enter — the Windows shell Properties sheet for the row under the cursor,
+    /// the same dialog Explorer opens. Deliberately the cursor row alone rather than the mark
+    /// set: Explorer's combined sheet for a multi-selection has to be invoked through
+    /// <c>IContextMenu</c> over an IDList array, which this shortcut doesn't reach for.
+    /// A ".." row resolves to the folder it points at, like any other directory row.</summary>
+    private void ShowProperties(char side)
+    {
+        var list = Rows(side);
+        int cur = Cursor(side);
+        if (cur < 0 || cur >= list.Count) return;
+        string path = list[cur].FullPath;
+
+        // Archive members exist only in the VFS; the shell has no item to describe.
+        if (ArchivePath.InArchive(path))
+        {
+            _notice = "No properties for an archive member";
+            MarkDirty(); return;
+        }
+        if (!ShellProperties.Show(path))
+        {
+            _notice = ShellProperties.IsSupported
+                ? "Couldn't open properties"
+                : "Properties is a Windows shell dialog";
+            MarkDirty();
+        }
+    }
+
     private void MoveCursor(char side, int delta, bool clearSearch = false)
     {
         if (clearSearch) _search = "";   // arrows keep the filter; nav within the matches
@@ -1575,6 +1602,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Edit file in external editor", "F4", () => EditFocused(side)),
             new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
             new($"Multi-rename… ({OperationTargets(side).Count(e => !e.IsParent)} files)", "Ctrl+M", OpenRename),
+            new("Properties…", "Alt+Enter", () => ShowProperties(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
