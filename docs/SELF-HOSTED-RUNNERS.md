@@ -134,6 +134,21 @@ For a little more, add the account to **Deny log on locally** and **Deny log on 
 Desktop Services** in `secpol.msc`. It then exists only to run the service — nobody can sign in
 as it, whatever happens to the password.
 
+**Changing the account later means discarding the workspace.** `_work` is created by whichever
+account first ran a job, and git refuses to operate on a repository owned by somebody else —
+*"detected dubious ownership"*, which surfaces at whatever step first shells out to git, often
+the release at the very end of a long build. Granting the new account Full Control does not
+help: git checks **ownership**, not ACLs.
+
+```powershell
+Remove-Item -Recurse -Force C:\actions-runner\_work\<repo-name>
+```
+
+The next run re-clones it under the new owner. Delete only the repository directory and the
+`_tool` and `_actions` caches beside it survive. Git's suggested `safe.directory` exception
+would also silence it, but it suppresses a real mismatch rather than correcting it, and it has
+to be set for the service account — awkward when that account is denied interactive logon.
+
 Keeping the build's caches inside the runner directory avoids depending on whatever profile the
 service account gets. The runner applies a `.env` file in its root to every job:
 
