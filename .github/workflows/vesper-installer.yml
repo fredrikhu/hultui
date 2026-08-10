@@ -3,10 +3,12 @@
 # Runs on release tags only. Pushing a tag like `vesper-v1.2.0` builds the
 # installer and publishes a GitHub Release with it attached.
 #
-# Deliberately not on every push to main: these are Windows runners, which bill
-# at twice the minute rate, and two apps building per push exhausted a month's
-# free allowance in nine days. Use `workflow_dispatch` for an off-tag build —
-# it still produces a CI-versioned installer as an artifact, without a release.
+# Runs on self-hosted runners (see docs/SELF-HOSTED-RUNNERS.md), so the machines
+# have to be awake for a queued job to start. Kept to tags rather than every
+# push from when these were hosted Windows runners, which bill at twice the
+# minute rate and exhausted a month's free allowance in nine days. Use
+# `workflow_dispatch` for an off-tag build — it still produces a CI-versioned
+# installer as an artifact, without publishing a release.
 
 name: Vesper Commander installer
 
@@ -26,7 +28,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, x64]
     steps:
       - uses: actions/checkout@v5
 
@@ -50,7 +52,7 @@ jobs:
 
   installer:
     needs: test
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, x64]
     permissions:
       contents: write # for the release step on tag builds
     steps:
