@@ -123,7 +123,8 @@ public class JunctionAppHostTests
     [InlineData(KeyCode.Digit3, JunctionView.Commit)]
     [InlineData(KeyCode.Digit4, JunctionView.Changes)]
     [InlineData(KeyCode.Digit5, JunctionView.Branches)]
-    [InlineData(KeyCode.Digit6, JunctionView.Files)]
+    [InlineData(KeyCode.Digit6, JunctionView.Tags)]
+    [InlineData(KeyCode.Digit7, JunctionView.Files)]
     public void EveryViewBuildsWithoutThrowing(KeyCode key, JunctionView expected)
     {
         // A view that throws mid-build kills the frame, and with nothing else on screen
@@ -150,7 +151,7 @@ public class JunctionAppHostTests
                 .Select(n => n.Name ?? "")
                 .ToList();
 
-            foreach (var name in new[] { "Overview", "History", "Commit", "Changes", "Branches", "Files" })
+            foreach (var name in new[] { "Overview", "History", "Commit", "Changes", "Branches", "Tags", "Files" })
                 Assert.Contains(buttons, b => b.StartsWith(name, StringComparison.Ordinal));
         });
     }

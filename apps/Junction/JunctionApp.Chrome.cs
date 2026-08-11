@@ -151,7 +151,8 @@ public partial class JunctionApp
         seg.AddChild(ViewTab(JunctionView.Commit, "Commit", Icons.GitDiff, "3", 0));
         seg.AddChild(ViewTab(JunctionView.Changes, "Changes", Icons.Pencil, "4", sum.Dirty));
         seg.AddChild(ViewTab(JunctionView.Branches, "Branches", Icons.GitBranch, "5", 0));
-        seg.AddChild(ViewTab(JunctionView.Files, "Files", Icons.Folders, "6", 0));
+        seg.AddChild(ViewTab(JunctionView.Tags, "Tags", Icons.Tag, "6", 0));
+        seg.AddChild(ViewTab(JunctionView.Files, "Files", Icons.Folders, "7", 0));
         bar.AddChild(seg);
 
         bar.AddChild(Box.New().FlexGrow(1));

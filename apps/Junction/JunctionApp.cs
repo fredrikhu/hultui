@@ -13,17 +13,16 @@ using Junction.Theme;
 
 namespace Junction;
 
-public enum JunctionView { Overview, History, Commit, Changes, Branches, Files }
+public enum JunctionView { Overview, History, Commit, Changes, Branches, Tags, Files }
 
 /// <summary>
 /// Root of the Junction multi-repo git client: a workspace-oriented shell
-/// (title bar · sidebar · five segmented views) over the real <see cref="GitRepository"/>
+/// (title bar · sidebar · seven segmented views) over the real <see cref="GitRepository"/>
 /// backend. This is the Nocturne redesign of the Junction sample.
 ///
-/// <para>Foundation slice: the shell, sidebar (workspaces / repositories /
-/// co-usage), command palette, and a fully wired History view are live; the
-/// Overview / Commit / Changes / Branches views are placeholders that switch
-/// but don't yet render their real content.</para>
+/// <para>The shell, sidebar (workspaces / repositories / co-usage), command palette and all
+/// seven views — Overview, History, Commit, Changes, Branches, Tags, Files, on keys 1–7 —
+/// render real repository data.</para>
 /// </summary>
 public partial class JunctionApp : Component, IDisposable
 {
@@ -160,6 +159,15 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Ref<ScrollViewElement> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
+    // Tags state, shaped like the branches state above.
+    private readonly KeyedAsyncLoader<string, TagsData> _tagsLoaders =
+        new(TagsData.Empty, capacity: 16, comparer: PathComparer);
+    private string _tagQuery = "";
+    private int _tagSel;
+    private readonly Ref<TextInputElement> _tagSearchRef = new();
+    private readonly Ref<ScrollViewElement> _tagScrollRef = new();
+    private bool _pendingTagSearchFocus;
+
     // Diff mode is a single app-level toggle shared by all diff panes.
     private bool _diffSplit;
     private bool _diffFull;
@@ -250,6 +258,11 @@ public partial class JunctionApp : Component, IDisposable
     private readonly record struct BranchesData(IReadOnlyList<GitBranch> Local)
     {
         public static readonly BranchesData Empty = new([]);
+    }
+
+    private readonly record struct TagsData(IReadOnlyList<GitTag> All)
+    {
+        public static readonly TagsData Empty = new([]);
     }
 
     public JunctionApp(Application app, Window window, JunctionSettingsData settings,
@@ -373,6 +386,7 @@ public partial class JunctionApp : Component, IDisposable
     private AsyncLoader<HistoryData> _history => _historyLoaders.For(_activeRepoPath);
     private AsyncLoader<ChangesData> _changes => _changesLoaders.For(_activeRepoPath);
     private AsyncLoader<BranchesData> _branches => _branchesLoaders.For(_activeRepoPath);
+    private AsyncLoader<TagsData> _tags => _tagsLoaders.For(_activeRepoPath);
 
     /// <summary>Reconcile the watcher set with the repos in the active workspace
     /// (plus the active repo). Cheap to call every Build — it only diffs the sets.</summary>
@@ -537,6 +551,7 @@ public partial class JunctionApp : Component, IDisposable
             JunctionView.Commit => BuildCommitView(),
             JunctionView.Changes => BuildChangesView(),
             JunctionView.Branches => BuildBranchesView(),
+            JunctionView.Tags => BuildTagsView(),
             JunctionView.Files => BuildFilesView(),
             _ => BuildHistoryView(),
         };
@@ -577,6 +592,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingBranchSearchFocus = false;
             _branchSearchRef.Current?.Focus();
+        }
+
+        if (_pendingTagSearchFocus)
+        {
+            _pendingTagSearchFocus = false;
+            _tagSearchRef.Current?.Focus();
         }
 
         if (_pendingDialogFocus)
@@ -962,7 +983,8 @@ public partial class JunctionApp : Component, IDisposable
             KeyCode.Digit3 => JunctionView.Commit,
             KeyCode.Digit4 => JunctionView.Changes,
             KeyCode.Digit5 => JunctionView.Branches,
-            KeyCode.Digit6 => JunctionView.Files,
+            KeyCode.Digit6 => JunctionView.Tags,
+            KeyCode.Digit7 => JunctionView.Files,
             _ => (JunctionView?)null,
         };
         if (viewForKey is { } v) { SetView(v); e.StopPropagation = true; return; }
@@ -1009,6 +1031,19 @@ public partial class JunctionApp : Component, IDisposable
                 return;
             }
             if (HandleHistoryNavKey(e))
+                e.StopPropagation = true;
+        }
+
+        if (View == JunctionView.Tags)
+        {
+            if (e.Key == KeyCode.Slash)
+            {
+                _pendingTagSearchFocus = true;
+                MarkDirty();
+                e.StopPropagation = true;
+                return;
+            }
+            if (HandleTagKey(e))
                 e.StopPropagation = true;
         }
 

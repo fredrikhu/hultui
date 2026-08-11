@@ -219,7 +219,7 @@ public class FilesFindTests
             session.Application.SetRoot(app.Mount());
             session.PumpFrames(3);
 
-            session.Window.PressKey(KeyCode.Digit6);   // Files
+            session.Window.PressKey(KeyCode.Digit7);   // Files
             session.PumpUntil(() => app!.View == JunctionView.Files, TimeSpan.FromSeconds(20));
 
             SelectFile(app, "sample.cs");

@@ -1282,11 +1282,59 @@ public class GitRepository
 
     // ── Tags ──
 
-    public List<string> GetTags()
+    /// <summary>Every tag, newest first, with the commit each one points at.</summary>
+    /// <remarks>
+    /// <c>%(*objectname)</c> and <c>%(*contents:subject)</c> are the dereferenced —
+    /// through-the-tag-object — commit fields, and are empty for a lightweight tag, whose
+    /// ref already is the commit. Which of the two a row is shows up in
+    /// <c>%(objecttype)</c>: "tag" for an annotated one, "commit" for a lightweight one.
+    /// </remarks>
+    public List<GitTag> GetTags()
     {
-        var result = GitProcess.Run(Path, "tag", "--sort=-creatordate");
-        return result.Success ? [.. result.Lines] : [];
+        var result = GitProcess.Run(Path,
+            "for-each-ref", "--sort=-creatordate",
+            "--format", $"%(refname:short){FieldSep}%(objecttype){FieldSep}%(objectname){FieldSep}" +
+                        $"%(*objectname){FieldSep}%(creatordate:iso-strict){FieldSep}" +
+                        $"%(contents:subject){FieldSep}%(*contents:subject)",
+            "refs/tags/");
+        if (!result.Success) return [];
+
+        var tags = new List<GitTag>();
+        foreach (var line in result.Lines)
+        {
+            var parts = line.Split(FieldSep);
+            if (parts.Length < 5) continue;
+
+            var name = parts[0];
+            if (name.Length == 0) continue;
+            bool annotated = parts[1] == "tag";
+            // The tag object's own sha is no use in a list of commits; take the
+            // dereferenced one whenever there is a tag object in the way.
+            var hash = parts[3].Length > 0 ? parts[3] : parts[2];
+
+            DateTimeOffset date = default;
+            DateTimeOffset.TryParse(parts[4], CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+
+            // For an annotated tag `contents:subject` is the tag's own message, and the
+            // commit's subject is behind the star; a lightweight tag has only the commit.
+            var tagMessage = parts.Length > 5 ? parts[5] : "";
+            var derefSubject = parts.Length > 6 ? parts[6] : "";
+            var subject = annotated ? derefSubject : tagMessage;
+
+            tags.Add(new GitTag(name, hash, subject, date, annotated, annotated ? tagMessage : ""));
+        }
+        return tags;
     }
+
+    /// <summary>Push one tag to a remote (<c>git push &lt;remote&gt; &lt;tag&gt;</c>).</summary>
+    public Task<GitResult> PushTagAsync(string remote, string name, Func<string, Task<string?>>? askPass = null)
+        => GitProcess.RunAsync(Path, askPass, "push", remote, "refs/tags/" + name);
+
+    /// <summary>Delete a tag from a remote. Separate from <see cref="DeleteTag"/>: deleting
+    /// locally leaves the remote's copy, which is what most people actually want, so the
+    /// two are never done together implicitly.</summary>
+    public Task<GitResult> DeleteRemoteTagAsync(string remote, string name, Func<string, Task<string?>>? askPass = null)
+        => GitProcess.RunAsync(Path, askPass, "push", remote, "--delete", "refs/tags/" + name);
 
     /// <summary>
     /// Creates a tag. If <paramref name="message"/> is non-empty, an annotated
