@@ -87,6 +87,38 @@ public class FilesFindTests
         });
     }
 
+    /// <summary>
+    /// Every match is actually painted — asserted against the display list, not against the
+    /// element's span property.
+    ///
+    /// <para>The distinction is the whole reason this test exists. The tints were being
+    /// appended to the span list after the syntax spans instead of merged in offset order,
+    /// and <c>TextAreaElement</c> slices that list per visible line and stops at the first
+    /// span starting past the end of the line — so every tint sitting behind that stop was
+    /// dropped on the way to the renderer. The spans on the element were perfect the whole
+    /// time; two of the three matches simply never reached the screen, which read as search
+    /// not highlighting at all.</para>
+    /// </summary>
+    [Fact]
+    public void EveryMatchIsPaintedAndNotJustRecorded()
+    {
+        Hosted((session, app) =>
+        {
+            Find(session, app, "needle");
+
+            session.Window.RenderLog!.Clear();
+            MarkDirty(app);
+            // Waited for rather than counted in frames: the body is rebuilt off the back of
+            // async work, so a fixed frame count sometimes captured a repaint that had not
+            // drawn it yet. The wait is on the lines being drawn at all — which happens with
+            // or without the tint — so it cannot mask the thing being asserted.
+            session.PumpUntil(() => DrawnMatchLines(session).Count >= 3, TimeSpan.FromSeconds(20));
+
+            var drawn = DrawnMatchLines(session);
+            Assert.All(drawn, line => Assert.Contains("/bg:", line, StringComparison.Ordinal));
+        }, record: true);
+    }
+
     /// <summary>Syntax colouring survives a search: a match carries a background only, so the
     /// grammar's foregrounds are all still asked for.</summary>
     [Fact]
@@ -144,6 +176,13 @@ public class FilesFindTests
             Find(session, app, "far-below");
             Assert.NotEmpty(Search(app).Hits);
 
+            // The reveal lands on a rebuild after the search resolves, so this waits for the
+            // scroll rather than assuming a frame count — it went red about one full run in
+            // four. The wait can only ever turn a slow pass into a pass; a body that never
+            // scrolls still fails, with the message intact.
+            try { session.PumpUntil(() => ScrollY(app) > 0, TimeSpan.FromSeconds(15)); }
+            catch (TimeoutException) { /* fall through to the assertion below */ }
+
             Assert.True(ScrollY(app) > 0,
                 "the only match is hundreds of lines down and the body never moved");
         }, longFile: true);
@@ -166,6 +205,17 @@ public class FilesFindTests
             .GetField("_fileBodyRef", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(app)!).Current
         ?? throw new Xunit.Sdk.XunitException("the file body is not on screen");
+
+    /// <summary>The body lines carrying a match, as they were handed to the renderer.</summary>
+    private static List<string> DrawnMatchLines(HeadlessSession session) =>
+        session.Window.RenderLog!.Named("DrawText")
+            .Select(op => op.ToString())
+            .Where(t => t.Contains("// needle", StringComparison.Ordinal))
+            .ToList();
+
+    private static void MarkDirty(JunctionApp app) =>
+        typeof(JunctionApp).GetMethod("MarkDirty",
+            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!.Invoke(app, null);
 
     private static string BodyText(JunctionApp app) => Body(app).Text;
 
@@ -193,7 +243,8 @@ public class FilesFindTests
 
     /// <summary>The Files view on a committed source file, with the cursor already on it —
     /// the view browses the tree at the selected commit, so the file has to be in one.</summary>
-    private static void Hosted(Action<HeadlessSession, JunctionApp> body, bool longFile = false)
+    private static void Hosted(Action<HeadlessSession, JunctionApp> body, bool longFile = false,
+        bool record = false)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         // A .cs file so the grammar colours it: one of these tests is about a match not
@@ -205,7 +256,9 @@ public class FilesFindTests
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "add a sample file");
 
-        using var session = HeadlessSession.Create(1400, 900);
+        using var session = record
+            ? HeadlessSession.Create(1400, 900, options: HeadlessOptions.DeterministicRecording())
+            : HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;
         try
         {

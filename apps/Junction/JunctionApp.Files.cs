@@ -614,6 +614,14 @@ public partial class JunctionApp
             merged.Add(new TextSpan(starts[hit.Line] + hit.Start, hit.Length, default,
                 isCurrent ? Nocturne.FindCurrentBg : Nocturne.FindHitBg));
         }
+        // Back into offset order. TextAreaElement slices the list per visible line and stops
+        // at the first span that starts past the end of that line, so a tint appended after
+        // the syntax spans sits behind the stop and is never drawn — every match but the one
+        // on the last decorated line went missing, which looked like search not highlighting
+        // at all. The tints still overlap the syntax spans they sit inside; that is the point
+        // of them (background over foreground) and the renderer handles it. Only the ordering
+        // was wrong.
+        merged.Sort(static (a, b) => a.Start.CompareTo(b.Start));
         return merged;
     }
 
