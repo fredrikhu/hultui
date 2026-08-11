@@ -205,6 +205,10 @@ public sealed partial class LayoutEngine
             foreach (var line in lines)
                 ResolveFlexGrowShrink(line, mainDistribute, mainGap);
 
+            // ── Phase 3.5: Re-measure items whose main size flexing changed ──
+            foreach (var line in lines)
+                RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
+
             // ── Phase 4: Compute per-line cross sizes ──
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
@@ -430,7 +434,7 @@ public sealed partial class LayoutEngine
             // min-content size, so an ancestor row wrapping a scroll view would be
             // pinned to the entire scrollable height and defeat the viewport.
             // Implementing it properly needs a real min-content measurement pass.
-            array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross);
+            array[count++] = new FlexItem(child, hypotheticalMain, hypotheticalCross, hypotheticalMain);
         }
 
         return (array, count);
@@ -561,6 +565,11 @@ public sealed partial class LayoutEngine
 
             foreach (var line in lines)
                 ResolveFlexGrowShrink(line, mainDistribute, mainGap);
+
+            // The measured height of a row is the height its parent will force on it, so
+            // this pass needs the same post-flex cross sizes the layout pass takes.
+            foreach (var line in lines)
+                RemeasureFlexedCrossSizes(line, isRow, mainDistribute, crossAvailable);
 
             ComputeLineCrossSizes(lines, crossAvailable, flex.AlignContent, isWrap, hasDefiniteCross);
 
@@ -738,6 +747,49 @@ public sealed partial class LayoutEngine
                     }
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// An item's cross size depends on the main size it ends up with, so it can only be
+    /// known once flex grow/shrink has run. Phase 1 measured against the flex base size,
+    /// which for <c>flex-basis: 0</c> means measuring a text cell at zero width — it wraps
+    /// to one line per character, and that height is what the line, and so the whole
+    /// container, would be sized to. CSS orders these the same way: the hypothetical cross
+    /// size is determined by laying out with the <em>used</em> main size
+    /// (css-flexbox-1 §9.4 step 7, after §9.7 resolves it).
+    /// <para>Only items flexing actually moved are re-measured. Everything else already
+    /// holds a measurement at the size it is going to be, and re-measuring the whole line
+    /// would double Phase 1's cost for no change in the answer.</para>
+    /// </summary>
+    private void RemeasureFlexedCrossSizes(FlexLine line, bool isRow, float mainAvailable, float crossAvailable)
+    {
+        var items = line.Items;
+        for (int i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            // Sub-pixel drift from distributing free space isn't a re-measure.
+            if (float.Abs(item.MainSize - item.BaseMain) < 0.01f) continue;
+
+            var child = item.Element;
+            var childBox = child.BoxRead;
+            // A cross dimension that was given a value can't depend on the main size.
+            if (!(isRow ? childBox.Height : childBox.Width).IsAuto) continue;
+
+            // MainSize is the outer (margin-box) size; the forced dimension is border-box.
+            var margin = childBox.Margin;
+            float forced = item.MainSize - (isRow ? margin.Horizontal : margin.Vertical);
+            if (float.IsNegative(forced)) forced = 0;
+            float? fw = isRow ? forced : null;
+            float? fh = isRow ? null : forced;
+
+            float constraintW = isRow ? mainAvailable : crossAvailable;
+            float constraintH = isRow ? crossAvailable : mainAvailable;
+            var measured = child.Children.Count == 0
+                ? MeasureLeafSize(child, constraintW, constraintH, fw, fh)
+                : MeasureSize(child, new LayoutConstraint(constraintW, constraintH), fw, fh);
+
+            items[i] = item with { CrossSize = isRow ? measured.Height : measured.Width };
         }
     }
 
@@ -921,6 +973,8 @@ public sealed partial class LayoutEngine
     }
 }
 
-internal record struct FlexItem(Element Element, float MainSize, float CrossSize);
+/// <param name="BaseMain">The main size this item was measured at, kept so Phase 3.5 can
+/// tell which items flex resolution actually moved and re-measure only those.</param>
+internal record struct FlexItem(Element Element, float MainSize, float CrossSize, float BaseMain);
 
 internal record struct FlexLine(ArraySegment<FlexItem> Items, float CrossSize = 0);
