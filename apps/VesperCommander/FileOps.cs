@@ -130,13 +130,33 @@ public static class FileOps
         // bare "code" would run a code.exe left in the folder Vesper was launched from.
         // ProgramPath still finds launchers like VS Code's code.cmd, via PATHEXT.
         if (ProgramPath.Resolve(exe) is not { } program) { OpenInShell(filePath); return; }
-        // UseShellExecute so a .cmd launcher still runs; the ArgumentList quotes each arg, so
-        // a token like {file} with spaces stays intact.
-        var psi = new ProcessStartInfo(program) { UseShellExecute = true };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-        try { Process.Start(psi); }
+        try { Process.Start(ShellLaunch(program, args)); }
         catch { OpenInShell(filePath); }
     }
+
+    /// <summary>A <see cref="ProcessStartInfo"/> for launching an installed program with
+    /// arguments. UseShellExecute so a batch launcher runs at all; the ArgumentList quotes
+    /// each argument, so a token like <c>{file}</c> with spaces stays intact.
+    /// <para>Batch launchers are asked to start hidden. A <c>.cmd</c> is run by cmd.exe,
+    /// which brings a console window with it — VS Code's <c>code</c> is <c>code.cmd</c>, so
+    /// opening a file in it put a terminal on screen. The editor the batch file goes on to
+    /// start is a separate process and shows normally.</para></summary>
+    internal static ProcessStartInfo ShellLaunch(string program, IEnumerable<string> args, string? workingDir = null)
+    {
+        var psi = new ProcessStartInfo(program) { UseShellExecute = true };
+        if (workingDir != null) psi.WorkingDirectory = workingDir;
+        // Only batch files. The hidden style reaches a GUI program as its initial show
+        // state, and one that honours it would start invisible.
+        if (IsBatchLauncher(program)) psi.WindowStyle = ProcessWindowStyle.Hidden;
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        return psi;
+    }
+
+    /// <summary>True for the file types Windows runs through a command interpreter, which
+    /// is what puts a console window on screen.</summary>
+    internal static bool IsBatchLauncher(string program) =>
+        program.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
+        || program.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Run a typed command in a terminal at <paramref name="dir"/> (the command
     /// line). Windows opens a cmd window that stays open (/k); other OSes run via sh.</summary>
@@ -211,9 +231,8 @@ public static class FileOps
         if (ProgramPath.Resolve(tokens[0].Replace("{dir}", dir)) is not { } program) return;
         try
         {
-            var psi = new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = dir };
-            for (int i = 1; i < tokens.Count; i++) psi.ArgumentList.Add(tokens[i].Replace("{dir}", dir));
-            Process.Start(psi);
+            Process.Start(ShellLaunch(program,
+                tokens.Skip(1).Select(t => t.Replace("{dir}", dir)), workingDir: dir));
         }
         catch { /* best-effort */ }
     }
@@ -223,14 +242,7 @@ public static class FileOps
     public static void LaunchDiff(string exe, string left, string right)
     {
         if (ProgramPath.Resolve(exe) is not { } program) return;
-        try
-        {
-            var psi = new ProcessStartInfo(program) { UseShellExecute = true };
-            psi.ArgumentList.Add("--diff");
-            psi.ArgumentList.Add(left);
-            psi.ArgumentList.Add(right);
-            Process.Start(psi);
-        }
+        try { Process.Start(ShellLaunch(program, ["--diff", left, right])); }
         catch { /* best-effort */ }
     }
 
