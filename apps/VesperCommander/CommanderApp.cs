@@ -842,6 +842,42 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
+    /// <summary>Ctrl+Shift+A: prompt for a pattern and mark the files it matches.</summary>
+    private void OpenMarkPatternPrompt(char side)
+    {
+        if (AnyOverlayOpen) return;
+        _namePromptValue = "";
+        _namePromptError = null;
+        _namePrompt = new NamePromptSpec("Mark files by pattern", Dir(side), "Mark",
+            p => MarkByPattern(side, p), Placeholder: "e.g. *.txt — wildcards * and ?");
+        _pendingNamePromptFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Mark the files matching <paramref name="raw"/> — additive, like marking by
+    /// hand, and files only (a pattern speaks about files; folders stay untouched). Matching
+    /// is the find dialog's: glob with wildcards, extension filter for a leading dot,
+    /// substring otherwise. Returns an error string (prompt stays open) or null.</summary>
+    private string? MarkByPattern(char side, string raw)
+    {
+        var pattern = raw.Trim();
+        if (pattern.Length == 0) return "Enter a pattern.";
+        var opts = new FindEngine.Options(pattern, null, Recursive: false, MatchCase: false,
+            Regex: false, Hidden: false);
+        var marks = Marks(side);
+        int matched = 0;
+        foreach (var e in Rows(side))
+        {
+            if (e.IsParent || e.IsDir) continue;
+            if (!FindEngine.NameMatches(e.Name, opts)) continue;
+            marks.Add(e.Name);
+            matched++;
+        }
+        if (matched == 0) return $"No files here match \"{pattern}\"";
+        MarkDirty();
+        return null;
+    }
+
     // ── Right-drag marking ───────────────────────────────────────────────
     // Press the RIGHT button on a row and drag: every row the pointer crosses is
     // marked (or unmarked). The first row sets the direction — if it was unmarked we
@@ -1591,6 +1627,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Properties…", "Alt+Enter", () => ShowProperties(side)),
             new("Context menu…", "Menu", () => ShowContextMenuAtCursor(side)),
             new("Mark all", "Ctrl+A", () => MarkAll(side)),
+            new("Mark files by pattern…", "Ctrl+Shift+A", () => OpenMarkPatternPrompt(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
@@ -2133,8 +2170,9 @@ public partial class CommanderApp : Component, IDisposable
         }
 
         // Ctrl+A marks everything in the active pane — except in a text field, where it
-        // keeps its select-all-text meaning.
-        if (ctrl && e.Key == KeyCode.A
+        // keeps its select-all-text meaning. Shift excluded: Ctrl+Shift+A is the (rebindable)
+        // mark-by-pattern command, and must not fall through to mark-all if rebound away.
+        if (ctrl && e.Key == KeyCode.A && !e.Modifiers.HasFlag(KeyModifiers.Shift)
             && e.Target is not (TextInputElement or TextAreaElement))
         {
             MarkAll(_active); e.StopPropagation = true; return;
