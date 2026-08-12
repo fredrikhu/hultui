@@ -12,9 +12,16 @@ public sealed record CollectionFolder(
     IReadOnlyList<RequestRef> Requests,
     bool HasFolderDefaults);
 
-/// <summary>A request in the tree: enough to draw a row (name + method chip)
-/// without holding the parsed document.</summary>
-public sealed record RequestRef(string DisplayName, string Path, string? Method);
+/// <summary>A request in the tree: enough to draw a row — name, method chip,
+/// and the chain badges (→first-produced-variable, ⛓uses-count) — without
+/// holding the parsed document.</summary>
+public sealed record RequestRef(
+    string DisplayName, string Path, string? Method,
+    IReadOnlyList<string> Produces, int UsesCount)
+{
+    public RequestRef(string displayName, string path, string? method)
+        : this(displayName, path, method, [], 0) { }
+}
 
 /// <summary>An environment file, named by its stem (<c>local.env</c> → "local").</summary>
 public sealed record EnvFileRef(string Name, string Path);
@@ -78,17 +85,23 @@ public static class CollectionScanner
     private static RequestRef ReadRef(string file)
     {
         string? method = null, name = null;
+        IReadOnlyList<string> produces = [];
+        int usesCount = 0;
         try
         {
             var doc = ReqDocument.Parse(File.ReadAllText(file));
             method = doc.Method;
             name = doc.Name;
+            var node = Chain.Analyze(file, doc);
+            produces = node.Produces;
+            usesCount = node.Uses.Count;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // The row still exists; it just has no chip until the file is readable.
         }
-        return new RequestRef(name ?? Prettify(System.IO.Path.GetFileNameWithoutExtension(file)), file, method);
+        return new RequestRef(name ?? Prettify(System.IO.Path.GetFileNameWithoutExtension(file)), file, method,
+            produces, usesCount);
     }
 
     private static IReadOnlyList<EnvFileRef> ScanEnvironments(string root)

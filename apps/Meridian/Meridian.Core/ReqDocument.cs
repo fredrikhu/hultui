@@ -255,6 +255,46 @@ public sealed class ReqDocument
         Touch();
     }
 
+    /// <summary>Rewrites the assert at <paramref name="index"/> in place.</summary>
+    public void SetAssert(int index, string args)
+    {
+        var line = _asserts[index].Line;
+        _lines[line - 1] = _lines[line - 1] with { Raw = $"assert {args}" };
+        Touch();
+    }
+
+    /// <summary>Appends an assert after the last one, or at the end of the file.</summary>
+    public void AddAssert(string args) => AddDirectiveLine("assert", args, _asserts);
+
+    public void RemoveAssert(int index)
+    {
+        _lines.RemoveAt(_asserts[index].Line - 1);
+        Touch();
+    }
+
+    /// <summary>Rewrites the extract at <paramref name="index"/> in place.</summary>
+    public void SetExtract(int index, string args)
+    {
+        var line = _extracts[index].Line;
+        _lines[line - 1] = _lines[line - 1] with { Raw = $"extract {args}" };
+        Touch();
+    }
+
+    public void AddExtract(string args) => AddDirectiveLine("extract", args, _extracts);
+
+    public void RemoveExtract(int index)
+    {
+        _lines.RemoveAt(_extracts[index].Line - 1);
+        Touch();
+    }
+
+    private void AddDirectiveLine(string keyword, string args, List<ReqDirective> kin)
+    {
+        int insertAfter = kin.Count > 0 ? kin[^1].Line : _lines.Count;
+        InsertLine(insertAfter, $"{keyword} {args}");
+        Touch();
+    }
+
     private void Touch()
     {
         Edited = true;

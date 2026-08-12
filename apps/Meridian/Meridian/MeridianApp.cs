@@ -72,9 +72,19 @@ public partial class MeridianApp : Component, IDisposable
         public bool UrlEditing;
         public ResponseTab RespTab = ResponseTab.Body;
         public bool RespRaw;
+        /// <summary>The document as it read when the last response arrived —
+        /// what the stale-preview banner compares against.</summary>
+        public string? ResultSnapshot;
     }
 
-    internal enum EditorTab { Params, Headers, Body }
+    internal enum EditorTab { Params, Headers, Body, Assertions, Chain }
+
+    // The extracted-variable store: what runs produced, when. Session state —
+    // never serialized (the files hold the *recipes*, not the values).
+    internal readonly Dictionary<string, string> Extracted = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _extractedRun = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Path, string Variable), int> _extractLastMatched = new();
+    private int _runCounter;
     internal enum ResponseTab { Body, Headers, Cookies, Timeline }
 
     // Response pane orientation: right 560dip by default, Ctrl+\ flips to
@@ -437,8 +447,10 @@ public partial class MeridianApp : Component, IDisposable
     /// have stays unresolved — visibly.</summary>
     internal VariableResolver Resolver()
     {
+        // No environment still resolves extracted values and built-ins — a
+        // chained collection with no envs/ directory is perfectly legal.
         if (_env is not { } env || _workspace is not { } ws)
-            return new VariableResolver();
+            return new VariableResolver(extracted: Extracted);
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var key in env.Keys)
         {
@@ -449,7 +461,7 @@ public partial class MeridianApp : Component, IDisposable
             else if (env.Values.TryGetValue(key, out var value))
                 values[key] = value;
         }
-        return new VariableResolver(environment: values);
+        return new VariableResolver(environment: values, extracted: Extracted);
     }
 
     private async void SendActive()
@@ -498,6 +510,9 @@ public partial class MeridianApp : Component, IDisposable
             var spec = new RequestSpec(method, url.Text, headers, bodyText,
                 bodyText != null && tab.Doc.Body!.Type == "json" ? "application/json" : null);
             tab.Result = await Task.Run(() => Engine.SendAsync(spec, cts.Token));
+            tab.ResultSnapshot = tab.Doc.Serialize();
+            if (tab.Result.Response is { } responseData)
+                ApplyExtractions(tab, responseData);
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is UriFormatException or InvalidOperationException or ArgumentException)

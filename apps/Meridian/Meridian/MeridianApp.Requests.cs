@@ -137,6 +137,12 @@ public partial class MeridianApp
         row.AddChild(Text.New(request.DisplayName).FontSize(12f)
             .TextColor(active ? Azimuth.Text : Azimuth.TextDim)
             .TextOverflow(TextOverflow.Ellipsis).MaxLines(1).FlexGrow(1));
+        // The cheap chain badges: what this request feeds forward, and how
+        // many variables it consumes. The Chain tab has the full story.
+        if (request.Produces.Count > 0)
+            row.AddChild(Ui.Mono("→" + request.Produces[0], 8f, Azimuth.Accent300).FlexShrink(0));
+        if (request.UsesCount > 0)
+            row.AddChild(Ui.Mono("⛓" + request.UsesCount, 8f, Azimuth.TextFaint).FlexShrink(0));
         if (openTab is { Dirty: true })
             row.AddChild(Dot(Azimuth.Accent));
 
@@ -203,6 +209,8 @@ public partial class MeridianApp
         {
             EditorTab.Params => BuildParamsEditor(tab),
             EditorTab.Body => BuildBodyEditor(tab),
+            EditorTab.Assertions => BuildAssertionsEditor(tab),
+            EditorTab.Chain => BuildChainEditor(tab),
             _ => BuildHeadersEditor(tab),
         };
         body.Key = "subeditor-" + tab.SubTab;
@@ -409,10 +417,26 @@ public partial class MeridianApp
         bar.AddChild(SubTabButton(tab, EditorTab.Params, $"Params {CountLabel(QueryParams(tab).Count)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Headers, $"Headers {CountLabel(tab.Doc.Headers.Count)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Body, tab.Doc.Body is { Type.Length: > 0 } b ? $"Body {b.Type}" : "Body"));
+        bar.AddChild(SubTabButton(tab, EditorTab.Assertions, AssertionsTabLabel(tab)));
+        var chainNode = Chain.Analyze(tab.Path, tab.Doc);
+        bar.AddChild(SubTabButton(tab, EditorTab.Chain,
+            $"Chain {CountLabel(chainNode.Uses.Count + chainNode.Produces.Count)}"));
         return bar;
     }
 
     private static string CountLabel(int n) => n > 0 ? n.ToString() : "";
+
+    /// <summary>"Assertions", or with the live verdict: "Assertions 2✓" when
+    /// all pass against the last response, "Assertions 1/3✗" when any fail.</summary>
+    private string AssertionsTabLabel(RequestTab tab)
+    {
+        int count = tab.Doc.Asserts.Count;
+        if (count == 0) return "Assertions";
+        if (tab.Result?.Response is not { } response) return $"Assertions {count}";
+        int failed = tab.Doc.Asserts.Count(a =>
+            Directives.ParseAssert(a.Args, out _) is { } spec && !Directives.Evaluate(spec, response).Passed);
+        return failed == 0 ? $"Assertions {count}✓" : $"Assertions {failed}/{count}✗";
+    }
 
     private Element SubTabButton(RequestTab tab, EditorTab which, string label)
     {
