@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>body{margin:0;background:#150F17;color:#EFE9F2;font-family:Inter,sans-serif}::selection{background:#9C3D68;color:#FADEEB}a{color:#EFA3C6}a:hover{color:#FADEEB}</style>
+</helmet>
+<div style="padding: 44px 52px; min-width: 1480px">
+  <div style="display: flex; align-items: baseline; gap: 24px; margin-bottom: 8px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <div style="position: relative; width: 22px; height: 22px">
+        <div style="position: absolute; left: 0; right: 0; top: 10px; height: 1px; background: #E0699E"></div>
+        <div style="position: absolute; top: 0; bottom: 0; left: 10px; width: 1px; background: #E0699E"></div>
+      </div>
+      <div style="font-size: 28px; font-weight: 500; color: #EFE9F2; letter-spacing: 0.06em">Meridian</div>
+    </div>
+    <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #E0699E; letter-spacing: 0.12em">THEME: ANTIPODE</div>
+  </div>
+  <div style="font-size: 13px; color: #A395AC; margin-bottom: 36px; max-width: 620px">Rose on plum-black. Bare-text chips with a tick mark — no boxes at all — grouped 26px rows, and a crosshair letterform: the point where lines cross.</div>
+  <div style="display: flex; gap: 48px; margin-bottom: 40px; flex-wrap: wrap">
+    <div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC; letter-spacing: 0.1em; margin-bottom: 10px">ACCENT RAMP — ap-accent-*</div>
+      <div style="display: flex; gap: 6px">
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #FADEEB"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">100 #FADEEB</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #EFA3C6"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">300 #EFA3C6</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #E0699E; outline: 1px solid #EFA3C6; outline-offset: 2px"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#EFE9F2;margin-top:5px">500 #E0699E</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #9C3D68"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">700 #9C3D68</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #471B2F"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">900 #471B2F</div></div>
+      </div>
+    </div>
+    <div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC; letter-spacing: 0.1em; margin-bottom: 10px">NEUTRALS — ap-surface-*</div>
+      <div style="display: flex; gap: 6px">
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #150F17; border: 1px solid #362A3B"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">bg #150F17</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #1D1520"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">srf #1D1520</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #251B29"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">rsd #251B29</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #362A3B"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">brd #362A3B</div></div>
+        <div><div style="width: 72px; height: 44px; border-radius: 4px; background: #A395AC"></div><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC;margin-top:5px">mut #A395AC</div></div>
+      </div>
+    </div>
+    <div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC; letter-spacing: 0.1em; margin-bottom: 10px">STATUS TRIO</div>
+      <div style="display: flex; flex-direction: column; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px">
+        <div style="color: #55BD86">✓ pass  #55BD86</div>
+        <div style="color: #E4586B">✗ fail  #E4586B</div>
+        <div style="color: #A395AC">− skip  #A395AC</div>
+      </div>
+    </div>
+    <div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC; letter-spacing: 0.1em; margin-bottom: 10px">METHOD CHIPS — bare text + tick</div>
+      <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;color:#57A5EE;border-left:3px solid #57A5EE;padding-left:5px">GET</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;color:#55BD86;border-left:3px solid #55BD86;padding-left:5px">POST</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;color:#E4813F;border-left:3px solid #E4813F;padding-left:5px">PUT</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;color:#AB8CE8;border-left:3px solid #AB8CE8;padding-left:5px">PATCH</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.08em;color:#E4586B;border-left:3px solid #E4586B;padding-left:5px">DELETE</span>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#57A5EE;border-left:2px solid #57A5EE;padding-left:4px">GET</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#55BD86;border-left:2px solid #55BD86;padding-left:4px">POST</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#E4586B;border-left:2px solid #E4586B;padding-left:4px">DEL</span>
+        <span style="font-size: 10px; color: #A395AC; margin-left: 4px">@ tree scale</span>
+      </div>
+    </div>
+  </div>
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC; letter-spacing: 0.1em; margin-bottom: 12px">MINI SHELL — grouped density (26px rows)</div>
+  <div style="width: 1400px; border: 1px solid #362A3B; border-radius: 8px; overflow: hidden; background: #150F17">
+    <div style="height: 36px; display: flex; align-items: center; padding: 0 16px; gap: 12px; background: #1D1520; border-bottom: 1px solid #362A3B">
+      <div style="display: flex; align-items: center; gap: 8px">
+        <div style="position: relative; width: 12px; height: 12px"><div style="position:absolute;left:0;right:0;top:5.5px;height:1px;background:#E0699E"></div><div style="position:absolute;top:0;bottom:0;left:5.5px;width:1px;background:#E0699E"></div></div>
+        <div style="font-size: 12px; font-weight: 500; letter-spacing: 0.06em; color: #A395AC">Meridian</div>
+      </div>
+      <div style="flex: 1"></div>
+      <div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #EFA3C6; background: #251B29; border-radius: 4px; padding: 3px 10px">env: local <span style="color: #A395AC">⌃E</span></div>
+    </div>
+    <div style="display: flex; height: 560px">
+      <div style="width: 46px; background: #1D1520; border-right: 1px solid #362A3B; display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 7px">
+        <div style="width: 33px; height: 33px; border-radius: 4px; color: #E0699E; display: flex; align-items: center; justify-content: center; font-size: 14px; border-bottom: 2px solid #E0699E">▤</div>
+        <div style="width: 33px; height: 33px; border-radius: 4px; color: #A395AC; display: flex; align-items: center; justify-content: center; font-size: 14px">▶</div>
+        <div style="width: 33px; height: 33px; border-radius: 4px; color: #A395AC; display: flex; align-items: center; justify-content: center; font-size: 14px">◎</div>
+        <div style="width: 33px; height: 33px; border-radius: 4px; color: #A395AC; display: flex; align-items: center; justify-content: center; font-size: 14px">≣</div>
+        <div style="width: 33px; height: 33px; border-radius: 4px; color: #A395AC; display: flex; align-items: center; justify-content: center; font-size: 14px">⬡</div>
+      </div>
+      <div style="width: 242px; background: #150F17; border-right: 1px solid #362A3B; padding: 10px 0; font-size: 12px">
+        <div style="padding: 4px 14px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC">payments-api/</div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 14px 4px 22px; height: 18px"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#55BD86;border-left:2px solid #55BD86;padding-left:4px">POST</span><span>Create charge</span><span style="width:5px;height:5px;border-radius:50%;background:#E0699E;margin-left:auto"></span></div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 14px 4px 22px; height: 18px; background: #251B29"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#57A5EE;border-left:2px solid #57A5EE;padding-left:4px">GET</span><span>Get charge</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 14px 4px 22px; height: 18px; color: #CFC6D4"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#E4586B;border-left:2px solid #E4586B;padding-left:4px">DEL</span><span>Void charge</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 14px 4px 22px; height: 18px; color: #CFC6D4"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#57A5EE;border-left:2px solid #57A5EE;padding-left:4px">GET</span><span>List refunds</span></div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; border-right: 1px solid #362A3B">
+        <div style="display: flex; border-bottom: 1px solid #362A3B; background: #1D1520">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 8px 15px; background: #150F17; border-right: 1px solid #362A3B; font-size: 12px; box-shadow: inset 0 2px 0 #E0699E"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#57A5EE;border-left:2px solid #57A5EE;padding-left:4px">GET</span>Get charge</div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 8px 15px; font-size: 12px; color: #A395AC"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.08em;color:#55BD86;border-left:2px solid #55BD86;padding-left:4px">POST</span>Create charge <span style="color:#E0699E">●</span></div>
+        </div>
+        <div style="display: flex; gap: 9px; padding: 11px 15px; align-items: center">
+          <div style="display: flex; align-items: center; gap: 5px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #57A5EE; background: #1D1520; border: 1px solid #362A3B; border-left: 3px solid #57A5EE; border-radius: 4px; padding: 6px 11px">GET ▾</div>
+          <div style="flex: 1; display: flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #1D1520; border: 1px solid #362A3B; border-radius: 4px; padding: 6px 11px"><span style="color: #EFA3C6; border-bottom: 1px dashed #9C3D68">{<span>{base_url}</span>}</span><span>/v1/charges/</span><span style="color: #EFA3C6; border-bottom: 1px dashed #9C3D68">{<span>{charge_id}</span>}</span></div>
+          <div style="display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: #E0699E; border: 1px solid #E0699E; border-radius: 4px; padding: 6px 15px">Send <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#A395AC">⌃↵</span></div>
+        </div>
+        <div style="display: flex; gap: 3px; padding: 0 15px; border-bottom: 1px solid #362A3B; font-size: 11.5px; color: #A395AC">
+          <div style="padding: 6px 10px">Params</div>
+          <div style="padding: 6px 10px; color: #EFE9F2; border-bottom: 2px solid #E0699E">Headers</div>
+          <div style="padding: 6px 10px">Body</div>
+          <div style="padding: 6px 10px">Auth</div>
+          <div style="padding: 6px 10px">Assertions <span style="color:#55BD86">2✓</span></div>
+          <div style="padding: 6px 10px">Chain</div>
+        </div>
+        <div style="flex: 1; padding: 11px 15px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #CFC6D4">
+          <div style="display: flex; gap: 16px; padding: 5px 0; border-bottom: 1px solid #251B29"><span style="width: 180px; color: #A395AC">Authorization</span><span>Bearer <span style="color:#EFA3C6;border-bottom:1px dashed #9C3D68">{<span>{token}</span>}</span></span></div>
+          <div style="display: flex; gap: 16px; padding: 5px 0; border-bottom: 1px solid #251B29"><span style="width: 180px; color: #A395AC">Accept</span><span>application/json</span></div>
+        </div>
+        <div style="padding: 7px 15px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #A395AC; border-top: 1px solid #362A3B">payments-api/charges/get-charge.req <span style="color: #E0699E">● unsaved</span></div>
+      </div>
+      <div style="width: 400px; display: flex; flex-direction: column; background: #150F17">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-bottom: 1px solid #362A3B; font-family: 'JetBrains Mono', monospace; font-size: 11.5px">
+          <span style="color: #55BD86; font-weight: 600">200 OK</span><span style="color: #A395AC">142 ms</span><span style="color: #A395AC">1.2 KB</span>
+        </div>
+        <div style="display: flex; gap: 3px; padding: 0 15px; border-bottom: 1px solid #362A3B; font-size: 11.5px; color: #A395AC">
+          <div style="padding: 6px 10px; color: #EFE9F2; border-bottom: 2px solid #E0699E">Body</div>
+          <div style="padding: 6px 10px">Headers</div>
+          <div style="padding: 6px 10px">Cookies</div>
+          <div style="padding: 6px 10px">Timeline</div>
+        </div>
+        <pre style="margin: 0; padding: 12px 15px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.6; color: #CFC6D4">{
+  <span style="color:#EFA3C6">"id"</span>: <span style="color:#55BD86">"ch_1M2X9A"</span>,
+  <span style="color:#EFA3C6">"amount"</span>: <span style="color:#E4813F">2499</span>,
+  <span style="color:#EFA3C6">"currency"</span>: <span style="color:#55BD86">"eur"</span>,
+  <span style="color:#EFA3C6">"status"</span>: <span style="color:#55BD86">"succeeded"</span>,
+  <span style="color:#EFA3C6">"captured"</span>: <span style="color:#AB8CE8">true</span>
+}</pre>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>body{margin:0;background:#0C1118;color:#E8EEF5;font-family:Inter,sans-serif}::selection{background:#1E7E8D;color:#D9F6FA}a{color:#86DFEB;text-decoration:none}a:hover{color:#D9F6FA;text-decoration:underline}</style>
+</helmet>
+<div style="padding: 52px 60px">
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8A99AC; margin-bottom: 10px"><a href="00 Index.dc.html">← index</a> · 08 / §G</div>
+  <div style="display: flex; align-items: baseline; gap: 20px; margin-bottom: 6px">
+    <div style="font-size: 26px; font-weight: 500">Auth &amp; cookies</div>
+    <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #38C5D8; letter-spacing: 0.12em">PER-REQUEST OR INHERITED · SECRETS FOLLOW §B</div>
+  </div>
+  <div style="font-size: 13px; color: #8A99AC; margin-bottom: 36px; max-width: 700px">Auth is a folder-level default that requests inherit; overriding is explicit and visible. Token state is a chip with a clock, not a surprise 401. Secrets are keyring-backed — the .req file stores which keys to use, never the values.</div>
+
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38C5D8; letter-spacing: 0.14em; margin-bottom: 12px">FRAME 1 — AUTH TAB · OAUTH2 CLIENT CREDENTIALS · 1920×1080</div>
+  <div style="width: 1920px; height: 1080px; border: 1px solid #223041; border-radius: 6px; background: #0C1118; display: flex; flex-direction: column; overflow: hidden">
+    <div style="height: 40px; display: flex; align-items: center; padding: 0 16px; gap: 14px; background: #121A24; border-bottom: 1px solid #223041; flex: none">
+      <div style="font-size: 12px; font-weight: 500; letter-spacing: 0.3em; color: #8A99AC">MERIDIAN</div>
+      <div style="flex: 1"></div>
+      <div style="display: flex; align-items: center; gap: 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #86DFEB; border: 1px solid #1E7E8D; border-radius: 3px; padding: 3px 10px">env: staging ▾ <span style="color: #8A99AC">⌃E</span></div>
+    </div>
+    <div style="flex: 1; display: flex; min-height: 0">
+      <div style="width: 48px; background: #121A24; border-right: 1px solid #223041; display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 6px; flex: none">
+        <div style="width: 34px; height: 34px; border-radius: 3px; background: rgba(56,197,216,0.14); color: #38C5D8; display: flex; flex-direction: column; align-items: center; justify-content: center; border-left: 2px solid #38C5D8"><span style="font-size:13px">▤</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px;color:#8A99AC">1</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">▶</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">2</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">◎</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">3</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">≣</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">4</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">⬡</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">5</span></div>
+      </div>
+      <div style="width: 264px; border-right: 1px solid #223041; padding: 10px 0; font-size: 12.5px; flex: none">
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #C6D0DC">▾ payments-api/</div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 26px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8A99AC">▾ charges/ <span style="font-size: 9px; color: #586878; margin-left: auto">auth: oauth2</span></div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 38px; height: 24px; background: #18222F; border-left: 2px solid #38C5D8"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;color:#4FBE7E;background:rgba(79,190,126,0.16)">POST</span><span>Create charge</span></div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 38px; height: 24px; color: #C6D0DC"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;color:#4EA1F2;background:rgba(78,161,242,0.16)">GET</span><span>Get charge</span></div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+        <div style="display: flex; gap: 10px; padding: 12px 16px; align-items: center; flex: none">
+          <div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: #4FBE7E; background: rgba(79,190,126,0.16); border-radius: 3px; padding: 8px 12px">POST ▾</div>
+          <div style="flex: 1; display: flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 8px 12px"><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{base_url}</span>}</span><span>/v1/charges</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: #38C5D8; border: 1px solid #38C5D8; border-radius: 3px; padding: 8px 18px">Send <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#8A99AC">⌃↵</span></div>
+        </div>
+        <div style="display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid #223041; font-size: 12px; color: #8A99AC; flex: none">
+          <div style="padding: 7px 11px">Params</div>
+          <div style="padding: 7px 11px">Headers</div>
+          <div style="padding: 7px 11px">Body</div>
+          <div style="padding: 7px 11px; color: #E8EEF5; border-bottom: 2px solid #38C5D8">Auth</div>
+          <div style="padding: 7px 11px">Assertions</div>
+          <div style="padding: 7px 11px">Chain</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: rgba(56,197,216,0.04); border-bottom: 1px solid #223041; font-size: 12px; flex: none">
+          <span style="font-family: 'JetBrains Mono', monospace; color: #86DFEB">⤴</span>
+          <span style="color: #C6D0DC">inherited from <span style="font-family:'JetBrains Mono',monospace;color:#86DFEB">charges/</span> — OAuth2 client credentials</span>
+          <span style="margin-left: auto; color: #86DFEB">override for this request</span>
+        </div>
+        <div style="flex: 1; padding: 18px 20px">
+          <div style="display: flex; gap: 1px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px">
+            <span style="padding: 5px 12px; border: 1px solid #223041; color: #8A99AC; border-radius: 3px 0 0 3px">None</span>
+            <span style="padding: 5px 12px; border: 1px solid #223041; color: #8A99AC">Basic</span>
+            <span style="padding: 5px 12px; border: 1px solid #223041; color: #8A99AC">Bearer</span>
+            <span style="padding: 5px 12px; border: 1px solid #223041; color: #8A99AC">API key</span>
+            <span style="padding: 5px 12px; background: rgba(56,197,216,0.14); border: 1px solid #38C5D8; color: #38C5D8; border-radius: 0 3px 3px 0">OAuth2</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 170px 420px; gap: 12px 16px; align-items: center; font-size: 12.5px; color: #C6D0DC">
+            <span style="color: #8A99AC">grant type</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 6px 10px">client_credentials ▾</span>
+            <span style="color: #8A99AC">token URL</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 6px 10px"><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{base_url}</span>}</span>/oauth/token</span>
+            <span style="color: #8A99AC">client id</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 6px 10px"><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{client_id}</span>}</span></span>
+            <span style="color: #8A99AC">client secret</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 6px 10px"><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{client_secret}</span>}</span> <span style="color: #586878; font-size: 10px">•••• keyring</span></span>
+            <span style="color: #8A99AC">scopes</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 6px 10px">charges:write refunds:read</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; margin-top: 24px">
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #4FBE7E; border: 1px solid rgba(79,190,126,0.45); border-radius: 999px; padding: 3px 12px">● token valid · expires in 42 m</span>
+            <span style="font-size: 12px; color: #86DFEB">refresh now</span>
+            <span style="font-size: 12px; color: #8A99AC">clear token</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #8A99AC; border-top: 1px solid #223041; flex: none">payments-api/charges/_folder.req<span style="color: #4FBE7E">saved</span><span style="margin-left: auto; color: #586878">auth config serializes here · tokens + secrets stay in the keyring</span></div>
+      </div>
+    </div>
+  </div>
+  <div style="width: 1920px; margin: 16px 0 48px; font-size: 12px; color: #C6D0DC; max-width: 1100px; line-height: 1.6">The inheritance bar is the anatomy lesson: where auth comes from, one action to override. Editing inherited auth edits the folder file (_folder.req) and says so in the footer. Type switcher is a segmented control; each type shows only its own fields.</div>
+
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38C5D8; letter-spacing: 0.14em; margin-bottom: 12px">TOKEN STATES, OTHER TYPES &amp; COOKIES — INSETS AT 1:1</div>
+  <div style="display: flex; flex-wrap: wrap; gap: 24px; width: 1920px; margin-bottom: 20px">
+    <div style="width: 460px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 16px; display: flex; flex-direction: column; gap: 10px; font-family: 'JetBrains Mono', monospace; font-size: 11px">
+        <span style="display: inline-flex; align-items: center; gap: 7px; color: #4FBE7E; border: 1px solid rgba(79,190,126,0.45); border-radius: 999px; padding: 3px 12px; width: fit-content">● token valid · expires in 42 m</span>
+        <span style="display: inline-flex; align-items: center; gap: 7px; color: #E8C14A; border: 1px solid rgba(232,193,74,0.5); border-radius: 999px; padding: 3px 12px; width: fit-content">● expires in 4 m · auto-refresh on send</span>
+        <span style="display: inline-flex; align-items: center; gap: 7px; color: #E5636B; border: 1px solid rgba(229,99,107,0.5); border-radius: 999px; padding: 3px 12px; width: fit-content">● expired 12 m ago · <span style="color: #86DFEB">refresh</span></span>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">Token chip trio — valid / expiring / expired. The chip also rides the Send button's corner when auth is OAuth2, so expiry is visible before sending.</div>
+    </div>
+    <div style="width: 500px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; gap: 12px; align-items: center"><span style="color: #8A99AC; width: 80px; font-size: 11px">Bearer</span><span style="background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 5px 10px; flex: 1"><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{token}</span>}</span></span></div>
+        <div style="display: flex; gap: 12px; align-items: center"><span style="color: #8A99AC; width: 80px; font-size: 11px">Basic</span><span style="background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 5px 10px; flex: 1">user: merchant_bot · pass: <span style="color: #8A99AC">•••• keyring</span></span></div>
+        <div style="display: flex; gap: 12px; align-items: center"><span style="color: #8A99AC; width: 80px; font-size: 11px">API key</span><span style="background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 5px 10px; flex: 1">header X-Api-Key ▾ · <span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{api_key}</span>}</span></span></div>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">The other types are one row each — value is a var chip by default, nudging secrets toward the environment + keyring instead of pasted literals.</div>
+    </div>
+    <div style="width: 640px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px">
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 10px; color: #586878; letter-spacing: 0.08em; margin-bottom: 10px">COOKIE JAR — PER DOMAIN <span style="margin-left: auto; color: #86DFEB; font-size: 11px; letter-spacing: 0">clear domain</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0; color: #C6D0DC">▾ staging.acme-pay.dev <span style="color: #586878">2 cookies · session only</span></div>
+        <div style="display: grid; grid-template-columns: 140px 1fr 110px 80px; gap: 0 14px; padding: 4px 0 4px 18px; border-bottom: 1px solid #18222F; color: #8A99AC"><span style="color: #86DFEB">sid</span><span>a8f2…c91 <span style="color: #586878">httponly secure</span></span><span>expires: session</span><span style="color: #86DFEB; text-align: right">delete</span></div>
+        <div style="display: grid; grid-template-columns: 140px 1fr 110px 80px; gap: 0 14px; padding: 4px 0 4px 18px; color: #8A99AC"><span style="color: #86DFEB">csrf_token</span><span>9d41…07a</span><span>expires: 1 h</span><span style="color: #86DFEB; text-align: right">delete</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 8px 0 2px; color: #586878">▸ localhost:8080 <span>1 cookie</span></div>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">Cookie jar — grouped by domain, flags in text, clear per domain or per cookie. Session-only by default; the jar never serializes to the collection.</div>
+    </div>
+  </div>
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #586878; padding: 20px 0 8px; border-top: 1px solid #18222F; width: 1920px">KEYS ON THIS SURFACE — ⌃↵ send (auto-refresh expiring token first) · ⌃S save · tab across fields</div>
+</div>
+</x-dc>
+</body>
+</html>

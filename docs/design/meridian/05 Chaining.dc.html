@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>body{margin:0;background:#0C1118;color:#E8EEF5;font-family:Inter,sans-serif}::selection{background:#1E7E8D;color:#D9F6FA}a{color:#86DFEB;text-decoration:none}a:hover{color:#D9F6FA;text-decoration:underline}</style>
+</helmet>
+<div style="padding: 52px 60px">
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8A99AC; margin-bottom: 10px"><a href="00 Index.dc.html">← index</a> · 05 / §D</div>
+  <div style="display: flex; align-items: baseline; gap: 20px; margin-bottom: 6px">
+    <div style="font-size: 26px; font-weight: 500">Chaining &amp; assertions</div>
+    <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #38C5D8; letter-spacing: 0.12em">DECLARATIVE · FILE-SERIALIZABLE · NO SCRIPTING</div>
+  </div>
+  <div style="font-size: 13px; color: #8A99AC; margin-bottom: 36px; max-width: 700px">Every row here is a line in the .req file. What makes it feel powerful instead of lesser-Postman: the live preview — each row evaluates against the last response the moment you type it, so authoring an assertion IS running it.</div>
+
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38C5D8; letter-spacing: 0.14em; margin-bottom: 12px">FRAME 1 — ASSERTIONS TAB, LIVE PREVIEW AGAINST LAST RESPONSE · 1920×1080</div>
+  <div style="width: 1920px; height: 1080px; border: 1px solid #223041; border-radius: 6px; background: #0C1118; display: flex; flex-direction: column; overflow: hidden">
+    <div style="height: 40px; display: flex; align-items: center; padding: 0 16px; gap: 14px; background: #121A24; border-bottom: 1px solid #223041; flex: none">
+      <div style="font-size: 12px; font-weight: 500; letter-spacing: 0.3em; color: #8A99AC">MERIDIAN</div>
+      <div style="flex: 1"></div>
+      <div style="display: flex; align-items: center; gap: 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #86DFEB; border: 1px solid #1E7E8D; border-radius: 3px; padding: 3px 10px">env: staging ▾ <span style="color: #8A99AC">⌃E</span></div>
+    </div>
+    <div style="flex: 1; display: flex; min-height: 0">
+      <div style="width: 48px; background: #121A24; border-right: 1px solid #223041; display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 6px; flex: none">
+        <div style="width: 34px; height: 34px; border-radius: 3px; background: rgba(56,197,216,0.14); color: #38C5D8; display: flex; flex-direction: column; align-items: center; justify-content: center; border-left: 2px solid #38C5D8"><span style="font-size:13px">▤</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px;color:#8A99AC">1</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">▶</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">2</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">◎</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">3</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">≣</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">4</span></div>
+        <div style="width: 34px; height: 34px; border-radius: 3px; color: #8A99AC; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size:13px">⬡</span><span style="font-family:'JetBrains Mono',monospace;font-size:7px">5</span></div>
+      </div>
+      <div style="width: 264px; border-right: 1px solid #223041; padding: 10px 0; font-size: 12.5px; flex: none">
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #C6D0DC">▾ payments-api/</div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 26px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8A99AC">▾ auth/</div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 38px; height: 24px"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;color:#4FBE7E;background:rgba(79,190,126,0.16)">POST</span><span>Login</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#86DFEB;margin-left:auto">→token</span></div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 26px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8A99AC">▾ charges/</div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 38px; height: 24px"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;color:#4FBE7E;background:rgba(79,190,126,0.16)">POST</span><span>Create charge</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#86DFEB;margin-left:auto">→charge_id</span></div>
+        <div style="display: flex; align-items: center; gap: 7px; padding: 0 14px 0 38px; height: 24px; background: #18222F; border-left: 2px solid #38C5D8"><span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:1px 4px;border-radius:2px;color:#4EA1F2;background:rgba(78,161,242,0.16)">GET</span><span>Get charge</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8A99AC;margin-left:auto">⛓2</span></div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; border-right: 1px solid #223041; min-width: 0">
+        <div style="display: flex; gap: 10px; padding: 12px 16px; align-items: center; flex: none">
+          <div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: #4EA1F2; background: rgba(78,161,242,0.16); border-radius: 3px; padding: 8px 12px">GET ▾</div>
+          <div style="flex: 1; display: flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 8px 12px"><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{base_url}</span>}</span><span>/v1/charges/</span><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{charge_id}</span>}</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: #38C5D8; border: 1px solid #38C5D8; border-radius: 3px; padding: 8px 18px">Send <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#8A99AC">⌃↵</span></div>
+        </div>
+        <div style="display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid #223041; font-size: 12px; color: #8A99AC; flex: none">
+          <div style="padding: 7px 11px">Params</div>
+          <div style="padding: 7px 11px">Headers <span style="color:#586878">3</span></div>
+          <div style="padding: 7px 11px">Body</div>
+          <div style="padding: 7px 11px">Auth</div>
+          <div style="padding: 7px 11px; color: #E8EEF5; border-bottom: 2px solid #38C5D8">Assertions <span style="color:#E5636B">3/4✗</span></div>
+          <div style="padding: 7px 11px">Chain <span style="color:#86DFEB">2</span></div>
+        </div>
+        <div style="flex: 1; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px">
+          <div style="display: grid; grid-template-columns: 150px 130px 1fr 230px; gap: 0 14px; align-items: center; height: 26px; color: #586878; font-size: 10px; letter-spacing: 0.08em; border-bottom: 1px solid #223041">
+            <span>SOURCE</span><span>OPERATOR</span><span>VALUE</span><span>PREVIEW — vs last response</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 150px 130px 1fr 230px; gap: 0 14px; align-items: center; height: 34px; border-bottom: 1px solid #18222F">
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">status ▾</span>
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">equals ▾</span>
+            <span style="color: #E8EEF5; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">200</span>
+            <span style="color: #4FBE7E; font-size: 11px">✓ 200</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 150px 130px 1fr 230px; gap: 0 14px; align-items: center; height: 34px; border-bottom: 1px solid #18222F">
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">header ▾</span>
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">contains ▾</span>
+            <span style="color: #E8EEF5; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">content-type: application/json</span>
+            <span style="color: #4FBE7E; font-size: 11px">✓ application/json; charset=utf-8</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 150px 130px 1fr 230px; gap: 0 14px; align-items: center; height: 34px; border-bottom: 1px solid #18222F; background: rgba(229,99,107,0.04)">
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">body $ ▾</span>
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">equals ▾</span>
+            <span style="color: #E8EEF5; background: #121A24; border: 1px solid #38C5D8; border-radius: 3px; padding: 4px 8px; outline: 2px solid #38C5D8; outline-offset: 1px">$.status == "succeeded"</span>
+            <span style="color: #E5636B; font-size: 11px">✗ got "requires_capture"</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 150px 130px 1fr 230px; gap: 0 14px; align-items: center; height: 34px; border-bottom: 1px solid #18222F">
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">time ▾</span>
+            <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">under ▾</span>
+            <span style="color: #E8EEF5; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">500 ms</span>
+            <span style="color: #4FBE7E; font-size: 11px">✓ 96 ms</span>
+          </div>
+          <div style="padding: 10px 0; color: #586878">＋ add assertion</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #8A99AC; border-top: 1px solid #223041; flex: none">payments-api/charges/get-charge.req<span style="color: #38C5D8">● unsaved</span><span style="margin-left: auto; color: #586878">each row = one `assert` line in the file</span></div>
+      </div>
+      <div style="width: 480px; display: flex; flex-direction: column; flex: none">
+        <div style="display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid #223041; font-family: 'JetBrains Mono', monospace; font-size: 12px; flex: none">
+          <span style="color: #4FBE7E; font-weight: 600">✓ 200 OK</span><span style="color: #8A99AC">96 ms</span><span style="color: #586878">last response · 2 min ago</span>
+        </div>
+        <pre style="flex: 1; margin: 0; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; color: #C6D0DC; overflow: hidden">{
+  <span style="color:#86DFEB">"id"</span>: <span style="color:#4FBE7E">"ch_9f2KpQ7Ns"</span>,
+  <span style="color:#86DFEB">"amount"</span>: <span style="color:#E8763F">2499</span>,
+  <span style="color:#86DFEB">"status"</span>: <span style="background:rgba(229,99,107,0.18);color:#E5636B;border-radius:2px">"requires_capture"</span>,
+  <span style="color:#86DFEB">"captured"</span>: <span style="color:#A78BE0">false</span>
+}</pre>
+        <div style="padding: 10px 16px; border-top: 1px solid #18222F; font-size: 11px; color: #8A99AC; flex: none">The focused assertion's JSONPath highlights its target in the response — editing the path moves the highlight live.</div>
+      </div>
+    </div>
+  </div>
+  <div style="width: 1920px; margin: 16px 0 48px; font-size: 12px; color: #C6D0DC; max-width: 1100px; line-height: 1.6">Row idiom: source ▾ · operator ▾ · value · live preview. The preview column re-evaluates on every keystroke against the stored last response; the focused row's path also highlights its selection in the response pane (right). Failing rows tint az-status-fail at 4%.</div>
+
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38C5D8; letter-spacing: 0.14em; margin-bottom: 12px">EXTRACTIONS, CHAIN VIEW &amp; STATES — INSETS AT 1:1</div>
+  <div style="display: flex; flex-wrap: wrap; gap: 24px; width: 1920px; margin-bottom: 20px">
+    <div style="width: 680px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px">
+        <div style="font-size: 10px; color: #586878; letter-spacing: 0.08em; margin-bottom: 10px">EXTRACTIONS — auth/Login · after response</div>
+        <div style="display: grid; grid-template-columns: 110px 1fr 130px 200px; gap: 0 12px; align-items: center; height: 34px; border-bottom: 1px solid #18222F">
+          <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">body $ ▾</span>
+          <span style="color: #E8EEF5; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">$.auth.access_token</span>
+          <span style="display: flex; align-items: center; gap: 4px"><span style="color: #586878">→</span><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 2px 6px">token</span></span>
+          <span style="color: #4FBE7E; font-size: 11px">✓ selects "eyJhbGciOiJIUzI1…"</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 110px 1fr 130px 200px; gap: 0 12px; align-items: center; height: 34px; border-bottom: 1px solid #18222F">
+          <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">header ▾</span>
+          <span style="color: #E8EEF5; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">x-rate-limit-remaining</span>
+          <span style="display: flex; align-items: center; gap: 4px"><span style="color: #586878">→</span><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 2px 6px">rl_left</span></span>
+          <span style="color: #4FBE7E; font-size: 11px">✓ selects "97"</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 110px 1fr 130px 200px; gap: 0 12px; align-items: center; height: 34px">
+          <span style="color: #C6D0DC; background: #121A24; border: 1px solid #223041; border-radius: 3px; padding: 4px 8px">body $ ▾</span>
+          <span style="color: #E8C14A; background: #121A24; border: 1px solid #E8C14A; border-radius: 3px; padding: 4px 8px">$.auth.refresh_token</span>
+          <span style="display: flex; align-items: center; gap: 4px"><span style="color: #586878">→</span><span style="color: #E8C14A; background: rgba(232,193,74,0.12); border-radius: 2px; padding: 2px 6px">refresh</span></span>
+          <span style="color: #E8C14A; font-size: 11px">! matches nothing — last matched 3 runs ago</span>
+        </div>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">Extraction rows: source · path · → variable · live selection preview (truncated at 24 chars). A path that stops matching goes warn and says when it last worked — the API changed, and the row remembers.</div>
+    </div>
+    <div style="width: 560px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px">
+        <div style="font-size: 10px; color: #586878; letter-spacing: 0.08em; margin-bottom: 10px">CHAIN TAB — charges/Get charge</div>
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11.5px">
+          <div style="display: flex; align-items: center; gap: 8px"><span style="color: #586878; width: 62px">uses</span><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{token}</span>}</span><span style="color: #586878">←</span><span style="color: #C6D0DC">auth/Login</span><span style="color: #4FBE7E; margin-left: auto">✓ fresh</span></div>
+          <div style="display: flex; align-items: center; gap: 8px"><span style="color: #586878; width: 62px">uses</span><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{charge_id}</span>}</span><span style="color: #586878">←</span><span style="color: #C6D0DC">charges/Create charge</span><span style="color: #E8C14A; margin-left: auto">! stale — from previous run</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #18222F"><span style="color: #586878; width: 62px">produces</span><span style="color: #86DFEB; background: rgba(56,197,216,0.12); border-radius: 2px; padding: 1px 5px">{<span>{charge_json}</span>}</span><span style="color: #586878">→ used by</span><span style="color: #C6D0DC">refunds/Create refund</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding-top: 10px; color: #586878; font-size: 10.5px">run order when executed alone: <span style="color: #8A99AC">Login → Create charge → this</span></div>
+        </div>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">The chain view is a list, not a canvas: uses / produces, provenance per variable, freshness state, and the derived run order. The tree shows the cheap version (→token badge, ⛓2 count).</div>
+    </div>
+    <div style="width: 560px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 14px 16px">
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #586878; letter-spacing: 0.08em; margin-bottom: 10px">EMPTY ASSERTIONS TAB — NUDGE, NOT NAG</div>
+        <div style="font-size: 12px; color: #8A99AC; line-height: 1.7">No assertions yet. A run counts this request as ✓ if the response is 2xx.<br><span style="color: #86DFEB">＋ assert status 200</span> <span style="color: #586878">·</span> <span style="color: #86DFEB">＋ assert from last response…</span></div>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">Zero rows states the default behavior and offers one-click starters — "assert from last response" pre-fills path + current value.</div>
+    </div>
+    <div style="width: 560px">
+      <div style="border: 1px solid #223041; border-radius: 6px; background: #0C1118; padding: 14px 16px">
+        <div style="display: flex; align-items: center; gap: 10px; background: rgba(232,193,74,0.08); border: 1px solid #223041; border-radius: 3px; padding: 8px 12px; font-size: 11.5px; color: #E8C14A"><span style="font-family:'JetBrains Mono',monospace">!</span> preview is stale — request edited since last send<span style="margin-left: auto; color: #86DFEB">send now ⌃↵</span></div>
+      </div>
+      <div style="font-size: 11.5px; color: #8A99AC; margin-top: 8px">Stale preview — the URL or body changed after the stored response. Previews keep evaluating but carry the banner until a fresh send.</div>
+    </div>
+  </div>
+  <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #586878; padding: 20px 0 8px; border-top: 1px solid #18222F; width: 1920px">KEYS ON THIS SURFACE — ⌃↵ send (refresh preview) · tab/shift-tab move across row cells · ⌃S save · enter add row below</div>
+</div>
+</x-dc>
+</body>
+</html>

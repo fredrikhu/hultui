@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "design-mocks",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8321", "--directory", "docs/design/meridian"],
+      "port": 8321
+    }
+  ]
+}
