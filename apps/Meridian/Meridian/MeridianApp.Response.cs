@@ -395,8 +395,13 @@ public partial class MeridianApp
         if (!json) return response.Body.Text;
         try
         {
+            // Utf8JsonWriter, not JsonSerializer: no reflection, so Native AOT
+            // has nothing to trim away.
             using var doc = JsonDocument.Parse(response.Body.Text);
-            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
+                doc.WriteTo(writer);
+            return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
         }
         catch (JsonException)
         {

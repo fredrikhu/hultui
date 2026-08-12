@@ -126,9 +126,7 @@ public partial class MeridianApp
         "no sends yet",
         "Everything you send lands here, newest first.");
 
-    private Element BuildEnvironmentsView() => EmptyView("Environments",
-        "no environments",
-        "Open a collection to edit its envs/*.env files side by side.");
+    private Element BuildEnvironmentsView() => BuildEnvironmentsRealView();
 
     private static Element EmptyView(string title, string headline, string hint) =>
         Flex.Column(gap: Azimuth.S2).FlexGrow(1)

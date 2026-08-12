@@ -37,10 +37,19 @@ public partial class MeridianApp : Component, IDisposable
     private CollectionTree? _tree;
     private CollectionWatcher? _watcher;
 
-    // The active environment: picked automatically on open ("local" preferred),
-    // shown in the titlebar. The switcher popover arrives with P4.
-    private EnvDocument? _env;
+    // All environments, loaded as editable documents (the compare table edits
+    // every column). _envName is the active one — null is the legal
+    // "no environment" state.
+    private readonly List<EnvFileRef> _envFiles = [];
+    private readonly Dictionary<string, EnvDocument> _envDocs = new(StringComparer.Ordinal);
     private string? _envName;
+    private EnvDocument? _env => _envName != null ? _envDocs.GetValueOrDefault(_envName) : null;
+    internal string? ActiveEnvName => _envName;
+
+    private readonly IKeyring _keyring;
+
+    // The one secret whose value is momentarily revealed, and until when.
+    private (string Key, long UntilTs)? _reveal;
 
     // Open requests. One engine for the whole session — it owns the connection
     // pool, the cookie jar, and the workspace's trusted certificates.
@@ -92,12 +101,14 @@ public partial class MeridianApp : Component, IDisposable
     private bool _pickingFolder;
 
     public MeridianApp(Application app, Window window, IFolderPicker? folderPicker = null,
-        ISaveFilePicker? saveFilePicker = null, int viewerCapBytes = 1024 * 1024)
+        ISaveFilePicker? saveFilePicker = null, int viewerCapBytes = 1024 * 1024,
+        IKeyring? keyring = null)
     {
         _app = app;
         _window = window;
         _folderPicker = folderPicker ?? new NativeFolderPicker();
         _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
+        _keyring = keyring ?? new DefaultKeyring();
         Engine = new HttpEngine(viewerCapBytes);
         _responseFind = new FindBarState(MarkDirty);
 
@@ -153,6 +164,12 @@ public partial class MeridianApp : Component, IDisposable
 
         // Overlays are conditional; keys keep each reconciling only against its
         // own kind rather than by position.
+        if (_dialog is { } dialogSpec)
+        {
+            var dialog = BuildDialog(dialogSpec);
+            dialog.Key = "dialog";
+            root.AddChild(dialog);
+        }
         if (_popover != null)
         {
             var popover = BuildPopover(_popover);
@@ -182,6 +199,11 @@ public partial class MeridianApp : Component, IDisposable
         {
             _pendingUrlFocus = false;
             _urlRef.Current?.Focus();
+        }
+        if (_pendingDialogFocus)
+        {
+            _pendingDialogFocus = false;
+            _dialogRef.Current?.Focus();
         }
         ServiceFindBar(_responseFind);
     }
@@ -255,15 +277,40 @@ public partial class MeridianApp : Component, IDisposable
         if (_workspace is not { } ws) return;
         _tree = CollectionScanner.Scan(ws);
 
-        // Pick the environment: keep the current one if it still exists,
-        // else prefer "local", else the first.
-        var envs = _tree.Environments;
-        var chosen = envs.FirstOrDefault(e => e.Name == _envName)
-                  ?? envs.FirstOrDefault(e => e.Name == "local")
-                  ?? envs.FirstOrDefault();
-        _envName = chosen?.Name;
-        _env = chosen != null ? ReadEnv(chosen.Path) : null;
+        // Reload every environment document — except ones with unsaved edits,
+        // which survive the rescan (the disk copy would clobber the table).
+        _envFiles.Clear();
+        _envFiles.AddRange(_tree.Environments);
+        var gone = _envDocs.Keys.Where(name => _envFiles.All(e => e.Name != name)).ToList();
+        foreach (var name in gone) _envDocs.Remove(name);
+        foreach (var env in _envFiles)
+        {
+            if (_envDocs.TryGetValue(env.Name, out var existing) && existing.Edited) continue;
+            if (ReadEnv(env.Path) is { } doc) _envDocs[env.Name] = doc;
+        }
+
+        // Pick the active environment: keep the current choice while it exists,
+        // else prefer "local", else the first. Null (no environment) is kept
+        // only if it was an explicit choice — a fresh open picks one.
+        if (_envName == null || !_envDocs.ContainsKey(_envName))
+        {
+            if (!_noEnvironmentChosen)
+                _envName = _envDocs.ContainsKey("local") ? "local" : _envFiles.FirstOrDefault()?.Name;
+            else
+                _envName = null;
+        }
     }
+
+    private bool _noEnvironmentChosen;
+
+    internal void SelectEnvironment(string? name)
+    {
+        _envName = name;
+        _noEnvironmentChosen = name == null;
+        MarkDirty();
+    }
+
+    internal string EnvPath(string name) => _envFiles.First(e => e.Name == name).Path;
 
     // ── Workspace certificate trust (.meridian/trusted.certs) ────────────
     // One thumbprint per line. The mock's "trust for this workspace" action:
@@ -384,9 +431,26 @@ public partial class MeridianApp : Component, IDisposable
 
     // ── Send / cancel ────────────────────────────────────────────────────
 
-    /// <summary>The resolver for the current environment. Secrets resolve from
-    /// the keyring in P4; until then a secret key resolves like a plain one.</summary>
-    internal VariableResolver Resolver() => new(environment: _env?.Values);
+    /// <summary>The resolver for the current environment. A secret key's file
+    /// value is only a placeholder: the real value comes from the keyring (or a
+    /// CI-injected environment variable), and a secret this machine doesn't
+    /// have stays unresolved — visibly.</summary>
+    internal VariableResolver Resolver()
+    {
+        if (_env is not { } env || _workspace is not { } ws)
+            return new VariableResolver();
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var key in env.Keys)
+        {
+            if (env.IsSecret(key))
+            {
+                if (_keyring.Get(ws.Root, key) is { } secret) values[key] = secret;
+            }
+            else if (env.Values.TryGetValue(key, out var value))
+                values[key] = value;
+        }
+        return new VariableResolver(environment: values);
+    }
 
     private async void SendActive()
     {
@@ -416,7 +480,12 @@ public partial class MeridianApp : Component, IDisposable
         }
         if (unresolved.Count > 0)
         {
-            Flash($"Unresolved in env {_envName ?? "(none)"}: {string.Join(", ", unresolved.Distinct().Select(n => $"{{{{{n}}}}}"))}");
+            // The mock's fresh-clone state: a flagged-secret key gets its own
+            // copy, naming the machine-local fix rather than the environment.
+            var missingSecret = unresolved.Distinct().FirstOrDefault(n => _env?.IsSecret(n) == true);
+            Flash(missingSecret != null
+                ? $"secret {missingSecret} not set on this machine — set it in Environments (5)"
+                : $"Unresolved in env {_envName ?? "(none)"}: {string.Join(", ", unresolved.Distinct().Select(n => $"{{{{{n}}}}}"))}");
             return;
         }
 
@@ -469,6 +538,14 @@ public partial class MeridianApp : Component, IDisposable
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
 
+        // A modal dialog owns Enter/Esc while it is up — before anything else.
+        if (_dialog != null)
+        {
+            if (e.Key == KeyCode.Enter) { SubmitDialog(); e.StopPropagation = true; }
+            else if (e.Key == KeyCode.Escape) { CancelDialog(); e.StopPropagation = true; }
+            return;
+        }
+
         // The response find bar's keys route ahead of everything else — the
         // Junction discipline, so Esc closes the bar before it cancels a send
         // and n/p walk matches instead of typing.
@@ -485,6 +562,8 @@ public partial class MeridianApp : Component, IDisposable
             switch (e.Key)
             {
                 case KeyCode.O: OpenFolder(); e.StopPropagation = true; return;
+                case KeyCode.E when _workspace != null: OpenEnvSwitcher(); e.StopPropagation = true; return;
+                case KeyCode.S when View == MeridianView.Environments: SaveEnvironments(); e.StopPropagation = true; return;
                 case KeyCode.S: SaveActiveTab(); e.StopPropagation = true; return;
                 case KeyCode.W when ActiveTab != null: CloseActiveTab(); e.StopPropagation = true; return;
                 case KeyCode.Enter when View == MeridianView.Requests: SendActive(); e.StopPropagation = true; return;
