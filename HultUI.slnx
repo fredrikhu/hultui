@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/apps/">
     <Project Path="apps/Junction/Junction.csproj" />
+    <Project Path="apps/Meridian/Meridian.Cli/Meridian.Cli.csproj" />
+    <Project Path="apps/Meridian/Meridian.Core/Meridian.Core.csproj" />
+    <Project Path="apps/Meridian/Meridian/Meridian.csproj" />
     <Project Path="apps/VesperCommander/VesperCommander.csproj" />
   </Folder>
   <Folder Name="/samples/">
@@ -49,5 +52,6 @@
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
     <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />
+    <Project Path="tests/Meridian.Tests/Meridian.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe = Windows GUI subsystem: no console window is allocated when the
+         app launches (on Linux/macOS this is identical to Exe). The CI runner is
+         the separate Meridian.Cli console binary for exactly this reason. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Meridian</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Meridian.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Meridian.Core\Meridian.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>
