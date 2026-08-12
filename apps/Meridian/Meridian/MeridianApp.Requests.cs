@@ -29,9 +29,32 @@ public partial class MeridianApp
     {
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var tree = BuildTree(); tree.Key = "tree";
-        var editor = BuildEditorColumn(); editor.Key = "editor";
         row.AddChild(tree);
-        row.AddChild(editor);
+
+        var editor = BuildEditorColumn(); editor.Key = "editor";
+        if (ActiveTab is not { } tab)
+        {
+            row.AddChild(editor);
+            return row;
+        }
+
+        // The response pane: right of the editor by default, under it when
+        // flipped or forced by the breakpoint. Keyed by orientation so the two
+        // shapes never patch into each other.
+        var response = BuildResponsePanel(tab, ResponseAtBottom);
+        response.Key = "response-" + (ResponseAtBottom ? "bottom" : "right");
+        if (ResponseAtBottom)
+        {
+            var main = Flex.Column(gap: 0).FlexGrow(1).Children(editor, response);
+            main.Key = "main-bottom";
+            row.AddChild(main);
+        }
+        else
+        {
+            var main = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch).Children(editor, response);
+            main.Key = "main-right";
+            row.AddChild(main);
+        }
         return row;
     }
 
@@ -186,9 +209,6 @@ public partial class MeridianApp
         var bodyBox = Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0));
         bodyBox.AddChild(body);
         col.AddChild(bodyBox);
-
-        var response = BuildResponseStrip(tab); response.Key = "response";
-        col.AddChild(response);
 
         var footer = BuildEditorFooter(tab); footer.Key = "footer";
         col.AddChild(footer);
@@ -566,72 +586,6 @@ public partial class MeridianApp
             .Children(Text.New(label).FontSize(11.5f).TextColor(Azimuth.TextMuted));
         b.OnClick(_ => onClick());
         return b.HoverBg(Azimuth.Raised, Color.Transparent);
-    }
-
-    // ── Response strip (P3a: status + raw body; the full viewer is P3b) ──
-
-    private Element BuildResponseStrip(RequestTab tab)
-    {
-        var col = Flex.Column(gap: 0).FlexShrink(0)
-            .Height(Azimuth.ResponseBottom)
-            .BorderColor(Azimuth.BorderStrong).BorderWidth(new Thickness(0, 2, 0, 0));
-
-        var status = Flex.Row(gap: Azimuth.S3).Height(32).FlexShrink(0)
-            .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
-            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
-        status.AutomationId("response-status");
-
-        var bodyBox = Flex.Column(gap: 0).FlexGrow(1).Padding(new Thickness(Azimuth.S2, Azimuth.S3, Azimuth.S2, Azimuth.S3));
-
-        if (tab.Sending != null)
-        {
-            status.AddChild(Text.New("sending…").FontSize(12f).TextColor(Azimuth.TextMuted));
-        }
-        else if (tab.Result?.Response is { } response)
-        {
-            var (glyph, color) = StatusFace(response.StatusCode);
-            status.AddChild(Text.New($"{glyph} {response.StatusCode} {response.ReasonPhrase}".TrimEnd())
-                .FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(color));
-            status.AddChild(Ui.Mono($"{response.Timings.Total.TotalMilliseconds:0} ms", 11f, Azimuth.TextMuted));
-            status.AddChild(Ui.Mono(SizeLabel(response.Body.TotalBytes), 11f, Azimuth.TextMuted));
-            if (response.Body.Truncated)
-                status.AddChild(Text.New($"! showing first {SizeLabel(response.Body.Text.Length)} of {SizeLabel(response.Body.TotalBytes)}")
-                    .FontSize(11f).TextColor(Azimuth.StatusWarn));
-
-            if (response.Body.Kind == BodyKind.Text)
-            {
-                var area = TextArea.New(response.Body.Text);
-                area.FontFamily(Fonts.Mono).FontSize(12f).TextColor(Azimuth.TextDim).FlexGrow(1);
-                area.ReadOnly = true;
-                area.AutomationId("response-body");
-                bodyBox.AddChild(area);
-            }
-            else if (response.Body.Kind == BodyKind.Binary)
-            {
-                bodyBox.AddChild(Text.New($"binary body · {response.ContentType ?? "unknown type"} · {SizeLabel(response.Body.TotalBytes)}")
-                    .FontSize(12f).TextColor(Azimuth.TextMuted));
-            }
-            else
-            {
-                bodyBox.AddChild(Text.New("empty body").FontSize(12f).TextColor(Azimuth.TextFaint));
-            }
-        }
-        else if (tab.Result?.Failure is { } failure)
-        {
-            status.AddChild(Text.New($"! {failure.Headline}").FontSize(12.5f).FontWeight(FontWeight.Medium)
-                .TextColor(Azimuth.StatusWarn));
-            bodyBox.AddChild(Ui.Mono(failure.Detail, 12f, Azimuth.TextDim));
-        }
-        else
-        {
-            status.AddChild(Text.New("never sent").FontSize(12f).TextColor(Azimuth.TextFaint));
-            bodyBox.AddChild(Text.New("Send with Ctrl ↵ to see the response here").FontSize(12f).TextColor(Azimuth.TextFaint));
-        }
-
-        col.AddChild(status);
-        col.AddChild(bodyBox);
-        return col;
     }
 
     /// <summary>Status glyph + colour per the Azimuth register: 2xx pass ✓,

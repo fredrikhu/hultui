@@ -43,8 +43,8 @@ public partial class MeridianApp : Component, IDisposable
     private string? _envName;
 
     // Open requests. One engine for the whole session — it owns the connection
-    // pool and the cookie jar.
-    internal readonly HttpEngine Engine = new();
+    // pool, the cookie jar, and the workspace's trusted certificates.
+    internal readonly HttpEngine Engine;
     private readonly List<RequestTab> _tabs = [];
     private int _activeTab = -1;
 
@@ -55,14 +55,25 @@ public partial class MeridianApp : Component, IDisposable
         public bool Dirty => Doc.Edited;
         public SendResult? Result;
         public CancellationTokenSource? Sending;
+        public long SendStartedTs;
         /// <summary>The file changed on disk while this tab had unsaved edits —
         /// show the reload/keep-mine bar.</summary>
         public bool ExternalChanged;
         public EditorTab SubTab = EditorTab.Headers;
         public bool UrlEditing;
+        public ResponseTab RespTab = ResponseTab.Body;
+        public bool RespRaw;
     }
 
     internal enum EditorTab { Params, Headers, Body }
+    internal enum ResponseTab { Body, Headers, Cookies, Timeline }
+
+    // Response pane orientation: right 560dip by default, Ctrl+\ flips to
+    // bottom 380dip, and below the breakpoint bottom is forced regardless.
+    private const float ForceBottomWindowWidth = 1100f;
+    private bool _responseBottomChoice;
+    private bool _forceResponseBottom;
+    internal bool ResponseAtBottom => _responseBottomChoice || _forceResponseBottom;
 
     // Small anchored popover (method picker). Junction's idiom.
     private IReadOnlyList<(string Label, Action Run)>? _popover;
@@ -80,15 +91,20 @@ public partial class MeridianApp : Component, IDisposable
 
     private bool _pickingFolder;
 
-    public MeridianApp(Application app, Window window, IFolderPicker? folderPicker = null)
+    public MeridianApp(Application app, Window window, IFolderPicker? folderPicker = null,
+        ISaveFilePicker? saveFilePicker = null, int viewerCapBytes = 1024 * 1024)
     {
         _app = app;
         _window = window;
         _folderPicker = folderPicker ?? new NativeFolderPicker();
+        _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
+        Engine = new HttpEngine(viewerCapBytes);
+        _responseFind = new FindBarState(MarkDirty);
 
         View = MeridianView.Requests;
 
         Ui.DisplayScale = _window.DisplayScale;
+        _forceResponseBottom = _window.LayoutWidth < ForceBottomWindowWidth;
         _window.Resized += OnWindowResize;
 
         // Global keys land on the host when nothing is focused. Materialise the
@@ -96,14 +112,27 @@ public partial class MeridianApp : Component, IDisposable
         Mount().On<KeyDownEvent>(HandleKeyDown);
     }
 
+    private readonly ISaveFilePicker _saveFilePicker;
+
     // A monitor change arrives as a resize; retire the icon rasters cached for
     // the old scale and rebuild, or every icon disappears until the next build.
+    // The response pane's forced-bottom breakpoint re-evaluates here too.
     private void OnWindowResize()
     {
+        bool changed = false;
         float scale = _window.DisplayScale;
-        if (MathF.Abs(Ui.DisplayScale - scale) < 0.001f) return;
-        Ui.DisplayScale = scale;
-        Rerender();
+        if (MathF.Abs(Ui.DisplayScale - scale) >= 0.001f)
+        {
+            Ui.DisplayScale = scale;
+            changed = true;
+        }
+        bool force = _window.LayoutWidth < ForceBottomWindowWidth;
+        if (force != _forceResponseBottom)
+        {
+            _forceResponseBottom = force;
+            changed = true;
+        }
+        if (changed) Rerender();
     }
 
     internal CollectionWorkspace? Workspace => _workspace;
@@ -140,6 +169,13 @@ public partial class MeridianApp : Component, IDisposable
         return root;
     }
 
+    internal void FlipResponsePane()
+    {
+        if (_forceResponseBottom) { Flash("Too narrow — the response pane stays at the bottom"); return; }
+        _responseBottomChoice = !_responseBottomChoice;
+        MarkDirty();
+    }
+
     protected override void OnAfterBuild()
     {
         if (_pendingUrlFocus)
@@ -147,6 +183,7 @@ public partial class MeridianApp : Component, IDisposable
             _pendingUrlFocus = false;
             _urlRef.Current?.Focus();
         }
+        ServiceFindBar(_responseFind);
     }
 
     private Element BuildBody()
@@ -205,6 +242,7 @@ public partial class MeridianApp : Component, IDisposable
         _tabs.Clear();
         _activeTab = -1;
         RescanWorkspace();
+        LoadTrustedCertificates(ws);
         _watcher?.Dispose();
         _watcher = new CollectionWatcher(ws.Root,
             () => Application.InvokeOnMainThread(OnWorkspaceChangedOnDisk));
@@ -225,6 +263,42 @@ public partial class MeridianApp : Component, IDisposable
                   ?? envs.FirstOrDefault();
         _envName = chosen?.Name;
         _env = chosen != null ? ReadEnv(chosen.Path) : null;
+    }
+
+    // ── Workspace certificate trust (.meridian/trusted.certs) ────────────
+    // One thumbprint per line. The mock's "trust for this workspace" action:
+    // scoped to the collection, serialized as text like everything else.
+
+    private static string TrustFile(CollectionWorkspace ws) =>
+        Path.Combine(ws.Root, ".meridian", "trusted.certs");
+
+    private void LoadTrustedCertificates(CollectionWorkspace ws)
+    {
+        if (TryReadFile(TrustFile(ws)) is not { } text) return;
+        foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (!line.StartsWith('#'))
+                Engine.TrustCertificate(line);
+    }
+
+    /// <summary>The TLS state's action: trust the rejected certificate for this
+    /// workspace, persist it, and send again.</summary>
+    internal void TrustAndResend(string thumbprint)
+    {
+        Engine.TrustCertificate(thumbprint);
+        if (_workspace is { } ws)
+        {
+            try
+            {
+                var file = TrustFile(ws);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.AppendAllText(file, thumbprint + "\n");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Flash($"Trusted for this session only — could not write: {e.Message}");
+            }
+        }
+        SendActive();
     }
 
     private static EnvDocument? ReadEnv(string path)
@@ -347,7 +421,9 @@ public partial class MeridianApp : Component, IDisposable
         }
 
         var cts = tab.Sending = new CancellationTokenSource();
+        tab.SendStartedTs = System.Diagnostics.Stopwatch.GetTimestamp();
         MarkDirty();
+        TickWhileSending(tab);
         try
         {
             var spec = new RequestSpec(method, url.Text, headers, bodyText,
@@ -372,12 +448,36 @@ public partial class MeridianApp : Component, IDisposable
         ActiveTab?.Sending?.Cancel();
     }
 
+    /// <summary>Repaints the live elapsed readout while a send is in flight.
+    /// Started on the UI thread, so the awaits resume there too.</summary>
+    private async void TickWhileSending(RequestTab tab)
+    {
+        while (tab.Sending != null)
+        {
+            await Task.Delay(150);
+            if (tab.Sending != null) MarkDirty();
+        }
+    }
+
+    internal TimeSpan SendElapsed(RequestTab tab) =>
+        System.Diagnostics.Stopwatch.GetElapsedTime(tab.SendStartedTs);
+
     // ── Keyboard ─────────────────────────────────────────────────────────
 
     private void HandleKeyDown(KeyDownEvent e)
     {
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
+
+        // The response find bar's keys route ahead of everything else — the
+        // Junction discipline, so Esc closes the bar before it cancels a send
+        // and n/p walk matches instead of typing.
+        if (View == MeridianView.Requests && ActiveTab?.Result?.Response != null
+            && HandleFindBarKey(e, _responseFind))
+        {
+            e.StopPropagation = true;
+            return;
+        }
 
         // Ctrl combos work everywhere, including while typing in an input.
         if (ctrl)
@@ -388,6 +488,7 @@ public partial class MeridianApp : Component, IDisposable
                 case KeyCode.S: SaveActiveTab(); e.StopPropagation = true; return;
                 case KeyCode.W when ActiveTab != null: CloseActiveTab(); e.StopPropagation = true; return;
                 case KeyCode.Enter when View == MeridianView.Requests: SendActive(); e.StopPropagation = true; return;
+                case KeyCode.Backslash when View == MeridianView.Requests: FlipResponsePane(); e.StopPropagation = true; return;
             }
             return;
         }
