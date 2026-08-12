@@ -832,6 +832,16 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
+    /// <summary>Ctrl+A: mark every row in the pane (never the ".." parent). While a
+    /// type-to-find filter is active, only the rows it shows are marked.</summary>
+    private void MarkAll(char side)
+    {
+        var marks = Marks(side);
+        foreach (var e in Rows(side))
+            if (!e.IsParent) marks.Add(e.Name);
+        MarkDirty();
+    }
+
     // ── Right-drag marking ───────────────────────────────────────────────
     // Press the RIGHT button on a row and drag: every row the pointer crosses is
     // marked (or unmarked). The first row sets the direction — if it was unmarked we
@@ -1580,6 +1590,7 @@ public partial class CommanderApp : Component, IDisposable
             new($"Multi-rename… ({OperationTargets(side).Count(e => !e.IsParent)} files)", "Ctrl+M", OpenRename),
             new("Properties…", "Alt+Enter", () => ShowProperties(side)),
             new("Context menu…", "Menu", () => ShowContextMenuAtCursor(side)),
+            new("Mark all", "Ctrl+A", () => MarkAll(side)),
             new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
             new("Cycle preview panel", "Ctrl+Q", CyclePreview),
             new("Open Options…", "Ctrl+,", OpenOptions),
@@ -2119,6 +2130,14 @@ public partial class CommanderApp : Component, IDisposable
             if (e.Key == KeyCode.V) PasteFromClipboard();
             else CopyToClipboard(cut: e.Key == KeyCode.X);
             e.StopPropagation = true; return;
+        }
+
+        // Ctrl+A marks everything in the active pane — except in a text field, where it
+        // keeps its select-all-text meaning.
+        if (ctrl && e.Key == KeyCode.A
+            && e.Target is not (TextInputElement or TextAreaElement))
+        {
+            MarkAll(_active); e.StopPropagation = true; return;
         }
 
         // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs.
