@@ -832,13 +832,21 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    /// <summary>Ctrl+A: mark every row in the pane (never the ".." parent). While a
-    /// type-to-find filter is active, only the rows it shows are marked.</summary>
+    /// <summary>Ctrl+A: mark every row in the pane (never the ".." parent) — or, when
+    /// every row is already marked, unmark them all (the toggle every editor's
+    /// select-all-again teaches). While a type-to-find filter is active, only the rows it
+    /// shows are marked or unmarked, so marks hidden by the filter survive the toggle.</summary>
     private void MarkAll(char side)
     {
         var marks = Marks(side);
-        foreach (var e in Rows(side))
-            if (!e.IsParent) marks.Add(e.Name);
+        var rows = Rows(side).Where(e => !e.IsParent).ToList();
+        if (rows.Count == 0) return;
+        bool allMarked = rows.All(e => marks.Contains(e.Name));
+        foreach (var e in rows)
+        {
+            if (allMarked) marks.Remove(e.Name);
+            else marks.Add(e.Name);
+        }
         MarkDirty();
     }
 

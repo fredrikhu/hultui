@@ -41,18 +41,56 @@ public class MarkAllTests
         Assert.Equal(new[] { "beta.txt" }, Marks(t).Order());
     }
 
-    /// <summary>Ctrl+A again after marking is idempotent — the set, not a toggle.</summary>
+    /// <summary>Ctrl+A when everything is already marked unmarks it all — the toggle.</summary>
     [Fact]
-    public void CtrlA_Twice_KeepsEverythingMarked()
+    public void CtrlA_Twice_DeselectsEverything()
     {
         using var t = new DiffViewTests.Fixture();
         t.WriteLeft("a.txt", "one");
+        t.WriteLeft("b.txt", "two");
         t.Open();
 
         t.Press(KeyCode.A, KeyModifiers.Ctrl);
+        Assert.Equal(2, Marks(t).Count);
         t.Press(KeyCode.A, KeyModifiers.Ctrl);
 
-        Assert.Equal(new[] { "a.txt" }, Marks(t).Order());
+        Assert.Empty(Marks(t));
+    }
+
+    /// <summary>Partially marked is not "all marked": Ctrl+A completes the set first,
+    /// and only the press after that clears it.</summary>
+    [Fact]
+    public void CtrlA_WithAPartialSelection_MarksTheRestBeforeToggling()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.WriteLeft("a.txt", "one");
+        t.WriteLeft("b.txt", "two");
+        t.Open();
+
+        t.PutCursorOn('L', "a.txt");
+        t.Press(KeyCode.Space);                 // one marked by hand
+        t.Press(KeyCode.A, KeyModifiers.Ctrl);
+
+        Assert.Equal(new[] { "a.txt", "b.txt" }, Marks(t).Order());
+    }
+
+    /// <summary>The toggle sees only what a filter shows — a mark hidden by the filter
+    /// survives deselect-all, just as it was out of reach for select-all.</summary>
+    [Fact]
+    public void CtrlA_UnderAFilter_TogglesOnlyTheRowsItShows()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.WriteLeft("alpha.txt", "one");
+        t.WriteLeft("beta.txt", "two");
+        t.Open();
+
+        t.PutCursorOn('L', "alpha.txt");
+        t.Press(KeyCode.Space);                 // alpha marked, then hidden by the filter
+        t.Press(KeyCode.B);                     // type-to-find: only beta.txt shows
+        t.Press(KeyCode.A, KeyModifiers.Ctrl);  // beta now marked → all visible marked
+        t.Press(KeyCode.A, KeyModifiers.Ctrl);  // toggle clears the visible only
+
+        Assert.Equal(new[] { "alpha.txt" }, Marks(t).Order());
     }
 
     private static HashSet<string> Marks(DiffViewTests.Fixture t) =>
