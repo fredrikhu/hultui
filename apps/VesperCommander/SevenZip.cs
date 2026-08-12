@@ -107,6 +107,31 @@ public static class SevenZip
         return ok ? null : "7-Zip failed to create the archive";
     }
 
+    /// <summary>Remove members (<c>7z d</c>). <paramref name="targets"/> are '/'-separated
+    /// member paths; a directory target takes everything beneath it. The archive is listed
+    /// first and the targets expanded to the exact stored paths — 7-Zip's wildcard matching
+    /// changes meaning with <c>-r</c>, and an exact list can't over-match a same-named
+    /// entry somewhere else in the tree. Returns an error message or null.</summary>
+    public static string? Delete(string archiveFile, IReadOnlyList<string> targets, string? password)
+    {
+        var (ok, stdout, wrongPassword) = Run(ListArgs(archiveFile, password), readAll: true);
+        if (wrongPassword) return "Wrong password";
+        if (!ok) return "7-Zip could not read the archive";
+
+        // Stored paths as 7-Zip printed them (it wants them back in the same shape);
+        // matching happens on a '/'-normalized copy.
+        var exact = ParseListing(stdout)
+            .Select(m => (Stored: m.Path, Norm: m.Path.Replace('\\', '/').TrimEnd('/')))
+            .Where(m => targets.Any(t => m.Norm.Equals(t, StringComparison.OrdinalIgnoreCase)
+                                      || m.Norm.StartsWith(t + "/", StringComparison.OrdinalIgnoreCase)))
+            .Select(m => m.Stored).ToList();
+        if (exact.Count == 0) return "Nothing in the archive matched";
+
+        var (delOk, _, delWrongPw) = Run(DeleteArgs(archiveFile, exact, password), readAll: false);
+        if (delWrongPw) return "Wrong password";
+        return delOk ? null : "7-Zip failed to modify the archive";
+    }
+
     // ── Command lines ────────────────────────────────────────────────────
     //
     // Everything positional goes after "--". 7-Zip reads any argument starting with "-" as a
@@ -124,6 +149,9 @@ public static class SevenZip
 
     internal static string[] ExtractArgs(string archiveFile, string internalPath, string? password) =>
         ["x", "-so", PwdArg(password), EndOfSwitches, archiveFile, internalPath.Replace('\\', '/')];
+
+    internal static string[] DeleteArgs(string archiveFile, IReadOnlyList<string> members, string? password) =>
+        [.. new[] { "d", PwdArg(password), EndOfSwitches, archiveFile }, .. members];
 
     internal static string[] CreateArgs(IReadOnlyList<(string Source, string Entry)> items,
         string archivePath, CompressionLevel level, string? password)

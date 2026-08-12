@@ -192,6 +192,20 @@ public class ArchiveSafetyTests
         Assert.True(Array.IndexOf(create, "-mx=6") < terminator);
     }
 
+    /// <summary>Delete passes member paths read out of the archive, the same injection
+    /// surface as extract — a member called "-y" must land on the data side of "--".</summary>
+    [Fact]
+    public void DeletePutsItsMemberPathsAfterTheTerminator()
+    {
+        var args = SevenZip.DeleteArgs(@"C:\tmp\a.7z", ["-y", "sub/-r"], "hunter2");
+        int terminator = Array.IndexOf(args, "--");
+        Assert.True(terminator >= 0, $"no switch terminator in [{string.Join(' ', args)}]");
+        Assert.True(Array.LastIndexOf(args, "-y") > terminator);
+        Assert.True(Array.IndexOf(args, "sub/-r") > terminator);
+        Assert.True(Array.IndexOf(args, @"C:\tmp\a.7z") > terminator);
+        Assert.True(Array.IndexOf(args, "-phunter2") < terminator);
+    }
+
     /// <summary>The password is a switch (<c>-p…</c>) and must stay on the switch side — this
     /// is the check that stops someone "fixing" the terminator by putting it first.</summary>
     [Fact]

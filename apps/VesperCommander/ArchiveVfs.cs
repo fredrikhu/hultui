@@ -244,6 +244,55 @@ public static class ArchiveVfs
         catch (Exception ex) { return ex.Message; }
     }
 
+    /// <summary>
+    /// Remove members from an archive. <paramref name="internalPaths"/> are the pane's
+    /// backslash-separated internal paths; a directory path removes everything beneath it.
+    /// Plain zip rewrites through the BCL (mirroring how it is listed); every other writable
+    /// format goes through <c>7z d</c>. Returns an error message or null.
+    ///
+    /// <para>Nested archives are the caller's problem: a path that crosses into an inner
+    /// archive reaches a temp extraction, so a delete there would edit the copy and leave the
+    /// real archive untouched — the UI blocks it before getting here.</para>
+    /// </summary>
+    public static string? DeleteMembers(string archiveFile, IReadOnlyList<string> internalPaths,
+        string? password, bool sevenZip)
+    {
+        var targets = internalPaths
+            .Select(p => p.Replace('\\', '/').TrimEnd('/'))
+            .Where(p => p.Length > 0).ToList();
+        if (targets.Count == 0) return null;
+
+        string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
+        if (!Caps(ext, sevenZip).Write)
+            return ext is ".rar"
+                ? "rar archives are read-only"
+                : "Deleting from this format needs 7-Zip — set it in Tools → Archiver";
+
+        try
+        {
+            return ext is ".zip" ? DeleteFromZip(archiveFile, targets)
+                                 : SevenZip.Delete(archiveFile, targets, password);
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    private static string? DeleteFromZip(string archiveFile, List<string> targets)
+    {
+        using var zip = ZipFile.Open(archiveFile, ZipArchiveMode.Update);
+        int removed = 0;
+        // Same case-insensitive matching as the listing, so what the pane showed under a
+        // folder is what leaves with it. Directory-marker entries end with '/', which the
+        // TrimEnd on `norm` folds into the exact match.
+        foreach (var entry in zip.Entries.ToList())
+        {
+            var norm = entry.FullName.Replace('\\', '/').TrimEnd('/');
+            if (targets.Any(t => norm.Equals(t, StringComparison.OrdinalIgnoreCase)
+                              || norm.StartsWith(t + "/", StringComparison.OrdinalIgnoreCase)))
+            { entry.Delete(); removed++; }
+        }
+        return removed > 0 ? null : "Nothing in the archive matched";
+    }
+
     /// <summary>Wraps a member stream so the owning <see cref="ZipArchive"/> is disposed
     /// when the reader closes.</summary>
     private sealed class ArchiveEntryStream(ZipArchive owner, Stream inner) : Stream

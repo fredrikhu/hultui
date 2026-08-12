@@ -1441,13 +1441,15 @@ public partial class CommanderApp : Component, IDisposable
         else MarkDirty();
     }
 
-    /// <summary>Delete (F8 / Delete): recycle the targets after a confirm.</summary>
+    /// <summary>Delete (F8 / Delete): recycle the targets after a confirm. Inside an
+    /// archive it removes the selection from the archive instead.</summary>
     private void StartDelete()
     {
         char side = _active;
+        if (InArchive(side)) { StartArchiveDelete(); return; }
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
-        if (LockedBlock(side, "delete here") || InArchiveBlock(side)) return;
+        if (LockedBlock(side, "delete here")) return;
         // "Confirm before delete" off ⇒ act immediately.
         if (!_settings.ConfirmDelete) { DoDelete(side, items); return; }
         var dest = _settings.Recycle ? "\nItems are sent to the Recycle Bin." : "\nItems are permanently deleted.";

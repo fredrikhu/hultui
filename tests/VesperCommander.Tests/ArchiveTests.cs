@@ -257,6 +257,78 @@ public class ArchiveTests : IDisposable
         ArchiveVfs.CleanupTemp();
     }
 
+    // ── Delete members ───────────────────────────────────────────────────
+    private string[] ZipNames()
+    {
+        using var zip = ZipFile.OpenRead(_zip);
+        return zip.Entries.Select(e => e.FullName).Order().ToArray();
+    }
+
+    [Fact]
+    public void Delete_File_RemovesJustThatMember()
+    {
+        var err = ArchiveVfs.DeleteMembers(_zip, ["readme.txt"], null, sevenZip: false);
+        Assert.Null(err);
+        var names = ZipNames();
+        Assert.DoesNotContain("readme.txt", names);
+        Assert.Contains("textures/palette.png", names);
+        Assert.Contains("models/crate.obj", names);
+        // The survivors' bytes are intact after the rewrite.
+        using var s = ArchiveVfs.OpenEntry(_zip, @"models\crate.obj", null, sevenZip: false);
+        Assert.Equal("OBJ", new StreamReader(s!).ReadToEnd());
+    }
+
+    [Fact]
+    public void Delete_Folder_RemovesItsWholeSubtree()
+    {
+        var err = ArchiveVfs.DeleteMembers(_zip, ["textures"], null, sevenZip: false);
+        Assert.Null(err);
+        var names = ZipNames();
+        Assert.DoesNotContain(names, n => n.StartsWith("textures/"));
+        Assert.Contains("readme.txt", names);
+        Assert.Contains("models/crate.obj", names);
+    }
+
+    /// <summary>The folder match is by whole path segment — "textures" must not sweep a
+    /// sibling that merely starts with the same letters.</summary>
+    [Fact]
+    public void Delete_Folder_DoesNotOverMatchASiblingPrefix()
+    {
+        var zip2 = Path.Combine(_dir, "sib.zip");
+        using (var z = ZipFile.Open(zip2, ZipArchiveMode.Create))
+        {
+            WriteEntry(z, "docs/a.txt", "A");
+            WriteEntry(z, "docs2/b.txt", "B");
+        }
+        Assert.Null(ArchiveVfs.DeleteMembers(zip2, ["docs"], null, sevenZip: false));
+        using var read = ZipFile.OpenRead(zip2);
+        Assert.Single(read.Entries);
+        Assert.Equal("docs2/b.txt", read.Entries[0].FullName);
+    }
+
+    [Fact]
+    public void Delete_MatchesCaseInsensitively_LikeTheListing()
+    {
+        Assert.Null(ArchiveVfs.DeleteMembers(_zip, [@"TEXTURES\HI_RES"], null, sevenZip: false));
+        Assert.DoesNotContain(ZipNames(), n => n.Contains("hi_res"));
+        Assert.Contains("textures/palette.png", ZipNames());
+    }
+
+    [Fact]
+    public void Delete_NothingMatched_SaysSo()
+    {
+        Assert.NotNull(ArchiveVfs.DeleteMembers(_zip, ["ghost.txt"], null, sevenZip: false));
+        Assert.Equal(4, ZipNames().Length);   // untouched
+    }
+
+    [Fact]
+    public void Delete_ReadOnlyFormats_AreRefusedBeforeTouchingAnything()
+    {
+        // tar/gz are read-only without 7-Zip; rar is read-only even with it.
+        Assert.NotNull(ArchiveVfs.DeleteMembers(Path.Combine(_dir, "x.gz"), ["a"], null, sevenZip: false));
+        Assert.Contains("read-only", ArchiveVfs.DeleteMembers(Path.Combine(_dir, "x.rar"), ["a"], null, sevenZip: true));
+    }
+
     [Fact]
     public void Create_BuiltinZip_RoundTrips()
     {

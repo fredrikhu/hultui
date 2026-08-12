@@ -36,6 +36,72 @@ public partial class CommanderApp
         return true;
     }
 
+    // ── Delete (F8 inside an archive) ────────────────────────────────────
+    /// <summary>True when the pane's folder crosses a nested archive — what's on view is a
+    /// temp extraction, so a delete would edit the copy and leave the real archive intact.</summary>
+    private bool InNestedArchive(char side) =>
+        ArchivePath.TryParse(Dir(side)) is { } ap
+        && ap.Internal.Split(System.IO.Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)
+            .Any(ArchivePath.IsArchiveFile);
+
+    /// <summary>F8/Delete while inside an archive — remove the selection from the archive
+    /// (the one write archives support). Blocks nested archives and read-only formats.</summary>
+    private void StartArchiveDelete()
+    {
+        char side = _active;
+        if (LockedBlock(side, "delete here")) return;
+        var items = OperationTargets(side).ToList();
+        if (items.Count == 0) return;
+        if (ArchivePath.TryParse(Dir(side)) is not { } ap) return;
+        string archive = ap.ArchiveFile;
+        string ext = System.IO.Path.GetExtension(archive).ToLowerInvariant();
+
+        if (InNestedArchive(side))
+        { _notice = "Can't delete inside a nested archive — extract it first"; MarkDirty(); return; }
+        if (!ArchiveVfs.Caps(ext, _sevenZip).Write)
+        {
+            _notice = ext is ".rar"
+                ? "rar archives are read-only"
+                : "Deleting from this format needs 7-Zip — set it in Tools → Archiver";
+            MarkDirty(); return;
+        }
+
+        // The members' archive-internal paths (dirs delete their whole subtree).
+        var paths = items.Select(e => ArchivePath.TryParse(e.FullPath))
+            .Where(p => p is { Internal.Length: > 0 })
+            .Select(p => p!.Value.Internal).ToList();
+        if (paths.Count == 0) return;
+
+        if (!_settings.ConfirmDelete) { DoArchiveDelete(side, archive, paths); return; }
+        string label = items.Count == 1 ? $"\"{items[0].Name}\"" : $"{items.Count} items";
+        _confirm = new ConfirmSpec("Delete from archive",
+            $"Delete {label} from {System.IO.Path.GetFileName(archive)}?\nThe archive is rewritten — items are not sent to the Recycle Bin.",
+            "Delete", Danger: true,
+            () => { _confirm = null; DoArchiveDelete(side, archive, paths); });
+        MarkDirty();
+    }
+
+    private void DoArchiveDelete(char side, string archive, List<string> paths)
+    {
+        string? password = PasswordFor(Dir(side));
+        bool sevenZip = _sevenZip;
+        _notice = "Removing from archive…";
+        MarkDirty();
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            var err = ArchiveVfs.DeleteMembers(archive, paths, password, sevenZip);
+            Application.InvokeOnMainThread(() =>
+            {
+                _notice = err == null
+                    ? $"Removed {paths.Count} item{(paths.Count == 1 ? "" : "s")} from {System.IO.Path.GetFileName(archive)}"
+                    : $"Delete failed: {err}";
+                Marks(side).Clear();
+                _genL++; _genR++;   // both panes could be showing this archive
+                MarkDirty();
+            });
+        });
+    }
+
     // ── Extract (copy-out) ───────────────────────────────────────────────
     private void StartArchiveTransfer(List<FileEntry> items, string dest, char source)
     {
