@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Meridian" />
     <InternalsVisibleTo Include="Meridian.Tests" />
   </ItemGroup>
 

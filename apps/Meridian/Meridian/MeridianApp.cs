@@ -34,6 +34,39 @@ public partial class MeridianApp : Component, IDisposable
 
     /// <summary>The opened collection, or null while the front door is up.</summary>
     private CollectionWorkspace? _workspace;
+    private CollectionTree? _tree;
+    private CollectionWatcher? _watcher;
+
+    // The active environment: picked automatically on open ("local" preferred),
+    // shown in the titlebar. The switcher popover arrives with P4.
+    private EnvDocument? _env;
+    private string? _envName;
+
+    // Open requests. One engine for the whole session — it owns the connection
+    // pool and the cookie jar.
+    internal readonly HttpEngine Engine = new();
+    private readonly List<RequestTab> _tabs = [];
+    private int _activeTab = -1;
+
+    internal sealed class RequestTab(string path, ReqDocument doc)
+    {
+        public string Path { get; } = path;
+        public ReqDocument Doc { get; set; } = doc;
+        public bool Dirty => Doc.Edited;
+        public SendResult? Result;
+        public CancellationTokenSource? Sending;
+        /// <summary>The file changed on disk while this tab had unsaved edits —
+        /// show the reload/keep-mine bar.</summary>
+        public bool ExternalChanged;
+        public EditorTab SubTab = EditorTab.Headers;
+        public bool UrlEditing;
+    }
+
+    internal enum EditorTab { Params, Headers, Body }
+
+    // Small anchored popover (method picker). Junction's idiom.
+    private IReadOnlyList<(string Label, Action Run)>? _popover;
+    private float _popoverX, _popoverY;
 
     // Bumped to force a *reactive* rebuild (via the build Effect) rather than the
     // untracked MarkDirty path. Nothing subscribes through it yet in P0, but the
@@ -91,6 +124,12 @@ public partial class MeridianApp : Component, IDisposable
 
         // Overlays are conditional; keys keep each reconciling only against its
         // own kind rather than by position.
+        if (_popover != null)
+        {
+            var popover = BuildPopover(_popover);
+            popover.Key = "popover";
+            root.AddChild(popover);
+        }
         if (_toast != null)
         {
             var toast = BuildToast(_toast);
@@ -99,6 +138,15 @@ public partial class MeridianApp : Component, IDisposable
         }
 
         return root;
+    }
+
+    protected override void OnAfterBuild()
+    {
+        if (_pendingUrlFocus)
+        {
+            _pendingUrlFocus = false;
+            _urlRef.Current?.Focus();
+        }
     }
 
     private Element BuildBody()
@@ -137,14 +185,7 @@ public partial class MeridianApp : Component, IDisposable
         {
             var picked = await _folderPicker.PickFolderAsync(_workspace?.Root);
             if (picked == null) return;
-            if (CollectionWorkspace.TryOpen(picked) is not { } ws)
-            {
-                Flash($"Not a folder: {picked}");
-                return;
-            }
-            _workspace = ws;
-            SetView(MeridianView.Requests);
-            Rerender();
+            OpenWorkspace(picked);
         }
         finally
         {
@@ -161,8 +202,98 @@ public partial class MeridianApp : Component, IDisposable
             return;
         }
         _workspace = ws;
+        _tabs.Clear();
+        _activeTab = -1;
+        RescanWorkspace();
+        _watcher?.Dispose();
+        _watcher = new CollectionWatcher(ws.Root,
+            () => Application.InvokeOnMainThread(OnWorkspaceChangedOnDisk));
         SetView(MeridianView.Requests);
         Rerender();
+    }
+
+    private void RescanWorkspace()
+    {
+        if (_workspace is not { } ws) return;
+        _tree = CollectionScanner.Scan(ws);
+
+        // Pick the environment: keep the current one if it still exists,
+        // else prefer "local", else the first.
+        var envs = _tree.Environments;
+        var chosen = envs.FirstOrDefault(e => e.Name == _envName)
+                  ?? envs.FirstOrDefault(e => e.Name == "local")
+                  ?? envs.FirstOrDefault();
+        _envName = chosen?.Name;
+        _env = chosen != null ? ReadEnv(chosen.Path) : null;
+    }
+
+    private static EnvDocument? ReadEnv(string path)
+    {
+        try { return EnvDocument.Parse(File.ReadAllText(path)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>The watcher saw the workspace change (already marshalled to the
+    /// main thread). Rescan the tree, and bring open tabs along: a clean tab
+    /// reloads silently, a dirty one gets the reload/keep-mine bar.</summary>
+    private void OnWorkspaceChangedOnDisk()
+    {
+        RescanWorkspace();
+        foreach (var tab in _tabs)
+        {
+            string? onDisk = TryReadFile(tab.Path);
+            if (onDisk == null || onDisk == tab.Doc.Serialize()) continue;   // our own save, or gone
+            if (!tab.Dirty)
+                tab.Doc = ReqDocument.Parse(onDisk);
+            else
+                tab.ExternalChanged = true;
+        }
+        Rerender();
+    }
+
+    private static string? TryReadFile(string path)
+    {
+        try { return File.ReadAllText(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    internal RequestTab? ActiveTab => _activeTab >= 0 && _activeTab < _tabs.Count ? _tabs[_activeTab] : null;
+    internal int OpenTabCount => _tabs.Count;
+
+    internal void OpenRequest(string path)
+    {
+        int existing = _tabs.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (existing >= 0) { _activeTab = existing; MarkDirty(); return; }
+        if (TryReadFile(path) is not { } text) { Flash($"Could not read {Path.GetFileName(path)}"); return; }
+        _tabs.Add(new RequestTab(path, ReqDocument.Parse(text)));
+        _activeTab = _tabs.Count - 1;
+        MarkDirty();
+    }
+
+    private void CloseActiveTab()
+    {
+        if (ActiveTab is not { } tab) return;
+        tab.Sending?.Cancel();
+        _tabs.RemoveAt(_activeTab);
+        if (_activeTab >= _tabs.Count) _activeTab = _tabs.Count - 1;
+        MarkDirty();
+    }
+
+    private void SaveActiveTab()
+    {
+        if (ActiveTab is not { } tab || !tab.Dirty) return;
+        try
+        {
+            File.WriteAllText(tab.Path, tab.Doc.Serialize());
+            tab.Doc.MarkSaved();
+            tab.ExternalChanged = false;
+            RescanWorkspace();   // method/name in the tree may have changed
+            MarkDirty();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Flash($"Could not save: {e.Message}");
+        }
     }
 
     private async void Flash(string message)
@@ -177,6 +308,70 @@ public partial class MeridianApp : Component, IDisposable
         MarkDirty();
     }
 
+    // ── Send / cancel ────────────────────────────────────────────────────
+
+    /// <summary>The resolver for the current environment. Secrets resolve from
+    /// the keyring in P4; until then a secret key resolves like a plain one.</summary>
+    internal VariableResolver Resolver() => new(environment: _env?.Values);
+
+    private async void SendActive()
+    {
+        if (ActiveTab is not { } tab || tab.Sending != null) return;
+        if (tab.Doc.Method is not { } method || tab.Doc.Url is not { } urlTemplate)
+        {
+            Flash("This file has no request line");
+            return;
+        }
+
+        var resolver = Resolver();
+        var url = resolver.Resolve(urlTemplate);
+        var headers = new List<(string, string)>();
+        var unresolved = new List<string>(url.Unresolved);
+        foreach (var h in tab.Doc.Headers)
+        {
+            var value = resolver.Resolve(h.Value);
+            unresolved.AddRange(value.Unresolved);
+            headers.Add((h.Name, value.Text));
+        }
+        string? bodyText = null;
+        if (tab.Doc.Body is { } body && body.Content.Length > 0)
+        {
+            var resolved = resolver.Resolve(body.Content);
+            unresolved.AddRange(resolved.Unresolved);
+            bodyText = resolved.Text;
+        }
+        if (unresolved.Count > 0)
+        {
+            Flash($"Unresolved in env {_envName ?? "(none)"}: {string.Join(", ", unresolved.Distinct().Select(n => $"{{{{{n}}}}}"))}");
+            return;
+        }
+
+        var cts = tab.Sending = new CancellationTokenSource();
+        MarkDirty();
+        try
+        {
+            var spec = new RequestSpec(method, url.Text, headers, bodyText,
+                bodyText != null && tab.Doc.Body!.Type == "json" ? "application/json" : null);
+            tab.Result = await Task.Run(() => Engine.SendAsync(spec, cts.Token));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is UriFormatException or InvalidOperationException or ArgumentException)
+        {
+            tab.Result = null;
+            Flash($"Bad request: {e.Message}");
+        }
+        finally
+        {
+            tab.Sending = null;
+            MarkDirty();
+        }
+    }
+
+    private void CancelActive()
+    {
+        ActiveTab?.Sending?.Cancel();
+    }
+
     // ── Keyboard ─────────────────────────────────────────────────────────
 
     private void HandleKeyDown(KeyDownEvent e)
@@ -184,14 +379,27 @@ public partial class MeridianApp : Component, IDisposable
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
 
-        if (ctrl && e.Key == KeyCode.O)
+        // Ctrl combos work everywhere, including while typing in an input.
+        if (ctrl)
         {
-            OpenFolder();
+            switch (e.Key)
+            {
+                case KeyCode.O: OpenFolder(); e.StopPropagation = true; return;
+                case KeyCode.S: SaveActiveTab(); e.StopPropagation = true; return;
+                case KeyCode.W when ActiveTab != null: CloseActiveTab(); e.StopPropagation = true; return;
+                case KeyCode.Enter when View == MeridianView.Requests: SendActive(); e.StopPropagation = true; return;
+            }
+            return;
+        }
+
+        if (e.Key == KeyCode.Escape && ActiveTab?.Sending != null)
+        {
+            CancelActive();
             e.StopPropagation = true;
             return;
         }
 
-        if (typing || ctrl) return;
+        if (typing) return;
 
         // Number keys switch views.
         var viewForKey = e.Key switch
@@ -210,5 +418,8 @@ public partial class MeridianApp : Component, IDisposable
     {
         _window.Resized -= OnWindowResize;
         _toastCts?.Cancel();
+        foreach (var tab in _tabs) tab.Sending?.Cancel();
+        _watcher?.Dispose();
+        Engine.Dispose();
     }
 }

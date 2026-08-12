@@ -38,6 +38,14 @@ public partial class MeridianApp
         // Draggable filler so the empty middle of the bar drags the window.
         right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
 
+        // The active environment, when one is loaded. Plain text on purpose —
+        // the switcher popover is P4, and a chip that looks clickable but isn't
+        // would be a phantom control.
+        if (_envName is { } envName)
+            right.AddChild(Ui.Mono($"env: {envName}", 11f, Azimuth.TextMuted).AutomationId("env-name"));
+
+        right.AddChild(Box.New().Width(14));
+
         var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
         controls.AddChild(WinButton(Icons.WinMinimize, "Minimize", () => _window.Minimize(), Azimuth.Raised));
         // Flagged so the Windows custom frame reports HTMAXBUTTON and Windows 11
