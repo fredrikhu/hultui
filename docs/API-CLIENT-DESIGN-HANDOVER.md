@@ -65,7 +65,7 @@ Three-region layout (proposal — challenge it if you have better):
 
 **States:** no collection open (first-run — this is the front door, make it earn attention: open folder / new collection / import OpenAPI / discover); request never sent; in-flight (cancellable); response ok; HTTP error (4xx/5xx are *successful* renders, not error states); network failure (DNS, refused, TLS, timeout — each distinguishable); huge body (truncated view + "open full"); binary body (hex/preview stub); unsaved changes.
 
-**Open questions:** response right vs bottom (or user-flippable)? Are collection tree and nav rail one region or two?
+**Decided:** response pane sits **right** by default, user-flippable to bottom, and drops to bottom automatically below ~1100dip — mock both orientations. Navigation follows the **Junction idiom**: a slim view rail (Requests / Runner / Discovery / History / Environments on keys 1–5), with the collection tree living inside the Requests view — rail and tree are two regions, and only Requests shows the tree.
 
 ## B. Environments & variables — *medium*
 
@@ -110,7 +110,7 @@ Two entry paths, one destination (a browsable API map that can be promoted into 
 
 **States:** spec parse error (line/position), spec found automatically (delight moment), nothing discovered yet (map empty, instructions), endpoint with no example schema, deprecated endpoint (spec flag).
 
-**Open question:** is Discovery a separate full view (Junction-style view switch) or a mode of the collection tree? Recommend separate view with a promote-to-collection bridge; challenge if you disagree.
+**Decided:** Discovery is a **separate full view** (key 3 on the rail) with a promote-to-collection bridge — the two-confidence-level map needs room the tree doesn't have, and an unknown API isn't a collection yet.
 
 ## F. History — *light*
 
@@ -135,10 +135,10 @@ Per-request or inherited-from-folder auth: None / Basic / Bearer / API-key / OAu
 - The on-disk file format itself (we'll spec it; likely a Bruno-adjacent plain-text format), CLI argument design, JUnit/report emitters, the HTTP engine, OAuth flows' network legs, keyring integration, OpenAPI parsing.
 - Multi-line text *editing* internals — design assumes a capable editor; making TextInput multi-line is a parallel framework track.
 
-## 5. Open questions to resolve with the requester
+## 5. Decisions (pre-answered — Design does not need to ask)
 
-1. App name (needed for the theme name too).
-2. Response pane: right, bottom, or flippable?
-3. Discovery: separate view vs tree mode (recommendation in §E).
-4. Runner iterations/perf-mode (N runs, timing distribution) in v1 or later? Design assumes later; the pre-flight leaves room.
-5. WebSocket/SSE/gRPC — out of v1 entirely, or stub tabs? Design assumes out.
+1. **App name: Meridian** (working name — navigation register alongside Vesper and Junction; letterform around it, and propose the theme name yourself as §1 says). If Design finds a strictly better name, propose it *alongside* the Meridian mocks, not instead of them.
+2. **Response pane:** right by default, flippable, auto-bottom below ~1100dip (§A). Mock both.
+3. **Discovery:** separate view on the rail (§E).
+4. **Runner iterations/perf-mode: later.** Pre-flight leaves the slot; do not design the distribution view.
+5. **WebSocket/SSE/gRPC: out of v1 entirely — no stub tabs.** A visible control that does nothing reads as broken (we learned this from Vesper's phantom F3/F9 shortcuts); the layout just shouldn't preclude a future protocol picker on the URL bar.

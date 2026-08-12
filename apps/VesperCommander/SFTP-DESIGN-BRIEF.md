@@ -29,7 +29,7 @@ Everything here fits the existing **Nocturne** design system (`apps/VesperComman
 
 ## A. Connection manager — *heavy*
 
-**Entry point decision first:** the drive picker is the existing "where does this pane point" surface (leading breadcrumb crumb opens it; letter keys jump drives). Recommendation: saved SFTP sites appear **in the drive picker** below the drives, plus a "New connection…" row — a remote host is conceptually a drive. Challenge this if a dedicated dialog is better; do not design both.
+**Entry point (decided):** saved SFTP sites appear **in the drive picker** below the drives, plus a "New connection…" row — a remote host is conceptually a drive, and the leading breadcrumb crumb already opens this surface. Do not design a dedicated manager dialog; the site *editor* (§A.3) is the only new modal.
 
 **Design the:**
 1. **Sites list** — saved connections: name, `user@host:port` (mono), optional folder grouping, last-connected hint. Reuse list-row styling; letter-key/type-ahead like the drive picker.
@@ -64,8 +64,8 @@ Sequential, cancellable prompts riding the existing dialog idiom (the archive pa
 The core question: **at a glance, which pane is remote?** Mixing up local and remote before an F8 delete is the disaster case.
 
 **Design the:**
-1. **Breadcrumb treatment** — leading crumb becomes `user@host` (mono) instead of a drive letter; decide the visual weight. Candidate: an accent-tinted host chip. Path crumbs continue normally (`/var/www/…`).
-2. **A persistent pane-level remote marker** — subtle but unmissable: tinted breadcrumb bar? 1px accent top border on the pane? Show it at both densities and prove it doesn't collide with the active-pane indicator.
+1. **Breadcrumb treatment (decided: this is the marker)** — leading crumb becomes an **accent-tinted host chip**, `user@host` in mono, where the drive letter normally sits; the "where am I" slot stays consistent between local and remote. Path crumbs continue normally (`/var/www/…`). No whole-bar tint or pane border — the chip carries it. Prove it at both densities and against the active-pane indicator.
+2. **Destructive-op reinforcement** — the chip alone is not enough protection for F8: delete/move confirmations on a remote pane must name the host in the dialog body ("Delete 3 files from **web-prod-01**?"). Design that dialog variant; it is the real guard for the mixed-panes disaster case.
 3. **Connection state in the chrome** — live (default, quiet), reconnecting (animated, amber), lost (red, with the §G overlay). A latency hint is optional — propose it only if it earns its place.
 4. **Footer additions** — free-space is often unavailable over SFTP; design the footer with that slot absent or showing server info instead.
 
@@ -115,10 +115,10 @@ The network fails mid-anything. Design the ladder:
 - SSH library choice and AOT compatibility, the `IVfs`/`ArchiveVfs`-style backend seam, keyring/DPAPI storage, agent protocol, connection pooling, known_hosts file handling, transfer resume mechanics.
 - Terminal-over-SSH (opening a shell on the host) — a separate future feature; don't design for it, but don't paint the chrome into a corner that forbids a "terminal here" affordance later.
 
-## 3. Open questions to resolve with the requester
+## 3. Decisions (pre-answered — Design does not need to ask)
 
-1. Connection entry point: drive picker (recommended) vs dedicated manager dialog?
-2. Permissions column: default-on for remote panes?
-3. Latency indicator in the pane chrome: include or drop?
-4. Both panes remote — supported in v1? (Design §F.3 assumes yes; the marker design must work doubled.)
-5. Remote marker treatment: chip vs tinted bar vs border — pick one to recommend.
+1. **Connection entry point: the drive picker** (§A). No dedicated manager dialog.
+2. **Permissions column: default-on for remote panes**, absent for local ones — it's the WinSCP-class expectation and the pane has the width; users can hide it like any optional column.
+3. **Latency indicator: dropped for v1.** Quiet chrome; the reconnecting/stall states (§D.3, §F.1) already surface a bad link when it matters.
+4. **Both panes remote: supported in v1.** The host chip must work doubled — two different hosts side by side is exactly when identification matters most; mock that case.
+5. **Remote marker: the accent-tinted host chip** in the breadcrumb (§D.1), reinforced by host-naming destructive dialogs (§D.2). No bar tint, no pane border.
