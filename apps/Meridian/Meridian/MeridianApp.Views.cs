@@ -118,9 +118,7 @@ public partial class MeridianApp
 
     private Element BuildDiscoveryView() => BuildDiscoveryRealView();
 
-    private Element BuildHistoryView() => EmptyView("History",
-        "no sends yet",
-        "Everything you send lands here, newest first.");
+    private Element BuildHistoryView() => BuildHistoryRealView();
 
     private Element BuildEnvironmentsView() => BuildEnvironmentsRealView();
 

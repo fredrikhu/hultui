@@ -121,6 +121,7 @@ public partial class MeridianApp : Component, IDisposable
         _keyring = keyring ?? new DefaultKeyring();
         Engine = new HttpEngine(viewerCapBytes);
         _responseFind = new FindBarState(MarkDirty);
+        _historyFind = new FindBarState(MarkDirty);
 
         View = MeridianView.Requests;
 
@@ -514,6 +515,7 @@ public partial class MeridianApp : Component, IDisposable
                 bodyText != null && tab.Doc.Body!.Type == "json" ? "application/json" : null);
             tab.Result = await Task.Run(() => Engine.SendAsync(spec, cts.Token));
             tab.ResultSnapshot = tab.Doc.Serialize();
+            RecordHistory(method, url.Text, tab.Result);
             if (tab.Result.Response is { } responseData)
             {
                 ApplyExtractions(tab, responseData);
@@ -610,6 +612,13 @@ public partial class MeridianApp : Component, IDisposable
         }
 
         if (typing) return;
+
+        // The History view walks its rows with the arrows (the mock's key map).
+        if (View == MeridianView.History && HandleHistoryKey(e))
+        {
+            e.StopPropagation = true;
+            return;
+        }
 
         // Number keys switch views.
         var viewForKey = e.Key switch
