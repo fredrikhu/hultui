@@ -122,6 +122,16 @@ Brave (Chromium 150) — the hand-written web baseline; medians, ms):
 > pre-warm-era cold numbers (e.g. `create 1,000` 59, `remove row` 84) were
 > JIT-tier-up artifacts.
 
+> **2026-08-13 — multi-entry measure cache** (`MeasureCache.cs`, commit 8805531):
+> the layout engine's per-element measure memo went from one slot (which thrashed
+> under flex's alternating measure inputs) to a 4-slot ring, so clean rows now keep
+> their measured size across frames. Same-machine interleaved before/after medians
+> (machine under load, so ratios are the signal, not the absolutes): **in-place ops
+> 2–3.5× faster** — `swap` 6.9 → 2.0 ms, `remove` 7.5 → 3.1 ms, `update` 8.1 →
+> 4.0 ms — and the bulk ops 20–40% (`append` 32.7 → 19.6 ms, `create 10,000`
+> −23%); `clear` and `select` unchanged. The columns above predate this and remain
+> the last idle-machine capture — re-record them next idle session.
+
 ### Linux capture (2026-07-23, same commit as the Windows column + AT-SPI coalescing)
 
 The **same machine** as the Windows/browser columns above, rebooted into Linux
