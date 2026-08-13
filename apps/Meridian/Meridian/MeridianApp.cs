@@ -445,13 +445,16 @@ public partial class MeridianApp : Component, IDisposable
     /// value is only a placeholder: the real value comes from the keyring (or a
     /// CI-injected environment variable), and a secret this machine doesn't
     /// have stays unresolved — visibly.</summary>
-    internal VariableResolver Resolver()
+    internal VariableResolver Resolver() =>
+        new(environment: EnvironmentValues(), extracted: Extracted);
+
+    /// <summary>The active environment's effective values — file values, with
+    /// secrets swapped for their keyring/env-var values (or absent when this
+    /// machine has none). What the editor's resolver and the runner both eat.</summary>
+    internal Dictionary<string, string> EnvironmentValues()
     {
-        // No environment still resolves extracted values and built-ins — a
-        // chained collection with no envs/ directory is perfectly legal.
-        if (_env is not { } env || _workspace is not { } ws)
-            return new VariableResolver(extracted: Extracted);
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (_env is not { } env || _workspace is not { } ws) return values;
         foreach (var key in env.Keys)
         {
             if (env.IsSecret(key))
@@ -461,7 +464,7 @@ public partial class MeridianApp : Component, IDisposable
             else if (env.Values.TryGetValue(key, out var value))
                 values[key] = value;
         }
-        return new VariableResolver(environment: values, extracted: Extracted);
+        return values;
     }
 
     private async void SendActive()
@@ -583,7 +586,15 @@ public partial class MeridianApp : Component, IDisposable
                 case KeyCode.W when ActiveTab != null: CloseActiveTab(); e.StopPropagation = true; return;
                 case KeyCode.Enter when View == MeridianView.Requests: SendActive(); e.StopPropagation = true; return;
                 case KeyCode.Backslash when View == MeridianView.Requests: FlipResponsePane(); e.StopPropagation = true; return;
+                case KeyCode.R when View == MeridianView.Runner && !RunnerRunning: StartRun(); e.StopPropagation = true; return;
             }
+            return;
+        }
+
+        if (e.Key == KeyCode.Escape && RunnerRunning)
+        {
+            AbortRun();
+            e.StopPropagation = true;
             return;
         }
 

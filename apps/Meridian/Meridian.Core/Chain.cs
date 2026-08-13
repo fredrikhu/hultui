@@ -82,6 +82,24 @@ public static class Chain
         return cycle != null ? ([], cycle) : (order, null);
     }
 
+    /// <summary>The order to run <b>every</b> node: dependencies first, each
+    /// once, scope order otherwise preserved. The runner's spine.</summary>
+    public static (IReadOnlyList<string> Order, string? Error) RunOrderAll(IReadOnlyList<Node> nodes)
+    {
+        var order = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? error = null;
+        foreach (var node in nodes)
+        {
+            var (partial, cycleError) = RunOrderFor(node.Path, nodes);
+            if (cycleError != null) { error = cycleError; break; }
+            foreach (var path in partial)
+                if (seen.Add(path))
+                    order.Add(path);
+        }
+        return error != null ? ([], error) : (order, null);
+    }
+
     /// <summary>Which requests consume <paramref name="variable"/> — the
     /// "→ used by" line on a produces row.</summary>
     public static IReadOnlyList<string> ConsumersOf(string variable, IReadOnlyList<Node> nodes) =>

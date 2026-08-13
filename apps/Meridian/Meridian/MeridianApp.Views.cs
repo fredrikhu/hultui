@@ -114,9 +114,7 @@ public partial class MeridianApp
 
     // ── Views 2–5: designed empty states until their phases land ─────────
 
-    private Element BuildRunnerView() => EmptyView("Runner",
-        "nothing to run yet",
-        "Open a collection in Requests (1); runs stream in here, exactly as CI sees them.");
+    private Element BuildRunnerView() => BuildRunnerRealView();
 
     private Element BuildDiscoveryView() => EmptyView("Discovery",
         "nothing discovered yet",
