@@ -109,11 +109,15 @@ Brave (Chromium 150) — the hand-written web baseline; medians, ms):
 > in-place ops carry its 2–3.5× (`update` 4.8 → 2.9, `swap` 3.7 → 1.7, `remove`
 > 4.4 → 2.6 vs the 2026-07-23 capture). Bulk creates moved less vs July
 > (`create 10,000` 165 → 177, `append` 18 → 20): a same-day run of the
-> pre-cache commit sat well *above* the July column (create-10k 232, swap 6.3),
-> so the intervening three weeks of framework work (e.g. the 2026-08-07
-> reconcile-copies-handlers change) gave back some of what the cache won —
-> the cache's own effect is the interleaved same-commit comparison below, not
-> the July delta. Note this machine runs a background UIA client, so the
+> pre-cache commit sat well *above* the July column (create-10k 232, swap 6.3).
+> Bisected 2026-08-13: that interim regression was f4389c3 ("Measure a flex
+> item's cross size at the width it ends up with", 2026-08-11) — a correctness
+> fix for flex-basis-0 items measured at zero width, whose remeasure pass both
+> added measure work and thrashed the then-single-slot measure cache (swap
+> 3.2 → 6.7 ms at that commit). The multi-entry cache below repaid it with
+> interest on warm trees; the few ms left on the bulk creates is that fix's
+> honest cold-tree cost. The cache's own effect is the interleaved same-commit
+> comparison below, not the July delta. Note this machine runs a background UIA client, so the
 > HultUI columns *include* an active accessibility bridge (tree build + diff
 > each frame — worth a few ms on the bulk ops); a browser typically benches
 > with accessibility off. The browser column is the 2026-07-19 capture with the
