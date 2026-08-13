@@ -8,8 +8,10 @@ namespace Meridian.Tests.Fixtures;
 
 /// <summary>
 /// A loopback TLS endpoint presenting a freshly generated self-signed
-/// certificate. No client should trust it — that's the point: the engine must
-/// fail the handshake and still name the certificate it rejected.
+/// certificate. A default client rejects the handshake — the engine must fail
+/// and still name what it rejected. A client that explicitly trusts the
+/// thumbprint completes the handshake and gets a real 200 back, which is what
+/// proves the trust-for-this-workspace round trip.
 /// </summary>
 public sealed class TestTlsServer : IDisposable
 {
@@ -19,6 +21,7 @@ public sealed class TestTlsServer : IDisposable
 
     public int Port { get; }
     public const string CertCn = "meridian-selftest";
+    public string Thumbprint => _cert.Thumbprint;
 
     public TestTlsServer()
     {
@@ -47,8 +50,20 @@ public sealed class TestTlsServer : IDisposable
                     try
                     {
                         await using var ssl = new SslStream(client.GetStream());
-                        // The client rejects the cert, so this throws — expected.
+                        // An untrusting client makes this throw — expected. A
+                        // trusting one completes, sends a request, and gets 200.
                         await ssl.AuthenticateAsServerAsync(_cert);
+                        var buffer = new byte[4096];
+                        int n = await ssl.ReadAsync(buffer);
+                        if (n > 0)
+                        {
+                            var body = "trusted"u8.ToArray();
+                            var head = System.Text.Encoding.ASCII.GetBytes(
+                                $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+                            await ssl.WriteAsync(head);
+                            await ssl.WriteAsync(body);
+                            await ssl.FlushAsync();
+                        }
                     }
                     catch (Exception e) when (e is IOException or System.Security.Authentication.AuthenticationException or ObjectDisposedException) { }
                     finally { client.Dispose(); }

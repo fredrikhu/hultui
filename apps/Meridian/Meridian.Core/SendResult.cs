@@ -24,15 +24,21 @@ public sealed record InfraFailure(
     InfraKind Kind,
     string Headline,     // "could not resolve host"
     string Detail,       // "api.acme-pay.devv — NXDOMAIN"
-    TimeSpan Elapsed);
+    TimeSpan Elapsed)
+{
+    /// <summary>On a TLS failure, the rejected certificate's thumbprint — what
+    /// the "trust for this workspace" action feeds back to the engine.</summary>
+    public string? CertThumbprint { get; init; }
+}
 
 public enum BodyKind { None, Text, Binary }
 
 /// <summary>
 /// A captured response body. Text bodies keep at most the viewer cap in
 /// <see cref="Text"/>; a body over the cap is spilled — in full — to
-/// <see cref="SpillPath"/> so "open full" can stream it. Binary bodies keep a
-/// <see cref="Preview"/> for the hex stub instead of text.
+/// <see cref="SpillPath"/> so "open full" can stream it. Binary bodies keep
+/// their bytes (up to the same cap) in <see cref="Preview"/> — the hex stub
+/// shows the first rows, save-to-file writes all of them.
 /// </summary>
 public sealed record ResponseBody(
     BodyKind Kind,

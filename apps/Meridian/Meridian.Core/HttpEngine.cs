@@ -29,7 +29,6 @@ public sealed class HttpEngine : IDisposable
     /// <summary>How much of a text body the viewer keeps in memory (the mock's
     /// "showing first 1 MB of n"). Test-sized in tests.</summary>
     private readonly int _viewerCapBytes;
-    private const int BinaryPreviewBytes = 512;
 
     private readonly SocketsHttpHandler _handler;
     private readonly HttpClient _client;
@@ -49,6 +48,18 @@ public sealed class HttpEngine : IDisposable
         public string? RemoteEndpoint;
         public string? TlsProtocol;
         public string? CertSubject;
+        public string? CertThumbprint;
+    }
+
+    // Certificates the user explicitly trusted for this session/workspace, by
+    // thumbprint. The GUI feeds these from the workspace's trust file; the
+    // validation callback lets them through where default validation would not.
+    private readonly HashSet<string> _trustedThumbprints = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _trustLock = new();
+
+    public void TrustCertificate(string thumbprint)
+    {
+        lock (_trustLock) _trustedThumbprints.Add(thumbprint);
     }
 
     /// <summary>Thrown from the connect callback so the failure keeps its phase;
@@ -86,9 +97,16 @@ public sealed class HttpEngine : IDisposable
                 // rejected handshake must still name what it rejected.
                 RemoteCertificateValidationCallback = (_, cert, _, errors) =>
                 {
+                    string? thumbprint = (cert as System.Security.Cryptography.X509Certificates.X509Certificate2)?.Thumbprint
+                        ?? cert?.GetCertHashString();
                     if (CurrentState.Value is { } state && cert != null)
+                    {
                         state.CertSubject = cert.Subject;
-                    return errors == SslPolicyErrors.None;
+                        state.CertThumbprint = thumbprint;
+                    }
+                    if (errors == SslPolicyErrors.None) return true;
+                    lock (_trustLock)
+                        return thumbprint != null && _trustedThumbprints.Contains(thumbprint);
                 },
             },
         };
@@ -178,7 +196,8 @@ public sealed class HttpEngine : IDisposable
                 ? $"certificate not trusted · {subject}"
                 : Unwrap<AuthenticationException>(e)!.Message;
             return SendResult.Infra(new InfraFailure(
-                InfraKind.TlsFailure, "TLS handshake failed", detail, total.Elapsed));
+                InfraKind.TlsFailure, "TLS handshake failed", detail, total.Elapsed)
+            { CertThumbprint = state.CertThumbprint });
         }
         catch (HttpRequestException e) when (Unwrap<SocketException>(e) is { } socket)
         {
@@ -294,7 +313,7 @@ public sealed class HttpEngine : IDisposable
         bool truncated = totalBytes > _viewerCapBytes;
         return IsTextContent(response.Content.Headers.ContentType?.MediaType, headBytes)
             ? new ResponseBody(BodyKind.Text, System.Text.Encoding.UTF8.GetString(headBytes), [], totalBytes, truncated, spillPath)
-            : new ResponseBody(BodyKind.Binary, "", headBytes[..Math.Min(BinaryPreviewBytes, headBytes.Length)], totalBytes, truncated, spillPath);
+            : new ResponseBody(BodyKind.Binary, "", headBytes, totalBytes, truncated, spillPath);
     }
 
     /// <summary>Known text media types; without a content type, a NUL byte in

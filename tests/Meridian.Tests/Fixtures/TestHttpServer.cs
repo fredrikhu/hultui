@@ -76,6 +76,7 @@ public sealed class TestHttpServer : IDisposable
                 await (path switch
                 {
                     "/ok" => Respond(stream, 200, "OK", "application/json", """{"ok":true}"""u8.ToArray()),
+                    "/two" => Respond(stream, 200, "OK", "application/json", """{"alpha":"xray","beta":"yankee"}"""u8.ToArray()),
                     "/echo" => Respond(stream, 200, "OK", "text/plain",
                         Encoding.UTF8.GetBytes($"{method}|{Encoding.UTF8.GetString(body)}")),
                     "/big" => Respond(stream, 200, "OK", "text/plain", Encoding.UTF8.GetBytes(new string('a', 5000))),

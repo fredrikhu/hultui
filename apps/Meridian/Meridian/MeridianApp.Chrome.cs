@@ -38,6 +38,28 @@ public partial class MeridianApp
         // Draggable filler so the empty middle of the bar drags the window.
         right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
 
+        // The environment switcher chip — a real control now that P4 is here.
+        if (_workspace != null)
+        {
+            var label = _envName is { } envName ? $"env: {envName}" : "no environment";
+            var chip = Flex.Row(gap: 4).AlignItems(AlignItems.Center)
+                .Padding(new Thickness(3, 7, 3, 7))
+                .CornerRadius(Azimuth.Radius1)
+                .BorderColor(Azimuth.Border).BorderWidth(1f)
+                .Cursor(CursorType.Pointer)
+                .Tooltip("Switch environment (Ctrl E)")
+                .AccessibleRole(AccessibilityRole.Button)
+                .AccessibleName($"Environment: {_envName ?? "none"}")
+                .AutomationId("env-name");
+            chip.AddChild(Ui.Mono(label, 11f, Azimuth.TextMuted));
+            chip.AddChild(Text.New("▾").FontSize(8f).TextColor(Azimuth.TextFaint));
+            chip.OnClick(_ => OpenEnvSwitcher());
+            chip.HoverBg(Azimuth.Raised, Color.Transparent);
+            right.AddChild(chip);
+        }
+
+        right.AddChild(Box.New().Width(14));
+
         var controls = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch);
         controls.AddChild(WinButton(Icons.WinMinimize, "Minimize", () => _window.Minimize(), Azimuth.Raised));
         // Flagged so the Windows custom frame reports HTMAXBUTTON and Windows 11

@@ -65,9 +65,29 @@ public sealed class ReqDocument
 
     public string Serialize() => LineBuffer.Join(_lines);
 
+    /// <summary>True once any edit method has run; cleared by <see cref="MarkSaved"/>.
+    /// This is what the tab dirty dot and the footer's "● unsaved" read.</summary>
+    public bool Edited { get; private set; }
+
+    public void MarkSaved() => Edited = false;
+
     public static ReqDocument Parse(string text)
     {
         var doc = new ReqDocument(LineBuffer.Split(text));
+        doc.Reparse();
+        return doc;
+    }
+
+    /// <summary>Re-derives every parsed field from <see cref="_lines"/>. Runs
+    /// after each edit so line numbers and typed views stay consistent with the
+    /// text — the lines are the single source of truth.</summary>
+    private void Reparse()
+    {
+        Method = null; Url = null; RequestLineNumber = 0; Name = null;
+        Body = null; Auth = null;
+        _headers.Clear(); _asserts.Clear(); _extracts.Clear(); _errors.Clear();
+
+        var doc = this;
         var lines = doc._lines;
 
         for (int i = 0; i < lines.Count; i++)
@@ -155,8 +175,157 @@ public sealed class ReqDocument
                 ? $"{keyword} needs a URL"
                 : $"unknown directive \"{keyword}\"");
         }
+    }
 
-        return doc;
+    // ── Edits ────────────────────────────────────────────────────────────
+    // Every edit rewrites only its own line(s), preserving comments, blanks,
+    // unknown constructs, and each untouched line's own terminator, then
+    // reparses so the typed views stay true.
+
+    /// <summary>Replaces the request line, or inserts one at the top when the
+    /// file has none.</summary>
+    public void SetRequestLine(string method, string url)
+    {
+        string raw = $"{method} {url}";
+        if (RequestLineNumber > 0)
+            _lines[RequestLineNumber - 1] = _lines[RequestLineNumber - 1] with { Raw = raw };
+        else
+            _lines.Insert(0, new SourceLine(raw, DominantTerminator()));
+        Touch();
+    }
+
+    /// <summary>Rewrites the header at <paramref name="index"/> (into
+    /// <see cref="Headers"/>) in place.</summary>
+    public void SetHeader(int index, string name, string value)
+    {
+        var line = _headers[index].Line;
+        _lines[line - 1] = _lines[line - 1] with { Raw = $"header {name}: {value}" };
+        Touch();
+    }
+
+    /// <summary>Appends a header after the last existing header, or after the
+    /// request line when there are none yet.</summary>
+    public void AddHeader(string name, string value)
+    {
+        int insertAfter = _headers.Count > 0 ? _headers[^1].Line
+            : RequestLineNumber > 0 ? RequestLineNumber
+            : 0;
+        InsertLine(insertAfter, $"header {name}: {value}");
+        Touch();
+    }
+
+    public void RemoveHeader(int index)
+    {
+        _lines.RemoveAt(_headers[index].Line - 1);
+        Touch();
+    }
+
+    /// <summary>
+    /// Replaces the body block's content (and type), or appends a new block at
+    /// the end of the file. The writer picks the fence marker: <c>end</c>
+    /// unless the content itself contains such a line, in which case a
+    /// collision-free one is generated — the reader's <c>until</c> form.
+    /// </summary>
+    public void SetBody(string type, string content)
+    {
+        // Remove the existing block (fence line through marker line) first.
+        if (Body is { } existing)
+        {
+            int fence = existing.Line - 1;
+            int marker = fence + 1;
+            while (marker < _lines.Count && _lines[marker].Raw.Trim() != existing.Marker) marker++;
+            _lines.RemoveRange(fence, Math.Min(marker + 1, _lines.Count) - fence);
+        }
+        if (content.Length == 0 && type.Length == 0) { Touch(); return; }
+
+        string chosen = "end";
+        string[] contentLines = content.Length == 0 ? [] : content.ReplaceLineEndings("\n").Split('\n');
+        if (contentLines.Any(l => l.Trim() == chosen))
+            chosen = $"end-{Guid.NewGuid():N}"[..12];
+
+        string term = DominantTerminator();
+        EnsureFinalTerminator(term);
+        string fenceRaw = chosen == "end"
+            ? (type.Length > 0 ? $"body {type}" : "body")
+            : (type.Length > 0 ? $"body {type} until {chosen}" : $"body until {chosen}");
+        _lines.Add(new SourceLine(fenceRaw, term));
+        foreach (var line in contentLines)
+            _lines.Add(new SourceLine(line, term));
+        _lines.Add(new SourceLine(chosen, term));
+        Touch();
+    }
+
+    /// <summary>Rewrites the assert at <paramref name="index"/> in place.</summary>
+    public void SetAssert(int index, string args)
+    {
+        var line = _asserts[index].Line;
+        _lines[line - 1] = _lines[line - 1] with { Raw = $"assert {args}" };
+        Touch();
+    }
+
+    /// <summary>Appends an assert after the last one, or at the end of the file.</summary>
+    public void AddAssert(string args) => AddDirectiveLine("assert", args, _asserts);
+
+    public void RemoveAssert(int index)
+    {
+        _lines.RemoveAt(_asserts[index].Line - 1);
+        Touch();
+    }
+
+    /// <summary>Rewrites the extract at <paramref name="index"/> in place.</summary>
+    public void SetExtract(int index, string args)
+    {
+        var line = _extracts[index].Line;
+        _lines[line - 1] = _lines[line - 1] with { Raw = $"extract {args}" };
+        Touch();
+    }
+
+    public void AddExtract(string args) => AddDirectiveLine("extract", args, _extracts);
+
+    public void RemoveExtract(int index)
+    {
+        _lines.RemoveAt(_extracts[index].Line - 1);
+        Touch();
+    }
+
+    private void AddDirectiveLine(string keyword, string args, List<ReqDirective> kin)
+    {
+        int insertAfter = kin.Count > 0 ? kin[^1].Line : _lines.Count;
+        InsertLine(insertAfter, $"{keyword} {args}");
+        Touch();
+    }
+
+    private void Touch()
+    {
+        Edited = true;
+        Reparse();
+    }
+
+    private void InsertLine(int afterLineNumber, string raw)
+    {
+        string term = DominantTerminator();
+        if (afterLineNumber >= _lines.Count) EnsureFinalTerminator(term);
+        _lines.Insert(Math.Min(afterLineNumber, _lines.Count), new SourceLine(raw, term));
+    }
+
+    /// <summary>The file's prevailing line ending, for lines this edit adds.</summary>
+    private string DominantTerminator()
+    {
+        int crlf = 0, lf = 0;
+        foreach (var line in _lines)
+        {
+            if (line.Terminator == "\r\n") crlf++;
+            else if (line.Terminator == "\n") lf++;
+        }
+        return crlf > lf ? "\r\n" : "\n";
+    }
+
+    /// <summary>A final line with no terminator gets one before anything is
+    /// appended after it.</summary>
+    private void EnsureFinalTerminator(string term)
+    {
+        if (_lines.Count > 0 && _lines[^1].Terminator.Length == 0)
+            _lines[^1] = _lines[^1] with { Terminator = term };
     }
 
     private void Error(int line, string message) => _errors.Add(new ParseError(line, message));

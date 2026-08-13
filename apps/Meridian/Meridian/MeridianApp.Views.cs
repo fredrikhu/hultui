@@ -16,48 +16,6 @@ public partial class MeridianApp
         _workspace == null ? BuildFrontDoor() : BuildCollectionShell();
 
     /// <summary>
-    /// The P0 shape of the shell: the 264dip tree pane with the workspace path
-    /// pinned at the bottom, and the editor area. The collection scan (P1) fills
-    /// the tree; the request editor (P3) fills the rest.
-    /// </summary>
-    private Element BuildCollectionShell()
-    {
-        var ws = _workspace!;
-
-        var tree = Flex.Column(gap: 0).FlexShrink(0)
-            .Width(Azimuth.TreeWidth)
-            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 0, 1));
-
-        var header = Flex.Row(gap: 0).Height(36).FlexShrink(0)
-            .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
-            .Children(Text.New("Collections").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Azimuth.TextDim));
-        tree.AddChild(header);
-
-        tree.AddChild(Flex.Column(gap: Azimuth.S2).FlexGrow(1)
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-            .Children(
-                Text.New("no requests yet").FontSize(12f).TextColor(Azimuth.TextMuted),
-                Text.New("The tree fills in as .req files appear.").FontSize(11f).TextColor(Azimuth.TextFaint)));
-
-        // The workspace path pinned at the bottom — the file-backed honesty line.
-        tree.AddChild(Flex.Row(gap: 0).Height(28).FlexShrink(0)
-            .AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
-            .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0))
-            .Children(Ui.Mono(ws.Root, 10.5f, Azimuth.TextFaint).TextOverflow(TextOverflow.Ellipsis).MaxLines(1)));
-
-        var editor = Flex.Column(gap: Azimuth.S2).FlexGrow(1)
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-            .Children(
-                Text.New("no request open").FontSize(13f).TextColor(Azimuth.TextMuted),
-                Text.New("Pick one from the tree once the collection loads.").FontSize(11f).TextColor(Azimuth.TextFaint));
-
-        return Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch)
-            .Children(tree, editor);
-    }
-
-    /// <summary>
     /// First run, per mock 02 frame 3: the wordmark with flanking rules fading
     /// outward, one sentence, four entry cards. The Discover card carries the
     /// accent border — the differentiating pillar gets the emphasis. Cards whose
@@ -156,9 +114,7 @@ public partial class MeridianApp
 
     // ── Views 2–5: designed empty states until their phases land ─────────
 
-    private Element BuildRunnerView() => EmptyView("Runner",
-        "nothing to run yet",
-        "Open a collection in Requests (1); runs stream in here, exactly as CI sees them.");
+    private Element BuildRunnerView() => BuildRunnerRealView();
 
     private Element BuildDiscoveryView() => EmptyView("Discovery",
         "nothing discovered yet",
@@ -168,9 +124,7 @@ public partial class MeridianApp
         "no sends yet",
         "Everything you send lands here, newest first.");
 
-    private Element BuildEnvironmentsView() => EmptyView("Environments",
-        "no environments",
-        "Open a collection to edit its envs/*.env files side by side.");
+    private Element BuildEnvironmentsView() => BuildEnvironmentsRealView();
 
     private static Element EmptyView(string title, string headline, string hint) =>
         Flex.Column(gap: Azimuth.S2).FlexGrow(1)
