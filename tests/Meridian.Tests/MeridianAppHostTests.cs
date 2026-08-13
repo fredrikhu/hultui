@@ -101,11 +101,13 @@ public class MeridianAppHostTests
         // live. Unbuilt cards carry "(not available yet)" in their accessible name.
         Hosted((session, app) =>
         {
+            // New collection is the last unbuilt card (P11).
             Assert.True(Contains(session, "New collection (not available yet)"));
-            Assert.True(Contains(session, "Import OpenAPI (not available yet)"));
-            // And the two live cards must NOT be marked unavailable.
-            Assert.False(Contains(session, "Open a folder (not available yet)"));
-            Assert.False(Contains(session, "Discover an API (not available yet)"));
+            // Everything else is live and must NOT be marked unavailable —
+            // Import OpenAPI became real in P8.
+            foreach (var live in new[] { "Open a folder", "Discover an API", "Import OpenAPI" })
+                Assert.False(Contains(session, $"{live} (not available yet)"),
+                    $"\"{live}\" is built — it must not read as unavailable");
         });
     }
 
