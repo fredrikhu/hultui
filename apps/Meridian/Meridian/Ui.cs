@@ -47,6 +47,17 @@ public static class Ui
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);
 
     /// <summary>
+    /// A chip's label — one line, always. <c>FlexShrink(0)</c> on the chip box
+    /// is not enough on its own: in a tight row the chip is <i>measured</i>
+    /// under the leftover width, the label wraps during that measurement, and
+    /// a no-shrink chip then faithfully keeps the two-line size. MaxLines(1)
+    /// makes it ellipsize instead. (Junction hit exactly this — a remote chip
+    /// rendered as "origi/n" — so every chip here bakes in both halves.)
+    /// </summary>
+    public static TextElement ChipLabel(string text, float size, Color color) =>
+        Mono(text, size, color).TextOverflow(TextOverflow.Ellipsis).MaxLines(1);
+
+    /// <summary>
     /// Declarative hover tint (Interaction system): re-applied after any rebuild, so
     /// it survives mid-hover reconciliation; un-hover restores the element's base
     /// snapshot. <paramref name="normal"/> documents the resting colour; the restore

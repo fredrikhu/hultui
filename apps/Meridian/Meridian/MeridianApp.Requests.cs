@@ -164,7 +164,7 @@ public partial class MeridianApp
             .CornerRadius(Azimuth.Radius1)
             .Background(Azimuth.Tint(color))
             .FlexShrink(0)
-            .Children(Ui.Mono(label, treeScale ? 8f : 10f, color).FontWeight(FontWeight.SemiBold));
+            .Children(Ui.ChipLabel(label, treeScale ? 8f : 10f, color).FontWeight(FontWeight.SemiBold));
     }
 
     private static Element Dot(Color color)
@@ -398,7 +398,7 @@ public partial class MeridianApp
                 .Background(Azimuth.Alpha(fg, 0.12))
                 .FlexShrink(0)
                 .AccessibleName($"variable {seg.Text}{(resolved ? "" : ", unresolved")}");
-            chip.AddChild(Ui.Mono("{{" + seg.Text + "}}", 12f, fg));
+            chip.AddChild(Ui.ChipLabel("{{" + seg.Text + "}}", 12f, fg));
             if (secret)
                 chip.AddChild(Ui.Mono("••• keyring", 9f, Azimuth.TextMuted));
             into.AddChild(chip);

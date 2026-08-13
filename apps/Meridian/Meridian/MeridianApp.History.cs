@@ -221,7 +221,7 @@ public partial class MeridianApp
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName($"{label}{(on ? ", on" : "")}")
             .AutomationId(automationId)
-            .Children(Ui.Mono(label, 10f, on ? color : Azimuth.TextMuted));
+            .Children(Ui.ChipLabel(label, 10f, on ? color : Azimuth.TextMuted));
         if (on) chip.Background(Azimuth.Alpha(color, 0.12));
         chip.OnClick(_ => onClick());
         return chip;

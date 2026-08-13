@@ -285,7 +285,7 @@ public partial class MeridianApp
     private static Element VarChipLabel(string name) =>
         Box.New().Padding(new Thickness(1, 4, 1, 4)).CornerRadius(Azimuth.Radius1)
             .Background(Azimuth.Alpha(Azimuth.Accent300, 0.12)).FlexShrink(0)
-            .Children(Ui.Mono("{{" + name + "}}", 11f, Azimuth.Accent300));
+            .Children(Ui.ChipLabel("{{" + name + "}}", 11f, Azimuth.Accent300));
 
     /// <summary>Chain nodes for every request in the tree, parsed on demand.
     /// The open tab contributes its in-memory (possibly unsaved) document.</summary>

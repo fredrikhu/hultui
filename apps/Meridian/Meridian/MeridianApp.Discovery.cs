@@ -390,7 +390,7 @@ public partial class MeridianApp
             .CornerRadius(Azimuth.Radius1)
             .BorderColor(observed ? color : Color.Transparent).BorderWidth(1f)
             .FlexShrink(0)
-            .Children(Ui.Mono(endpoint.Method, 9f, color).FontWeight(FontWeight.SemiBold));
+            .Children(Ui.ChipLabel(endpoint.Method, 9f, color).FontWeight(FontWeight.SemiBold));
         if (!observed) chip.Background(Azimuth.Tint(color));
         row.AddChild(chip);
 
