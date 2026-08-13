@@ -53,7 +53,7 @@ public sealed class TestHttpServer : IDisposable
             // Keep-alive: serve requests on this connection until close/stall.
             while (true)
             {
-                var (method, path, contentLength) = await ReadRequestAsync(stream);
+                var (method, path, contentLength, authHeader) = await ReadRequestAsync(stream);
                 if (method == null) return;
 
                 byte[] body = new byte[contentLength];
@@ -86,6 +86,14 @@ public sealed class TestHttpServer : IDisposable
                     "/setcookie" => Respond(stream, 200, "OK", "text/plain", "set"u8.ToArray(),
                         "Set-Cookie: sid=s3cr3t; Path=/\r\n"),
                     "/teapot" => Respond(stream, 418, "I'm a teapot", "text/plain", "short and stout"u8.ToArray()),
+                    // An OAuth2 token endpoint: echoes back a fixed grant so the
+                    // client-credentials flow can be exercised end to end.
+                    "/token" => Respond(stream, 200, "OK", "application/json",
+                        Encoding.UTF8.GetBytes($$"""{"access_token":"tok-abc123","token_type":"Bearer","expires_in":3600,"echo":"{{Encoding.UTF8.GetString(body).Replace("\"", "")}}"}""")),
+                    // Mirrors the Authorization header, so a test can prove what
+                    // auth actually put on the wire.
+                    "/whoami" => Respond(stream, 200, "OK", "text/plain",
+                        Encoding.UTF8.GetBytes(authHeader ?? "none")),
                     _ when path == "/cookie-echo" => Respond(stream, 200, "OK", "text/plain",
                         Encoding.UTF8.GetBytes(_lastCookieHeader ?? "none")),
                     _ => Respond(stream, 404, "Not Found", "text/plain", []),
@@ -100,28 +108,38 @@ public sealed class TestHttpServer : IDisposable
     }
 
     private string? _lastCookieHeader;
+    /// <summary>The full request line of the last request, so a test can see
+    /// query parameters auth appended.</summary>
+    public string? LastRequestLine { get; private set; }
 
-    private async Task<(string? Method, string Path, int ContentLength)> ReadRequestAsync(NetworkStream stream)
+    /// <summary>The Authorization header travels with its own request rather
+    /// than through a field: connections are served concurrently, and a shared
+    /// "last header seen" reports the wrong request's credentials.</summary>
+    private async Task<(string? Method, string Path, int ContentLength, string? Auth)> ReadRequestAsync(NetworkStream stream)
     {
         var sb = new StringBuilder();
         var one = new byte[1];
         while (!sb.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
         {
             int n = await stream.ReadAsync(one.AsMemory(), _cts.Token);
-            if (n == 0) return (null, "", 0);
+            if (n == 0) return (null, "", 0, null);
             sb.Append((char)one[0]);
         }
         var lines = sb.ToString().Split("\r\n");
+        LastRequestLine = lines[0];
         var parts = lines[0].Split(' ');
         int contentLength = 0;
+        string? auth = null;
         foreach (var line in lines[1..])
         {
             if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
                 contentLength = int.Parse(line.Split(':')[1].Trim());
             if (line.StartsWith("Cookie:", StringComparison.OrdinalIgnoreCase))
                 _lastCookieHeader = line["Cookie:".Length..].Trim();
+            if (line.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))
+                auth = line["Authorization:".Length..].Trim();
         }
-        return (parts[0], parts.Length > 1 ? parts[1] : "", contentLength);
+        return (parts[0], parts.Length > 1 ? parts[1] : "", contentLength, auth);
     }
 
     private static async Task Respond(NetworkStream stream, int status, string reason,

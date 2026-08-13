@@ -255,6 +255,26 @@ public sealed class ReqDocument
         Touch();
     }
 
+    /// <summary>Sets the <c>auth</c> line, rewriting the existing one in place
+    /// or appending after the headers. "none" removes it — the absence of a
+    /// line is what lets a folder default apply again.</summary>
+    public void SetAuth(string args)
+    {
+        if (Auth is { } existing)
+        {
+            if (args == "none") _lines.RemoveAt(existing.Line - 1);
+            else _lines[existing.Line - 1] = _lines[existing.Line - 1] with { Raw = $"auth {args}" };
+            Touch();
+            return;
+        }
+        if (args == "none") { Touch(); return; }
+        int after = _headers.Count > 0 ? _headers[^1].Line
+            : RequestLineNumber > 0 ? RequestLineNumber
+            : _lines.Count;
+        InsertLine(after, $"auth {args}");
+        Touch();
+    }
+
     /// <summary>Rewrites the assert at <paramref name="index"/> in place.</summary>
     public void SetAssert(int index, string args)
     {

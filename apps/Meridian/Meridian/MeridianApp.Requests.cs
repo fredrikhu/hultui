@@ -209,6 +209,7 @@ public partial class MeridianApp
         {
             EditorTab.Params => BuildParamsEditor(tab),
             EditorTab.Body => BuildBodyEditor(tab),
+            EditorTab.Auth => BuildAuthEditor(tab),
             EditorTab.Assertions => BuildAssertionsEditor(tab),
             EditorTab.Chain => BuildChainEditor(tab),
             _ => BuildHeadersEditor(tab),
@@ -417,6 +418,11 @@ public partial class MeridianApp
         bar.AddChild(SubTabButton(tab, EditorTab.Params, $"Params {CountLabel(QueryParams(tab).Count)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Headers, $"Headers {CountLabel(tab.Doc.Headers.Count)}"));
         bar.AddChild(SubTabButton(tab, EditorTab.Body, tab.Doc.Body is { Type.Length: > 0 } b ? $"Body {b.Type}" : "Body"));
+        var (authSpec, authInherited) = EffectiveAuth(tab);
+        bar.AddChild(SubTabButton(tab, EditorTab.Auth,
+            authSpec.Kind == AuthKind.None ? "Auth"
+            : authInherited != null ? "Auth inherited"
+            : "Auth " + KindLabel(authSpec.Kind)));
         bar.AddChild(SubTabButton(tab, EditorTab.Assertions, AssertionsTabLabel(tab)));
         var chainNode = Chain.Analyze(tab.Path, tab.Doc);
         bar.AddChild(SubTabButton(tab, EditorTab.Chain,

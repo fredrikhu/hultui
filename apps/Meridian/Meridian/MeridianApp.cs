@@ -77,7 +77,7 @@ public partial class MeridianApp : Component, IDisposable
         public string? ResultSnapshot;
     }
 
-    internal enum EditorTab { Params, Headers, Body, Assertions, Chain }
+    internal enum EditorTab { Params, Headers, Body, Auth, Assertions, Chain }
 
     // The extracted-variable store: what runs produced, when. Session state —
     // never serialized (the files hold the *recipes*, not the values).
@@ -120,6 +120,7 @@ public partial class MeridianApp : Component, IDisposable
         _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
         _keyring = keyring ?? new DefaultKeyring();
         Engine = new HttpEngine(viewerCapBytes);
+        _oauth = new OAuth2(Engine);
         _responseFind = new FindBarState(MarkDirty);
         _historyFind = new FindBarState(MarkDirty);
 
@@ -505,13 +506,20 @@ public partial class MeridianApp : Component, IDisposable
             return;
         }
 
+        // Auth last, so an explicit Authorization header on the request wins
+        // and OAuth2 only fetches a token once everything else resolved.
         var cts = tab.Sending = new CancellationTokenSource();
         tab.SendStartedTs = System.Diagnostics.Stopwatch.GetTimestamp();
         MarkDirty();
         TickWhileSending(tab);
         try
         {
-            var spec = new RequestSpec(method, url.Text, headers, bodyText,
+            if (await ApplyAuthAsync(tab, resolver, headers, cts.Token) is { } authError)
+            {
+                Flash(authError);
+                return;
+            }
+            var spec = new RequestSpec(method, ApplyAuthQuery(tab, resolver, url.Text), headers, bodyText,
                 bodyText != null && tab.Doc.Body!.Type == "json" ? "application/json" : null);
             tab.Result = await Task.Run(() => Engine.SendAsync(spec, cts.Token));
             tab.ResultSnapshot = tab.Doc.Serialize();
