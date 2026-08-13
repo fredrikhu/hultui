@@ -22,6 +22,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\apps\Meridian\Meridian\Meridian.csproj" />
+    <!-- Build the CLI so the end-to-end tests have a binary to run, but do NOT
+         copy its output: its assembly is named "meridian", which collides with
+         the GUI's "Meridian.dll" on a case-insensitive filesystem and would
+         overwrite it. The tests invoke the built binary by path instead. -->
+    <ProjectReference Include="..\..\apps\Meridian\Meridian.Cli\Meridian.Cli.csproj"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
   </ItemGroup>
 
