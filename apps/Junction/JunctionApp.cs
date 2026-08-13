@@ -672,6 +672,25 @@ public partial class JunctionApp : Component, IDisposable
     /// MarkDirty path), so a newly-activated per-repo loader gets subscribed.</summary>
     private void Rerender() => _revision.Value++;
 
+    /// <summary>Automation hook for scripted perf captures (JUNCTION_BENCH in
+    /// Program.cs): a view name switches tabs, "row:N" selects the Nth branch row
+    /// like a click on it would. Main thread only.</summary>
+    internal void BenchStep(string step)
+    {
+        if (step.StartsWith("row:", StringComparison.Ordinal))
+        {
+            var list = FilteredBranches();
+            if (list.Count == 0) return;
+            _branchSel = Math.Clamp(int.Parse(step[4..]), 0, list.Count - 1);
+            BranchSelectSingle(list[_branchSel]);
+            MarkDirty();
+        }
+        else if (Enum.TryParse<JunctionView>(step, out var v))
+        {
+            SetView(v);
+        }
+    }
+
     /// <summary>Collapses the commit selection to a single commit (or none).</summary>
     private void SetCommitSelection(string? hash)
     {

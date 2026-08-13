@@ -76,6 +76,35 @@ app.SetRoot(junction.Mount());
 // Flush / Present are exercised every frame. This is how automation grabs a
 // steady-state GL trace without interaction (SDL3/Wayland doesn't turn
 // SIGINT/SIGTERM into a clean quit, so a signal can't do the flush).
+// Scripted-interaction hook, same job as HULTUI_TRACE_MS but for discrete actions:
+// JUNCTION_BENCH="Branches@4000,History@12000,row:5@20000,close@26000" runs each
+// step on the main thread at its absolute ms-since-launch. A view name switches
+// tabs, "row:N" selects the Nth branch row, "close" ends the run (flushing
+// HULTUI_TRACE). Each step is stamped into the trace as a Meta "BenchStep" event,
+// so captures need no wall-clock correlation. Exists because there's no other way
+// to drive an unfocused window: SDL drops posted keyboard/click messages, and the
+// chrome tabs expose no UIA invoke pattern.
+if (Environment.GetEnvironmentVariable("JUNCTION_BENCH") is { Length: > 0 } benchScript)
+{
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    _ = System.Threading.Tasks.Task.Run(() =>
+    {
+        foreach (var part in benchScript.Split(','))
+        {
+            var split = part.Split('@');
+            var step = split[0].Trim();
+            var wait = long.Parse(split[1]) - clock.ElapsedMilliseconds;
+            if (wait > 0) System.Threading.Thread.Sleep((int)wait);
+            Application.InvokeOnMainThread(() =>
+            {
+                window.Tracer.Annotate("BenchStep", step);
+                if (step == "close") window.Close();
+                else junction.BenchStep(step);
+            });
+        }
+    });
+}
+
 if (int.TryParse(Environment.GetEnvironmentVariable("HULTUI_TRACE_MS"), out var traceMs) && traceMs > 0)
 {
     var deadline = Environment.TickCount64 + traceMs;
