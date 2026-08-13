@@ -475,6 +475,21 @@ public sealed partial class LayoutEngine
         var resolvedW = forcedWidth ?? box.Width.Resolve(constraint.AvailableWidth);
         var resolvedH = forcedHeight ?? box.Height.Resolve(constraint.AvailableHeight);
 
+        // Both dimensions already resolved (explicit size or flex-forced): the
+        // content extent can't influence the result — contentSize only feeds the
+        // ?? fallbacks below — so skip measuring the subtree entirely. Phase 6's
+        // ComputeLayout is the authoritative pass and still measures/arranges the
+        // children it needs; this only prunes redundant Phase 1 descent.
+        if (resolvedW is { } fixedW && resolvedH is { } fixedH)
+        {
+            var sizedW = ApplyMinMax(fixedW, box.MinWidth, box.MaxWidth, constraint.AvailableWidth);
+            var sizedH = ApplyMinMax(fixedH, box.MinHeight, box.MaxHeight, constraint.AvailableHeight);
+            var sized = new Size(sizedW + margin.Horizontal, sizedH + margin.Vertical);
+            element.MeasureCache.Store(constraint.AvailableWidth, constraint.AvailableHeight,
+                forcedWidth, forcedHeight, sized);
+            return sized;
+        }
+
         var contentAvailW = (resolvedW ?? constraint.AvailableWidth) - outerSpacing.Horizontal;
         var contentAvailH = (resolvedH ?? constraint.AvailableHeight) - outerSpacing.Vertical;
         contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
@@ -618,6 +633,19 @@ public sealed partial class LayoutEngine
 
         var resolvedW = forcedWidth ?? box.Width.Resolve(constraintW);
         var resolvedH = forcedHeight ?? box.Height.Resolve(constraintH);
+
+        // Both dimensions resolved: content can't influence the result (see the
+        // matching early-out in MeasureSize), so skip MeasureContent — for text
+        // that's the shaping call. Phase 6's ComputeLayout still measures content
+        // for the authoritative pass.
+        if (resolvedW is { } fixedW && resolvedH is { } fixedH)
+        {
+            var sizedW = ApplyMinMax(fixedW, box.MinWidth, box.MaxWidth, constraintW);
+            var sizedH = ApplyMinMax(fixedH, box.MinHeight, box.MaxHeight, constraintH);
+            var sized = new Size(sizedW + margin.Horizontal, sizedH + margin.Vertical);
+            element.MeasureCache.Store(constraintW, constraintH, forcedWidth, forcedHeight, sized);
+            return sized;
+        }
 
         var contentAvailW = (resolvedW ?? constraintW) - outerSpacing.Horizontal;
         var contentAvailH = (resolvedH ?? constraintH) - outerSpacing.Vertical;
