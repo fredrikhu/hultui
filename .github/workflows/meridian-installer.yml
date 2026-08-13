@@ -1,0 +1,135 @@
+# Builds the Meridian Windows installer.
+#
+# Runs on release tags only. Pushing a tag like `meridian-v1.2.0` builds the
+# installer and publishes a GitHub Release with it attached.
+#
+# Runs on self-hosted runners (see docs/SELF-HOSTED-RUNNERS.md), so the machines
+# have to be awake for a queued job to start. Kept to tags rather than every
+# push from when these were hosted Windows runners, which bill at twice the
+# minute rate and exhausted a month's free allowance in nine days. Use
+# `workflow_dispatch` for an off-tag build — it still produces a CI-versioned
+# installer as an artifact, without publishing a release.
+
+name: Meridian installer
+
+on:
+  push:
+    tags: ['meridian-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meridian-installer-${{ github.ref }}
+  # Never cancelled: every run is now either a release tag or a deliberate
+  # manual build, and neither is worth superseding.
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: [self-hosted, windows, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
+      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
+      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
+      # try to install into that same Program Files directory, which the
+      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
+      # every step after it is skipped.
+
+      - name: Build solution
+        run: dotnet build HultUI.slnx -c Release
+
+      # The UI-automation tests (FlaUI) launch real SDL sample windows, which
+      # need a GPU context the hosted runner's Basic Render Driver can't
+      # provide — the samples exit at startup there. Run everything else.
+      - name: Run tests
+        run: dotnet test HultUI.slnx -c Release --no-build --filter "FullyQualifiedName!~HultUI.UiTests"
+
+  # Proves the framework is display-free on Linux: the headless tests run full
+  # app scenarios (render, input, accessibility queries) with no X11/Wayland
+  # and no GPU. Uses the solution filter, which excludes the Windows-only
+  # HultUI.UiTests — testing each project separately instead would rebuild the
+  # shared graph once per project.
+  test-linux:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
+      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
+      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
+      # try to install into that same Program Files directory, which the
+      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
+      # every step after it is skipped.
+
+      - name: Run tests
+        run: dotnet test HultUI.CrossPlatform.slnf -c Release
+
+  installer:
+    needs: [test, test-linux]
+    runs-on: [self-hosted, windows, x64]
+    permissions:
+      contents: write # for the release step on tag builds
+    steps:
+      - uses: actions/checkout@v5
+
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself
+      # (Windows: C:\Program Files\dotnet on the machine PATH; the Linux
+      # container: dotnet-sdk-10.0 from the Ubuntu archive). The action would
+      # try to install into that same Program Files directory, which the
+      # runner's NETWORK SERVICE account cannot write to — it exits 1 and
+      # every step after it is skipped.
+
+      # Tag meridian-v1.2.0 -> 1.2.0; other builds get a CI prerelease version.
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/meridian-v*') {
+            $version = $env:GITHUB_REF_NAME.Substring('meridian-v'.Length)
+          } else {
+            $version = "0.1.0-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer version: $version"
+
+      # Native AOT publish (PublishAot is set in the csproj); the runner image
+      # includes the required MSVC toolchain.
+      # Two publishes: the windowed app and the console CLI. The installer
+      # ships both — the pipeline story is half the product.
+      - name: Publish Meridian (win-x64, AOT)
+        run: dotnet publish apps/Meridian/Meridian/Meridian.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Publish the meridian CLI (win-x64, AOT)
+        run: dotnet publish apps/Meridian/Meridian.Cli/Meridian.Cli.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\Meridian\Meridian\Installer\meridian.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Meridian-Setup-${{ steps.version.outputs.version }}
+          path: apps/Meridian/Meridian/Installer/Output/*.exe
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/meridian-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem apps\Meridian\Meridian\Installer\Output\*.exe | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $exe.FullName `
+            --title "Meridian ${{ steps.version.outputs.version }}" `
+            --generate-notes

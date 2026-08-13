@@ -176,6 +176,18 @@ public partial class MeridianApp : Component, IDisposable
 
         // Overlays are conditional; keys keep each reconciling only against its
         // own kind rather than by position.
+        if (_optionsOpen)
+        {
+            var options = BuildOptions();
+            options.Key = "options";
+            root.AddChild(options);
+        }
+        if (_paletteOpen)
+        {
+            var palette = BuildPalette();
+            palette.Key = "palette";
+            root.AddChild(palette);
+        }
         if (_dialog is { } dialogSpec)
         {
             var dialog = BuildDialog(dialogSpec);
@@ -211,6 +223,11 @@ public partial class MeridianApp : Component, IDisposable
         {
             _pendingUrlFocus = false;
             _urlRef.Current?.Focus();
+        }
+        if (_pendingPaletteFocus)
+        {
+            _pendingPaletteFocus = false;
+            _paletteRef.Current?.Focus();
         }
         if (_pendingDialogFocus)
         {
@@ -570,6 +587,20 @@ public partial class MeridianApp : Component, IDisposable
         var ctrl = e.Modifiers.HasFlag(KeyModifiers.Ctrl) || e.Modifiers.HasFlag(KeyModifiers.Super);
         var typing = e.Target is TextInputElement or TextAreaElement;
 
+        // The palette owns the keyboard while it is up.
+        if (_paletteOpen && HandlePaletteKey(e))
+        {
+            e.StopPropagation = true;
+            return;
+        }
+        if (_optionsOpen && e.Key == KeyCode.Escape)
+        {
+            _optionsOpen = false;
+            MarkDirty();
+            e.StopPropagation = true;
+            return;
+        }
+
         // A modal dialog owns Enter/Esc while it is up — before anything else.
         if (_dialog != null)
         {
@@ -594,6 +625,7 @@ public partial class MeridianApp : Component, IDisposable
             switch (e.Key)
             {
                 case KeyCode.O: OpenFolder(); e.StopPropagation = true; return;
+                case KeyCode.P: TogglePalette(); e.StopPropagation = true; return;
                 case KeyCode.E when _workspace != null: OpenEnvSwitcher(); e.StopPropagation = true; return;
                 case KeyCode.S when View == MeridianView.Environments: SaveEnvironments(); e.StopPropagation = true; return;
                 case KeyCode.S: SaveActiveTab(); e.StopPropagation = true; return;

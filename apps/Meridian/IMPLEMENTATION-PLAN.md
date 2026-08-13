@@ -1,5 +1,9 @@
 # Implementation Plan — Meridian (HTTP/API client, app #3)
 
+> **Status: all twelve phases shipped** (P0–P11, milestones M1–M3). The
+> sections below are the plan as written before the build; deviations taken
+> along the way are recorded in "What changed" at the bottom.
+
 Responds to `docs/design/meridian/` (Azimuth token sheet + surfaces 02–08). Design resolved
 every open question from `docs/API-CLIENT-DESIGN-HANDOVER.md`; this plan is about *how*, not
 *whether*. High-fidelity mocks — colors, spacing, states, and copy are final.
@@ -189,3 +193,33 @@ provable headless in CI on Linux.
 - **Multi-line editor scope creep** — F1 is caret/edit/IME only; no undo tree, no
   soft-wrap changes, no syntax-aware editing. The Body tab renders highlights read-only
   style while typing plain (highlight-while-edit is a later framework feature).
+
+
+---
+
+## What changed
+
+The plan held. The deviations worth recording:
+
+- **The multi-line editor (F1) never became a blocker.** TextArea's editing was
+  good enough for the body, `.env` values and assertion rows, so the parallel
+  framework track was not needed. Highlight-while-editing is still absent —
+  the response viewer highlights, the body editor does not.
+- **P3 split as planned into P3a/P3b**, and the runner (P6) and CLI (P7) landed
+  in the planned order. The chain-order engine ended up shared: the app's
+  Runner view and the CLI call the same `CollectionRunner`, and both print
+  `RunReports`, asserted line-for-line by a test.
+- **JSONPath highlighting in the response pane is deferred.** The focused
+  assertion row does not tint its target span; it needs a JSON-text locator
+  with byte offsets. Everything else in P5 shipped.
+- **OAuth2 auth-code stayed out** (as the plan allowed) — client-credentials
+  only, with no stub UI for the missing grant.
+- **YAML OpenAPI stayed out** (as the plan allowed). JSON specs plus live
+  probing cover discovery; a YAML reader is the one obvious P12 candidate.
+- **The Linux desktop keyring is unimplemented.** Secrets resolve from the
+  Windows Credential Manager, then from a process environment variable — which
+  is what CI uses, so the pipeline story is unaffected on Linux.
+- **Three bugs found in neighbouring code** while building: a toast that
+  swallowed clicks near the window's bottom edge (Junction and Vesper share the
+  idiom), the CLI/GUI assembly-name collision on Windows, and the OEM codepage
+  mangling report glyphs in redirected logs.

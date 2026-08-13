@@ -15,6 +15,7 @@ app.DevToolsHotkeysEnabled = false;
 
 var window = app.PrimaryWindow;
 window.SetMinimumSize(760, 540);
+window.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "meridian.png"));
 
 var meridian = new MeridianApp(app, window);
 window.Closed += meridian.Dispose;

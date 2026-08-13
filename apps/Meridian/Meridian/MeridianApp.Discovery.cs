@@ -20,7 +20,6 @@ public partial class MeridianApp
     private int _specErrorLine;
     private bool _probing;
     private Endpoint? _mapSelection;
-    private string _mapFilter = "";
     private bool _promoteObserved;
 
     internal ApiMap? Map => _map;

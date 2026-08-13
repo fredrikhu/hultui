@@ -98,6 +98,30 @@ GitHub Actions:
     client_secret: ${{ secrets.CLIENT_SECRET }}   # a flagged secret, injected
 ```
 
+## Keys
+
+| | |
+|---|---|
+| `Ctrl P` | command palette — every command, and every request by name |
+| `1`–`5` | Requests · Runner · Discovery · History · Environments |
+| `Ctrl ↵` / `Esc` | send · cancel |
+| `Ctrl O` / `Ctrl S` / `Ctrl W` | open a collection · save · close tab |
+| `Ctrl E` | switch environment |
+| `Ctrl R` | run the collection |
+| `Ctrl F` | find in the response, or in history |
+| `Ctrl \` | flip the response pane right ⇄ bottom |
+| `↑↓ · enter · r` | in History: walk rows · open · restore |
+
+## Installing
+
+Tagging `meridian-v<x.y.z>` builds the Windows installer and publishes a
+release ([workflow](../../.github/workflows/meridian-installer.yml)). The
+installer ships the app and the `meridian` CLI, and offers to put the CLI on
+PATH.
+
+The app icon is generated, not hand-drawn — `python
+scripts/generate-meridian-icon.py` redraws it from the Azimuth palette.
+
 ## Building
 
 ```bash

@@ -12,10 +12,21 @@
     <IsAotCompatible>true</IsAotCompatible>
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- Embedded in the exe: Explorer, shortcuts and the taskbar read this.
+         The runtime window icon (Linux WMs, alt-tab) is set from
+         Assets\meridian.png in Program.cs. Both are generated — see
+         scripts/generate-meridian-icon.py. -->
+    <ApplicationIcon>Assets\meridian.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Meridian.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Assets\*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
