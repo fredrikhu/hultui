@@ -142,8 +142,12 @@ public partial class MeridianApp
 
     private Element BuildToast(string message)
     {
-        var strip = Flex.Row(gap: 0)
-            .Width(Dimension.Percent(100))
+        // PassThroughBox, not a plain box: the strip spans the window's width at
+        // the bottom, and a hit-testable one steals clicks from whatever control
+        // sits near the bottom edge for as long as the toast is up.
+        var strip = new Ui.PassThroughBox();
+        strip.Flex.Direction = FlexDirection.Row;
+        strip.Width(Dimension.Percent(100))
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.FlexEnd)
             .Padding(new Thickness(0, 0, 22, 0))
             .ZIndex(50);

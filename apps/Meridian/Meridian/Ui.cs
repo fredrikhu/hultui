@@ -55,6 +55,21 @@ public static class Ui
     public static T HoverBg<T>(this T el, Color hover, Color normal) where T : BoxElement =>
         el.OnHover(b => b.BackgroundColor = hover);
 
+    /// <summary>
+    /// A box the pointer passes straight through — CSS <c>pointer-events: none</c>.
+    /// Hit testing skips the whole subtree, so a decorative overlay can span the
+    /// window without stealing clicks from what is underneath.
+    ///
+    /// <para>The toast needs this: it is a full-width strip pinned to the bottom
+    /// of the window, and it was swallowing clicks on any control near the
+    /// bottom edge (found when a "Generate request" button stopped responding
+    /// while an import toast was up).</para>
+    /// </summary>
+    public sealed class PassThroughBox : BoxElement
+    {
+        public override bool HitTest(Point point) => false;
+    }
+
     /// <summary>Key-hint chip: mono 10, az-border box (the sheet's kbd idiom).</summary>
     public static BoxElement Kbd(string text) =>
         Box.New()

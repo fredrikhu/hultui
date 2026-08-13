@@ -515,7 +515,11 @@ public partial class MeridianApp : Component, IDisposable
             tab.Result = await Task.Run(() => Engine.SendAsync(spec, cts.Token));
             tab.ResultSnapshot = tab.Doc.Serialize();
             if (tab.Result.Response is { } responseData)
+            {
                 ApplyExtractions(tab, responseData);
+                // Exploring by hand is discovery's other input.
+                RecordInMap(method, url.Text, responseData);
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is UriFormatException or InvalidOperationException or ArgumentException)

@@ -52,7 +52,7 @@ public partial class MeridianApp
         grid.AddChild(Flex.Row(gap: Azimuth.S3).Children(
             EntryCard(Icons.ImportSpec, "Import OpenAPI",
                 "A spec file or URL becomes a browsable endpoint map.",
-                "Ctrl I", null),
+                "Ctrl I", () => OpenDialog("Import OpenAPI", "path to openapi.json", ImportSpecFile)),
             EntryCard(Icons.Discovery, "Discover an API",
                 "Give a base URL; Meridian probes for specs and maps what it sees.",
                 "3", () => SetView(MeridianView.Discovery), accent: true)));
@@ -116,9 +116,7 @@ public partial class MeridianApp
 
     private Element BuildRunnerView() => BuildRunnerRealView();
 
-    private Element BuildDiscoveryView() => EmptyView("Discovery",
-        "nothing discovered yet",
-        "Import a spec or send requests against a base URL, and the endpoint map grows here.");
+    private Element BuildDiscoveryView() => BuildDiscoveryRealView();
 
     private Element BuildHistoryView() => EmptyView("History",
         "no sends yet",
