@@ -451,20 +451,17 @@ public sealed partial class LayoutEngine
     private Size MeasureSize(Element element, LayoutConstraint constraint,
         float? forcedWidth = null, float? forcedHeight = null)
     {
-        // Cache hit: each ancestor's Phase 1 re-measures this element with
-        // identical (constraint, forced) inputs, so the result is reusable
-        // both within a pass and across frames. CacheMeasureValid is cleared
+        // Cache hit: each ancestor's Phase 1 re-measures this element with a
+        // small set of alternating (constraint, forced) inputs, so results are
+        // reusable both within a pass and across frames. The cache is cleared
         // by MarkLayoutDirty (which propagates up from any changed descendant),
         // so a hit here means the cached size is still authoritative — no need
         // to consult DirtyFlags.Layout (that flag belongs to ComputeLayout's
         // cache, which gates whether descendant positions need re-writing).
-        if (element.CacheMeasureValid
-            && element.CacheMeasureConstraintW == constraint.AvailableWidth
-            && element.CacheMeasureConstraintH == constraint.AvailableHeight
-            && element.CacheMeasureForcedW == forcedWidth
-            && element.CacheMeasureForcedH == forcedHeight)
+        if (element.MeasureCache.TryGet(constraint.AvailableWidth, constraint.AvailableHeight,
+                forcedWidth, forcedHeight, out var cachedSize))
         {
-            return element.CacheMeasureResult;
+            return cachedSize;
         }
 
         using var _trace = _tracer is null
@@ -518,12 +515,8 @@ public sealed partial class LayoutEngine
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
-        element.CacheMeasureConstraintW = constraint.AvailableWidth;
-        element.CacheMeasureConstraintH = constraint.AvailableHeight;
-        element.CacheMeasureForcedW = forcedWidth;
-        element.CacheMeasureForcedH = forcedHeight;
-        element.CacheMeasureResult = resultSize;
-        element.CacheMeasureValid = true;
+        element.MeasureCache.Store(constraint.AvailableWidth, constraint.AvailableHeight,
+            forcedWidth, forcedHeight, resultSize);
 
         // Do NOT clear DirtyFlags.Layout here — it belongs to ComputeLayout,
         // which uses it to decide whether to re-lay out descendant positions.
@@ -612,14 +605,11 @@ public sealed partial class LayoutEngine
         // per ancestor's Phase 1 measure and again in Phase 6 arrange, across every
         // nesting level — and for text those MeasureContent calls dominate the pass.
         // The cache is keyed on (constraint, forced) and invalidated by
-        // MarkLayoutDirty (which clears CacheMeasureValid up the changed subtree).
-        if (element.CacheMeasureValid
-            && element.CacheMeasureConstraintW == constraintW
-            && element.CacheMeasureConstraintH == constraintH
-            && element.CacheMeasureForcedW == forcedWidth
-            && element.CacheMeasureForcedH == forcedHeight)
+        // MarkLayoutDirty (which resets MeasureCache up the changed subtree).
+        if (element.MeasureCache.TryGet(constraintW, constraintH, forcedWidth, forcedHeight,
+                out var cachedSize))
         {
-            return element.CacheMeasureResult;
+            return cachedSize;
         }
 
         var box = element.BoxRead;
@@ -643,12 +633,7 @@ public sealed partial class LayoutEngine
 
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
-        element.CacheMeasureConstraintW = constraintW;
-        element.CacheMeasureConstraintH = constraintH;
-        element.CacheMeasureForcedW = forcedWidth;
-        element.CacheMeasureForcedH = forcedHeight;
-        element.CacheMeasureResult = resultSize;
-        element.CacheMeasureValid = true;
+        element.MeasureCache.Store(constraintW, constraintH, forcedWidth, forcedHeight, resultSize);
 
         return resultSize;
     }
