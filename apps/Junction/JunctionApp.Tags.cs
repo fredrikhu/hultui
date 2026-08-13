@@ -121,24 +121,40 @@ public partial class JunctionApp
 
     private Element BuildTagScroll(List<GitTag> list)
     {
-        var scroll = ScrollView.New().FlexGrow(1)
-            .Padding(new Thickness(0, 26, 12, 26));
-        scroll.WithRef(_tagScrollRef);
-
         if (list.Count == 0)
         {
-            scroll.AddChild(Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
-                .AlignItems(AlignItems.Center)
+            return Box.New().FlexGrow(1).Padding(new Thickness(26))
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Children(Text.New(_tagQuery.Trim().Length > 0
                         ? $"No tags match \"{_tagQuery.Trim()}\""
                         : "This repository has no tags")
-                    .FontSize(13f).TextColor(Nocturne.On(0.45))));
-            return scroll;
+                    .FontSize(13f).TextColor(Nocturne.On(0.45)));
         }
 
-        for (var i = 0; i < list.Count; i++)
-            scroll.AddChild(TagRow(list[i], i));
-        return scroll;
+        // Virtualized like the branch table — same index map, keyed on the tag
+        // name (unique per repo).
+        var indexOf = new Dictionary<string, int>(list.Count, StringComparer.Ordinal);
+        for (var i = 0; i < list.Count; i++) indexOf[list[i].Name] = i;
+
+        return VirtualListElement<GitTag>.New()
+            .ItemHeight(TagRowHeight)
+            .Items(list)
+            .RenderWith(t => TagRow(t, indexOf[t.Name]))
+            // The virtual list surfaces items to assistive tech by this label alone
+            // (rows off-screen are never realized as elements), so it carries
+            // everything the row says: name, kind, annotation message, commit.
+            .AccessibleItemLabel(t => t.Message.Length > 0
+                ? $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {t.Message}, {ShortHash(t.Hash)} {t.Subject}"
+                : $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {ShortHash(t.Hash)} {t.Subject}")
+            .OnActivateItem(t =>
+            {
+                // Assistive-tech activation mirrors a plain row click.
+                if (indexOf.TryGetValue(t.Name, out var i)) SelectTag(i);
+            })
+            .SelectedIndex(_tagSel)
+            .FlexGrow(1)
+            .Padding(new Thickness(0, 26, 12, 26))
+            .WithRef(_tagScrollRef);
     }
 
     private Element TagRow(GitTag t, int index)

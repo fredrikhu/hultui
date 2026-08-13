@@ -168,24 +168,44 @@ public partial class JunctionApp
 
     private Element BuildBranchScroll(List<GitBranch> list)
     {
-        var scroll = ScrollView.New().FlexGrow(1)
-            .Padding(new Thickness(0, 26, 12, 26));
-        scroll.WithRef(_branchScrollRef);
-
         if (list.Count == 0)
         {
-            scroll.AddChild(Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
-                .AlignItems(AlignItems.Center)
+            return Box.New().FlexGrow(1).Padding(new Thickness(26))
+                .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Children(Text.New(_branchQuery.Trim().Length > 0
                         ? $"No branches match \"{_branchQuery.Trim()}\""
                         : "No local branches")
-                    .FontSize(13f).TextColor(Nocturne.On(0.45))));
-            return scroll;
+                    .FontSize(13f).TextColor(Nocturne.On(0.45)));
         }
 
-        for (var i = 0; i < list.Count; i++)
-            scroll.AddChild(BranchRow(list[i], i));
-        return scroll;
+        // Virtualized: with 1000+ branches a plain ScrollView costs hundreds of ms
+        // per rebuild (every row built and measured); the virtual list realizes only
+        // the visible ~20. The template gets the item alone, so rows find their
+        // index through this map (FullName is unique across heads and remotes).
+        var indexOf = new Dictionary<string, int>(list.Count, StringComparer.Ordinal);
+        for (var i = 0; i < list.Count; i++) indexOf[list[i].FullName] = i;
+
+        return VirtualListElement<GitBranch>.New()
+            .ItemHeight(BranchRowHeight)
+            .Items(list)
+            .RenderWith(b => BranchRow(b, indexOf[b.FullName]))
+            // The virtual list surfaces items to assistive tech by this label alone
+            // (rows off-screen are never realized as elements), so it says what the
+            // row says: name, current marker, ahead/behind, last commit.
+            .AccessibleItemLabel(b => b.IsRemote
+                ? $"{b.Name}, remote, {b.Subject}"
+                : $"{b.Name}{(b.IsCurrent ? ", current" : "")}, ahead {b.AheadCount} behind {b.BehindCount}, {b.Subject}")
+            .OnActivateItem(b =>
+            {
+                // Assistive-tech activation mirrors a plain row click.
+                if (indexOf.TryGetValue(b.FullName, out var i)) _branchSel = i;
+                BranchSelectSingle(b);
+                MarkDirty();
+            })
+            .SelectedIndex(_branchSel)
+            .FlexGrow(1)
+            .Padding(new Thickness(0, 26, 12, 26))
+            .WithRef(_branchScrollRef);
     }
 
     private Element BranchRow(GitBranch b, int index)

@@ -156,7 +156,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
-    private readonly Ref<ScrollViewElement> _branchScrollRef = new();
+    private readonly Ref<VirtualListElement<GitBranch>> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
     // Tags state, shaped like the branches state above.
@@ -165,7 +165,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _tagQuery = "";
     private int _tagSel;
     private readonly Ref<TextInputElement> _tagSearchRef = new();
-    private readonly Ref<ScrollViewElement> _tagScrollRef = new();
+    private readonly Ref<VirtualListElement<GitTag>> _tagScrollRef = new();
     private bool _pendingTagSearchFocus;
 
     // Diff mode is a single app-level toggle shared by all diff panes.
