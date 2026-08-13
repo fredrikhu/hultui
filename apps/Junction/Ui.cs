@@ -64,6 +64,15 @@ public static class Ui
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);
 
     // ── Tags / chips ─────────────────────────────────────────────────────
+    // All three keep their label on one line, whatever the row does around them.
+    // FlexShrink(0) alone is not enough: in a tight row the chip is *measured*
+    // under the leftover width, the label wraps during that measurement, and a
+    // no-shrink chip then faithfully keeps the two-line size. MaxLines(1) makes
+    // the label ellipsize instead ("origi/n" was on screen in the Branches tab).
+
+    private static TextElement TagLabel(string label, float fontSize, Color fg) =>
+        Text.New(label).FontSize(fontSize).TextColor(fg)
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1);
 
     public static BoxElement Tag(string label, Color bg, Color fg, float fontSize = 11f) =>
         Box.New()
@@ -71,7 +80,8 @@ public static class Ui
             .CornerRadius(Nocturne.RadiusMd * 0.75f)
             .Background(bg)
             .AlignItems(AlignItems.Center)
-            .Children(Text.New(label).FontSize(fontSize).TextColor(fg));
+            .FlexShrink(0)
+            .Children(TagLabel(label, fontSize, fg));
 
     public static BoxElement TagOutline(string label, Color color, float fontSize = 11f)
     {
@@ -80,7 +90,8 @@ public static class Ui
             .CornerRadius(Nocturne.RadiusMd * 0.75f)
             .BorderColor(color).BorderWidth(1f)
             .AlignItems(AlignItems.Center)
-            .Children(Text.New(label).FontSize(fontSize).TextColor(color));
+            .FlexShrink(0)
+            .Children(TagLabel(label, fontSize, color));
         return box;
     }
 
@@ -91,11 +102,12 @@ public static class Ui
         var box = Flex.Row(gap: 3)
             .AlignItems(AlignItems.Center)
             .Padding(new Thickness(2, 7, 2, 7))
-            .CornerRadius(Nocturne.RadiusMd * 0.75f);
+            .CornerRadius(Nocturne.RadiusMd * 0.75f)
+            .FlexShrink(0);
         if (outline) box.BorderColor(fg).BorderWidth(1f);
         else box.Background(bg);
         if (!string.IsNullOrEmpty(glyph)) box.AddChild(Icon(glyph, 9f, fg));
-        box.AddChild(Text.New(label).FontSize(9.5f).TextColor(fg));
+        box.AddChild(TagLabel(label, 9.5f, fg));
         return box;
     }
 
