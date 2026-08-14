@@ -131,6 +131,16 @@ public class FilesFindTests
 
             Find(session, app, "needle");
 
+            // Same async repaint as the wait above: a fixed frame count can sample the pane
+            // while the tinted spans are still being composed, and the foregrounds this test
+            // is about are absent for that moment. Wait for the tint to exist, then ask what
+            // the spans are made of. The wait is on the search having been applied at all,
+            // which says nothing about whether the grammar's colours came through with it —
+            // so it cannot mask the assertion below. CI caught this once in a hundred-odd
+            // runs; it has never reproduced locally.
+            session.PumpUntil(() => BodySpans(app).Any(s => IsFindTint(s.Background)),
+                TimeSpan.FromSeconds(20));
+
             var after = BodySpans(app);
             foreach (var s in before) Assert.Contains(after, a => a.Color == s.Color);
             Assert.Contains(after, s => IsFindTint(s.Background));
