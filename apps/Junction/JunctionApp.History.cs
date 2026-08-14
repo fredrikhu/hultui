@@ -559,8 +559,12 @@ public partial class JunctionApp
         line2.AddChild(Ui.Mono(commit.ShortHash, 11f, Nocturne.On(0.46)).Tooltip(commit.Hash));
         line2.AddChild(Text.New(commit.AuthorName).FontSize(11f).TextColor(Nocturne.On(0.46)));
         line2.AddChild(Text.New("·").FontSize(11f).TextColor(Nocturne.On(0.46)));
+        // The label is the author's own wall clock: git records the offset a commit was
+        // written at, and "g" renders in that offset — to the minute, and without saying
+        // which offset it is. So the tooltip carries what the label leaves out, the seconds
+        // and the offset, rather than restating the same instant in a second format.
         line2.AddChild(Text.New(commit.AuthorDate.ToString("g")).FontSize(11f).TextColor(Nocturne.On(0.46))
-            .Tooltip(commit.AuthorDate.ToString("yyyy-MM-dd HH:mm:ss")));
+            .Tooltip(commit.AuthorDate.ToString("yyyy-MM-dd HH:mm:ss zzz")));
         if (stat.Added > 0)
             line2.AddChild(Text.New($"+{stat.Added}").FontSize(11f).TextColor(Nocturne.AddCount));
         if (stat.Deleted > 0)
