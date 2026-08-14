@@ -103,6 +103,25 @@ public class JunctionAppHostTests
     }
 
     [Fact]
+    public void HostingTheAppThemesTheBuiltInWidgets()
+    {
+        // The built-in widgets read the Application theme rather than the colours this app
+        // paints with, and TextInputElement.ApplyTheme re-reads it on every style pass. An
+        // unthemed Application therefore leaves the History search box and the commit
+        // fields flat white in an otherwise dark window — which is exactly what a headless
+        // screenshot showed, because only Program.cs used to set the theme and nothing
+        // hosting JunctionApp directly went through Program.cs.
+        Hosted((repo, session, app) =>
+        {
+            var expected = Junction.Theme.Nocturne.ToHultTheme().TextInput.Background;
+
+            Assert.Equal(expected, session.Application.Theme.TextInput.Background);
+            Assert.NotEqual(HultUI.Core.Primitives.Color.White,
+                session.Application.Theme.TextInput.Background);
+        });
+    }
+
+    [Fact]
     public void TheHistoryViewLoadsTheRepositorysCommits()
     {
         Hosted((repo, session, app) =>

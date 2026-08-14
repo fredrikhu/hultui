@@ -307,6 +307,13 @@ public partial class JunctionApp : Component, IDisposable
         _app = app;
         _window = window;
         _settings = settings;
+        // The built-in widgets read the Application theme rather than the colours this app
+        // paints with, and TextInputElement.ApplyTheme re-reads it on every style pass — so
+        // an unthemed Application leaves the search boxes and commit fields flat white in an
+        // otherwise Nocturne window. Program.cs sets this too, before the first frame; doing
+        // it here as well means anything that hosts JunctionApp directly (tests, screenshot
+        // harnesses) gets the same window the user sees. Mirrors CommanderApp.
+        _app.Theme = Nocturne.ToHultTheme();
         _folderPicker = folderPicker ?? new NativeFolderPicker();
         _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
         // The diff's sideways offset is app state, so moving it has to rebuild the rows.
