@@ -156,7 +156,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
-    private readonly Ref<VirtualListElement<GitBranch>> _branchScrollRef = new();
+    private readonly Ref<VirtualListElement<RefNode<GitBranch>>> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
     // Tags state, shaped like the branches state above.
@@ -165,7 +165,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _tagQuery = "";
     private int _tagSel;
     private readonly Ref<TextInputElement> _tagSearchRef = new();
-    private readonly Ref<VirtualListElement<GitTag>> _tagScrollRef = new();
+    private readonly Ref<VirtualListElement<RefNode<GitTag>>> _tagScrollRef = new();
     private bool _pendingTagSearchFocus;
 
     // Diff mode is a single app-level toggle shared by all diff panes.
@@ -280,6 +280,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
+        _refTreeView = _settings.RefTreeView;
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
         _activeRepoPath = _settings.ActiveRepoPath ?? ActiveWorkspace?.RepoPaths.FirstOrDefault() ?? "";
@@ -674,15 +675,30 @@ public partial class JunctionApp : Component, IDisposable
 
     /// <summary>Automation hook for scripted perf captures (JUNCTION_BENCH in
     /// Program.cs): a view name switches tabs, "row:N" selects the Nth branch row
-    /// like a click on it would. Main thread only.</summary>
+    /// like a click on it would, and "tree"/"flat" picks the ref presentation so a
+    /// capture can compare the two without editing settings.json. Main thread only.</summary>
     internal void BenchStep(string step)
     {
         if (step.StartsWith("row:", StringComparison.Ordinal))
         {
-            var list = FilteredBranches();
-            if (list.Count == 0) return;
-            _branchSel = Math.Clamp(int.Parse(step[4..]), 0, list.Count - 1);
-            BranchSelectSingle(list[_branchSel]);
+            var rows = BranchRows();
+            if (rows.Count == 0) return;
+            _branchSel = Math.Clamp(int.Parse(step[4..]), 0, rows.Count - 1);
+            if (rows[_branchSel] is { IsFolder: false } leaf) BranchSelectSingle(leaf.Item);
+            MarkDirty();
+        }
+        else if (step is "tree" or "flat")
+        {
+            SetRefTreeView(step == "tree");
+        }
+        else if (step.StartsWith("expand:", StringComparison.Ordinal))
+        {
+            // Opens every branch folder, so a capture can measure the worst case the
+            // tree can reach: as many rows as the flat list, plus the folders.
+            var set = RefExpandedSet(RefKindBranch);
+            foreach (var root in RefTree.Build(_branches.Value.Local, b => b.Name))
+                foreach (var folder in RefTree.Folders(root))
+                    set[folder.Path] = step[7..] == "all";
             MarkDirty();
         }
         else if (Enum.TryParse<JunctionView>(step, out var v))
@@ -825,6 +841,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.ActiveRepoPath = _activeRepoPath;
         _settings.DiffWrap = _diffWrap;
         _settings.DiffSplit = _diffSplit;
+        _settings.RefTreeView = _refTreeView;
         JunctionSettings.Save(_settings);
     }
 

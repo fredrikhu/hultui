@@ -26,6 +26,13 @@ public sealed class JunctionSettingsData
     /// to read a diff, not decisions about a particular one.</summary>
     public bool DiffSplit { get; set; }
 
+    /// <summary>Whether the Branches and Tags tables group refs into a folder tree by their
+    /// <c>/</c> segments rather than listing them flat. Remembered for the same reason the
+    /// diff's reading modes are: it is how someone wants to look at their refs, not a
+    /// decision about one repository. Which folders are open is not stored — that is a
+    /// place in a list, and it is per-repo session state.</summary>
+    public bool RefTreeView { get; set; } = true;
+
     // Junction: per-repo badge swatch id (path → swatch id), driving the repo's
     // initial tile everywhere. Missing entries fall back to a deterministic seed.
     public Dictionary<string, string> RepoBadges { get; set; } = new();
@@ -85,6 +92,9 @@ public sealed class JunctionSettingsData
         Workspaces = Workspaces.Select(w => w.Clone()).ToList(),
         ActiveWorkspaceId = ActiveWorkspaceId,
         ActiveRepoPath = ActiveRepoPath,
+        DiffWrap = DiffWrap,
+        DiffSplit = DiffSplit,
+        RefTreeView = RefTreeView,
         RepoBadges = new(RepoBadges),
         General = General.Clone(),
         Git = Git.Clone(),
