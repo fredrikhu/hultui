@@ -50,7 +50,16 @@ public partial class JunctionApp
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         header.AddChild(DiffModeToggle());
         header.AddChild(IgnoreWhitespaceToggle());
-        header.AddChild(Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)").FlexShrink(0));
+        // A binary file has no two texts to compare, so the external-diff button is inert
+        // rather than absent — the tooltip says why. The two variants carry different keys
+        // so the reconciler replaces one with the other: patched in place, the disabled
+        // button would inherit the live one's click handler and still open VS Code.
+        var external = diff is { IsBinary: true }
+            ? Ui.DisabledIconButton(Icons.FileCode,
+                "Binary file — there are no two texts for VS Code to compare")
+            : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)");
+        external.Key = diff is { IsBinary: true } ? "diff-external#off" : "diff-external";
+        header.AddChild(external.FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
         col.AddChild(header);
         if (_diffFind.Open)
@@ -64,14 +73,15 @@ public partial class JunctionApp
 
         // Interactive staging: an action bar appears while lines are selected, plus
         // a one-line hint when nothing is selected yet (so the affordance is discoverable).
-        if (interact != null && diff != null)
+        // A binary file has no lines to click, so it gets neither.
+        if (interact != null && diff is { IsBinary: false })
         {
             if (_stageSel.Count > 0)
                 col.AddChild(BuildStageActionBar(diff, interact));
             else
                 col.AddChild(BuildStageHint(interact));
         }
-        else if (diff != null && View == JunctionView.Changes && !_changeSelConflicted
+        else if (diff is { IsBinary: false } && View == JunctionView.Changes && !_changeSelConflicted
                  && _settings.Git.IgnoreWhitespace)
         {
             // Explain the missing affordance rather than just dropping it.
@@ -84,16 +94,29 @@ public partial class JunctionApp
                         .FontSize(10.5f).TextColor(Nocturne.On(0.45))));
         }
 
+        col.AddChild(BuildDiffBody(path, diff, interact));
+        return col;
+    }
+
+    /// <summary>
+    /// What goes under the diff header. Three bodies share the slot, and which one applies
+    /// is decided in one place so the pane, the fullscreen overlay, split and unified all
+    /// agree: an image comparison, a binary summary, or the scrolling text diff.
+    ///
+    /// <para>Only the last of the three reaches <see cref="HighlightForCurrent"/>, so a
+    /// binary blob is never handed to the tokenizer.</para>
+    /// </summary>
+    private Element BuildDiffBody(string path, GitFileDiff? diff, DiffInteract? interact = null)
+    {
         // Images have no textual diff (git reports "Binary files … differ"), so they
         // get a before/after view instead of the empty "No textual changes" pane.
         if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
-        {
-            col.AddChild(imagePane);
-            return col;
-        }
-
-        col.AddChild(BuildDiffScroll(diff, interact));
-        return col;
+            return imagePane;
+        // Every other binary — archive, font, PDF, compiled output — says it differs and
+        // by how much, and stops there.
+        if (diff?.Binary is { } binary)
+            return BuildBinaryDiffBody(path, binary);
+        return BuildDiffScroll(diff, interact);
     }
 
     private Element BuildStageHint(DiffInteract it) =>
@@ -817,7 +840,9 @@ public partial class JunctionApp
             () => { _diffFull = false; MarkDirty(); }, 12f));
         col.AddChild(bar);
 
-        col.AddChild(BuildDiffScroll(diff));
+        // Same three-way choice as the docked pane, so fullscreen is not the one place a
+        // binary file (or an image) still shows an empty text diff.
+        col.AddChild(BuildDiffBody(path, diff));
         overlay.AddChild(col);
         return overlay;
     }
@@ -848,6 +873,15 @@ public partial class JunctionApp
     private async void OpenSelectedDiffExternally()
     {
         if (ActiveRepo is not { } repo) return;
+
+        // Both sides would be fetched as text, so a binary file reaches VS Code as two
+        // temp files of mojibake. The header button is disabled for these; this is the
+        // same refusal for the keyboard, which does not go through the button.
+        if (CurrentDiffTarget().Diff is { IsBinary: true })
+        {
+            Flash("Binary file — there are no two texts for VS Code to compare");
+            return;
+        }
 
         string path;
         ExternalDiffMode mode;

@@ -76,6 +76,16 @@ internal sealed class TempRepo : IDisposable
         File.WriteAllText(full, content);
     }
 
+    /// <summary>Writes a file byte-for-byte. Binary fixtures have to go in this way: the
+    /// text helper would put the platform's encoding between the bytes and the repository,
+    /// and the NUL bytes are the whole point of the fixture.</summary>
+    public void WriteBytes(string relativePath, byte[] content)
+    {
+        var full = System.IO.Path.Combine(Path, relativePath);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
+        File.WriteAllBytes(full, content);
+    }
+
     public string Read(string relativePath) =>
         File.ReadAllText(System.IO.Path.Combine(Path, relativePath));
 

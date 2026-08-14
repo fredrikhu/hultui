@@ -69,6 +69,8 @@ public static class Icons
     public const string Columns = "columns";
     public const string FileCode = "file-code";
     public const string FileImage = "file-image";
+    // Phosphor has no binary-file glyph; the crossed file is its "nothing to show here" mark.
+    public const string FileBinary = "file-x";
     public const string CheckSquare = "check-square";
     public const string Square = "square";
 
