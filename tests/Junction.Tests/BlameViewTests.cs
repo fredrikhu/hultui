@@ -89,13 +89,11 @@ public class BlameViewTests
             Toggle(app);
             Assert.True(BlameOn(app));
 
-            session.PumpUntil(() => BlameLines(app, repo).Count > 0, TimeSpan.FromSeconds(30));
-            session.PumpFrames(2);
-
             // Not "a frame happened": the rows themselves have to have reached the tree, and
             // a blame row's accessible name is the only form off-screen rows ever take.
-            Assert.Contains("third line", Dump(session), StringComparison.Ordinal);
-            Assert.Contains("line 3, ", Dump(session), StringComparison.Ordinal);
+            var tree = TreeOnce(session, has: "third line");
+            Assert.Contains("third line", tree, StringComparison.Ordinal);
+            Assert.Contains("line 3, ", tree, StringComparison.Ordinal);
         });
     }
 
@@ -136,13 +134,10 @@ public class BlameViewTests
             Assert.DoesNotContain("line 1, ", Dump(session), StringComparison.Ordinal);
 
             Toggle(app);
-            session.PumpUntil(() => BlameLines(app, repo).Count > 0, TimeSpan.FromSeconds(30));
-            session.PumpFrames(2);
-            Assert.Contains("line 1, ", Dump(session), StringComparison.Ordinal);
+            Assert.Contains("line 1, ", TreeOnce(session, has: "line 1, "), StringComparison.Ordinal);
 
             Toggle(app);
-            session.PumpFrames(3);
-            Assert.DoesNotContain("line 1, ", Dump(session), StringComparison.Ordinal);
+            Assert.DoesNotContain("line 1, ", TreeOnce(session, lacks: "line 1, "), StringComparison.Ordinal);
         });
     }
 
@@ -195,6 +190,30 @@ public class BlameViewTests
 
             Assert.False(BlameOn(app));
         });
+    }
+
+    /// <summary>
+    /// Dumps the accessibility tree once <paramref name="has"/> has appeared in it (or
+    /// <paramref name="lacks"/> has left it), and returns that dump for the caller to
+    /// assert on.
+    ///
+    /// <para>Blame lands off the UI thread, so "the loader holds lines" is a step short of
+    /// "the rows are in the tree" — the gap is a repaint the test does not control. These
+    /// waits used to be a fixed <c>PumpFrames(2)</c>, which was a coin flip on a loaded
+    /// machine and failed roughly one run in three. Waiting on the asserted condition
+    /// itself removes the guess; a timeout falls through deliberately so the assertion,
+    /// not the pump, reports what the tree actually held.</para>
+    /// </summary>
+    private static string TreeOnce(HeadlessSession session, string? has = null, string? lacks = null)
+    {
+        bool Settled() =>
+            (has is null || Dump(session).Contains(has, StringComparison.Ordinal)) &&
+            (lacks is null || !Dump(session).Contains(lacks, StringComparison.Ordinal));
+
+        try { session.PumpUntil(Settled, TimeSpan.FromSeconds(30)); }
+        catch (TimeoutException) { /* let the caller's assertion say what was missing */ }
+
+        return Dump(session);
     }
 
     // ── Reaching the app's state ─────────────────────────────────────────
