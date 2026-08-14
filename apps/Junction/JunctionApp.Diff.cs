@@ -307,6 +307,13 @@ public partial class JunctionApp
         // moves the rows have to be measured again and rebuilt, because a realized row is
         // otherwise reused exactly as it was.
         float codeWidth = _diffCodeWidth;
+        // Switching mode or file re-arms the width settle: the first build of a shape is the
+        // one that has to guess, so each shape is allowed its one corrective rebuild. A width
+        // that merely moves — a resize — needs no settle, because it is measured from a body
+        // that has already been laid out.
+        var settleKey = (_diffWrap, _diffSplit, rows.Count);
+        if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffWidthSettled = false; }
+
         var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count);
         if (_diffHeightShape != shape)
         {
@@ -355,14 +362,37 @@ public partial class JunctionApp
     // Whether the last build included the scrollbar.
     private bool _diffBarBuilt;
 
+    // What the number / sign / staging-mark columns took in the last build. Kept so the
+    // post-frame check can redo the same arithmetic against the width the body ended up
+    // with, rather than reconstructing the column model a second time and drifting from it.
+    private float _diffFixedCols;
+
+    /// <summary>One code column's width inside a body of <paramref name="body"/> pixels —
+    /// what the fixed columns leave over, halved in split mode.</summary>
+    private float CodeWidthFor(float body) =>
+        Math.Max(0, _diffSplit ? (body - _diffFixedCols) / 2 : body - _diffFixedCols);
+
+    // The wrap/split/row-count the width settle has already fired for. The corrective
+    // rebuild happens at most once per shape, so a width that flip-flops — a vertical
+    // scrollbar appearing as rows grow, then leaving as they shrink — cannot loop.
+    private (bool Wrap, bool Split, int Rows) _diffWidthSettleKey = (false, false, -1);
+    private bool _diffWidthSettled;
+
     /// <summary>
-    /// Ask for one more build when the scrollbar's presence was decided on a guess.
+    /// Ask for one more build when the scrollbar's presence, or the width the wrapped rows
+    /// were measured at, was decided on a guess.
     ///
     /// <para>Whether there is anything to scroll to depends on how wide the diff pane is,
     /// and the first build after opening a file runs before any layout — so
     /// <see cref="DiffCodeWidth"/> falls back to the window, which here is several times
     /// the pane. Once the body has a real width the answer can flip, and nothing else would
     /// mark the tree dirty to act on it. Rebuilds at most once: after it, the two agree.</para>
+    ///
+    /// <para>The same guess sizes the wrapped rows, and there it is not cosmetic: heights
+    /// come from measuring each line at the code width, so a width guessed too wide measures
+    /// fewer lines than the row goes on to draw, and the overflow lands on top of the next
+    /// row. That state sticks — the scrollbar half of this check has already agreed by then,
+    /// so without the width half nothing asks for the build that would correct it.</para>
     /// </summary>
     private void SettleDiffScrollbar()
     {
@@ -373,9 +403,15 @@ public partial class JunctionApp
         // here. Same reason ScrollRowIntoView defers.
         _window.RequestPostFrameCallback(() =>
         {
-            if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 }) return;
-            if (_diffBarBuilt == _diffPan.CanPan) return;
-            MarkDirty();   // settles: after the rebuild the two agree
+            if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
+            if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return; }
+            if (!_diffWrap || _diffWidthSettled) return;
+
+            // _diffHeightShape.Width is the width the heights on screen were measured at.
+            if (Math.Abs(CodeWidthFor(body.Layout.AbsoluteContentBox.Width) - _diffHeightShape.Width) <= 0.5f)
+                return;
+            _diffWidthSettled = true;
+            MarkDirty();
         });
     }
 
@@ -392,9 +428,8 @@ public partial class JunctionApp
             : _window.LayoutWidth;
         // Split: two 44px number columns. Unified: two 46px number columns, a 16px sign,
         // and — while staging — a 20px checkbox.
-        float fixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f);
-        float code = body - fixedCols;
-        _diffCodeWidth = Math.Max(0, _diffSplit ? code / 2 : code);
+        _diffFixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f);
+        _diffCodeWidth = CodeWidthFor(body);
         // Wrapped, every line is visible in full, so there is nothing left to scroll to. An
         // unbounded viewport is what says so: it leaves no offset to pan by, so CanPan goes
         // false and the scrollbar disappears with it. The real column width is kept
