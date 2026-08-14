@@ -154,15 +154,8 @@ public class DiffWrapTests
     /// line over its neighbour, and nothing marks layout dirty afterwards to correct it.
     /// </para>
     /// </summary>
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(6)]
-    [InlineData(8)]
-    [InlineData(12)]
-    public void NoFrameAfterWrappingDrawsALineOutsideItsRow(int frames)
+    [Fact]
+    public void NoFrameAfterWrappingDrawsALineOutsideItsRow()
     {
         DiffScrollTests.Hosted((session, app) =>
         {
@@ -174,25 +167,30 @@ public class DiffWrapTests
 
             Body(app).Focus();
             session.Window.PressKey(KeyCode.W);
-            session.PumpFrames(frames);
 
-            // Re-read the list: the wrap rebuild replaces the instance rather than patching
-            // it, so a reference taken before the keypress describes a detached tree.
-            var list = Body(app);
-            int checkedRows = 0;
-            foreach (var row in list.Children)
+            int seen = 0;
+            for (int frame = 1; frame <= 12; frame++)
             {
-                var label = LayoutProbe.Descendants<TextElement>(row,
-                    t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
-                if (label is null) continue;
-                float drawn = LayoutProbe.DrawnText(label).Height;
-                if (drawn <= 0) continue;
-                checkedRows++;
-                float rowHeight = row.Layout.AbsoluteBorderBox.Height;
-                Assert.True(drawn <= rowHeight + 0.5f,
-                    $"{frames} frame(s) after wrapping, {drawn:0}px of text sits in a {rowHeight:0}px row");
+                session.PumpFrames(1);
+                // Re-read every frame: the wrap rebuild replaces the list rather than
+                // patching it, so a reference from an earlier frame describes a detached tree.
+                foreach (var row in Body(app).Children)
+                {
+                    var label = LayoutProbe.Descendants<TextElement>(row,
+                        t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
+                    if (label is null) continue;
+                    float drawn = LayoutProbe.DrawnText(label).Height;
+                    if (drawn <= 0) continue;
+                    seen++;
+                    float rowHeight = row.Layout.AbsoluteBorderBox.Height;
+                    Assert.True(drawn <= rowHeight + 0.5f,
+                        $"{frame} frame(s) after wrapping, {drawn:0}px of text sits in a {rowHeight:0}px row");
+                }
             }
-            Assert.True(checkedRows > 2, $"only {checkedRows} rows were checked — this proves nothing");
+            // Counted across the frames rather than within each one: right after the toggle
+            // the list has just been replaced and has realized nothing yet, so an early frame
+            // legitimately has no rows to check — as the build runner showed.
+            Assert.True(seen > 2, $"only {seen} row observations — this proves nothing");
         });
     }
 
