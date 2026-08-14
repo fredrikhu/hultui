@@ -28,11 +28,11 @@ public readonly record struct BranchName(
     /// <summary>
     /// Checks a name against the rules <c>git check-ref-format --branch</c> enforces,
     /// returning a sentence explaining the first problem, or null when the name is
-    /// usable. Used where a branch name is *derived* rather than typed — the new-worktree
-    /// prompt names the branch after the folder — so a folder like <c>my work</c> or
-    /// <c>.tmp</c> is refused up front instead of reaching git and coming back as
-    /// "fatal: '.tmp' is not a valid branch name", which says nothing about which
-    /// character was the problem.
+    /// usable. Used wherever a branch name is chosen — typed into the new-branch,
+    /// create-from and rename prompts, or *derived*, as the new-worktree prompt names the
+    /// branch after the folder — so <c>my work</c> or <c>.tmp</c> is refused up front
+    /// instead of reaching git and coming back as "fatal: '.tmp' is not a valid branch
+    /// name", which says nothing about which character was the problem.
     /// </summary>
     public static string? Validate(string? name)
     {

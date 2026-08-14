@@ -157,11 +157,8 @@ public partial class JunctionApp
         "feature/my-branch",
         "Create",
         (name, checkout) => DoCreateBranch(name, startPoint: null, checkout: checkout),
-        Validate: NonEmptyBranch,
+        Validate: BranchName.Validate,
         CheckboxLabel: "Check out after creating"));
-
-    private static string? NonEmptyBranch(string name) =>
-        string.IsNullOrWhiteSpace(name) ? "Enter a branch name" : null;
 
     private void DoCreateBranch(string name, string? startPoint, bool checkout)
     {
@@ -183,7 +180,7 @@ public partial class JunctionApp
         "feature/my-branch",
         "Create",
         (name, checkout) => DoCreateBranch(name, startPoint, checkout: checkout),
-        Validate: NonEmptyBranch,
+        Validate: BranchName.Validate,
         CheckboxLabel: "Check out after creating"));
 
     private void PromptCreateTagAt(string commit, string commitLabel) => OpenDialog(new DialogSpec(
@@ -212,7 +209,7 @@ public partial class JunctionApp
             Flash(res.Success ? $"Renamed to {newName}" : FirstLine(res.Stderr, "Rename failed"));
             RefreshAll();
         },
-        Validate: NonEmptyBranch), initial: oldName);
+        Validate: BranchName.Validate), initial: oldName);
 
     private void PromptSetUpstream(string branch) => OpenDialog(new DialogSpec(
         "Set upstream",
