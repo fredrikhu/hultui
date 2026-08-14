@@ -185,6 +185,10 @@ public partial class CommanderApp
             // Ctrl+R flips the scope segment (This folder ↔ Recursive) without leaving the field.
             case KeyCode.R when e.Modifiers.HasFlag(KeyModifiers.Ctrl):
                 _findRecursive = !_findRecursive; RunFind(); e.StopPropagation = true; break;
+            // Ctrl+L hands the whole result set to the pane the search ran from, so the normal
+            // pane machinery can operate on it (Total Commander's "feed to listbox").
+            case KeyCode.L when e.Modifiers.HasFlag(KeyModifiers.Ctrl):
+                FeedResultsToPane(_findSide); e.StopPropagation = true; break;
             case KeyCode.Enter:
                 if (_findResults.Count > 0)
                 {
@@ -502,7 +506,7 @@ public partial class CommanderApp
             footer.AddChild(Box.New().FlexGrow(1));
             footer.AddChild(Ui.Kbd("↵")); footer.AddChild(Ui.Mono("jump", 10.5f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("Ctrl+R")); footer.AddChild(Ui.Mono("scope", 10.5f, Nocturne.On(0.45)));
-            footer.AddChild(Ui.Kbd("Esc"));
+            footer.AddChild(FeedToPaneButton());
         }
         else
         {
@@ -520,6 +524,26 @@ public partial class CommanderApp
             footer.AddChild(banner);
         }
         return footer;
+    }
+
+    /// <summary>"Feed to pane" — hand the hits to the pane the search ran from, where they
+    /// become a browsable listing that takes the ordinary file operations. Total Commander
+    /// calls this "feed to listbox"; it's the difference between finding a hundred files and
+    /// being able to do something with them.</summary>
+    private Element FeedToPaneButton()
+    {
+        var btn = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(4, 10, 4, 10)).CornerRadius(Nocturne.RadiusSm)
+            .BorderColor(Nocturne.Accent700).BorderWidth(1f)
+            .Cursor(CursorType.Pointer)
+            .Tooltip("Browse the results in the pane — mark, copy, move, delete, rename them there");
+        btn.AutomationId = "find-feed-to-pane";
+        btn.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        btn.AccessibleName = "Feed results to pane";
+        btn.AddChild(Text.New("Feed to pane").FontSize(11.5f).TextColor(Nocturne.Accent200));
+        btn.AddChild(Ui.Kbd("Ctrl+L"));
+        btn.OnClick(_ => FeedResultsToPane(_findSide));
+        return btn.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.12), Color.Transparent);
     }
 
     /// <summary>The corner resize grip. Absolutely positioned in the card's bottom-right so it

@@ -33,6 +33,10 @@ public partial class CommanderApp
     private void OpenSync()
     {
         if (AnyOverlayOpen) return;
+        // Sync compares and then writes into two folders. A pane showing a fed-in result set
+        // has a folder behind it, but that is the folder its search ran under — not what is
+        // on screen — so syncing it would act on something the user isn't looking at.
+        if (ResultsBlock('L') || ResultsBlock('R')) return;
         _syncLeft = Dir('L');
         _syncRight = Dir('R');
         if (PathEquals(_syncLeft, _syncRight)) return;   // nothing to sync against itself

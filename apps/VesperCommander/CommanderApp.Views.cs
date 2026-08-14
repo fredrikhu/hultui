@@ -75,7 +75,7 @@ public partial class CommanderApp
         var m = ThumbMetrics();
         int n = list.Count;
         int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, n - 1));
-        string? cursorName = active && n > 0 ? list[cur].Name : null;
+        string? cursorPath = active && n > 0 ? list[cur].FullPath : null;
         var marks = Marks(side);
 
         var tv = ThumbVList(side).Current;
@@ -100,14 +100,14 @@ public partial class CommanderApp
         return VirtualListElement<int>.New()
             .ItemHeight((int)stride)
             .Items(rows)   // fresh list reference each build → re-realizes visible rows
-            .RenderWith(r => ThumbRow(side, list, r * perRow, perRow, m, cursorName, marks))
+            .RenderWith(r => ThumbRow(side, list, r * perRow, perRow, m, cursorPath, marks))
             .WithRef(ThumbVList(side))
             .FlexGrow(1)
             .Width(Dimension.Px(paneW));
     }
 
     private Element ThumbRow(char side, IReadOnlyList<FileEntry> list, int start, int perRow, ThumbM m,
-        string? cursorName, HashSet<string> marks)
+        string? cursorPath, HashSet<string> marks)
     {
         var row = Flex.Row(gap: m.Gap).Height(m.TileH).AlignItems(AlignItems.FlexStart)
             .Padding(new Thickness(0, 10, 0, 10));
@@ -116,14 +116,14 @@ public partial class CommanderApp
             int i = start + k;
             if (i >= list.Count) break;
             var e = list[i];
-            row.AddChild(Tile(side, e, m, cursorName, marks.Contains(e.Name)));
+            row.AddChild(Tile(side, e, m, cursorPath, marks.Contains(MarkKey(e))));
         }
         return row;
     }
 
-    private Element Tile(char side, FileEntry e, ThumbM m, string? cursorName, bool marked)
+    private Element Tile(char side, FileEntry e, ThumbM m, string? cursorPath, bool marked)
     {
-        bool cursor = e.Name == cursorName;
+        bool cursor = cursorPath != null && PathEquals(e.FullPath, cursorPath);
         bool cut = !marked && _cutPending.Contains(e.FullPath);
         Color nameFg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
         if (cut) nameFg = Nocturne.Alpha(nameFg, 0.45);
@@ -133,7 +133,7 @@ public partial class CommanderApp
         var tile = Flex.Column(gap: 4).Width(m.TileW).Height(m.TileH).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4)).CornerRadius(Nocturne.RadiusRow)
             .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
-            .Cursor(CursorType.Default).Tooltip(e.Name);
+            .Cursor(CursorType.Default).Tooltip(EntryTooltip(side, e));
         if (cursor) tile.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
 
         // Image area on a Neutral900 backing. P2 shows the kind icon (images use a dimmed
@@ -264,7 +264,7 @@ public partial class CommanderApp
     {
         int n = list.Count;
         int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, n - 1));
-        string? cursorName = active && n > 0 ? list[cur].Name : null;
+        string? cursorPath = active && n > 0 ? list[cur].FullPath : null;
         var marks = Marks(side);
         float rowH = RowHeight;
 
@@ -304,7 +304,7 @@ public partial class CommanderApp
                 int i = c * rows + r;
                 if (i >= n) break;
                 var e = list[i];
-                column.AddChild(BriefCell(side, e, cursorName, marks.Contains(e.Name)));
+                column.AddChild(BriefCell(side, e, cursorPath, marks.Contains(MarkKey(e))));
             }
             content.AddChild(column);
         }
@@ -323,9 +323,9 @@ public partial class CommanderApp
     // wrap point by one cell; kept a touch generous so the list never overflows the footer.
     private const float BriefChromeHeight = 142f;
 
-    private Element BriefCell(char side, FileEntry e, string? cursorName, bool marked)
+    private Element BriefCell(char side, FileEntry e, string? cursorPath, bool marked)
     {
-        bool cursor = e.Name == cursorName;
+        bool cursor = cursorPath != null && PathEquals(e.FullPath, cursorPath);
         Color fg = marked ? Nocturne.MarkRed : e.IsDir ? Nocturne.DirText : Nocturne.Text;
         bool cut = !marked && _cutPending.Contains(e.FullPath);
         if (cut) fg = Nocturne.Alpha(fg, 0.45);
@@ -333,7 +333,7 @@ public partial class CommanderApp
         var cell = Flex.Row(gap: 7).Height(RowHeight).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, 9, 0, 9))
             .BorderWidth(1f).BorderColor(cursor ? Nocturne.Accent600 : Color.Transparent)
-            .Cursor(CursorType.Default).Tooltip(e.Name);
+            .Cursor(CursorType.Default).Tooltip(EntryTooltip(side, e));
         if (cursor) cell.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
 
         var icon = Icons.Draw(Icons.KindFor(e), marked ? Nocturne.MarkRed : (Color?)null);
@@ -394,6 +394,12 @@ public partial class CommanderApp
         }
     }
 
+    /// <summary>The hover text for a Brief cell / thumbnail tile. Normally the name (these
+    /// two views truncate hard); in a fed-in result set the full path, since neither view has
+    /// room for the source folder the Detail rows show.</summary>
+    private string EntryTooltip(char side, FileEntry e) =>
+        InResults(side) && !e.IsParent ? e.FullPath : e.Name;
+
     // ── Shared entry pointer interaction (rows, brief cells, tiles) ───────
     private void AttachEntryPointer(BoxElement el, char side, FileEntry e, bool cursor)
     {
@@ -414,9 +420,9 @@ public partial class CommanderApp
             }
             if (ev.Button != 0) return;
             _active = side;
-            int idx = IndexOfName(Rows(side), e.Name);
+            int idx = IndexOfPath(Rows(side), e.FullPath);
             if (idx >= 0) SetCursor(side, idx);
-            if (IsDoublePress(side, e.Name)) ActivateCursor(side);
+            if (IsDoublePress(side, e.FullPath)) ActivateCursor(side);
             MarkDirty();
         });
         el.On<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); });

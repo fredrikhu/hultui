@@ -191,7 +191,15 @@ public partial class CommanderApp
         // Tab strip on top, then breadcrumb + column header as one block on the
         // pane ground; the header's bottom border is the only divider to the list.
         pane.AddChild(BuildTabStrip(side));
-        pane.AddChild(BuildBreadcrumb(side, active));
+        // A fed-in result set replaces the path trail outright — it is not a place, so a
+        // trail of folders would be a lie about where the pane is.
+        var crumb = ResultsOf(side) is { } results
+            ? BuildResultsBreadcrumb(side, active, results)
+            : BuildBreadcrumb(side, active);
+        // Keyed: the two are different elements at one position, and the reconciler does not
+        // copy handlers across a keyless swap.
+        crumb.Key = ResultsOf(side) != null ? "crumb-results" : "crumb-path";
+        pane.AddChild(crumb);
         // The column header belongs to Detail only — Brief and Thumbnails have no columns.
         if (ViewOf(side) == ViewMode.Detail)
             pane.AddChild(BuildListHeader(side, InArchive(side)));
@@ -402,7 +410,10 @@ public partial class CommanderApp
 
         if (tab.Locked)
             chip.AddChild(Ui.Icon(Glyphs.Lock, 10f, on ? Nocturne.Accent300 : Nocturne.On(0.40)));
-        chip.AddChild(Text.New(TabLabel(tab.Dir)).FontSize(11.5f)
+        // A tab holding a fed-in result set says so: its folder is only where the search ran.
+        if (tab.Results != null)
+            chip.AddChild(Ui.Icon(Glyphs.Search, 10f, ResultsTeal));
+        chip.AddChild(Text.New(tab.Results != null ? "Results" : TabLabel(tab.Dir)).FontSize(11.5f)
             .FontWeight(on ? FontWeight.Medium : FontWeight.Regular)
             .TextColor(on ? Nocturne.Text : Nocturne.Neutral500));
 
@@ -639,10 +650,11 @@ public partial class CommanderApp
 
     private Element BuildList(char side, IReadOnlyList<FileEntry> list, bool active)
     {
-        // Cursor is tracked by index; compare by name so it survives row recycling.
+        // Cursor is tracked by index; compare by full path so it survives row recycling and
+        // still names one row in a fed-in result set (where names repeat across folders).
         // Only the active pane renders a cursor (design: the caret follows focus).
         int cur = Math.Clamp(Cursor(side), 0, Math.Max(0, list.Count - 1));
-        string? cursorName = active && list.Count > 0 && cur < list.Count ? list[cur].Name : null;
+        string? cursorPath = active && list.Count > 0 && cur < list.Count ? list[cur].FullPath : null;
         var marks = Marks(side);
 
         // The row F3 would compare the active pane's cursor against. Only in the inactive
@@ -656,15 +668,15 @@ public partial class CommanderApp
         return VirtualListElement<FileEntry>.New()
             .ItemHeight((int)RowHeight)
             .Items(list)
-            .RenderWith(e => FileRow(side, e, cursorName, marks.Contains(e.Name), partnerPath))
+            .RenderWith(e => FileRow(side, e, cursorPath, marks.Contains(MarkKey(e)), partnerPath))
             .WithRef(VList(side))
             .FlexGrow(1);
     }
 
-    private Element FileRow(char side, FileEntry e, string? cursorName, bool marked,
+    private Element FileRow(char side, FileEntry e, string? cursorPath, bool marked,
         string? partnerPath = null)
     {
-        bool cursor = e.Name == cursorName;
+        bool cursor = cursorPath != null && PathEquals(e.FullPath, cursorPath);
         // The other pane's F3 operand. Matched on the full path rather than the name, because
         // this one comes from DiffPartner as a path and a name could collide with a row in a
         // folder the answer isn't about.
@@ -696,7 +708,7 @@ public partial class CommanderApp
         if (cursor)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
         else if (_settings.Zebra && !marked && !e.IsParent
-                 && IndexOfName(Rows(side), e.Name) % 2 == 1)
+                 && IndexOfPath(Rows(side), e.FullPath) % 2 == 1)
             row.Background(Nocturne.Alpha(Nocturne.Text, 0.03));   // alternating tint
 
         // Type icon rasterized from the design's SVG glyphs; marked rows tint red, a
@@ -705,8 +717,7 @@ public partial class CommanderApp
         var iconEl = Icons.Draw(kind, marked ? Nocturne.MarkRed : (Color?)null);
         if (cut) iconEl.Opacity = 0.45f;
         row.AddChild(iconEl.GridColumn(0));
-        row.AddChild(Ui.Mono(e.Name, 12f, fg).TextAlign(TextAlign.Left)
-            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).GridColumn(1));
+        row.AddChild(NameCell(side, e, fg, metaFg).GridColumn(1));
         if (sizeCol >= 0)
         {
             // A Space-measured folder shows its byte total in place of "<DIR>"; while the
@@ -732,6 +743,26 @@ public partial class CommanderApp
         // so the framework's down==up click synthesis never fires for a recycled row.)
         AttachEntryPointer(row, side, e, cursor);
         return row;
+    }
+
+    /// <summary>The name column of a Detail row. In a folder that is just the name; in a
+    /// fed-in result set it is the name followed by a dimmed source folder, because the rows
+    /// come from many folders and the name alone doesn't say which file this is.</summary>
+    private Element NameCell(char side, FileEntry e, Color fg, Color metaFg)
+    {
+        var name = Ui.Mono(e.Name, 12f, fg).TextAlign(TextAlign.Left)
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis);
+        if (ResultsOf(side) is not { } v || e.IsParent) return name;
+
+        string source = ResultSource(v, e);
+        if (source.Length == 0) return name;
+        // Both parts are one line and both ellipsize: wrapping is decided at measure time,
+        // where FlexShrink alone can't stop it, so each needs MaxLines(1) too.
+        var cell = Flex.Row(gap: 6).AlignItems(AlignItems.Center).Overflow(Overflow.Hidden);
+        cell.AddChild(name.FlexShrink(1));
+        cell.AddChild(Ui.Mono("· " + source, 10.5f, metaFg)
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexShrink(1));
+        return cell;
     }
 
     private Element BuildFooter(char side, IReadOnlyList<FileEntry> list)
@@ -788,10 +819,21 @@ public partial class CommanderApp
         var label = $"{files} files, {dirs} dirs, {sizeLabel}" + (tail.Length > 0 ? $" · {tail}" : "");
         footer.AddChild(Ui.Mono(label, 10.5f, decoding > 0 ? Nocturne.Accent300 : Nocturne.On(0.50)));
 
+        // Same rule for a fed-in result set that dropped its archive members: the pane says
+        // what it is not showing rather than quietly showing fewer hits than the search found.
+        if (ResultsOf(side) is { SkippedInArchive: > 0 } res)
+        {
+            footer.AddChild(Ui.Mono("·", 10.5f, Nocturne.On(0.30)));
+            footer.AddChild(Icons.Draw(IconKind.Archive, ArchiveAmber));
+            footer.AddChild(Ui.Mono(
+                $"{res.SkippedInArchive} inside archives left out", 10.5f, ArchiveAmber)
+                .Tooltip("Archive members can't take move, delete or rename — search again and use F5 to extract"));
+        }
+
         // An archive whose members point outside itself is listed short. Say so — a listing
         // that quietly omits files is worse than one that explains why, and the omission is
         // itself worth knowing about.
-        int hidden = Loader(side).Value.Unsafe;
+        int hidden = InResults(side) ? 0 : Loader(side).Value.Unsafe;
         if (hidden > 0)
         {
             footer.AddChild(Ui.Mono("·", 10.5f, Nocturne.On(0.30)));
