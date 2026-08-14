@@ -49,15 +49,25 @@ public class ViewModesTests
     public void ThumbnailCache_MissIsPendingThenClassifies()
     {
         using var mre = new System.Threading.ManualResetEventSlim();
-        using var cache = new ThumbnailCache(mre.Set);
+        int decodes = 0;
+        using var cache = new ThumbnailCache(() =>
+        {
+            System.Threading.Interlocked.Increment(ref decodes);
+            mre.Set();
+        });
 
         // A non-existent file: first Get enqueues a decode and reports Pending.
         var (img, status) = cache.Get(@"C:\does\not\exist.png", size: 123, mtime: default, targetPx: 128);
         Assert.Null(img);
         Assert.Equal(ThumbnailCache.Status.Pending, status);
-        Assert.Equal(1, cache.PendingCount);
 
+        // That a decode was enqueued is counted, not sampled. PendingCount is in-flight work,
+        // and a file that does not exist fails as fast as the decode can be dequeued — so
+        // reading 1 there is a race the test thread only usually wins. It lost on the build
+        // runner (expected 1, actual 0) and turned main red on an unrelated commit.
         Assert.True(mre.Wait(System.TimeSpan.FromSeconds(5)), "decode did not complete");
+        Assert.Equal(1, System.Threading.Volatile.Read(ref decodes));
+        // Deterministic in the other direction: the count is dropped before the callback runs.
         Assert.Equal(0, cache.PendingCount);
 
         // Now cached as Failed (undecodable), and repeat Gets don't re-enqueue.
@@ -65,6 +75,7 @@ public class ViewModesTests
         Assert.Null(img2);
         Assert.Equal(ThumbnailCache.Status.Failed, status2);
         Assert.Equal(0, cache.PendingCount);
+        Assert.Equal(1, System.Threading.Volatile.Read(ref decodes));   // the hit decoded nothing
     }
 
     [Fact]
