@@ -74,4 +74,66 @@ public class BranchNameTests
         Assert.Equal("", b.Title);
         Assert.Equal("", b.Short);
     }
+
+    // ── Validation ───────────────────────────────────────────────────────
+    // The new-worktree prompt names the branch after the folder, so these names are
+    // *derived* rather than typed and reach git without anyone reading them first.
+
+    [Theory]
+    [InlineData("main")]
+    [InlineData("feature/24.1/payments/PC-1043-refund-flow")]
+    [InlineData("release-24.1")]
+    [InlineData("fix.a.thing")]
+    [InlineData("junction-revamped-wt")]   // what SuggestWorktreePath proposes
+    public void ValidateAcceptsNamesGitAccepts(string name)
+    {
+        Assert.Null(BranchName.Validate(name));
+    }
+
+    [Theory]
+    [InlineData("", "Enter")]
+    [InlineData("my work", "spaces")]
+    [InlineData("wip~1", "'~'")]
+    [InlineData("a^b", "'^'")]
+    [InlineData("a:b", "':'")]
+    [InlineData("a?b", "'?'")]
+    [InlineData("a*b", "'*'")]
+    [InlineData("a[b", "'['")]
+    [InlineData("a\\b", "'\\'")]
+    [InlineData("a..b", "'..'")]
+    [InlineData("HEAD@{0}", "'@{'")]
+    [InlineData("a//b", "empty path component")]
+    [InlineData("@", "reserved")]
+    [InlineData("/leading", "'/'")]
+    [InlineData("trailing/", "'/'")]
+    [InlineData("-dashed", "'-'")]
+    [InlineData("dotted.", "'.'")]
+    [InlineData("thing.lock", "'.lock'")]
+    [InlineData(".hidden", "'.'")]
+    [InlineData("feature/.hidden", "start with '.'")]
+    [InlineData("feature/thing.lock", "'.lock'")]
+    public void ValidateExplainsWhatIsWrongRatherThanJustSayingNo(string name, string expected)
+    {
+        var error = BranchName.Validate(name);
+
+        Assert.NotNull(error);
+        // The point of validating up front is the sentence: git's own answer is
+        // "fatal: '<name>' is not a valid branch name", which names no character.
+        Assert.Contains(expected, error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateRejectsSurroundingWhitespaceBeforeItRejectsTheSpaceItself()
+    {
+        // A folder picked up with a trailing space is the likeliest way this fires, and
+        // "can't start or end with a space" is a more actionable sentence than the
+        // generic no-spaces rule that would otherwise catch it.
+        Assert.Contains("start or end with a space", BranchName.Validate("feature/x ")!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateTreatsANullNameAsEmpty()
+    {
+        Assert.Equal("Enter a branch name", BranchName.Validate(null));
+    }
 }

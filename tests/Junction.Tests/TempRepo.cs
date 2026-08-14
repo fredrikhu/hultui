@@ -133,8 +133,13 @@ internal sealed class TempRepo : IDisposable
     /// <para>So this stays best-effort: a fixture that outlives its run is litter, not a
     /// broken test, and throwing here would fail a passing test because a virus scanner
     /// opened a file. <see cref="SweepStaleFixtures"/> is what stops litter accumulating.</para>
+    ///
+    /// <para>Internal rather than private because a test that pulls a worktree directory out
+    /// from under a *running* app hits the same handle race deliberately — the app watches
+    /// every repository in the workspace — and a bare <c>Directory.Delete</c> there fails
+    /// intermittently for reasons that have nothing to do with what is under test.</para>
     /// </summary>
-    private static bool ForceDelete(string path)
+    internal static bool ForceDelete(string path)
     {
         for (int attempt = 0; ; attempt++)
         {

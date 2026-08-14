@@ -25,6 +25,47 @@ public readonly record struct BranchName(
 {
     public bool HasSub => Sub.Length > 0;
 
+    /// <summary>
+    /// Checks a name against the rules <c>git check-ref-format --branch</c> enforces,
+    /// returning a sentence explaining the first problem, or null when the name is
+    /// usable. Used where a branch name is *derived* rather than typed — the new-worktree
+    /// prompt names the branch after the folder — so a folder like <c>my work</c> or
+    /// <c>.tmp</c> is refused up front instead of reaching git and coming back as
+    /// "fatal: '.tmp' is not a valid branch name", which says nothing about which
+    /// character was the problem.
+    /// </summary>
+    public static string? Validate(string? name)
+    {
+        var n = name ?? "";
+        if (n.Length == 0) return "Enter a branch name";
+        if (n.Trim().Length != n.Length) return "A branch name can't start or end with a space";
+
+        foreach (var c in n)
+        {
+            if (char.IsControl(c) || c == ' ') return "A branch name can't contain spaces or control characters";
+            if (c is '~' or '^' or ':' or '?' or '*' or '[' or '\\')
+                return $"A branch name can't contain '{c}'";
+        }
+
+        if (n.Contains("..")) return "A branch name can't contain '..'";
+        if (n.Contains("@{")) return "A branch name can't contain '@{'";
+        if (n.Contains("//")) return "A branch name can't contain an empty path component";
+        if (n == "@") return "'@' is reserved by git";
+        if (n.StartsWith('/') || n.EndsWith('/')) return "A branch name can't start or end with '/'";
+        if (n.StartsWith('-')) return "A branch name can't start with '-'";
+        if (n.EndsWith('.')) return "A branch name can't end with '.'";
+        if (n.EndsWith(".lock", StringComparison.Ordinal)) return "A branch name can't end with '.lock'";
+
+        // Per-component rules: each slash-separated piece is its own ref path element.
+        foreach (var part in n.Split('/'))
+        {
+            if (part.StartsWith('.')) return "No part of a branch name can start with '.'";
+            if (part.EndsWith(".lock", StringComparison.Ordinal)) return "No part of a branch name can end with '.lock'";
+        }
+
+        return null;
+    }
+
     public static BranchName Parse(string name)
     {
         name ??= "";
