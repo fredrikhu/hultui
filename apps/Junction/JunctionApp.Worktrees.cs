@@ -150,8 +150,13 @@ public partial class JunctionApp
 
         var actions = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center);
         if (!isCurrent)
-            actions.AddChild(Ui.SecondaryButton("Open", Icons.BendDownRight,
-                () => OpenWorktree(wt.Path), 11.5f));
+        {
+            // The row itself opens the worktree too, so without stopping here the button
+            // ran the whole action twice — two Persist calls, two SelectRepo, two toasts.
+            var open = Ui.SecondaryButton("Open", Icons.BendDownRight, () => OpenWorktree(wt.Path), 11.5f);
+            open.OnClick(e => e.StopPropagation = true);
+            actions.AddChild(open);
+        }
         // The main worktree can't be removed (it's the repo itself); the current
         // one git also refuses to remove. Both keep just the Open/badge affordance.
         if (!wt.IsMain && !isCurrent)

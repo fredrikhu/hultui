@@ -93,6 +93,13 @@ public partial class CommanderApp
         _packClash = false;
         if (stem.Length == 0) { _packError = "Enter an archive name"; MarkDirty(); return; }
 
+        // The destination pane must be a folder: PackDestDir would otherwise resolve to the
+        // folder a fed-in result set was searched from, which is not what "this pane" says.
+        if (InResults(_packOther ? (_packSource == 'L' ? 'R' : 'L') : _packSource))
+        {
+            _packError = "That pane is showing search results — pick a folder to pack into";
+            MarkDirty(); return;
+        }
         string destDir = PackDestDir();
         bool needs7z = _packFmt != PackFmt.Zip || _packEncrypt;
         if (needs7z && !_sevenZip)

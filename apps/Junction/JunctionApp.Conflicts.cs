@@ -52,15 +52,23 @@ public partial class JunctionApp
     // A conflict entry in the file list (no checkbox — you resolve via the pane).
     private Element ConflictListRow(GitFileChange f)
     {
-        var selected = _changeSelConflicted && f.Path == _changeSelPath;
+        // Conflicts are the third section of the same file list, so they select like
+        // the other two (and never alongside them — see the one-section rule).
+        var self = new ChangeRef(f.Path, ChangeSection.Conflicted);
+        var selected = _changeSelection.Contains(self);
+        var focused = ChangeFocus() == self;
+        var bg = selected ? Nocturne.Accent900
+            : focused ? Nocturne.Neutral900
+            : Color.Transparent;
         var name = System.IO.Path.GetFileName(f.Path);
         var dir = f.Path.Length > name.Length ? f.Path[..^name.Length] : "";
 
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
-        row.Key = "c:" + f.Path + (selected ? "#s" : "");
-        if (selected) row.Background(Nocturne.Accent900);
+        row.Key = "c:" + f.Path + (selected ? "#s" : "") + (focused ? "#f" : "");
+        if (bg != Color.Transparent) row.Background(bg);
+        if (focused) row.WithRef(_changeFocusRef);
 
         row.AddChild(Box.New().Width(14).FlexShrink(0)
             .Children(Ui.Icon(Icons.Warning, 12f, Nocturne.DangerIcon)));
@@ -75,20 +83,36 @@ public partial class JunctionApp
 
         row.AddChild(Ui.Tag("conflict", Nocturne.Alpha(Nocturne.DangerText, 0.16), Nocturne.DangerText, 9.5f).FlexShrink(0));
 
-        row.OnClick(_ => SelectConflict(f.Path));
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) SelectConflict(f.Path); });
+        row.OnClick(e => OnChangeRowClick(self, e.Modifiers));
+        row.On<PointerDownEvent>(e =>
+        {
+            if (e.Button == 2 && !_changeSelection.Contains(self))
+            {
+                SetChangeSelection(self);
+                Rerender();
+            }
+        });
         row.ContextMenu(() => ConflictFileMenuItems(f));
-        if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        if (!selected) row.HoverBg(Nocturne.Neutral900, bg);
         return row;
     }
 
-    private IReadOnlyList<ContextMenuItem> ConflictFileMenuItems(GitFileChange f) =>
-    [
-        Item(Icons.ArrowFatRight, "Use ours (current)", () => ResolveConflict(f.Path, ours: true)),
-        Item(Icons.Cloud, "Use theirs (incoming)", () => ResolveConflict(f.Path, ours: false)),
-        ContextMenuItem.Separator(),
-        Item(Icons.FileCode, "Open in VS Code", () => OpenConflictInVsCode(f.Path)),
-    ];
+    private IReadOnlyList<ContextMenuItem> ConflictFileMenuItems(GitFileChange f)
+    {
+        // Whole-file resolution generalizes to a selection; the hand resolution in the
+        // right pane doesn't, so "Open in VS Code" stays on the clicked file.
+        var sel = ChangeActionPaths(new ChangeRef(f.Path, ChangeSection.Conflicted));
+        var n = sel.Count;
+        return
+        [
+            Item(Icons.ArrowFatRight, n > 1 ? $"Use ours (current) for {n} files" : "Use ours (current)",
+                () => ResolveConflicts(sel, ours: true)),
+            Item(Icons.Cloud, n > 1 ? $"Use theirs (incoming) for {n} files" : "Use theirs (incoming)",
+                () => ResolveConflicts(sel, ours: false)),
+            ContextMenuItem.Separator(),
+            Item(Icons.FileCode, "Open in VS Code", () => OpenConflictInVsCode(f.Path)),
+        ];
+    }
 
     // ── Per-hunk resolution state ────────────────────────────────────────
     //
@@ -516,28 +540,38 @@ public partial class JunctionApp
         _conflictManual.Clear();
         _conflictEditing = null;
         // Keep the file selected as a normal staged change so its merged diff shows.
-        _changeSelConflicted = false;
-        _changeSelStaged = true;
+        RetargetChangeSelection([path], ChangeSection.Staged);
         Flash($"Resolved {System.IO.Path.GetFileName(path)}");
         RefreshAll();
     }
 
     // ── Actions ──────────────────────────────────────────────────────────
 
-    private void ResolveConflict(string path, bool ours)
+    private void ResolveConflict(string path, bool ours) => ResolveConflicts([path], ours);
+
+    /// <summary>Takes one whole side for every given conflicted file. Each file is its
+    /// own checkout, so a failure on one leaves the others resolved — the toast names
+    /// the first error rather than pretending the batch was atomic.</summary>
+    private void ResolveConflicts(IReadOnlyList<string> paths, bool ours)
     {
-        if (ActiveRepo is not { } repo) return;
-        var res = ours ? repo.CheckoutOurs(path) : repo.CheckoutTheirs(path);
-        if (res.Success)
+        if (ActiveRepo is not { } repo || paths.Count == 0) return;
+        string? error = null;
+        var done = 0;
+        foreach (var path in paths)
         {
-            // Resolved files are staged; keep this one selected as a normal change so
-            // its (now-merged) diff shows, and the next conflict is a click away.
-            _changeSelConflicted = false;
-            _changeSelStaged = true;
+            var res = ours ? repo.CheckoutOurs(path) : repo.CheckoutTheirs(path);
+            if (res.Success) done++;
+            else error ??= FirstLine(res.Stderr, "Resolve failed");
         }
-        Flash(res.Success
-            ? $"Used {(ours ? "ours" : "theirs")} for {System.IO.Path.GetFileName(path)}"
-            : FirstLine(res.Stderr, "Resolve failed"));
+        if (done > 0)
+        {
+            // Resolved files are staged; keep them selected as normal changes so the
+            // (now-merged) diff shows, and the next conflict is a click away.
+            RetargetChangeSelection(paths, ChangeSection.Staged);
+        }
+        Flash(error ?? (paths.Count == 1
+            ? $"Used {(ours ? "ours" : "theirs")} for {System.IO.Path.GetFileName(paths[0])}"
+            : $"Used {(ours ? "ours" : "theirs")} for {paths.Count} files"));
         RefreshAll();
     }
 

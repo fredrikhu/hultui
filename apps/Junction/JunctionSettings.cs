@@ -26,6 +26,13 @@ public sealed class JunctionSettingsData
     /// to read a diff, not decisions about a particular one.</summary>
     public bool DiffSplit { get; set; }
 
+    /// <summary>Whether the Branches and Tags tables group refs into a folder tree by their
+    /// <c>/</c> segments rather than listing them flat. Remembered for the same reason the
+    /// diff's reading modes are: it is how someone wants to look at their refs, not a
+    /// decision about one repository. Which folders are open is not stored — that is a
+    /// place in a list, and it is per-repo session state.</summary>
+    public bool RefTreeView { get; set; } = true;
+
     // Junction: per-repo badge swatch id (path → swatch id), driving the repo's
     // initial tile everywhere. Missing entries fall back to a deterministic seed.
     public Dictionary<string, string> RepoBadges { get; set; } = new();
@@ -85,6 +92,9 @@ public sealed class JunctionSettingsData
         Workspaces = Workspaces.Select(w => w.Clone()).ToList(),
         ActiveWorkspaceId = ActiveWorkspaceId,
         ActiveRepoPath = ActiveRepoPath,
+        DiffWrap = DiffWrap,
+        DiffSplit = DiffSplit,
+        RefTreeView = RefTreeView,
         RepoBadges = new(RepoBadges),
         General = General.Clone(),
         Git = Git.Clone(),
@@ -224,41 +234,65 @@ public enum ThemeMode
 
 public static class JunctionSettings
 {
+    /// <summary>
+    /// Reads the stored settings, falling back to the backup written by <see cref="Save"/>
+    /// when the live file cannot be parsed, and to defaults when neither can.
+    /// <para>The fallback matters because losing this file is silent: an unreadable config
+    /// looks exactly like a first run, so the repository list simply comes back empty.</para>
+    /// </summary>
     public static JunctionSettingsData Load()
+    {
+        var path = SettingsPath;
+        return ReadFile(path) ?? ReadFile(path + BackupSuffix) ?? new JunctionSettingsData();
+    }
+
+    private static JunctionSettingsData? ReadFile(string path)
     {
         try
         {
-            var path = SettingsPath;
-            if (!File.Exists(path)) return new JunctionSettingsData();
-
+            if (!File.Exists(path)) return null;
             var settings = JsonSerializer.Deserialize(
-                               File.ReadAllText(path),
-                               JunctionSettingsJsonContext.Default.JunctionSettingsData)
-                           ?? new JunctionSettingsData();
-            settings.Normalize();
+                File.ReadAllText(path),
+                JunctionSettingsJsonContext.Default.JunctionSettingsData);
+            settings?.Normalize();
             return settings;
         }
         catch
         {
-            return new JunctionSettingsData();
+            return null;
         }
     }
 
+    /// <summary>
+    /// Writes the settings, keeping the previous contents as <c>settings.json.bak</c>.
+    /// <para>The new file is built beside the live one and swapped in, so an interrupted
+    /// write cannot leave a half-written <c>settings.json</c> behind — truncating in place
+    /// risks exactly that, and <see cref="Load"/> reads a truncated file as a first run.
+    /// The backup is one step of undo, not a history: the next save overwrites it.</para>
+    /// </summary>
     public static void Save(JunctionSettingsData settings)
     {
+        var path = SettingsPath;
+        var pending = path + ".tmp";
         try
         {
-            var path = SettingsPath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(
+            File.WriteAllText(pending, JsonSerializer.Serialize(
                 settings,
                 JunctionSettingsJsonContext.Default.JunctionSettingsData));
+
+            if (File.Exists(path)) File.Replace(pending, path, path + BackupSuffix, ignoreMetadataErrors: true);
+            else File.Move(pending, path);
         }
         catch
         {
             // Persistence is best-effort; the UI should keep working if config writes fail.
+            // The half-written file is the failure, so it must not be left to be found.
+            try { File.Delete(pending); } catch { /* nothing further to try */ }
         }
     }
+
+    private const string BackupSuffix = ".bak";
 
     private static string SettingsPath => Path.Combine(GetConfigDirectory(), "settings.json");
 

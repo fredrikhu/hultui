@@ -9,8 +9,12 @@ namespace Junction.Tests;
 /// can hand the UI a null list or an active pointer aimed at a repository that is not
 /// in the open workspace.
 ///
-/// <para>Nothing here touches <c>JunctionSettings.Load/Save</c>: those read and write the
-/// real per-user config, and a test that clobbers it would be a bug of its own.</para>
+/// <para><c>Load</c> and <c>Save</c> are covered too, which they could not be while they
+/// read and wrote the developer's real config — a test that clobbered it would have been a
+/// bug of its own, and for a while the hosted app tests were exactly that bug. They are
+/// testable now because <see cref="SettingsIsolation"/> redirects the config directory for
+/// the whole process; each test below still takes its own directory so it can assert on the
+/// files without depending on what another test left behind.</para>
 /// </summary>
 public class SettingsTests
 {
@@ -196,5 +200,148 @@ public class SettingsTests
         Assert.Equal("browsers", ws.Icon);
         Assert.Equal("amber", ws.Color);
         Assert.Equal(new[] { "/a" }, ws.RepoPaths);
+    }
+
+    // ── Load / Save against the file ─────────────────────────────────────
+
+    [Fact]
+    public void SavingThenLoadingReturnsWhatWasStored()
+    {
+        InIsolatedConfig(_ =>
+        {
+            JunctionSettings.Save(WithRepo("/a"));
+
+            Assert.Equal(new[] { "/a" }, JunctionSettings.Load().RepositoryPaths);
+        });
+    }
+
+    /// <summary>The config directory does not exist before the first save — the very case
+    /// where there is no file to replace, so the write has to take the other branch.</summary>
+    [Fact]
+    public void TheFirstSaveCreatesTheConfigDirectory()
+    {
+        InIsolatedConfig(dir =>
+        {
+            Assert.False(Directory.Exists(dir), "the fixture handed the test an existing config dir");
+
+            JunctionSettings.Save(WithRepo("/a"));
+
+            Assert.True(File.Exists(Path.Combine(dir, "settings.json")));
+            Assert.Equal(new[] { "/a" }, JunctionSettings.Load().RepositoryPaths);
+        });
+    }
+
+    [Fact]
+    public void AnOverwriteKeepsThePreviousContentsAsABackup()
+    {
+        InIsolatedConfig(dir =>
+        {
+            JunctionSettings.Save(WithRepo("/first"));
+            JunctionSettings.Save(WithRepo("/second"));
+
+            Assert.Equal(new[] { "/second" }, JunctionSettings.Load().RepositoryPaths);
+            Assert.Equal(new[] { "/first" }, ReadJson(Path.Combine(dir, "settings.json.bak")).RepositoryPaths);
+        });
+    }
+
+    /// <summary>A config that cannot be parsed is indistinguishable from a first run, so
+    /// without the fallback a single bad write silently empties the sidebar.</summary>
+    [Fact]
+    public void ACorruptConfigIsReadFromTheBackupInstead()
+    {
+        InIsolatedConfig(dir =>
+        {
+            JunctionSettings.Save(WithRepo("/first"));
+            JunctionSettings.Save(WithRepo("/second"));
+            File.WriteAllText(Path.Combine(dir, "settings.json"), "{ this is not json");
+
+            Assert.Equal(new[] { "/first" }, JunctionSettings.Load().RepositoryPaths);
+        });
+    }
+
+    [Fact]
+    public void AConfigAndBackupThatAreBothUnreadableFallBackToDefaults()
+    {
+        InIsolatedConfig(dir =>
+        {
+            JunctionSettings.Save(WithRepo("/first"));
+            JunctionSettings.Save(WithRepo("/second"));
+            File.WriteAllText(Path.Combine(dir, "settings.json"), "{ this is not json");
+            File.WriteAllText(Path.Combine(dir, "settings.json.bak"), "nor is this");
+
+            Assert.Empty(JunctionSettings.Load().RepositoryPaths);
+        });
+    }
+
+    /// <summary>The scratch file the swap is staged through belongs to the save, not to the
+    /// config directory — one left behind would be read as a stray config by anything
+    /// globbing the folder, and hides that a write failed.</summary>
+    [Fact]
+    public void TheStagingFileDoesNotSurviveTheSave()
+    {
+        InIsolatedConfig(dir =>
+        {
+            JunctionSettings.Save(WithRepo("/a"));
+            JunctionSettings.Save(WithRepo("/b"));
+
+            Assert.False(File.Exists(Path.Combine(dir, "settings.json.tmp")));
+        });
+    }
+
+    /// <summary>The redirect itself, which is what keeps the hosted app tests off the
+    /// developer's real config. Deliberately does not take a directory of its own: the claim
+    /// is about the process-wide isolation <see cref="SettingsIsolation"/> installs, so a
+    /// test that set the variable itself would prove nothing.</summary>
+    [Fact]
+    public void TheProcessWideRedirectSendsSavesToTheThrowawayConfig()
+    {
+        var written = Path.Combine(SettingsIsolation.ConfigHome, "HultGit", "settings.json");
+
+        // Cleared first, and asserted gone. Reading the file straight after the save would
+        // pass on one left by an earlier run even with the redirect removed — the guard has
+        // to show that *this* save arrived, not that the directory has ever been written to.
+        try { File.Delete(written); } catch { /* asserted below */ }
+        Assert.False(File.Exists(written), "the probe file could not be cleared");
+
+        JunctionSettings.Save(WithRepo("/probe"));
+
+        Assert.True(File.Exists(written),
+            "the save went somewhere other than the redirected config directory — " +
+            "SettingsIsolation is not in effect, and the hosted tests are writing the real settings.json");
+        Assert.Equal(new[] { "/probe" }, ReadJson(written).RepositoryPaths);
+    }
+
+    // ── harness ──────────────────────────────────────────────────────────
+
+    private static JunctionSettingsData WithRepo(string path) =>
+        new()
+        {
+            RepositoryPaths = [path],
+            ActiveRepoPath = path,
+            Workspaces = [new WorkspaceData { Id = "w1", Name = "W", RepoPaths = [path] }],
+            ActiveWorkspaceId = "w1",
+        };
+
+    private static JunctionSettingsData ReadJson(string path) =>
+        JsonSerializer.Deserialize(File.ReadAllText(path),
+            JunctionSettingsJsonContext.Default.JunctionSettingsData)!;
+
+    /// <summary>Runs the body with the config redirected to a directory of its own, and
+    /// hands it the path Junction will use. Restores the process-wide redirect afterwards —
+    /// the suite runs unparallelized, so borrowing the variable for one test is safe.</summary>
+    private static void InIsolatedConfig(Action<string> body)
+    {
+        var previous = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var home = Path.Combine(Path.GetTempPath(), "junction-settings-" + Guid.NewGuid().ToString("N"));
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", home);
+        try
+        {
+            body(Path.Combine(home, "HultGit"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", previous);
+            try { Directory.Delete(home, recursive: true); } catch { /* best-effort temp cleanup */ }
+        }
     }
 }

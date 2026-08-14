@@ -124,7 +124,7 @@ public partial class JunctionApp
             .TextColor(Nocturne.Text).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         textCol.AddChild(Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
             Ui.Mono(e.ShortHash, 10.5f, Nocturne.On(0.46)),
-            Text.New(RelativeTime(e.Date)).FontSize(10.5f).TextColor(Nocturne.On(0.42))));
+            Text.New(e.Date.ToString("g")).FontSize(10.5f).TextColor(Nocturne.On(0.42))));
         row.AddChild(textCol);
 
         // Primary safe-recovery affordance + full menu on the caret / right-click.

@@ -13,6 +13,47 @@ public static class GitProcess
     // CJK) in diffs, logs, and status. No BOM so stdin patches stay byte-clean.
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
+    // Somewhere that is nobody's repository. Only the OS-level pin matters here: -C decides
+    // where git looks for the repository, so this never affects what a command sees.
+    private static readonly string NeutralDirectory = Path.GetTempPath();
+
+    /// <summary>
+    /// The common part of launching git against a repository.
+    ///
+    /// <para>The repository is passed as <c>-C &lt;path&gt;</c> rather than as the process's
+    /// working directory, because Windows pins a running process's current directory: while
+    /// any git call was in flight, the folder it ran in could not be deleted, moved or
+    /// renamed. Junction's loaders outlive the views that start them, so a repository stayed
+    /// pinned after the user had moved on from it — and the test fixtures, which are ordinary
+    /// repositories in the temp folder, could not be cleaned up on the way out.</para>
+    ///
+    /// <para><c>-C</c> is defined as changing to that directory before running, so commands
+    /// behave identically, relative path arguments included — they still resolve against the
+    /// repository. One difference is deliberate: a path that does not exist used to throw from
+    /// <see cref="Process.Start(ProcessStartInfo)"/> and now comes back as an ordinary failed
+    /// <see cref="GitResult"/>, which is what every caller already handles.</para>
+    /// </summary>
+    private static ProcessStartInfo StartInfo(string workingDirectory, string[] args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = NeutralDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            psi.ArgumentList.Add("-C");
+            psi.ArgumentList.Add(workingDirectory);
+        }
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+
+        return psi;
+    }
+
     public static Task<GitResult> RunAsync(string workingDirectory, params string[] args)
         => RunAsync(workingDirectory, null, args);
 
@@ -27,20 +68,11 @@ public static class GitProcess
         Func<string, Task<string?>>? askPassHandler,
         params string[] args)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Utf8NoBom,
-            StandardErrorEncoding = Utf8NoBom,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Utf8NoBom;
+        psi.StandardErrorEncoding = Utf8NoBom;
 
         using var bridge = askPassHandler != null ? new AskPassBridge() : null;
         bridge?.ConfigureProcess(psi);
@@ -74,20 +106,11 @@ public static class GitProcess
     /// </summary>
     public static GitResult RunWithEnv(string workingDirectory, Dictionary<string, string>? env, params string[] args)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Utf8NoBom,
-            StandardErrorEncoding = Utf8NoBom,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Utf8NoBom;
+        psi.StandardErrorEncoding = Utf8NoBom;
 
         if (env != null)
             foreach (var kv in env)
@@ -108,17 +131,10 @@ public static class GitProcess
     /// </summary>
     public static (bool Success, byte[] Stdout) RunBytes(string workingDirectory, params string[] args)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            // No StandardOutputEncoding: we read BaseStream directly, undecoded.
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        // No StandardOutputEncoding: we read BaseStream directly, undecoded.
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
 
         using var process = Process.Start(psi)!;
         using var buffer = new MemoryStream();
@@ -130,22 +146,13 @@ public static class GitProcess
 
     public static GitResult RunWithStdin(string workingDirectory, string stdin, params string[] args)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            WorkingDirectory = workingDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Utf8NoBom,
-            StandardErrorEncoding = Utf8NoBom,
-            StandardInputEncoding = Utf8NoBom,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
+        var psi = StartInfo(workingDirectory, args);
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Utf8NoBom;
+        psi.StandardErrorEncoding = Utf8NoBom;
+        psi.StandardInputEncoding = Utf8NoBom;
 
         using var process = Process.Start(psi)!;
         process.StandardInput.Write(stdin);

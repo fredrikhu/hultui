@@ -137,7 +137,18 @@ public partial class JunctionApp : Component, IDisposable
     private (string BaseHash, string HeadHash)? _detailRange;
     private string? _selectedFilePath;    // file selected in the Commit view
 
-    // Changes (staging) state.
+    // Changes (staging) state. Multi-selection à la Windows lists, the same model as
+    // the History list above: the three _changeSel* fields are the FOCUS caret — the
+    // one file the diff pane, Ctrl+D and the line-level staging selection follow —
+    // while _changeSelection is the selection set and _changeAnchor anchors Shift
+    // ranges. The selection may legitimately go empty, and the caret may sit outside
+    // it after Ctrl+arrows / Ctrl+Space.
+    //
+    // One rule is specific to this list: a selection never spans two of the three
+    // sections (Conflicts / Staged / Changes). "Stage these files" has no single
+    // meaning for a set that is half staged and half not, so any range or toggle that
+    // would cross a section boundary starts a fresh selection in the clicked row's
+    // section instead — see OnChangeRowClick and MoveChangeSelection.
     private readonly KeyedAsyncLoader<string, ChangesData> _changesLoaders =
         new(ChangesData.Empty, capacity: 16, comparer: PathComparer);
     private string? _changeSelPath;
@@ -145,6 +156,12 @@ public partial class JunctionApp : Component, IDisposable
     // True when the selected file is a merge conflict; the right pane then shows the
     // ours/theirs resolution UI instead of a diff.
     private bool _changeSelConflicted;
+    private readonly HashSet<ChangeRef> _changeSelection = new();
+    private ChangeRef? _changeAnchor;
+    // Scroll the keyboard-focused file row into view (the list isn't focused, so it
+    // won't follow the caret on its own).
+    private readonly Ref<ScrollViewElement> _changeScrollRef = new();
+    private readonly Ref<Element> _changeFocusRef = new();
     private string _commitSummary = "";
     private string _commitDescription = "";
     private readonly Ref<TextInputElement> _summaryRef = new();
@@ -156,7 +173,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
-    private readonly Ref<VirtualListElement<GitBranch>> _branchScrollRef = new();
+    private readonly Ref<VirtualListElement<RefNode<GitBranch>>> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
     // Tags state, shaped like the branches state above.
@@ -165,7 +182,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _tagQuery = "";
     private int _tagSel;
     private readonly Ref<TextInputElement> _tagSearchRef = new();
-    private readonly Ref<VirtualListElement<GitTag>> _tagScrollRef = new();
+    private readonly Ref<VirtualListElement<RefNode<GitTag>>> _tagScrollRef = new();
     private bool _pendingTagSearchFocus;
 
     // Diff mode is a single app-level toggle shared by all diff panes.
@@ -249,6 +266,14 @@ public partial class JunctionApp : Component, IDisposable
         public static readonly ChangesData Empty = new([], [], new(), new(), false, [], null, []);
     }
 
+    /// <summary>Which of the Changes view's three lists a file row lives in. Part of a
+    /// row's identity rather than a property of the file: a partially-staged file has a
+    /// row in <see cref="ChangeSection.Staged"/> AND one in <see cref="ChangeSection.Unstaged"/>,
+    /// and they select independently.</summary>
+    private enum ChangeSection { Conflicted, Staged, Unstaged }
+
+    private readonly record struct ChangeRef(string Path, ChangeSection Section);
+
     // Identity of the two sides of an in-progress merge: "ours" = HEAD (the branch
     // being merged into), "theirs" = MERGE_HEAD (the branch being merged in).
     private readonly record struct MergeSides(
@@ -280,6 +305,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
+        _refTreeView = _settings.RefTreeView;
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
         _activeRepoPath = _settings.ActiveRepoPath ?? ActiveWorkspace?.RepoPaths.FirstOrDefault() ?? "";
@@ -637,14 +663,17 @@ public partial class JunctionApp : Component, IDisposable
                 // Fixed row height, so index math needs no per-row layout.
                 EnsureSelectedCommitVisible();
             }
-            else if (_paletteOpen || View == JunctionView.Commit)
+            else if (_paletteOpen || View is JunctionView.Commit or JunctionView.Changes)
             {
                 // OnAfterBuild runs before the layout pass, so the selected row's box
                 // for this frame isn't available yet (and the file row, re-keyed on
                 // selection, is a fresh element with no prior layout at all). Read it
                 // in a post-frame callback, once the frame has been laid out.
-                var scrollRef = _paletteOpen ? _paletteScrollRef : _fileScrollRef;
-                var rowRef = _paletteOpen ? _paletteSelRef : _fileSelRef;
+                var changes = !_paletteOpen && View == JunctionView.Changes;
+                var scrollRef = _paletteOpen ? _paletteScrollRef
+                    : changes ? _changeScrollRef : _fileScrollRef;
+                var rowRef = _paletteOpen ? _paletteSelRef
+                    : changes ? _changeFocusRef : _fileSelRef;
                 _window.RequestPostFrameCallback(() => ScrollRowIntoView(scrollRef, rowRef));
             }
         }
@@ -674,15 +703,30 @@ public partial class JunctionApp : Component, IDisposable
 
     /// <summary>Automation hook for scripted perf captures (JUNCTION_BENCH in
     /// Program.cs): a view name switches tabs, "row:N" selects the Nth branch row
-    /// like a click on it would. Main thread only.</summary>
+    /// like a click on it would, and "tree"/"flat" picks the ref presentation so a
+    /// capture can compare the two without editing settings.json. Main thread only.</summary>
     internal void BenchStep(string step)
     {
         if (step.StartsWith("row:", StringComparison.Ordinal))
         {
-            var list = FilteredBranches();
-            if (list.Count == 0) return;
-            _branchSel = Math.Clamp(int.Parse(step[4..]), 0, list.Count - 1);
-            BranchSelectSingle(list[_branchSel]);
+            var rows = BranchRows();
+            if (rows.Count == 0) return;
+            _branchSel = Math.Clamp(int.Parse(step[4..]), 0, rows.Count - 1);
+            if (rows[_branchSel] is { IsFolder: false } leaf) BranchSelectSingle(leaf.Item);
+            MarkDirty();
+        }
+        else if (step is "tree" or "flat")
+        {
+            SetRefTreeView(step == "tree");
+        }
+        else if (step.StartsWith("expand:", StringComparison.Ordinal))
+        {
+            // Opens every branch folder, so a capture can measure the worst case the
+            // tree can reach: as many rows as the flat list, plus the folders.
+            var set = RefExpandedSet(RefKindBranch);
+            foreach (var root in RefTree.Build(_branches.Value.Local, b => b.Name))
+                foreach (var folder in RefTree.Folders(root))
+                    set[folder.Path] = step[7..] == "all";
             MarkDirty();
         }
         else if (Enum.TryParse<JunctionView>(step, out var v))
@@ -825,6 +869,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.ActiveRepoPath = _activeRepoPath;
         _settings.DiffWrap = _diffWrap;
         _settings.DiffSplit = _diffSplit;
+        _settings.RefTreeView = _refTreeView;
         JunctionSettings.Save(_settings);
     }
 
@@ -888,9 +933,13 @@ public partial class JunctionApp : Component, IDisposable
 
         // A modal dialog swallows every global shortcut; only Esc (cancel) acts,
         // and typing flows straight to the focused field.
-        if (_dialog != null)
+        if (_dialog is { } dialog)
         {
             if (e.Key == KeyCode.Escape) { CloseDialog(); e.StopPropagation = true; }
+            // A confirm-only prompt has no field to take the Enter (the field's own
+            // handler is what confirms the others), so it is accepted here.
+            else if (e.Key == KeyCode.Enter && dialog.Placeholder == null)
+            { ConfirmDialog(); e.StopPropagation = true; }
             return;
         }
 
@@ -1076,6 +1125,14 @@ public partial class JunctionApp : Component, IDisposable
                 return;
             }
             if (HandleBranchKey(e))
+                e.StopPropagation = true;
+        }
+
+        // The file list. Reached only when nothing is typing (the composer's fields sit
+        // in this view) and the diff pane didn't consume the key to scroll itself.
+        if (View == JunctionView.Changes)
+        {
+            if (HandleChangesNavKey(e))
                 e.StopPropagation = true;
         }
     }

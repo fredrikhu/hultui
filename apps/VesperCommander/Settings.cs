@@ -35,6 +35,11 @@ public sealed class Settings
     public PreviewMode Preview = PreviewMode.Normal;
     public ViewMode DefaultView = ViewMode.Detail;   // new tabs/panes open in this mode
 
+    // Find files (Alt+F7) — the dialog seeds itself from these and writes a change back
+    // when it closes, so a depth/exclude set once carries into the next search.
+    public int FindMaxDepth;                    // folder levels below the search root; 0 = unlimited
+    public string FindExcludeFolders = "";      // ";"-separated folder patterns, e.g. ".git;.vs"
+
     // Tools
     public DiffToolKind DiffTool = DiffToolKind.Builtin;
     // Built-in diff: wrap a line too wide for its column instead of scrolling sideways.

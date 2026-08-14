@@ -190,9 +190,7 @@ public class PackCollisionTests
         /// the app rather than clicked, since which control carries it is not under test.</summary>
         public void Commit(bool eachOwn, params string[] items)
         {
-            var marks = (System.Collections.Generic.HashSet<string>)_t.Invoke("Marks", 'L')!;
-            foreach (var i in items) marks.Add(i);
-            _t.MarkDirty();
+            _t.Mark('L', items);
 
             _t.Press(KeyCode.F5, KeyModifiers.Alt);
             Assert.True(DialogOpen, "Alt+F5 did not open the Pack dialog");

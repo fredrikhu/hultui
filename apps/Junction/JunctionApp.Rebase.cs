@@ -98,7 +98,7 @@ public partial class JunctionApp
                 ShortHash = cm.ShortHash,
                 Subject = cm.Subject,
                 Author = cm.AuthorName,
-                When = RelativeTime(cm.AuthorDate),
+                When = cm.AuthorDate.ToString("g"),
                 Add = add,
                 Del = del,
                 Reword = cm.Subject,

@@ -106,8 +106,15 @@ public class DiffWrapTests
             session.PumpFrames(2);
             float after = TallestCodeRow(session, app);
 
-            Assert.True(after > before * 1.5f,
-                $"rows were {before:0}px and are {after:0}px — the long lines did not wrap");
+            // The line count is the direct evidence that wrapping happened; the row growth is
+            // that the list made room for it. The bar used to be `after > before * 1.5`, which
+            // reads as a noise margin but is really an assumption about glyph width: the
+            // fixture breaks into three lines at this machine's metrics and into two on the
+            // build runner's, where correctly wrapped rows failed the test.
+            int lines = MostLines(session, app);
+            Assert.True(lines > 1, $"the longest line laid out as {lines} line(s) — it did not wrap");
+            Assert.True(after > before,
+                $"rows were {before:0}px and are {after:0}px — they did not grow to fit the wrap");
         });
     }
 
@@ -137,6 +144,56 @@ public class DiffWrapTests
         });
     }
 
+    /// <summary>
+    /// No frame after the toggle may leave a row shorter than the text drawn in it.
+    /// <para>
+    /// The sibling test above checks the state the suite happens to settle into; this one
+    /// checks every frame from the keypress onwards, because the wrap rebuild is a two-pass
+    /// settle — the row heights, the pan's CanPan and the scrollbar around the list all move
+    /// on different passes. A frame that realizes rows before the heights apply draws each
+    /// line over its neighbour, and nothing marks layout dirty afterwards to correct it.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NoFrameAfterWrappingDrawsALineOutsideItsRow()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            // Render once before the toggle, the way an app someone is looking at has. This
+            // is not incidental: it settles the unwrapped layout, so the wrap rebuild starts
+            // from a clean tree rather than a dirty one, and that changes which pass applies
+            // the row heights.
+            session.Window.CapturePixels().Dispose();
+
+            Body(app).Focus();
+            session.Window.PressKey(KeyCode.W);
+
+            int seen = 0;
+            for (int frame = 1; frame <= 12; frame++)
+            {
+                session.PumpFrames(1);
+                // Re-read every frame: the wrap rebuild replaces the list rather than
+                // patching it, so a reference from an earlier frame describes a detached tree.
+                foreach (var row in Body(app).Children)
+                {
+                    var label = LayoutProbe.Descendants<TextElement>(row,
+                        t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
+                    if (label is null) continue;
+                    float drawn = LayoutProbe.DrawnText(label).Height;
+                    if (drawn <= 0) continue;
+                    seen++;
+                    float rowHeight = row.Layout.AbsoluteBorderBox.Height;
+                    Assert.True(drawn <= rowHeight + 0.5f,
+                        $"{frame} frame(s) after wrapping, {drawn:0}px of text sits in a {rowHeight:0}px row");
+                }
+            }
+            // Counted across the frames rather than within each one: right after the toggle
+            // the list has just been replaced and has realized nothing yet, so an early frame
+            // legitimately has no rows to check — as the build runner showed.
+            Assert.True(seen > 2, $"only {seen} row observations — this proves nothing");
+        });
+    }
+
     private static void Press(HeadlessSession session, JunctionApp app, KeyCode key)
     {
         var body = Field<HultUI.Core.Reactivity.Ref<Element>>(app, "_diffBodyRef").Current
@@ -159,6 +216,15 @@ public class DiffWrapTests
     private static Element Body(JunctionApp app) =>
         Field<HultUI.Core.Reactivity.Ref<Element>>(app, "_diffBodyRef").Current
         ?? throw new Xunit.Sdk.XunitException("the diff body is not mounted");
+
+    /// <summary>The most lines any code label on screen broke into.</summary>
+    private static int MostLines(HeadlessSession session, JunctionApp app)
+    {
+        int most = 0;
+        foreach (var label in CodeLabels(session))
+            most = System.Math.Max(most, LayoutProbe.DrawnText(label).LineCount);
+        return most;
+    }
 
     private static float TallestCodeRow(HeadlessSession session, JunctionApp app)
     {

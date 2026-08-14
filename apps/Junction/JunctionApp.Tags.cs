@@ -24,13 +24,13 @@ public partial class JunctionApp
             return BuildStubView("Tags", "Open a repository first.");
 
         _tags.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadTags, onLoaded: ClampTagSel);
-        var list = FilterTags(_tags.Value.All);
-        if (_tagSel >= list.Count) _tagSel = Math.Max(0, list.Count - 1);
+        var rows = TagRows();
+        if (_tagSel >= rows.Count) _tagSel = Math.Max(0, rows.Count - 1);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildTagsHeader());
         col.AddChild(BuildTagTableHeader());
-        col.AddChild(BuildTagScroll(list));
+        col.AddChild(BuildTagScroll(rows));
         return col;
     }
 
@@ -39,7 +39,7 @@ public partial class JunctionApp
 
     private void ClampTagSel(TagsData data)
     {
-        var count = FilterTags(data.All).Count;
+        var count = TagRowsOf(data.All).Count;
         if (_tagSel >= count) _tagSel = Math.Max(0, count - 1);
     }
 
@@ -53,12 +53,23 @@ public partial class JunctionApp
             t.Message.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
-    private List<GitTag> FilteredTags() => FilterTags(_tags.Value.All);
+    /// <summary>The rows the table shows. Tag names are slash-hierarchical too
+    /// (<c>v1/rc1</c>, <c>release/2024-06</c>); the ones that carry no slash — the usual
+    /// <c>v1.2.3</c> — stay at the top level, so a plain semver repo looks the same in
+    /// either mode.</summary>
+    private List<RefNode<GitTag>> TagRowsOf(IReadOnlyList<GitTag> all) =>
+        RefRows(FilterTags(all), RefKindTag, t => t.Name, flag: null,
+            filtering: _tagQuery.Trim().Length > 0);
 
+    private List<RefNode<GitTag>> TagRows() => TagRowsOf(_tags.Value.All);
+
+    /// <summary>The tag under the caret, or null when the caret is on a folder row.</summary>
     private GitTag? SelectedTag()
     {
-        var list = FilteredTags();
-        return _tagSel >= 0 && _tagSel < list.Count ? list[_tagSel] : null;
+        var rows = TagRows();
+        return _tagSel >= 0 && _tagSel < rows.Count && rows[_tagSel] is { IsFolder: false } leaf
+            ? leaf.Item
+            : null;
     }
 
     // ── Header (title · search · new tag) ────────────────────────────────
@@ -70,6 +81,7 @@ public partial class JunctionApp
 
         bar.AddChild(Text.New("Tags").FontSize(18f).FontWeight(FontWeight.SemiBold));
         bar.AddChild(BuildTagSearch());
+        bar.AddChild(RefViewToggle());
         bar.AddChild(Ui.PrimaryButton("New tag", Icons.Plus, PromptNewTag, 12.5f));
         return bar;
     }
@@ -119,9 +131,9 @@ public partial class JunctionApp
         return row;
     }
 
-    private Element BuildTagScroll(List<GitTag> list)
+    private Element BuildTagScroll(List<RefNode<GitTag>> rows)
     {
-        if (list.Count == 0)
+        if (rows.Count == 0)
         {
             return Box.New().FlexGrow(1).Padding(new Thickness(26))
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -131,25 +143,25 @@ public partial class JunctionApp
                     .FontSize(13f).TextColor(Nocturne.On(0.45)));
         }
 
-        // Virtualized like the branch table — same index map, keyed on the tag
-        // name (unique per repo).
-        var indexOf = new Dictionary<string, int>(list.Count, StringComparer.Ordinal);
-        for (var i = 0; i < list.Count; i++) indexOf[list[i].Name] = i;
+        // Virtualized like the branch table, and fed the same way: the expanded tree
+        // flattened into one row list, indexed by node identity.
+        var indexOf = new Dictionary<RefNode<GitTag>, int>(rows.Count);
+        for (var i = 0; i < rows.Count; i++) indexOf[rows[i]] = i;
 
-        return VirtualListElement<GitTag>.New()
+        return VirtualListElement<RefNode<GitTag>>.New()
             .ItemHeight(TagRowHeight)
-            .Items(list)
-            .RenderWith(t => TagRow(t, indexOf[t.Name]))
+            .Items(rows)
+            .RenderWith(n => TagRow(n, indexOf[n]))
             // The virtual list surfaces items to assistive tech by this label alone
             // (rows off-screen are never realized as elements), so it carries
             // everything the row says: name, kind, annotation message, commit.
-            .AccessibleItemLabel(t => t.Message.Length > 0
-                ? $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {t.Message}, {ShortHash(t.Hash)} {t.Subject}"
-                : $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {ShortHash(t.Hash)} {t.Subject}")
-            .OnActivateItem(t =>
+            .AccessibleItemLabel(n => n.IsFolder ? RefFolderLabel(RefKindTag, n) : TagLabel(n.Item))
+            .OnActivateItem(n =>
             {
                 // Assistive-tech activation mirrors a plain row click.
-                if (indexOf.TryGetValue(t.Name, out var i)) SelectTag(i);
+                if (!indexOf.TryGetValue(n, out var i)) return;
+                if (n.IsFolder) { _tagSel = i; ToggleFolder(RefKindTag, n); }
+                else SelectTag(i);
             })
             .SelectedIndex(_tagSel)
             .FlexGrow(1)
@@ -157,10 +169,22 @@ public partial class JunctionApp
             .WithRef(_tagScrollRef);
     }
 
-    private Element TagRow(GitTag t, int index)
+    private static string TagLabel(GitTag t) => t.Message.Length > 0
+        ? $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {t.Message}, {ShortHash(t.Hash)} {t.Subject}"
+        : $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {ShortHash(t.Hash)} {t.Subject}";
+
+    private Element TagRow(RefNode<GitTag> node, int index)
     {
         var focused = index == _tagSel;
+        return node.IsFolder
+            ? RefFolderRow(RefKindTag, node, index, focused, TagRowHeight, SelectTagRow)
+            : TagLeafRow(node, index, focused);
+    }
 
+    private Element TagLeafRow(RefNode<GitTag> node, int index, bool focused)
+    {
+        var t = node.Item;
+        var depth = node.Depth;
         var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
             .Height(TagRowHeight).FlexShrink(0)
             .Padding(new Thickness(0, 26, 0, 26))
@@ -173,14 +197,20 @@ public partial class JunctionApp
         row.Background(focused ? Nocturne.Neutral900 : Color.Transparent);
 
         // Tag cell: chip + name, with the annotation message underneath when there is one.
+        // The tree's indent lives inside this cell so the columns beside it stay aligned.
         var tagCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
             .FlexGrow(34).FlexBasis(Dimension.Px(0));
+        if (depth > 0)
+            tagCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         tagCell.AddChild(Ui.Chip(Icons.Tag, "TAG",
             t.Annotated ? Nocturne.Accent2_800 : Nocturne.Neutral800,
             t.Annotated ? Nocturne.Accent2_100 : Nocturne.Neutral100));
 
         var titleCol = Flex.Column(gap: 1).FlexShrink(1).FlexBasis(Dimension.Px(0)).FlexGrow(1);
-        titleCol.AddChild(Ui.Mono(t.Name, 12.5f, Nocturne.Text)
+        // Segment, not the full name: inside a folder the prefix is already on screen.
+        // The flat rows carry the whole name as their segment, so this is the same text
+        // there as it always was.
+        titleCol.AddChild(Ui.Mono(node.Segment, 12.5f, Nocturne.Text)
             .FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         if (t.Message.Length > 0)
             titleCol.AddChild(Text.New(t.Message).FontSize(10.5f).TextColor(Nocturne.On(0.42))
@@ -197,7 +227,7 @@ public partial class JunctionApp
         row.AddChild(commitCell);
 
         row.AddChild(Box.New().Width(ColTagCreated).FlexShrink(0)
-            .Children(Text.New(t.Date == default ? "" : RelativeTime(t.Date))
+            .Children(Text.New(t.Date == default ? "" : t.Date.ToString("g"))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));
 
         var kind = Flex.Row(gap: 0).Width(ColTagKind).FlexShrink(0)
@@ -235,8 +265,26 @@ public partial class JunctionApp
         {
             case KeyCode.C: CheckoutSelectedTag(); return true;
             case KeyCode.P: PushSelectedTag(); return true;
+            case KeyCode.T: ToggleRefTreeView(); return true;
+            // The folder keys, kept out of HandleTagNavKey for the same reason the
+            // branch ones are: that subset also runs from inside the search box.
+            case KeyCode.Right when _refTreeView: StepTagTree(right: true); return true;
+            case KeyCode.Left when _refTreeView: StepTagTree(right: false); return true;
             default: return false;
         }
+    }
+
+    private void StepTagTree(bool right)
+    {
+        var rows = TagRows();
+        var next = RefTreeStep(rows, RefKindTag, _tagSel, right);
+        if (next != _tagSel)
+        {
+            _tagSel = next;
+            if (!rows[next].IsFolder) SelectTag(next);
+            _tagScrollRef.Current?.ScrollRangeIntoView(next * TagRowHeight, TagRowHeight);
+        }
+        MarkDirty();
     }
 
     private bool HandleTagNavKey(KeyDownEvent e)
@@ -249,9 +297,19 @@ public partial class JunctionApp
             case KeyCode.PageUp: MoveTagSel(-6); return true;
             case KeyCode.Home: MoveTagSel(int.MinValue / 2); return true;
             case KeyCode.End: MoveTagSel(int.MaxValue / 2); return true;
-            case KeyCode.Enter: CheckoutSelectedTag(); return true;
+            case KeyCode.Enter: ActivateSelectedTagRow(); return true;
             default: return false;
         }
+    }
+
+    /// <summary>Enter on the caret row: a folder opens or closes, a tag is checked out.</summary>
+    private void ActivateSelectedTagRow()
+    {
+        var rows = TagRows();
+        if (_tagSel >= 0 && _tagSel < rows.Count && rows[_tagSel] is { IsFolder: true } folder)
+            ToggleFolder(RefKindTag, folder);
+        else
+            CheckoutSelectedTag();
     }
 
     private void TagSearchKey(KeyDownEvent e)
@@ -277,7 +335,8 @@ public partial class JunctionApp
     {
         _tagSel = index;
         // The tag's commit becomes the selection, so Commit and Files show what it
-        // points at — the same thing clicking a branch does with its tip.
+        // points at — the same thing clicking a branch does with its tip. A folder row
+        // names no commit, so it only moves the caret.
         if (SelectedTag() is { } t)
         {
             _selectedCommitHash = t.Hash;
@@ -286,11 +345,19 @@ public partial class JunctionApp
         MarkDirty();
     }
 
+    /// <summary>Moves the caret without touching the commit selection — what a folder row's
+    /// click does before it opens or closes.</summary>
+    private void SelectTagRow(int index)
+    {
+        _tagSel = index;
+        MarkDirty();
+    }
+
     private void MoveTagSel(int delta)
     {
-        var list = FilteredTags();
-        if (list.Count == 0) return;
-        _tagSel = Math.Clamp(_tagSel + delta, 0, list.Count - 1);
+        var rows = TagRows();
+        if (rows.Count == 0) return;
+        _tagSel = Math.Clamp(_tagSel + delta, 0, rows.Count - 1);
         SelectTag(_tagSel);
         _tagScrollRef.Current?.ScrollRangeIntoView(_tagSel * TagRowHeight, TagRowHeight);
         MarkDirty();

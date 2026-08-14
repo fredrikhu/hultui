@@ -50,7 +50,16 @@ public partial class JunctionApp
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         header.AddChild(DiffModeToggle());
         header.AddChild(IgnoreWhitespaceToggle());
-        header.AddChild(Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)").FlexShrink(0));
+        // A binary file has no two texts to compare, so the external-diff button is inert
+        // rather than absent — the tooltip says why. The two variants carry different keys
+        // so the reconciler replaces one with the other: patched in place, the disabled
+        // button would inherit the live one's click handler and still open VS Code.
+        var external = diff is { IsBinary: true }
+            ? Ui.DisabledIconButton(Icons.FileCode,
+                "Binary file — there are no two texts for VS Code to compare")
+            : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)");
+        external.Key = diff is { IsBinary: true } ? "diff-external#off" : "diff-external";
+        header.AddChild(external.FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
         col.AddChild(header);
         if (_diffFind.Open)
@@ -64,14 +73,15 @@ public partial class JunctionApp
 
         // Interactive staging: an action bar appears while lines are selected, plus
         // a one-line hint when nothing is selected yet (so the affordance is discoverable).
-        if (interact != null && diff != null)
+        // A binary file has no lines to click, so it gets neither.
+        if (interact != null && diff is { IsBinary: false })
         {
             if (_stageSel.Count > 0)
                 col.AddChild(BuildStageActionBar(diff, interact));
             else
                 col.AddChild(BuildStageHint(interact));
         }
-        else if (diff != null && View == JunctionView.Changes && !_changeSelConflicted
+        else if (diff is { IsBinary: false } && View == JunctionView.Changes && !_changeSelConflicted
                  && _settings.Git.IgnoreWhitespace)
         {
             // Explain the missing affordance rather than just dropping it.
@@ -84,16 +94,29 @@ public partial class JunctionApp
                         .FontSize(10.5f).TextColor(Nocturne.On(0.45))));
         }
 
+        col.AddChild(BuildDiffBody(path, diff, interact));
+        return col;
+    }
+
+    /// <summary>
+    /// What goes under the diff header. Three bodies share the slot, and which one applies
+    /// is decided in one place so the pane, the fullscreen overlay, split and unified all
+    /// agree: an image comparison, a binary summary, or the scrolling text diff.
+    ///
+    /// <para>Only the last of the three reaches <see cref="HighlightForCurrent"/>, so a
+    /// binary blob is never handed to the tokenizer.</para>
+    /// </summary>
+    private Element BuildDiffBody(string path, GitFileDiff? diff, DiffInteract? interact = null)
+    {
         // Images have no textual diff (git reports "Binary files … differ"), so they
         // get a before/after view instead of the empty "No textual changes" pane.
         if (IsImagePath(path) && BuildImageDiffBody(path) is { } imagePane)
-        {
-            col.AddChild(imagePane);
-            return col;
-        }
-
-        col.AddChild(BuildDiffScroll(diff, interact));
-        return col;
+            return imagePane;
+        // Every other binary — archive, font, PDF, compiled output — says it differs and
+        // by how much, and stops there.
+        if (diff?.Binary is { } binary)
+            return BuildBinaryDiffBody(path, binary);
+        return BuildDiffScroll(diff, interact);
     }
 
     private Element BuildStageHint(DiffInteract it) =>
@@ -307,6 +330,13 @@ public partial class JunctionApp
         // moves the rows have to be measured again and rebuilt, because a realized row is
         // otherwise reused exactly as it was.
         float codeWidth = _diffCodeWidth;
+        // Switching mode or file re-arms the width settle: the first build of a shape is the
+        // one that has to guess, so each shape is allowed its one corrective rebuild. A width
+        // that merely moves — a resize — needs no settle, because it is measured from a body
+        // that has already been laid out.
+        var settleKey = (_diffWrap, _diffSplit, rows.Count);
+        if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffWidthSettled = false; }
+
         var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count);
         if (_diffHeightShape != shape)
         {
@@ -355,14 +385,37 @@ public partial class JunctionApp
     // Whether the last build included the scrollbar.
     private bool _diffBarBuilt;
 
+    // What the number / sign / staging-mark columns took in the last build. Kept so the
+    // post-frame check can redo the same arithmetic against the width the body ended up
+    // with, rather than reconstructing the column model a second time and drifting from it.
+    private float _diffFixedCols;
+
+    /// <summary>One code column's width inside a body of <paramref name="body"/> pixels —
+    /// what the fixed columns leave over, halved in split mode.</summary>
+    private float CodeWidthFor(float body) =>
+        Math.Max(0, _diffSplit ? (body - _diffFixedCols) / 2 : body - _diffFixedCols);
+
+    // The wrap/split/row-count the width settle has already fired for. The corrective
+    // rebuild happens at most once per shape, so a width that flip-flops — a vertical
+    // scrollbar appearing as rows grow, then leaving as they shrink — cannot loop.
+    private (bool Wrap, bool Split, int Rows) _diffWidthSettleKey = (false, false, -1);
+    private bool _diffWidthSettled;
+
     /// <summary>
-    /// Ask for one more build when the scrollbar's presence was decided on a guess.
+    /// Ask for one more build when the scrollbar's presence, or the width the wrapped rows
+    /// were measured at, was decided on a guess.
     ///
     /// <para>Whether there is anything to scroll to depends on how wide the diff pane is,
     /// and the first build after opening a file runs before any layout — so
     /// <see cref="DiffCodeWidth"/> falls back to the window, which here is several times
     /// the pane. Once the body has a real width the answer can flip, and nothing else would
     /// mark the tree dirty to act on it. Rebuilds at most once: after it, the two agree.</para>
+    ///
+    /// <para>The same guess sizes the wrapped rows, and there it is not cosmetic: heights
+    /// come from measuring each line at the code width, so a width guessed too wide measures
+    /// fewer lines than the row goes on to draw, and the overflow lands on top of the next
+    /// row. That state sticks — the scrollbar half of this check has already agreed by then,
+    /// so without the width half nothing asks for the build that would correct it.</para>
     /// </summary>
     private void SettleDiffScrollbar()
     {
@@ -373,9 +426,15 @@ public partial class JunctionApp
         // here. Same reason ScrollRowIntoView defers.
         _window.RequestPostFrameCallback(() =>
         {
-            if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 }) return;
-            if (_diffBarBuilt == _diffPan.CanPan) return;
-            MarkDirty();   // settles: after the rebuild the two agree
+            if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
+            if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return; }
+            if (!_diffWrap || _diffWidthSettled) return;
+
+            // _diffHeightShape.Width is the width the heights on screen were measured at.
+            if (Math.Abs(CodeWidthFor(body.Layout.AbsoluteContentBox.Width) - _diffHeightShape.Width) <= 0.5f)
+                return;
+            _diffWidthSettled = true;
+            MarkDirty();
         });
     }
 
@@ -392,9 +451,8 @@ public partial class JunctionApp
             : _window.LayoutWidth;
         // Split: two 44px number columns. Unified: two 46px number columns, a 16px sign,
         // and — while staging — a 20px checkbox.
-        float fixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f);
-        float code = body - fixedCols;
-        _diffCodeWidth = Math.Max(0, _diffSplit ? code / 2 : code);
+        _diffFixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f);
+        _diffCodeWidth = CodeWidthFor(body);
         // Wrapped, every line is visible in full, so there is nothing left to scroll to. An
         // unbounded viewport is what says so: it leaves no offset to pan by, so CanPan goes
         // false and the scrollbar disappears with it. The real column width is kept
@@ -782,7 +840,9 @@ public partial class JunctionApp
             () => { _diffFull = false; MarkDirty(); }, 12f));
         col.AddChild(bar);
 
-        col.AddChild(BuildDiffScroll(diff));
+        // Same three-way choice as the docked pane, so fullscreen is not the one place a
+        // binary file (or an image) still shows an empty text diff.
+        col.AddChild(BuildDiffBody(path, diff));
         overlay.AddChild(col);
         return overlay;
     }
@@ -813,6 +873,15 @@ public partial class JunctionApp
     private async void OpenSelectedDiffExternally()
     {
         if (ActiveRepo is not { } repo) return;
+
+        // Both sides would be fetched as text, so a binary file reaches VS Code as two
+        // temp files of mojibake. The header button is disabled for these; this is the
+        // same refusal for the keyboard, which does not go through the button.
+        if (CurrentDiffTarget().Diff is { IsBinary: true })
+        {
+            Flash("Binary file — there are no two texts for VS Code to compare");
+            return;
+        }
 
         string path;
         ExternalDiffMode mode;

@@ -131,14 +131,13 @@ public class PropertiesTests
     private static List<string>? Scope(DiffViewTests.Fixture t) =>
         (List<string>?)t.Invoke("ShellScope", 'L', "Properties");
 
-    private static HashSet<string> Marks(DiffViewTests.Fixture t) =>
-        (HashSet<string>)t.Invoke("Marks", 'L')!;
+    /// <summary>Leaf names of the left pane's marks — the set itself is keyed by full
+    /// path (CommanderApp.MarkKey), which these single-folder tests don't need to spell out.</summary>
+    private static HashSet<string> Marks(DiffViewTests.Fixture t) => t.MarkNames('L');
 
     private static void Mark(DiffViewTests.Fixture t, params string[] names)
     {
-        var marks = Marks(t);
-        foreach (var n in names) marks.Add(n);
-        t.MarkDirty();
+        t.Mark('L', names);
         t.Session.PumpFrame();
     }
 

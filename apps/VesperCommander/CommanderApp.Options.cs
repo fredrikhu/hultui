@@ -165,6 +165,10 @@ public partial class CommanderApp
                     ("Ask", _draft.Conflict == ConflictMode.Ask, () => SetDraft(() => _draft.Conflict = ConflictMode.Ask)),
                     ("Keep newer", _draft.Conflict == ConflictMode.KeepNewer, () => SetDraft(() => _draft.Conflict = ConflictMode.KeepNewer)),
                     ("Auto-rename", _draft.Conflict == ConflictMode.AutoRename, () => SetDraft(() => _draft.Conflict = ConflictMode.AutoRename))))),
+            new(0, "Find: max search depth", "find files search recursive levels subfolders limit depth",
+                () => FieldRow("Max search depth", FindDepthStepper())),
+            new(0, "Find: exclude folders", "find files search skip prune ignore git vs node_modules pattern",
+                () => FieldRow("Exclude folders", FindExcludeField())),
             // Panes
             new(1, "Size column", "columns visible",
                 () => ToggleRow(_draft.ShowSize, "Size column", () => Flip(ref _draft.ShowSize))),
@@ -258,6 +262,10 @@ public partial class CommanderApp
             ("Ask", _draft.Conflict == ConflictMode.Ask, () => SetDraft(() => _draft.Conflict = ConflictMode.Ask)),
             ("Keep newer", _draft.Conflict == ConflictMode.KeepNewer, () => SetDraft(() => _draft.Conflict = ConflictMode.KeepNewer)),
             ("Auto-rename", _draft.Conflict == ConflictMode.AutoRename, () => SetDraft(() => _draft.Conflict = ConflictMode.AutoRename)))));
+        page.AddChild(Divider());
+        page.AddChild(GroupLabel("Find files (Alt+F7)"));
+        page.AddChild(FieldRow("Max search depth", FindDepthStepper()));
+        page.AddChild(FieldRow("Exclude folders", FindExcludeField()));
     }
 
     private void PanesPage(BoxElement page)
@@ -460,21 +468,62 @@ public partial class CommanderApp
         return row;
     }
 
-    private static Element Stepper(int value, string unit, Action dec, Action inc)
+    private static Element Stepper(int value, string unit, Action dec, Action inc) =>
+        Stepper($"{value} {unit}", dec, inc);
+
+    /// <summary>A −/value/+ stepper whose middle cell shows an arbitrary label, so a value
+    /// where 0 has its own meaning can read "Unlimited" instead of "0 levels". The buttons are
+    /// icon-only, so <paramref name="id"/> is what lets a test (or a screen reader) name
+    /// them — "&lt;id&gt;:dec" / "&lt;id&gt;:inc".</summary>
+    private static Element Stepper(string display, Action dec, Action inc,
+        float width = 56f, string? id = null)
     {
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
-        row.AddChild(StepBtn(Glyphs.Minus, dec));
-        row.AddChild(Ui.Mono($"{value} {unit}", 11.5f, Nocturne.Text).Width(56).TextAlign(TextAlign.Center));
-        row.AddChild(StepBtn(Glyphs.Plus, inc));
+        row.AddChild(StepBtn(Glyphs.Minus, dec, id == null ? null : id + ":dec"));
+        row.AddChild(Ui.Mono(display, 11.5f, Nocturne.Text).Width(width).TextAlign(TextAlign.Center)
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        row.AddChild(StepBtn(Glyphs.Plus, inc, id == null ? null : id + ":inc"));
         return row;
     }
 
-    private static Element StepBtn(string icon, Action onClick)
+    // ── Find-files defaults (shared by the General page and settings search) ──
+    /// <summary>Default depth bound for Alt+F7 — folder levels below the searched folder,
+    /// 0 = unlimited. See <see cref="DepthLabel"/> for the wording.</summary>
+    private Element FindDepthStepper() => Stepper(DepthLabel(_draft.FindMaxDepth),
+        () => SetDraft(() => _draft.FindMaxDepth = Math.Max(0, _draft.FindMaxDepth - 1)),
+        () => SetDraft(() => _draft.FindMaxDepth = Math.Min(MaxFindDepth, _draft.FindMaxDepth + 1)),
+        width: 68f);
+
+    /// <summary>Default folder-exclude list for Alt+F7. Unlike the read-only tool fields this
+    /// one is editable, so it needs the bordered wrapper and an explicit height (a bare flex
+    /// TextInput paints nothing). No MarkDirty per keystroke — rebuilding with new text is
+    /// what loses the caret. Keyed because search results place it in a different subtree.</summary>
+    private Element FindExcludeField()
+    {
+        var box = Box.New().FlexGrow(1)
+            .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(3f)
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral800).BorderWidth(1f);
+        box.Key = "opt-find-exclude";
+        var input = TextInput.New(_draft.FindExcludeFolders)
+            .Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
+        input.PlaceholderText(".git;.vs");
+        input.OnTextChanged(v => _draft.FindExcludeFolders = v);
+        box.AddChild(input);
+        return box;
+    }
+
+    private static Element StepBtn(string icon, Action onClick, string? id = null)
     {
         var b = Box.New().Padding(new Thickness(3, 9, 3, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
             .BorderColor(Nocturne.Neutral800).BorderWidth(1f)
             .Children(Ui.Icon(icon, 12f, Nocturne.Neutral400));
         b.OnClick(_ => onClick());
+        if (id != null)
+        {
+            b.AutomationId = id;
+            b.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+            b.AccessibleName = icon == Glyphs.Minus ? "Decrease" : "Increase";
+        }
         return b.HoverBg(Nocturne.Neutral900, Color.Transparent);
     }
 

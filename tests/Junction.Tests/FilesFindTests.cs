@@ -188,6 +188,49 @@ public class FilesFindTests
         }, longFile: true);
     }
 
+    /// <summary>
+    /// A match below the fold in a file whose lines <i>wrap</i> is scrolled to just as far.
+    ///
+    /// <para>The reported bug: find scrolled "as far down as if no row wrapped", leaving the
+    /// match below the viewport. The body draws in wrapped rows and the reveal was multiplying
+    /// the <i>logical</i> line index by the row height, so every wrap above the match cost one
+    /// row of accuracy — a file wrapping four ways under-scrolled by roughly three quarters of
+    /// the distance.</para>
+    ///
+    /// <para>Asserted by comparison rather than against a pixel figure, because the right answer
+    /// depends on the measured line height and the wrap width and this has to hold on any font.
+    /// Two files, same line count, same marker on the same line, one wrapping and one not: the
+    /// wrapping one has strictly more rows above the marker, so it must end up strictly further
+    /// down. Under the old arithmetic both files produced the same offset, which is exactly the
+    /// symptom.</para>
+    /// </summary>
+    [Fact]
+    public void AMatchInAWrappedFileIsScrolledToItsRealRowNotItsLineNumber()
+    {
+        float flat = ScrollAfterFindingTheMarker(wrapping: false);
+        float wrapped = ScrollAfterFindingTheMarker(wrapping: true);
+
+        Assert.True(flat > 0, "the unwrapped file's match is hundreds of lines down and it never scrolled");
+        Assert.True(wrapped > flat,
+            $"every line above the match wraps, so the match sits far further down than its line "
+            + $"number suggests — the body stopped at {wrapped:F0}px, no further than the "
+            + $"{flat:F0}px an unwrapped file of the same length needs");
+    }
+
+    private static float ScrollAfterFindingTheMarker(bool wrapping)
+    {
+        float scroll = 0;
+        Hosted((session, app) =>
+        {
+            Find(session, app, "far-below");
+            Assert.NotEmpty(Search(app).Hits);
+            try { session.PumpUntil(() => ScrollY(app) > 0, TimeSpan.FromSeconds(15)); }
+            catch (TimeoutException) { /* the assertion in the caller reports it */ }
+            scroll = ScrollY(app);
+        }, longFile: true, wrapping: wrapping);
+        return scroll;
+    }
+
     // ── Reaching the app's state ─────────────────────────────────────────
 
     private static object State(JunctionApp app) =>
@@ -244,13 +287,17 @@ public class FilesFindTests
     /// <summary>The Files view on a committed source file, with the cursor already on it —
     /// the view browses the tree at the selected commit, so the file has to be in one.</summary>
     private static void Hosted(Action<HeadlessSession, JunctionApp> body, bool longFile = false,
-        bool record = false)
+        bool record = false, bool wrapping = false)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         // A .cs file so the grammar colours it: one of these tests is about a match not
         // discarding the syntax colour under it.
+        // `wrapping` pads every line past any plausible pane width, so each one occupies
+        // several drawn rows while the line *count* stays the same as the flat variant —
+        // the pair the wrapped-scroll test compares.
+        var filler = wrapping ? " " + string.Join(' ', Enumerable.Repeat("filler", 70)) : "";
         repo.Write("sample.cs", longFile
-            ? Lines("// old line {0}", 400) + "// the far-below marker\n"
+            ? Lines("// old line {0}" + filler, 400) + "// the far-below marker\n"
             : "class Alpha\n{\n    // needle one\n    void M() { }\n    // needle two\n"
               + "    int x;\n    // needle three\n}\n");
         repo.Git("add", "-A");

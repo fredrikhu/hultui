@@ -64,6 +64,43 @@ public class GitRepositoryTests
     }
 
     [Fact]
+    public void StageAndUnstageTakeSeveralFilesAtOnce()
+    {
+        using var t = TempRepo.CreateWithInitialCommit();
+        t.Write("a.txt", "a\n");
+        t.Write("b.txt", "b\n");
+        t.Write("c.txt", "c\n");
+
+        // Two of the three: the batch has to name its files, not sweep the worktree
+        // the way `git add -A` would.
+        Assert.True(t.Repo.Stage(["a.txt", "b.txt"]));
+        Assert.Equal(["a.txt", "b.txt"], t.Repo.GetStagedChanges().Select(c => c.Path).Order());
+        Assert.Equal("c.txt", Assert.Single(t.Repo.GetUnstagedChanges()).Path);
+
+        Assert.True(t.Repo.Unstage(["a.txt", "b.txt"]));
+        Assert.Empty(t.Repo.GetStagedChanges());
+    }
+
+    [Fact]
+    public void DiscardingASetRestoresTrackedFilesAndDeletesUntrackedOnes()
+    {
+        using var t = TempRepo.CreateWithInitialCommit();
+        t.Write("tracked.txt", "committed\n");
+        t.Git("add", "-A");
+        t.Git("commit", "-m", "add tracked");
+        t.Write("tracked.txt", "edited\n");
+        t.Write("fresh.txt", "never committed\n");
+
+        // The two kinds need different git commands; discarding a mixed set has to do
+        // both, which a single `git restore` over every path silently would not.
+        Assert.True(t.Repo.DiscardChanges(t.Repo.GetUnstagedChanges()));
+
+        Assert.Equal("committed\n", t.Read("tracked.txt"));
+        Assert.False(File.Exists(System.IO.Path.Combine(t.Path, "fresh.txt")));
+        Assert.Empty(t.Repo.GetUnstagedChanges());
+    }
+
+    [Fact]
     public void ARenameIsReportedAsOneChangeWithBothPaths()
     {
         using var t = TempRepo.CreateWithInitialCommit();

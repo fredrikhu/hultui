@@ -422,6 +422,9 @@ public partial class CommanderApp
         var results = RenameEngine.Apply(rows);
         _renSucceeded += results.Count(r => r.Error == null);
         BumpGen(_renameSide);   // refresh the pane
+        // A fed-in result set holds its own rows: the renamed paths are gone, so re-stat both
+        // sides (either pane may be showing a set that included these files).
+        RefreshResultsBothSides();
 
         var failed = results.Where(r => r.Error != null).Select(r => (r.Row, r.Error!)).ToList();
         if (failed.Count == 0)

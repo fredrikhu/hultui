@@ -13,11 +13,13 @@ public partial class JunctionApp
     /// <summary>A one-field modal prompt, optionally with a checkbox.
     /// <see cref="Validate"/> returns an error message to reject the value (kept
     /// open), or null to accept. <see cref="OnConfirm"/> receives the field value
-    /// and the checkbox state (false when the prompt has no checkbox).</summary>
+    /// and the checkbox state (false when the prompt has no checkbox).
+    /// A null <see cref="Placeholder"/> drops the field entirely — that is the
+    /// confirm-only shape, see <see cref="OpenConfirm"/>.</summary>
     private sealed record DialogSpec(
         string Title,
         string? Body,
-        string Placeholder,
+        string? Placeholder,
         string ConfirmLabel,
         Action<string, bool> OnConfirm,
         Func<string, string?>? Validate = null,
@@ -29,9 +31,18 @@ public partial class JunctionApp
         _dialog = spec;
         _dialogValue = initial;
         _dialogChecked = spec.CheckboxInitial;
-        _pendingDialogFocus = true;
+        // Only ask for focus when there is a field to give it to: _dialogRef still
+        // points at the last prompt's (unmounted) input, and focusing that corpse
+        // takes the keyboard away from the root handler this dialog's Enter needs.
+        _pendingDialogFocus = spec.Placeholder != null;
         MarkDirty();
     }
+
+    /// <summary>A confirm-only modal: the same card without a field, for the
+    /// destructive actions that have to say what they are about to destroy before
+    /// they do it. Enter accepts (handled by the root key handler), Esc cancels.</summary>
+    private void OpenConfirm(string title, string body, string confirmLabel, Action onConfirm) =>
+        OpenDialog(new DialogSpec(title, body, null, confirmLabel, (_, _) => onConfirm()));
 
     private void CloseDialog()
     {
@@ -81,26 +92,40 @@ public partial class JunctionApp
             .CornerRadius(Nocturne.RadiusLg);
         card.On<ClickEvent>(e => e.StopPropagation = true);
 
-        card.AddChild(Text.New(spec.Title).FontSize(19f).FontWeight(FontWeight.SemiBold));
+        // Key every child: the field and the checkbox are both optional, so without
+        // keys the actions row can land at the index the field had and be patched
+        // from it — a prompt that had a field and one that doesn't share this card.
+        var title = Text.New(spec.Title).FontSize(19f).FontWeight(FontWeight.SemiBold);
+        title.Key = "dialog-title";
+        card.AddChild(title);
         if (!string.IsNullOrEmpty(spec.Body))
-            card.AddChild(Text.New(spec.Body).FontSize(13f).TextColor(Nocturne.On(0.72)));
+        {
+            var body = Text.New(spec.Body).FontSize(13f).TextColor(Nocturne.On(0.72));
+            body.Key = "dialog-body";
+            card.AddChild(body);
+        }
 
         // Input: bordered wrapper; the field itself is flush/borderless via theme.
-        var inputBox = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(38).Padding(new Thickness(0, 12, 0, 12))
-            .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(_dialogValue);
-        input.PlaceholderText(spec.Placeholder)
-            .OnTextChanged(v => { _dialogValue = v; MarkDirty(); })
-            .Height(Dimension.Px(30))
-            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
-            .TextColor(Nocturne.Text)
-            .WithRef(_dialogRef);
-        input.On<KeyDownEvent>(DialogKey);
-        inputBox.AddChild(input);
-        card.AddChild(inputBox);
+        // A confirm-only prompt (no placeholder) has no field at all.
+        if (spec.Placeholder is { } placeholder)
+        {
+            var inputBox = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
+                .Height(38).Padding(new Thickness(0, 12, 0, 12))
+                .Background(Nocturne.Bg)
+                .BorderColor(Nocturne.Divider).BorderWidth(1f)
+                .CornerRadius(Nocturne.RadiusMd);
+            var input = TextInput.New(_dialogValue);
+            input.PlaceholderText(placeholder)
+                .OnTextChanged(v => { _dialogValue = v; MarkDirty(); })
+                .Height(Dimension.Px(30))
+                .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+                .TextColor(Nocturne.Text)
+                .WithRef(_dialogRef);
+            input.On<KeyDownEvent>(DialogKey);
+            inputBox.AddChild(input);
+            inputBox.Key = "dialog-input";
+            card.AddChild(inputBox);
+        }
 
         // Optional checkbox.
         if (spec.CheckboxLabel is { } checkLabel)
@@ -109,11 +134,13 @@ public partial class JunctionApp
                 .OnCheckedChanged(v => { _dialogChecked = v; MarkDirty(); });
             check.LabelGap = 9f;
             check.TextColor(Nocturne.On(0.82)).FontSize(13f);
+            check.Key = "dialog-check";
             card.AddChild(check);
         }
 
         // Actions.
         var actions = Flex.Row(gap: 8).JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
+        actions.Key = "dialog-actions";
         actions.AddChild(Ui.SecondaryButton("Cancel", null, CloseDialog, 12.5f));
         actions.AddChild(Ui.PrimaryButton(spec.ConfirmLabel, null, ConfirmDialog, 12.5f));
         card.AddChild(actions);

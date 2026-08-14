@@ -138,9 +138,9 @@ public partial class CommanderApp
     {
         if (!_rmarkActive) return;
         var marks = Marks(_rmarkSide);
-        foreach (var name in _rmarkSeen)
+        foreach (var path in _rmarkSeen)
         {
-            if (_rmarkAdd) marks.Remove(name); else marks.Add(name);
+            if (_rmarkAdd) marks.Remove(path); else marks.Add(path);
         }
         EndRightMark();
         MarkDirty();

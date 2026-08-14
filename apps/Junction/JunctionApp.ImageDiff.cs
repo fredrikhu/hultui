@@ -97,28 +97,12 @@ public partial class JunctionApp
     /// has no image comparison to make.</summary>
     private Element? BuildImageDiffBody(string path)
     {
-        if (!HasActiveRepo) return null;
+        // Which two blobs to compare, and the key naming that pair, are the same questions
+        // the binary summary asks — see CurrentDiffSource / DiffSourceKey.
+        if (CurrentDiffSource() is not { } src) return null;
+        var (mode, commitHash, baseHash) = src;
 
-        ExternalDiffMode mode;
-        string? commitHash = null, baseHash = null;
-        if (View == JunctionView.Commit)
-        {
-            if (_detailRange is { } r) { mode = ExternalDiffMode.Commit; commitHash = r.HeadHash; baseHash = r.BaseHash; }
-            else if (_detailHash is { } h) { mode = ExternalDiffMode.Commit; commitHash = h; }
-            else return null;
-        }
-        else if (View == JunctionView.Changes)
-        {
-            mode = _changeSelStaged ? ExternalDiffMode.Staged : ExternalDiffMode.Unstaged;
-        }
-        else
-        {
-            return null;
-        }
-
-        var key = mode == ExternalDiffMode.Commit
-            ? $"{_activeRepoPath}|{baseHash ?? commitHash + "^"}..{commitHash}|{path}"
-            : $"{_activeRepoPath}|{DataGen(_activeRepoPath)}|{mode}|{path}";
+        var key = DiffSourceKey(mode, commitHash, baseHash, path);
 
         var loader = _imageDiffLoaders.For(key);
         var repoPath = _activeRepoPath;
