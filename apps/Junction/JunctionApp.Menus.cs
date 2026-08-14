@@ -22,6 +22,12 @@ public partial class JunctionApp
     private static ContextMenuItem Danger(string glyph, string label, Action run) =>
         new() { Icon = MenuIcon(glyph), Label = label, Action = run, IsDanger = true };
 
+    /// <summary>An entry that stays in the menu but cannot be chosen — for an action that
+    /// belongs here and is unavailable right now, where dropping the row instead would only
+    /// leave the reader wondering whether the feature exists.</summary>
+    private static ContextMenuItem Unavailable(string glyph, string label) =>
+        new() { Icon = MenuIcon(glyph), Label = label, IsDisabled = true };
+
     private static ContextMenuItem SubMenu(string glyph, string label, IReadOnlyList<ContextMenuItem> children) =>
         new() { Icon = MenuIcon(glyph), Label = label, Children = children };
 

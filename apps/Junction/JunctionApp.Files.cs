@@ -8,6 +8,7 @@ using HultUI.Core.Rendering;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using Junction.Git;
+using Junction.Platform;
 using Junction.Theme;
 
 using HultUI.Icons;
@@ -280,10 +281,24 @@ public partial class JunctionApp
             .TextColor(node.IsDir ? Nocturne.Text : Nocturne.On(selected ? 0.9 : 0.72))
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
 
+        // Both clicks of a double-click reach the same handler, as count 1 then count 2.
+        // A folder must ignore the second, or the pair toggles it open and shut again;
+        // a file uses it the way a file manager does, to launch what was just selected.
         if (node.IsDir)
-            row.OnClick(_ => { _filesCursorPath = node.Path; ToggleFolder(node.Path); });
+            row.OnClick(e =>
+            {
+                if (e.ClickCount >= 2) return;
+                _filesCursorPath = node.Path;
+                ToggleFolder(node.Path);
+            });
         else
-            row.OnClick(_ => { _filesCursorPath = node.Path; SelectTreeFile(node.Path); });
+            row.OnClick(e =>
+            {
+                _filesCursorPath = node.Path;
+                if (e.ClickCount >= 2) LaunchFilesPath(node.Path);
+                else SelectTreeFile(node.Path);
+            });
+        row.ContextMenu(() => FilesTreeMenuItems(node));
         if (!selected && !cursor) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
@@ -324,8 +339,10 @@ public partial class JunctionApp
             case KeyCode.End: MoveFilesCursor(_filesFlat.Count - 1); return true;
             case KeyCode.Right: FilesTreeExpand(idx); return true;
             case KeyCode.Left: FilesTreeCollapse(idx); return true;
-            case KeyCode.Enter:
-            case KeyCode.Space: FilesTreeActivate(idx); return true;
+            // Enter launches, like a file manager; Space is the quieter half that only
+            // opens the file in the pane, for walking a tree without starting programs.
+            case KeyCode.Enter: FilesTreeActivate(idx, launch: true); return true;
+            case KeyCode.Space: FilesTreeActivate(idx, launch: false); return true;
             default: return false;
         }
     }
@@ -393,13 +410,14 @@ public partial class JunctionApp
         if (slash > 0) MoveFilesCursorToPath(node.Path[..slash]);
     }
 
-    private void FilesTreeActivate(int idx)
+    private void FilesTreeActivate(int idx, bool launch)
     {
         var node = _filesFlat[idx].node;
         _filesCursorPath = node.Path;
         _pendingFilesTreeScroll = true;
-        if (node.IsDir) ToggleFolder(node.Path);       // MarkDirty inside
-        else SelectTreeFile(node.Path);                // Rerender inside
+        if (node.IsDir) { ToggleFolder(node.Path); return; }   // MarkDirty inside
+        SelectTreeFile(node.Path);                             // Rerender inside
+        if (launch) LaunchFilesPath(node.Path);
     }
 
     // ── Content pane ─────────────────────────────────────────────────────
@@ -455,6 +473,24 @@ public partial class JunctionApp
         if (content.Lines is { } l)
             header.AddChild(Text.New($"{l.Length} lines").FontSize(11f)
                 .TextColor(Nocturne.On(0.45)).FlexShrink(0));
+        // Blame is only meaningful over text: an image or a binary blob has no lines for git
+        // to attribute, so the toggle is not offered rather than offered and empty.
+        if (content.Lines is { Length: > 0 })
+            header.AddChild(BlameToggle());
+        // Keyed: these two come and go with whether the file is still in the working tree,
+        // and an unkeyed button appearing beside an unkeyed one is exactly the case where a
+        // patched-over element keeps the handler of whatever last held the slot.
+        if (WorktreePath(path) != null)
+        {
+            var open = Ui.IconButton(Icons.RocketLaunch, () => LaunchFilesPath(path),
+                "Open with the default app (Enter)", 28f).FlexShrink(0);
+            open.Key = "files-open";
+            header.AddChild(open);
+            var reveal = Ui.IconButton(Icons.FolderOpen, () => RevealFilesPath(path),
+                ShellLauncher.RevealLabel, 28f).FlexShrink(0);
+            reveal.Key = "files-reveal";
+            header.AddChild(reveal);
+        }
         pane.AddChild(header);
         if (_filesFind.Open)
         {
@@ -465,7 +501,21 @@ public partial class JunctionApp
             pane.AddChild(bar);
         }
 
-        pane.AddChild(BuildFileBody(loader, content));
+        // Keyed: the two bodies are different elements in one slot, and the source body is the
+        // one carrying a focusable TextArea — swapping them unkeyed is the case where a
+        // patched-over element keeps the previous variant's handlers.
+        Element body;
+        if (_filesBlame && content.Lines is { Length: > 0 })
+        {
+            body = BuildBlameBody(reference, path, content);
+            body.Key = "files-body-blame";
+        }
+        else
+        {
+            body = BuildFileBody(loader, content);
+            body.Key = "files-body-source";
+        }
+        pane.AddChild(body);
         return pane;
     }
 
@@ -543,6 +593,88 @@ public partial class JunctionApp
         _fileBodyText = text;
         _fileBodySpans = flat;
         return (text, flat);
+    }
+
+    // ── Launching into the desktop ───────────────────────────────────────
+    //
+    // The tree lists a *commit's* files, and a commit is not a folder. A row here exists on
+    // disk only while the working tree still carries it — browse an old commit, or a file
+    // deleted since, and there is nothing to hand the desktop. So every entry point asks the
+    // filesystem first and says why when the answer is no, rather than launching a path that
+    // is not there and letting the OS produce the error.
+
+    /// <summary>Where a repo-relative path lives in the working tree, or null when nothing is
+    /// there. Git spells paths with '/' on every platform; the filesystem may not.</summary>
+    private string? WorktreePath(string relPath)
+    {
+        if (string.IsNullOrEmpty(_activeRepoPath) || string.IsNullOrEmpty(relPath)) return null;
+        var full = System.IO.Path.Combine(_activeRepoPath,
+            relPath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+        return File.Exists(full) || Directory.Exists(full) ? full : null;
+    }
+
+    /// <summary>Opens a tree row with the OS default handler. Off the UI thread: a Windows
+    /// association lookup goes through COM and can stall for the better part of a second, and
+    /// this is on the double-click path.</summary>
+    private async void LaunchFilesPath(string relPath)
+    {
+        if (WorktreePath(relPath) is not { } full) { Flash(NotOnDisk(relPath)); return; }
+        var (ok, error) = await Task.Run(() =>
+        {
+            var started = ShellLauncher.Open(full, out var err);
+            return (started, err);
+        });
+        if (!ok)
+            Flash(string.IsNullOrEmpty(error) ? "Nothing is registered to open this file" : error);
+    }
+
+    private async void RevealFilesPath(string relPath)
+    {
+        if (WorktreePath(relPath) is not { } full) { Flash(NotOnDisk(relPath)); return; }
+        var (ok, error) = await Task.Run(() =>
+        {
+            var started = ShellLauncher.Reveal(full, out var err);
+            return (started, err);
+        });
+        if (!ok)
+            Flash(string.IsNullOrEmpty(error) ? "Could not open the file manager" : error);
+    }
+
+    private static string NotOnDisk(string relPath) =>
+        $"{System.IO.Path.GetFileName(relPath)} isn't in the working tree";
+
+    private IReadOnlyList<ContextMenuItem> FilesTreeMenuItems(TreeNode node)
+    {
+        var onDisk = WorktreePath(node.Path) is { } full ? full : null;
+        var items = new List<ContextMenuItem>();
+
+        if (onDisk != null)
+        {
+            items.Add(Item(node.IsDir ? Icons.FolderOpen : Icons.RocketLaunch,
+                node.IsDir ? "Open folder" : "Open",
+                () => LaunchFilesPath(node.Path)));
+            items.Add(Item(Icons.FolderOpen, ShellLauncher.RevealLabel, () => RevealFilesPath(node.Path)));
+        }
+        else
+        {
+            // Named rather than dropped: browsing an old commit is the common way to land
+            // here, and a row that simply loses its Open entry reads as a broken menu.
+            items.Add(Unavailable(Icons.RocketLaunch, "Open — not in the working tree"));
+        }
+
+        if (!node.IsDir)
+        {
+            items.Add(ContextMenuItem.Separator());
+            // Blame reads the commit's blob, not the disk, so this is offered whether or not
+            // the working tree still has the file.
+            items.Add(Item(Icons.Blame, "Blame", () => BlameTreeFile(node.Path)));
+        }
+
+        items.Add(ContextMenuItem.Separator());
+        items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(node.Path)));
+        if (onDisk != null)
+            items.Add(Item(Icons.Copy, "Copy full path", () => CopyToClipboard(onDisk)));
+        return items;
     }
 }
 
@@ -625,12 +757,22 @@ public partial class JunctionApp
         return merged;
     }
 
-    /// <summary>Brings the current match on screen. The TextArea scrolls by line, and the
-    /// search already answers in lines, so no offset arithmetic is needed here.</summary>
+    /// <summary>
+    /// Brings the current match on screen.
+    ///
+    /// <para>Handed to the body as an absolute offset rather than a line number. The body wraps,
+    /// so one logical line can be several drawn rows: a line index only names the row the line
+    /// <i>starts</i> on, and a match near the end of a paragraph-long line would be scrolled to
+    /// just off the bottom. The offsets are the ones already computed for the tinting, so this
+    /// costs nothing extra.</para>
+    /// </summary>
     private void RevealFilesHit()
     {
         if (_fileBodyRef.Current is not { } area) return;
         if (_filesFind.Search.Current is not { } hit) return;
-        area.ScrollLineIntoView(hit.Line);
+        if (hit.Line >= 0 && hit.Line < _fileLineStarts.Length)
+            area.ScrollOffsetIntoView(_fileLineStarts[hit.Line] + hit.Start);
+        else
+            area.ScrollLineIntoView(hit.Line);   // starts not built yet (no tinting pass ran)
     }
 }

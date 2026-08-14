@@ -51,6 +51,11 @@ public partial class JunctionApp
     {
         s.Open = true;
         s.PendingFocus = true;
+        // Find works over the file's text, and blame replaces that text with a gutter view
+        // whose rows are a virtual list — nothing for the search to bind to, and its reveal
+        // would be scrolling a body no longer on screen. So Ctrl+F comes back to the source
+        // rather than opening a bar that could not answer.
+        if (ReferenceEquals(s, _filesFind)) _filesBlame = false;
         MarkDirty();
     }
 

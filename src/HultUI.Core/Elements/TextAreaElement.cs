@@ -634,16 +634,30 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
     /// matches down a file does not yank the viewport on every step.
     ///
     /// <para>Counted in <i>logical</i> lines, which is what a caller searching the text has.
-    /// With wrapping on, a logical line can occupy several drawn rows, so the position is an
-    /// estimate that lands on the right screenful rather than the exact row; without wrapping
-    /// the two are the same thing.</para>
+    /// The body is drawn in <i>wrapped</i> rows, and every row is one line height tall, so the
+    /// two only agree while nothing wraps. Multiplying the logical index by the line height —
+    /// which is what this used to do — therefore lands short by one row per wrap above the
+    /// target, and the further down the file the match is, the further above the viewport's
+    /// bottom edge it stops. The line's character offset is resolved through the same wrap
+    /// cache the renderer uses, so the answer is the row the line actually starts on.</para>
     /// </summary>
-    public void ScrollLineIntoView(int line)
+    public void ScrollLineIntoView(int line) =>
+        ScrollOffsetIntoView(OffsetOfLogicalLine(line));
+
+    /// <summary>
+    /// Brings the character at <paramref name="offset"/> into view. Same scroll-only-when-needed
+    /// behaviour as <see cref="ScrollLineIntoView"/>, but exact for a caller that already holds
+    /// an absolute offset: on a logical line long enough to wrap several times, this lands on
+    /// the row carrying that character rather than the row the line began on.
+    /// </summary>
+    public void ScrollOffsetIntoView(int offset)
     {
-        float lh = GetLineHeight(ResolvedInherited);
+        var style = ResolvedInherited;
+        float lh = GetLineHeight(style);
         if (lh <= 0) return;
+        var (row, _) = CursorToLineCol(Math.Clamp(offset, 0, _text.Length), GetWrapWidth(), style);
         float viewport = Layout.AbsoluteContentBox.Height;
-        float top = line * lh;
+        float top = row * lh;
 
         if (top < _scrollOffsetY)
             _scrollOffsetY = top;
@@ -654,6 +668,20 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
 
         _scrollOffsetY = Math.Clamp(_scrollOffsetY, 0, MaxScrollY());
         MarkPaintDirty();
+    }
+
+    /// <summary>Character offset where hard line <paramref name="line"/> begins. Past the last
+    /// line clamps to that line's start, so a stale index scrolls to the end rather than to 0.</summary>
+    private int OffsetOfLogicalLine(int line)
+    {
+        int offset = 0;
+        for (int seen = 0; seen < line; seen++)
+        {
+            int nl = _text.IndexOf('\n', offset);
+            if (nl < 0) break;
+            offset = nl + 1;
+        }
+        return offset;
     }
 
     /// <summary>Scrolls the viewport by <paramref name="lines"/> text lines (read-only pager nav).</summary>
