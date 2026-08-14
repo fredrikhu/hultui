@@ -52,6 +52,43 @@ public class BlameRevealTests
     }
 
     [Fact]
+    public void RevealingACommitFarDownTheListScrollsToIt()
+    {
+        // The whole point of "reveal" rather than "open": the commit has to end up on
+        // screen. Selecting it and leaving the list at the top is the failure this guards.
+        Hosted((repo, session, app) =>
+        {
+            var old = repo.Repo.Blame("story.txt")[0].CommitHash;   // the very first commit
+
+            Invoke(app, "RevealCommitInHistory", old);
+            session.PumpUntil(() => app.View == JunctionView.History, TimeSpan.FromSeconds(20));
+
+            // Wait for what is asserted, not a frame count: the log for 60-odd commits
+            // loads off-thread, and only then can the reveal settle and the post-frame
+            // scroll run. A fixed PumpFrames passed alone and failed under a full suite.
+            // The timeout falls through so the assertions report, not the pump.
+            try
+            {
+                session.PumpUntil(
+                    () => session.Window.DumpAccessibilityTree().Contains("first pass", StringComparison.Ordinal),
+                    TimeSpan.FromSeconds(30));
+            }
+            catch (TimeoutException) { }
+
+            var list = Field<HultUI.Core.Reactivity.Ref<VirtualListElement<GitCommit>>>(app, "_commitListRef")
+                .Current;
+            Assert.NotNull(list);
+            Assert.True(list!.ScrollOffsetY > 0,
+                $"the list is still at the top ({list.ScrollOffsetY}) — the revealed commit is off screen");
+
+            // Stronger than a non-zero offset, and the thing the reader actually cares
+            // about: a VirtualList only realizes the rows in view, so the oldest commit's
+            // subject reaching the tree means the row is genuinely on screen.
+            Assert.Contains("first pass", session.Window.DumpAccessibilityTree(), StringComparison.Ordinal);
+        }, extraCommits: 60);
+    }
+
+    [Fact]
     public void RevealingClearsASearchThatWouldHideTheRow()
     {
         Hosted((repo, session, app) =>
@@ -127,8 +164,10 @@ public class BlameRevealTests
     private static T Field<T>(JunctionApp app, string name) =>
         (T)typeof(JunctionApp).GetField(name, Priv)!.GetValue(app)!;
 
-    /// <summary>Three lines over two commits, opened on the Files view showing the file.</summary>
-    private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp> body)
+    /// <summary>Three lines over two commits, opened on the Files view showing the file.
+    /// <paramref name="extraCommits"/> piles unrelated commits on top, so the blamed ones
+    /// end up far enough down the history that reaching them needs a scroll.</summary>
+    private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp> body, int extraCommits = 0)
     {
         using var repo = TempRepo.CreateEmpty();
         repo.Write("story.txt", "first line\nsecond line\n");
@@ -139,6 +178,13 @@ public class BlameRevealTests
         repo.Write("story.txt", "first line\nsecond line\nthird line\n");
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "second pass");
+
+        for (var i = 0; i < extraCommits; i++)
+        {
+            repo.Write("filler.txt", $"{i}\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", $"filler {i}");
+        }
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;

@@ -253,7 +253,13 @@ public partial class JunctionApp
 
         if (IndexOfHash(filtered, hash) >= 0)
         {
-            _pendingScrollToSelected = true;
+            // Not _pendingScrollToSelected: that is consumed in OnAfterBuild, which runs
+            // *before* the layout pass. The other setters get away with it because they
+            // scroll a list that earlier frames already laid out, but a reveal arrives with
+            // History being built for the first time — the list's viewport and content
+            // heights are both still 0, so ScrollRangeIntoView clamps the offset to 0 and
+            // the commit is selected but left off screen. Scroll once the frame is laid out.
+            _window.RequestPostFrameCallback(EnsureSelectedCommitVisible);
             return;
         }
 
