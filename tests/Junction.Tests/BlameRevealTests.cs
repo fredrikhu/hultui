@@ -63,28 +63,29 @@ public class BlameRevealTests
             Invoke(app, "RevealCommitInHistory", old);
             session.PumpUntil(() => app.View == JunctionView.History, TimeSpan.FromSeconds(20));
 
-            // Wait for what is asserted, not a frame count: the log for 60-odd commits
-            // loads off-thread, and only then can the reveal settle and the post-frame
-            // scroll run. A fixed PumpFrames passed alone and failed under a full suite.
-            // The timeout falls through so the assertions report, not the pump.
+            // Wait for the scroll itself. The log for 60-odd commits loads off-thread, and
+            // only then can the reveal settle and its post-frame callback run — so there is
+            // no frame count that is right on every machine.
+            //
+            // Waiting on the asserted value is safe here precisely because the bug is not
+            // slowness: a pre-layout scroll clamps the offset to 0 and leaves it there, so a
+            // broken build never satisfies this and falls out at the timeout. The negative
+            // control confirms it. An earlier version waited on the commit's subject reaching
+            // the accessibility tree instead, which looked stronger and was not: a dump can
+            // carry rows the VirtualList has not realized, so it went through while the list
+            // sat at the top. That is what failed on CI.
+            var listRef = Field<HultUI.Core.Reactivity.Ref<VirtualListElement<GitCommit>>>(app, "_commitListRef");
             try
             {
-                session.PumpUntil(
-                    () => session.Window.DumpAccessibilityTree().Contains("first pass", StringComparison.Ordinal),
+                session.PumpUntil(() => listRef.Current is { ScrollOffsetY: > 0 },
                     TimeSpan.FromSeconds(30));
             }
             catch (TimeoutException) { }
 
-            var list = Field<HultUI.Core.Reactivity.Ref<VirtualListElement<GitCommit>>>(app, "_commitListRef")
-                .Current;
+            var list = listRef.Current;
             Assert.NotNull(list);
             Assert.True(list!.ScrollOffsetY > 0,
                 $"the list is still at the top ({list.ScrollOffsetY}) — the revealed commit is off screen");
-
-            // Stronger than a non-zero offset, and the thing the reader actually cares
-            // about: a VirtualList only realizes the rows in view, so the oldest commit's
-            // subject reaching the tree means the row is genuinely on screen.
-            Assert.Contains("first pass", session.Window.DumpAccessibilityTree(), StringComparison.Ordinal);
         }, extraCommits: 60);
     }
 
