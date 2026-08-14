@@ -17,13 +17,13 @@ The framework has three test layers plus ad-hoc verification. Pick the lowest la
 | `tests/Junction.Tests` | app | `apps/Junction`: pure logic (diff/conflict/patch/graph parsing), `GitRepository` against real temp repos, plus the whole app hosted headless |
 | `tests/VesperCommander.Tests` | app | `apps/VesperCommander`: engines (find/sync/rename/diff/archive) plus headless hosting |
 | `tests/HultUI.Text.Tests`, `HultUI.Rendering.Skia.Tests`, `HultUI.SourceGenerators.Tests`, `HultUI.Platform.Accessibility.Linux.Tests` | subsystem unit | text pipeline, Skia surfaces, reactive generator, AT-SPI constants |
-| `tests/HultUI.UiTests` | real window (Windows-only, local-only) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients. Excluded from CI |
+| `tests/HultUI.UiTests` | real window (Windows-only, **opt-in**) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients. Skipped unless `HULTUI_UITESTS=1` |
 
 ## Running tests
 
 ```powershell
-# Everything CI runs (excludes real-window UiTests):
-dotnet test HultUI.slnx --filter "FullyQualifiedName!~HultUI.UiTests"
+# Everything CI runs. The real-window UiTests skip themselves:
+dotnet test HultUI.slnx
 
 # Cross-platform subset (what the Linux CI leg runs):
 dotnet test HultUI.CrossPlatform.slnf
@@ -31,18 +31,27 @@ dotnet test HultUI.CrossPlatform.slnf
 # One project / one test:
 dotnet test tests/HultUI.Headless.Tests
 dotnet test tests/HultUI.Core.Tests --filter "FullyQualifiedName~PatchFrom_Preserves"
+
+# The real-window UiTests, which take over the foreground (Windows, desktop session):
+$env:HULTUI_UITESTS = "1"; dotnet test tests/HultUI.UiTests
 ```
+
+**`HULTUI_UITESTS` is the gate for the real-window suite.** Without it every UiTest
+reports as *skipped* — deliberately visible, rather than silently absent the way the old
+`--filter "FullyQualifiedName!~HultUI.UiTests"` left them. Don't reintroduce that filter:
+the gate is the one mechanism, and a name filter also swallows any future test whose name
+happens to contain the string.
 
 - `dotnet build`/`dotnet test` take **one** project per invocation (MSB1008) — run them separately or use the solution.
 - MSB3027 "file locked" usually means a previously launched sample app still holds its exe — find and `Stop-Process` it.
-- Reference CI: `.github/workflows/junction-installer.yml` (`test` on windows-latest with the UiTests filter; `test-linux` on ubuntu-latest with the slnf).
+- Reference CI: `.github/workflows/junction-installer.yml` (`test` on windows-latest runs the whole slnx and lets the UiTests skip themselves; `test-linux` on ubuntu-latest with the slnf).
 
 ## Choosing a layer
 
 - **Element/layout/event logic** → Core.Tests. Build elements directly, dispatch with `EventDispatcher.Dispatch(new ClickEvent(), target)`, measure text with `StubMeasureContext` (7px/char, 14px lines). Target-phase dispatch runs *all* handlers in registration order; `StopPropagation` breaks the loop.
 - **Anything needing a laid-out frame, focus, input funnel, scrolling, animations, or a11y queries** → HultUI.Headless. Full guide: `docs/HEADLESS.md`. Runs on any CI runner, no display.
 - **Sample-app behavior** → host the whole app headlessly (below), or tree-walk like TodoList tests if no layout is needed.
-- **"Does a real screen reader / UIA client see it?"** → HultUI.UiTests with FlaUI. Windows only, launches real windows — run locally, never in CI.
+- **"Does a real screen reader / UIA client see it?"** → HultUI.UiTests with FlaUI. Windows only, launches real windows that take the foreground — run locally with `HULTUI_UITESTS=1`, never in CI.
 - **Perf/GL** → real window with tracing (`HULTUI_TRACE=<path>`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`), or `samples/HultUI.Samples.Benchmark --auto|--profile`, or the live **F12 HUD** (below). Never use the real window for *correctness* checks.
 
 ## Headless quick reference

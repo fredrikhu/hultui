@@ -31,7 +31,7 @@ public sealed class VirtualListSampleTests : IDisposable
         _window.FindFirstDescendant(cf => cf.ByControlType(ControlType.List))
         ?? throw new InvalidOperationException("no List found");
 
-    [Fact]
+    [UiFact]
     public void List_ExposesFirstItem_Lazily()
     {
         var first = List().FindFirstChild();
@@ -40,7 +40,7 @@ public sealed class VirtualListSampleTests : IDisposable
         Assert.Equal("Item #0", first.Name);
     }
 
-    [Fact]
+    [UiFact]
     public void ListItem_ReportsAndUpdatesSelection()
     {
         var first = List().FindFirstChild()!;
@@ -56,7 +56,7 @@ public sealed class VirtualListSampleTests : IDisposable
             timeoutMessage: "item did not become selected after Select()");
     }
 
-    [Fact]
+    [UiFact]
     public void ListItems_ReportOffscreenState()
     {
         var list = List();
@@ -69,7 +69,7 @@ public sealed class VirtualListSampleTests : IDisposable
         Assert.True(last!.Properties.IsOffscreen.Value);
     }
 
-    [Fact]
+    [UiFact]
     public void List_SupportsScrollPattern()
     {
         var list = List();
@@ -88,7 +88,7 @@ public sealed class VirtualListSampleTests : IDisposable
         Assert.True(list.FindFirstChild()!.Properties.IsOffscreen.Value);
     }
 
-    [Fact]
+    [UiFact]
     public void List_ExposesContainerSelection()
     {
         var selection = List().Patterns.Selection.Pattern;
@@ -107,7 +107,7 @@ public sealed class VirtualListSampleTests : IDisposable
             timeoutMessage: "container selection did not reflect the selected item");
     }
 
-    [Fact]
+    [UiFact]
     public void List_FindsItemByName_WithoutWalking()
     {
         // The container locates a deep item straight from its data — no walking

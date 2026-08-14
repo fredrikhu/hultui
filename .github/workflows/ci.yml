@@ -34,10 +34,11 @@ jobs:
         run: dotnet build HultUI.slnx -c Release
 
       # The UI-automation tests (FlaUI) launch real sample windows and need a GPU
-      # context, so they stay out of the automated pass — same exclusion the
-      # release workflow uses.
+      # context, so they stay out of the automated pass. They gate themselves on
+      # HULTUI_UITESTS, which nothing here sets, so they report as skipped —
+      # same as the release workflows.
       - name: Run tests
-        run: dotnet test HultUI.slnx -c Release --no-build --filter "FullyQualifiedName!~HultUI.UiTests"
+        run: dotnet test HultUI.slnx -c Release --no-build
 
   test-linux:
     runs-on: [self-hosted, linux, x64]

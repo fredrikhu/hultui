@@ -44,9 +44,10 @@ jobs:
 
       # The UI-automation tests (FlaUI) launch real SDL sample windows, which
       # need a GPU context the hosted runner's Basic Render Driver can't
-      # provide — the samples exit at startup there. Run everything else.
+      # provide — the samples exit at startup there. They gate themselves on
+      # HULTUI_UITESTS, which nothing here sets, so they report as skipped.
       - name: Run tests
-        run: dotnet test HultUI.slnx -c Release --no-build --filter "FullyQualifiedName!~HultUI.UiTests"
+        run: dotnet test HultUI.slnx -c Release --no-build
 
   # Proves the framework is display-free on Linux: the headless tests run full
   # app scenarios (render, input, accessibility queries) with no X11/Wayland

@@ -34,7 +34,7 @@ public sealed class AccessibilitySampleTests : IDisposable
         _window.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
         ?? throw new InvalidOperationException($"no element with AutomationId '{automationId}'");
 
-    [Fact]
+    [UiFact]
     public void Button_HasExpectedControlTypeAndName()
     {
         var button = Find("click-me");
@@ -42,7 +42,7 @@ public sealed class AccessibilitySampleTests : IDisposable
         Assert.Equal("Click Me", button.Name);
     }
 
-    [Fact]
+    [UiFact]
     public void InvokingButton_UpdatesCountText()
     {
         Assert.Equal("Clicked 0 time(s)", Find("click-count").Name);
@@ -56,7 +56,7 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeoutMessage: "count text did not update after Invoke");
     }
 
-    [Fact]
+    [UiFact]
     public void TogglingCheckbox_FlipsToggleState()
     {
         var checkbox = Find("enable-thing").AsCheckBox();
@@ -71,7 +71,7 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeoutMessage: "checkbox did not toggle On");
     }
 
-    [Fact]
+    [UiFact]
     public void SettingTextInputValue_TakesEffect()
     {
         var input = Find("name-input");
@@ -84,7 +84,7 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeoutMessage: "text input value did not update");
     }
 
-    [Fact]
+    [UiFact]
     public void Slider_ExposesRangeValueAndSetValueWorks()
     {
         var slider = Find("volume");
@@ -105,7 +105,7 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "displayed value did not update");
     }
 
-    [Fact]
+    [UiFact]
     public void Expander_ReportsAndTogglesExpandCollapseState()
     {
         var expander = Find("expander");
@@ -123,7 +123,7 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeout: TimeSpan.FromSeconds(5), throwOnTimeout: true, timeoutMessage: "did not collapse");
     }
 
-    [Fact]
+    [UiFact]
     public void MultiSelectList_ExposesContainerAndPerItemSelection()
     {
         var list = Find("toppings");
@@ -159,7 +159,7 @@ public sealed class AccessibilitySampleTests : IDisposable
             timeoutMessage: "removing an item did not update the container selection");
     }
 
-    [Fact]
+    [UiFact]
     public void ResizingWindow_UpdatesReportedBounds()
     {
         // Wait until the sample's deferred row load has fired (header flips to
