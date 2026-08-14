@@ -365,6 +365,22 @@ public partial class JunctionApp
 
     private void RemoveRepo(string path)
     {
+        ForgetRepo(path);
+        Persist();
+        Flash("Removed repository");
+        RefreshAll();
+    }
+
+    /// <summary>Drops a path from everything that remembers repositories — the flat
+    /// registry, every workspace, its badge — and reselects a fallback if it was the
+    /// active repo. Deliberately does not persist or refresh: the caller does, so a
+    /// batch (pruning several worktrees at once) writes settings once.
+    ///
+    /// <para>Shared with the worktree panel, which registers a linked worktree as a
+    /// repository when you open it and so has to undo exactly this much when the
+    /// worktree goes away.</para></summary>
+    private void ForgetRepo(string path)
+    {
         _settings.RepositoryPaths.RemoveAll(p => PathEquals(p, path));
         foreach (var ws in _settings.Workspaces)
             ws.RepoPaths.RemoveAll(p => PathEquals(p, path));
@@ -376,9 +392,6 @@ public partial class JunctionApp
                 ?? _settings.RepositoryPaths.FirstOrDefault() ?? "";
             SetCommitSelection(null);
         }
-        Persist();
-        Flash("Removed repository");
-        RefreshAll();
     }
 
     // ── Sidebar context-menu item lists ──────────────────────────────────

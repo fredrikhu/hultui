@@ -1,3 +1,5 @@
+using System.Reflection;
+using HultUI.Headless;
 using Xunit;
 
 namespace Junction.Tests;
@@ -118,4 +120,241 @@ public class WorktreeTests
         Assert.True(repo.Repo.PruneWorktrees().Success);
         Assert.Single(repo.Repo.GetWorktrees());
     }
+
+    /// <summary>A lock is what you put on a checkout that lives on a drive which is not
+    /// always mounted, so git stops calling it prunable. It also blocks removal outright —
+    /// <c>--force</c> included — which is why the panel shows the lock and its reason, and
+    /// offers a way to lift it.</summary>
+    [Fact]
+    public void ALockedWorktreeCarriesItsReasonAndRefusesToBeRemovedUntilUnlocked()
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        var linked = LinkedPathFor(repo, "-locked");
+
+        try
+        {
+            Assert.True(repo.Repo.AddWorktree(linked, newBranch: "locked-branch").Success);
+            Assert.True(repo.Repo.LockWorktree(linked, "on the external drive").Success);
+
+            var locked = repo.Repo.GetWorktrees().Single(w => !w.IsMain);
+            Assert.True(locked.IsLocked);
+            Assert.Equal("on the external drive", locked.LockReason);
+
+            Assert.False(repo.Repo.RemoveWorktree(linked, force: true).Success);
+
+            Assert.True(repo.Repo.UnlockWorktree(linked).Success);
+            Assert.False(repo.Repo.GetWorktrees().Single(w => !w.IsMain).IsLocked);
+            Assert.True(repo.Repo.RemoveWorktree(linked).Success);
+            Assert.Single(repo.Repo.GetWorktrees());
+        }
+        finally
+        {
+            repo.Repo.UnlockWorktree(linked);
+            repo.Repo.RemoveWorktree(linked, force: true);
+            if (Directory.Exists(linked)) Directory.Delete(linked, recursive: true);
+        }
+    }
+
+    // ── Registration: the panel's half of the bargain ────────────────────
+    //
+    // Opening a worktree registers its path as a repository (it is the same repo checked
+    // out elsewhere, which the rest of the app handles natively) and adds it to the active
+    // workspace. Removing or pruning it therefore has to undo exactly that — the symptom
+    // when it does not is a sidebar row pointing at a folder that is no longer on disk,
+    // which nothing else in the app ever cleans up.
+
+    [Fact]
+    public void OpeningAWorktreeRegistersItAsARepository()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            Invoke(app, "OpenWorktree", linked);
+            session.PumpFrames(2);
+
+            Assert.Contains(settings.RepositoryPaths, p => Same(p, linked));
+            Assert.Contains(settings.Workspaces[0].RepoPaths, p => Same(p, linked));
+        });
+    }
+
+    [Fact]
+    public void RemovingAWorktreeAlsoRemovesTheRepositoryRowItRegistered()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            Invoke(app, "OpenWorktree", linked);
+            // Back to the main worktree: git refuses to remove the tree you are standing
+            // in, and the panel hides Remove on that row for the same reason.
+            Invoke(app, "SelectRepo", repo.Path);
+            session.PumpFrames(2);
+
+            Invoke(app, "RemoveWorktreeAction", linked, false);
+            session.PumpFrames(2);
+
+            Assert.Single(repo.Repo.GetWorktrees());
+            Assert.DoesNotContain(settings.RepositoryPaths, p => Same(p, linked));
+            Assert.DoesNotContain(settings.Workspaces[0].RepoPaths, p => Same(p, linked));
+        });
+    }
+
+    /// <summary>A failed removal must not deregister anything: the worktree is still
+    /// there, and the row that reaches it has to stay.</summary>
+    [Fact]
+    public void AWorktreeThatRefusesToBeRemovedKeepsItsRepositoryRow()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            Invoke(app, "OpenWorktree", linked);
+            Invoke(app, "SelectRepo", repo.Path);
+            Assert.True(repo.Repo.LockWorktree(linked, "held").Success);
+            session.PumpFrames(2);
+
+            Invoke(app, "RemoveWorktreeAction", linked, true);   // locked: git refuses
+            session.PumpFrames(2);
+
+            Assert.Equal(2, repo.Repo.GetWorktrees().Count);
+            Assert.Contains(settings.RepositoryPaths, p => Same(p, linked));
+
+            repo.Repo.UnlockWorktree(linked);
+        });
+    }
+
+    [Fact]
+    public void PruningForgetsTheRepositoryRowsOfTheWorktreesItDropped()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            Invoke(app, "OpenWorktree", linked);
+            Invoke(app, "SelectRepo", repo.Path);
+            session.PumpFrames(2);
+            // Pulled out from under git — the state the Prune button exists for. Forced,
+            // because the app is watching this directory while the test deletes it.
+            Assert.True(TempRepo.ForceDelete(linked), "the fixture worktree would not delete");
+
+            Invoke(app, "PruneWorktreesAction");
+            session.PumpFrames(2);
+
+            Assert.Single(repo.Repo.GetWorktrees());
+            Assert.DoesNotContain(settings.RepositoryPaths, p => Same(p, linked));
+            Assert.DoesNotContain(settings.Workspaces[0].RepoPaths, p => Same(p, linked));
+        });
+    }
+
+    /// <summary>Pruning goes by what git actually dropped, not by what looked prunable: a
+    /// locked worktree survives a prune even with its directory gone, so its row has to
+    /// survive too.</summary>
+    [Fact]
+    public void PruningKeepsTheRowOfALockedWorktreeItCouldNotDrop()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            Invoke(app, "OpenWorktree", linked);
+            Invoke(app, "SelectRepo", repo.Path);
+            Assert.True(repo.Repo.LockWorktree(linked, "unplugged").Success);
+            session.PumpFrames(2);
+            Assert.True(TempRepo.ForceDelete(linked), "the fixture worktree would not delete");
+
+            Invoke(app, "PruneWorktreesAction");
+            session.PumpFrames(2);
+
+            Assert.Equal(2, repo.Repo.GetWorktrees().Count);
+            Assert.Contains(settings.RepositoryPaths, p => Same(p, linked));
+
+            repo.Repo.UnlockWorktree(linked);
+        });
+    }
+
+    /// <summary>Deregistering the repository you are standing in has to land somewhere:
+    /// the shared undo reselects from the active workspace, which is what keeps the app
+    /// from ending up pointed at a path it just forgot.</summary>
+    [Fact]
+    public void ForgettingTheActiveRepositoryFallsBackToAnotherOne()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            Invoke(app, "OpenWorktree", linked);
+            session.PumpFrames(2);
+            Assert.True(Same(ActiveRepoPath(app), linked));
+
+            Invoke(app, "ForgetRepo", linked);
+
+            Assert.True(Same(ActiveRepoPath(app), repo.Path),
+                $"expected a fallback to the main worktree, got \"{ActiveRepoPath(app)}\"");
+        });
+    }
+
+    /// <summary>The prompt accepts a relative folder, and git resolves it against the
+    /// repository root because that is the working directory the command runs in. What gets
+    /// registered has to be that same absolute path: a stored "../side" matches nothing the
+    /// panel or the sidebar later compares it against.</summary>
+    [Fact]
+    public void ATypedRelativeFolderResolvesAgainstTheRepositoryRoot()
+    {
+        WithApp((repo, session, app, settings, linked) =>
+        {
+            var resolved = (string)typeof(JunctionApp)
+                .GetMethod("ResolveWorktreePath", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, ["../" + Path.GetFileName(linked)])!;
+
+            Assert.True(Path.IsPathFullyQualified(resolved), resolved);
+            Assert.True(Same(resolved, linked), $"expected \"{linked}\", got \"{resolved}\"");
+        });
+    }
+
+    // ── Hosting ──────────────────────────────────────────────────────────
+
+    /// <summary>Mounts the app over a repository that already has one linked worktree, and
+    /// hands both plus the live settings object to <paramref name="body"/>. The settings
+    /// instance is the one the app mutates, so assertions read it directly rather than
+    /// re-loading the file (which <c>SettingsIsolation</c> has already redirected away
+    /// from the developer's real one).</summary>
+    private static void WithApp(Action<TempRepo, HeadlessSession, JunctionApp, JunctionSettingsData, string> body)
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        var linked = LinkedPathFor(repo, "-panel");
+        var added = repo.Repo.AddWorktree(linked, newBranch: "side");
+        Assert.True(added.Success, added.Stderr);
+
+        var settings = new JunctionSettingsData
+        {
+            RepositoryPaths = [repo.Path],
+            ActiveRepoPath = repo.Path,
+            Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
+            ActiveWorkspaceId = "w1",
+        };
+
+        using var session = HeadlessSession.Create(1200, 800);
+        JunctionApp? app = null;
+        try
+        {
+            app = new JunctionApp(session.Application, session.Window.Window, settings);
+            session.Application.SetRoot(app.Mount());
+            session.PumpFrame();
+
+            body(repo, session, app, settings, linked);
+        }
+        finally
+        {
+            app?.Dispose();
+            repo.Repo.UnlockWorktree(linked);
+            repo.Repo.RemoveWorktree(linked, force: true);
+            TempRepo.ForceDelete(linked);
+        }
+    }
+
+    private static void Invoke(JunctionApp app, string method, params object?[] args) =>
+        typeof(JunctionApp)
+            .GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(app, args);
+
+    private static string ActiveRepoPath(JunctionApp app) =>
+        (string)typeof(JunctionApp)
+            .GetField("_activeRepoPath", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!;
+
+    /// <summary>The app's own path comparison: git prints forward slashes even on Windows
+    /// and the registry stores OS-native paths, so a raw string compare is the trap this
+    /// whole area is built around.</summary>
+    private static bool Same(string a, string b) =>
+        string.Equals(a, b,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

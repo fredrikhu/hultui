@@ -1718,6 +1718,23 @@ public class GitRepository
     /// are gone (<c>git worktree prune</c>).</summary>
     public GitResult PruneWorktrees() => GitProcess.Run(Path, "worktree", "prune");
 
+    /// <summary>Locks a linked worktree so git refuses to prune or remove it — what
+    /// you do to a checkout on a removable drive or network share, which would
+    /// otherwise look prunable every time it is unmounted. <paramref name="reason"/>
+    /// is the note git stores and reports back in <c>worktree list --porcelain</c>.
+    /// Git rejects locking the main worktree.</summary>
+    public GitResult LockWorktree(string path, string? reason = null)
+    {
+        var args = new List<string> { "worktree", "lock" };
+        if (!string.IsNullOrWhiteSpace(reason)) { args.Add("--reason"); args.Add(reason); }
+        args.Add(path);
+        return GitProcess.Run(Path, args.ToArray());
+    }
+
+    /// <summary>Releases a lock taken by <see cref="LockWorktree"/>. A locked worktree
+    /// cannot be removed — not even with <c>--force</c> — so this is the way out.</summary>
+    public GitResult UnlockWorktree(string path) => GitProcess.Run(Path, "worktree", "unlock", path);
+
     // ── Patch application ──
 
     /// <summary>

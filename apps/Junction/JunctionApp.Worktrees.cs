@@ -126,7 +126,12 @@ public partial class JunctionApp
         var row = Flex.Row(gap: 11).AlignItems(AlignItems.Center)
             .Padding(new Thickness(8, 10, 8, 10)).CornerRadius(Nocturne.RadiusMd)
             .Cursor(CursorType.Pointer);
-        row.Key = "wt:" + wt.Path + (isCurrent ? "#c" : "");
+        // Every flag that changes what the row renders belongs in the key: rows come and
+        // go as worktrees are added and pruned, and a lock or a detach swaps a chip and a
+        // whole line in or out at fixed positions — patched by position, they'd cross.
+        row.Key = "wt:" + wt.Path
+            + (isCurrent ? "#c" : "") + (wt.IsDetached ? "#d" : "")
+            + (wt.IsLocked ? "#l" : "") + (wt.Prunable ? "#p" : "");
         if (isCurrent)
             row.Background(Nocturne.Accent900).BorderColor(Nocturne.Accent).BorderWidth(new Thickness(0, 0, 0, 2));
 
@@ -138,14 +143,26 @@ public partial class JunctionApp
         var titleRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         titleRow.AddChild(Ui.Mono(name, 12.5f, Nocturne.Text).FlexShrink(1)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        titleRow.AddChild(Ui.Chip(Icons.GitBranch, wt.RefLabel, Nocturne.Neutral800, Nocturne.Neutral100).FlexShrink(0));
+        // Detached, the ref label is only ever the word "(detached)" — the short HEAD is
+        // what actually says where the checkout sits, so the chip carries that instead.
+        // (The row key carries the detached/locked flags, so this swap is a fresh row
+        // rather than an in-place patch of one glyph over another.)
+        titleRow.AddChild(wt.IsDetached
+            ? Ui.Chip(Icons.GitCommit, Short(wt.Head), Nocturne.Neutral800, Nocturne.Neutral100).FlexShrink(0)
+            : Ui.Chip(Icons.GitBranch, wt.RefLabel, Nocturne.Neutral800, Nocturne.Neutral100).FlexShrink(0));
         if (isCurrent) titleRow.AddChild(Ui.TagOutline("current", Nocturne.Accent, 9f).FlexShrink(0));
         else if (wt.IsMain) titleRow.AddChild(Ui.TagOutline("main", Nocturne.On(0.5), 9f).FlexShrink(0));
-        if (wt.IsLocked) titleRow.AddChild(Ui.TagOutline("locked", Nocturne.On(0.5), 9f).FlexShrink(0));
+        if (wt.IsDetached) titleRow.AddChild(Ui.TagOutline("detached", Nocturne.On(0.5), 9f).FlexShrink(0));
+        if (wt.IsLocked) titleRow.AddChild(Ui.TagOutline("locked", Nocturne.Accent2, 9f).FlexShrink(0));
         if (wt.Prunable) titleRow.AddChild(Ui.TagOutline("prunable", Nocturne.DelCount, 9f).FlexShrink(0));
         textCol.AddChild(titleRow);
         textCol.AddChild(Text.New(wt.Path).FontSize(10.5f).TextColor(Nocturne.On(0.42))
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        // A lock is the reason Remove refuses even with --force, so its note belongs on
+        // screen rather than in a tooltip nobody hovers before clicking Remove.
+        if (wt.IsLocked && wt.LockReason is { Length: > 0 } reason)
+            textCol.AddChild(Text.New($"Locked — {reason}").FontSize(10.5f).TextColor(Nocturne.Accent2)
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         row.AddChild(textCol);
 
         var actions = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center);
@@ -168,7 +185,9 @@ public partial class JunctionApp
         row.AddChild(actions);
 
         row.OnClick(_ => { if (!isCurrent) OpenWorktree(wt.Path); });
-        row.On<PointerDownEvent>(e => { if (e.Button == 2) MarkDirty(); });
+        // (No right-click PointerDown handler here. The sidebar's rows have one because
+        // right-clicking a repo there also selects it; these rows carry no selection, so
+        // the copy of it only ever marked dirty for a rebuild the menu already causes.)
         row.ContextMenu(() => WorktreeMenuItems(wt, isCurrent));
         if (!isCurrent) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
@@ -180,6 +199,13 @@ public partial class JunctionApp
         if (!isCurrent)
             items.Add(Item(Icons.BendDownRight, "Open in Junction", () => OpenWorktree(wt.Path)));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(wt.Path)));
+        // Locking is git's own answer to "don't prune this one" (a checkout on a drive
+        // that isn't always mounted), and a locked worktree refuses to be removed even
+        // with --force — so unlocking has to be reachable from the same menu as Remove.
+        if (!wt.IsMain)
+            items.Add(wt.IsLocked
+                ? Item(Icons.Unlock, "Unlock", () => UnlockWorktreeAction(wt.Path))
+                : Item(Icons.Lock, "Lock", () => PromptLockWorktree(wt.Path)));
         if (!wt.IsMain && !isCurrent)
         {
             items.Add(ContextMenuItem.Separator());
@@ -213,7 +239,15 @@ public partial class JunctionApp
         if (ActiveRepo is not { } repo) return;
         var res = repo.RemoveWorktree(path, force);
         if (res.Success)
+        {
+            // The other half of OpenWorktree: the folder is gone from disk, so the
+            // registration it added has to go too — otherwise the sidebar keeps a repo
+            // row pointing at nothing. ForgetRepo is the same undo the sidebar's
+            // "Remove repository" runs, reselection and all.
+            ForgetRepo(path);
+            Persist();
             Flash($"Removed worktree {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}");
+        }
         else
             Flash(FirstLine(res.Stderr, "Remove failed — worktree may have changes (try Force remove)"));
         RefreshAll();
@@ -222,8 +256,47 @@ public partial class JunctionApp
     private void PruneWorktreesAction()
     {
         if (ActiveRepo is not { } repo) return;
+        // Which linked worktrees git actually dropped, rather than which ones looked
+        // prunable: a locked one stays even when its directory is gone, and only the
+        // ones that really went may have their registrations taken with them.
+        var before = repo.GetWorktrees();
         var res = repo.PruneWorktrees();
+        if (res.Success)
+        {
+            var kept = new HashSet<string>(repo.GetWorktrees().Select(w => w.Path), PathComparer);
+            foreach (var wt in before)
+                if (!wt.IsMain && !kept.Contains(wt.Path))
+                    ForgetRepo(wt.Path);   // same undo as Remove — see RemoveWorktreeAction
+            Persist();   // one write for the whole batch
+        }
         Flash(res.Success ? "Pruned stale worktrees" : FirstLine(res.Stderr, "Prune failed"));
+        RefreshAll();
+    }
+
+    // ── Locking ──────────────────────────────────────────────────────────
+
+    private void PromptLockWorktree(string path) => OpenDialog(new DialogSpec(
+        "Lock worktree",
+        "A locked worktree is never pruned and refuses to be removed. The reason is optional — git shows it beside the worktree.",
+        "on the external drive",
+        "Lock",
+        (reason, _) =>
+        {
+            if (ActiveRepo is not { } repo) return;
+            var res = repo.LockWorktree(path, reason);
+            Flash(res.Success
+                ? $"Locked {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}"
+                : FirstLine(res.Stderr, "Lock failed"));
+            RefreshAll();
+        }));
+
+    private void UnlockWorktreeAction(string path)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var res = repo.UnlockWorktree(path);
+        Flash(res.Success
+            ? $"Unlocked {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}"
+            : FirstLine(res.Stderr, "Unlock failed"));
         RefreshAll();
     }
 
@@ -240,6 +313,27 @@ public partial class JunctionApp
         return System.IO.Path.Combine(parent, $"{name}-{(slug.Length > 0 ? slug : "worktree")}");
     }
 
+    /// <summary>Resolves a typed folder the way git itself would — <c>~</c> expanded,
+    /// relative paths taken against the repository root, since that is the working
+    /// directory the worktree command runs in. Everything downstream (registering the
+    /// path, matching it against <c>GetWorktrees</c>) compares full OS-native paths, so a
+    /// verbatim "../side" would never match the worktree it just created.</summary>
+    private string ResolveWorktreePath(string path)
+    {
+        try
+        {
+            return System.IO.Path.TrimEndingDirectorySeparator(
+                System.IO.Path.GetFullPath(ExpandPath(path.Trim()), _activeRepoPath));
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or System.IO.PathTooLongException)
+        {
+            // Not something the OS can even shape into a path (a stray '|', a name past the
+            // length limit). Hand it back as typed: git's own refusal names the folder,
+            // which is a better message than an exception out of a validator.
+            return path.Trim();
+        }
+    }
+
     private void PromptNewWorktree() => OpenDialog(new DialogSpec(
         "New worktree",
         "Creates a worktree in a new folder. By default it starts a new branch from the current HEAD; uncheck to check out HEAD detached.",
@@ -248,16 +342,32 @@ public partial class JunctionApp
         (path, newBranch) =>
         {
             if (ActiveRepo is not { } repo) return;
-            var folder = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
+            var full = ResolveWorktreePath(path);
+            var folder = System.IO.Path.GetFileName(full);
             var res = newBranch
-                ? repo.AddWorktree(path, committish: null, newBranch: folder)
-                : repo.AddWorktree(path, committish: "HEAD");
+                ? repo.AddWorktree(full, committish: null, newBranch: folder)
+                : repo.AddWorktree(full, committish: "HEAD");
             Flash(res.Success ? $"Created worktree {folder}" : FirstLine(res.Stderr, "Create worktree failed"));
             RefreshAll();
         },
-        Validate: NonEmptyPath,
+        Validate: ValidateNewWorktree,
         CheckboxLabel: "Create a new branch (named after the folder)"),
         initial: SuggestWorktreePath("wt"));
+
+    /// <summary>The folder has to be a path, and — while the checkbox is on — also has to
+    /// work as a branch name, because that is what <c>worktree add -b</c> receives. Checked
+    /// here so the prompt stays open with a sentence naming the offending character,
+    /// instead of closing and letting git answer "not a valid branch name". Reads the live
+    /// checkbox, so clearing it lifts the branch rule.</summary>
+    private string? ValidateNewWorktree(string path)
+    {
+        if (NonEmptyPath(path) is { } bad) return bad;
+        if (!_dialogChecked) return null;
+        var folder = System.IO.Path.GetFileName(ResolveWorktreePath(path));
+        return BranchName.Validate(folder) is { } err
+            ? $"{err} — the new branch takes the folder's name"
+            : null;
+    }
 
     /// <summary>Branch context-menu entry: check out an existing branch in a new
     /// worktree (git forbids the same branch in two worktrees, so this only makes
@@ -270,11 +380,15 @@ public partial class JunctionApp
         (path, _) =>
         {
             if (ActiveRepo is not { } repo) return;
-            var res = repo.AddWorktree(path, committish: branch);
+            // Full path, not the typed one: OpenWorktree registers whatever it is given,
+            // and a stored relative path would never PathEquals-match the absolute one
+            // the panel and the sidebar compare against.
+            var full = ResolveWorktreePath(path);
+            var res = repo.AddWorktree(full, committish: branch);
             if (res.Success)
             {
                 Flash($"Created worktree for {branch}");
-                OpenWorktree(path);   // jump straight into the new checkout
+                OpenWorktree(full);   // jump straight into the new checkout
             }
             else
             {

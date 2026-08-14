@@ -80,6 +80,11 @@ public static class Icons
     public const string Trash = "trash";
     public const string Broom = "broom";
 
+    // Worktree locks
+    public const string Lock = "lock-simple";
+    // Phosphor's bundled set has no open-padlock; the key is its "this opens the lock" mark.
+    public const string Unlock = "key";
+
     // Window controls (Windows/Linux style)
     public const string WinMinimize = "minus-bold";   // bold: the regular bar is thinner than a device pixel at caption size
     public const string WinMaximize = "square-bold";
