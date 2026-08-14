@@ -127,6 +127,9 @@ public static class Icons
     public const string ArrowsDownUp = "arrows-down-up";
     public const string ListChecks = "list-checks";
     public const string CounterClockwise = "arrow-counter-clockwise";
+    // Phosphor has no blame glyph; a clock winding back is what the view shows — who
+    // last touched each line, and when.
+    public const string Blame = "clock-counter-clockwise";
     public const string LineLeft = "arrow-line-left";
     public const string Warning = "warning";
     public const string Copy = "copy";

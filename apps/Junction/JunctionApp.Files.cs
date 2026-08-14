@@ -473,6 +473,10 @@ public partial class JunctionApp
         if (content.Lines is { } l)
             header.AddChild(Text.New($"{l.Length} lines").FontSize(11f)
                 .TextColor(Nocturne.On(0.45)).FlexShrink(0));
+        // Blame is only meaningful over text: an image or a binary blob has no lines for git
+        // to attribute, so the toggle is not offered rather than offered and empty.
+        if (content.Lines is { Length: > 0 })
+            header.AddChild(BlameToggle());
         // Keyed: these two come and go with whether the file is still in the working tree,
         // and an unkeyed button appearing beside an unkeyed one is exactly the case where a
         // patched-over element keeps the handler of whatever last held the slot.
@@ -497,7 +501,21 @@ public partial class JunctionApp
             pane.AddChild(bar);
         }
 
-        pane.AddChild(BuildFileBody(loader, content));
+        // Keyed: the two bodies are different elements in one slot, and the source body is the
+        // one carrying a focusable TextArea — swapping them unkeyed is the case where a
+        // patched-over element keeps the previous variant's handlers.
+        Element body;
+        if (_filesBlame && content.Lines is { Length: > 0 })
+        {
+            body = BuildBlameBody(reference, path, content);
+            body.Key = "files-body-blame";
+        }
+        else
+        {
+            body = BuildFileBody(loader, content);
+            body.Key = "files-body-source";
+        }
+        pane.AddChild(body);
         return pane;
     }
 
@@ -642,6 +660,14 @@ public partial class JunctionApp
             // Named rather than dropped: browsing an old commit is the common way to land
             // here, and a row that simply loses its Open entry reads as a broken menu.
             items.Add(Unavailable(Icons.RocketLaunch, "Open — not in the working tree"));
+        }
+
+        if (!node.IsDir)
+        {
+            items.Add(ContextMenuItem.Separator());
+            // Blame reads the commit's blob, not the disk, so this is offered whether or not
+            // the working tree still has the file.
+            items.Add(Item(Icons.Blame, "Blame", () => BlameTreeFile(node.Path)));
         }
 
         items.Add(ContextMenuItem.Separator());
