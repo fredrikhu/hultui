@@ -590,6 +590,22 @@ public class GitRepository
         return GitProcess.Run(Path, "restore", "--staged", "--", filePath).Success;
     }
 
+    /// <summary>Stages several files in one <c>git add</c>. A single call rather than a
+    /// loop so a multi-file stage lands as one index write — a loop that fails half way
+    /// leaves the user looking at a list that is part staged for no stated reason.</summary>
+    public bool Stage(IReadOnlyList<string> filePaths)
+    {
+        if (filePaths.Count == 0) return true;
+        return GitProcess.Run(Path, ["add", "--", .. filePaths]).Success;
+    }
+
+    /// <summary>Unstages several files in one <c>git restore --staged</c>.</summary>
+    public bool Unstage(IReadOnlyList<string> filePaths)
+    {
+        if (filePaths.Count == 0) return true;
+        return GitProcess.Run(Path, ["restore", "--staged", "--", .. filePaths]).Success;
+    }
+
     public bool StageAll()
     {
         return GitProcess.Run(Path, "add", "-A").Success;
@@ -605,13 +621,25 @@ public class GitRepository
     /// the file via `git clean`; for tracked files it restores the worktree
     /// copy from HEAD via `git restore`.
     /// </summary>
-    public bool DiscardChanges(GitFileChange file)
+    public bool DiscardChanges(GitFileChange file) => DiscardChanges([file]);
+
+    /// <summary>
+    /// Discard worktree changes for several files at once. The two kinds need different
+    /// commands, so the set is split and each half runs as one call — untracked files
+    /// are deleted by <c>git clean</c>, tracked ones restored from the index.
+    /// </summary>
+    public bool DiscardChanges(IReadOnlyList<GitFileChange> files)
     {
-        if (file.Kind == FileChangeKind.Untracked)
-        {
-            return GitProcess.Run(Path, "clean", "-f", "--", file.Path).Success;
-        }
-        return GitProcess.Run(Path, "restore", "--worktree", "--", file.Path).Success;
+        if (files.Count == 0) return true;
+        var untracked = files.Where(f => f.Kind == FileChangeKind.Untracked).Select(f => f.Path).ToList();
+        var tracked = files.Where(f => f.Kind != FileChangeKind.Untracked).Select(f => f.Path).ToList();
+
+        var ok = true;
+        if (untracked.Count > 0)
+            ok &= GitProcess.Run(Path, ["clean", "-f", "--", .. untracked]).Success;
+        if (tracked.Count > 0)
+            ok &= GitProcess.Run(Path, ["restore", "--worktree", "--", .. tracked]).Success;
+        return ok;
     }
 
     // ── Ignore / assume-unchanged ──
