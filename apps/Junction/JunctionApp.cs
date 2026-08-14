@@ -66,9 +66,17 @@ public partial class JunctionApp : Component, IDisposable
     //
     // CompactChromeContentWidth: below it the title-bar breadcrumb + toolbar
     // collapse to icon-only and the commit-row ref chips hide. The full-label
-    // toolbar needs ~890 dip of content to lay out without clipping the stash
-    // button (the tabs are FlexShrink(0), so they no longer compress to fit).
-    private const float CompactChromeContentWidth = 910f;
+    // toolbar needs ~1100 dip of content to lay out without clipping its trailing
+    // buttons (the tabs are FlexShrink(0), so they no longer compress to fit); the
+    // rest is headroom for the wider system fonts other platforms resolve.
+    //
+    // Measured, not estimated — and re-measured whenever the toolbar gains
+    // something (see RepositoryToolsTests). The 910 this used to be was measured
+    // against a five-tab toolbar; the two tabs added since pushed the real
+    // requirement to ~1050, so every window between the two numbers had been
+    // laying out a toolbar that ran off its own row and took the stash button
+    // with it.
+    private const float CompactChromeContentWidth = 1140f;
     // HideDiffContentWidth: below it the Commit/Changes views drop the diff pane
     // and let the file list fill (the 3-pane split gets unusable when narrow).
     private const float HideDiffContentWidth = 620f;

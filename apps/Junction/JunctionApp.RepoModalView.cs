@@ -352,11 +352,20 @@ public partial class JunctionApp
                 Text.New(label).FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(muted));
     }
 
-    // ── Repositories "+" popover (a small left-click dropdown) ───────────
+    // ── Left-click dropdown (Repositories "+", Stash, Repository tools) ──
+
+    /// <summary>The app's own dropdown menu: the same <see cref="ContextMenuItem"/> list the
+    /// right-click menus use, drawn as elements and anchored to whatever button opened it
+    /// (<c>_popoverX/_popoverY</c>, captured from that button's laid-out box at click time).
+    /// The framework's <c>ContextMenu</c> only opens on right-click, which is why this
+    /// exists.</summary>
+    /// <summary>Fixed menu width. The buttons that open one right-align it under
+    /// themselves against this, so it never runs off the window edge.</summary>
+    private const float PopoverWidth = 230f;
 
     private Element BuildPopover(IReadOnlyList<ContextMenuItem> items)
     {
-        // Anchored under the "+" button; coords captured at click time.
+        // Anchored under the button that opened it; coords captured at click time.
         float x = _popoverX, y = _popoverY;
 
         var layer = Box.New()
@@ -369,7 +378,7 @@ public partial class JunctionApp
         layer.On<PointerDownEvent>(e => { if (e.Button == 2) { _popover = null; MarkDirty(); } });
 
         var menu = Flex.Column(gap: 0)
-            .Width(230).Padding(new Thickness(5))
+            .Width(PopoverWidth).Padding(new Thickness(5))
             .Background(Nocturne.Surface).BorderColor(Nocturne.Neutral700).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusMd);
         menu.Position.Type = PositionType.Absolute;
@@ -377,15 +386,49 @@ public partial class JunctionApp
         menu.Position.Top = Dimension.Px(y);
         menu.On<ClickEvent>(e => e.StopPropagation = true);
 
-        foreach (var it in items)
+        for (var i = 0; i < items.Count; i++)
         {
+            var it = items[i];
+            if (it.IsSeparator)
+            {
+                var rule = Box.New().Height(1).FlexShrink(0)
+                    .Margin(new Thickness(4, 4, 4, 4))
+                    .Background(Nocturne.Divider);
+                rule.Key = $"sep{i}";
+                menu.AddChild(rule);
+                continue;
+            }
+
+            var fg = it.IsDisabled ? Nocturne.On(0.30)
+                : it.IsDanger ? Nocturne.DangerText
+                : Nocturne.Text;
+            var iconFg = it.IsDisabled ? Nocturne.On(0.26)
+                : it.IsDanger ? Nocturne.DangerIcon
+                : Nocturne.On(0.7);
+
             var row = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
-                .Padding(new Thickness(7, 9, 7, 9)).CornerRadius(Nocturne.RadiusRow).Cursor(CursorType.Pointer);
-            row.AddChild(Ui.Icon(it.Glyph ?? "", 14f, Nocturne.On(0.7)));
-            row.AddChild(Text.New(it.Label).FontSize(12.5f).FlexGrow(1));
+                .Padding(new Thickness(7, 9, 7, 9)).CornerRadius(Nocturne.RadiusRow)
+                .Cursor(it.IsDisabled ? CursorType.Default : CursorType.Pointer);
+            // Key by label: a menu never repeats one, and an entry that swaps between its
+            // enabled and disabled build (the repository tools with no repo open) then
+            // patches against its own previous row rather than against a neighbour.
+            row.Key = it.Label;
+            row.AddChild(Ui.Icon(it.Glyph ?? "", 14f, iconFg));
+            // One line, ellipsized: the menu is a fixed 230 wide, and a label that wrapped
+            // would push the rest of the menu down under it.
+            row.AddChild(Text.New(it.Label).FontSize(12.5f).TextColor(fg).FlexGrow(1)
+                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+
             var run = it.Action;
-            row.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; run?.Invoke(); });
-            row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+            if (it.IsDisabled)
+                // Swallowed rather than left unhandled: an unavailable row must not run
+                // anything, and must not dismiss the menu either (the layer below would).
+                row.On<ClickEvent>(e => e.StopPropagation = true);
+            else
+            {
+                row.On<ClickEvent>(e => { e.StopPropagation = true; _popover = null; run?.Invoke(); });
+                row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+            }
             menu.AddChild(row);
         }
         layer.AddChild(menu);

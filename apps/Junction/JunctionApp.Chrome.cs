@@ -159,20 +159,33 @@ public partial class JunctionApp
 
         // Git actions. Narrow windows drop the button labels (keeping the
         // ahead/behind counts) so Fetch/Pull/Push don't crowd the view tabs.
+        // Keyed: the compact breakpoint swaps each button between its labelled and
+        // its icon-only build at the same position, which is exactly the case that
+        // must reconcile by identity rather than by index.
         var actions = Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center);
-        actions.AddChild(ActionButton("Fetch", Icons.ArrowsClockwise, DoFetch, primary: false, compact));
+        var fetch = ActionButton("Fetch", Icons.ArrowsClockwise, DoFetch, primary: false, compact);
+        fetch.Key = "fetch";
+        actions.AddChild(fetch);
 
         var pull = ActionButton("Pull", Icons.ArrowDown, DoPull, primary: false, compact);
+        pull.Key = "pull";
         if (sum.Behind > 0)
             pull.AddChild(Text.New(sum.Behind.ToString()).FontSize(13f).TextColor(Nocturne.Accent300));
         actions.AddChild(pull);
 
         var push = ActionButton("Push", Icons.ArrowUp, DoPush, primary: true, compact);
+        push.Key = "push";
         if (sum.Ahead > 0)
             push.AddChild(Text.New(sum.Ahead.ToString()).FontSize(13f).TextColor(Nocturne.Accent));
         actions.AddChild(push);
 
-        actions.AddChild(StashButton());
+        var stash = StashButton();
+        stash.Key = "stash";
+        actions.AddChild(stash);
+
+        var tools = RepositoryToolsButton();
+        tools.Key = "repo-tools";
+        actions.AddChild(tools);
         bar.AddChild(actions);
 
         return bar;
@@ -291,33 +304,93 @@ public partial class JunctionApp
     }
 
     // Stash affordance: a toolbar button that opens a small popover offering
-    // "stash" and "stash including untracked". Anchors the popover under itself,
-    // right-aligned so the 230px menu doesn't run off the window edge.
-    private Element StashButton()
-    {
-        var b = Flex.Row(gap: 0).Width(34).Height(34)
-            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .CornerRadius(Nocturne.RadiusMd)
-            .BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .Cursor(CursorType.Pointer).Tooltip("Stash…");
-        b.AddChild(Ui.Icon(Icons.TrayArrowDown, 15f, Nocturne.Text));
-        b.On<ClickEvent>(e =>
-        {
-            e.StopPropagation = true;
-            var box = e.CurrentTarget.Layout.AbsoluteBorderBox;   // live element's box, not the captured build's
-            _popoverX = Math.Max(8f, box.X + box.Width - 230f);
-            _popoverY = box.Y + box.Height + 4f;
-            _popover = StashMenuItems();
-            MarkDirty();
-        });
-        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
-    }
+    // "stash" and "stash including untracked".
+    private BoxElement StashButton() =>
+        ToolbarMenuButton(Icons.TrayArrowDown, "Stash…", StashMenuItems, accessibleName: "Stash");
 
     private IReadOnlyList<ContextMenuItem> StashMenuItems() =>
     [
         Item(Icons.TrayArrowDown, "Stash changes", () => DoStash(includeUntracked: false)),
         Item(Icons.Stack, "Stash including untracked", () => DoStash(includeUntracked: true)),
     ];
+
+    // ── Repository tools ─────────────────────────────────────────────────
+
+    // Worktrees, submodules, remotes and the reflog are complete panels that used to
+    // be reachable only by opening the palette and typing their name — which is to
+    // say, only by someone who already knew they existed (the app's owner asked for
+    // worktree support months after it shipped). They are still overlays rather than
+    // numbered views: this is occasional upkeep, not a daily tab, and eight tabs would
+    // dilute the ones people do use every day. What they were missing was a home in
+    // the chrome, so here it is — one menu, beside the other repository-wide actions,
+    // that any future panel of the same kind joins.
+    //
+    // Icon-only at every width, unlike Fetch/Pull/Push: the labelled toolbar already
+    // needs all but ~75 dip of the default 1440 window's content width, and a labelled
+    // button here costs about 130 — which would drop the *default* window below the
+    // compact breakpoint and take every toolbar label with it. The tooltip names the
+    // four, so a hover answers "what is in here" without opening it.
+    private BoxElement RepositoryToolsButton() =>
+        ToolbarMenuButton(Icons.Wrench, "Repository tools — worktrees, submodules, remotes, reflog",
+            RepositoryToolMenuItems, caret: true, accessibleName: "Repository tools");
+
+    private IReadOnlyList<ContextMenuItem> RepositoryToolMenuItems()
+    {
+        // With no repository open the panels have nothing to show. They stay in the
+        // menu, greyed: dropping the rows instead would leave a reader wondering
+        // whether the app has worktrees at all — the very question this menu exists
+        // to answer. (See Unavailable.)
+        if (!HasActiveRepo)
+            return
+            [
+                Unavailable(Icons.TreeStructure, "Worktrees…"),
+                Unavailable(Icons.Cube, "Submodules…"),
+                Unavailable(Icons.Cloud, "Remotes…"),
+                ContextMenuItem.Separator(),
+                Unavailable(Icons.CounterClockwise, "Reflog (recover work)…"),
+            ];
+
+        return
+        [
+            Item(Icons.TreeStructure, "Worktrees…", OpenWorktrees),
+            Item(Icons.Cube, "Submodules…", OpenSubmodules),
+            Item(Icons.Cloud, "Remotes…", OpenRemotes),
+            ContextMenuItem.Separator(),
+            // Set apart: the other three manage a repository, this one recovers from
+            // an accident with it.
+            Item(Icons.CounterClockwise, "Reflog (recover work)…", OpenReflog),
+        ];
+    }
+
+    /// <summary>A square toolbar button that drops a menu under itself, right-aligned so
+    /// the fixed-width menu cannot run off the window edge. The anchor comes from the live
+    /// element's box inside the handler — a Ref read during Build() has not been laid out
+    /// yet, and the box captured while building is a frame stale.</summary>
+    private BoxElement ToolbarMenuButton(string glyph, string tooltip,
+        Func<IReadOnlyList<ContextMenuItem>> items, bool caret = false, string? accessibleName = null)
+    {
+        var b = Flex.Row(gap: 2).Width(caret ? 44 : 34).Height(34)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .CornerRadius(Nocturne.RadiusMd)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer).Tooltip(tooltip);
+        b.AddChild(Ui.Icon(glyph, 15f, Nocturne.Text));
+        if (caret)
+            b.AddChild(Ui.Icon(Icons.CaretDown, 9f, Nocturne.On(0.55)));
+        // An icon-only button has no text for the accessibility tree to name it from, and
+        // a tooltip is not a name — spell it out so screen readers (and tests) find it.
+        if (accessibleName != null) b.AccessibleName(accessibleName);
+        b.On<ClickEvent>(e =>
+        {
+            e.StopPropagation = true;
+            var box = e.CurrentTarget.Layout.AbsoluteBorderBox;   // live element's box, not the captured build's
+            _popoverX = Math.Max(8f, box.X + box.Width - PopoverWidth);
+            _popoverY = box.Y + box.Height + 4f;
+            _popover = items();
+            MarkDirty();
+        });
+        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+    }
 
     private void DoStash(bool includeUntracked)
     {
