@@ -51,8 +51,8 @@ app.DevToolsHotkeysEnabled = false;
 
 var window = app.PrimaryWindow;
 // Floor the window size so the chrome never collapses. Below the compact-chrome
-// breakpoint (~930 dip) JunctionApp switches the toolbar/breadcrumb to icon-only,
-// which stays legible down to this minimum.
+// breakpoint (1140 dip of content) JunctionApp switches the toolbar/breadcrumb to
+// icon-only, which stays legible down to this minimum.
 window.SetMinimumSize(760, 540);
 window.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "junction.png"));
 

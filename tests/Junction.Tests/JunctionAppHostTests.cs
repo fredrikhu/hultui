@@ -202,8 +202,8 @@ public class JunctionAppHostTests
     [Fact]
     public void AResizeAcrossTheCompactBreakpointKeepsRendering()
     {
-        // Below ~930dip the chrome switches to icon-only. Both sides have to build, and
-        // crossing the line must not leave a half-rebuilt tree.
+        // Below 1140 dip of content width the chrome switches to icon-only. Both sides
+        // have to build, and crossing the line must not leave a half-rebuilt tree.
         Hosted((repo, session, app) =>
         {
             PumpUntilVisible(session, "a distinctive subject");

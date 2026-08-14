@@ -16,20 +16,26 @@ public partial class JunctionApp
     private static Func<Color, IImageSource?> MenuIcon(string name) =>
         color => Phosphor.Source(name, Ui.IconBox(14f), color, Ui.DisplayScale);
 
+    // Every builder carries the Phosphor name as well as the artwork factory. The
+    // framework's context menu paints its own rows and uses Icon; the app's own
+    // left-click popover (BuildPopover) builds elements and needs the name to draw
+    // the same glyph. Icon takes precedence in the framework menu, so setting both
+    // costs nothing and keeps the two menu surfaces showing the same artwork —
+    // without it the popover rows drew a blank icon column.
     private static ContextMenuItem Item(string glyph, string label, Action run) =>
-        new() { Icon = MenuIcon(glyph), Label = label, Action = run };
+        new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, Action = run };
 
     private static ContextMenuItem Danger(string glyph, string label, Action run) =>
-        new() { Icon = MenuIcon(glyph), Label = label, Action = run, IsDanger = true };
+        new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, Action = run, IsDanger = true };
 
     /// <summary>An entry that stays in the menu but cannot be chosen — for an action that
     /// belongs here and is unavailable right now, where dropping the row instead would only
     /// leave the reader wondering whether the feature exists.</summary>
     private static ContextMenuItem Unavailable(string glyph, string label) =>
-        new() { Icon = MenuIcon(glyph), Label = label, IsDisabled = true };
+        new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, IsDisabled = true };
 
     private static ContextMenuItem SubMenu(string glyph, string label, IReadOnlyList<ContextMenuItem> children) =>
-        new() { Icon = MenuIcon(glyph), Label = label, Children = children };
+        new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, Children = children };
 
     private ContextMenuItem IncludeItem(string name)
     {
