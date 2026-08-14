@@ -136,6 +136,9 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Dictionary<string, HashSet<string>> _includeBranches = new();
     private readonly Ref<VirtualListElement<GitCommit>> _commitListRef = new();
     private bool _pendingScrollToSelected;
+    /// <summary>A commit another view asked History to reveal (the blame gutter), held until
+    /// the log it has to be found in is loaded. See <c>ResolvePendingReveal</c>.</summary>
+    private string? _pendingRevealHash;
 
     // Commit-details state.
     private readonly AsyncLoader<CommitDetail> _commitDetail = new(CommitDetail.Empty);

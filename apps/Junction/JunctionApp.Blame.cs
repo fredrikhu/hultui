@@ -182,9 +182,12 @@ public partial class JunctionApp
         return row;
     }
 
+    // The two destinations carry their own view's tab icon, so the menu says where each one
+    // goes before you read the label: GitDiff is the Commit tab, GitCommit the History tab.
     private IReadOnlyList<ContextMenuItem> BlameMenuItems(GitBlameLine line) =>
     [
-        Item(Icons.GitCommit, $"Open commit {line.ShortHash}", () => OpenBlameCommit(line.CommitHash)),
+        Item(Icons.GitDiff, $"Open commit {line.ShortHash}", () => OpenBlameCommit(line.CommitHash)),
+        Item(Icons.GitCommit, "Reveal in history", () => RevealCommitInHistory(line.CommitHash)),
         Item(Icons.Copy, "Copy commit hash", () => CopyToClipboard(line.CommitHash)),
         ContextMenuItem.Separator(),
         Item(Icons.Copy, "Copy line", () => CopyToClipboard(line.Content)),
@@ -194,16 +197,23 @@ public partial class JunctionApp
     /// destination double-clicking a row in History reaches.</summary>
     private void OpenBlameCommit(string hash)
     {
-        // git writes an all-zero hash for a line that is not committed yet. There is nothing
-        // to open, and selecting it would leave the Commit view resolving a hash git will not
-        // answer for.
-        if (string.IsNullOrEmpty(hash) || hash.All(c => c == '0'))
-        {
-            Flash("That line isn't committed yet");
-            return;
-        }
+        if (!IsBlamableCommit(hash)) return;
         SetCommitSelection(hash);
         PrefetchCommitDetail(hash);   // the detail is usually the slowest part of the switch
         SetView(JunctionView.Commit);
+    }
+
+    /// <summary>
+    /// Whether a blame row names a commit that can be opened, complaining if it doesn't.
+    ///
+    /// <para>git writes an all-zero hash for a line that is not committed yet. There is
+    /// nothing to open, and selecting it would leave the Commit view resolving a hash git
+    /// will not answer for.</para>
+    /// </summary>
+    private bool IsBlamableCommit(string hash)
+    {
+        if (!string.IsNullOrEmpty(hash) && !hash.All(c => c == '0')) return true;
+        Flash("That line isn't committed yet");
+        return false;
     }
 }

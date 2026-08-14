@@ -43,6 +43,11 @@ public partial class JunctionApp
         var data = _history.Value;
         var filtered = FilteredCommits(data);
 
+        // A reveal requested from another view settles here rather than at the click: the
+        // switch into History is usually what starts this repo's log loading, so there is
+        // nothing to look the hash up in at the moment the menu item runs.
+        ResolvePendingReveal(filtered);
+
         // Keep the selection valid within the filtered view (e.g. after a search
         // narrows the list past the current selection).
         if (filtered.Count > 0 && (_selectedCommitHash == null || filtered.All(c => c.Hash != _selectedCommitHash)))
@@ -208,6 +213,54 @@ public partial class JunctionApp
             SetCommitSelection(commit.Hash);
             MarkDirty();
         }
+    }
+
+    /// <summary>
+    /// Asks History to select a commit and scroll to it. Used by the blame gutter, where
+    /// "which commit wrote this line" and "where does it sit in the history" are two
+    /// different questions — the first is the Commit view, this is the second.
+    /// </summary>
+    private void RevealCommitInHistory(string hash)
+    {
+        if (!IsBlamableCommit(hash)) return;
+
+        SetCommitSelection(hash);
+        PrefetchCommitDetail(hash);   // the reader is one keystroke from opening it anyway
+
+        // The History search box filters the loaded log client-side, so a query left in it
+        // can hide the very row being revealed. Clear it: a reveal that lands on nothing
+        // reads as a broken menu item, and retyping a search is cheap.
+        _historyQuery = "";
+
+        _pendingRevealHash = hash;
+        SetView(JunctionView.History);
+        Rerender();   // the switch activates this repo's history loader
+    }
+
+    /// <summary>
+    /// Settles a pending reveal once the log is actually loaded: scrolls to the commit if
+    /// the list holds it, and says why if it does not.
+    ///
+    /// <para>The include-branches set and the content (pickaxe) search both narrow the log
+    /// <i>server-side</i>, so a commit that certainly exists in the repository can equally
+    /// certainly be absent from the list on screen. Doing nothing in that case would be
+    /// indistinguishable from a dead menu item.</para>
+    /// </summary>
+    private void ResolvePendingReveal(List<GitCommit> filtered)
+    {
+        if (_pendingRevealHash is not { } hash || _history.IsLoading) return;
+        _pendingRevealHash = null;
+
+        if (IndexOfHash(filtered, hash) >= 0)
+        {
+            _pendingScrollToSelected = true;
+            return;
+        }
+
+        var why = _contentApplied.Length > 0
+            ? "the Included branches filter or the content search"
+            : "the Included branches filter";
+        Flash($"{hash[..Math.Min(7, hash.Length)]} isn't in the history shown here — check {why}");
     }
 
     /// <summary>Scrolls the commit list so the keyboard-selected row is on screen
