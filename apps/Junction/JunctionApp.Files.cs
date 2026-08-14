@@ -625,12 +625,22 @@ public partial class JunctionApp
         return merged;
     }
 
-    /// <summary>Brings the current match on screen. The TextArea scrolls by line, and the
-    /// search already answers in lines, so no offset arithmetic is needed here.</summary>
+    /// <summary>
+    /// Brings the current match on screen.
+    ///
+    /// <para>Handed to the body as an absolute offset rather than a line number. The body wraps,
+    /// so one logical line can be several drawn rows: a line index only names the row the line
+    /// <i>starts</i> on, and a match near the end of a paragraph-long line would be scrolled to
+    /// just off the bottom. The offsets are the ones already computed for the tinting, so this
+    /// costs nothing extra.</para>
+    /// </summary>
     private void RevealFilesHit()
     {
         if (_fileBodyRef.Current is not { } area) return;
         if (_filesFind.Search.Current is not { } hit) return;
-        area.ScrollLineIntoView(hit.Line);
+        if (hit.Line >= 0 && hit.Line < _fileLineStarts.Length)
+            area.ScrollOffsetIntoView(_fileLineStarts[hit.Line] + hit.Start);
+        else
+            area.ScrollLineIntoView(hit.Line);   // starts not built yet (no tinting pass ran)
     }
 }
