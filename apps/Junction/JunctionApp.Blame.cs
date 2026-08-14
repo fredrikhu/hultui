@@ -4,7 +4,6 @@ using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
-using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 using Junction.Git;
 using Junction.Theme;
@@ -119,11 +118,8 @@ public partial class JunctionApp
             .OnActivateItem(l => OpenBlameCommit(l.CommitHash))
             .FlexGrow(1)
             .Background(Nocturne.Bg)
-            .Padding(new Thickness(6, 0, 6, 0))
-            .WithRef(_blameListRef);
+            .Padding(new Thickness(6, 0, 6, 0));
     }
-
-    private readonly Ref<VirtualListElement<GitBlameLine>> _blameListRef = new();
 
     private Element BlameRow(GitBlameLine line, FileContent content, bool runStart)
     {
