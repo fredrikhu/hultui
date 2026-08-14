@@ -197,7 +197,7 @@ public partial class JunctionApp
         row.AddChild(commitCell);
 
         row.AddChild(Box.New().Width(ColTagCreated).FlexShrink(0)
-            .Children(Text.New(t.Date == default ? "" : RelativeTime(t.Date))
+            .Children(Text.New(t.Date == default ? "" : t.Date.ToString("g"))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));
 
         var kind = Flex.Row(gap: 0).Width(ColTagKind).FlexShrink(0)

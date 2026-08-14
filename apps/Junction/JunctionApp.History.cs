@@ -559,7 +559,7 @@ public partial class JunctionApp
         line2.AddChild(Ui.Mono(commit.ShortHash, 11f, Nocturne.On(0.46)).Tooltip(commit.Hash));
         line2.AddChild(Text.New(commit.AuthorName).FontSize(11f).TextColor(Nocturne.On(0.46)));
         line2.AddChild(Text.New("·").FontSize(11f).TextColor(Nocturne.On(0.46)));
-        line2.AddChild(Text.New(RelativeTime(commit.AuthorDate)).FontSize(11f).TextColor(Nocturne.On(0.46))
+        line2.AddChild(Text.New(commit.AuthorDate.ToString("g")).FontSize(11f).TextColor(Nocturne.On(0.46))
             .Tooltip(commit.AuthorDate.ToString("yyyy-MM-dd HH:mm:ss")));
         if (stat.Added > 0)
             line2.AddChild(Text.New($"+{stat.Added}").FontSize(11f).TextColor(Nocturne.AddCount));
@@ -747,15 +747,4 @@ public partial class JunctionApp
 
     private static Color LaneColor(int i) =>
         LanePalette[((i % LanePalette.Length) + LanePalette.Length) % LanePalette.Length];
-
-    private static string RelativeTime(DateTimeOffset date)
-    {
-        var span = DateTimeOffset.Now - date;
-        if (span.TotalMinutes < 1) return "just now";
-        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
-        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
-        if (span.TotalDays < 30) return $"{(int)span.TotalDays}d ago";
-        if (span.TotalDays < 365) return $"{(int)(span.TotalDays / 30)}mo ago";
-        return $"{(int)(span.TotalDays / 365)}y ago";
-    }
 }

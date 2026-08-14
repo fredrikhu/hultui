@@ -268,7 +268,7 @@ public partial class JunctionApp
             .Children(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
                 .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)));
         row.AddChild(Box.New().Width(ColUpdated).FlexShrink(0)
-            .Children(Text.New(b.CommitDate == default ? "" : RelativeTime(b.CommitDate))
+            .Children(Text.New(b.CommitDate == default ? "" : b.CommitDate.ToString("g"))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));
 
         // Ahead / behind (remote-tracking refs have no upstream of their own).

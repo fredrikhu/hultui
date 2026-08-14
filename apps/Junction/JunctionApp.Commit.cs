@@ -226,7 +226,7 @@ public partial class JunctionApp
             Text.New(author).FontSize(11.5f).TextColor(Nocturne.On(0.55))));
         row2.AddChild(Ui.Mono($"commit {(commit?.ShortHash ?? hash[..Math.Min(7, hash.Length)])}", 11.5f, Nocturne.On(0.55)));
         if (commit != null)
-            row2.AddChild(Text.New(RelativeTime(commit.AuthorDate)).FontSize(11.5f).TextColor(Nocturne.On(0.55)));
+            row2.AddChild(Text.New(commit.AuthorDate.ToString("g")).FontSize(11.5f).TextColor(Nocturne.On(0.55)));
         row2.AddChild(Flex.Row(gap: 5).AlignItems(AlignItems.Center).Children(
             Ui.Icon(Icons.GitBranch, 12f, Nocturne.On(0.55)),
             Text.New(CommitBranchTitle(commit)).FontSize(11.5f).TextColor(Nocturne.On(0.55))));
