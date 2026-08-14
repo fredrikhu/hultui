@@ -33,13 +33,17 @@ public class BranchesViewTests
 
             // The table is virtualized and its rows are realized during layout, so wait
             // for both chips to exist rather than pumping a fixed number of frames.
+            // The tree groups both refs under a folder row that is also labelled
+            // "origin" — the chip labels are the small ones, so the font size tells the
+            // two apart without depending on the tree being on or off.
             List<TextElement> chips = [];
             try
             {
                 session.PumpUntil(() =>
                 {
                     chips = LayoutProbe.Descendants<TextElement>(Root(session),
-                        t => t.Content == "origin" && t.Layout.AbsoluteBorderBox.Height > 0);
+                        t => t.Content == "origin" && t.Layout.AbsoluteBorderBox.Height > 0
+                             && t.Inherited.FontSize is < 11f);
                     return chips.Count == 2;
                 }, TimeSpan.FromSeconds(20));
             }

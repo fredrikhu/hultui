@@ -79,7 +79,8 @@ app.SetRoot(junction.Mount());
 // Scripted-interaction hook, same job as HULTUI_TRACE_MS but for discrete actions:
 // JUNCTION_BENCH="Branches@4000,History@12000,row:5@20000,close@26000" runs each
 // step on the main thread at its absolute ms-since-launch. A view name switches
-// tabs, "row:N" selects the Nth branch row, "close" ends the run (flushing
+// tabs, "row:N" selects the Nth branch row, "tree"/"flat" pick the ref presentation,
+// "expand:all"/"expand:none" open or close every branch folder, "close" ends the run (flushing
 // HULTUI_TRACE). Each step is stamped into the trace as a Meta "BenchStep" event,
 // so captures need no wall-clock correlation. Exists because there's no other way
 // to drive an unfocused window: SDL drops posted keyboard/click messages, and the

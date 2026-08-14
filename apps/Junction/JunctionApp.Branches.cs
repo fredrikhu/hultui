@@ -25,15 +25,15 @@ public partial class JunctionApp
             return BuildStubView("Branches", "Open a repository first.");
 
         _branches.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadBranches, onLoaded: ClampBranchSel);
-        var list = FilterBranches(_branches.Value.Local);
-        if (_branchSel >= list.Count) _branchSel = Math.Max(0, list.Count - 1);
+        var rows = BranchRows();
+        if (_branchSel >= rows.Count) _branchSel = Math.Max(0, rows.Count - 1);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildBranchesHeader());
         if (BranchCompareActive())
             col.AddChild(BuildBranchCompareBar(_branchCompare!.Value));
         col.AddChild(BuildBranchTableHeader());
-        col.AddChild(BuildBranchScroll(list));
+        col.AddChild(BuildBranchScroll(rows));
         return col;
     }
 
@@ -61,7 +61,7 @@ public partial class JunctionApp
 
     private void ClampBranchSel(BranchesData data)
     {
-        var count = FilterBranches(data.Local).Count;
+        var count = BranchRowsOf(data.Local).Count;
         if (_branchSel >= count) _branchSel = Math.Max(0, count - 1);
     }
 
@@ -75,7 +75,15 @@ public partial class JunctionApp
             b.Subject.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
-    private List<GitBranch> FilteredBranches() => FilterBranches(_branches.Value.Local);
+    /// <summary>The rows the table shows: the filtered branches grouped into the expanded
+    /// tree, or the same branches flat. Remote-tracking refs carry their remote as the first
+    /// name segment (<c>origin/feature/x</c>), so the tree groups them under it for free —
+    /// and the folder says so with a cloud, because every ref beneath it is remote.</summary>
+    private List<RefNode<GitBranch>> BranchRowsOf(IReadOnlyList<GitBranch> all) =>
+        RefRows(FilterBranches(all), RefKindBranch, b => b.Name, b => b.IsRemote,
+            filtering: _branchQuery.Trim().Length > 0);
+
+    private List<RefNode<GitBranch>> BranchRows() => BranchRowsOf(_branches.Value.Local);
 
     // ── Header (title · search · new branch) ─────────────────────────────
 
@@ -86,6 +94,7 @@ public partial class JunctionApp
 
         bar.AddChild(Text.New("Branches").FontSize(18f).FontWeight(FontWeight.SemiBold));
         bar.AddChild(BuildBranchSearch());
+        bar.AddChild(RefViewToggle());
         bar.AddChild(Ui.PrimaryButton("New branch", Icons.Plus, PromptNewBranch, 12.5f));
         return bar;
     }
@@ -166,9 +175,9 @@ public partial class JunctionApp
         return box;
     }
 
-    private Element BuildBranchScroll(List<GitBranch> list)
+    private Element BuildBranchScroll(List<RefNode<GitBranch>> rows)
     {
-        if (list.Count == 0)
+        if (rows.Count == 0)
         {
             return Box.New().FlexGrow(1).Padding(new Thickness(26))
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
@@ -180,26 +189,28 @@ public partial class JunctionApp
 
         // Virtualized: with 1000+ branches a plain ScrollView costs hundreds of ms
         // per rebuild (every row built and measured); the virtual list realizes only
-        // the visible ~20. The template gets the item alone, so rows find their
-        // index through this map (FullName is unique across heads and remotes).
-        var indexOf = new Dictionary<string, int>(list.Count, StringComparer.Ordinal);
-        for (var i = 0; i < list.Count; i++) indexOf[list[i].FullName] = i;
+        // the visible ~20. The tree feeds it the same way — one flat row list of the
+        // expanded nodes — so grouping costs a row per open folder, never a subtree.
+        // The template gets the row alone, so rows find their index through this map
+        // (nodes are rebuilt per build, so identity is the natural key — and unlike a
+        // name it can't collide when a ref is also a folder prefix).
+        var indexOf = new Dictionary<RefNode<GitBranch>, int>(rows.Count);
+        for (var i = 0; i < rows.Count; i++) indexOf[rows[i]] = i;
 
-        return VirtualListElement<GitBranch>.New()
+        return VirtualListElement<RefNode<GitBranch>>.New()
             .ItemHeight(BranchRowHeight)
-            .Items(list)
-            .RenderWith(b => BranchRow(b, indexOf[b.FullName]))
+            .Items(rows)
+            .RenderWith(n => BranchRow(n, indexOf[n]))
             // The virtual list surfaces items to assistive tech by this label alone
             // (rows off-screen are never realized as elements), so it says what the
             // row says: name, current marker, ahead/behind, last commit.
-            .AccessibleItemLabel(b => b.IsRemote
-                ? $"{b.Name}, remote, {b.Subject}"
-                : $"{b.Name}{(b.IsCurrent ? ", current" : "")}, ahead {b.AheadCount} behind {b.BehindCount}, {b.Subject}")
-            .OnActivateItem(b =>
+            .AccessibleItemLabel(n => n.IsFolder ? RefFolderLabel(RefKindBranch, n) : BranchLabel(n.Item))
+            .OnActivateItem(n =>
             {
                 // Assistive-tech activation mirrors a plain row click.
-                if (indexOf.TryGetValue(b.FullName, out var i)) _branchSel = i;
-                BranchSelectSingle(b);
+                if (indexOf.TryGetValue(n, out var i)) _branchSel = i;
+                if (n.IsFolder) ToggleFolder(RefKindBranch, n);
+                else BranchSelectSingle(n.Item);
                 MarkDirty();
             })
             .SelectedIndex(_branchSel)
@@ -208,7 +219,19 @@ public partial class JunctionApp
             .WithRef(_branchScrollRef);
     }
 
-    private Element BranchRow(GitBranch b, int index)
+    private static string BranchLabel(GitBranch b) => b.IsRemote
+        ? $"{b.Name}, remote, {b.Subject}"
+        : $"{b.Name}{(b.IsCurrent ? ", current" : "")}, ahead {b.AheadCount} behind {b.BehindCount}, {b.Subject}";
+
+    private Element BranchRow(RefNode<GitBranch> node, int index)
+    {
+        var focused = index == _branchSel;
+        return node.IsFolder
+            ? RefFolderRow(RefKindBranch, node, index, focused, BranchRowHeight, SelectBranch)
+            : BranchLeafRow(node.Item, node.Depth, index, focused);
+    }
+
+    private Element BranchLeafRow(GitBranch b, int depth, int index, bool focused)
     {
         // Rows in the compare selection are highlighted; the base/head extremes tagged.
         var comparePick = _selectedBranches.Contains(b.FullName);
@@ -217,7 +240,6 @@ public partial class JunctionApp
             : null;
         // The focus caret (Ctrl+arrows) can sit outside the selection. Same colours
         // as the History list: the selection is accent, the caret a neutral tint.
-        var focused = index == _branchSel;
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
         var pb = BranchName.Parse(leaf);
 
@@ -236,8 +258,12 @@ public partial class JunctionApp
             : Color.Transparent);
 
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
+        // The tree's indent lives inside this cell so every column right of it stays
+        // aligned however deep the ref sits.
         var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
             .FlexGrow(38).FlexBasis(Dimension.Px(0));
+        if (depth > 0)
+            branchCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         var (glyph, chipBg, chipFg) = pb.ChipLabel switch
         {
             "FEAT" => (Icons.GitBranch, Nocturne.Accent800, Nocturne.Accent100),
@@ -373,8 +399,27 @@ public partial class JunctionApp
             case KeyCode.P: PushSelected(); return true;
             case KeyCode.L: PullSelected(); return true;
             case KeyCode.I: ToggleIncludeSelected(); return true;
+            case KeyCode.T: ToggleRefTreeView(); return true;
+            // The folder keys. Left/right stay out of HandleBranchNavKey deliberately:
+            // that subset also runs from inside the search box, where the arrows are
+            // the text caret's.
+            case KeyCode.Right when _refTreeView: StepBranchTree(right: true); return true;
+            case KeyCode.Left when _refTreeView: StepBranchTree(right: false); return true;
             default: return false;
         }
+    }
+
+    private void StepBranchTree(bool right)
+    {
+        var rows = BranchRows();
+        var next = RefTreeStep(rows, RefKindBranch, _branchSel, right);
+        if (next != _branchSel)
+        {
+            _branchSel = next;
+            if (!rows[next].IsFolder) BranchSelectSingle(rows[next].Item);
+            EnsureBranchVisible();
+        }
+        MarkDirty();
     }
 
     // Nav subset that also drives the list from inside the search box.
@@ -392,9 +437,19 @@ public partial class JunctionApp
             case KeyCode.Home: MoveBranchSel(int.MinValue / 2, focusOnly); return true;
             case KeyCode.End: MoveBranchSel(int.MaxValue / 2, focusOnly); return true;
             case KeyCode.Space when focusOnly: ToggleFocusedBranch(); return true;
-            case KeyCode.Enter: CheckoutSelected(); return true;
+            case KeyCode.Enter: ActivateSelectedBranchRow(); return true;
             default: return false;
         }
+    }
+
+    /// <summary>Enter on the caret row: a folder opens or closes, a branch is checked out.</summary>
+    private void ActivateSelectedBranchRow()
+    {
+        var rows = BranchRows();
+        if (_branchSel >= 0 && _branchSel < rows.Count && rows[_branchSel] is { IsFolder: true } folder)
+            ToggleFolder(RefKindBranch, folder);
+        else
+            CheckoutSelected();
     }
 
     private void BranchSearchKey(KeyDownEvent e)
@@ -496,10 +551,12 @@ public partial class JunctionApp
 
     private void MoveBranchSel(int delta, bool focusOnly = false)
     {
-        var list = FilteredBranches();
-        if (list.Count == 0) return;
-        _branchSel = Math.Clamp(_branchSel + delta, 0, list.Count - 1);
-        if (!focusOnly) BranchSelectSingle(list[_branchSel]);   // plain nav single-selects
+        var rows = BranchRows();
+        if (rows.Count == 0) return;
+        _branchSel = Math.Clamp(_branchSel + delta, 0, rows.Count - 1);
+        // Plain nav single-selects — folder rows have nothing to select, so walking
+        // through one leaves the previous branch selection standing.
+        if (!focusOnly && rows[_branchSel] is { IsFolder: false } leaf) BranchSelectSingle(leaf.Item);
         EnsureBranchVisible();
         MarkDirty();
     }
@@ -511,10 +568,13 @@ public partial class JunctionApp
         _branchScrollRef.Current?.ScrollRangeIntoView(_branchSel * BranchRowHeight, BranchRowHeight);
     }
 
+    /// <summary>The branch under the caret, or null when the caret is on a folder row.</summary>
     private GitBranch? SelectedBranch()
     {
-        var list = FilteredBranches();
-        return _branchSel >= 0 && _branchSel < list.Count ? list[_branchSel] : null;
+        var rows = BranchRows();
+        return _branchSel >= 0 && _branchSel < rows.Count && rows[_branchSel] is { IsFolder: false } leaf
+            ? leaf.Item
+            : null;
     }
 
     private void CheckoutSelected()
