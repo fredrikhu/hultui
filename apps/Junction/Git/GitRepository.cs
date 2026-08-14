@@ -364,6 +364,18 @@ public class GitRepository
         var fullPath = System.IO.Path.Combine(Path, filePath);
         if (!File.Exists(fullPath)) return [];
 
+        // An untracked file was never handed to git, so nothing has judged it binary yet.
+        // Apply git's own test first: read as text, a new .pdf arrives as thousands of
+        // mojibake "additions", each one measured, tokenized and laid out.
+        if (LooksBinary(fullPath))
+            return
+            [
+                new GitFileDiff(filePath, null, [])
+                {
+                    Binary = new GitBinaryDiff(FileChangeKind.Added, null, null),
+                },
+            ];
+
         var lines = File.ReadAllLines(fullPath);
         var hunkLines = new List<GitDiffLine>
         {
@@ -439,6 +451,49 @@ public class GitRepository
         var fullPath = System.IO.Path.Combine(Path, filePath);
         try { return File.Exists(fullPath) ? File.ReadAllBytes(fullPath) : null; }
         catch { return null; }
+    }
+
+    // ── Blob sizes (binary summaries) ──
+    //
+    // A binary summary needs the two sides' byte counts and nothing else, so these ask
+    // git for the size instead of fetching the blob — a 40 MB asset would otherwise be
+    // read into memory twice to print two numbers.
+
+    /// <summary>Byte size of a blob at a ref, or null when the file isn't there.</summary>
+    public long? GetBlobSize(string gitRef, string filePath) => CatFileSize($"{gitRef}:{filePath}");
+
+    /// <summary>Byte size of the staged (index) copy, or null when it isn't staged.</summary>
+    public long? GetIndexBlobSize(string filePath) => CatFileSize($":{filePath}");
+
+    /// <summary>Byte size of the working-tree copy, or null if it's gone.</summary>
+    public long? GetWorkingFileSize(string filePath)
+    {
+        var fullPath = System.IO.Path.Combine(Path, filePath);
+        try { return File.Exists(fullPath) ? new FileInfo(fullPath).Length : null; }
+        catch { return null; }
+    }
+
+    private long? CatFileSize(string spec)
+    {
+        var result = GitProcess.Run(Path, "cat-file", "-s", spec);
+        return result.Success && long.TryParse(result.Stdout.Trim(), out var size) ? size : null;
+    }
+
+    /// <summary>git's own heuristic, and the one the Files browser already uses: a NUL
+    /// byte in the first 8 KB means binary. Only the head of the file is read.</summary>
+    internal static bool LooksBinary(string fullPath)
+    {
+        try
+        {
+            using var stream = File.OpenRead(fullPath);
+            var probe = new byte[8000];
+            int read = stream.ReadAtLeast(probe, probe.Length, throwOnEndOfStream: false);
+            for (int i = 0; i < read; i++)
+                if (probe[i] == 0)
+                    return true;
+            return false;
+        }
+        catch { return false; }   // unreadable is not "binary"; the text path reports the error
     }
 
     /// <summary>
@@ -1697,6 +1752,12 @@ public class GitRepository
         GitDiffHunk? currentHunk = null;
         int oldLine = 0, newLine = 0;
 
+        // Extended-header state for the file being read. git puts these between the
+        // "diff --git" line and the first hunk, so by the time a "Binary files … differ"
+        // line arrives they are all known.
+        var headerKind = FileChangeKind.Modified;
+        string? oldBlob = null, newBlob = null;
+
         foreach (var rawLine in diffText.Split('\n'))
         {
             if (rawLine.StartsWith("diff --git "))
@@ -1706,6 +1767,8 @@ public class GitRepository
                 currentFile = new GitFileDiff(path, null, []);
                 diffs.Add(currentFile);
                 currentHunk = null;
+                headerKind = FileChangeKind.Modified;
+                oldBlob = newBlob = null;
             }
             else if (rawLine.StartsWith("--- ") && currentFile != null && currentHunk == null)
             {
@@ -1714,6 +1777,32 @@ public class GitRepository
             else if (rawLine.StartsWith("+++ ") && currentFile != null && currentHunk == null)
             {
                 currentFile.NewPathHeader = rawLine;
+            }
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("new file mode "))
+            {
+                headerKind = FileChangeKind.Added;
+            }
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("deleted file mode "))
+            {
+                headerKind = FileChangeKind.Deleted;
+            }
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("rename from "))
+            {
+                headerKind = FileChangeKind.Renamed;
+            }
+            else if (currentFile != null && currentHunk == null && rawLine.StartsWith("index "))
+            {
+                // "similarity index 90%" does not match — that line has no trailing space
+                // after "similarity", and this one is anchored at the start.
+                (oldBlob, newBlob) = ParseIndexBlobs(rawLine);
+            }
+            else if (currentFile != null && currentHunk == null
+                     && (rawLine.StartsWith("Binary files ") || rawLine.StartsWith("GIT binary patch")))
+            {
+                // git's stand-in for a patch it will not produce. Recorded rather than
+                // dropped, so the viewer can say what changed instead of showing an empty
+                // pane — and so nothing downstream tries to tokenize bytes that aren't text.
+                currentFile.Binary = new GitBinaryDiff(headerKind, oldBlob, newBlob);
             }
             else if (rawLine.StartsWith("@@ ") && currentFile != null)
             {
@@ -1761,6 +1850,24 @@ public class GitRepository
         }
 
         return diffs;
+    }
+
+    /// <summary>
+    /// The two blob hashes on a diff's <c>index e0d84f4..9114530 100644</c> line. Git
+    /// abbreviates them and omits the mode on an add or a delete; an all-zero hash means
+    /// the file did not exist on that side and comes back null.
+    /// </summary>
+    private static (string? Old, string? New) ParseIndexBlobs(string line)
+    {
+        var body = line["index ".Length..].Trim();
+        var space = body.IndexOf(' ');
+        if (space >= 0) body = body[..space];              // drop the trailing file mode
+        var dots = body.IndexOf("..", StringComparison.Ordinal);
+        if (dots < 0) return (null, null);
+        return (Blob(body[..dots]), Blob(body[(dots + 2)..]));
+
+        static string? Blob(string hash) =>
+            hash.Length == 0 || hash.All(c => c == '0') ? null : hash;
     }
 
     private static void ParseHunkHeader(string header, out int oldStart, out int newStart)

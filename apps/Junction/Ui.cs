@@ -173,6 +173,23 @@ public static class Ui
         return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
     }
 
+    /// <summary>
+    /// An icon button that cannot be pressed: the same footprint, dimmed, with no click
+    /// handler and no hover tint. <paramref name="reason"/> becomes the tooltip, because a
+    /// control that does nothing has to say why rather than just look inert.
+    /// </summary>
+    public static BoxElement DisabledIconButton(string glyph, string reason, float size = 34f)
+    {
+        var b = Flex.Row(gap: 6)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Width(size).Height(size)
+            .CornerRadius(Nocturne.RadiusMd)
+            .BorderColor(Nocturne.Alpha(Nocturne.Divider, 0.55)).BorderWidth(1f)
+            .Tooltip(reason);
+        b.AddChild(Icon(glyph, 15f, Nocturne.On(0.26)));
+        return b;
+    }
+
     /// <summary>A square repository "logo" tile (coloured initial).</summary>
     public static BoxElement InitialTile(string name, Color bg, Color fg, float size, float fontSize)
     {

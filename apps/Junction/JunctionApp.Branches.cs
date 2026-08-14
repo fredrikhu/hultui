@@ -96,6 +96,10 @@ public partial class JunctionApp
         bar.AddChild(BuildBranchSearch());
         bar.AddChild(RefViewToggle());
         bar.AddChild(Ui.PrimaryButton("New branch", Icons.Plus, PromptNewBranch, 12.5f));
+        // Worktrees are branch-adjacent — the branch context menu already offers to create
+        // one — and until now the panel could only be reached by typing into the palette,
+        // which is not where anyone looks for "this branch, checked out somewhere else".
+        bar.AddChild(Ui.SecondaryButton("Worktrees", Icons.TreeStructure, OpenWorktrees, 12.5f));
         return bar;
     }
 
