@@ -315,6 +315,7 @@ public partial class CommanderApp : Component, IDisposable
         Icons.DisplayScale = window.DisplayScale;
         window.Resized += OnWindowResized;
         _settings = SettingsStore.Load();
+        SeedFindDefaults();
         // A sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
         _viewerPan = new HorizontalPan(MarkDirty);
@@ -1225,7 +1226,7 @@ public partial class CommanderApp : Component, IDisposable
         _pwOpen = false;
         _renameOpen = false;
         _historyPop = null;
-        if (_findOpen) { _findOpen = false; StopFind(); }
+        if (_findOpen) { _findOpen = false; StopFind(); PersistFindDefaults(); }
         MarkDirty();
     }
 
@@ -1718,6 +1719,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         _settings = _draft.Clone();
         SettingsStore.Save(_settings);
+        SeedFindDefaults();                         // the find dialog adopts the new defaults
         RebuildKeymap();                            // apply any rebinds
         Nocturne.SetAccent(_settings.Accent);      // retheme the accent ramp
         Icons.InvalidateCache();                    // icons bake the ramp — re-rasterize

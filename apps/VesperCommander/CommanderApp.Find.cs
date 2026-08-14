@@ -19,6 +19,9 @@ public partial class CommanderApp
     private string _findPattern = "";
     private string _findContains = "";
     private bool _findRecursive, _findMatchCase, _findRegex, _findHidden, _findArchives;
+    // Scope limits, seeded from Settings and sticky across opens (like the option chips above).
+    private int _findMaxDepth;            // folder levels below the root; 0 = unlimited
+    private string _findExclude = "";     // ";"-separated folder patterns, e.g. ".git;.vs"
     private readonly List<FindEngine.Hit> _findResults = new();   // main-thread only
     private readonly System.Collections.Concurrent.ConcurrentQueue<FindEngine.Hit> _findIncoming = new();
     private long _lastFindRepaint;
@@ -42,6 +45,33 @@ public partial class CommanderApp
     private const float FindMinW = 460f, FindMinListH = 160f;
 
     private const int FindResultCap = 2000;
+    /// <summary>Upper stop for the depth stepper — past this a bound stops meaning anything
+    /// a real tree would notice, and "Unlimited" is one click away at the other end.</summary>
+    private const int MaxFindDepth = 32;
+
+    /// <summary>How the depth stepper reads. 0 is unbounded (the default, so an untouched
+    /// dialog searches exactly as it always did); N counts folder levels *below* the search
+    /// root, so "1 level" means this folder and its immediate subfolders and no further.</summary>
+    private static string DepthLabel(int d) => d <= 0 ? "Unlimited" : d == 1 ? "1 level" : $"{d} levels";
+
+    /// <summary>Adopt the persisted find defaults. Called at start-up and after Options is
+    /// saved; between those the dialog keeps whatever the user sets in it.</summary>
+    private void SeedFindDefaults()
+    {
+        _findMaxDepth = Math.Clamp(_settings.FindMaxDepth, 0, MaxFindDepth);
+        _findExclude = _settings.FindExcludeFolders;
+    }
+
+    /// <summary>Depth and excludes are the "set once" half of the dialog, so a change made
+    /// there becomes the default for the next search too. Written only when it actually
+    /// changed — closing the dialog shouldn't rewrite settings.json every time.</summary>
+    private void PersistFindDefaults()
+    {
+        if (_findMaxDepth == _settings.FindMaxDepth && _findExclude == _settings.FindExcludeFolders) return;
+        _settings.FindMaxDepth = _findMaxDepth;
+        _settings.FindExcludeFolders = _findExclude;
+        SettingsStore.Save(_settings);
+    }
 
     private void OpenFind(char side)
     {
@@ -60,6 +90,7 @@ public partial class CommanderApp
     private void CloseFind()
     {
         StopFind();
+        PersistFindDefaults();
         _findOpen = false;
         PaneRef(_findSide).Current?.Focus();
         MarkDirty();
@@ -88,7 +119,8 @@ public partial class CommanderApp
         _findCts = cts;
         var opts = new FindEngine.Options(
             _findPattern, _findContains.Length > 0 ? _findContains : null,
-            _findRecursive, _findMatchCase, _findRegex, _findHidden, _findArchives, _sevenZip);
+            _findRecursive, _findMatchCase, _findRegex, _findHidden, _findArchives, _sevenZip,
+            _findMaxDepth, _findExclude);
         string root = Dir(_findSide);
 
         // Callbacks run on the walker thread. We do NOT marshal + MarkDirty per hit (that
@@ -128,7 +160,7 @@ public partial class CommanderApp
     {
         if (_findSel < 0 || _findSel >= _findResults.Count) return;
         var h = _findResults[_findSel];
-        _findOpen = false; StopFind();
+        _findOpen = false; StopFind(); PersistFindDefaults();
         _active = side;
         // Land the cursor on the hit (or on the folder itself if the hit is a folder).
         NavigateTo(side, h.IsDir ? h.FullPath : h.ParentDir, focusChildName: h.IsDir ? null : h.Name);
@@ -239,6 +271,7 @@ public partial class CommanderApp
         controls.AddChild(FindCheck("Hidden", _findHidden, () => { _findHidden = !_findHidden; RunFind(); }));
         controls.AddChild(FindCheck("Archives", _findArchives, () => { _findArchives = !_findArchives; RunFind(); }));
         card.AddChild(controls);
+        card.AddChild(FindScopeRow());
 
         card.AddChild(BuildFindBody());
         card.AddChild(BuildFindFooter());
@@ -261,6 +294,34 @@ public partial class CommanderApp
         input.OnTextChanged(v => onChange(v));
         if (refBox != null) input.WithRef(refBox);
         row.AddChild(input);
+        return row;
+    }
+
+    /// <summary>The two scope limits — folders to skip, and how deep to go. On their own row
+    /// rather than in the chip row above so the chips keep their single line at the dialog's
+    /// minimum width, and so the exclude field has somewhere to shrink to.</summary>
+    private Element FindScopeRow()
+    {
+        var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(8, 14, 8, 14))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
+        row.AddChild(Ui.Icon(Glyphs.Prohibit, 14f, Nocturne.On(0.45)).FlexShrink(0));
+
+        // Same explicit-height rule as the pattern fields: a flex-only TextInput collapses
+        // its content box and paints nothing.
+        var input = Ui.Field(TextInput.New(_findExclude)).FlexShrink(1);
+        input.PlaceholderText("Skip folders: .git;.vs");
+        input.OnTextChanged(v => { _findExclude = v; RunFind(); });
+        input.AutomationId = "find-exclude";
+        row.AddChild(input);
+
+        row.AddChild(Text.New("Depth").FontSize(11.5f).TextColor(Nocturne.Neutral300)
+            .MaxLines(1).FlexShrink(0)
+            .Tooltip("How many folder levels below this one to search. Unlimited is the default."));
+        row.AddChild(Stepper(DepthLabel(_findMaxDepth),
+            () => { _findMaxDepth = Math.Max(0, _findMaxDepth - 1); RunFind(); },
+            () => { _findMaxDepth = Math.Min(MaxFindDepth, _findMaxDepth + 1); RunFind(); },
+            width: 68f, id: "find-depth").FlexShrink(0));
         return row;
     }
 
