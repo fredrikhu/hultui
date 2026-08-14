@@ -137,7 +137,18 @@ public partial class JunctionApp : Component, IDisposable
     private (string BaseHash, string HeadHash)? _detailRange;
     private string? _selectedFilePath;    // file selected in the Commit view
 
-    // Changes (staging) state.
+    // Changes (staging) state. Multi-selection à la Windows lists, the same model as
+    // the History list above: the three _changeSel* fields are the FOCUS caret — the
+    // one file the diff pane, Ctrl+D and the line-level staging selection follow —
+    // while _changeSelection is the selection set and _changeAnchor anchors Shift
+    // ranges. The selection may legitimately go empty, and the caret may sit outside
+    // it after Ctrl+arrows / Ctrl+Space.
+    //
+    // One rule is specific to this list: a selection never spans two of the three
+    // sections (Conflicts / Staged / Changes). "Stage these files" has no single
+    // meaning for a set that is half staged and half not, so any range or toggle that
+    // would cross a section boundary starts a fresh selection in the clicked row's
+    // section instead — see OnChangeRowClick and MoveChangeSelection.
     private readonly KeyedAsyncLoader<string, ChangesData> _changesLoaders =
         new(ChangesData.Empty, capacity: 16, comparer: PathComparer);
     private string? _changeSelPath;
@@ -145,6 +156,12 @@ public partial class JunctionApp : Component, IDisposable
     // True when the selected file is a merge conflict; the right pane then shows the
     // ours/theirs resolution UI instead of a diff.
     private bool _changeSelConflicted;
+    private readonly HashSet<ChangeRef> _changeSelection = new();
+    private ChangeRef? _changeAnchor;
+    // Scroll the keyboard-focused file row into view (the list isn't focused, so it
+    // won't follow the caret on its own).
+    private readonly Ref<ScrollViewElement> _changeScrollRef = new();
+    private readonly Ref<Element> _changeFocusRef = new();
     private string _commitSummary = "";
     private string _commitDescription = "";
     private readonly Ref<TextInputElement> _summaryRef = new();
@@ -248,6 +265,14 @@ public partial class JunctionApp : Component, IDisposable
     {
         public static readonly ChangesData Empty = new([], [], new(), new(), false, [], null, []);
     }
+
+    /// <summary>Which of the Changes view's three lists a file row lives in. Part of a
+    /// row's identity rather than a property of the file: a partially-staged file has a
+    /// row in <see cref="ChangeSection.Staged"/> AND one in <see cref="ChangeSection.Unstaged"/>,
+    /// and they select independently.</summary>
+    private enum ChangeSection { Conflicted, Staged, Unstaged }
+
+    private readonly record struct ChangeRef(string Path, ChangeSection Section);
 
     // Identity of the two sides of an in-progress merge: "ours" = HEAD (the branch
     // being merged into), "theirs" = MERGE_HEAD (the branch being merged in).
@@ -638,14 +663,17 @@ public partial class JunctionApp : Component, IDisposable
                 // Fixed row height, so index math needs no per-row layout.
                 EnsureSelectedCommitVisible();
             }
-            else if (_paletteOpen || View == JunctionView.Commit)
+            else if (_paletteOpen || View is JunctionView.Commit or JunctionView.Changes)
             {
                 // OnAfterBuild runs before the layout pass, so the selected row's box
                 // for this frame isn't available yet (and the file row, re-keyed on
                 // selection, is a fresh element with no prior layout at all). Read it
                 // in a post-frame callback, once the frame has been laid out.
-                var scrollRef = _paletteOpen ? _paletteScrollRef : _fileScrollRef;
-                var rowRef = _paletteOpen ? _paletteSelRef : _fileSelRef;
+                var changes = !_paletteOpen && View == JunctionView.Changes;
+                var scrollRef = _paletteOpen ? _paletteScrollRef
+                    : changes ? _changeScrollRef : _fileScrollRef;
+                var rowRef = _paletteOpen ? _paletteSelRef
+                    : changes ? _changeFocusRef : _fileSelRef;
                 _window.RequestPostFrameCallback(() => ScrollRowIntoView(scrollRef, rowRef));
             }
         }
@@ -905,9 +933,13 @@ public partial class JunctionApp : Component, IDisposable
 
         // A modal dialog swallows every global shortcut; only Esc (cancel) acts,
         // and typing flows straight to the focused field.
-        if (_dialog != null)
+        if (_dialog is { } dialog)
         {
             if (e.Key == KeyCode.Escape) { CloseDialog(); e.StopPropagation = true; }
+            // A confirm-only prompt has no field to take the Enter (the field's own
+            // handler is what confirms the others), so it is accepted here.
+            else if (e.Key == KeyCode.Enter && dialog.Placeholder == null)
+            { ConfirmDialog(); e.StopPropagation = true; }
             return;
         }
 
@@ -1093,6 +1125,14 @@ public partial class JunctionApp : Component, IDisposable
                 return;
             }
             if (HandleBranchKey(e))
+                e.StopPropagation = true;
+        }
+
+        // The file list. Reached only when nothing is typing (the composer's fields sit
+        // in this view) and the diff pane didn't consume the key to scroll itself.
+        if (View == JunctionView.Changes)
+        {
+            if (HandleChangesNavKey(e))
                 e.StopPropagation = true;
         }
     }
