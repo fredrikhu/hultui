@@ -272,6 +272,131 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         }, options: HeadlessOptions.DeterministicRecording());
     }
 
+    /// <summary>
+    /// A match below the fold in a body whose lines <i>wrap</i> is scrolled all the way to it.
+    ///
+    /// <para>The response body is one read-only TextArea and it wraps at the pane width, which
+    /// for a JSON payload in a 560dip pane is most of the time. The reveal used to hand the
+    /// search's <i>logical</i> line index to a scroll that counts <i>drawn rows</i>, so every
+    /// wrap above the match cost one row of accuracy and the match stopped short of the
+    /// viewport — further short the deeper in the body it sat.</para>
+    ///
+    /// <para>Asserted by comparison rather than against a pixel figure, because the right answer
+    /// depends on the measured line height and the pane width and this has to hold on any font.
+    /// Two bodies, same line count, same marker on the same line, one wrapping and one not: the
+    /// wrapping one has strictly more rows above the marker and so must end up strictly further
+    /// down. Under the old arithmetic both produced the same offset, which is the symptom.</para>
+    /// </summary>
+    [Fact]
+    public void AMatchInAWrappedBodyIsScrolledToItsRealRowNotItsLineNumber()
+    {
+        float flat = ScrollAfterFindingTheMarker(wrapping: false);
+        float wrapped = ScrollAfterFindingTheMarker(wrapping: true);
+
+        Assert.True(flat > 0, "the unwrapped body's match is hundreds of lines down and it never scrolled");
+        Assert.True(wrapped > flat,
+            $"every line above the match wraps, so the match sits far further down than its line "
+            + $"number suggests — the body stopped at {wrapped:F0}px, no further than the "
+            + $"{flat:F0}px an unwrapped body of the same length needs");
+    }
+
+    /// <summary>
+    /// A match deep inside a single very long line is scrolled to, not merely to the top of the
+    /// line it sits on.
+    ///
+    /// <para>This is Meridian's own shape rather than an invented one: <c>raw</c> mode on a
+    /// minified JSON payload is one logical line thousands of characters wide, wrapped into
+    /// hundreds of rows. A line number cannot name a row inside it — every match in the body
+    /// resolves to line 0, which is the top of the pane — so the reveal hands the body an
+    /// absolute offset instead.</para>
+    /// </summary>
+    [Fact]
+    public void AMatchInsideOneLongWrappedLineScrollsToTheMatchNotTheLineStart()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-ok");
+            var words = Enumerable.Repeat("filler", 4000).Append("far-below");
+            var text = string.Join(' ', words);
+            app.ActiveTab!.Result = Meridian.Core.SendResult.Ok(TextResponse(text));
+            MarkDirty(app);
+            session.PumpFrames(2);
+
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("far-below");
+            session.PumpFrames(3);
+            Assert.True(Contains(session, "1 of 1"), "the marker should be the only match");
+
+            try { session.PumpUntil(() => ScrollY(session) > 0, TimeSpan.FromSeconds(15)); }
+            catch (TimeoutException) { /* the assertion below reports it */ }
+
+            Assert.True(ScrollY(session) > 0,
+                "the whole body is one logical line, so scrolling to a line number can only ever "
+                + "reach the top of the pane — the match is hundreds of wrapped rows below it");
+        });
+    }
+
+    /// <summary>Where the body ended up after walking to the only match, for a body that wraps
+    /// and one that does not. Both are the same number of lines with the marker on the last.</summary>
+    private float ScrollAfterFindingTheMarker(bool wrapping)
+    {
+        float scroll = 0;
+        Hosted((session, app) =>
+        {
+            Click(session, "req-ok");
+            // Handed straight to the tab rather than sent: the shape under test is the reveal,
+            // and a fabricated body is the only way to hold the line count fixed across the
+            // wrapping and non-wrapping variants.
+            app.ActiveTab!.Result = Meridian.Core.SendResult.Ok(LongTextResponse(wrapping));
+            MarkDirty(app);
+            session.PumpFrames(2);
+
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("far-below");
+            session.PumpFrames(3);
+            Assert.True(Contains(session, "1 of 1"), "the marker should be the only match");
+
+            // The reveal lands in a post-frame callback off a rebuild, so this waits for the
+            // scroll rather than assuming a frame count. The wait can only turn a slow pass
+            // into a pass; a body that never scrolls still fails, with the message intact.
+            try { session.PumpUntil(() => ScrollY(session) > 0, TimeSpan.FromSeconds(15)); }
+            catch (TimeoutException) { /* the caller's assertion reports it */ }
+            scroll = ScrollY(session);
+        });
+        return scroll;
+    }
+
+    /// <summary>400 filler lines then the marker, as text/plain so nothing re-indents it.
+    /// <paramref name="wrapping"/> pads every line past any plausible pane width, so each one
+    /// occupies several drawn rows while the line <i>count</i> stays the same.</summary>
+    private static Meridian.Core.HttpResponseData LongTextResponse(bool wrapping)
+    {
+        var filler = wrapping ? " " + string.Join(' ', Enumerable.Repeat("filler", 70)) : "";
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < 400; i++) sb.Append("old line ").Append(i).Append(filler).Append('\n');
+        sb.Append("the far-below marker\n");
+        return TextResponse(sb.ToString());
+    }
+
+    /// <summary>A 200 carrying <paramref name="text"/> as text/plain — plain so pretty mode
+    /// leaves it exactly as written and the line count is the one the test intends.</summary>
+    private static Meridian.Core.HttpResponseData TextResponse(string text) =>
+        new(200, "OK", [("Content-Type", "text/plain")], "text/plain",
+            new Meridian.Core.ResponseBody(Meridian.Core.BodyKind.Text, text, [], text.Length, false, null),
+            new Meridian.Core.PhaseTimings(default, default, default, default, default, default, false, "HTTP/1.1", null),
+            "http://127.0.0.1/long");
+
+    private static float ScrollY(HeadlessSession session)
+    {
+        var el = session.Window.FindByAutomationId("response-body");
+        Assert.True(el != null, "response body area not found");
+        return (float)typeof(TextAreaElement).GetProperty("ScrollOffsetY",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(el!.Element)!;
+    }
+
     private static void MarkDirty(MeridianApp app) =>
         typeof(MeridianApp).GetMethod("MarkDirty",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!

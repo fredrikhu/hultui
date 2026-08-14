@@ -68,12 +68,27 @@ public partial class MeridianApp
         if (s.PendingReveal)
         {
             s.PendingReveal = false;
-            _window.RequestPostFrameCallback(() =>
-            {
-                if (_responseBodyRef.Current is { } area && s.Search.Current is { } hit)
-                    area.ScrollLineIntoView(hit.Line);
-            });
+            _window.RequestPostFrameCallback(() => RevealResponseHit(s));
         }
+    }
+
+    /// <summary>
+    /// Brings the current match on screen.
+    ///
+    /// <para>Handed to the body as an absolute offset rather than a line number. The body wraps
+    /// at the pane width, and a JSON line is routinely longer than a 560dip pane: one logical
+    /// line is then several drawn rows, a line index only names the row the line <i>starts</i>
+    /// on, and a match near the end of such a line would be scrolled to just off the bottom.
+    /// The offsets are the ones already computed for the tinting, so this costs nothing.</para>
+    /// </summary>
+    private void RevealResponseHit(FindBarState s)
+    {
+        if (_responseBodyRef.Current is not { } area) return;
+        if (s.Search.Current is not { } hit) return;
+        if (hit.Line >= 0 && hit.Line < _respLineStarts.Length)
+            area.ScrollOffsetIntoView(_respLineStarts[hit.Line] + hit.Start);
+        else
+            area.ScrollLineIntoView(hit.Line);   // starts not built yet (nothing displayed)
     }
 
     // ── The response panel ───────────────────────────────────────────────
@@ -361,6 +376,10 @@ public partial class MeridianApp
     private object? _respBodyMemoKey;
     private string _respBodyText = "";
     private string[] _respBodyLines = [];
+    /// <summary>Character offset where each displayed line begins. Both the search tinting and
+    /// the scroll-to-match speak absolute offsets into the flattened body, so this is computed
+    /// once with the text rather than rebuilt on every repaint.</summary>
+    private int[] _respLineStarts = [];
     private IReadOnlyList<TextSpan>? _respSyntaxSpans;
 
     private (string Text, IReadOnlyList<TextSpan>? Spans) ResponseBodyTextAndSpans(RequestTab tab, HttpResponseData response)
@@ -373,6 +392,7 @@ public partial class MeridianApp
             text = text.ReplaceLineEndings("\n");
             _respBodyText = text;
             _respBodyLines = text.Split('\n');
+            _respLineStarts = LineStarts(_respBodyLines);
             _respSyntaxSpans = SyntaxSpans(text, response.ContentType);
 
             // (Re)bind the search to the displayed text.
@@ -381,7 +401,15 @@ public partial class MeridianApp
             _responseFind.Search.Bind(lines.Length, lanes: 1,
                 (line, _) => line >= 0 && line < lines.Length ? lines[line] : null);
         }
-        return (_respBodyText, DecorateResponseBody(_respBodyLines, _respSyntaxSpans));
+        return (_respBodyText, DecorateResponseBody(_respLineStarts, _respSyntaxSpans));
+    }
+
+    private static int[] LineStarts(string[] lines)
+    {
+        var starts = new int[lines.Length];
+        int offset = 0;
+        for (int i = 0; i < lines.Length; i++) { starts[i] = offset; offset += lines[i].Length + 1; }
+        return starts;
     }
 
     /// <summary>Pretty mode: JSON re-indented via a real parse; anything that
@@ -444,14 +472,10 @@ public partial class MeridianApp
     /// offsets — and sorted, because TextArea slices the list per visible line
     /// and stops at the first span past the line end (the lesson Junction's
     /// Files view learned the hard way).</summary>
-    private IReadOnlyList<TextSpan>? DecorateResponseBody(string[] lines, IReadOnlyList<TextSpan>? syntax)
+    private IReadOnlyList<TextSpan>? DecorateResponseBody(int[] starts, IReadOnlyList<TextSpan>? syntax)
     {
         var search = _responseFind.Search;
         if (!search.HasHits) return syntax;
-
-        var starts = new int[lines.Length];
-        int offset = 0;
-        for (int i = 0; i < lines.Length; i++) { starts[i] = offset; offset += lines[i].Length + 1; }
 
         var current = search.Current;
         var merged = syntax is null ? new List<TextSpan>() : new List<TextSpan>(syntax);
