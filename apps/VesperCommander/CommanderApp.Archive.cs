@@ -19,7 +19,10 @@ public partial class CommanderApp
     private bool _sevenZip;
     private readonly Dictionary<string, string> _archivePasswords = new(StringComparer.OrdinalIgnoreCase);
 
-    private bool InArchive(char side) => ArchivePath.InArchive(Dir(side));
+    // A pane showing a fed-in result set is never "inside an archive", whatever its folder
+    // is: the rows are ordinary files on disk (archive members are excluded from a fed set),
+    // so the archive column, footer and write gating must all stay out of the way.
+    private bool InArchive(char side) => !InResults(side) && ArchivePath.InArchive(Dir(side));
 
     /// <summary>The cached password for the archive that <paramref name="dir"/> is inside
     /// (or null). Used so a listing/extract can reuse a password entered this session.</summary>
@@ -120,7 +123,7 @@ public partial class CommanderApp
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
         var dest = Dir(other);
-        if (InArchiveBlock(other) || LockedBlock(other, "extract into a locked tab")) return;
+        if (InArchiveBlock(other) || LockedBlock(other, "extract into a locked tab") || ResultsBlock(other)) return;
         string from = ArchivePath.TryParse(Dir(side)) is { } a ? System.IO.Path.GetFileName(a.ArchiveFile) : "the archive";
         string label = items.Count == 1 ? $"\"{items[0].Name}\"" : $"{items.Count} items";
         _confirm = new ConfirmSpec("Extract", $"Extract {label} from {from} to\n{dest}", "Extract", Danger: false,
@@ -143,7 +146,7 @@ public partial class CommanderApp
         if (!(ArchiveVfs.IsArchiveFile(e.FullPath) && File.Exists(e.FullPath))) return;
 
         var dest = Dir(other);
-        if (InArchiveBlock(other) || LockedBlock(other, "extract into a locked tab")) return;
+        if (InArchiveBlock(other) || LockedBlock(other, "extract into a locked tab") || ResultsBlock(other)) return;
 
         var root = ArchiveVfs.ListEntries(e.FullPath, "", PasswordFor(e.FullPath), _sevenZip);
         var members = root.Entries.Where(x => !x.IsParent).ToList();
@@ -225,7 +228,10 @@ public partial class CommanderApp
     }
 
     // ── Archive error state (in-pane, replaces the listing) ──────────────
-    private ArchiveStatus? ArchiveStatusOf(char side) => Loader(side).Value.Archive;
+    // Null while a fed-in result set is showing: the loader still holds whatever the tab's
+    // folder last resolved to, and an archive error from that read is not this pane's state.
+    private ArchiveStatus? ArchiveStatusOf(char side) =>
+        InResults(side) ? null : Loader(side).Value.Archive;
 
     private Element BuildArchiveError(char side, ArchiveStatus status)
     {

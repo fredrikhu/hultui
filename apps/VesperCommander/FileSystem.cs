@@ -166,6 +166,35 @@ public static class FileSystem
         return new(state, result);
     }
 
+    /// <summary>Sort a set of entries the way <see cref="List"/> sorts a folder — same
+    /// comparator, same dirs-before-files grouping. Used by the fed-in search-result
+    /// listing, which has entries to show but no directory to read them from. Any ".."
+    /// parent in the input is dropped; the caller re-adds its own.</summary>
+    public static List<FileEntry> Sort(IReadOnlyList<FileEntry> entries,
+        SortMode sort = SortMode.Name, bool dirsFirst = true, bool descending = false)
+    {
+        var cmp = Comparator(sort, descending);
+        var dirs = new List<FileEntry>();
+        var files = new List<FileEntry>();
+        foreach (var e in entries)
+        {
+            if (e.IsParent) continue;
+            (e.IsDir ? dirs : files).Add(e);
+        }
+        var result = new List<FileEntry>(dirs.Count + files.Count);
+        if (dirsFirst)
+        {
+            dirs.Sort(cmp); files.Sort(cmp);
+            result.AddRange(dirs); result.AddRange(files);
+        }
+        else
+        {
+            result.AddRange(dirs); result.AddRange(files);
+            result.Sort(cmp);
+        }
+        return result;
+    }
+
     /// <summary>Sort comparator for a listing, honoring the sort key and direction.</summary>
     private static Comparison<FileEntry> Comparator(SortMode sort, bool descending)
     {

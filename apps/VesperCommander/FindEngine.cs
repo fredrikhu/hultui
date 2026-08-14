@@ -14,9 +14,12 @@ public static class FindEngine
         bool Recursive, bool MatchCase, bool Regex, bool Hidden,
         bool Archives = false, bool SevenZip = false);
 
+    /// <param name="Attributes">Carried through so a hit fed into a pane listing renders
+    /// (and reports) exactly like the same file read from its folder — the walker already
+    /// has them, and re-statting a fed-in result set would cost a syscall per row.</param>
     public sealed record Hit(
         string FullPath, string Name, bool IsDir, long Size, DateTime Modified,
-        string ParentDir, int ContentHits);
+        string ParentDir, int ContentHits, FileAttributes Attributes = 0);
 
     private const long MaxContentBytes = 4L * 1024 * 1024;
 
@@ -144,7 +147,7 @@ public static class FindEngine
                     long size = 0; DateTime mtime = default;
                     try { mtime = info.LastWriteTime; if (!isDir && info is FileInfo fi) size = fi.Length; } catch { }
                     onHit(new Hit(info.FullName, info.Name, isDir, size, mtime,
-                        Path.GetDirectoryName(info.FullName) ?? "", hits));
+                        Path.GetDirectoryName(info.FullName) ?? "", hits, attr));
                     // (The archive descent above runs before the name check so it always fires
                     // once — no second walk here, which would double-count a name-matched archive.)
                 }
@@ -176,7 +179,7 @@ public static class FindEngine
                 if (hits == 0) continue;
             }
             onHit(new Hit(e.FullPath, e.Name, IsDir: false, e.Size, e.Modified,
-                Path.GetDirectoryName(e.FullPath) ?? "", hits));
+                Path.GetDirectoryName(e.FullPath) ?? "", hits, e.Attributes));
         }
     }
 }

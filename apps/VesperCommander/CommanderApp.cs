@@ -27,25 +27,27 @@ public partial class CommanderApp : Component, IDisposable
     private readonly Window _window;
 
     // Manual double-click detection for the file rows (see BuildPane's PointerDown).
-    // Keyed by side + entry name so two presses on the same row within the window read
-    // as a double-click even though the row element was re-realized in between.
+    // Keyed by side + entry path so two presses on the same row within the window read
+    // as a double-click even though the row element was re-realized in between. (Path, not
+    // name: a fed-in result set can list two same-named files, and a press on one followed
+    // by a press on the other is two clicks, not a double-click.)
     private const long DoubleClickMs = 400;
-    private string? _lastPressName;
+    private string? _lastPressPath;
     private char _lastPressSide;
     private long _lastPressTick;
-    private bool IsDoublePress(char side, string name)
+    private bool IsDoublePress(char side, string path)
     {
         long now = Environment.TickCount64;
-        bool dbl = _lastPressName == name && _lastPressSide == side
+        bool dbl = _lastPressPath == path && _lastPressSide == side
                    && now - _lastPressTick <= DoubleClickMs;
         _lastPressSide = side;
         _lastPressTick = now;
-        _lastPressName = dbl ? null : name;   // consume, so a third press isn't a second activate
+        _lastPressPath = dbl ? null : path;   // consume, so a third press isn't a second activate
         return dbl;
     }
 
     // Each pane is a list of tabs; a tab owns its folder, cursor, and mark set.
-    // Marks are kept by name (they survive row recycling) and cleared on navigation.
+    // Marks are kept by full path (see MarkKey) and cleared on navigation.
     private sealed class PaneTab(string dir)
     {
         public string Dir = dir;
@@ -54,12 +56,28 @@ public partial class CommanderApp : Component, IDisposable
         public ViewMode View = ViewMode.Detail;   // per-tab list layout, persisted per session
         public SortMode Sort = SortMode.Name;      // per-tab sort column + direction (seeded
         public bool SortDescending;                // from the Options default at tab creation)
-        public readonly HashSet<string> Marks = new(StringComparer.Ordinal);
+        public readonly HashSet<string> Marks = PathSet();
+        // Non-null while this tab browses a fed-in search result set instead of its folder
+        // (CommanderApp.Results.cs). Dir still names the folder the search ran under.
+        public ResultListing? Results;
         // Per-tab navigation history (most-recent last). Back holds folders left behind;
         // Fwd holds folders returned-from after a Back. A new forward navigation clears Fwd.
         public readonly List<string> Back = new();
         public readonly List<string> Fwd = new();
     }
+
+    /// <summary>The key an entry is held under in a mark set: its full path.
+    ///
+    /// <para>Names would be shorter, but a fed-in search result set lists files from many
+    /// folders at once, where two rows routinely share a name — and every operation resolves
+    /// its targets by <see cref="FileEntry.FullPath"/> anyway. Keying the marks the same way
+    /// is what makes "marked" mean one row rather than every row that happens to be called
+    /// the same thing.</para></summary>
+    private static string MarkKey(FileEntry e) => e.FullPath;
+
+    /// <summary>A set of paths, compared the way the platform compares them.</summary>
+    private static HashSet<string> PathSet() => new(OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private List<PaneTab> _tabsL = [];
     private List<PaneTab> _tabsR = [];
     private int _tabL, _tabR;                        // active tab index per pane
@@ -186,8 +204,10 @@ public partial class CommanderApp : Component, IDisposable
 
     // Off-thread directory reads. Keyed by "path#gen" so a Refresh reloads and a
     // navigation supersedes the previous listing without blocking Build().
-    private readonly AsyncLoader<DirListing> _listL = new(DirListing.Loading);
-    private readonly AsyncLoader<DirListing> _listR = new(DirListing.Loading);
+    // Not readonly: Ctrl+U swaps the two panes wholesale, and a loader belongs to the tabs
+    // it read for rather than to a screen position (see SwapPanes).
+    private AsyncLoader<DirListing> _listL = new(DirListing.Loading);
+    private AsyncLoader<DirListing> _listR = new(DirListing.Loading);
     private int _genL, _genR;
     private bool _loadedL, _loadedR;
 
@@ -398,13 +418,25 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    private PaneState PaneStateOf(char side) =>
-        (side == 'L' ? _forceStateL : _forceStateR) ?? Loader(side).Value.State;
+    private PaneState PaneStateOf(char side)
+    {
+        var forced = side == 'L' ? _forceStateL : _forceStateR;
+        if (forced is { } f) return f;
+        // A fed-in result set has no directory to be offline or denied; it is Ok while it
+        // holds anything and Empty once a refresh has taken the last row away.
+        if (ActiveTab(side).Results is { } v)
+            return v.Entries.Count == 0 ? PaneState.Empty : PaneState.Ok;
+        return Loader(side).Value.State;
+    }
 
     /// <summary>The current (possibly stale-while-loading) listing for a side,
     /// kicking off / refreshing the off-thread load as a side effect of Build().</summary>
     private IReadOnlyList<FileEntry> Listing(char side)
     {
+        // A fed-in result set short-circuits the directory loader entirely: there is no
+        // folder to read, and the held set is what the pane is for.
+        if (ActiveTab(side).Results is { } results) return ResultRows(side, results);
+
         var loader = Loader(side);
         var dir = Dir(side);
         var sort = SortOf(side); var desc = SortDescOf(side);   // per-tab; captured for the worker
@@ -641,6 +673,7 @@ public partial class CommanderApp : Component, IDisposable
             tab.Fwd.Clear();   // a fresh forward move invalidates the redo stack
         }
         tab.Dir = path;
+        tab.Results = null;   // navigating anywhere leaves a fed-in result set behind
         BumpGen(side);
         // Cursor reset now; the loader's onLoaded re-clamps once the listing lands.
         // If we ascended, try to land on the folder we came from.
@@ -758,6 +791,8 @@ public partial class CommanderApp : Component, IDisposable
 
         if (e.IsParent)
         {
+            // In a fed-in result set ".." is the way out, not a folder above this one.
+            if (ExitResults(side)) return;
             var leaving = new DirectoryInfo(Dir(side)).Name;
             NavigateTo(side, e.FullPath, focusChildName: leaving);
         }
@@ -808,6 +843,17 @@ public partial class CommanderApp : Component, IDisposable
         return -1;
     }
 
+    /// <summary>The row holding <paramref name="path"/>. Used wherever a row has to be found
+    /// again after the list was rebuilt or recycled — a fed-in result set lists many folders
+    /// at once, so a name can name several rows and only the path names one.</summary>
+    private static int IndexOfPath(IReadOnlyList<FileEntry> list, string? path)
+    {
+        if (path == null) return -1;
+        for (int i = 0; i < list.Count; i++)
+            if (PathEquals(list[i].FullPath, path)) return i;
+        return -1;
+    }
+
     private int PageSize(char side)
     {
         var h = VList(side).Current?.Layout.AbsoluteContentBox.Height ?? (10 * RowHeight);
@@ -826,7 +872,7 @@ public partial class CommanderApp : Component, IDisposable
         if (!e.IsParent)
         {
             var marks = Marks(side);
-            if (!marks.Remove(e.Name)) marks.Add(e.Name);
+            if (!marks.Remove(MarkKey(e))) marks.Add(MarkKey(e));
         }
         if (advance) MoveCursor(side, 1, clearSearch: false);
         MarkDirty();
@@ -841,11 +887,11 @@ public partial class CommanderApp : Component, IDisposable
         var marks = Marks(side);
         var rows = Rows(side).Where(e => !e.IsParent).ToList();
         if (rows.Count == 0) return;
-        bool allMarked = rows.All(e => marks.Contains(e.Name));
+        bool allMarked = rows.All(e => marks.Contains(MarkKey(e)));
         foreach (var e in rows)
         {
-            if (allMarked) marks.Remove(e.Name);
-            else marks.Add(e.Name);
+            if (allMarked) marks.Remove(MarkKey(e));
+            else marks.Add(MarkKey(e));
         }
         MarkDirty();
     }
@@ -878,7 +924,7 @@ public partial class CommanderApp : Component, IDisposable
         {
             if (e.IsParent || e.IsDir) continue;
             if (!FindEngine.NameMatches(e.Name, opts)) continue;
-            marks.Add(e.Name);
+            marks.Add(MarkKey(e));
             matched++;
         }
         if (matched == 0) return $"No files here match \"{pattern}\"";
@@ -890,12 +936,12 @@ public partial class CommanderApp : Component, IDisposable
     // Press the RIGHT button on a row and drag: every row the pointer crosses is
     // marked (or unmarked). The first row sets the direction — if it was unmarked we
     // add marks, otherwise we remove them — so a right-drag over a mixed range makes
-    // it uniform, matching Total Commander. Rows recycle, so we track by name and
+    // it uniform, matching Total Commander. Rows recycle, so we track by path and
     // handle each row once per drag; the release is caught at the root (below).
     private bool _rmarkActive;
     private char _rmarkSide;
     private bool _rmarkAdd;
-    private readonly HashSet<string> _rmarkSeen = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _rmarkSeen = PathSet();
 
     private void BeginRightMark(char side, FileEntry e)
     {
@@ -903,16 +949,16 @@ public partial class CommanderApp : Component, IDisposable
         _rmarkActive = true;
         _rmarkSide = side;
         _rmarkSeen.Clear();
-        _rmarkAdd = !Marks(side).Contains(e.Name);   // direction from the first row
+        _rmarkAdd = !Marks(side).Contains(MarkKey(e));   // direction from the first row
         ApplyRightMark(side, e);
     }
 
     private void ApplyRightMark(char side, FileEntry e)
     {
         if (!_rmarkActive || side != _rmarkSide || e.IsParent) return;
-        if (!_rmarkSeen.Add(e.Name)) return;         // each row toggles once per drag
+        if (!_rmarkSeen.Add(MarkKey(e))) return;     // each row toggles once per drag
         var marks = Marks(side);
-        if (_rmarkAdd) marks.Add(e.Name); else marks.Remove(e.Name);
+        if (_rmarkAdd) marks.Add(MarkKey(e)); else marks.Remove(MarkKey(e));
         MarkDirty();
     }
 
@@ -1012,7 +1058,7 @@ public partial class CommanderApp : Component, IDisposable
         // the cursor fallback indexes the filtered view.
         var marks = Marks(side);
         if (marks.Count > 0)
-            return Listing(side).Where(e => !e.IsParent && marks.Contains(e.Name)).ToList();
+            return Listing(side).Where(e => !e.IsParent && marks.Contains(MarkKey(e))).ToList();
         var rows = Rows(side);
         int cur = Cursor(side);
         if (cur >= 0 && cur < rows.Count && !rows[cur].IsParent) return [rows[cur]];
@@ -1039,7 +1085,7 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (!Clipboard.TryGetFiles(out var paths, out bool cut) || paths.Count == 0) return;
         char side = _active;
-        if (LockedBlock(side, "paste into a locked tab") || InArchiveBlock(side)) return;
+        if (LockedBlock(side, "paste into a locked tab") || InArchiveBlock(side) || ResultsBlock(side)) return;
         var dest = Dir(side);
         var items = new List<FileEntry>();
         foreach (var p in paths)
@@ -1090,9 +1136,10 @@ public partial class CommanderApp : Component, IDisposable
     private void ExitSearch(char side)
     {
         if (_search.Length == 0) return;
-        string? keep = CursorEntryName(side);
+        string? keep = CursorEntryPath(side);
         _search = "";
-        if (keep != null) { int i = IndexOfName(Listing(side), keep); if (i >= 0) SetCursor(side, i); }
+        int i = IndexOfPath(Listing(side), keep);
+        if (i >= 0) SetCursor(side, i);
         RequestScroll(side);
     }
 
@@ -1121,11 +1168,13 @@ public partial class CommanderApp : Component, IDisposable
         return filtered;
     }
 
-    private string? CursorEntryName(char side)
+    /// <summary>The full path of the row under the cursor — the row's identity everywhere it
+    /// has to be found again (see <see cref="IndexOfPath"/>).</summary>
+    private string? CursorEntryPath(char side)
     {
         var rows = Rows(side);
         int c = Cursor(side);
-        return c >= 0 && c < rows.Count ? rows[c].Name : null;
+        return c >= 0 && c < rows.Count ? rows[c].FullPath : null;
     }
 
     /// <summary>The cursor's index in the *full* listing (not the filtered view), so a filter
@@ -1133,8 +1182,7 @@ public partial class CommanderApp : Component, IDisposable
     /// the list.</summary>
     private int CursorListingPos(char side)
     {
-        string? name = CursorEntryName(side);
-        int i = name != null ? IndexOfName(Listing(side), name) : -1;
+        int i = IndexOfPath(Listing(side), CursorEntryPath(side));
         return i < 0 ? 0 : i;
     }
 
@@ -1250,6 +1298,27 @@ public partial class CommanderApp : Component, IDisposable
         return true;
     }
 
+    /// <summary>The items a copy / move should actually carry to <paramref name="dest"/>.
+    ///
+    /// <para>From a folder that is the same thing as the whole selection, and copying a folder
+    /// onto itself is a no-op the pane refuses outright. From a fed-in result set there is no
+    /// single source folder — the rows come from many — so the rule applies per row instead:
+    /// a hit that already lives in the destination is dropped, and the rest go. Without that,
+    /// a move would take a file's own folder as its target and (with overwrite) recycle the
+    /// file on the way to replacing it with itself.</para></summary>
+    private List<FileEntry> TransferItemsFrom(char side, List<FileEntry> items, string dest)
+    {
+        if (!InResults(side))
+            return PathEquals(dest, Dir(side)) ? [] : items;
+        var kept = items.Where(e => !PathEquals(System.IO.Path.GetDirectoryName(e.FullPath), dest)).ToList();
+        if (kept.Count == 0 && items.Count > 0)
+        {
+            _notice = "Those results are already in the other pane's folder";
+            MarkDirty();
+        }
+        return kept;
+    }
+
     // ── Move (F6): synchronous confirm + transfer (moves are usually instant) ──
     private void StartMove()
     {
@@ -1257,9 +1326,11 @@ public partial class CommanderApp : Component, IDisposable
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
         var dest = Dir(other);
-        if (PathEquals(dest, Dir(side))) return;
+        items = TransferItemsFrom(side, items, dest);
+        if (items.Count == 0) return;
         if (LockedBlock(side, "move out of a locked tab") || LockedBlock(other, "move into a locked tab")) return;
         if (InArchiveBlock(side) || InArchiveBlock(other)) return;   // read-only in v1
+        if (ResultsBlock(other)) return;                             // nothing can be moved *into* results
 
         _confirm = new ConfirmSpec(
             $"Move {(items.Count == 1 ? "item" : "items")}",
@@ -1285,9 +1356,11 @@ public partial class CommanderApp : Component, IDisposable
         var items = OperationTargets(side).ToList();
         if (items.Count == 0) return;
         var dest = Dir(other);
-        if (PathEquals(dest, Dir(side))) return;
+        items = TransferItemsFrom(side, items, dest);
+        if (items.Count == 0) return;
 
         if (LockedBlock(other, "copy into a locked tab") || InArchiveBlock(other)) return;
+        if (ResultsBlock(other)) return;
         var op = new TransferOp(items) { IsMove = false, Source = side, DestDir = dest };
         _op = op;
         _progressOpen = true;
@@ -1444,6 +1517,9 @@ public partial class CommanderApp : Component, IDisposable
             _genL++; _genR++;               // both panes may have changed
             Marks(op.Source).Clear();
             ClearMeasuredIn(Dir(op.Source)); ClearMeasuredIn(op.DestDir);   // totals may be stale
+            // A generation bump only re-reads a folder; a fed-in result set that just had
+            // rows moved out of it has to drop them itself.
+            RefreshResultsBothSides();
         }
 
         // Sync's second batch (the ← direction) starts once the → batch finishes.
@@ -1529,6 +1605,7 @@ public partial class CommanderApp : Component, IDisposable
         _genL++; _genR++;
         Marks(side).Clear();
         ClearMeasuredIn(Dir(side));       // a deleted folder's cached total is now stale
+        RefreshResultsBothSides();        // deleted hits leave a fed-in set
         MarkDirty();
         if (denied.Count > 0) OfferElevation(Job("delete", denied, recycle: _settings.Recycle), "Delete");
     }
@@ -1678,6 +1755,9 @@ public partial class CommanderApp : Component, IDisposable
     // ── Navigation / view actions (also palette targets) ─────────────────
     private void GoUp(char side)
     {
+        // Backspace out of a fed-in result set returns to the folder it was searched from,
+        // rather than climbing above it.
+        if (ExitResults(side)) { MarkDirty(); return; }
         var dir = Dir(side);
         // Already at a drive / UNC root → stay put. (Trimming the trailing separator off
         // "C:\" leaves "C:", which Directory.GetParent resolves relative to the process's
@@ -1690,9 +1770,13 @@ public partial class CommanderApp : Component, IDisposable
         NavigateTo(side, parent.FullName, leaving);
     }
 
+    /// <summary>Ctrl+R. A folder is re-read by bumping the pane's generation; a fed-in result
+    /// set has no folder to re-read, so its held rows are re-stat'd instead (re-running the
+    /// search would answer a different question — see <see cref="RefreshResults"/>).</summary>
     private void RefreshPane(char side)
     {
         ClearMeasuredIn(Dir(side));
+        RefreshResults(side);
         if (side == 'L') _genL++; else _genR++;
         MarkDirty();
     }
@@ -1762,7 +1846,7 @@ public partial class CommanderApp : Component, IDisposable
     private void OpenNewFolderPrompt(char side)
     {
         _active = side;
-        if (LockedBlock(side, "create a folder here") || InArchiveBlock(side)) return;
+        if (LockedBlock(side, "create a folder here") || InArchiveBlock(side) || ResultsBlock(side)) return;
         _namePromptValue = "";
         _namePromptError = null;
         _namePrompt = new NamePromptSpec("New folder", Dir(side), "Create",
@@ -1836,18 +1920,40 @@ public partial class CommanderApp : Component, IDisposable
             if (OfferElevation(Job("rename", [(e.FullPath, target, e.IsDir)]), "Rename")) return null;
         }
         if (err != null) return err;
+        // In a fed-in result set the renamed row has to be swapped in by hand: there is no
+        // folder read to pick the new name up, and its old path no longer resolves.
+        ReplaceResultEntry(side, e.FullPath,
+            System.IO.Path.Combine(System.IO.Path.GetDirectoryName(e.FullPath) ?? "", newName));
         BumpGen(side);
         Marks(side).Clear();
         _pendingFocusChild[side == 'L' ? 0 : 1] = newName;
         return null;
     }
 
+    /// <summary>Ctrl+U — exchange the two panes. Everything a pane <i>is</i> travels: its whole
+    /// tab list (and so each tab's folder, cursor, marks, view mode, sort, lock and Back/Fwd
+    /// history), the listing already read for it, and the review-state override.
+    ///
+    /// <para>Swapping the loaders and generation counters as well is what makes the exchange
+    /// instant rather than a reload. Left behind on purpose: <c>_active</c> (the keyboard stays
+    /// in the pane you are looking at, so the swap moves the folders past the cursor rather
+    /// than moving the cursor), and the element Refs, which name screen positions rather than
+    /// panes. The scroll offsets those elements hold do belong to the old side, so both panes
+    /// are asked to re-reveal their cursor.</para></summary>
     private void SwapPanes()
     {
         ExitSearch(_active);
         (_tabsL, _tabsR) = (_tabsR, _tabsL);
         (_tabL, _tabR) = (_tabR, _tabL);
-        _genL++; _genR++;
+        // The listing, its generation and its loaded flag belong with the tabs they were read
+        // for. Without this the pane kept the *other* side's entries until a fresh read landed
+        // — a folder shown under the wrong breadcrumb, and briefly operable.
+        (_listL, _listR) = (_listR, _listL);
+        (_genL, _genR) = (_genR, _genL);
+        (_loadedL, _loadedR) = (_loadedR, _loadedL);
+        (_forceStateL, _forceStateR) = (_forceStateR, _forceStateL);
+        (_pendingFocusChild[0], _pendingFocusChild[1]) = (_pendingFocusChild[1], _pendingFocusChild[0]);
+        RequestScroll('L'); RequestScroll('R');
         MarkDirty();
     }
 
@@ -2296,7 +2402,12 @@ public partial class CommanderApp : Component, IDisposable
         views != null && i < views.Count && Enum.IsDefined((ViewMode)views[i]) ? (ViewMode)views[i] : ViewMode.Detail;
 
     /// <summary>Persist the current tabs (dirs + per-tab view mode) so "Restore tabs on
-    /// start" can bring them back exactly.</summary>
+    /// start" can bring them back exactly.
+    ///
+    /// <para>A fed-in search result set is deliberately not persisted: it is a snapshot of a
+    /// walk, and restoring it a week later would show a list of files that may no longer be
+    /// there and were never re-searched for. Such a tab saves the folder the search ran under,
+    /// so it comes back as that folder — which is where Backspace would have taken it.</para></summary>
     private void SaveSession() => SessionStore.Save(new SessionData(
         _tabsL.Select(t => t.Dir).ToList(), _tabL,
         _tabsR.Select(t => t.Dir).ToList(), _tabR,

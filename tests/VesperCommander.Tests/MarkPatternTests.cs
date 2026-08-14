@@ -99,6 +99,7 @@ public class MarkPatternTests
         t.Press(KeyCode.Enter);
     }
 
-    private static HashSet<string> Marks(DiffViewTests.Fixture t) =>
-        (HashSet<string>)t.Invoke("Marks", 'L')!;
+    /// <summary>Leaf names of the left pane's marks — the set itself is keyed by full
+    /// path (CommanderApp.MarkKey), which these single-folder tests don't need to spell out.</summary>
+    private static HashSet<string> Marks(DiffViewTests.Fixture t) => t.MarkNames('L');
 }

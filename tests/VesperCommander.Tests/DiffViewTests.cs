@@ -1081,6 +1081,10 @@ public class DiffViewTests
 
         public HeadlessSession Session => _session;
 
+        /// <summary>The app under test, for the odd assertion that has to read a private
+        /// property off it directly.</summary>
+        public CommanderApp App => _app;
+
         /// <summary>Wait for the background tokenize to land. Genuinely asynchronous work,
         /// which is what PumpUntil is for — the assertions that follow are about content,
         /// not about whether an idle app repaints.</summary>
@@ -1263,6 +1267,23 @@ public class DiffViewTests
             Assert.Fail($"{name} is not listed in the {side} pane");
         }
 
+        /// <summary>Put a pane's cursor on the row holding <paramref name="path"/>. The
+        /// by-name form can't say which row is meant in a fed-in search result set, where
+        /// several rows may share a name.</summary>
+        public void PutCursorOnPath(char side, string path)
+        {
+            var rows = Rows(side);
+            for (int i = 0; i < rows.Count; i++)
+                if (string.Equals(rows[i].FullPath, path, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    Call("SetCursor", side, i);
+                    MarkDirty();
+                    _session.PumpFrame();
+                    return;
+                }
+            Assert.Fail($"{path} is not listed in the {side} pane");
+        }
+
         public void MarkDirty() =>
             typeof(CommanderApp).GetMethod("MarkDirty",
                 BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!.Invoke(_app, null);
@@ -1275,6 +1296,25 @@ public class DiffViewTests
 
         /// <summary>The folder a pane is showing.</summary>
         public string Dir(char side) => (string)Call("Dir", side)!;
+
+        /// <summary>A pane's mark set. Marks are held by <b>full path</b> (CommanderApp.MarkKey)
+        /// so that a fed-in search result set, whose rows come from many folders, can tell two
+        /// same-named files apart.</summary>
+        public System.Collections.Generic.HashSet<string> MarkSet(char side) =>
+            (System.Collections.Generic.HashSet<string>)Call("Marks", side)!;
+
+        /// <summary>The mark set as leaf names — the readable form for the tests that work in
+        /// a single folder.</summary>
+        public System.Collections.Generic.HashSet<string> MarkNames(char side) =>
+            MarkSet(side).Select(p => Path.GetFileName(p)).ToHashSet();
+
+        /// <summary>Mark entries of a pane by name, as clicking each row would.</summary>
+        public void Mark(char side, params string[] names)
+        {
+            var marks = MarkSet(side);
+            foreach (var n in names) marks.Add(Path.Combine(side == 'L' ? Left : Right, n));
+            MarkDirty();
+        }
 
         /// <summary>Reach a private method on the app under test. Public counterpart of
         /// <see cref="Call"/>, for tests whose subject has no UI surface to drive.</summary>
