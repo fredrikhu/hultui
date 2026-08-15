@@ -346,6 +346,40 @@ label.Content = "Updated";  // marks paint dirty, no rebuild needed
 
 Direct mutation and reactive components can coexist in the same application. Use components for sections of UI with complex state dependencies, and direct mutation for hot paths where you want precise control over what gets updated.
 
+### Layout styles do not self-invalidate
+
+Visual properties like `BackgroundColor` and `CornerRadius` mark themselves paint-dirty in
+their setters. The **layout** style objects — `Flex`, `Box`, `Position`, `Grid`,
+`GridItem` — do not. They are plain classes with auto-property setters, so this is
+silently dropped:
+
+```csharp
+pane.Flex.FlexBasis = Dimension.Px(newWidth);   // nothing happens
+```
+
+During construction it works anyway, because a new element starts fully dirty and the
+first layout pass has yet to run. After that first pass, nothing marks the element dirty,
+the next frame sees no reason to re-run layout, and the change never reaches the screen.
+Nothing throws and nothing logs — the UI just doesn't move. Call `MarkLayoutDirty()` after
+the mutation (`MarkPaintDirty()` for `Position.ZIndex`, which only changes draw order):
+
+```csharp
+pane.Flex.FlexBasis = Dimension.Px(newWidth);
+pane.MarkLayoutDirty();
+```
+
+Auto-invalidating setters were considered and rejected: every style object would need a
+back-pointer to its element and every write would walk to the root, so static UI
+construction would pay for a problem it doesn't have.
+
+**`HULTUI002` catches the miss.** The analyzer reports a layout-style assignment inside a
+lambda on an element that predates it — a captured local, a field, an event argument's
+element — when nothing in the enclosing method invalidates. It stays quiet on
+construction code, on elements the callback itself introduced, and when any of
+`MarkLayoutDirty` / `MarkPaintDirty` / `MarkDirty` or a structural mutator appears in
+scope, including as a method group. Post-layout mutation from a named method is outside
+what it can tell apart from construction, so that case is still on you.
+
 ---
 
 ## Keeping `Build()` Cheap: Off-Thread Data with `AsyncLoader`
