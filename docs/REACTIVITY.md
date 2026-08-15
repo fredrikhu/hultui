@@ -387,6 +387,43 @@ partial class UserPanel : Component
 - `Value` / `IsLoading` are reactive reads — reading them in `Build()` makes it re-run when the load completes.
 - `produce` runs off the UI thread and **must not touch elements or reactive state**. Do that in the optional `onLoaded` callback, which runs on the UI thread once the result is applied (inside a batch, before the rebuild) — use it to reconcile dependent state, e.g. dropping a selection that no longer exists in the freshly loaded data.
 
+### The thread guard
+
+That last rule used to be enforced by nothing. A background thread writing a signal or
+mutating an element does not fail at the write: it corrupts the reactive graph or a
+dirty-flag walk, and the symptom surfaces frames later somewhere unrelated. HultUI takes
+no locks in its hot paths — that is the price of the single-UI-thread model — so there is
+no safe version of the mistake.
+
+`UIThread` turns it into an immediate exception instead:
+
+```
+Signal<Int32>.Value was called from a thread-pool thread (managed thread 7); HultUI owns
+the element tree and the reactive graph on the UI thread (managed thread 1) and takes no
+locks, so this would corrupt state silently rather than fail here. Marshal the mutation
+back with Application.InvokeOnMainThread(...), or drop the ConfigureAwait(false) so the
+continuation resumes on the UI thread. Set UIThread.Enforce = false to disable this check.
+```
+
+- The UI thread is claimed by `Application`'s constructor and released when it is
+  disposed. Code that never starts an application — pure layout and reactivity unit
+  tests — has no UI thread and is never checked.
+- Guarded entry points: the `Signal<T>` setter, `ReactiveRuntime.ScheduleEffect`,
+  `Component.MarkDirty()`, and the four `Element.Mark*Dirty` methods every element
+  mutation funnels through.
+- `UIThread.Enforce` defaults to true in Debug builds of `HultUI.Core` and false in
+  Release. Setting it true in a Release diagnostic build is supported.
+- **Cost, measured:** enforcing adds ~0.4ns per guarded call (a thread-local read and a
+  comparison) — 29% on a bare `Signal<int>` write, 6% on one with a subscriber, and 166%
+  on an already-dirty `MarkPaintDirty`, which is the ratio you get when the operation
+  itself is two field reads. In app terms it disappears: the whole
+  js-framework-benchmark suite makes 2.5M guarded calls, so the guard accounts for about
+  1ms of ~770ms, or 0.13% — well under the benchmark's own run-to-run variance. With
+  `Enforce` off the check is one static bool read, which does not measure at all.
+- The fix is almost always `Application.InvokeOnMainThread(...)`, or removing a
+  `ConfigureAwait(false)` that sent the continuation off the UI thread. `AsyncLoader`
+  already does the marshalling for you; prefer it over hand-rolled `Task.Run`.
+
 ### `Refresh()` (reload) vs `MarkDirty()` (re-render)
 
 The loader **key** decides whether the expensive work re-runs. Choose it so that **UI-only rebuilds are cache hits**:

@@ -6,6 +6,7 @@ using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Platform;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 using HultUI.DevTools;
 using HultUI.Platform.SDL3;
 
@@ -140,6 +141,9 @@ public sealed class Application : IDisposable
     {
         _platform = platform ?? throw new ArgumentNullException(nameof(platform));
         _current = this;
+        // Claim this thread before any window (and therefore any element) exists, so
+        // the tree can never be built on one thread and driven from another.
+        UIThread.Bind();
         CreateWindow(title, width, height, style);
     }
 
@@ -348,7 +352,13 @@ public sealed class Application : IDisposable
         _disposed = true;
 
         if (_current == this)
+        {
             _current = null;
+            // Return the guard to its inert state. A test host that runs the next
+            // session on a different pool thread would otherwise inherit this
+            // binding and fail on a thread that is legitimately its UI thread.
+            UIThread.Unbind();
+        }
 
         foreach (var window in _windows)
             window.Dispose();

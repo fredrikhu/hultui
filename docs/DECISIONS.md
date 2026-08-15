@@ -22,7 +22,7 @@ This document records all architectural and design decisions for the HultUI fram
 |-------|--------|------------------------|-----------|
 | Rendering | SkiaSharp | Silk.NET, Veldrid, MAUI Graphics | Battle-tested 2D, handles text/shaping, used by Avalonia. Can be swapped later behind abstraction |
 | Text shaping | HarfBuzz (via SkiaSharp.HarfBuzz) | Manual shaping | Industry standard, handles complex scripts |
-| Text segmentation | ICU4N | Skia built-in | Full UAX #14/#29/#9 support (line break, grapheme, BiDi) |
+| Text segmentation | ICU4N | Skia built-in | Full UAX #14/#29 support (line break, grapheme). UAX #9 (BiDi) is available in the library but not yet used — the pipeline is LTR-only |
 | Windowing/Input | SDL3 (ppy.SDL3-CS) | GLFW, platform-native | Cross-platform, provides GL context + input + clipboard + IME + drag-and-drop |
 | Source generators | Roslyn incremental generators | Fody, PostSharp | No runtime dependency, standard .NET tooling |
 | Test framework | xunit | NUnit, MSTest | Widely used, good async support |
@@ -118,6 +118,7 @@ HultUI (meta-package)
 | Decision | Rationale |
 |----------|-----------|
 | Single UI thread | No locks in hot path. Simplest correct model |
+| Thread affinity is checked, not assumed | No locks means a background write corrupts state silently instead of failing. `UIThread.VerifyAccess` on the Signal setter, effect scheduling, and the `Element.Mark*Dirty` funnel throws at the offending call. Debug-on / Release-off by default; one thread-id comparison |
 | Custom SynchronizationContext | Standard async/await automatically marshals back to UI thread |
 | Same-thread rendering | Layout + paint on UI thread. Simpler than separate render thread. Sufficient with VSync |
 

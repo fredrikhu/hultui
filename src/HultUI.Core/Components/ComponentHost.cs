@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using HultUI.Core.Elements;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Threading;
 
 namespace HultUI.Core.Components;
 
@@ -58,6 +59,10 @@ public sealed class ComponentHost : Element
     /// </summary>
     internal void ForceRebuild()
     {
+        // Component.MarkDirty() and hot reload reach the tree here without passing
+        // through a Signal write, so the reactive guard would not see them.
+        UIThread.VerifyAccess("Component.MarkDirty");
+
         if (_buildEffect is null) return;
         // A rebuild requested while a reconcile is in progress (e.g. MarkDirty from a
         // BlurEvent handler fired as the focused element is removed) must not run a

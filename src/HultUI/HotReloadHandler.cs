@@ -16,7 +16,11 @@ internal static class HotReloadHandler
     /// <summary>Called by the runtime after metadata has been updated.</summary>
     public static void UpdateApplication(Type[]? updatedTypes)
     {
-        Application.Current?.RebuildAll();
+        // The runtime invokes update handlers from its own thread, not the UI thread,
+        // so rebuilding every mounted component directly here would run Build() and
+        // reconcile the live tree off-thread. Queue it instead; the run loop drains
+        // the queue on its next pass (at worst one 16 ms wait away).
+        Application.InvokeOnMainThread(() => Application.Current?.RebuildAll());
     }
 }
 #endif

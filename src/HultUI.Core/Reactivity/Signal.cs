@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using HultUI.Core.Threading;
 
 namespace HultUI.Core.Reactivity;
 
@@ -8,6 +9,11 @@ namespace HultUI.Core.Reactivity;
 /// </summary>
 public sealed class Signal<T> : IReactiveSource
 {
+    // Built once per closed generic type, not per write: the setter's guard needs a
+    // description, and interpolating one on every assignment would put an allocation
+    // on the hottest write path in the framework.
+    private static readonly string SetterName = $"Signal<{typeof(T).Name}>.Value";
+
     private T _value;
     private readonly IEqualityComparer<T> _comparer;
     private HashSet<IReactiveNode>? _subscribers;
@@ -32,6 +38,11 @@ public sealed class Signal<T> : IReactiveSource
         }
         set
         {
+            // Checked before the equality short-circuit: a cross-thread write is a bug
+            // whether or not the value happened to match, and a guard that only fires
+            // sometimes is the heisenbug it exists to remove.
+            UIThread.VerifyAccess(SetterName);
+
             if (_comparer.Equals(_value, value))
                 return;
 

@@ -5,6 +5,7 @@ using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
+using HultUI.Core.Threading;
 
 namespace HultUI.Core.Elements;
 
@@ -394,6 +395,13 @@ public abstract class Element
     /// </summary>
     public void MarkLayoutDirty()
     {
+        // The four Mark*Dirty methods are where every element mutation ends up — the
+        // fluent setters, the imperative escape hatch, and the reconciler all funnel
+        // here. Guarding them covers direct tree mutation the way the Signal setter
+        // covers reactive state. Each walks to the root, so one thread-id comparison
+        // is not measurable against the work already being done.
+        UIThread.VerifyAccess("Element.MarkLayoutDirty");
+
         var current = (Element?)this;
         while (current is not null)
         {
@@ -417,6 +425,8 @@ public abstract class Element
     /// </summary>
     public void MarkPaintDirty()
     {
+        UIThread.VerifyAccess("Element.MarkPaintDirty");
+
         var current = (Element?)this;
         while (current is not null)
         {
@@ -435,6 +445,8 @@ public abstract class Element
     /// </summary>
     internal void MarkChildrenDirty()
     {
+        UIThread.VerifyAccess("Element.MarkChildrenDirty");
+
         var current = (Element?)this;
         while (current is not null)
         {
@@ -447,6 +459,8 @@ public abstract class Element
 
     internal void MarkStyleDirty()
     {
+        UIThread.VerifyAccess("Element.MarkStyleDirty");
+
         // Propagate down (inherited style may change for descendants)
         MarkStyleDirtyDown();
         // Propagate up so root knows style work is needed

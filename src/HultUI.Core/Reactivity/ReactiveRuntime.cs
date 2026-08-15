@@ -1,3 +1,5 @@
+using HultUI.Core.Threading;
+
 namespace HultUI.Core.Reactivity;
 
 /// <summary>
@@ -95,6 +97,12 @@ public static class ReactiveRuntime
     /// </summary>
     internal static void ScheduleEffect(Effect effect)
     {
+        // The queue and the flush flags below are plain statics, and a flush runs
+        // component Build() methods against the live tree. Reaching here off-thread
+        // means someone found a path around the Signal setter's guard (a Computed, a
+        // ReactiveList, a hand-scheduled Effect) — catch it at the shared choke point.
+        UIThread.VerifyAccess("ReactiveRuntime.ScheduleEffect");
+
         _pendingEffects.Enqueue(effect);
 
         if (!_isFlushing && (_batchDepth == 0 || _suspendDepth > 0))
