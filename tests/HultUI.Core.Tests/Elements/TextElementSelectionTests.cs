@@ -191,6 +191,13 @@ public class TextElementSelectionTests
         public string? Text { get; private set; }
         public string? GetText() => Text;
         public void SetText(string text) => Text = text;
+
+        // Selection only ever copies text; the data formats are here to satisfy the
+        // interface, not because this test exercises them.
+        public bool HasFormat(string mimeType) => false;
+        public byte[]? GetData(string mimeType) => null;
+        public void SetData(IReadOnlyDictionary<string, byte[]> data) => throw new NotSupportedException();
+        public void Clear() => Text = null;
     }
 
     // Minimal render context: measures text at a fixed per-character width and

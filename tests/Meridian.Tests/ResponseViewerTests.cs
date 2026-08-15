@@ -2,7 +2,6 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
-using Meridian.Platform;
 using Meridian.Tests.Fixtures;
 using Xunit;
 
@@ -36,30 +35,18 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         File.WriteAllText(path, content);
     }
 
-    private sealed class NoPicker : IFolderPicker
-    {
-        public bool IsAvailable => true;
-        public Task<string?> PickFolderAsync(string? d = null, CancellationToken c = default) => Task.FromResult<string?>(null);
-    }
-
-    private sealed class FakeSavePicker(string? destination) : ISaveFilePicker
-    {
-        public bool IsAvailable => true;
-        public Task<string?> PickSaveFileAsync(string suggestedFileName, string? initialDirectory = null,
-            string? filterLabel = null, string? extension = null, CancellationToken cancellationToken = default)
-            => Task.FromResult(destination);
-    }
 
     private void Hosted(Action<HeadlessSession, MeridianApp> body,
         int viewerCap = 1024 * 1024, string? saveTo = null, HeadlessOptions? options = null,
         int width = 1440)
     {
         using var session = HeadlessSession.Create(width, 900, options: options);
+        if (saveTo is not null)
+            session.Window.FileDialogs.EnqueueResult(saveTo);
         MeridianApp? app = null;
         try
         {
-            app = new MeridianApp(session.Application, session.Window.Window,
-                new NoPicker(), new FakeSavePicker(saveTo), viewerCap);
+            app = new MeridianApp(session.Application, session.Window.Window, viewerCapBytes: viewerCap);
             session.Application.SetRoot(app.Mount());
             app.OpenWorkspace(_root);
             session.PumpFrame();

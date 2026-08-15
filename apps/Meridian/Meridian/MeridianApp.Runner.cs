@@ -418,7 +418,7 @@ public partial class MeridianApp
 
     private async void ExportReport(RunSummary summary)
     {
-        var dest = await _saveFilePicker.PickSaveFileAsync("run-report.txt", _workspace?.Root);
+        var dest = await _fileDialogs.SaveFileAsync("run-report.txt", _workspace?.Root);
         if (dest == null) return;
         try
         {

@@ -200,14 +200,14 @@ public partial class JunctionApp
     /// Runs off the UI thread; guards against the modal changing while it's open.</summary>
     private async void BrowseForFolder(ModalForm f, string current, Action<string> apply)
     {
-        if (!_folderPicker.IsAvailable) { Flash("No folder picker available — paste the path"); return; }
+        if (!_fileDialogs.IsAvailable) { Flash("No folder picker available — paste the path"); return; }
 
         var initial = string.IsNullOrWhiteSpace(current)
             ? (HasActiveRepo ? System.IO.Path.GetDirectoryName(_activeRepoPath.TrimEnd('/', '\\')) : null)
             : ExpandPath(current);
 
         string? picked;
-        try { picked = await _folderPicker.PickFolderAsync(initial); }
+        try { picked = await _fileDialogs.OpenFolderAsync(initial); }
         catch (OperationCanceledException) { return; }
         catch { Flash("Couldn't open the folder picker — paste the path"); return; }
 

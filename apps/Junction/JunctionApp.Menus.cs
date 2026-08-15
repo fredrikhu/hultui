@@ -1,6 +1,7 @@
 using HultUI.Core.Elements;
 using Junction.Git;
 
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Icons;
@@ -192,7 +193,7 @@ public partial class JunctionApp
     private async void SavePatch(IReadOnlyList<string> selOldestFirst)
     {
         if (ActiveRepo is not { } repo) return;
-        if (!_saveFilePicker.IsAvailable) { Flash("No native save dialog available"); return; }
+        if (!_fileDialogs.IsAvailable) { Flash("No native save dialog available"); return; }
 
         var oldest = selOldestFirst[0];
         var newest = selOldestFirst[^1];
@@ -205,7 +206,7 @@ public partial class JunctionApp
             ? slug.Length > 0 ? $"{Short(newest)}-{slug}.patch" : $"{Short(newest)}.patch"
             : $"{Short(oldest)}..{Short(newest)}.patch";
 
-        var path = await _saveFilePicker.PickSaveFileAsync(name, repo.Path, "Patch files", "patch");
+        var path = await _fileDialogs.SaveFileAsync(name, repo.Path, [new FileDialogFilter("Patch files", "patch")]);
         if (path == null) return;
 
         var error = await Task.Run(() =>

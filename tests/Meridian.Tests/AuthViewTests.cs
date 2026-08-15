@@ -2,7 +2,6 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Headless;
 using Meridian.Core;
-using Meridian.Platform;
 using Meridian.Tests.Fixtures;
 using Xunit;
 
@@ -33,11 +32,6 @@ public class AuthViewTests : IClassFixture<TestHttpServer>, IDisposable
         File.WriteAllText(path, content);
     }
 
-    private sealed class NoPicker : IFolderPicker
-    {
-        public bool IsAvailable => true;
-        public Task<string?> PickFolderAsync(string? d = null, CancellationToken c = default) => Task.FromResult<string?>(null);
-    }
 
     private void Hosted(Action<HeadlessSession, MeridianApp> body)
     {
@@ -45,7 +39,7 @@ public class AuthViewTests : IClassFixture<TestHttpServer>, IDisposable
         MeridianApp? app = null;
         try
         {
-            app = new MeridianApp(session.Application, session.Window.Window, new NoPicker());
+            app = new MeridianApp(session.Application, session.Window.Window);
             session.Application.SetRoot(app.Mount());
             app.OpenWorkspace(_root);
             session.PumpFrame();

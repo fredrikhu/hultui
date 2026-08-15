@@ -3,7 +3,6 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
 using Meridian.Core;
-using Meridian.Platform;
 using Meridian.Tests.Fixtures;
 using Xunit;
 
@@ -34,11 +33,6 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         File.WriteAllText(path, content);
     }
 
-    private sealed class NoPicker : IFolderPicker
-    {
-        public bool IsAvailable => true;
-        public Task<string?> PickFolderAsync(string? d = null, CancellationToken c = default) => Task.FromResult<string?>(null);
-    }
 
     internal sealed class FakeKeyring : IKeyring
     {
@@ -59,7 +53,7 @@ public class EnvironmentsViewTests : IClassFixture<TestHttpServer>, IDisposable
         try
         {
             app = new MeridianApp(session.Application, session.Window.Window,
-                new NoPicker(), keyring: keyring);
+                keyring: keyring);
             session.Application.SetRoot(app.Mount());
             app.OpenWorkspace(_root);
             session.PumpFrame();

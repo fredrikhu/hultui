@@ -1,7 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Headless;
-using Meridian.Platform;
 using Meridian.Tests.Fixtures;
 using Xunit;
 
@@ -30,11 +29,6 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
         File.WriteAllText(path, content);
     }
 
-    private sealed class NoPicker : IFolderPicker
-    {
-        public bool IsAvailable => true;
-        public Task<string?> PickFolderAsync(string? d = null, CancellationToken c = default) => Task.FromResult<string?>(null);
-    }
 
     private void Hosted(Action<HeadlessSession, MeridianApp> body, bool open = true)
     {
@@ -42,7 +36,7 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
         MeridianApp? app = null;
         try
         {
-            app = new MeridianApp(session.Application, session.Window.Window, new NoPicker());
+            app = new MeridianApp(session.Application, session.Window.Window);
             session.Application.SetRoot(app.Mount());
             if (open) app.OpenWorkspace(_root);
             session.PumpFrame();
@@ -249,7 +243,7 @@ public class PaletteTests : IClassFixture<TestHttpServer>, IDisposable
         // Below the breakpoint the pane cannot move, so the row reports it
         // instead of offering a toggle that would do nothing.
         using var session = HeadlessSession.Create(1000, 900);
-        var app = new MeridianApp(session.Application, session.Window.Window, new NoPicker());
+        var app = new MeridianApp(session.Application, session.Window.Window);
         try
         {
             session.Application.SetRoot(app.Mount());

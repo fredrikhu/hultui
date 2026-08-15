@@ -34,6 +34,7 @@ public interface IPlatformWindow : IDisposable
     bool IsMaximized { get; }
 
     IClipboard Clipboard { get; }
+    IFileDialogs FileDialogs { get; }
     ITextInputHost TextInputHost { get; }
 
     /// <summary>

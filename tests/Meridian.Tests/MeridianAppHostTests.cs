@@ -1,7 +1,6 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Headless;
-using Meridian.Platform;
 using Xunit;
 
 namespace Meridian.Tests;
@@ -13,20 +12,15 @@ namespace Meridian.Tests;
 /// </summary>
 public class MeridianAppHostTests
 {
-    private sealed class FakeFolderPicker(string? result) : IFolderPicker
-    {
-        public bool IsAvailable => true;
-        public Task<string?> PickFolderAsync(string? initialDirectory = null, CancellationToken cancellationToken = default)
-            => Task.FromResult(result);
-    }
-
     private static void Hosted(Action<HeadlessSession, MeridianApp> body, string? pickerResult = null)
     {
         using var session = HeadlessSession.Create(1440, 900);
+        if (pickerResult is not null)
+            session.Window.FileDialogs.EnqueueResult(pickerResult);
         MeridianApp? app = null;
         try
         {
-            app = new MeridianApp(session.Application, session.Window.Window, new FakeFolderPicker(pickerResult));
+            app = new MeridianApp(session.Application, session.Window.Window);
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
             body(session, app);

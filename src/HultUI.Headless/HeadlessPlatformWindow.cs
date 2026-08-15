@@ -77,6 +77,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public int PixelHeight => (int)MathF.Round(_layoutHeight * _scale);
 
     public IClipboard Clipboard { get; } = new HeadlessClipboard();
+    public IFileDialogs FileDialogs { get; } = new HeadlessFileDialogs();
     public ITextInputHost TextInputHost { get; } = new HeadlessTextInputHost();
 
     public event Action<InputEvent>? InputReceived;

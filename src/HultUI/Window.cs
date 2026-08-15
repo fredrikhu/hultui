@@ -104,6 +104,9 @@ public sealed class Window : IOverlayHost, IDisposable
     internal Application Application { get; }
 
     public IClipboard Clipboard { get; }
+
+    /// <summary>The OS file and folder dialogs, parented to this window.</summary>
+    public IFileDialogs FileDialogs { get; }
     public ITextInputHost TextInputHost { get; }
     /// <summary>The element with keyboard focus, or null. Keyboard events route here.</summary>
     public Element? FocusedElement => _focusManager.FocusedElement;
@@ -249,6 +252,7 @@ public sealed class Window : IOverlayHost, IDisposable
         // can measure text (sizing, budgeting, path collapse) without a layout pass.
         TextMeasure.Context = platformWindow.Surface.MeasureContext;
         Clipboard = platformWindow.Clipboard;
+        FileDialogs = platformWindow.FileDialogs;
         TextInputHost = platformWindow.TextInputHost;
         _devTools = new DevToolsOverlay(_perf);
         _a11yObserver = new AccessibilityObserverAdapter(this);

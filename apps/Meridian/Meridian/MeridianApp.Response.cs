@@ -658,7 +658,7 @@ public partial class MeridianApp
     private async void SaveBody(HttpResponseData response)
     {
         string suggested = "response" + (response.Body.Kind == BodyKind.Binary ? ".bin" : ".txt");
-        var dest = await _saveFilePicker.PickSaveFileAsync(suggested, _workspace?.Root);
+        var dest = await _fileDialogs.SaveFileAsync(suggested, _workspace?.Root);
         if (dest == null) return;
         try
         {

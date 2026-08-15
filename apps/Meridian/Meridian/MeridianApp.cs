@@ -4,10 +4,10 @@ using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using Meridian.Core;
-using Meridian.Platform;
 using Meridian.Theme;
 
 namespace Meridian;
@@ -28,7 +28,7 @@ public partial class MeridianApp : Component, IDisposable
 {
     private readonly Application _app;
     private readonly Window _window;
-    private readonly IFolderPicker _folderPicker;
+    private readonly IFileDialogs _fileDialogs;
 
     [Reactive] public partial MeridianView View { get; set; }
 
@@ -110,14 +110,15 @@ public partial class MeridianApp : Component, IDisposable
 
     private bool _pickingFolder;
 
-    public MeridianApp(Application app, Window window, IFolderPicker? folderPicker = null,
-        ISaveFilePicker? saveFilePicker = null, int viewerCapBytes = 1024 * 1024,
+    public MeridianApp(Application app, Window window, IFileDialogs? fileDialogs = null,
+        int viewerCapBytes = 1024 * 1024,
         IKeyring? keyring = null)
     {
         _app = app;
         _window = window;
-        _folderPicker = folderPicker ?? new NativeFolderPicker();
-        _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
+        // The window's dialogs are the real ones on a desktop and the scriptable
+        // headless pair under test, so nothing needs substituting for either.
+        _fileDialogs = fileDialogs ?? window.FileDialogs;
         _keyring = keyring ?? new DefaultKeyring();
         Engine = new HttpEngine(viewerCapBytes);
         _oauth = new OAuth2(Engine);
@@ -135,7 +136,7 @@ public partial class MeridianApp : Component, IDisposable
         Mount().On<KeyDownEvent>(HandleKeyDown);
     }
 
-    private readonly ISaveFilePicker _saveFilePicker;
+
 
     // A monitor change arrives as a resize; retire the icon rasters cached for
     // the old scale and rebuild, or every icon disappears until the next build.
@@ -271,7 +272,7 @@ public partial class MeridianApp : Component, IDisposable
         _pickingFolder = true;
         try
         {
-            var picked = await _folderPicker.PickFolderAsync(_workspace?.Root);
+            var picked = await _fileDialogs.OpenFolderAsync(_workspace?.Root);
             if (picked == null) return;
             OpenWorkspace(picked);
         }

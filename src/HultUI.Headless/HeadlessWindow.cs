@@ -29,6 +29,13 @@ public sealed partial class HeadlessWindow
     /// <summary>The window's in-memory clipboard.</summary>
     public HeadlessClipboard Clipboard => (HeadlessClipboard)_platform.Clipboard;
 
+    /// <summary>
+    /// This window's file dialogs. Nothing opens; queue what the user would have picked
+    /// with <see cref="HeadlessFileDialogs.EnqueueResult"/> before triggering the action
+    /// that opens one.
+    /// </summary>
+    public HeadlessFileDialogs FileDialogs => (HeadlessFileDialogs)_platform.FileDialogs;
+
     /// <summary>The window's recorded text-input host (IME arm/disarm state).</summary>
     public HeadlessTextInputHost TextInputHost => (HeadlessTextInputHost)_platform.TextInputHost;
 

@@ -66,6 +66,7 @@ public sealed class Application : IDisposable
     public PerformanceCounters Performance => PrimaryWindow.Performance;
     public DevToolsOverlay DevTools => PrimaryWindow.DevTools;
     public IClipboard Clipboard => PrimaryWindow.Clipboard;
+    public IFileDialogs FileDialogs => PrimaryWindow.FileDialogs;
 
     // ──── DevTools inspector ────
 

@@ -4,11 +4,11 @@ using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using HultUI.Core.Reactivity;
 using Junction.Git;
-using Junction.Platform;
 using Junction.Theme;
 
 namespace Junction;
@@ -29,8 +29,7 @@ public partial class JunctionApp : Component, IDisposable
     private readonly Application _app;
     private readonly Window _window;
     private readonly JunctionSettingsData _settings;
-    private readonly IFolderPicker _folderPicker;
-    private readonly ISaveFilePicker _saveFilePicker;
+    private readonly IFileDialogs _fileDialogs;
 
     // One GitRepository per path, plus a background summary loader per path so
     // the sidebar's branch / ahead-behind / dirty badges never block Build().
@@ -302,7 +301,7 @@ public partial class JunctionApp : Component, IDisposable
     }
 
     public JunctionApp(Application app, Window window, JunctionSettingsData settings,
-        IFolderPicker? folderPicker = null, ISaveFilePicker? saveFilePicker = null)
+        IFileDialogs? fileDialogs = null)
     {
         _app = app;
         _window = window;
@@ -314,8 +313,9 @@ public partial class JunctionApp : Component, IDisposable
         // it here as well means anything that hosts JunctionApp directly (tests, screenshot
         // harnesses) gets the same window the user sees. Mirrors CommanderApp.
         _app.Theme = Nocturne.ToHultTheme();
-        _folderPicker = folderPicker ?? new NativeFolderPicker();
-        _saveFilePicker = saveFilePicker ?? new NativeSaveFilePicker();
+        // The window's dialogs are the real ones on a desktop and the scriptable
+        // headless pair under test, so nothing needs substituting for either.
+        _fileDialogs = fileDialogs ?? window.FileDialogs;
         // The diff's sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
         _diffFind = new FindBarState(MarkDirty);

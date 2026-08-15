@@ -16,6 +16,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
 
     private SDL_Window* _window;
+
+    /// <summary>The native handle, for sibling platform services (file dialogs) that
+    /// need to parent a dialog to this window.</summary>
+    internal SDL_Window* NativeWindow => _window;
     private SDL_GLContextState* _glContext;
     private SkiaGLRenderSurface? _surface;
     private bool _disposed;
@@ -24,6 +28,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     private GCHandle _gcHandle;
     private bool _textInputActive;
     private SDL3Clipboard? _clipboard;
+    private SDL3FileDialogs? _fileDialogs;
     private SDL3TextInputHost? _textInputHost;
 
     public bool ResizePending { get; set; }
@@ -88,6 +93,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     public WindowStyle Style { get; }
 
     public IClipboard Clipboard => _clipboard ??= new SDL3Clipboard(this);
+    public IFileDialogs FileDialogs => _fileDialogs ??= new SDL3FileDialogs(this);
 
     public ITextInputHost TextInputHost => _textInputHost ??= new SDL3TextInputHost(this);
 
@@ -737,7 +743,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
             return SDL_GetPointerProperty(props, name, IntPtr.Zero);
     }
 
-    private static byte[] MarshalUtf8(string text)
+    internal static byte[] MarshalUtf8(string text)
     {
         var bytes = new byte[System.Text.Encoding.UTF8.GetByteCount(text) + 1];
         System.Text.Encoding.UTF8.GetBytes(text, bytes);
