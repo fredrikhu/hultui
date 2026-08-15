@@ -349,8 +349,8 @@ Direct mutation and reactive components can coexist in the same application. Use
 ### Layout styles do not self-invalidate
 
 Visual properties like `BackgroundColor` and `CornerRadius` mark themselves paint-dirty in
-their setters. The **layout** style objects — `Flex`, `Box`, `Position`, `Grid`,
-`GridItem` — do not. They are plain classes with auto-property setters, so this is
+their setters. The style objects — `Flex`, `Box`, `Position`, `Grid`, `GridItem` and
+`Inherited` — do not. They are plain classes with auto-property setters, so this is
 silently dropped:
 
 ```csharp
@@ -368,11 +368,23 @@ pane.Flex.FlexBasis = Dimension.Px(newWidth);
 pane.MarkLayoutDirty();
 ```
 
+`Inherited` (the text properties — font, colour, alignment, spacing) needs
+`MarkStyleDirty()`, which re-resolves the subtree. That re-resolves but does **not**
+re-measure, so anything that changes text metrics needs both:
+
+```csharp
+label.Inherited.FontSize = 20f;
+label.MarkStyleDirty();     // re-resolve the value…
+label.MarkLayoutDirty();    // …and re-measure, or the text draws at its old size
+```
+
+`TextColor`, `Decoration` and `Cursor` move nothing, so those need only the style call.
+
 Auto-invalidating setters were considered and rejected: every style object would need a
 back-pointer to its element and every write would walk to the root, so static UI
 construction would pay for a problem it doesn't have.
 
-**`HULTUI002` catches the miss.** The analyzer reports a layout-style assignment inside a
+**`HULTUI002` catches the miss.** The analyzer reports a style assignment inside a
 lambda on an element that predates it — a captured local, a field, an event argument's
 element — when nothing in the enclosing method invalidates. It stays quiet on
 construction code, on elements the callback itself introduced, and when any of

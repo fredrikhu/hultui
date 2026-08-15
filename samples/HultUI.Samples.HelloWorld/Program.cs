@@ -114,6 +114,10 @@ toggleBtn.OnClick(_ =>
     {
         footerBar.BackgroundColor = theme.Surface;
         footerBar.Inherited.TextColor = theme.Secondary;
+        // Inherited style has plain setters. This happens to be covered by the
+        // app.Theme assignment above dirtying every window, but relying on that
+        // ordering is how the change goes missing the day the lines move.
+        footerBar.MarkStyleDirty();
     }
     foreach (var (item, lightHex, darkHex) in sidebarItems)
         item.BackgroundColor = Color.FromHex(isDark ? darkHex : lightHex);

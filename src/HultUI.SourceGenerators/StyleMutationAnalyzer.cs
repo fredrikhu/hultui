@@ -42,7 +42,7 @@ public sealed class StyleMutationAnalyzer : DiagnosticAnalyzer
         id: DiagnosticId,
         title: "Layout style mutated without invalidating layout",
         messageFormat: "'{0}' is assigned on an element that is already laid out, but nothing " +
-                       "invalidates it — call {1}() after the assignment or the change is dropped",
+                       "invalidates it — call {1} after the assignment or the change is dropped",
         category: "HultUI.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -60,6 +60,19 @@ public sealed class StyleMutationAnalyzer : DiagnosticAnalyzer
         "HultUI.Core.Layout.PositionStyle",
         "HultUI.Core.Layout.GridStyle",
         "HultUI.Core.Layout.GridItemStyle",
+        "HultUI.Core.Styling.InheritedStyle",
+    ];
+
+    /// <summary>
+    /// Inherited properties that change text metrics. Re-resolving the style is not enough
+    /// for these: the style pass recomputes the value, but the text keeps whatever size it
+    /// was last measured at until layout runs again. The rest (TextColor, Decoration,
+    /// Cursor) only need the style pass.
+    /// </summary>
+    private static readonly HashSet<string> MetricAffecting =
+    [
+        "FontFamily", "FontSize", "FontWeight", "FontSlant",
+        "LineHeight", "LetterSpacing", "TextAlign", "TextDirection",
     ];
 
     /// <summary>
@@ -70,7 +83,7 @@ public sealed class StyleMutationAnalyzer : DiagnosticAnalyzer
     /// </summary>
     private static readonly HashSet<string> InvalidatingNames =
     [
-        "MarkLayoutDirty", "MarkPaintDirty", "MarkDirty",
+        "MarkLayoutDirty", "MarkPaintDirty", "MarkStyleDirty", "MarkDirty",
         "ReplaceChildren", "AddChild", "InsertChild", "RemoveChild", "ClearChildren",
     ];
 
@@ -119,12 +132,25 @@ public sealed class StyleMutationAnalyzer : DiagnosticAnalyzer
 
         if (ScopeInvalidates(assignment.Syntax)) return;
 
-        // ZIndex changes paint order, not geometry, so it needs the cheaper of the two.
-        string fix = target.Property.Name == "ZIndex" ? "MarkPaintDirty" : "MarkLayoutDirty";
-
         context.ReportDiagnostic(Diagnostic.Create(
             Rule, assignment.Syntax.GetLocation(),
-            $"{owner.Name}.{target.Property.Name}", fix));
+            $"{owner.Name}.{target.Property.Name}", FixFor(owner, target.Property.Name)));
+    }
+
+    /// <summary>
+    /// The call that actually makes the assignment take effect. Inherited style is the
+    /// awkward one: <c>MarkStyleDirty</c> re-resolves the value but does not re-measure,
+    /// so a font change needs both passes or the text redraws at its old size.
+    /// </summary>
+    private static string FixFor(INamedTypeSymbol styleType, string property)
+    {
+        if (styleType.Name == "InheritedStyle")
+            return MetricAffecting.Contains(property)
+                ? "MarkStyleDirty() and MarkLayoutDirty()"
+                : "MarkStyleDirty()";
+
+        // ZIndex changes paint order, not geometry, so it needs the cheaper of the two.
+        return property == "ZIndex" ? "MarkPaintDirty()" : "MarkLayoutDirty()";
     }
 
     private static bool DerivesFromElement(ITypeSymbol? type, INamedTypeSymbol elementType)

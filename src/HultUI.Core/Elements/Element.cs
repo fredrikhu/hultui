@@ -457,7 +457,24 @@ public abstract class Element
         }
     }
 
-    internal void MarkStyleDirty()
+    /// <summary>
+    /// Marks this element and its descendants as needing inherited style re-resolved on
+    /// the next frame. Call this after directly mutating <see cref="Inherited"/> — those
+    /// setters do not auto-invalidate, so the style pass would otherwise skip the subtree
+    /// and every descendant would keep the value it resolved earlier.
+    ///
+    /// <para>This re-resolves; it does not re-measure. Anything that changes text metrics
+    /// — <c>FontFamily</c>, <c>FontSize</c>, <c>FontWeight</c>, <c>FontSlant</c>,
+    /// <c>LineHeight</c>, <c>LetterSpacing</c>, <c>TextAlign</c>, <c>TextDirection</c> —
+    /// needs <see cref="MarkLayoutDirty"/> as well, or the text redraws at its old
+    /// measured size. <c>TextColor</c>, <c>Decoration</c> and <c>Cursor</c> need only
+    /// this call.</para>
+    ///
+    /// <para>Like <see cref="MarkLayoutDirty"/>, this is the escape hatch for imperative
+    /// code. Builder chains run before the first style pass and component rebuilds
+    /// invalidate through PatchFrom, so neither needs it.</para>
+    /// </summary>
+    public void MarkStyleDirty()
     {
         UIThread.VerifyAccess("Element.MarkStyleDirty");
 

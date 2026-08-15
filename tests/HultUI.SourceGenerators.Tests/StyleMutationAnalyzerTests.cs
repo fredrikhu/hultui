@@ -67,6 +67,45 @@ public class StyleMutationAnalyzerTests
         Assert.DoesNotContain("MarkLayoutDirty", d.GetMessage());
     }
 
+    [Fact]
+    public void InheritedFontSize_AsksForBothPasses()
+    {
+        // Re-resolving alone leaves the text drawn at the size it was last measured at.
+        var d = Assert.Single(Analyze("""
+            var el = Text.New("hi");
+            Register(() => { el.Inherited.FontSize = 20f; });
+            """));
+
+        Assert.Contains("InheritedStyle.FontSize", d.GetMessage());
+        Assert.Contains("MarkStyleDirty() and MarkLayoutDirty()", d.GetMessage());
+    }
+
+    [Fact]
+    public void InheritedTextColor_AsksForTheStylePassOnly()
+    {
+        // Colour does not move anything, so re-resolving is the whole fix.
+        var d = Assert.Single(Analyze("""
+            var el = Text.New("hi");
+            Register(() => { el.Inherited.TextColor = Color.Red; });
+            """));
+
+        Assert.Contains("MarkStyleDirty()", d.GetMessage());
+        Assert.DoesNotContain("MarkLayoutDirty", d.GetMessage());
+    }
+
+    [Fact]
+    public void InheritedStyle_FollowedByMarkStyleDirty_IsNotReported()
+    {
+        Assert.Empty(Analyze("""
+            var el = Text.New("hi");
+            Register(() =>
+            {
+                el.Inherited.TextColor = Color.Red;
+                el.MarkStyleDirty();
+            });
+            """));
+    }
+
     // ──── Shapes that must stay quiet ────
 
     [Fact]
