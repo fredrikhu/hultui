@@ -67,6 +67,9 @@ public partial class JunctionApp
     {
         s.Open = false;
         s.Search.SetQuery("");
+        // A reveal can now outlive the frame it was asked for, so drop any that is still
+        // owed — the bar is gone and its query with it.
+        s.PendingReveal = false;
         s.PendingBodyFocus = true;
         MarkDirty();
     }
@@ -121,7 +124,14 @@ public partial class JunctionApp
     {
         if (s.PendingFocus) { s.PendingFocus = false; s.FieldRef.Current?.Focus(); }
         if (s.PendingBodyFocus && !s.Open) { s.PendingBodyFocus = false; body()?.Focus(); }
-        if (s.PendingReveal)
+        // Hold the request until there is a body to receive it. The reveal runs after the
+        // frame — scrolling during Build would precede the layout pass and clamp to 0 — but
+        // the callback gives up quietly when the pane is still a placeholder, and the flag
+        // used to be cleared the moment the callback was *queued*. A reveal that fell due one
+        // frame before the file's text arrived was therefore dropped and never retried: the
+        // search reported its hits and nothing scrolled. The body landing triggers its own
+        // rebuild, which is when this comes back round.
+        if (s.PendingReveal && body() is not null)
         {
             s.PendingReveal = false;
             _window.RequestPostFrameCallback(reveal);
