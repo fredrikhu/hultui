@@ -59,6 +59,64 @@ public sealed class TextPipeline
         _shaper = shaper;
     }
 
+    // ── Metric-affecting spans (stage 2 of docs/plans/12-rich-text-spans.md) ──
+    //
+    // A span carrying Weight/Slant/FontSize changes shaping, so the layout must see
+    // it. Style segmentation happens BEFORE font itemization: the string is split at
+    // metric-span boundaries, each segment itemized with its effective weight/slant
+    // and shaped at its effective size. Line breaking stays one pass — UAX #14 break
+    // opportunities are style-independent. Plain and color-only-span text keeps
+    // today's paths, caches and keys untouched.
+
+    /// <summary>True when any span would change shaping or measurement.</summary>
+    public static bool AnyMetricAffecting(IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    {
+        if (spans is null) return false;
+        for (int i = 0; i < spans.Count; i++)
+            if (spans[i].Weight is not null || spans[i].Slant is not null || spans[i].FontSize is not null)
+                return true;
+        return false;
+    }
+
+    // Layout-relevant digest of a span list: offsets and metric fields only. Colors
+    // and decorations are paint-only and must not fragment the layout caches.
+    private static int MetricDigest(IReadOnlyList<Core.Rendering.TextSpan> spans)
+    {
+        var hash = new HashCode();
+        for (int i = 0; i < spans.Count; i++)
+        {
+            var s = spans[i];
+            if (s.Weight is null && s.Slant is null && s.FontSize is null) continue;
+            hash.Add(s.Start); hash.Add(s.Length);
+            hash.Add(s.Weight); hash.Add(s.Slant); hash.Add(s.FontSize);
+        }
+        return hash.ToHashCode();
+    }
+
+    /// <summary>Span-aware layout. Falls back to the plain path unless some span is
+    /// metric-affecting; spans are absolute offsets into <paramref name="text"/>.</summary>
+    public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<Core.Rendering.TextSpan>? spans)
+    {
+        if (!AnyMetricAffecting(spans))
+            return Layout(text, style, maxWidth, maxLines, overflow);
+        if (string.IsNullOrEmpty(text))
+            return TextLayout.Empty;
+
+        // Styled text skips the width-independent single-line fast path for now and
+        // goes straight to the width-keyed cache; the digest keeps styled and plain
+        // results apart without touching plain keys.
+        var key = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
+            style.LetterSpacing, MetricDigest(spans!));
+        if (_cache.TryGet(key, out var cached))
+            return cached;
+
+        var layout = ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines);
+        _cache.Put(key, layout);
+        return layout;
+    }
+
     public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
         TextOverflow overflow = TextOverflow.Clip)
     {
@@ -228,6 +286,195 @@ public sealed class TextPipeline
 
         var breakPoints = LineBreaker.FindBreakOpportunities(text);
         return BreakIntoLines(text, shapedRuns, fontRuns, style, breakPoints, maxWidth, maxLines);
+    }
+
+    // ── Styled layout internals ──
+    // A styled line is segments cut at metric-span boundaries, each itemized with its
+    // effective weight/slant and shaped at its effective size. Offsets are absolute
+    // into the source string throughout, because span ranges are.
+
+    private ResolvedInheritedStyle EffectiveStyleAt(
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, int offset)
+    {
+        for (int i = 0; i < spans.Count; i++)
+        {
+            var s = spans[i];
+            if (s.IsMetricAffecting && offset >= s.Start && offset < s.End)
+                return style with
+                {
+                    FontWeight = s.Weight ?? style.FontWeight,
+                    FontSlant = s.Slant ?? style.FontSlant,
+                    FontSize = s.FontSize ?? style.FontSize,
+                };
+        }
+        return style;
+    }
+
+    // The nearest metric-span edge after <paramref name="offset"/>, clamped to limit.
+    private static int NextStyleBoundary(IReadOnlyList<Core.Rendering.TextSpan> spans, int offset, int limit)
+    {
+        int next = limit;
+        for (int i = 0; i < spans.Count; i++)
+        {
+            var s = spans[i];
+            if (!s.IsMetricAffecting) continue;
+            if (s.Start > offset && s.Start < next) next = s.Start;
+            if (s.End > offset && s.End < next) next = s.End;
+        }
+        return next;
+    }
+
+    private float MeasureStyled(string text, int from, int to,
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans)
+    {
+        float width = 0;
+        int i = from;
+        while (i < to)
+        {
+            int b = NextStyleBoundary(spans, i, to);
+            width += MeasureString(text[i..b], EffectiveStyleAt(style, spans, i));
+            i = b;
+        }
+        return width;
+    }
+
+    private TextLine ShapeStyledLine(string text, int from, int to,
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans)
+    {
+        int sourceLength = to - from;
+        // Trailing whitespace is trimmed for width, as in ShapeLineText.
+        while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
+
+        var runs = new List<ShapedRun>();
+        float width = 0, maxAscent = 0, maxDescent = 0, maxLeading = 0;
+        int i = from;
+        while (i < to)
+        {
+            int b = NextStyleBoundary(spans, i, to);
+            var eff = EffectiveStyleAt(style, spans, i);
+            foreach (var fr in FontItemizer.Itemize(text[i..b], _fonts, eff.FontFamily, eff.FontWeight, eff.FontSlant))
+            {
+                var shaped = ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing);
+                shaped.OffsetX = width;
+                width += shaped.Width;
+                runs.Add(shaped);
+                // A larger-size run raises its whole line, the same max-across-runs
+                // rule font fallback already applies.
+                maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * eff.FontSize);
+                maxDescent = Math.Max(maxDescent, fr.Font.Descent * eff.FontSize);
+                maxLeading = Math.Max(maxLeading, fr.Font.Leading * eff.FontSize);
+            }
+            i = b;
+        }
+
+        if (runs.Count == 0)
+        {
+            var primary = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
+            maxAscent = Math.Abs(primary.Ascent) * style.FontSize;
+            maxDescent = primary.Descent * style.FontSize;
+            maxLeading = primary.Leading * style.FontSize;
+        }
+
+        (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, style.LineHeight);
+        return new TextLine(runs, width, maxAscent, maxDescent, maxLeading) { Start = from, Length = sourceLength };
+    }
+
+    // Styled twin of FitPrefix: gallop out, then bisect, measuring with spans.
+    private int StyledFitPrefix(string text, int from, int to,
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth)
+    {
+        int span = 1;
+        while (from + span < to && MeasureStyled(text, from, from + span, style, spans) <= maxWidth)
+            span <<= 1;
+
+        int lo = from + Math.Min(span >> 1, to - from);
+        int hi = from + Math.Min(span, to - from);
+        int best = lo;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (MeasureStyled(text, from, mid, style, spans) <= maxWidth) { best = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+        return SnapPrefix(text, best);
+    }
+
+    // The styled twin of ComputeWrapped + BreakIntoLines: same greedy break logic,
+    // measurement and line shaping made span-aware. Overflow.Ellipsis on styled text
+    // clips instead of ellipsizing for now (the rewrite needs a styled
+    // BuildEllipsizedLine; tracked in docs/plans/12-rich-text-spans.md).
+    private TextLayout ComputeWrappedStyled(string text, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, int? maxLines)
+    {
+        var breakPoints = LineBreaker.FindBreakOpportunities(text);
+        var allBreaks = new List<int> { 0 };
+        for (int i = 0; i < text.Length; i++)
+            if (text[i] == '\n') { allBreaks.Add(i); allBreaks.Add(i + 1); }
+        foreach (var bp in breakPoints)
+            if (!allBreaks.Contains(bp)) allBreaks.Add(bp);
+        allBreaks.Add(text.Length);
+        allBreaks.Sort();
+        for (int i = allBreaks.Count - 1; i > 0; i--)
+            if (allBreaks[i] == allBreaks[i - 1]) allBreaks.RemoveAt(i);
+
+        var lines = new List<TextLine>();
+        int textOffset = 0;
+        float lineWidth = 0;
+
+        for (int s = 1; s < allBreaks.Count; s++)
+        {
+            int segStart = allBreaks[s - 1];
+            int segEnd = allBreaks[s];
+
+            if (segEnd - segStart == 1 && text[segStart] == '\n')
+            {
+                lines.Add(ShapeStyledLine(text, textOffset, segStart, style, spans));
+                textOffset = segEnd;
+                lineWidth = 0;
+                if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
+                continue;
+            }
+
+            float segWidth = MeasureStyled(text, segStart, segEnd, style, spans);
+
+            if (lineWidth + segWidth > maxWidth && lineWidth > 0)
+            {
+                lines.Add(ShapeStyledLine(text, textOffset, segStart, style, spans));
+                textOffset = segStart;
+                lineWidth = 0;
+                if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
+            }
+
+            if (lineWidth == 0 && segWidth > maxWidth)
+            {
+                // Unbreakable overlong segment: cut by character, span-aware.
+                while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
+                {
+                    int fit = StyledFitPrefix(text, textOffset, segEnd, style, spans, maxWidth);
+                    if (fit <= textOffset) fit = SnapPrefix(text, textOffset + 1);
+                    if (fit >= segEnd) break;
+                    lines.Add(ShapeStyledLine(text, textOffset, fit, style, spans));
+                    textOffset = fit;
+                }
+                if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
+                lineWidth = MeasureStyled(text, textOffset, segEnd, style, spans);
+                continue;
+            }
+
+            lineWidth += segWidth;
+        }
+
+        if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
+            lines.Add(ShapeStyledLine(text, textOffset, text.Length, style, spans));
+
+        float totalHeight = 0, maxLineWidth = 0;
+        foreach (var line in lines)
+        {
+            line.OffsetY = totalHeight;
+            totalHeight += line.Height;
+            maxLineWidth = Math.Max(maxLineWidth, line.Width);
+        }
+        return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
     }
 
     private const string EllipsisString = "…"; // …

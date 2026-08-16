@@ -19,4 +19,13 @@ public interface IMeasureContext
     /// </summary>
     Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
         TextOverflow overflow = TextOverflow.Clip);
+
+    /// <summary>
+    /// Span-aware measurement: metric-affecting spans (weight, slant, size) change
+    /// the answer. Default ignores the spans so measure contexts that predate them
+    /// keep working; contexts backed by the real pipeline override it.
+    /// </summary>
+    Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<TextSpan>? spans)
+        => MeasureText(text, style, maxWidth, maxLines, overflow);
 }

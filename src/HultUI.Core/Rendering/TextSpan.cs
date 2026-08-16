@@ -18,7 +18,12 @@ namespace HultUI.Core.Rendering;
 /// </summary>
 public readonly record struct TextSpan(
     int Start, int Length, Color Color, Color Background = default,
-    TextDecoration Decoration = TextDecoration.None)
+    TextDecoration Decoration = TextDecoration.None,
+    FontWeight? Weight = null, FontSlant? Slant = null, float? FontSize = null)
 {
     public int End => Start + Length;
+
+    /// <summary>True when this span changes shaping or measurement (weight, slant or
+    /// size override) rather than only paint.</summary>
+    public bool IsMetricAffecting => Weight is not null || Slant is not null || FontSize is not null;
 }

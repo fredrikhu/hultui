@@ -117,6 +117,20 @@ element with links/inline images materializes later it composes on this pipeline
   one spanned line per row (fewer elements per row on the hottest list in the app);
   markdown-ish commit-body rendering becomes possible.
 
+## Stage-2 status and known gaps (2026-08-16)
+
+Stage 2 shipped: `TextSpan.Weight/Slant/FontSize`, span-aware `Layout` with the
+metric-only digest, renderer/measure wiring, layout-dirty on metric span change.
+Open follow-ups:
+
+- **Ellipsis on styled text clips instead of ellipsizing** — needs a styled
+  `BuildEllipsizedLine`.
+- **`LineXAt`'s ligature fallback** measures prefixes with the element style; a
+  boundary inside a ligature of a styled run can sit a hair off. Glyph-per-char
+  runs (code, Latin UI text) are exact.
+- **Styled single-line fast path**: styled text always takes the width-keyed
+  cache; the width-independent shape cache is plain-text only for now.
+
 ## Non-goals
 
 - Editing rich text (review's own carve-out).

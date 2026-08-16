@@ -287,7 +287,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         }
         if (string.IsNullOrEmpty(text) || _pipeline is null) return;
 
-        var layout = _pipeline.Layout(text, style, bounds.Width, maxLines, overflow);
+        // Span-aware layout: metric-affecting spans (bold, italic, size) shape and
+        // wrap here; paint-only span lists take the identical plain-layout path.
+        var layout = _pipeline.Layout(text, style, bounds.Width, maxLines, overflow, spans);
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
 

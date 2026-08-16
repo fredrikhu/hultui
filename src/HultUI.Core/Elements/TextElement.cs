@@ -50,9 +50,21 @@ public class TextElement : Element
             // Value-compare so reconciliation (which rebuilds span lists each
             // frame) doesn't mark paint dirty when the highlighting is unchanged.
             if (ReferenceEquals(_spans, value) || SpansEqual(_spans, value)) return;
+            // Metric-affecting spans (bold, italic, size) change measurement, so a
+            // list gaining, losing or moving one has to re-layout, not just repaint.
+            bool metric = AnyMetricAffecting(_spans) || AnyMetricAffecting(value);
             _spans = value;
+            if (metric) MarkLayoutDirty();
             MarkPaintDirty();
         }
+    }
+
+    private static bool AnyMetricAffecting(IReadOnlyList<TextSpan>? spans)
+    {
+        if (spans is null) return false;
+        for (int i = 0; i < spans.Count; i++)
+            if (spans[i].IsMetricAffecting) return true;
+        return false;
     }
 
     private static bool SpansEqual(IReadOnlyList<TextSpan>? a, IReadOnlyList<TextSpan>? b)
@@ -361,7 +373,9 @@ public class TextElement : Element
     // the element never occupies — and couples every Ellipsis label to changes in the
     // Clip path, which is how a clipping fix once resized cards that never clip.
     internal override Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
-        ctx.MeasureText(Content, ResolvedInherited, availableWidth, MaxLines, Overflow);
+        // Spans ride along so metric-affecting ones (bold, italic, size) size the
+        // element the way they will draw; the overload ignores paint-only lists.
+        ctx.MeasureText(Content, ResolvedInherited, availableWidth, MaxLines, Overflow, _spans);
 
     public override void Render(IRenderContext ctx)
     {

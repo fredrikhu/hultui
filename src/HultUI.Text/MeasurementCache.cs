@@ -6,7 +6,10 @@ namespace HultUI.Text;
 /// <summary>Key for a fully laid-out, width-dependent text result.</summary>
 internal readonly record struct MeasurementKey(
     string Text, string FontFamily, float FontSize, FontWeight FontWeight, FontSlant FontSlant,
-    float MaxWidth, int MaxLines, TextOverflow Overflow, float LineHeight, float LetterSpacing);
+    float MaxWidth, int MaxLines, TextOverflow Overflow, float LineHeight, float LetterSpacing,
+    // Layout-relevant digest of metric-affecting spans; 0 for plain text, so plain
+    // keys and hit rates are exactly what they were before spans could shape.
+    int SpanDigest = 0);
 
 /// <summary>
 /// Key for the width-independent shaping of a string. Shaping (itemization +

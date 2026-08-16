@@ -26,4 +26,14 @@ public sealed class SkiaMeasureContext : IMeasureContext
         var layout = _pipeline.Layout(text, style, maxWidth, maxLines, overflow);
         return layout.Size;
     }
+
+    public Size MeasureText(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow, IReadOnlyList<TextSpan>? spans)
+    {
+        if (string.IsNullOrEmpty(text))
+            return Size.Zero;
+
+        var layout = _pipeline.Layout(text, style, maxWidth, maxLines, overflow, spans);
+        return layout.Size;
+    }
 }
