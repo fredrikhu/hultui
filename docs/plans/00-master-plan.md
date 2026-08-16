@@ -5,7 +5,19 @@ Execution plan for addressing feedback from the Git client sample
 
 ## Current Step
 
-> **All plans complete.**
+> **Plan 11 is a design awaiting feedback; everything before it is complete.**
+
+## Phase 6 — External review follow-ups
+
+From the 2026-08-12 external source review, in the order agreed after triage.
+
+| # | Plan | Status |
+|---|------|--------|
+| — | Thread-affinity guard (`UIThread.VerifyAccess`) | Done |
+| — | README BiDi claim corrected | Done |
+| — | Style-mutation analyzer (`HULTUI002`) + public `MarkStyleDirty` | Done |
+| — | File dialogs and typed clipboard into the framework | Done |
+| 11 | [Theme extension by key](11-theme-extension.md) | Design — awaiting feedback |
 
 ## Phase 5 — Layout
 
