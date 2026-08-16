@@ -141,6 +141,21 @@ public partial class CommanderApp : Component, IDisposable
         public bool? OverwriteAll;   // null = ask each conflict; true/false = apply to rest
         public int Done, Skipped, Failed;
 
+        /// <summary>Packing rather than copying. The overlay is the same shape — a queue of
+        /// named items with a byte bar over it — so it is driven by the same op; this changes
+        /// the wording and drops the controls that don't apply (there is no per-entry skip,
+        /// and no destination to resolve conflicts against).</summary>
+        public bool IsPack;
+
+        /// <summary>The archive being written, for the pack overlay's subtitle.</summary>
+        public string PackTarget = "";
+
+        /// <summary>The backend reports one percentage for the whole run rather than bytes per
+        /// member — 7-Zip, which is packing in its own process. The overlay drops the per-file
+        /// bar for these: it has nothing to fill it with, and a bar pinned at 0% beside a moving
+        /// total reads as a stall rather than as an absence.</summary>
+        public bool PackWholeRunOnly;
+
         // ── Streaming progress (background copy) ─────────────────────────
         public readonly long[] ItemBytes = [];      // per-item total size
         public byte[] Status = [];                   // 0 queued · 1 active · 2 done · 3 skipped · 4 failed
@@ -1559,16 +1574,21 @@ public partial class CommanderApp : Component, IDisposable
         if (_op != null) { _progressOpen = false; MarkDirty(); }
     }
 
+    /// <summary>Skip the item being copied. Not offered while packing — the writer streams
+    /// into the archive, so a member abandoned half-written would stay in it looking whole.</summary>
     private void SkipCurrentFile()
     {
+        if (_op is { IsPack: true }) return;
         if (_op is { } op) { op.SkipCurrent = true; if (op.Gate is { } g) { op.ConflictOverwrite = false; g.Set(); } MarkDirty(); }
     }
 
     private void CancelTransfer()
     {
         if (_op is { } op) { op.Cancelled = true; if (op.Gate is { } g) g.Set(); }
-        // The worker marshals FinishTransfer; for the sync move, finish now.
-        if (_op is { Gate: null } && !_progressOpen) FinishTransfer();
+        // The worker marshals FinishTransfer; for the sync move, finish now. A pack always has
+        // a worker, and it finishes through FinishPack — clearing _op from here would leave it
+        // reporting into an op nothing is showing, and then finish a second time.
+        if (_op is { Gate: null, IsPack: false } && !_progressOpen) FinishTransfer();
         else MarkDirty();
     }
 
@@ -1686,37 +1706,77 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>A palette action: label, optional shortcut caption, and what it does.</summary>
     private readonly record struct Command(string Label, string? Shortcut, Action Run);
 
-    /// <summary>All palette commands in display order (before query filtering).</summary>
+    /// <summary>The caption for a rebindable command's chord, read from the live keymap rather
+    /// than written out here — a palette row that still advertises the default after the user
+    /// has rebound it is worse than one showing nothing. Null when the command is unbound,
+    /// which <see cref="Overlays.PaletteRow"/> renders as no chip at all.</summary>
+    private string? Key(Cmd cmd) =>
+        CurrentChord(cmd, _settings) is { } chord ? Keybindings.Format(chord) : null;
+
+    /// <summary>All palette commands in display order (before query filtering). Everything the
+    /// keymap can reach is here, so the palette is a complete second route to the app's
+    /// commands and not a shortlist; the structural keys (Tab, Backspace, Ctrl+A) that aren't
+    /// rebindable keep their literal captions.</summary>
     private IReadOnlyList<Command> Commands()
     {
         char side = _active, other = _active == 'L' ? 'R' : 'L';
+        // What the file operations would act on, so their rows say how much is at stake rather
+        // than making the user close the palette to check. Counted once: the list is rebuilt on
+        // every keystroke of the query.
+        int targets = OperationTargets(side).Count(e => !e.IsParent);
+        string n = $"{targets} item{(targets == 1 ? "" : "s")}";
         return
         [
-            new("Go up one folder", "Backspace", () => GoUp(side)),
-            new("Go to path…", "Ctrl+G", () => OpenGotoPrompt(side)),
+            // Navigation. Backspace also goes up, but it is structural and can't be rebound —
+            // the chip shows the rebindable chord, which is the one that can stop being true.
+            new("Go up one folder", Key(Cmd.GoUpFolder), () => GoUp(side)),
+            new("Enter folder under cursor", Key(Cmd.IntoFolder), () => DescendCursor(side)),
+            new("Go to path…", Key(Cmd.GotoPath), () => OpenGotoPrompt(side)),
             new("Open drive…", "Alt+F1", () => OpenDrivePicker(side)),
-            new("Refresh", "Ctrl+R", () => RefreshPane(side)),
-            new($"{(_settings.ShowHidden ? "Hide" : "Show")} hidden files", "Ctrl+H", ToggleHidden),
-            new("Swap left and right panes", "Ctrl+U", SwapPanes),
-            new("Open this folder in the other pane", "=", () => NavigateTo(other, Dir(side))),
+            new("Bookmarks…", Key(Cmd.Bookmarks), OpenBookmarks),
+            new("Refresh", Key(Cmd.Refresh), () => RefreshPane(side)),
+
+            // Panes, tabs and view.
+            new($"{(_settings.ShowHidden ? "Hide" : "Show")} hidden files", Key(Cmd.ToggleHidden), ToggleHidden),
+            new("Swap left and right panes", Key(Cmd.Swap), SwapPanes),
+            new("Open this folder in the other pane", Key(Cmd.OpenInOther), () => NavigateTo(other, Dir(side))),
             new("Focus other pane", "Tab", () => { _active = other; }),
-            new("New folder…", "F7", () => OpenNewFolderPrompt(side)),
-            new("Find files…", "Alt+F7", () => OpenFind(side)),
-            new("Compare files (diff)", "F3", () => OpenDiff(side)),
-            new("View file", "Shift+F3", () => OpenViewer(side)),
-            new("Synchronize folders", "F9", OpenSync),
+            new("New tab", Key(Cmd.NewTab), () => NewTab(side)),
+            new("Close tab", Key(Cmd.CloseTab), () => CloseTab(side, TabIndex(side))),
+            new("View: Detail", Key(Cmd.ViewDetail), () => SetView(side, ViewMode.Detail)),
+            new("View: Brief", Key(Cmd.ViewBrief), () => SetView(side, ViewMode.Brief)),
+            new("View: Thumbnails", Key(Cmd.ViewThumbnails), () => SetView(side, ViewMode.Thumbnails)),
+            new("Cycle preview panel", Key(Cmd.Preview), CyclePreview),
+
+            // File operations.
+            new($"Copy to other pane ({n})", Key(Cmd.Copy), StartCopy),
+            new($"Move to other pane ({n})", Key(Cmd.Move), StartMove),
+            new($"Delete ({n})", Key(Cmd.Delete), StartDelete),
+            new("New folder…", Key(Cmd.NewFolder), () => OpenNewFolderPrompt(side)),
+            new("Rename…", Key(Cmd.Rename), () => OpenRenamePrompt(side)),
+            new($"Multi-rename… ({targets} files)", Key(Cmd.MultiRename), OpenRename),
+
+            // Archives.
+            new($"Pack into archive… ({n})", Key(Cmd.Pack), OpenPack),
+            new("Extract archive…", Key(Cmd.Extract), ExtractCursorArchive),
+
+            // Tools.
+            new("Find files…", Key(Cmd.Find), () => OpenFind(side)),
+            new("Compare files (diff)", Key(Cmd.Diff), () => OpenDiff(side)),
+            new("View file", Key(Cmd.View), () => OpenViewer(side)),
+            new("Edit file in external editor", Key(Cmd.Edit), () => EditFocused(side)),
+            new("Synchronize folders", Key(Cmd.Sync), OpenSync),
             new("Open terminal here", null, OpenTerminalHere),
             new("Open in git client", null, OpenGitClientHere),
-            new("Edit file in external editor", "F4", () => EditFocused(side)),
-            new("Rename…", "Shift+F6", () => OpenRenamePrompt(side)),
-            new($"Multi-rename… ({OperationTargets(side).Count(e => !e.IsParent)} files)", "Ctrl+M", OpenRename),
-            new("Properties…", "Alt+Enter", () => ShowProperties(side)),
-            new("Context menu…", "Menu", () => ShowContextMenuAtCursor(side)),
+            new("Properties…", Key(Cmd.Properties), () => ShowProperties(side)),
+            new("Context menu…", Key(Cmd.ContextMenu), () => ShowContextMenuAtCursor(side)),
+
+            // Selection and totals.
             new("Mark all", "Ctrl+A", () => MarkAll(side)),
-            new("Mark files by pattern…", "Ctrl+Shift+A", () => OpenMarkPatternPrompt(side)),
-            new("Measure all folder sizes", "Alt+Shift+Enter", () => MeasureAllDirs(side)),
-            new("Cycle preview panel", "Ctrl+Q", CyclePreview),
-            new("Open Options…", "Ctrl+,", OpenOptions),
+            new("Mark files by pattern…", Key(Cmd.MarkPattern), () => OpenMarkPatternPrompt(side)),
+            new("Measure all folder sizes", Key(Cmd.MeasureAll), () => MeasureAllDirs(side)),
+
+            new("Open Options…", Key(Cmd.Options), OpenOptions),
         ];
     }
 

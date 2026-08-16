@@ -349,11 +349,19 @@ public partial class CommanderApp
     // ── Copy-progress overlay (F5) ───────────────────────────────────────
     private static readonly Color DoneGreen = Color.FromHex("#7fbf79");
 
+    /// <summary>How many queue rows the progress overlay shows at once. Rows are 22px; the
+    /// clipped box is sized from this so the window and the height can't drift apart.</summary>
+    private const int QueueWindow = 9;
+
     private Element BuildProgress(TransferOp op)
     {
         int processed = op.Done + op.Skipped + op.Failed;
-        var card = Card(560, op.IsMove ? "Moving" : "Copying", $"{processed} of {op.Items.Count}",
-            op.IsMove ? Glyphs.Swap : Glyphs.Copy);
+        string subtitle = op.IsPack && op.PackTarget.Length > 0
+            ? $"{processed} of {op.Items.Count} · {op.PackTarget}"
+            : $"{processed} of {op.Items.Count}";
+        var card = Card(560,
+            op.IsPack ? "Packing" : op.IsMove ? "Moving" : "Copying", subtitle,
+            op.IsPack ? Glyphs.Pack : op.IsMove ? Glyphs.Swap : Glyphs.Copy);
 
         var body = Flex.Column(gap: 12).Padding(new Thickness(12, 16, 12, 16));
 
@@ -361,21 +369,30 @@ public partial class CommanderApp
         var curName = op.Index >= 0 && op.Index < op.Items.Count ? op.Items[op.Index].Name : "";
         double fileFrac = op.FileBytes > 0 ? (double)op.FileBytesDone / op.FileBytes : 0;
         double totalFrac = op.TotalBytes > 0 ? (double)op.TotalBytesDone / op.TotalBytes : 0;
-        body.AddChild(ProgressBar(op.Paused ? "Paused" : "File", curName, fileFrac, Nocturne.Accent500));
-        body.AddChild(ProgressBar("Total",
+        if (!op.PackWholeRunOnly)
+            body.AddChild(ProgressBar(op.Paused ? "Paused" : "File", curName, fileFrac, Nocturne.Accent500));
+        body.AddChild(ProgressBar(op.PackWholeRunOnly && op.Paused ? "Paused" : "Total",
             $"{FileSystem.ByteLabel(op.TotalBytesDone)} of {FileSystem.ByteLabel(op.TotalBytes)}{TransferRate(op)}",
             totalFrac, Nocturne.Accent700));
 
-        // Queue: one row per item with its status. Clipped to a fixed height.
-        var queue = Flex.Column(gap: 0).MaxHeight(200).Overflow(Overflow.Hidden)
+        // Queue: one row per item with its status, in a window that follows the active item.
+        // The box is clipped to a fixed height, so laying every row out from the first meant a
+        // batch longer than the window showed its opening rows for the whole run and never the
+        // item actually being worked on — which is the one thing the queue is there to say.
+        // The card's subtitle carries the "72 of 400", so the window needs no count of its own.
+        var queue = Flex.Column(gap: 0).MaxHeight(QueueWindow * 22).Overflow(Overflow.Hidden)
             .Margin(new Thickness(2, 0, 0, 0));
-        for (int i = 0; i < op.Items.Count; i++) queue.AddChild(ProgressRow(op, i));
+        int first = Math.Clamp(op.Index - QueueWindow / 2, 0, Math.Max(0, op.Items.Count - QueueWindow));
+        int last = Math.Min(op.Items.Count, first + QueueWindow);
+        for (int i = first; i < last; i++) queue.AddChild(ProgressRow(op, i));
         body.AddChild(queue);
         card.AddChild(body);
 
         var footer = DialogFooter();
         footer.AddChild(GhostButton(op.Paused ? "Resume  P" : "Pause  P", ToggleTransferPause));
-        footer.AddChild(GhostButton("Skip file  S", SkipCurrentFile));
+        // No per-entry skip while packing: a member abandoned half-written would still be in
+        // the archive, listing and extracting as though it were whole. See PackProgress.
+        if (!op.IsPack) footer.AddChild(GhostButton("Skip file  S", SkipCurrentFile));
         footer.AddChild(GhostButton("Background  B", BackgroundTransfer));
         footer.AddChild(Box.New().FlexGrow(1));
         footer.AddChild(SecondaryButton("Cancel", CancelTransfer));
@@ -424,9 +441,9 @@ public partial class CommanderApp
         byte st = op.Status[i];
         (string icon, Color color, string text) = st switch
         {
-            1 => (Glyphs.Play, Nocturne.Accent, "copying"),
+            1 => (Glyphs.Play, Nocturne.Accent, op.IsPack ? "packing" : "copying"),
             2 => (Glyphs.Check, DoneGreen, "done"),
-            3 => (Glyphs.Minus, Nocturne.On(0.35), "skipped"),
+            3 => (Glyphs.Minus, Nocturne.On(0.35), op.IsPack ? "missing" : "skipped"),
             4 => (Glyphs.Close, Nocturne.MarkRed, "failed"),
             _ => (Glyphs.Dot, Nocturne.On(0.35), "queued"),
         };

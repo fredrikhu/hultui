@@ -136,30 +136,176 @@ public partial class CommanderApp
             MarkDirty(); return;
         }
 
+        // One progress op at a time. A copy that was sent to the background is still running
+        // with _op set and the overlay hidden, so AnyOverlayOpen doesn't catch it — and pack
+        // would take _op out from under it, leaving that transfer with nothing to report to.
+        if (_op != null)
+        {
+            _packError = "A transfer is already running — let it finish first";
+            MarkDirty(); return;
+        }
+
+        var op = new TransferOp(PackRows(jobs))
+        {
+            IsPack = true,
+            Source = _packSource,
+            DestDir = destDir,
+            PackTarget = System.IO.Path.GetFileName(jobs[0].archivePath),
+            PackWholeRunOnly = needs7z,
+        };
         _packOpen = false;
-        _notice = jobs.Count == 1 ? "Packing…" : $"Packing {jobs.Count} archives…";
+        _op = op;
+        _progressOpen = true;
+        // Notices only clear on the next keypress, so whatever was on the command line would sit
+        // there behind the overlay. The overlay is the report now; the notice comes at the end.
+        _notice = null;
         MarkDirty();
 
         System.Threading.Tasks.Task.Run(() =>
-        {
-            string? err = null;
-            foreach (var (archivePath, items) in jobs)
-            {
-                err = ArchiveVfs.Create(items, archivePath, level, password, needs7z, addToExisting);
-                if (err != null) break;
-            }
-            if (err == null && move)
-                foreach (var (p, isDir) in sources) FileOps.DeletePermanent(p, isDir);
+            RunPack(op, jobs, level, password, needs7z, addToExisting, move, sources));
+    }
 
-            Application.InvokeOnMainThread(() =>
+    /// <summary>The queue rows for the progress overlay: every entry of every job, in the order
+    /// they will be written, so a job's item index plus its row offset addresses one row.
+    /// <para>Sizes are read here rather than left to <see cref="FileOps.EntrySize"/>, which
+    /// trusts a file's recorded <c>Size</c> — these rows are synthesised, so nothing has filled
+    /// that in yet. Folders keep <c>Size</c> 0 and are measured by walking them, which is what
+    /// EntrySize is for.</para></summary>
+    private static List<FileEntry> PackRows(
+        List<(string archivePath, List<(string Source, string Entry)> items)> jobs)
+    {
+        var rows = new List<FileEntry>();
+        foreach (var (_, items) in jobs)
+            foreach (var (source, entry) in items)
             {
-                _notice = err == null
-                    ? (jobs.Count == 1 ? $"Packed {System.IO.Path.GetFileName(jobs[0].archivePath)}" : $"Packed {jobs.Count} archives")
-                    : $"Pack failed: {err}";
-                _genL++; _genR++;
-                MarkDirty();
-            });
-        });
+                bool isDir = System.IO.Directory.Exists(source);
+                long size = 0;
+                if (!isDir) { try { size = new System.IO.FileInfo(source).Length; } catch { } }
+                rows.Add(new FileEntry(entry, source, isDir, size, DateTime.Now));
+            }
+        return rows;
+    }
+
+    /// <summary>Write every job, reporting into the shared progress overlay as it goes.
+    /// Runs off the UI thread; the overlay is repainted through <see cref="Repaint"/> and the
+    /// result is marshalled back through <see cref="FinishPack"/>.</summary>
+    private void RunPack(TransferOp op,
+        List<(string archivePath, List<(string Source, string Entry)> items)> jobs,
+        CompressionLevel level, string? password, bool needs7z, bool addToExisting,
+        bool move, List<(string FullPath, bool IsDir)> sources)
+    {
+        for (int i = 0; i < op.Items.Count; i++) op.ItemBytes[i] = FileOps.EntrySize(op.Items[i]);
+        op.TotalBytes = op.ItemBytes.Sum();
+        op.StartTick = Environment.TickCount64;
+        Repaint();
+
+        // The one archive currently being written — the only thing a cancel may remove.
+        // Deliberately not a list of everything this run created: "one archive per item" cancelled
+        // at the fifth would then also take the four that had already finished, which is data the
+        // user watched succeed. Null while appending, because an archive they already had is not
+        // ours to throw away even half-modified.
+        string? inFlight = null;
+        string? err = null;
+        int offset = 0;
+
+        foreach (var (archivePath, items) in jobs)
+        {
+            if (op.Cancelled) break;
+            inFlight = addToExisting && FileOps.Exists(archivePath) ? null : archivePath;
+            op.PackTarget = System.IO.Path.GetFileName(archivePath);
+            Repaint();
+
+            err = ArchiveVfs.Create(items, archivePath, level, password, needs7z, addToExisting,
+                PackWatcher(op, offset, items.Count));
+            offset += items.Count;
+            if (err != null) break;
+            inFlight = null;                    // this one landed whole
+        }
+
+        bool cancelled = op.Cancelled || err == ArchiveVfs.CancelledError;
+        if (cancelled)
+        {
+            // A part-written archive is not a usable one: it lists and extracts as though it
+            // were whole, so leaving it behind is worse than leaving nothing.
+            if (inFlight != null) FileOps.DeletePermanent(inFlight, isDir: false);
+        }
+        else if (err == null && move)
+            foreach (var (path, isDir) in sources) FileOps.DeletePermanent(path, isDir);
+
+        string notice =
+            cancelled ? "Pack cancelled"
+            : err != null ? $"Pack failed: {err}"
+            : jobs.Count == 1 ? $"Packed {System.IO.Path.GetFileName(jobs[0].archivePath)}"
+            : $"Packed {jobs.Count} archives";
+        Application.InvokeOnMainThread(() => FinishPack(notice));
+    }
+
+    /// <summary>Wire one job's <see cref="PackProgress"/> to the overlay's op.
+    /// <paramref name="offset"/> shifts the job's item indices onto its rows.
+    ///
+    /// <para>The two byte routes are exclusive by backend, not merged: the built-in writer
+    /// streams and reports <c>Bytes</c> deltas, while 7-Zip only ever gives a percentage for
+    /// the run — so the percentage is scaled into this job's share of the total and added to
+    /// what earlier jobs already accounted for, or the second archive's "10%" would drag the
+    /// overall bar backwards.</para></summary>
+    private PackProgress PackWatcher(TransferOp op, int offset, int count)
+    {
+        long jobBase = op.ItemBytes.Take(offset).Sum();
+        long jobBytes = op.ItemBytes.Skip(offset).Take(count).Sum();
+        return new PackProgress
+        {
+            EntryStart = (i, length) =>
+            {
+                int row = offset + i;
+                op.Index = row;
+                op.Status[row] = 1;                                  // active
+                op.FileBytes = length > 0 ? length : op.ItemBytes[row];
+                op.FileBytesDone = 0;
+                Repaint();
+            },
+            Bytes = n => { op.FileBytesDone += n; op.TotalBytesDone += n; Repaint(); },
+            EntryDone = (i, ok) =>
+            {
+                int row = offset + i;
+                op.Status[row] = (byte)(ok ? 2 : 3);                 // done · missing
+                if (ok) op.Done++;
+                else
+                {
+                    // Its bytes were never streamed, so the total bar has to be credited them
+                    // here or it can never reach the end.
+                    op.Skipped++;
+                    op.TotalBytesDone += op.ItemBytes[row];
+                }
+                Repaint();
+            },
+            Percent = pct =>
+            {
+                op.TotalBytesDone = jobBase + (long)(jobBytes * Math.Clamp(pct, 0, 100) / 100.0);
+                Repaint();
+            },
+            Cancelled = () => op.Cancelled,
+            WaitWhilePaused = () => WaitWhilePaused(op),
+        };
+    }
+
+    /// <summary>Back on the UI thread: drop the op, close the overlay, and refresh both panes.
+    /// Deliberately not <c>FinishTransfer</c>, which carries copy-only business — the elevated
+    /// retry of denied items, and handing over to sync's second batch.</summary>
+    private void FinishPack(string notice)
+    {
+        var op = _op;
+        _op = null;
+        _progressOpen = false;
+        _notice = notice;
+        if (op != null)
+        {
+            Marks(op.Source).Clear();
+            ClearMeasuredIn(op.DestDir);        // the new archive changes the folder's total
+            ClearMeasuredIn(Dir(op.Source));    // and "move to archive" took the originals out
+        }
+        _genL++; _genR++;
+        RefreshResultsBothSides();
+        MarkDirty();
     }
 
     /// <summary>Apply the overwrite rule to every job. Returns the message to put in front of

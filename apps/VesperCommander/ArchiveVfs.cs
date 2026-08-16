@@ -15,6 +15,52 @@ public sealed record ArchiveListing(
 /// <summary>What a backend can do with a given format.</summary>
 public readonly record struct ArchiveCaps(bool Read, bool Write, bool Encrypt);
 
+/// <summary>Progress and cancellation for a pack run, handed to
+/// <see cref="ArchiveVfs.Create"/>. Every member is optional, and creation behaves exactly as
+/// it did before when none is supplied — the engine has no opinion about who is watching.
+///
+/// <para>There is deliberately no "skip this entry". The built-in writer streams a source
+/// straight into the archive, so abandoning one half-written would leave a truncated member
+/// behind that lists and extracts as if it were whole. The Pack overlay therefore offers
+/// Pause and Cancel and no per-entry skip, unlike the copy overlay it borrows its shape
+/// from.</para></summary>
+public sealed class PackProgress
+{
+    /// <summary>An entry is about to be written: its index in the items list, and its size
+    /// in bytes so the caller can size a bar before any of it has moved.</summary>
+    public Action<int, long>? EntryStart;
+
+    /// <summary>Bytes just written for the entry in progress (a delta, not a running total).</summary>
+    public Action<long>? Bytes;
+
+    /// <summary>An entry finished. <c>false</c> means it was left out — its source had gone
+    /// missing between the selection and the write.</summary>
+    public Action<int, bool>? EntryDone;
+
+    /// <summary>Whole-job completion, 0–100, for the backend that can only report that much:
+    /// 7-Zip prints one percentage for the run rather than a byte count per member.</summary>
+    public Action<double>? Percent;
+
+    /// <summary>Polled between entries and between chunks within one. True stops the run,
+    /// which returns <see cref="ArchiveVfs.CancelledError"/>.</summary>
+    public Func<bool>? Cancelled;
+
+    /// <summary>Blocks while the run is paused. Called at the same points as
+    /// <see cref="Cancelled"/>, so a pause held during a large member takes effect inside it
+    /// rather than at the next entry boundary.</summary>
+    public Action? WaitWhilePaused;
+
+    internal bool IsCancelled => Cancelled?.Invoke() == true;
+
+    /// <summary>The pause-then-check pair every loop in the writers uses: hold here while
+    /// paused, then report whether the run was cancelled (possibly while it waited).</summary>
+    internal bool Stop()
+    {
+        WaitWhilePaused?.Invoke();
+        return IsCancelled;
+    }
+}
+
 /// <summary>The archive virtual filesystem: lists a level inside an archive, opens a
 /// member's bytes, and creates archives. Plain zip (and tar/gz read) go through the BCL
 /// <see cref="ZipArchive"/>; 7z / rar / encryption route to <see cref="SevenZip"/> when it
@@ -210,9 +256,14 @@ public static class ArchiveVfs
     /// zip writer used to replace either way, so the button labelled "Add to it" deleted the
     /// very archive it offered to add to — <c>ZipArchiveMode.Create</c> starts an empty
     /// archive, and nothing told it not to.</para>
+    ///
+    /// <para>Pass <paramref name="progress"/> to drive a progress overlay and to be able to
+    /// stop the run; a cancelled run returns <see cref="CancelledError"/>, which the caller
+    /// must tell apart from a real failure because the two want different cleanup.</para>
     /// </summary>
     public static string? Create(IReadOnlyList<(string Source, string Entry)> items, string archivePath,
-        CompressionLevel level, string? password, bool sevenZip, bool addToExisting = false)
+        CompressionLevel level, string? password, bool sevenZip, bool addToExisting = false,
+        PackProgress? progress = null)
     {
         string ext = Path.GetExtension(archivePath).ToLowerInvariant();
         bool append = addToExisting && File.Exists(archivePath);
@@ -224,25 +275,78 @@ public static class ArchiveVfs
             if (!append && File.Exists(archivePath)) File.Delete(archivePath);
 
             if (ext is ".zip" && password is null && !sevenZip)
-            {
-                using var zip = ZipFile.Open(archivePath, append ? ZipArchiveMode.Update : ZipArchiveMode.Create);
-                foreach (var (src, entry) in items)
-                {
-                    if (!File.Exists(src)) continue;
-                    var name = entry.Replace('\\', '/');
-                    // Update keeps what is already there, so a same-named entry has to be
-                    // removed explicitly or the archive ends up holding two of it.
-                    if (append) zip.GetEntry(name)?.Delete();
-                    zip.CreateEntryFromFile(src, name, level);
-                }
-                return null;
-            }
+                return CreateZip(items, archivePath, level, append, progress);
+
             return sevenZip
-                ? SevenZip.Create(items, archivePath, level, password)   // "a" appends to what survives above
+                ? SevenZip.Create(items, archivePath, level, password, progress)   // "a" appends to what survives above
                 : "This format needs 7-Zip — set it in Tools → Archiver";
         }
         catch (Exception ex) { return ex.Message; }
     }
+
+    /// <summary>What <see cref="Create"/> returns when <see cref="PackProgress.Cancelled"/>
+    /// asked it to stop. Not a failure: the caller reports it as cancelled and, for an archive
+    /// it had just created, deletes the part-written file.</summary>
+    public const string CancelledError = "cancelled";
+
+    /// <summary>The built-in zip writer. Sources are streamed in chunks rather than handed to
+    /// <c>CreateEntryFromFile</c>, which does the whole file in one opaque call: the overlay
+    /// needs the bytes counted as they go, and Cancel needs somewhere to take effect inside a
+    /// member rather than only between them.</summary>
+    private static string? CreateZip(IReadOnlyList<(string Source, string Entry)> items, string archivePath,
+        CompressionLevel level, bool append, PackProgress? progress)
+    {
+        using (var zip = ZipFile.Open(archivePath, append ? ZipArchiveMode.Update : ZipArchiveMode.Create))
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (progress?.Stop() == true) return CancelledError;
+                var (src, entry) = items[i];
+                // A source that has gone missing since the selection is reported rather than
+                // silently passed over: the queue row says so instead of sitting at "queued".
+                if (!File.Exists(src)) { progress?.EntryDone?.Invoke(i, false); continue; }
+
+                var info = new FileInfo(src);
+                progress?.EntryStart?.Invoke(i, info.Length);
+
+                var name = entry.Replace('\\', '/');
+                // Update keeps what is already there, so a same-named entry has to be
+                // removed explicitly or the archive ends up holding two of it.
+                if (append) zip.GetEntry(name)?.Delete();
+                var e = zip.CreateEntry(name, level);
+                e.LastWriteTime = ZipStamp(info.LastWriteTime);
+
+                using (var input = File.OpenRead(src))
+                using (var output = e.Open())
+                    if (!Pump(input, output, progress)) return CancelledError;
+
+                progress?.EntryDone?.Invoke(i, true);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Copy a source into its archive entry, counting the bytes and stopping when
+    /// asked. False means the run was cancelled part-way through this member.</summary>
+    private static bool Pump(Stream input, Stream output, PackProgress? progress)
+    {
+        var buffer = new byte[128 * 1024];
+        int n;
+        while ((n = input.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (progress?.Stop() == true) return false;
+            output.Write(buffer, 0, n);
+            progress?.Bytes?.Invoke(n);
+        }
+        return true;
+    }
+
+    /// <summary>Zip stores DOS timestamps, whose epoch is 1980 — assigning an mtime outside
+    /// that range throws, which would fail the whole pack over a file with a silly date. The
+    /// out-of-range stamp is clamped instead, as <c>CreateEntryFromFile</c> did for us before
+    /// the entries were written by hand.</summary>
+    private static DateTimeOffset ZipStamp(DateTime t) =>
+        t.Year is < 1980 or > 2107 ? new DateTime(1980, 1, 1, 0, 0, 0) : t;
 
     /// <summary>
     /// Remove members from an archive. <paramref name="internalPaths"/> are the pane's

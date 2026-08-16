@@ -101,10 +101,62 @@ public static class SevenZip
     }
 
     public static string? Create(IReadOnlyList<(string Source, string Entry)> items, string archivePath,
-        CompressionLevel level, string? password)
+        CompressionLevel level, string? password, PackProgress? progress = null)
     {
-        var (ok, _, _) = Run(CreateArgs(items, archivePath, level, password), readAll: false);
-        return ok ? null : "7-Zip failed to create the archive";
+        if (progress is null)
+        {
+            var (ok, _, _) = Run(CreateArgs(items, archivePath, level, password), readAll: false);
+            return ok ? null : "7-Zip failed to create the archive";
+        }
+        return CreateWatched(CreateArgs(items, archivePath, level, password, reportProgress: true), items, progress);
+    }
+
+    /// <summary>Run <c>7z a</c> with its progress output switched on and feed the overlay as it
+    /// arrives. Unlike the built-in writer, 7-Zip reports one percentage for the whole run and
+    /// separately logs each file as it adds it, so the byte bar is driven by the percentage and
+    /// the queue rows by the logged paths — see <see cref="PackScan"/>.
+    ///
+    /// <para>Cancel kills the process. That leaves a part-written archive behind, which the
+    /// caller deletes; there is no way to ask 7-Zip to unwind what it has already put in.</para></summary>
+    private static string? CreateWatched(string[] args, IReadOnlyList<(string Source, string Entry)> items,
+        PackProgress progress)
+    {
+        try
+        {
+            var psi = Psi(args);
+            if (psi is null) return "7-Zip is not available";
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            using var p = Process.Start(psi);
+            if (p is null) return "7-Zip failed to start";
+
+            var scan = new PackScan(items);
+            var buffer = new char[4096];
+            while (true)
+            {
+                // Read blocks, so cancellation is noticed between chunks rather than instantly.
+                // -bsp1 makes 7-Zip write its percentage continuously, which keeps those chunks
+                // arriving even while it works through one large member.
+                if (progress.Stop()) { Kill(p); return ArchiveVfs.CancelledError; }
+                int n = p.StandardOutput.Read(buffer, 0, buffer.Length);
+                if (n <= 0) break;
+                scan.Feed(new string(buffer, 0, n), progress);
+            }
+
+            string errText = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            if (progress.IsCancelled) return ArchiveVfs.CancelledError;
+            if (p.ExitCode == 0) { scan.Finish(progress); return null; }
+            return errText.Contains("password", StringComparison.OrdinalIgnoreCase)
+                ? "Wrong password"
+                : "7-Zip failed to create the archive";
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    private static void Kill(Process p)
+    {
+        try { p.Kill(entireProcessTree: true); } catch { }
     }
 
     /// <summary>Remove members (<c>7z d</c>). <paramref name="targets"/> are '/'-separated
@@ -153,14 +205,124 @@ public static class SevenZip
     internal static string[] DeleteArgs(string archiveFile, IReadOnlyList<string> members, string? password) =>
         [.. new[] { "d", PwdArg(password), EndOfSwitches, archiveFile }, .. members];
 
+    /// <param name="reportProgress">Adds the two output switches the Pack overlay reads:
+    /// <c>-bsp1</c> sends the run's percentage to stdout, <c>-bb1</c> logs each file as it is
+    /// added. Off by default so a pack with nobody watching keeps 7-Zip quiet.</param>
     internal static string[] CreateArgs(IReadOnlyList<(string Source, string Entry)> items,
-        string archivePath, CompressionLevel level, string? password)
+        string archivePath, CompressionLevel level, string? password, bool reportProgress = false)
     {
         // 7-Zip packs by source path; entry-name remapping isn't expressed on the CLI, so
         // v1 adds the sources as-is (flat/relative names preserved by 7z).
-        var args = new List<string> { "a", $"-mx={Level(level)}", PwdArg(password), EndOfSwitches, archivePath };
+        var args = new List<string> { "a", $"-mx={Level(level)}" };
+        if (reportProgress) { args.Add("-bsp1"); args.Add("-bb1"); }
+        args.Add(PwdArg(password));
+        args.Add(EndOfSwitches);
+        args.Add(archivePath);
         args.AddRange(items.Select(i => i.Source));
         return [.. args];
+    }
+
+    /// <summary>Turns 7-Zip's console chatter into <see cref="PackProgress"/> calls.
+    ///
+    /// <para>Two things are picked out of the stream. <c>-bsp1</c> writes the run's percentage
+    /// as <c>" 45% 12 + name"</c>, redrawn in place with carriage returns rather than newlines —
+    /// so the text is split on both, and every token is examined rather than assuming lines.
+    /// <c>-bb1</c> writes a file log, <c>"+ path"</c> for an addition and <c>"U path"</c> for an
+    /// update, which is what moves the queue rows along.</para>
+    ///
+    /// <para>A read can end mid-token, so the trailing fragment is held over to be completed by
+    /// the next one. Kept separate from the process plumbing because this machine has no 7-Zip
+    /// to run: the parsing is what the tests can reach.</para></summary>
+    internal sealed class PackScan
+    {
+        private readonly string[] _entries;
+        private string _tail = "";
+        private int _percent = -1;
+        private int _active = -1;
+
+        internal PackScan(IReadOnlyList<(string Source, string Entry)> items) =>
+            _entries = [.. items.Select(i => i.Entry)];
+
+        internal void Feed(string chunk, PackProgress progress)
+        {
+            _tail += chunk;
+            // Split on both terminators; the final piece is a fragment unless the chunk ended
+            // on one, and holding it back costs at most one update.
+            var parts = _tail.Split('\r', '\n');
+            _tail = parts[^1];
+            for (int i = 0; i < parts.Length - 1; i++) Token(parts[i], progress);
+        }
+
+        private void Token(string token, PackProgress progress)
+        {
+            if (Percent(token) is { } pct && pct != _percent)
+            {
+                _percent = pct;
+                progress.Percent?.Invoke(pct);
+            }
+            if (LoggedPath(token) is { } path && IndexOf(path) is var i && i >= 0 && i != _active)
+            {
+                if (_active >= 0) progress.EntryDone?.Invoke(_active, true);
+                _active = i;
+                progress.EntryStart?.Invoke(i, 0);
+            }
+        }
+
+        /// <summary>The run ended cleanly: close out the member left mid-flight and fill the bar.
+        /// Without this the last row would sit at "packing" forever, because nothing follows it
+        /// in the log to displace it.</summary>
+        internal void Finish(PackProgress progress)
+        {
+            if (_active >= 0) { progress.EntryDone?.Invoke(_active, true); _active = -1; }
+            progress.Percent?.Invoke(100);
+        }
+
+        /// <summary>The leading "NN%" of a progress token, or null when there isn't one.</summary>
+        internal static int? Percent(string token)
+        {
+            int i = 0;
+            while (i < token.Length && token[i] == ' ') i++;
+            int start = i;
+            while (i < token.Length && char.IsAsciiDigit(token[i])) i++;
+            if (i == start || i >= token.Length || token[i] != '%') return null;
+            return int.TryParse(token.AsSpan(start, i - start), out var pct) ? Math.Clamp(pct, 0, 100) : null;
+        }
+
+        /// <summary>The path out of a "+ path" / "U path" file-log token. The marker may follow
+        /// a percentage on the same redrawn line, so it is looked for after any leading
+        /// progress rather than only at the start.</summary>
+        internal static string? LoggedPath(string token)
+        {
+            for (int i = 0; i + 1 < token.Length; i++)
+            {
+                if (token[i] is not ('+' or 'U')) continue;
+                if (token[i + 1] != ' ') continue;
+                // A marker is a word of its own: what precedes it must be nothing or a space,
+                // so a '+' inside a filename can't be read as the start of a log entry.
+                if (i > 0 && token[i - 1] != ' ') continue;
+                var path = token[(i + 2)..].Trim();
+                return path.Length > 0 ? path : null;
+            }
+            return null;
+        }
+
+        /// <summary>Match a logged path back to the item that produced it. 7-Zip logs the
+        /// <em>stored</em> name, so a file from a packed folder arrives as
+        /// <c>folder\sub\file.txt</c> while the item is the folder — hence the match on the
+        /// first segment as well as on the whole path.</summary>
+        private int IndexOf(string stored)
+        {
+            var norm = stored.Replace('\\', '/');
+            int slash = norm.IndexOf('/');
+            var first = slash < 0 ? norm : norm[..slash];
+            for (int i = 0; i < _entries.Length; i++)
+            {
+                var entry = _entries[i].Replace('\\', '/');
+                if (entry.Equals(norm, StringComparison.OrdinalIgnoreCase)
+                    || entry.Equals(first, StringComparison.OrdinalIgnoreCase)) return i;
+            }
+            return -1;
+        }
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────

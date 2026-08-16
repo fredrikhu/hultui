@@ -1067,7 +1067,8 @@ public partial class CommanderApp
         else if (_op is { } op && !_progressOpen)
         {
             int pct = op.TotalBytes > 0 ? (int)(100 * op.TotalBytesDone / op.TotalBytes) : 0;
-            row.AddChild(Ui.Mono($"▶ copying {pct}% · {op.Done}/{op.Items.Count}", 11.5f, Nocturne.Accent300));
+            string verb = op.IsPack ? "packing" : op.IsMove ? "moving" : "copying";
+            row.AddChild(Ui.Mono($"▶ {verb} {pct}% · {op.Done}/{op.Items.Count}", 11.5f, Nocturne.Accent300));
         }
         // While a type-to-find filter is active, show it with a block caret + match count.
         else if (_search.Length > 0)
