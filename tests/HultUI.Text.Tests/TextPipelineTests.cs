@@ -571,7 +571,7 @@ internal sealed class StubFontCollection : IFontCollection
 
 internal sealed class StubTextShaper : ITextShaper
 {
-    public ShapedRun Shape(string text, IResolvedFont font, float fontSize)
+    public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
     {
         var stubFont = (StubResolvedFont)font;
         float charWidth = stubFont.CharWidth;

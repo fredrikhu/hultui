@@ -9,7 +9,10 @@ internal readonly record struct MeasurementKey(
     float MaxWidth, int MaxLines, TextOverflow Overflow, float LineHeight, float LetterSpacing,
     // Layout-relevant digest of metric-affecting spans; 0 for plain text, so plain
     // keys and hit rates are exactly what they were before spans could shape.
-    int SpanDigest = 0);
+    int SpanDigest = 0,
+    // Paragraph direction: an RTL-style layout of the same string reorders runs, so
+    // the two must not share a cache entry. Ltr default keeps existing keys intact.
+    TextDirection Direction = TextDirection.Ltr);
 
 /// <summary>
 /// Key for the width-independent shaping of a string. Shaping (itemization +

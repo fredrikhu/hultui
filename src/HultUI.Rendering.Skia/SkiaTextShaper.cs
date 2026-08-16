@@ -9,7 +9,7 @@ public sealed class SkiaTextShaper : ITextShaper
     // Cache shapers per typeface to avoid re-creating HarfBuzz objects
     private readonly Dictionary<SKTypeface, SKShaper> _shaperCache = new();
 
-    public ShapedRun Shape(string text, IResolvedFont font, float fontSize)
+    public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
     {
         if (string.IsNullOrEmpty(text))
             return new ShapedRun(text, font, fontSize, 0, []);
@@ -20,7 +20,22 @@ public sealed class SkiaTextShaper : ITextShaper
         using var paint = new SKPaint();
         using var skFont = new SKFont(typeface, fontSize);
 
-        var result = shaper.Shape(text, skFont);
+        SKShaper.Result result;
+        if (rtl)
+        {
+            // Direction set explicitly, not guessed: guessing is per-buffer, and a
+            // neutral-heavy RTL run (punctuation, digits) guesses LTR and comes out
+            // backwards. The script is still guessed — that part is per-content.
+            using var buffer = new HarfBuzzSharp.Buffer();
+            buffer.AddUtf16(text);
+            buffer.GuessSegmentProperties();
+            buffer.Direction = HarfBuzzSharp.Direction.RightToLeft;
+            result = shaper.Shape(buffer, 0, 0, skFont);
+        }
+        else
+        {
+            result = shaper.Shape(text, skFont);
+        }
 
         // Convert SkiaSharp.HarfBuzz result to our GlyphPosition array
         var glyphs = new GlyphPosition[result.Codepoints.Length];

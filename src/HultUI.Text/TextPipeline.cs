@@ -123,6 +123,23 @@ public sealed class TextPipeline
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
 
+        // BiDi (docs/plans/14-bidi.md, stage 1): text that can contain right-to-left
+        // script — or an Rtl paragraph style — takes the direction-aware path. The
+        // classifier is the cheap one browsers use (any char at or above U+0590);
+        // pure Latin/ASCII text never reaches ICU and pays one comparison per char
+        // at most. Cached under the same width-keyed cache; Direction is in the key.
+        if (NeedsBidi(text, style))
+        {
+            var bidiKey = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+                style.FontSlant, maxWidth, maxLines ?? -1, overflow, style.LineHeight,
+                style.LetterSpacing, 0, style.TextDirection);
+            if (_cache.TryGet(bidiKey, out var cachedBidi))
+                return cachedBidi;
+            var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines);
+            _cache.Put(bidiKey, bidiLayout);
+            return bidiLayout;
+        }
+
         // Shape once, width-independently. The layout pass measures the same
         // string many times per frame at different available widths (Phase 1
         // measure vs Phase 6 arrange, plus flex-grow re-measures); without this,
@@ -477,6 +494,245 @@ public sealed class TextPipeline
         return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
     }
 
+    // ── BiDi internals (docs/plans/14-bidi.md, stage 1: display-only) ──
+
+    /// <summary>Cheap classifier: does this text need UAX #9 analysis at all?</summary>
+    private static bool NeedsBidi(string text, ResolvedInheritedStyle style)
+    {
+        if (style.TextDirection == TextDirection.Rtl) return true;
+        foreach (char c in text)
+            if (c >= '֐') return true;
+        return false;
+    }
+
+    /// <summary>Contiguous same-embedding-level segments of the text, logical order,
+    /// resolved by native ICU's UAX #9 implementation (see BidiAnalyzer).</summary>
+    private static List<(int Start, int End, byte Level)> BidiLevels(string text, bool rtlParagraph)
+    {
+        var levels = BidiAnalyzer.Levels(text, rtlParagraph);
+        var segments = new List<(int, int, byte)>();
+        int i = 0;
+        while (i < text.Length)
+        {
+            byte level = levels[i];
+            int j = i + 1;
+            while (j < text.Length && levels[j] == level) j++;
+            segments.Add((i, j, level));
+            i = j;
+        }
+        return segments;
+    }
+
+    /// <summary>
+    /// UAX #9 rule L2: from the highest embedding level down to the lowest odd one,
+    /// reverse every contiguous run at that level or higher. Returns the visual
+    /// sequence of logical segment indices. Implemented directly — it is a dozen
+    /// lines — so the reorder does not depend on a second ICU API surface.
+    /// </summary>
+    private static int[] VisualOrder(IReadOnlyList<byte> levels)
+    {
+        int n = levels.Count;
+        var order = new int[n];
+        for (int i = 0; i < n; i++) order[i] = i;
+
+        byte max = 0, minOdd = byte.MaxValue;
+        foreach (var l in levels)
+        {
+            if (l > max) max = l;
+            if ((l & 1) == 1 && l < minOdd) minOdd = l;
+        }
+        if (minOdd == byte.MaxValue) return order;   // all even: already visual
+
+        for (int level = max; level >= minOdd; level--)
+        {
+            int i = 0;
+            while (i < n)
+            {
+                if (levels[order[i]] >= level)
+                {
+                    int j = i;
+                    while (j < n && levels[order[j]] >= level) j++;
+                    Array.Reverse(order, i, j - i);
+                    i = j;
+                }
+                else i++;
+            }
+        }
+        return order;
+    }
+
+    private float MeasureBidi(string text, int from, int to, ResolvedInheritedStyle style, bool rtlParagraph)
+    {
+        if (to <= from) return 0;
+        float width = 0;
+        foreach (var (s, e, level) in BidiLevels(text[from..to], rtlParagraph))
+            foreach (var fr in FontItemizer.Itemize(text[(from + s)..(from + e)], _fonts,
+                style.FontFamily, style.FontWeight, style.FontSlant))
+                width += ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing,
+                    rtl: (level & 1) == 1).Width;
+        return width;
+    }
+
+    /// <summary>
+    /// One line, direction-aware: segments shaped with their resolved direction and
+    /// placed in visual order. <see cref="TextLine.Runs"/> stays in LOGICAL order —
+    /// painting reads each run's own <see cref="ShapedRun.OffsetX"/>, and the
+    /// char→x mapping (spans, selection) walks runs logically — only the offsets
+    /// carry the reordering.
+    /// </summary>
+    private TextLine ShapeBidiLine(string text, int from, int to, ResolvedInheritedStyle style, bool rtlParagraph)
+    {
+        int sourceLength = to - from;
+        while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
+        string lineText = text[from..to];
+
+        var segments = BidiLevels(lineText, rtlParagraph);
+        var segRuns = new List<ShapedRun>[segments.Count];
+        var levels = new byte[segments.Count];
+        float maxAscent = 0, maxDescent = 0, maxLeading = 0;
+
+        for (int s = 0; s < segments.Count; s++)
+        {
+            var (segStart, segEnd, level) = segments[s];
+            levels[s] = level;
+            var runs = new List<ShapedRun>();
+            foreach (var fr in FontItemizer.Itemize(lineText[segStart..segEnd], _fonts,
+                style.FontFamily, style.FontWeight, style.FontSlant))
+            {
+                var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing,
+                    rtl: (level & 1) == 1);
+                runs.Add(shaped);
+                maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * style.FontSize);
+                maxDescent = Math.Max(maxDescent, fr.Font.Descent * style.FontSize);
+                maxLeading = Math.Max(maxLeading, fr.Font.Leading * style.FontSize);
+            }
+            segRuns[s] = runs;
+        }
+
+        // Place in visual order; within an RTL segment the fallback sub-runs flip too.
+        float x = 0;
+        foreach (int logical in VisualOrder(levels))
+        {
+            var runs = segRuns[logical];
+            bool rtl = (levels[logical] & 1) == 1;
+            for (int r = 0; r < runs.Count; r++)
+            {
+                var run = runs[rtl ? runs.Count - 1 - r : r];
+                run.OffsetX = x;
+                x += run.Width;
+            }
+        }
+
+        var logicalRuns = new List<ShapedRun>();
+        foreach (var runs in segRuns) logicalRuns.AddRange(runs);
+
+        if (logicalRuns.Count == 0)
+        {
+            var primary = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
+            maxAscent = Math.Abs(primary.Ascent) * style.FontSize;
+            maxDescent = primary.Descent * style.FontSize;
+            maxLeading = primary.Leading * style.FontSize;
+        }
+
+        (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, style.LineHeight);
+        return new TextLine(logicalRuns, x, maxAscent, maxDescent, maxLeading) { Start = from, Length = sourceLength };
+    }
+
+    // The direction-aware twin of ComputeWrapped: same greedy break logic over
+    // logical order, measurement and line shaping direction-resolved. Ellipsis on
+    // bidi text clips for now (as the styled path does; both tracked in the plan).
+    private TextLayout ComputeWrappedBidi(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    {
+        bool rtlParagraph = style.TextDirection == TextDirection.Rtl;
+        var breakPoints = LineBreaker.FindBreakOpportunities(text);
+        var allBreaks = new List<int> { 0 };
+        for (int i = 0; i < text.Length; i++)
+            if (text[i] == '\n') { allBreaks.Add(i); allBreaks.Add(i + 1); }
+        foreach (var bp in breakPoints)
+            if (!allBreaks.Contains(bp)) allBreaks.Add(bp);
+        allBreaks.Add(text.Length);
+        allBreaks.Sort();
+        for (int i = allBreaks.Count - 1; i > 0; i--)
+            if (allBreaks[i] == allBreaks[i - 1]) allBreaks.RemoveAt(i);
+
+        var lines = new List<TextLine>();
+        int textOffset = 0;
+        float lineWidth = 0;
+
+        for (int s = 1; s < allBreaks.Count; s++)
+        {
+            int segStart = allBreaks[s - 1];
+            int segEnd = allBreaks[s];
+
+            if (segEnd - segStart == 1 && text[segStart] == '\n')
+            {
+                lines.Add(ShapeBidiLine(text, textOffset, segStart, style, rtlParagraph));
+                textOffset = segEnd;
+                lineWidth = 0;
+                if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
+                continue;
+            }
+
+            float segWidth = MeasureBidi(text, segStart, segEnd, style, rtlParagraph);
+
+            if (lineWidth + segWidth > maxWidth && lineWidth > 0)
+            {
+                lines.Add(ShapeBidiLine(text, textOffset, segStart, style, rtlParagraph));
+                textOffset = segStart;
+                lineWidth = 0;
+                if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
+            }
+
+            if (lineWidth == 0 && segWidth > maxWidth)
+            {
+                while (textOffset < segEnd && (!maxLines.HasValue || lines.Count < maxLines.Value))
+                {
+                    int fit = BidiFitPrefix(text, textOffset, segEnd, style, rtlParagraph, maxWidth);
+                    if (fit <= textOffset) fit = SnapPrefix(text, textOffset + 1);
+                    if (fit >= segEnd) break;
+                    lines.Add(ShapeBidiLine(text, textOffset, fit, style, rtlParagraph));
+                    textOffset = fit;
+                }
+                if (maxLines.HasValue && lines.Count >= maxLines.Value) break;
+                lineWidth = MeasureBidi(text, textOffset, segEnd, style, rtlParagraph);
+                continue;
+            }
+
+            lineWidth += segWidth;
+        }
+
+        if (textOffset < text.Length && (!maxLines.HasValue || lines.Count < maxLines.Value))
+            lines.Add(ShapeBidiLine(text, textOffset, text.Length, style, rtlParagraph));
+
+        float totalHeight = 0, maxLineWidth = 0;
+        foreach (var line in lines)
+        {
+            line.OffsetY = totalHeight;
+            totalHeight += line.Height;
+            maxLineWidth = Math.Max(maxLineWidth, line.Width);
+        }
+        return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
+    }
+
+    private int BidiFitPrefix(string text, int from, int to,
+        ResolvedInheritedStyle style, bool rtlParagraph, float maxWidth)
+    {
+        int span = 1;
+        while (from + span < to && MeasureBidi(text, from, from + span, style, rtlParagraph) <= maxWidth)
+            span <<= 1;
+
+        int lo = from + Math.Min(span >> 1, to - from);
+        int hi = from + Math.Min(span, to - from);
+        int best = lo;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (MeasureBidi(text, from, mid, style, rtlParagraph) <= maxWidth) { best = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+        return SnapPrefix(text, best);
+    }
+
     private const string EllipsisString = "…"; // …
 
     // Rewrites the last line of an already-broken (clipped) layout with a
@@ -571,9 +827,16 @@ public sealed class TextPipeline
     // Shapes a run, then applies letter spacing by widening each glyph's advance
     // and shifting the following glyphs. Returns the shaper's result unchanged
     // when spacing is zero (the common case), so there is no allocation cost.
-    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing)
+    private ShapedRun ShapeWithSpacing(string text, IResolvedFont font, float fontSize, float letterSpacing,
+        bool rtl = false)
     {
-        var run = ShapeByWords(text, font, fontSize);
+        // RTL runs bypass the word cache and digit fast path in stage 1: correctness
+        // first, and the caches' space-split assumptions are unproven for RTL
+        // (Arabic joining does not cross spaces, but "likely sound" is not proven —
+        // docs/plans/14-bidi.md). LTR text keeps every cache untouched.
+        var run = rtl
+            ? _shaper.Shape(text, font, fontSize, rtl: true)
+            : ShapeByWords(text, font, fontSize);
         if (letterSpacing == 0f || run.Glyphs.Length == 0)
             return run;
 

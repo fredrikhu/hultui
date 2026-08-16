@@ -91,7 +91,7 @@ public class DigitFastPathTests
     {
         public int Calls { get; private set; }
 
-        public ShapedRun Shape(string text, IResolvedFont font, float fontSize)
+        public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
         {
             Calls++;
             return inner.Shape(text, font, fontSize);
@@ -105,7 +105,7 @@ public class DigitFastPathTests
     {
         public const float Kern = 2f;
 
-        public ShapedRun Shape(string text, IResolvedFont font, float fontSize)
+        public ShapedRun Shape(string text, IResolvedFont font, float fontSize, bool rtl = false)
         {
             var xs = new float[text.Length];
             float x = 0;

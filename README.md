@@ -9,8 +9,9 @@ A cross-platform UI framework for C#/.NET. Build desktop applications with a flu
 - **Fine-grained reactivity** -- Signal/Computed/Effect system (SolidJS-inspired)
 - **Component model** -- class-based components with automatic reactive rebuilds
 - **Source generators** -- `[Reactive]` attribute generates Signal-backed properties
-- **Text rendering** -- HarfBuzz shaping, font fallback, emoji, Unicode line breaking
-  (left-to-right only: BiDi reordering for Arabic/Hebrew is not implemented yet)
+- **Text rendering** -- HarfBuzz shaping, font fallback, emoji, Unicode line breaking,
+  BiDi display (mixed Arabic/Hebrew/Latin lines reorder per UAX #9; caret and
+  selection inside RTL runs still map logically)
 - **Built-in controls** -- text input, checkbox, radio button, dropdown, tabs, slider, scroll view, canvas
 - **Animations** -- tween-based system with easing, delays, and chaining
 - **Drag and drop** -- internal element drag and OS file/text drops
