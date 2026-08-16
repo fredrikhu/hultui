@@ -33,16 +33,20 @@ public sealed class Signal<T> : IReactiveSource
     // event-dispatch change did not. That was recorded here as "the snapshot is
     // load-bearing".
     //
-    // That conclusion does not hold. Re-tested afterwards, the direct-notify shape passes
-    // 3/3 in isolation with everything else identical, so whatever caused the original
-    // failure was not this line. The bookkeeping was independently cleared at the time: a
+    // That conclusion does not hold. Re-tested afterwards with everything else identical,
+    // the direct-notify shape passes 13/13 in isolation — 3 runs, then 10 more on an idle
+    // machine with the test project pre-built so no compilation competed with it. The
+    // original failures all landed while heavy builds were running concurrently, and that
+    // test waits on a real background file read behind a 30s PumpUntil, so load is the
+    // likeliest explanation. Whatever it was, it was not this line. The bookkeeping was independently cleared at the time: a
     // shadow set maintained by the same Subscribe/Unsubscribe calls agreed with the fast
     // path at every single write, and no write ever lost a subscriber.
     //
-    // So the storage below is trusted and the snapshot is kept as the conservative shape —
-    // it costs nothing measurable and matches the many-subscriber path — but NOT because a
-    // mechanism was ever demonstrated. The original failure is unexplained and currently
-    // unreproducible. If it returns, the sequence worth tracing is a source first read
+    // The snapshot is kept anyway, and the reason is that dropping it buys nothing: the
+    // rented buffer allocates zero bytes, so a single-subscriber write costs the same
+    // either way, and only the rent/return call is saved. No measurable upside against an
+    // unexplained failure is not a trade worth taking. The original failure remains
+    // unexplained and is not currently reproducible. If it returns, the sequence worth tracing is a source first read
     // during a rebuild, where a freshly created per-key AsyncLoader subscribes mid-flush —
     // see ComponentHost.ForceRebuild's comment.
     private IReactiveNode? _single;
