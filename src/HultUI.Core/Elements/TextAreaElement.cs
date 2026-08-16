@@ -808,8 +808,8 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         // Compute preferred X from current position if not set
         if (_preferredX < 0)
         {
-            int lineStart = starts[line];
-            _preferredX = MeasureSubstring(lineStart, _cursorPos - lineStart, style);
+            var (lineStart, lineEnd) = VisualLineRange(starts, line);
+            _preferredX = CaretXOnLine(lineStart, lineEnd, _cursorPos, style);
         }
 
         int targetLine = line + lineDelta;
@@ -935,17 +935,58 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
     {
         if (lineStart >= lineEnd) return lineStart;
 
+        if (_renderCtx is not null)
+            return lineStart + _renderCtx.TextOffsetAtX(_text[lineStart..lineEnd], style, x);
+
+        // No render context (tests): nearest boundary over the estimated widths.
         int lo = lineStart, hi = lineEnd;
         while (lo < hi)
         {
             int mid = (lo + hi) / 2;
-            float midWidth = MeasureSubstring(lineStart, mid - lineStart, style);
-            if (midWidth < x)
-                lo = mid + 1;
-            else
-                hi = mid;
+            if (MeasureSubstring(lineStart, mid - lineStart, style) < x) lo = mid + 1;
+            else hi = mid;
         }
-        return lo;
+        int before = Math.Max(lineStart, lo - 1);
+        return Math.Abs(MeasureSubstring(lineStart, before - lineStart, style) - x)
+               <= Math.Abs(MeasureSubstring(lineStart, lo - lineStart, style) - x)
+            ? before
+            : lo;
+    }
+
+    /// <summary>
+    /// Visual x, relative to the start of a visual line, of the caret at flat
+    /// position <paramref name="pos"/>. For text that reads left to right this is
+    /// the width of the prefix; once a line contains right-to-left script it is
+    /// not, so the mapping goes through the render context's laid-out line.
+    /// </summary>
+    private float CaretXOnLine(int lineStart, int lineEnd, int pos, ResolvedInheritedStyle style)
+        => _renderCtx is null
+            ? MeasureSubstring(lineStart, pos - lineStart, style)
+            : _renderCtx.TextCaretX(_text[lineStart..lineEnd], style, pos - lineStart);
+
+    /// <summary>Visual x-ranges covering <c>[from, to)</c> on one visual line.</summary>
+    private IReadOnlyList<TextRangeBox> SelectionRangesOnLine(
+        int lineStart, int lineEnd, int from, int to, ResolvedInheritedStyle style)
+    {
+        if (to <= from) return [];
+        if (_renderCtx is null)
+        {
+            float a = MeasureSubstring(lineStart, from - lineStart, style);
+            float b = MeasureSubstring(lineStart, to - lineStart, style);
+            return b > a ? [new TextRangeBox(a, b)] : [];
+        }
+        return _renderCtx.TextSelectionRanges(
+            _text[lineStart..lineEnd], style, from - lineStart, to - lineStart);
+    }
+
+    /// <summary>The character range of a visual line, excluding a trailing newline.</summary>
+    private (int Start, int End) VisualLineRange(IReadOnlyList<int> starts, int lineIndex)
+    {
+        int lineStart = starts[lineIndex];
+        int lineEnd = lineIndex + 1 < starts.Count ? starts[lineIndex + 1] : _text.Length;
+        if (lineEnd > lineStart && lineEnd <= _text.Length && _text[lineEnd - 1] == '\n')
+            lineEnd--;
+        return (lineStart, lineEnd);
     }
 
     // ──── Rendering ────
@@ -1033,8 +1074,8 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         {
             if (cursorLine < 0)
                 (cursorLine, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
-            int cursorLineStart = starts[cursorLine];
-            float cursorBaseX = contentBox.X + MeasureSubstring(cursorLineStart, _cursorPos - cursorLineStart, style);
+            var (cursorLineStart, cursorLineEnd) = VisualLineRange(starts, cursorLine);
+            float cursorBaseX = contentBox.X + CaretXOnLine(cursorLineStart, cursorLineEnd, _cursorPos, style);
             float cy = contentBox.Y + cursorLine * lh - _scrollOffsetY;
 
             float caretX = cursorBaseX;
@@ -1141,24 +1182,26 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
                 continue;
 
             float lineY = contentBox.Y + i * lh - _scrollOffsetY;
-            float x1 = ls > lineStart
-                ? MeasureSubstring(lineStart, ls - lineStart, style)
-                : 0;
-            float x2 = le > lineStart
-                ? MeasureSubstring(lineStart, le - lineStart, style)
-                : 0;
 
             // The selection continues onto a later visual line — fill this one to the
             // right edge (like a browser). selEnd > displayEnd covers both a hard "\n"
             // (displayEnd = lineEnd - 1) and a soft wrap (displayEnd = lineEnd), so
             // wrapped mid-selection lines extend just like hard-broken ones.
-            if (selEnd > displayEnd && selStart <= displayEnd)
-                x2 = contentBox.Width;
-
-            if (x2 > x1)
+            bool continues = selEnd > displayEnd && selStart <= displayEnd;
+            float leadingX = ls > lineStart ? CaretXOnLine(lineStart, displayEnd, ls, style) : 0;
+            if (continues)
             {
-                ctx.DrawRect(new Rect(contentBox.X + x1, lineY, x2 - x1, lh), SelectionColor);
+                if (contentBox.Width > leadingX)
+                    ctx.DrawRect(new Rect(contentBox.X + leadingX, lineY,
+                        contentBox.Width - leadingX, lh), SelectionColor);
+                continue;
             }
+
+            // One rect per contiguous visual stretch — a selection that crosses a
+            // direction boundary covers two pieces of the line, not the gap between.
+            foreach (var r in SelectionRangesOnLine(lineStart, displayEnd, ls, le, style))
+                if (r.X1 > r.X0)
+                    ctx.DrawRect(new Rect(contentBox.X + r.X0, lineY, r.X1 - r.X0, lh), SelectionColor);
         }
     }
 

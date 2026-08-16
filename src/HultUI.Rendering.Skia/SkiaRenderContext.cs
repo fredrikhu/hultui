@@ -26,6 +26,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // a dedicated font keeps those pixels identical rather than inheriting the text
     // renderer's settings.
     private readonly SKFont _pooledCanvasFont = new(SKTypeface.Default, 12f);
+    // Reused by every offset→x range query below: a spanned line asks once per
+    // span per pass, so a fresh list each time would be per-frame garbage.
+    private readonly List<VisualRange> _rangeBuffer = new();
     private SkiaCanvasDrawingContext? _canvasContext;
     private bool _disposed;
 
@@ -333,6 +336,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             drawnLength += run.Text.Length;
         if (drawnLength == 0) return;
 
+        var measurer = PrefixMeasurer(line, style);
+
         // Background pass first so every glyph (including ones whose ink crosses
         // a span boundary) draws on top of the finished highlight rects.
         foreach (var span in spans)
@@ -341,11 +346,13 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             int bs = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int be = Math.Clamp(span.End - line.Start, 0, drawnLength);
             if (be <= bs) continue;
-            float bx0 = LineXAt(line, bs, style);
-            float bx1 = LineXAt(line, be, style);
-            if (bx1 <= bx0) continue;
             _pooledPaint.Color = ToSkColor(span.Background);
-            Canvas.DrawRect(SKRect.Create(baseX + bx0, lineTop, bx1 - bx0, line.Height), _pooledPaint);
+            // One rect per contiguous visual piece: a span crossing a direction
+            // boundary covers two stretches of the line, not the span between them.
+            line.VisualRanges(bs, be, _rangeBuffer, measurer);
+            foreach (var r in _rangeBuffer)
+                if (r.X1 > r.X0)
+                    Canvas.DrawRect(SKRect.Create(baseX + r.X0, lineTop, r.X1 - r.X0, line.Height), _pooledPaint);
         }
 
         int cursor = 0;
@@ -375,59 +382,39 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
             int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
             if (e <= s) continue;
-            float x0 = LineXAt(line, s, style);
-            float x1 = LineXAt(line, e, style);
-            if (x1 <= x0) continue;
             var fg = span.Color.A == 0 ? style.TextColor : span.Color;
             _pooledPaint.Color = ToSkColor(fg);
-            DrawDecorationRects(span.Decoration, style.FontSize, line.Ascent,
-                baseX + x0, x1 - x0, baselineY);
+            line.VisualRanges(s, e, _rangeBuffer, measurer);
+            foreach (var r in _rangeBuffer)
+                if (r.X1 > r.X0)
+                    DrawDecorationRects(span.Decoration, style.FontSize, line.Ascent,
+                        baseX + r.X0, r.X1 - r.X0, baselineY);
         }
     }
 
     private void DrawLineSegment(TextLine line, int startChar, int endChar, Color color,
         ResolvedInheritedStyle style, float baseX, float baselineY, float lineTop)
     {
-        if (color.A == 0) return;
-        float x0 = LineXAt(line, startChar, style);
-        float x1 = endChar >= startChar ? LineXAt(line, endChar, style) : x0;
-        if (x1 <= x0) return;
+        if (color.A == 0 || endChar <= startChar) return;
 
         _pooledPaint.Color = ToSkColor(color);
-        int save = Canvas.Save();
-        // Hard-edged (non-AA) clip so adjacent segments tile without seams; a glyph
-        // crossing the boundary is drawn by both segments, each contributing its half.
-        Canvas.ClipRect(SKRect.Create(baseX + x0, lineTop, x1 - x0, line.Height));
-        foreach (var run in line.Runs)
+        line.VisualRanges(startChar, endChar, _rangeBuffer, PrefixMeasurer(line, style));
+        foreach (var r in _rangeBuffer)
         {
-            if (run.OffsetX >= x1 || run.OffsetX + run.Width <= x0) continue;
-            var blob = BuildShapedBlob(run);
-            if (blob is not null)
-                Canvas.DrawText(blob, baseX + run.OffsetX, baselineY, _pooledPaint);
+            if (r.X1 <= r.X0) continue;
+            int save = Canvas.Save();
+            // Hard-edged (non-AA) clip so adjacent segments tile without seams; a glyph
+            // crossing the boundary is drawn by both segments, each contributing its half.
+            Canvas.ClipRect(SKRect.Create(baseX + r.X0, lineTop, r.X1 - r.X0, line.Height));
+            foreach (var run in line.Runs)
+            {
+                if (run.OffsetX >= r.X1 || run.OffsetX + run.Width <= r.X0) continue;
+                var blob = BuildShapedBlob(run);
+                if (blob is not null)
+                    Canvas.DrawText(blob, baseX + run.OffsetX, baselineY, _pooledPaint);
+            }
+            Canvas.RestoreToCount(save);
         }
-        Canvas.RestoreToCount(save);
-    }
-
-    // X position (line-relative) of the boundary before drawn character charIdx.
-    // Glyph origins give the exact position when glyphs map 1:1 to characters (the
-    // usual case for code and Latin text); runs where shaping merged clusters
-    // (ligatures, marks) fall back to measuring the prefix, which may sit a hair
-    // off inside a ligature but never moves any glyph.
-    private float LineXAt(TextLine line, int charIdx, ResolvedInheritedStyle style)
-    {
-        int offset = 0;
-        foreach (var run in line.Runs)
-        {
-            int len = run.Text.Length;
-            int rel = charIdx - offset;
-            if (rel <= 0) return run.OffsetX;
-            if (rel < len)
-                return run.Glyphs.Length == len
-                    ? run.OffsetX + run.Glyphs[rel].X
-                    : run.OffsetX + MeasureText(run.Text[..rel], style).Width;
-            offset += len;
-        }
-        return line.Width;
     }
 
     // Draws underline and/or strike-through for a line. The paint is already set
@@ -566,6 +553,56 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             boxes[i] = new TextLineBox(line.Start, line.Length, line.OffsetY, line.Height, line.Width);
         }
         return boxes;
+    }
+
+    // ── Offset ↔ x mapping, direction-aware (docs/plans/14-bidi.md, stage 2) ──
+    // All three go through the same laid-out line the text is drawn from, so a
+    // caret, a click and a highlight agree with the glyphs on screen even when the
+    // line's visual order is not its logical order.
+
+    public float TextCaretX(string lineText, ResolvedInheritedStyle style, int offset)
+    {
+        var line = SingleLine(lineText, style);
+        return line is null ? 0f : line.CaretXAt(offset, PrefixMeasurer(line, style));
+    }
+
+    public int TextOffsetAtX(string lineText, ResolvedInheritedStyle style, float x)
+    {
+        var line = SingleLine(lineText, style);
+        return line is null ? 0 : line.OffsetAtX(x, PrefixMeasurer(line, style));
+    }
+
+    public IReadOnlyList<TextRangeBox> TextSelectionRanges(
+        string lineText, ResolvedInheritedStyle style, int from, int to)
+    {
+        var line = SingleLine(lineText, style);
+        if (line is null) return [];
+        line.VisualRanges(from, to, _rangeBuffer, PrefixMeasurer(line, style));
+        if (_rangeBuffer.Count == 0) return [];
+        var boxes = new TextRangeBox[_rangeBuffer.Count];
+        for (int i = 0; i < _rangeBuffer.Count; i++)
+            boxes[i] = new TextRangeBox(_rangeBuffer[i].X0, _rangeBuffer[i].X1);
+        return boxes;
+    }
+
+    // The single laid-out line behind one string. Unbounded width and one line, so
+    // this is the cached single-line layout DrawText and MeasureText already built.
+    private TextLine? SingleLine(string lineText, ResolvedInheritedStyle style)
+    {
+        if (string.IsNullOrEmpty(lineText) || _pipeline is null) return null;
+        var layout = _pipeline.Layout(lineText, style, float.PositiveInfinity, maxLines: 1);
+        return layout.Lines.Count > 0 ? layout.Lines[0] : null;
+    }
+
+    // Only lines whose shaping merged clusters (ligatures, marks, emoji) need a
+    // prefix measurer; for the 1:1 case the glyph array answers exactly and this
+    // stays null, so the common path allocates no closure.
+    private Func<string, float>? PrefixMeasurer(TextLine line, ResolvedInheritedStyle style)
+    {
+        foreach (var run in line.Runs)
+            if (run.Glyphs.Length != run.Text.Length)
+                return s => MeasureText(s, style).Width;
+        return null;
     }
 
     public void DrawLine(Point from, Point to, Color color, float strokeWidth)

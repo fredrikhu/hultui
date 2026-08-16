@@ -22,7 +22,7 @@ This document records all architectural and design decisions for the HultUI fram
 |-------|--------|------------------------|-----------|
 | Rendering | SkiaSharp | Silk.NET, Veldrid, MAUI Graphics | Battle-tested 2D, handles text/shaping, used by Avalonia. Can be swapped later behind abstraction |
 | Text shaping | HarfBuzz (via SkiaSharp.HarfBuzz) | Manual shaping | Industry standard, handles complex scripts |
-| Text segmentation | Native ICU (P/Invoke) | Skia built-in, ICU4N | Full UAX #14/#29 support (line break, grapheme) via the platform's ICU, shared loader in `IcuLibrary`. UAX #9 (BiDi) uses the same library: display-level reordering shipped (docs/plans/14-bidi.md); interaction mapping is staged |
+| Text segmentation | Native ICU (P/Invoke) | Skia built-in, ICU4N | Full UAX #14/#29 support (line break, grapheme) via the platform's ICU, shared loader in `IcuLibrary`. UAX #9 (BiDi) uses the same library: display reordering and interaction mapping shipped (docs/plans/14-bidi.md); auto-direction and mirroring are staged |
 | Windowing/Input | SDL3 (ppy.SDL3-CS) | GLFW, platform-native | Cross-platform, provides GL context + input + clipboard + IME + drag-and-drop |
 | Source generators | Roslyn incremental generators | Fody, PostSharp | No runtime dependency, standard .NET tooling |
 | Test framework | xunit | NUnit, MSTest | Widely used, good async support |

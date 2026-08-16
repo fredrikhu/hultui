@@ -47,11 +47,28 @@ then correctness beats reuse. LTR text keeps every cache and fast path untouched
   explicit-direction shaping + per-line visual reordering. A read-only label or
   TextArea shows mixed Arabic/Hebrew/Latin correctly. Caret, selection and
   hit-testing remain logical==visual (wrong inside RTL runs) — documented.
-- **Stage 2 — interaction mapping.** Logical↔visual caret movement, selection
-  rects split across reordered runs, hit-testing through visual order
-  (`LineXAt` and TextArea's caret math are the consumers).
+- **Stage 2 — interaction mapping.** ✅ Done. `TextLine` owns the offset↔x
+  mapping — `CaretXAt`, `OffsetAtX`, `VisualRanges` — and every consumer goes
+  through it: the renderer's span backgrounds, colors and decorations, and
+  `IRenderContext.TextCaretX` / `TextOffsetAtX` / `TextSelectionRanges`, which
+  TextInput and TextArea use for the caret, click targeting, selection
+  highlights and IME underlines. Inside an RTL run a logical prefix is a visual
+  *suffix*, read straight off the glyph array (the shaper returns RTL glyphs in
+  visual order — `RtlGlyphOrderTests` pins that); runs where shaping merged
+  clusters keep today's measure-the-prefix fallback. A logical range crossing a
+  direction boundary now paints as two rects instead of one that covered
+  unselected text. Two things came along: hit-testing picks the *nearest*
+  boundary rather than always rounding up (clicking the left half of the first
+  character used to put the caret after it), and paragraph levels are resolved
+  once per paragraph and sliced per line rather than re-resolved per line and
+  per break candidate — UAX #9 resolution is paragraph-scoped, so the old way
+  was also wrong for neutrals next to a cut.
 - **Stage 3 — polish.** First-strong auto direction, bracket mirroring
   (UAX #9 §3.1.3), RTL-aware default alignment, RTL scrollbar/gutter layout.
+  **Visual caret movement** belongs here too: Left/Right still move logically,
+  which is GTK's and Firefox's default but not Chrome's. The primitives stage 2
+  built are what an implementation would sit on; the open question is the
+  boundary convention, not the geometry.
 
 ## Non-goals
 

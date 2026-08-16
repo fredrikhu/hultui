@@ -21,6 +21,7 @@
     <Project Path="samples/HultUI.Samples.Grid/HultUI.Samples.Grid.csproj" />
     <Project Path="samples/HultUI.Samples.Accessibility/HultUI.Samples.Accessibility.csproj" />
     <Project Path="samples/HultUI.Samples.Benchmark/HultUI.Samples.Benchmark.csproj" />
+    <Project Path="samples/HultUI.Samples.TextBench/HultUI.Samples.TextBench.csproj" />
     <Project Path="samples/HultUI.Samples.Typography/HultUI.Samples.Typography.csproj" />
     <Project Path="samples/HultUI.Samples.Effects/HultUI.Samples.Effects.csproj" />
     <Project Path="samples/HultUI.Samples.Dialogs/HultUI.Samples.Dialogs.csproj" />

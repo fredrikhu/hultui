@@ -59,6 +59,62 @@ public interface IRenderContext
     /// </summary>
     IReadOnlyList<TextLineBox> LayoutTextLines(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines);
 
+    // ── Offset ↔ x mapping for one line of text (docs/plans/14-bidi.md, stage 2) ──
+    //
+    // Editable and selectable text needs three things from a laid-out line: where
+    // a caret goes, what a click means, and what a selection covers. For text that
+    // reads left to right all three are prefix widths, which is what the defaults
+    // below compute. Once a line contains right-to-left script they stop being the
+    // same question: a logical prefix is no longer a visual prefix, and a logical
+    // range can be visually discontiguous. A render context that lays text out for
+    // real overrides these; one that only measures keeps the prefix answers, which
+    // stay exactly right for the text it can render.
+
+    /// <summary>
+    /// Visual x, relative to the start of the line, of the caret at logical
+    /// <paramref name="offset"/> within <paramref name="lineText"/>.
+    /// </summary>
+    float TextCaretX(string lineText, ResolvedInheritedStyle style, int offset)
+        => offset <= 0 || lineText.Length == 0
+            ? 0f
+            : MeasureText(lineText[..Math.Min(offset, lineText.Length)], style).Width;
+
+    /// <summary>
+    /// The logical offset in <paramref name="lineText"/> whose caret sits nearest
+    /// visual x <paramref name="x"/> — what a click at that x selects.
+    /// </summary>
+    int TextOffsetAtX(string lineText, ResolvedInheritedStyle style, float x)
+    {
+        if (lineText.Length == 0) return 0;
+        // Width is monotonic in prefix length, so the first boundary at or past x
+        // is a binary search; the nearer of it and its predecessor wins, so
+        // clicking the left half of a character puts the caret before it.
+        int lo = 0, hi = lineText.Length;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (TextCaretX(lineText, style, mid) < x) lo = mid + 1;
+            else hi = mid;
+        }
+        int before = Math.Max(0, lo - 1);
+        return Math.Abs(TextCaretX(lineText, style, before) - x) <= Math.Abs(TextCaretX(lineText, style, lo) - x)
+            ? before
+            : lo;
+    }
+
+    /// <summary>
+    /// Visual x-ranges covering the logical range <c>[from, to)</c> of
+    /// <paramref name="lineText"/> — one entry for text that reads left to right,
+    /// more when the range crosses a direction boundary.
+    /// </summary>
+    IReadOnlyList<TextRangeBox> TextSelectionRanges(string lineText, ResolvedInheritedStyle style, int from, int to)
+    {
+        if (to <= from || lineText.Length == 0) return [];
+        float x0 = TextCaretX(lineText, style, from);
+        float x1 = TextCaretX(lineText, style, to);
+        return x1 > x0 ? [new TextRangeBox(x0, x1)] : [];
+    }
+
     void PushClip(Rect clipRect);
     void PushRoundedClip(Rect clipRect, CornerRadius radius);
     void PushTranslate(float x, float y);
@@ -83,10 +139,18 @@ public interface IRenderContext
 /// One laid-out line of text: its character range in the source string
 /// (<see cref="Start"/>, <see cref="Length"/>), its vertical offset from the text
 /// origin (<see cref="OffsetY"/>), and its <see cref="Height"/> and drawn
-/// <see cref="Width"/>. Line-relative x positions are recovered by measuring
-/// substrings of the source text with <see cref="IRenderContext.MeasureText"/>.
+/// <see cref="Width"/>. Line-relative x positions come from
+/// <see cref="IRenderContext.TextCaretX"/> and its two companions, which know
+/// about direction; measuring a prefix directly only agrees with them for text
+/// that reads left to right.
 /// </summary>
 public readonly record struct TextLineBox(int Start, int Length, float OffsetY, float Height, float Width);
+
+/// <summary>
+/// One contiguous visual x-range on a line, relative to the line's start — the
+/// shape a selection highlight or a span background is painted as.
+/// </summary>
+public readonly record struct TextRangeBox(float X0, float X1);
 
 public interface IImageSource
 {

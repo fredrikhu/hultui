@@ -468,19 +468,23 @@ public class TextInputElement : BoxElement
     {
         if (string.IsNullOrEmpty(_text)) return 0;
 
-        // Binary search for the position
         var style = ResolvedInherited;
+        if (_renderCtx is not null)
+            return _renderCtx.TextOffsetAtX(_text, style, x);
+
+        // No render context (tests): fall back to the same nearest-boundary search
+        // over the estimated widths MeasureSubstring hands out.
         int lo = 0, hi = _text.Length;
         while (lo < hi)
         {
             int mid = (lo + hi) / 2;
-            float midWidth = MeasureSubstring(0, mid, style);
-            if (midWidth < x)
-                lo = mid + 1;
-            else
-                hi = mid;
+            if (MeasureSubstring(0, mid, style) < x) lo = mid + 1;
+            else hi = mid;
         }
-        return lo;
+        int before = Math.Max(0, lo - 1);
+        return Math.Abs(MeasureSubstring(0, before, style) - x) <= Math.Abs(MeasureSubstring(0, lo, style) - x)
+            ? before
+            : lo;
     }
 
     private float MeasureSubstring(int start, int length, ResolvedInheritedStyle style)
@@ -557,8 +561,8 @@ public class TextInputElement : BoxElement
             caretIndex = _cursorPos;
         }
 
-        float cursorX = caretIndex > 0 && displayText.Length > 0
-            ? ctx.MeasureText(displayText[..caretIndex], style).Width
+        float cursorX = displayText.Length > 0
+            ? ctx.TextCaretX(displayText, style, caretIndex)
             : 0;
         float totalTextWidth = displayText.Length > 0
             ? ctx.MeasureText(displayText, style).Width
@@ -581,15 +585,12 @@ public class TextInputElement : BoxElement
         // Selection highlight (suppressed during composition — IMEs don't show it)
         if (HasSelection && !composing)
         {
-            float selStartX = SelectionStart > 0
-                ? ctx.MeasureText(_text[..SelectionStart], style).Width
-                : 0;
-            float selEndX = SelectionEnd > 0
-                ? ctx.MeasureText(_text[..SelectionEnd], style).Width
-                : 0;
-            ctx.DrawRect(new Rect(
-                contentBox.X + selStartX - _scrollOffset, contentBox.Y,
-                selEndX - selStartX, contentBox.Height), SelectionColor);
+            // One rect per contiguous visual stretch: a selection spanning a
+            // direction change covers two pieces of the line, not the gap between.
+            foreach (var r in ctx.TextSelectionRanges(_text, style, SelectionStart, SelectionEnd))
+                ctx.DrawRect(new Rect(
+                    contentBox.X + r.X0 - _scrollOffset, contentBox.Y,
+                    r.X1 - r.X0, contentBox.Height), SelectionColor);
         }
 
         // Draw text or placeholder
@@ -613,23 +614,22 @@ public class TextInputElement : BoxElement
         // Preedit underline
         if (composing)
         {
-            float preStart = ctx.MeasureText(displayText[.._cursorPos], style).Width;
-            float preEnd = ctx.MeasureText(displayText[..(_cursorPos + _composition.Text.Length)], style).Width;
             float underlineY = textTop + textHeight;
 
-            ctx.DrawRect(new Rect(
-                contentBox.X + preStart - _scrollOffset, underlineY,
-                preEnd - preStart, 1f), CursorColor);
+            foreach (var r in ctx.TextSelectionRanges(displayText, style,
+                _cursorPos, _cursorPos + _composition.Text.Length))
+                ctx.DrawRect(new Rect(
+                    contentBox.X + r.X0 - _scrollOffset, underlineY,
+                    r.X1 - r.X0, 1f), CursorColor);
 
             if (_composition.SegmentLength > 0)
             {
                 int segStartIdx = _cursorPos + _composition.SegmentStart;
-                int segEndIdx = segStartIdx + _composition.SegmentLength;
-                float segStartX = ctx.MeasureText(displayText[..segStartIdx], style).Width;
-                float segEndX = ctx.MeasureText(displayText[..segEndIdx], style).Width;
-                ctx.DrawRect(new Rect(
-                    contentBox.X + segStartX - _scrollOffset, underlineY,
-                    segEndX - segStartX, 2f), CursorColor);
+                foreach (var r in ctx.TextSelectionRanges(displayText, style,
+                    segStartIdx, segStartIdx + _composition.SegmentLength))
+                    ctx.DrawRect(new Rect(
+                        contentBox.X + r.X0 - _scrollOffset, underlineY,
+                        r.X1 - r.X0, 2f), CursorColor);
             }
         }
 
