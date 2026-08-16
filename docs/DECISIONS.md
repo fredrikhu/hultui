@@ -144,6 +144,47 @@ HultUI (meta-package)
 | GPU-accelerated via OpenGL | SkiaSharp renders to GRContext backed by SDL3's GL context. Zero pixel copying |
 | IRenderContext abstraction | Backend-swappable. Core doesn't depend on SkiaSharp |
 | SKPaint pooling | Avoid per-draw-call allocation. Reuse paint objects |
+| **No damage rects** (2026-08-16) | Measured, not assumed — see below |
+
+### Damage rects: measured and declined
+
+`DamageProbe` (attach `DamageProbe.OnFrame`, or read the per-frame `Damage`
+annotations in an F11 trace) reports what a damage-rect renderer would have
+repainted: the union of the deepest paint-dirty elements, a deliberate best case
+for partial repaints. Junction hosted headlessly on this repository at 1400×900,
+per rendered frame:
+
+| Workload | Frames | Damage union p50 | Full-repaint cost p50 |
+|----------|-------:|-----------------:|----------------------:|
+| History hover sweep | 30 | 100% (40% of frames <10%) | 1.1 ms |
+| History selection walk | 25 | 97% | — (git work dominates) |
+| History wheel scroll | 25 | 64% | 1.1 ms |
+| Files find-bar typing | 5 | 97% | 1.3 ms |
+| Files tree cursor walk | 15 | 45% | 0.9 ms |
+| View switch | 3 | 100% | 0.8 ms |
+| Tooltip appears | 1 | 100% | 1.2 ms |
+| Idle | 0 | — | — |
+
+Three reasons partial repaints don't pay here:
+
+1. **Idle is already free.** Frame-granularity dirty tracking renders nothing
+   when nothing changed — the caret-blink scenario damage rects classically fix
+   does not exist in this framework.
+2. **The frames that do render are honestly large or conservatively large.**
+   Scrolling moves 64% of the window; rebuild-driven frames (typing, selection)
+   patch whole views; and the input safety net (`Window` marks the root when any
+   handler ran, because handlers may mutate without marking) turns most pointer
+   traffic into whole-window invalidations. Damage rects cannot shrink a frame
+   the invalidation system cannot describe — tightening invalidation (the
+   HULTUI002 analyzer is the migration path for silent mutations) would have to
+   come first, and it, not clipping, is where the win lives.
+3. **A full repaint costs ~1 ms** at 1400×900 on the CPU raster path (GPU is
+   cheaper still) — ~6% of a 60 Hz budget, only while the user is actively
+   interacting. The complexity price of damage rects (old-bounds tracking,
+   shadow bleed, buffer age) buys back part of one millisecond.
+
+Revisit only if a workload appears where frames are frequent, small-change, and
+expensive — the probe stays in the tree to make that check cheap.
 
 ---
 

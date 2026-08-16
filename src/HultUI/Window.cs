@@ -501,6 +501,7 @@ public sealed class Window : IOverlayHost, IDisposable
         // A layout change (window/pane resize) moves elements without adding or
         // removing any, and their bounding rects must be re-snapshotted for UIA.
         bool layoutWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Layout);
+        bool styleWasDirty = _root.DirtyFlags.HasFlag(DirtyFlags.Style);
 
         // Style resolution (only if any element has style changes)
         _perf.BeginStyle();
@@ -575,6 +576,11 @@ public sealed class Window : IOverlayHost, IDisposable
 
         // Keep the maximize button's non-client hover highlight alive across rebuilds.
         ReassertMaximizeButtonHover();
+
+        // Damage instrumentation: measured here, after layout (bounds are current)
+        // and before the paint flags are consumed. One null-check when nothing is
+        // attached and no trace is recording.
+        CollectDamage(layoutWasDirty, styleWasDirty);
 
         // Render (user content only — DevTools excluded from timing). The Render
         // span includes BeginFrame's full-surface clear: that clear is part of
@@ -1510,6 +1516,64 @@ public sealed class Window : IOverlayHost, IDisposable
         element.DirtyFlags &= ~flags;
         foreach (var child in element.Children)
             ClearFlags(child, flags);
+    }
+
+    /// <summary>
+    /// Best-case damage for this frame: the union of the deepest paint-dirty elements
+    /// (flags propagate to the root, so the deepest carriers are the ones actually
+    /// marked — see <see cref="DamageProbe"/> for why this overstates what damage
+    /// rects could save, never understates it). Runs only when a probe is attached
+    /// or a trace is recording.
+    /// </summary>
+    private void CollectDamage(bool layoutWasDirty, bool styleWasDirty)
+    {
+        var probe = DamageProbe.OnFrame;
+        if ((probe is null && !_tracer.IsRecording) || _root is null) return;
+
+        float ux0 = float.MaxValue, uy0 = float.MaxValue, ux1 = float.MinValue, uy1 = float.MinValue;
+        float rectArea = 0f;
+        int count = 0;
+
+        void Add(Rect r)
+        {
+            if (r.Width <= 0 || r.Height <= 0) return;
+            ux0 = Math.Min(ux0, r.X); uy0 = Math.Min(uy0, r.Y);
+            ux1 = Math.Max(ux1, r.Right); uy1 = Math.Max(uy1, r.Bottom);
+            rectArea += r.Width * r.Height;
+            count++;
+        }
+
+        void Visit(Element e, float dx, float dy)
+        {
+            if ((e.DirtyFlags & DirtyFlags.Paint) == 0) return;
+            bool descended = false;
+            foreach (var child in e.Children)
+                if ((child.DirtyFlags & DirtyFlags.Paint) != 0)
+                {
+                    Visit(child, dx, dy);
+                    descended = true;
+                }
+            if (!descended)
+            {
+                var b = e.Layout.AbsoluteBorderBox;
+                Add(new Rect(b.X + dx, b.Y + dy, b.Width, b.Height));
+            }
+        }
+
+        Visit(_root, 0, 0);
+        foreach (var overlay in _overlays)
+            Visit(overlay.Content, overlay.X, overlay.Y);
+
+        float unionArea = count == 0 ? 0 : (ux1 - ux0) * (uy1 - uy0);
+        var frame = new DamageProbe.DamageFrame(
+            PlatformWindow.LayoutWidth * PlatformWindow.LayoutHeight,
+            unionArea, rectArea, count, layoutWasDirty, styleWasDirty);
+
+        probe?.Invoke(frame);
+        if (_tracer.IsRecording)
+            _tracer.Annotate("Damage",
+                $"union={frame.UnionFraction:P1} rects={count} rectArea={frame.RectFraction:P1}"
+                + (layoutWasDirty ? " layout" : "") + (styleWasDirty ? " style" : ""));
     }
 
     private static void ClearAllFlags(Element element)
