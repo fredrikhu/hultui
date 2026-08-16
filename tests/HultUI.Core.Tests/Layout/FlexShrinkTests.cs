@@ -197,4 +197,68 @@ public class FlexShrinkTests
 
         Assert.Equal(100, child.Layout.Height);
     }
+
+    // A row 100 wide holding a label that measures 100 and an unshrinkable 70px
+    // sibling: 70px of overflow, all of which the label has to absorb. Where it
+    // stops is the automatic minimum size, and for text that is the longest word —
+    // "wonderfully", 11 chars = 77px in the stub's metrics — not the widest
+    // character, which would let it collapse to 30.
+    private (TextElement Label, BoxElement Row) SqueezedLabel(string text)
+    {
+        var label = TextElement.New(text);
+        var rigid = TextElement.New("yyyyyyyyyy");
+        rigid.Flex.FlexShrink = 0;
+
+        var row = BoxElement.New();
+        row.Flex.Direction = FlexDirection.Row;
+        row.Box.Width = 100;
+        row.AddChild(label);
+        row.AddChild(rigid);
+        return (label, row);
+    }
+
+    [Fact]
+    public void AShrinkingLabel_StopsAtItsWidestWord()
+    {
+        var (label, row) = SqueezedLabel("a wonderfully long word");
+
+        _layout.PerformLayout(row, 300, 200);
+
+        Assert.Equal(77, label.Layout.Width);
+    }
+
+    [Fact]
+    public void AShrinkingLabelOfShortWords_StillShrinksPastThem()
+    {
+        // The floor follows the content: nothing here is wider than 3 characters,
+        // so this label gives way where the one above refuses to.
+        var (label, row) = SqueezedLabel("a bb ccc dd e ff g hh i jj");
+
+        _layout.PerformLayout(row, 300, 200);
+
+        Assert.Equal(30, label.Layout.Width);
+    }
+
+    [Fact]
+    public void AShrinkingLabelInsideAScrollContainer_HasNoFloorAtAll()
+    {
+        // A horizontally scrolling container is entitled to be narrower than its
+        // content — the rule that made the automatic minimum safe to turn on.
+        var label = TextElement.New("a wonderfully long word");
+        var inner = BoxElement.New();
+        inner.Box.OverflowX = Overflow.Scroll;
+        inner.AddChild(label);
+        var rigid = TextElement.New("yyyyyyyyyy");
+        rigid.Flex.FlexShrink = 0;
+
+        var row = BoxElement.New();
+        row.Flex.Direction = FlexDirection.Row;
+        row.Box.Width = 100;
+        row.AddChild(inner);
+        row.AddChild(rigid);
+
+        _layout.PerformLayout(row, 300, 200);
+
+        Assert.Equal(30, inner.Layout.Width);
+    }
 }

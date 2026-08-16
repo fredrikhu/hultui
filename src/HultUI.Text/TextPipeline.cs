@@ -112,7 +112,7 @@ public sealed class TextPipeline
         if (_cache.TryGet(key, out var cached))
             return cached;
 
-        var layout = ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines);
+        var layout = ComputeWrappedStyled(text, style, spans!, maxWidth, maxLines, overflow);
         _cache.Put(key, layout);
         return layout;
     }
@@ -140,7 +140,7 @@ public sealed class TextPipeline
                 style.LetterSpacing, 0, style.TextDirection);
             if (_cache.TryGet(bidiKey, out var cachedBidi))
                 return cachedBidi;
-            var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines);
+            var bidiLayout = ComputeWrappedBidi(text, style, maxWidth, maxLines, overflow);
             _cache.Put(bidiKey, bidiLayout);
             return bidiLayout;
         }
@@ -357,9 +357,10 @@ public sealed class TextPipeline
     }
 
     private TextLine ShapeStyledLine(string text, int from, int to,
-        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans)
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans,
+        bool appendEllipsis = false)
     {
-        int sourceLength = to - from;
+        int sourceLength = to - from + (appendEllipsis ? 1 : 0);
         // Trailing whitespace is trimmed for width, as in ShapeLineText.
         while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
 
@@ -385,6 +386,21 @@ public sealed class TextPipeline
             i = b;
         }
 
+        // The ellipsis is the element's own text, not the span's: a truncation mark
+        // rendered bold because the last word happened to be bold reads as content.
+        if (appendEllipsis)
+            foreach (var fr in FontItemizer.Itemize(EllipsisString, _fonts,
+                style.FontFamily, style.FontWeight, style.FontSlant))
+            {
+                var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing);
+                shaped.OffsetX = width;
+                width += shaped.Width;
+                runs.Add(shaped);
+                maxAscent = Math.Max(maxAscent, Math.Abs(fr.Font.Ascent) * style.FontSize);
+                maxDescent = Math.Max(maxDescent, fr.Font.Descent * style.FontSize);
+                maxLeading = Math.Max(maxLeading, fr.Font.Leading * style.FontSize);
+            }
+
         if (runs.Count == 0)
         {
             var primary = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
@@ -395,6 +411,27 @@ public sealed class TextPipeline
 
         (maxAscent, maxLeading) = ApplyLineHeight(maxAscent, maxDescent, maxLeading, style.LineHeight);
         return new TextLine(runs, width, maxAscent, maxDescent, maxLeading) { Start = from, Length = sourceLength };
+    }
+
+    // Styled twin of BuildEllipsizedLine: the longest styled prefix that leaves room
+    // for the ellipsis, plus the ellipsis. Width is monotonic in prefix length, so
+    // this converges in O(log n) measurements however long the tail is.
+    private TextLine BuildStyledEllipsizedLine(string text, int start, int tailEnd,
+        ResolvedInheritedStyle style, IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth)
+    {
+        float ellipsisWidth = MeasureString(EllipsisString, style);
+        int lo = start, hi = tailEnd, best = start;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (MeasureStyled(text, start, mid, style, spans) + ellipsisWidth <= maxWidth)
+            {
+                best = mid;
+                lo = mid + 1;
+            }
+            else hi = mid - 1;
+        }
+        return ShapeStyledLine(text, start, SnapPrefix(text, best), style, spans, appendEllipsis: true);
     }
 
     // Styled twin of FitPrefix: gallop out, then bisect, measuring with spans.
@@ -418,22 +455,12 @@ public sealed class TextPipeline
     }
 
     // The styled twin of ComputeWrapped + BreakIntoLines: same greedy break logic,
-    // measurement and line shaping made span-aware. Overflow.Ellipsis on styled text
-    // clips instead of ellipsizing for now (the rewrite needs a styled
-    // BuildEllipsizedLine; tracked in docs/plans/12-rich-text-spans.md).
+    // measurement and line shaping made span-aware, same truncation policy.
     private TextLayout ComputeWrappedStyled(string text, ResolvedInheritedStyle style,
-        IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, int? maxLines)
+        IReadOnlyList<Core.Rendering.TextSpan> spans, float maxWidth, int? maxLines,
+        TextOverflow overflow)
     {
-        var breakPoints = LineBreaker.FindBreakOpportunities(text);
-        var allBreaks = new List<int> { 0 };
-        for (int i = 0; i < text.Length; i++)
-            if (text[i] == '\n') { allBreaks.Add(i); allBreaks.Add(i + 1); }
-        foreach (var bp in breakPoints)
-            if (!allBreaks.Contains(bp)) allBreaks.Add(bp);
-        allBreaks.Add(text.Length);
-        allBreaks.Sort();
-        for (int i = allBreaks.Count - 1; i > 0; i--)
-            if (allBreaks[i] == allBreaks[i - 1]) allBreaks.RemoveAt(i);
+        var allBreaks = BreakOffsets(text);
 
         var lines = new List<TextLine>();
         int textOffset = 0;
@@ -492,10 +519,14 @@ public sealed class TextPipeline
             totalHeight += line.Height;
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
         }
-        return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
+        var styledLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight));
+        return overflow == TextOverflow.Ellipsis
+            ? ApplyEllipsis(text, styledLayout, maxWidth,
+                (start, tailEnd) => BuildStyledEllipsizedLine(text, start, tailEnd, style, spans, maxWidth))
+            : styledLayout;
     }
 
-    // ── BiDi internals (docs/plans/14-bidi.md, stage 1: display-only) ──
+    // ── BiDi internals (docs/plans/14-bidi.md) ──
 
     /// <summary>Cheap classifier: does this text need UAX #9 analysis at all?</summary>
     /// <remarks>
@@ -602,9 +633,10 @@ public sealed class TextPipeline
     /// char→x mapping (spans, selection) walks runs logically — only the offsets
     /// carry the reordering.
     /// </summary>
-    private TextLine ShapeBidiLine(string text, int from, int to, ResolvedInheritedStyle style, byte[] paraLevels)
+    private TextLine ShapeBidiLine(string text, int from, int to, ResolvedInheritedStyle style, byte[] paraLevels,
+        bool appendEllipsis = false, bool rtlParagraph = false)
     {
-        int sourceLength = to - from;
+        int sourceLength = to - from + (appendEllipsis ? 1 : 0);
         while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
 
         var segments = SegmentsIn(paraLevels, from, to);
@@ -648,6 +680,23 @@ public sealed class TextPipeline
         var logicalRuns = new List<ShapedRun>();
         foreach (var runs in segRuns) logicalRuns.AddRange(runs);
 
+        if (appendEllipsis)
+        {
+            var ellipsis = ShapeWithSpacing(EllipsisString,
+                _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant),
+                style.FontSize, style.LetterSpacing);
+            // The mark goes where reading ENDS, so in a right-to-left paragraph it
+            // sits at the left edge and everything already placed shifts right.
+            if (rtlParagraph)
+            {
+                foreach (var run in logicalRuns) run.OffsetX += ellipsis.Width;
+                ellipsis.OffsetX = 0;
+            }
+            else ellipsis.OffsetX = x;
+            x += ellipsis.Width;
+            logicalRuns.Add(ellipsis);
+        }
+
         if (logicalRuns.Count == 0)
         {
             var primary = _fonts.Resolve(style.FontFamily, style.FontWeight, style.FontSlant);
@@ -660,24 +709,38 @@ public sealed class TextPipeline
         return new TextLine(logicalRuns, x, maxAscent, maxDescent, maxLeading) { Start = from, Length = sourceLength };
     }
 
+    // BiDi twin of BuildEllipsizedLine. The prefix is logical — truncation removes
+    // the end of the text, not the right of the line — and the mark is placed by
+    // ShapeBidiLine according to the paragraph's direction.
+    private TextLine BuildBidiEllipsizedLine(string text, int start, int tailEnd,
+        ResolvedInheritedStyle style, byte[] levels, bool rtlParagraph, float maxWidth)
+    {
+        float ellipsisWidth = MeasureString(EllipsisString, style);
+        int lo = start, hi = tailEnd, best = start;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (MeasureBidi(text, start, mid, style, levels) + ellipsisWidth <= maxWidth)
+            {
+                best = mid;
+                lo = mid + 1;
+            }
+            else hi = mid - 1;
+        }
+        return ShapeBidiLine(text, start, SnapPrefix(text, best), style, levels,
+            appendEllipsis: true, rtlParagraph);
+    }
+
     // The direction-aware twin of ComputeWrapped: same greedy break logic over
-    // logical order, measurement and line shaping direction-resolved. Ellipsis on
-    // bidi text clips for now (as the styled path does; both tracked in the plan).
-    private TextLayout ComputeWrappedBidi(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
+    // logical order, measurement and line shaping direction-resolved, same
+    // truncation policy.
+    private TextLayout ComputeWrappedBidi(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
+        TextOverflow overflow)
     {
         // One UAX #9 resolution for the whole paragraph; every line, break
         // candidate and prefix measurement below slices into it.
         var (levels, rtlParagraph) = BidiAnalyzer.Levels(text, style.TextDirection);
-        var breakPoints = LineBreaker.FindBreakOpportunities(text);
-        var allBreaks = new List<int> { 0 };
-        for (int i = 0; i < text.Length; i++)
-            if (text[i] == '\n') { allBreaks.Add(i); allBreaks.Add(i + 1); }
-        foreach (var bp in breakPoints)
-            if (!allBreaks.Contains(bp)) allBreaks.Add(bp);
-        allBreaks.Add(text.Length);
-        allBreaks.Sort();
-        for (int i = allBreaks.Count - 1; i > 0; i--)
-            if (allBreaks[i] == allBreaks[i - 1]) allBreaks.RemoveAt(i);
+        var allBreaks = BreakOffsets(text);
 
         var lines = new List<TextLine>();
         int textOffset = 0;
@@ -735,7 +798,11 @@ public sealed class TextPipeline
             totalHeight += line.Height;
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
         }
-        return new TextLayout(lines, new Size(maxLineWidth, totalHeight), rtlParagraph);
+        var bidiLayout = new TextLayout(lines, new Size(maxLineWidth, totalHeight), rtlParagraph);
+        return overflow == TextOverflow.Ellipsis
+            ? ApplyEllipsis(text, bidiLayout, maxWidth,
+                (start, tailEnd) => BuildBidiEllipsizedLine(text, start, tailEnd, style, levels, rtlParagraph, maxWidth))
+            : bidiLayout;
     }
 
     private int BidiFitPrefix(string text, int from, int to,
@@ -757,6 +824,65 @@ public sealed class TextPipeline
         return SnapPrefix(text, best);
     }
 
+    /// <summary>
+    /// Every offset a line may start or end at: the UAX #14 break opportunities plus
+    /// both sides of each explicit newline, sorted and deduplicated, bracketed by 0
+    /// and the text length. Consecutive entries delimit one unbreakable segment —
+    /// which is also exactly what min-content width is the widest of.
+    /// </summary>
+    private static List<int> BreakOffsets(string text)
+    {
+        var offsets = new List<int> { 0 };
+        for (int i = 0; i < text.Length; i++)
+            if (text[i] == '\n') { offsets.Add(i); offsets.Add(i + 1); }
+        foreach (var bp in LineBreaker.FindBreakOpportunities(text))
+            if (!offsets.Contains(bp)) offsets.Add(bp);
+        offsets.Add(text.Length);
+        offsets.Sort();
+        for (int i = offsets.Count - 1; i > 0; i--)
+            if (offsets[i] == offsets[i - 1]) offsets.RemoveAt(i);
+        return offsets;
+    }
+
+    // ── Min-content width (docs/plans/13-min-content.md) ──
+
+    // Widest unbreakable segment per (text, font attributes). Layout asks for this
+    // once per shrinking flex item per pass, and the answer is width-independent,
+    // so it is worth not re-measuring every word each time.
+    private readonly LruCache<ShapeKey, float> _minContentCache = new(capacity: 4096);
+
+    /// <summary>
+    /// The narrowest width at which this text does not overflow: the widest segment
+    /// between line-break opportunities (CSS min-content width). Trailing whitespace
+    /// at a break does not count towards it, because that is where the line ends.
+    /// </summary>
+    public float MinContentWidth(string text, ResolvedInheritedStyle style,
+        IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
+    {
+        if (string.IsNullOrEmpty(text)) return 0f;
+
+        bool styled = AnyMetricAffecting(spans);
+        var key = new ShapeKey(text, style.FontFamily, style.FontSize, style.FontWeight,
+            style.FontSlant, style.LineHeight, style.LetterSpacing);
+        if (!styled && _minContentCache.TryGet(key, out float cached))
+            return cached;
+
+        var offsets = BreakOffsets(text);
+        float widest = 0f;
+        for (int i = 1; i < offsets.Count; i++)
+        {
+            int from = offsets[i - 1], to = offsets[i];
+            while (to > from && char.IsWhiteSpace(text[to - 1])) to--;
+            if (to <= from) continue;
+            widest = Math.Max(widest, styled
+                ? MeasureStyled(text, from, to, style, spans!)
+                : MeasureString(text[from..to], style));
+        }
+
+        if (!styled) _minContentCache.Put(key, widest);
+        return widest;
+    }
+
     private const string EllipsisString = "…"; // …
 
     // Rewrites the last line of an already-broken (clipped) layout with a
@@ -765,6 +891,16 @@ public sealed class TextPipeline
     // unbreakable token is wider than the available width. Only the final line
     // is touched; earlier lines keep their exact shaping and positions.
     private TextLayout ApplyEllipsis(string text, ResolvedInheritedStyle style, TextLayout clip, float maxWidth)
+        => ApplyEllipsis(text, clip, maxWidth,
+            (start, tailEnd) => BuildEllipsizedLine(text[start..tailEnd], start, style, maxWidth));
+
+    /// <summary>
+    /// One truncation policy for all three layout paths; only the line builder
+    /// differs (plain, styled, direction-aware). <paramref name="buildEllipsized"/>
+    /// is handed the source range the final line may draw from.
+    /// </summary>
+    private TextLayout ApplyEllipsis(string text, TextLayout clip, float maxWidth,
+        Func<int, int, TextLine> buildEllipsized)
     {
         if (clip.Lines.Count == 0)
             return clip;
@@ -782,9 +918,8 @@ public sealed class TextPipeline
         // begins up to the next explicit newline (or the end of the string).
         int nl = text.IndexOf('\n', last.Start);
         int tailEnd = nl < 0 ? text.Length : nl;
-        string tail = text[last.Start..tailEnd];
 
-        var ellipsized = BuildEllipsizedLine(tail, last.Start, style, maxWidth);
+        var ellipsized = buildEllipsized(last.Start, tailEnd);
         ellipsized.OffsetY = last.OffsetY;
 
         var lines = new List<TextLine>(clip.Lines.Count);
@@ -798,7 +933,7 @@ public sealed class TextPipeline
 
         // The replacement line uses the same font metrics, so the overall height
         // is unchanged; only the max width can shrink.
-        return new TextLayout(lines, new Size(maxLineWidth, clip.Size.Height));
+        return new TextLayout(lines, new Size(maxLineWidth, clip.Size.Height), clip.IsRtlParagraph);
     }
 
     // Builds a single line holding the longest prefix of <paramref name="tail"/>
@@ -1046,27 +1181,7 @@ public sealed class TextPipeline
         var lines = new List<TextLine>();
         int textOffset = 0;
 
-        // Add text start and ensure break at newlines
-        var allBreaks = new List<int> { 0 };
-        for (int i = 0; i < text.Length; i++)
-        {
-            if (text[i] == '\n')
-            {
-                allBreaks.Add(i);
-                allBreaks.Add(i + 1);
-            }
-        }
-        foreach (var bp in breakPoints)
-        {
-            if (!allBreaks.Contains(bp))
-                allBreaks.Add(bp);
-        }
-        allBreaks.Add(text.Length);
-        allBreaks.Sort();
-        // Remove duplicates
-        for (int i = allBreaks.Count - 1; i > 0; i--)
-            if (allBreaks[i] == allBreaks[i - 1])
-                allBreaks.RemoveAt(i);
+        var allBreaks = BreakOffsets(text);
 
         // Greedy line breaking
         float lineWidth = 0;

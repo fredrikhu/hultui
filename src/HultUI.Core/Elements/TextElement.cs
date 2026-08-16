@@ -377,6 +377,14 @@ public class TextElement : Element
         // element the way they will draw; the overload ignores paint-only lists.
         ctx.MeasureText(Content, ResolvedInherited, availableWidth, MaxLines, Overflow, _spans);
 
+    // The widest word, not the widest character: measuring text at zero available
+    // width wraps it one character per line, which under-reports the width below
+    // which the text really breaks.
+    internal override float MeasureMinContentWidth(IMeasureContext ctx) =>
+        string.IsNullOrEmpty(Content)
+            ? 0f
+            : ctx.MinContentTextWidth(Content, ResolvedInherited, _spans);
+
     public override void Render(IRenderContext ctx)
     {
         if (string.IsNullOrEmpty(Content))

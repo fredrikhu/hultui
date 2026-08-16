@@ -90,9 +90,10 @@ public class FlexCrossSizeTests
     [Fact]
     public void AShrunkCellIsMeasuredAtTheWidthItShrankTo()
     {
-        // Two 200px-wide cells in a 100px row: each shrinks to 50px, and the 14-character
-        // label then needs two lines. Measured at its 200px basis it would claim one.
-        var wide = Flex.Row(gap: 0).Width(200).Children(Text.New("ABCDEFGHIJKLMN"));
+        // Two 200px-wide cells in a 100px row: each shrinks to 50px, and the label —
+        // a 7-character word, so a 49px minimum that 50px clears — then needs two
+        // lines. Measured at its 200px basis it would claim one.
+        var wide = Flex.Row(gap: 0).Width(200).Children(Text.New("ABCDEFG HIJKL"));
         var other = Flex.Row(gap: 0).Width(200).Children(Text.New("X"));
         var row = Flex.Row(gap: 0).Children(wide, other);
         var root = Flex.Column().Width(100).Height(600).Children(row);
@@ -101,6 +102,27 @@ public class FlexCrossSizeTests
 
         Assert.Equal(50, wide.Layout.Width, 1f);
         Assert.Equal(28, row.Layout.Height, 1f);
+    }
+
+    [Fact]
+    public void ACellHoldingOneUnbreakableWordRefusesToShrinkPastIt()
+    {
+        // The same row, with the label's space taken out. Fourteen characters with
+        // nowhere to break is a 98px minimum, so the cell stops there and overflows
+        // instead of shredding the word down each line. This is the shape of
+        // automatic minimum size that a table of long identifiers actually meets,
+        // and it is why min-content asks for the widest *word*: the renderer can
+        // still break a word by character when something genuinely forces it
+        // narrower, but nothing should choose that outcome on its own.
+        var wide = Flex.Row(gap: 0).Width(200).Children(Text.New("ABCDEFGHIJKLMN"));
+        var other = Flex.Row(gap: 0).Width(200).Children(Text.New("X"));
+        var row = Flex.Row(gap: 0).Children(wide, other);
+        var root = Flex.Column().Width(100).Height(600).Children(row);
+
+        _layout.PerformLayout(root, 100, 600);
+
+        Assert.Equal(98, wide.Layout.Width, 1f);
+        Assert.Equal(14, row.Layout.Height, 1f);
     }
 
     /// <summary>The other half of the engine. A container's height normally comes from its

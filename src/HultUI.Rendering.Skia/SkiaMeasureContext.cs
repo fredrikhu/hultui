@@ -36,4 +36,8 @@ public sealed class SkiaMeasureContext : IMeasureContext
         var layout = _pipeline.Layout(text, style, maxWidth, maxLines, overflow, spans);
         return layout.Size;
     }
+
+    public float MinContentTextWidth(string text, ResolvedInheritedStyle style,
+        IReadOnlyList<TextSpan>? spans = null)
+        => _pipeline.MinContentWidth(text, style, spans);
 }

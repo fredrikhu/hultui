@@ -79,10 +79,25 @@ text content; an explicit-height empty box is correctly capped to zero by the
 definite-size cap and cannot reproduce the failure. Whole solution (2,285 tests,
 all three app suites) green with zero churn.
 
-Remaining refinement (tracked): text min-content *width* measures at zero
-available width (per-character wrap), a floor slightly below the spec's
-widest-unbreakable-segment — conservative, never over-pins. Flex wrap containers
-use the row max rule per line-less approximation.
+**Refinement landed (2026-08-16): text answers with its widest word.** Text
+min-content *width* used to be measured at zero available width, which wraps at
+every character and so reported the widest *character* — a floor far below the
+spec's widest-unbreakable-segment. `TextPipeline.MinContentWidth` now measures
+the segments between UAX #14 break opportunities and takes the widest, cached
+per (text, font attributes) since the answer is width-independent. It reaches
+layout through `IMeasureContext.MinContentTextWidth` and a new
+`Element.MeasureMinContentWidth`, whose default is the old
+measure-at-zero-width — so every other leaf, and every measure context that
+does not override it, is unaffected.
+
+The subtlety worth recording: HultUI's renderer *will* break a word by character
+(`SplitByCharacter`) when a box is genuinely narrower than one, which is CSS's
+`overflow-wrap: break-word` rather than `anywhere` — breaks happen when forced,
+but they do not lower min-content. So the widest word is the right floor: nothing
+*chooses* to shred a word across lines, while a scroll container or an
+over-constrained layout can still force it and get a sane rendering.
+
+Flex wrap containers still use the row max rule per line-less approximation.
 
 ## Open decision
 

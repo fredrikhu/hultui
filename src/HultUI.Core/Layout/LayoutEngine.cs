@@ -848,10 +848,11 @@ public sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Min-content width (border-box). Text leaves are measured at zero available
-    /// width, which wraps at every character — a floor slightly below the spec's
-    /// widest-unbreakable-segment, i.e. conservative: it can only under-protect,
-    /// never pin an ancestor too wide. Noted in docs/plans/13-min-content.md.
+    /// Min-content width (border-box): the width below which an element's content
+    /// genuinely breaks. Leaves answer for themselves — text with its widest
+    /// unbreakable segment, everything else by measuring at zero available width.
+    /// Scroll/hidden overflow on the axis contributes zero, as in
+    /// <see cref="MinContentHeight"/>.
     /// </summary>
     private float MinContentWidth(Element e)
     {
@@ -868,7 +869,7 @@ public sealed partial class LayoutEngine
         float content;
         if (!hasFlow)
         {
-            content = e.MeasureContent(0f, LayoutSpace.Unbounded, _measureContext).Width;
+            content = e.MeasureMinContentWidth(_measureContext);
         }
         else
         {

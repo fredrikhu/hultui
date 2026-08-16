@@ -83,6 +83,12 @@ then correctness beats reuse. LTR text keeps every cache and fast path untouched
     a line that mixes directions. `TextLine.TryMoveCaretVisually` declines on
     lines with no RTL run, so LTR editing keeps the callers' own codepoint
     stepping — surrogate pairs and clusters included — bit for bit.
+  - **Ellipsis** (2026-08-16, with the styled-text twin). BiDi text used to clip
+    under `TextOverflow.Ellipsis` — the text simply stopped, with nothing to say
+    it had been cut. It now ellipsizes, and the mark goes where *reading* ends:
+    at the left edge in a right-to-left paragraph, with everything already
+    placed shifted right to make room. The prefix kept is logical, because
+    truncation removes the end of the text, not the right of the line.
   - **RTL scrollbar/gutter layout — not this project.** Mirroring the interface
     is logical-vs-physical box sides across the whole layout API, not a text
     concern; the verdict and its reasoning are in docs/DECISIONS.md, and it is

@@ -129,8 +129,14 @@ Stage 2 shipped: `TextSpan.Weight/Slant/FontSize`, span-aware `Layout` with the
 metric-only digest, renderer/measure wiring, layout-dirty on metric span change.
 Open follow-ups:
 
-- **Ellipsis on styled text clips instead of ellipsizing** — needs a styled
-  `BuildEllipsizedLine`.
+- ~~**Ellipsis on styled text clips instead of ellipsizing**~~ — done
+  (2026-08-16). `ApplyEllipsis` became one truncation policy taking a line
+  builder, so the plain, styled and direction-aware paths share the decision of
+  *whether* to truncate and differ only in how the final line is built.
+  `BuildStyledEllipsizedLine` binary-searches the longest span-aware prefix that
+  leaves room for the mark. The mark itself is drawn in the element's own style,
+  not the last span's — an ellipsis rendered bold because the last visible word
+  happened to be bold reads as content.
 - **`LineXAt`'s ligature fallback** measures prefixes with the element style; a
   boundary inside a ligature of a styled run can sit a hair off. Glyph-per-char
   runs (code, Latin UI text) are exact.

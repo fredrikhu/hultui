@@ -826,6 +826,16 @@ public abstract class Element
     // ──── Measurement (overridden by leaf elements) ────
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;
+
+    /// <summary>
+    /// The narrowest content width below which this element's own content genuinely
+    /// breaks, used by the automatic minimum size (docs/plans/13-min-content.md).
+    /// Measuring at zero available width answers that for most leaves; text
+    /// overrides it, because zero width wraps text at every character and reports
+    /// the widest character rather than the widest word.
+    /// </summary>
+    internal virtual float MeasureMinContentWidth(IMeasureContext ctx) =>
+        MeasureContent(0f, LayoutSpace.Unbounded, ctx).Width;
 }
 
 internal readonly record struct EventHandlerEntry(

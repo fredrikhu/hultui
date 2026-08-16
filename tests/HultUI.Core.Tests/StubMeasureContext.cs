@@ -32,4 +32,20 @@ public sealed class StubMeasureContext(float charWidth = 7f, float lineHeight = 
         float width = Math.Min(totalWidth, maxWidth);
         return new Size(width, lineCount * lineHeight);
     }
+
+    /// <summary>
+    /// The widest word, matching what the real pipeline answers. The default
+    /// interface implementation would measure at zero width and, because
+    /// <see cref="MeasureText"/> above wraps mid-word, report one character — which
+    /// is exactly the under-reporting this override exists to stop tests from
+    /// inheriting.
+    /// </summary>
+    public float MinContentTextWidth(string text, ResolvedInheritedStyle style,
+        IReadOnlyList<TextSpan>? spans = null)
+    {
+        float widest = 0f;
+        foreach (var word in text.Split(' ', '\n'))
+            widest = Math.Max(widest, word.Length * charWidth);
+        return widest;
+    }
 }
