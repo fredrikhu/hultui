@@ -16,13 +16,12 @@ namespace HultUI.Platform.SDL3;
 /// It also means the bytes have to outlive the call, so each offer is held in a table
 /// until SDL says the clipboard changed hands.</para>
 ///
-/// <para><b>Windows, multiple formats.</b> SDL's Windows backend serves the first offered
-/// format's bytes whatever type is asked for, so a two-format offer reads back as one
-/// format twice. Reproduced with a single-format offer working correctly and a two-format
-/// offer failing in both orders, which puts it below this class rather than in it. The
-/// fix is direct Win32 clipboard calls or an SDL change; until then, offer one format on
-/// Windows. <see cref="GetText"/> asks for the text alternative by name so it is at least
-/// right whenever the platform answers honestly.</para>
+/// <para><b>Windows goes around SDL.</b> Its backend serves the first offered format's
+/// bytes whatever type is asked for — reproduced with a single format working and two
+/// failing in either order — which defeats the entire point of offering alternatives. The
+/// typed-data methods therefore route through <see cref="WindowsClipboard"/> and the Win32
+/// clipboard API there. Plain text still goes through SDL on every platform, since that
+/// part works and SDL already handles the encoding.</para>
 /// </summary>
 public sealed class SDL3Clipboard : IClipboard
 {
@@ -65,6 +64,9 @@ public sealed class SDL3Clipboard : IClipboard
 
     public unsafe bool HasFormat(string mimeType)
     {
+        if (OperatingSystem.IsWindows())
+            return WindowsClipboard.HasFormat(mimeType);
+
         var bytes = SDL3Window.MarshalUtf8(mimeType);
         fixed (byte* ptr = bytes)
             return SDL_HasClipboardData(ptr);
@@ -72,6 +74,9 @@ public sealed class SDL3Clipboard : IClipboard
 
     public unsafe byte[]? GetData(string mimeType)
     {
+        if (OperatingSystem.IsWindows())
+            return WindowsClipboard.TryGetData(_window.GetWin32Hwnd(), mimeType);
+
         var mime = SDL3Window.MarshalUtf8(mimeType);
         fixed (byte* mimePtr = mime)
         {
@@ -103,6 +108,12 @@ public sealed class SDL3Clipboard : IClipboard
             return;
         }
 
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsClipboard.TrySetData(_window.GetWin32Hwnd(), data);
+            return;
+        }
+
         nint id = Interlocked.Increment(ref _nextId);
         var copy = new Dictionary<string, byte[]>(data.Count, StringComparer.Ordinal);
         var pins = new List<GCHandle>(data.Count);
@@ -131,6 +142,12 @@ public sealed class SDL3Clipboard : IClipboard
 
     public void Clear()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsClipboard.Clear(_window.GetWin32Hwnd());
+            return;
+        }
+
         SDL_ClearClipboardData();
     }
 

@@ -44,13 +44,11 @@ public interface IClipboard
     /// to the first, it would replace it, because taking ownership of the clipboard
     /// discards whatever was there.</para>
     ///
-    /// <para><b>Known limitation on Windows.</b> Offering more than one format currently
-    /// serves the <i>first</i> format's bytes for every requested type — SDL's Windows
-    /// backend does not honour the requested MIME type. Verified against SDL 3 (ppy.SDL3-CS
-    /// 2026.320): a single format round-trips correctly, and with two, both read back as
-    /// whichever was listed first, regardless of order. Until that is fixed upstream or
-    /// replaced with direct Win32 clipboard calls, offer one format on Windows and treat
-    /// the multi-format path as Linux/macOS only.</para>
+    /// <para>MIME types are mapped to whatever the platform actually uses, so the data is
+    /// visible to other applications rather than only to other HultUI apps:
+    /// <see cref="ClipboardFormats.PlainText"/> and <see cref="ClipboardFormats.Html"/> in
+    /// particular land in the formats Word, the browsers and every text editor look for.
+    /// Anything unmapped is offered under its MIME string and round-trips verbatim.</para>
     /// </summary>
     void SetData(IReadOnlyDictionary<string, byte[]> data);
 
