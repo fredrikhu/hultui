@@ -203,7 +203,7 @@ public sealed partial class LayoutEngine
 
             // ── Phase 3: Resolve flex grow/shrink per line ──
             foreach (var line in lines)
-                ResolveFlexGrowShrink(line, mainDistribute, mainGap);
+                ResolveFlexGrowShrink(line, mainDistribute, mainGap, isRow, crossAvailable);
 
             // ── Phase 3.5: Re-measure items whose main size flexing changed ──
             foreach (var line in lines)
@@ -557,7 +557,7 @@ public sealed partial class LayoutEngine
             var lines = CollectLines(itemsArray, itemCount, mainDistribute, mainGap, isWrap);
 
             foreach (var line in lines)
-                ResolveFlexGrowShrink(line, mainDistribute, mainGap);
+                ResolveFlexGrowShrink(line, mainDistribute, mainGap, isRow, crossAvailable);
 
             // The measured height of a row is the height its parent will force on it, so
             // this pass needs the same post-flex cross sizes the layout pass takes.
@@ -680,7 +680,7 @@ public sealed partial class LayoutEngine
         return lines;
     }
 
-    private static void ResolveFlexGrowShrink(FlexLine line, float mainAvailable, float gap)
+    private void ResolveFlexGrowShrink(FlexLine line, float mainAvailable, float gap, bool isRow, float crossAvailable)
     {
         var items = line.Items;
         float totalMainSize = 0;
@@ -714,25 +714,182 @@ public sealed partial class LayoutEngine
         }
         else if (remainingSpace < 0)
         {
-            float totalShrink = 0;
-            foreach (var item in items)
-                totalShrink += item.Element.FlexRead.FlexShrink * item.MainSize;
-
-            if (totalShrink > 0)
+            // Automatic minimum size (CSS min-width/height: auto): shrinking never
+            // compresses an item below its content's min-content size. Floors are
+            // computed lazily — only overflowing lines pay for them — and follow
+            // css-flexbox-1 §9.7's shape: distribute, clamp violators to their
+            // floor and freeze them, then redistribute the shortfall among the
+            // rest. An item with no floor (floor 0) behaves as before.
+            float[]? floors = null;
+            for (int i = 0; i < items.Count; i++)
             {
-                for (int i = 0; i < items.Count; i++)
+                var el = items[i].Element;
+                if (el.FlexRead.FlexShrink <= 0) continue;
+                float floor = AutomaticMinMain(el, isRow, mainAvailable, crossAvailable);
+                if (floor > 0)
                 {
-                    var item = items[i];
-                    float shrinkFactor = item.Element.FlexRead.FlexShrink * item.MainSize;
-                    if (shrinkFactor > 0)
-                    {
-                        float reduction = -remainingSpace * (shrinkFactor / totalShrink);
-                        float shrunk = item.MainSize - reduction;
-                        items[i] = item with { MainSize = float.IsNegative(shrunk) ? 0 : shrunk };
-                    }
+                    floors ??= new float[items.Count];
+                    floors[i] = floor;
                 }
             }
+
+            Span<bool> frozen = items.Count <= 64 ? stackalloc bool[items.Count] : new bool[items.Count];
+            float deficit = -remainingSpace;
+            while (deficit > 0.01f)
+            {
+                float totalShrink = 0;
+                for (int i = 0; i < items.Count; i++)
+                    if (!frozen[i])
+                        totalShrink += items[i].Element.FlexRead.FlexShrink * items[i].MainSize;
+                if (totalShrink <= 0) break;
+
+                bool anyFroze = false;
+                float applied = 0;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (frozen[i]) continue;
+                    var item = items[i];
+                    float shrinkFactor = item.Element.FlexRead.FlexShrink * item.MainSize;
+                    if (shrinkFactor <= 0) continue;
+
+                    float reduction = deficit * (shrinkFactor / totalShrink);
+                    float floor = floors?[i] ?? 0f;
+                    float shrunk = item.MainSize - reduction;
+                    if (shrunk <= floor)
+                    {
+                        applied += item.MainSize - floor;
+                        items[i] = item with { MainSize = floor };
+                        frozen[i] = true;
+                        anyFroze = true;
+                    }
+                    else
+                    {
+                        applied += reduction;
+                        items[i] = item with { MainSize = shrunk };
+                    }
+                }
+
+                deficit -= applied;
+                if (!anyFroze) break;   // everything distributed without hitting a floor
+            }
         }
+    }
+
+    /// <summary>
+    /// The automatic minimum (margin-box) main size of a shrinking flex item —
+    /// CSS <c>min-width/height: auto</c>. An explicit min on the axis wins; otherwise
+    /// the content-based minimum, in which scroll containers contribute zero (the
+    /// rule whose absence sank the Phase-1-approximation attempt — see
+    /// docs/plans/13-min-content.md and the note in MeasureFlexItems).
+    /// </summary>
+    private float AutomaticMinMain(Element child, bool isRow, float mainAvailable, float crossAvailable)
+    {
+        var box = child.BoxRead;
+        var margin = box.Margin;
+        float marginMain = isRow ? margin.Horizontal : margin.Vertical;
+
+        var explicitMin = isRow ? box.MinWidth : box.MinHeight;
+        if (!explicitMin.IsNone)
+            return (explicitMin.Resolve(mainAvailable) ?? 0f) + marginMain;
+
+        float crossAvail = Math.Max(0f, crossAvailable - (isRow ? margin.Vertical : margin.Horizontal));
+        float content = isRow ? MinContentWidth(child) : MinContentHeight(child, crossAvail);
+        return content + marginMain;
+    }
+
+    /// <summary>
+    /// Min-content height (border-box) of an element at a given available width: the
+    /// height below which its content genuinely breaks. Scroll/hidden overflow on
+    /// the axis contributes zero — a scroll container's whole purpose is to be
+    /// smaller than its content. A definite height caps the answer (a box that says
+    /// it is 40px tall needs at most 40px protected); an explicit min raises it.
+    /// </summary>
+    private float MinContentHeight(Element e, float availWidth)
+    {
+        var box = e.BoxRead;
+        if (box.OverflowY != Overflow.Visible) return 0f;
+
+        var spacing = box.Padding + box.BorderWidth;
+        float inner = Math.Max(0f, availWidth - spacing.Horizontal);
+
+        var children = e.Children;
+        bool hasFlow = false;
+        for (int i = 0; i < children.Count; i++)
+            if (children[i].PositionRead.Type != PositionType.Absolute) { hasFlow = true; break; }
+
+        float content;
+        if (!hasFlow)
+        {
+            content = e.MeasureContent(inner, LayoutSpace.Unbounded, _measureContext).Height;
+        }
+        else
+        {
+            bool row = e.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+            content = 0f;
+            int flowCount = 0;
+            for (int i = 0; i < children.Count; i++)
+            {
+                var c = children[i];
+                if (c.PositionRead.Type == PositionType.Absolute) continue;
+                // For a row, each child is offered the full inner width — an
+                // over-generous width can only shorten a child, so the max stays a
+                // floor rather than an overestimate.
+                float h = MinContentHeight(c, inner) + c.BoxRead.Margin.Vertical;
+                if (row) content = Math.Max(content, h);
+                else { content += h; flowCount++; }
+            }
+            if (!row && flowCount > 1) content += e.FlexRead.ResolvedRowGap * (flowCount - 1);
+        }
+
+        float result = content + spacing.Vertical;
+        if (box.Height.Resolve(LayoutSpace.Unbounded) is { } definite) result = Math.Min(result, definite);
+        if (box.MinHeight.Resolve(LayoutSpace.Unbounded) is { } explicitMin) result = Math.Max(result, explicitMin);
+        return result;
+    }
+
+    /// <summary>
+    /// Min-content width (border-box). Text leaves are measured at zero available
+    /// width, which wraps at every character — a floor slightly below the spec's
+    /// widest-unbreakable-segment, i.e. conservative: it can only under-protect,
+    /// never pin an ancestor too wide. Noted in docs/plans/13-min-content.md.
+    /// </summary>
+    private float MinContentWidth(Element e)
+    {
+        var box = e.BoxRead;
+        if (box.OverflowX != Overflow.Visible) return 0f;
+
+        var spacing = box.Padding + box.BorderWidth;
+
+        var children = e.Children;
+        bool hasFlow = false;
+        for (int i = 0; i < children.Count; i++)
+            if (children[i].PositionRead.Type != PositionType.Absolute) { hasFlow = true; break; }
+
+        float content;
+        if (!hasFlow)
+        {
+            content = e.MeasureContent(0f, LayoutSpace.Unbounded, _measureContext).Width;
+        }
+        else
+        {
+            bool row = e.FlexRead.Direction is FlexDirection.Row or FlexDirection.RowReverse;
+            content = 0f;
+            int flowCount = 0;
+            for (int i = 0; i < children.Count; i++)
+            {
+                var c = children[i];
+                if (c.PositionRead.Type == PositionType.Absolute) continue;
+                float w = MinContentWidth(c) + c.BoxRead.Margin.Horizontal;
+                if (row) { content += w; flowCount++; }
+                else content = Math.Max(content, w);
+            }
+            if (row && flowCount > 1) content += e.FlexRead.ResolvedColumnGap * (flowCount - 1);
+        }
+
+        float result = content + spacing.Horizontal;
+        if (box.Width.Resolve(LayoutSpace.Unbounded) is { } definite) result = Math.Min(result, definite);
+        if (box.MinWidth.Resolve(LayoutSpace.Unbounded) is { } explicitMin) result = Math.Max(result, explicitMin);
+        return result;
     }
 
     /// <summary>

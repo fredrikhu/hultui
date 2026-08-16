@@ -84,7 +84,7 @@ public class FlexShrinkTests
         Assert.Equal(100, tall.Layout.Height);
     }
 
-    [Fact(Skip = "Automatic minimum size for flex items is not implemented — needs a real min-content pass.")]
+    [Fact]
     public void BoundedContainer_DoesNotCrushContentBelowItsMinimum()
     {
         // CSS min-height:auto — an auto-sized item should not be compressed below
@@ -104,6 +104,34 @@ public class FlexShrinkTests
         _layout.PerformLayout(container, 200, 200);
 
         Assert.Equal(14, card.Layout.Height);
+    }
+
+    [Fact]
+    public void AScrollViewInAncestors_DoesNotPinThemToItsContentHeight()
+    {
+        // The reverted approximation's failure shape (docs/plans/13-min-content.md):
+        // the min-content floor must see a scroll container as ZERO, or an auto-sized
+        // wrapper around one is pinned to the entire scrollable height — 14,640px
+        // tall, viewport collapsed, culling dead. The floor exists to protect
+        // content; a scroll view's content is, by design, allowed to not fit.
+        // Real content, not an explicit height: 600 text rows at the stub's 14px
+        // line height is an 8,400px min-content column — the floor must not see it
+        // through the scroll view.
+        var list = BoxElement.New();
+        for (int i = 0; i < 600; i++)
+            list.AddChild(TextElement.New($"row {i}"));
+        var scroll = ScrollViewElement.New(); scroll.AddChild(list);
+        var wrapper = BoxElement.New(); wrapper.AddChild(scroll);
+        var sibling = Box(50); sibling.Flex.FlexShrink = 0;
+        var window = Box(600);
+        window.AddChild(wrapper);
+        window.AddChild(sibling);
+
+        _layout.PerformLayout(window, 800, 600);
+
+        Assert.True(wrapper.Layout.Height <= 600,
+            $"the scroll wrapper was pinned to {wrapper.Layout.Height}px — the floor "
+            + "counted the scrollable content instead of zeroing the scroll container");
     }
 
     [Fact]

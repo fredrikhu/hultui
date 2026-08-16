@@ -66,6 +66,24 @@ per element beside `MeasureCache` and invalidated by layout dirt.
    an eyeball pass gate the merge; some `FlexShrink(0)` workarounds become
    removable afterwards.
 
+## Status (2026-08-16): shipped, default-on
+
+Implemented per the sequencing above. The floor lives in the shrink branch of
+`ResolveFlexGrowShrink` (LayoutEngine) with css-flexbox §9.7-style iterative
+freezing; floors are computed lazily, so only overflowing lines pay. Explicit
+mins now also floor shrinking (they previously did not). The shrink benchmark got
+*faster* (0.91→0.59, 0.82→0.67, 0.42→0.25 ms p50): floored items land on the size
+they measured at, so Phase 3.5's re-measure of moved items shrinks. The scroll-
+zero anti-regression test was verified red against the rule's removal — with real
+text content; an explicit-height empty box is correctly capped to zero by the
+definite-size cap and cannot reproduce the failure. Whole solution (2,285 tests,
+all three app suites) green with zero churn.
+
+Remaining refinement (tracked): text min-content *width* measures at zero
+available width (per-character wrap), a floor slightly below the spec's
+widest-unbreakable-segment — conservative, never over-pins. Flex wrap containers
+use the row max rule per line-less approximation.
+
 ## Open decision
 
 Whether the automatic minimum ships **on by default** (CSS semantics, matches
