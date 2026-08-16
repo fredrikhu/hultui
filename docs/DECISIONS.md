@@ -76,6 +76,7 @@ HultUI (meta-package)
 | Small set of inheritable properties | FontFamily, FontSize, FontWeight, TextColor, TextDirection, Cursor. Null = inherit from parent |
 | Everything else explicit per element | Padding, margin, background, border are not inherited — avoids cascade complexity |
 | Theme object for root defaults | One Theme per Application. Swappable at runtime. Provides root values for inherited properties |
+| Theme extension by key, not by selector | A control shipped outside the framework needs a themable slot. `theme.Get<T>()` over a keyed store, defaults from `IThemeExtension<T>.CreateDefault(theme)`, overridden with `theme.With(...)`. One dictionary lookup at style time — no cascade, no specificity, and the theme object stays inspectable. The built-in control themes are facades over the same store, so the framework's own controls are not a privileged case |
 | Style resolution is O(1) with caching | Resolved value cached on element. Invalidated only when ancestor changes |
 
 ---

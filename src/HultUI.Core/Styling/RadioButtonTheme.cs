@@ -2,10 +2,18 @@ using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Styling;
 
-public sealed class RadioButtonTheme
+public sealed class RadioButtonTheme : IThemeExtension<RadioButtonTheme>
 {
     public float Size { get; init; } = 18f;
     public Color? BorderColor { get; init; }
     public Color? SelectedColor { get; init; }
     public Color? DotColor { get; init; }
+
+    /// <summary>
+    /// The built-in defaults are literal rather than derived from the palette: they are the
+    /// values these controls already shipped with, and deriving them here would repaint
+    /// every existing app. New extensions should prefer deriving from the theme — see
+    /// <see cref="IThemeExtension{TSelf}"/>.
+    /// </summary>
+    public static RadioButtonTheme CreateDefault(Theme theme) => new();
 }

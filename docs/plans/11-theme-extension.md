@@ -1,6 +1,6 @@
 # Plan 11: Theme extension by key
 
-**Priority:** Medium now, high the day someone ships a control library | **Effort:** Design-heavy, code-light | **Status:** Design — awaiting feedback
+**Priority:** Medium now, high the day someone ships a control library | **Effort:** Design-heavy, code-light | **Status:** Implemented (facade approach)
 
 ## Problem
 
@@ -102,20 +102,22 @@ literal dark `TooltipTheme` and `ContextMenuTheme` into itself — seven hardcod
 values that any third palette would have to copy again. Handing the theme to
 `CreateDefault` is what makes the first pattern the easy one.
 
-## Design decisions — ask for feedback
+## Design decisions — settled
 
-### 1. Do the built-in control themes migrate to the same mechanism?
+### 1. Do the built-in control themes migrate to the same mechanism? — **Yes, as facades**
 
-The review's actual complaint is the asymmetry: built-ins get a property, everyone else gets
-nothing. Two ways to close it.
+The review's actual complaint was the asymmetry: built-ins get a property, everyone else
+gets nothing. The six properties are now facades over the store:
 
-| Option | What it costs |
-|--------|---------------|
-| **Leave built-ins alone** | Two idioms forever. The framework visibly privileges itself, which is what was objected to. |
-| **Keep the properties as facades over the store** (recommended) | `public ButtonTheme Button { get => Get<ButtonTheme>(); init => Set(value); }`. Existing `new Theme { Button = … }` keeps compiling, `Theme.Dark`'s initializer keeps working, and there is one mechanism underneath. |
+```csharp
+public ButtonTheme Button { get => Get<ButtonTheme>(); init => Set(value); }
+```
 
-Recommend the facade, but as a **second step** — step one is purely additive and cannot
-break anything, so it can land and be used while this is still being argued about.
+`new Theme { Button = … }` still compiles, `Theme.Dark`'s initializer still works, all three
+apps built unchanged, and there is one mechanism underneath. The built-in defaults stayed
+literal rather than becoming derived — they are the values these controls already shipped
+with, and deriving them would have repainted every app. `CreateDefault` still receives the
+theme, so new extensions get the good pattern for free.
 
 ### 2. Naming
 
@@ -124,20 +126,20 @@ sites, and `With` matches the copy-on-write convention it actually implements. A
 considered: `Extension<T>()` (accurate, wordier), `Extend<T>()` (reads like mutation, which
 it must not be).
 
-### 3. Per-instance overrides
+### 3. Per-instance overrides — **none**
 
-Recommend **no framework mechanism**. A control author who wants a local tweak exposes it
+No framework mechanism. A control author who wants a local tweak exposes it
 on their own fluent chain (`gauge.FillColor(x)`), exactly as built-in elements do. Adding a
 per-element theme slot would be the first step toward a cascade, and the existing builder
 covers the need.
 
 ## Analysis steps
 
-1. Confirm the style pass picks extensions up on a theme switch with no extra work.
-   `Application.Theme`'s setter calls `MarkStyleDirty()` on every window, and
-   `StyleResolver.ResolveRecursive` calls `element.ApplyTheme(theme)` for every element it
-   visits — so a control reading `theme.Get<T>()` inside `ApplyTheme` should re-read the new
-   theme on the next frame. Verify with a headless test that switches themes.
+1. ~~Confirm the style pass picks extensions up on a theme switch with no extra work.~~
+   **Confirmed, no extra work needed.** `Application.Theme`'s setter marks every window
+   style-dirty and `StyleResolver` calls `ApplyTheme` on each element it visits, so a
+   control reading `theme.Get<T>()` picks up the new palette on the next frame. Pinned by
+   `ThirdPartyControlThemingTests.ARuntimeThemeSwitch_ReachesTheExtension`.
 2. Measure the cost of `Get<T>()`. It runs per themed element per style pass, so it must be
    a dictionary hit and nothing more once the default has been materialized. If it shows up,
    the fallback is a per-closed-generic static cache keyed by theme identity.

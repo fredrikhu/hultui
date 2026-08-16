@@ -2,7 +2,7 @@ using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Styling;
 
-public sealed class ContextMenuTheme
+public sealed class ContextMenuTheme : IThemeExtension<ContextMenuTheme>
 {
     public Color Background { get; init; } = new(255, 255, 255);        // white
     public Color BorderColor { get; init; } = new(226, 232, 240);       // slate-200
@@ -21,4 +21,12 @@ public sealed class ContextMenuTheme
     public float SeparatorMargin { get; init; } = 4f;
     public float ShortcutGap { get; init; } = 24f;
     public float IconGap { get; init; } = 9f;
+
+    /// <summary>
+    /// The built-in defaults are literal rather than derived from the palette: they are the
+    /// values these controls already shipped with, and deriving them here would repaint
+    /// every existing app. New extensions should prefer deriving from the theme — see
+    /// <see cref="IThemeExtension{TSelf}"/>.
+    /// </summary>
+    public static ContextMenuTheme CreateDefault(Theme theme) => new();
 }
