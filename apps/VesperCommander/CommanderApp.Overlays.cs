@@ -293,22 +293,31 @@ public partial class CommanderApp
     private Element BuildOverwrite(TransferOp op)
     {
         var e = op.Items[op.Index];
-        var destPath = System.IO.Path.Combine(op.DestDir, e.Name);
         long tSize = 0; DateTime tDate = default;
-        try
+        // An archive member has nothing on disk to stat, so what it would replace was recorded
+        // when the conflict was found. Only a real destination is measured here.
+        if (op.ArchiveTargets is { } targets && targets.TryGetValue(op.Index, out var member))
+            (tSize, tDate) = member;
+        else
         {
-            if (File.Exists(destPath)) { var fi = new FileInfo(destPath); tSize = fi.Length; tDate = fi.LastWriteTime; }
-            else if (Directory.Exists(destPath)) tDate = new DirectoryInfo(destPath).LastWriteTime;
+            var destPath = System.IO.Path.Combine(op.DestDir, e.Name);
+            try
+            {
+                if (File.Exists(destPath)) { var fi = new FileInfo(destPath); tSize = fi.Length; tDate = fi.LastWriteTime; }
+                else if (Directory.Exists(destPath)) tDate = new DirectoryInfo(destPath).LastWriteTime;
+            }
+            catch { /* target stat failed — show what we have */ }
         }
-        catch { /* target stat failed — show what we have */ }
 
         var card = DialogCard(440);
 
         var head = Flex.Column(gap: 4).Padding(new Thickness(14, 16, 4, 16));
-        head.AddChild(Text.New("File already exists").FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
+        head.AddChild(Text.New(op.ArchiveTargets != null ? "Already in the archive" : "File already exists")
+            .FontSize(13f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Text));
         var line = Flex.Row(gap: 5).AlignItems(AlignItems.Center);
         line.AddChild(Ui.Mono(e.Name, 12f, Nocturne.Text).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
-        line.AddChild(Text.New("already exists in the target").FontSize(12f).TextColor(Nocturne.On(0.60)));
+        line.AddChild(Text.New(op.ArchiveTargets != null ? "is already in this archive" : "already exists in the target")
+            .FontSize(12f).TextColor(Nocturne.On(0.60)));
         head.AddChild(line);
         card.AddChild(head);
 
@@ -360,7 +369,7 @@ public partial class CommanderApp
             ? $"{processed} of {op.Items.Count} · {op.PackTarget}"
             : $"{processed} of {op.Items.Count}";
         var card = Card(560,
-            op.IsPack ? "Packing" : op.IsMove ? "Moving" : "Copying", subtitle,
+            op.IsPack ? op.PackVerb : op.IsMove ? "Moving" : "Copying", subtitle,
             op.IsPack ? Glyphs.Pack : op.IsMove ? Glyphs.Swap : Glyphs.Copy);
 
         var body = Flex.Column(gap: 12).Padding(new Thickness(12, 16, 12, 16));
@@ -441,7 +450,7 @@ public partial class CommanderApp
         byte st = op.Status[i];
         (string icon, Color color, string text) = st switch
         {
-            1 => (Glyphs.Play, Nocturne.Accent, op.IsPack ? "packing" : "copying"),
+            1 => (Glyphs.Play, Nocturne.Accent, op.IsPack ? op.PackRowVerb : "copying"),
             2 => (Glyphs.Check, DoneGreen, "done"),
             3 => (Glyphs.Minus, Nocturne.On(0.35), op.IsPack ? "missing" : "skipped"),
             4 => (Glyphs.Close, Nocturne.MarkRed, "failed"),

@@ -150,6 +150,20 @@ public partial class CommanderApp : Component, IDisposable
         /// <summary>The archive being written, for the pack overlay's subtitle.</summary>
         public string PackTarget = "";
 
+        /// <summary>The overlay's title for a <see cref="IsPack"/> op — "Packing" a new archive,
+        /// "Adding to" one that already exists.</summary>
+        public string PackVerb = "Packing";
+
+        /// <summary>What a queue row says while it is the one being written. Separate from
+        /// <see cref="PackVerb"/> because the title is a heading and this is a status: "Adding to"
+        /// reads as the archive's name following it, which a row has nothing to follow with.</summary>
+        public string PackRowVerb = "packing";
+
+        /// <summary>For an add into an archive: the member each row would replace, keyed by row.
+        /// The overwrite dialog stats its destination on disk, and an archive member isn't
+        /// there — without this the Target column reports every member as absent.</summary>
+        public Dictionary<int, (long Size, DateTime Modified)>? ArchiveTargets;
+
         /// <summary>The backend reports one percentage for the whole run rather than bytes per
         /// member — 7-Zip, which is packing in its own process. The overlay drops the per-file
         /// bar for these: it has nothing to fill it with, and a bar pinned at 0% beside a moving
@@ -1101,16 +1115,27 @@ public partial class CommanderApp : Component, IDisposable
     {
         if (!Clipboard.TryGetFiles(out var paths, out bool cut) || paths.Count == 0) return;
         char side = _active;
-        if (LockedBlock(side, "paste into a locked tab") || InArchiveBlock(side) || ResultsBlock(side)) return;
+        if (LockedBlock(side, "paste into a locked tab") || ResultsBlock(side)) return;
+        bool intoArchive = InArchive(side);
+        if (intoArchive && !CanAddToArchive(side)) return;
         var dest = Dir(side);
         var items = new List<FileEntry>();
         foreach (var p in paths)
         {
             if (!FileOps.Exists(p)) continue;
-            if (PathEquals(System.IO.Path.GetDirectoryName(p) ?? "", dest)) continue;   // same-folder paste = no-op
+            // The same-folder check is a disk one: an archive's contents are never the clipboard
+            // paths' own folder, so it has nothing to say about a paste going into one.
+            if (!intoArchive && PathEquals(System.IO.Path.GetDirectoryName(p) ?? "", dest)) continue;
             items.Add(FileOps.EntryFromPath(p));
         }
         if (items.Count == 0) return;
+
+        if (intoArchive)
+        {
+            StartArchiveAdd(side, side, items, move: cut);
+            if (cut) { Clipboard.Clear(); _cutPending.Clear(); }
+            return;
+        }
 
         var op = new TransferOp(items) { IsMove = cut, Source = side, DestDir = dest };
         _op = op;
@@ -1345,8 +1370,23 @@ public partial class CommanderApp : Component, IDisposable
         items = TransferItemsFrom(side, items, dest);
         if (items.Count == 0) return;
         if (LockedBlock(side, "move out of a locked tab") || LockedBlock(other, "move into a locked tab")) return;
-        if (InArchiveBlock(side) || InArchiveBlock(other)) return;   // read-only in v1
+        // Moving *out* of an archive is still refused: it would mean extracting and then deleting
+        // members, two writes to different places, and F5 already copies out.
+        if (InArchiveBlock(side)) return;
         if (ResultsBlock(other)) return;                             // nothing can be moved *into* results
+        // Moving *into* one adds, then deletes the sources that landed. Confirmed like any other
+        // move: what makes it a move rather than a copy is that the originals stop existing.
+        if (InArchive(other))
+        {
+            if (!CanAddToArchive(other)) return;
+            _confirm = new ConfirmSpec(
+                $"Move {(items.Count == 1 ? "item" : "items")} into archive",
+                $"Move {SelectionLabel(side)} into\n{dest}\n\nThe originals are deleted once they are in the archive.",
+                "Move", Danger: true,
+                () => { _confirm = null; StartArchiveAdd(side, other, items, move: true); });
+            MarkDirty();
+            return;
+        }
 
         _confirm = new ConfirmSpec(
             $"Move {(items.Count == 1 ? "item" : "items")}",
@@ -1375,8 +1415,15 @@ public partial class CommanderApp : Component, IDisposable
         items = TransferItemsFrom(side, items, dest);
         if (items.Count == 0) return;
 
-        if (LockedBlock(other, "copy into a locked tab") || InArchiveBlock(other)) return;
+        if (LockedBlock(other, "copy into a locked tab")) return;
         if (ResultsBlock(other)) return;
+        // The other pane is inside an archive: copy in rather than refuse. CanAddToArchive posts
+        // its own reason for the archives that can't take one (rar, or a format needing 7-Zip).
+        if (InArchive(other))
+        {
+            if (CanAddToArchive(other)) StartArchiveAdd(side, other, items, move: false);
+            return;
+        }
         var op = new TransferOp(items) { IsMove = false, Source = side, DestDir = dest };
         _op = op;
         _progressOpen = true;

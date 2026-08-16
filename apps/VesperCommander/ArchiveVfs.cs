@@ -348,6 +348,128 @@ public static class ArchiveVfs
     private static DateTimeOffset ZipStamp(DateTime t) =>
         t.Year is < 1980 or > 2107 ? new DateTime(1980, 1, 1, 0, 0, 0) : t;
 
+    /// <summary>Every file member in the archive, keyed by '/'-normalised stored path, with its
+    /// size and mtime. What an add consults to find out whether it would replace something.
+    ///
+    /// <para>Not <see cref="ListEntries"/>, which returns one level: adding a folder brings
+    /// members at depths the pane never showed, and each of those can collide too. Null when the
+    /// archive can't be read.</para>
+    ///
+    /// <para><paramref name="sevenZip"/> is whether 7-Zip is <em>available</em>, not whether to
+    /// use it — which backend reads is decided here from the format, so no caller can pair a
+    /// plain zip with the wrong reader and get a listing that disagrees with the pane's.</para></summary>
+    public static Dictionary<string, (long Size, DateTime Modified)>? AllMembers(
+        string archiveFile, string? password, bool sevenZip)
+    {
+        if (!File.Exists(archiveFile)) return null;
+        string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
+        try
+        {
+            if (ext is ".zip" && password is null)
+            {
+                using var zip = ZipFile.OpenRead(archiveFile);
+                var map = new Dictionary<string, (long, DateTime)>(StringComparer.OrdinalIgnoreCase);
+                foreach (var e in zip.Entries)
+                {
+                    if (ArchivePath.SafeMemberPath(e.FullName) is not { } full) continue;
+                    if (full.EndsWith('/')) continue;               // a directory marker
+                    map[full.TrimEnd('/')] = (e.Length, e.LastWriteTime.DateTime);
+                }
+                return map;
+            }
+            return sevenZip ? SevenZip.AllMembers(archiveFile, password) : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Add <paramref name="items"/> to an existing archive, storing them under
+    /// <paramref name="internalPath"/> — the folder inside the archive the pane is showing.
+    /// <c>Entry</c> is the stored path <em>relative to that folder</em>.
+    ///
+    /// <para>Same-named members are replaced, so conflicts are the caller's to resolve first;
+    /// this is the write, not the decision.</para>
+    ///
+    /// <para>Backends differ in what they can be told. The BCL writer takes an entry name per
+    /// source, so it stores straight into the right place. 7-Zip's command line has no way to
+    /// remap a name while adding — it packs by source path — so its sources go in at the root
+    /// and are then renamed into place with <c>7z rn</c>, which moves whole subtrees without
+    /// rewriting bytes. That detour is refused rather than risked when a name it would land on
+    /// at the root is already taken; see <paramref name="internalPath"/>.</para>
+    /// </summary>
+    /// <summary>Which writer an add to this archive will go through: 7-Zip when the format or an
+    /// encryption password puts it beyond the BCL. Public because the UI has to agree with it —
+    /// the two backends report progress differently (bytes per member vs one run percentage), so
+    /// a caller that guesses wrong shows a bar that never fills.</summary>
+    public static bool WritesThroughSevenZip(string archiveFile, string? password) =>
+        Path.GetExtension(archiveFile).ToLowerInvariant() is not ".zip" || password is not null;
+
+    public static string? AddMembers(string archiveFile, string internalPath,
+        IReadOnlyList<(string Source, string Entry)> items, string? password, bool sevenZip,
+        PackProgress? progress = null)
+    {
+        if (items.Count == 0) return null;
+        if (!File.Exists(archiveFile)) return "That archive is no longer there";
+
+        string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
+        if (!Caps(ext, sevenZip).Write)
+            return ext is ".rar"
+                ? "rar archives are read-only"
+                : "Adding to this format needs 7-Zip — set it in Tools → Archiver";
+
+        string prefix = internalPath.Replace('\\', '/').Trim('/');
+
+        if (!WritesThroughSevenZip(archiveFile, password))
+        {
+            // The entry name carries the folder, so one Update pass puts everything in place.
+            var named = items
+                .Select(i => (i.Source, Entry: prefix.Length == 0 ? i.Entry : prefix + "/" + i.Entry.Replace('\\', '/')))
+                .ToList();
+            return CreateZip(named, archiveFile, CompressionLevel.Optimal, append: true, progress);
+        }
+
+        // ── the 7-Zip detour ────────────────────────────────────────────────
+        // The top-level names the sources will land under at the archive root.
+        var roots = items
+            .Select(i => i.Entry.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (prefix.Length > 0)
+        {
+            var existing = AllMembers(archiveFile, password, sevenZip);
+            if (existing != null)
+            {
+                // A root member of the same name would be overwritten by the add and then
+                // renamed away — losing a file nobody was asked about. Refused, not risked.
+                var clash = roots.FirstOrDefault(r =>
+                    existing.Keys.Any(k => k.Equals(r, StringComparison.OrdinalIgnoreCase)
+                                        || k.StartsWith(r + "/", StringComparison.OrdinalIgnoreCase)));
+                if (clash != null)
+                    return $"\"{clash}\" is already at the top level of this archive — "
+                         + "add it there instead, or rename it first";
+
+                // Clear what the closing rename is about to land on. These are members the
+                // caller already decided to replace — an unapproved one never reaches here —
+                // and "rn" onto an occupied path fails rather than merging.
+                var occupied = roots
+                    .Select(r => prefix + "/" + r)
+                    .Where(t => existing.Keys.Any(k => k.Equals(t, StringComparison.OrdinalIgnoreCase)
+                                                    || k.StartsWith(t + "/", StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                if (occupied.Count > 0 && SevenZip.Delete(archiveFile, occupied, password) is { } delErr)
+                    return delErr;
+            }
+        }
+
+        var err = SevenZip.Create(items, archiveFile, CompressionLevel.Optimal, password, progress);
+        if (err != null) return err;
+        if (prefix.Length == 0) return null;
+
+        return SevenZip.Rename(archiveFile, [.. roots.Select(r => (r!, prefix + "/" + r))], password);
+    }
+
     /// <summary>
     /// Remove members from an archive. <paramref name="internalPaths"/> are the pane's
     /// backslash-separated internal paths; a directory path removes everything beneath it.

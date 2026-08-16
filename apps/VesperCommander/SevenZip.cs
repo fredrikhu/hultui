@@ -159,6 +159,31 @@ public static class SevenZip
         try { p.Kill(entireProcessTree: true); } catch { }
     }
 
+    /// <summary>Every file member in the archive with its size and mtime, keyed by '/'-normalised
+    /// stored path — what an add consults to find out whether it would be replacing something.
+    /// Null when 7-Zip can't read the archive.</summary>
+    public static Dictionary<string, (long Size, DateTime Modified)>? AllMembers(string archiveFile, string? password)
+    {
+        var (ok, stdout, _) = Run(ListArgs(archiveFile, password), readAll: true);
+        if (!ok) return null;
+        var map = new Dictionary<string, (long, DateTime)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in ParseListing(stdout))
+            if (!m.IsDir) map[m.Path.Replace('\\', '/').TrimEnd('/')] = (m.Size, m.Modified);
+        return map;
+    }
+
+    /// <summary>Move members within the archive (<c>7z rn</c>), which is how an add reaches a
+    /// folder inside it: 7-Zip's command line cannot remap an entry name while adding, so the
+    /// sources go in at the root and are renamed into place afterwards. A folder rename carries
+    /// everything beneath it, and no bytes are rewritten.</summary>
+    public static string? Rename(string archiveFile, IReadOnlyList<(string From, string To)> pairs, string? password)
+    {
+        if (pairs.Count == 0) return null;
+        var (ok, _, wrongPassword) = Run(RenameArgs(archiveFile, pairs, password), readAll: false);
+        if (wrongPassword) return "Wrong password";
+        return ok ? null : "7-Zip could not move the added items into place";
+    }
+
     /// <summary>Remove members (<c>7z d</c>). <paramref name="targets"/> are '/'-separated
     /// member paths; a directory target takes everything beneath it. The archive is listed
     /// first and the targets expanded to the exact stored paths — 7-Zip's wildcard matching
@@ -204,6 +229,15 @@ public static class SevenZip
 
     internal static string[] DeleteArgs(string archiveFile, IReadOnlyList<string> members, string? password) =>
         [.. new[] { "d", PwdArg(password), EndOfSwitches, archiveFile }, .. members];
+
+    /// <summary>Pairs go after the "--" as from/to, from/to — they are member paths read out of
+    /// the archive, so they are data and must not be able to look like switches.</summary>
+    internal static string[] RenameArgs(string archiveFile, IReadOnlyList<(string From, string To)> pairs, string? password)
+    {
+        var args = new List<string> { "rn", PwdArg(password), EndOfSwitches, archiveFile };
+        foreach (var (from, to) in pairs) { args.Add(from); args.Add(to); }
+        return [.. args];
+    }
 
     /// <param name="reportProgress">Adds the two output switches the Pack overlay reads:
     /// <c>-bsp1</c> sends the run's percentage to stdout, <c>-bb1</c> logs each file as it is
