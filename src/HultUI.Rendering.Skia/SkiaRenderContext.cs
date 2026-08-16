@@ -363,6 +363,24 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         }
         if (cursor < drawnLength)
             DrawLineSegment(line, cursor, drawnLength, style.TextColor, style, baseX, baselineY, lineTop);
+
+        // Decorations last, over the glyphs — the same order the element-level
+        // decoration draws in, so a spanned underline crosses descenders exactly
+        // the way a whole-element one does.
+        foreach (var span in spans)
+        {
+            if (span.Decoration == TextDecoration.None) continue;
+            int s = Math.Clamp(span.Start - line.Start, 0, drawnLength);
+            int e = Math.Clamp(span.End - line.Start, 0, drawnLength);
+            if (e <= s) continue;
+            float x0 = LineXAt(line, s, style);
+            float x1 = LineXAt(line, e, style);
+            if (x1 <= x0) continue;
+            var fg = span.Color.A == 0 ? style.TextColor : span.Color;
+            _pooledPaint.Color = ToSkColor(fg);
+            DrawDecorationRects(span.Decoration, style.FontSize, line.Ascent,
+                baseX + x0, x1 - x0, baselineY);
+        }
     }
 
     private void DrawLineSegment(TextLine line, int startChar, int endChar, Color color,
@@ -413,20 +431,26 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Draws underline and/or strike-through for a line. The paint is already set
     // to the text color; decorations reuse it as a fill for the rule rectangles.
     private void DrawTextDecoration(ResolvedInheritedStyle style, float x, float baselineY, TextLine line)
-    {
-        float thickness = Math.Max(1f, style.FontSize * 0.07f);
+        => DrawDecorationRects(style.Decoration, style.FontSize, line.Ascent, x, line.Width, baselineY);
 
-        if ((style.Decoration & TextDecoration.Underline) != 0)
+    // One geometry for element-level and span-level decorations, in whatever color
+    // the pooled paint currently holds.
+    private void DrawDecorationRects(TextDecoration decoration, float fontSize, float ascent,
+        float x, float width, float baselineY)
+    {
+        float thickness = Math.Max(1f, fontSize * 0.07f);
+
+        if ((decoration & TextDecoration.Underline) != 0)
         {
-            float y = baselineY + Math.Max(1f, style.FontSize * 0.12f);
-            Canvas.DrawRect(SKRect.Create(x, y, line.Width, thickness), _pooledPaint);
+            float y = baselineY + Math.Max(1f, fontSize * 0.12f);
+            Canvas.DrawRect(SKRect.Create(x, y, width, thickness), _pooledPaint);
         }
 
-        if ((style.Decoration & TextDecoration.LineThrough) != 0)
+        if ((decoration & TextDecoration.LineThrough) != 0)
         {
             // Roughly the x-height midpoint above the baseline.
-            float y = baselineY - line.Ascent * 0.33f - thickness / 2f;
-            Canvas.DrawRect(SKRect.Create(x, y, line.Width, thickness), _pooledPaint);
+            float y = baselineY - ascent * 0.33f - thickness / 2f;
+            Canvas.DrawRect(SKRect.Create(x, y, width, thickness), _pooledPaint);
         }
     }
 
