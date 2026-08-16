@@ -61,7 +61,51 @@ public class FindRevealDeliveryTests
         });
     }
 
+    [Fact]
+    public void ARevealDueWhileTheNextFileLoads_IsNotSpentOnTheOldBody()
+    {
+        Hosted((session, app) =>
+        {
+            // Let everything land: the tree auto-selects README.md and its body mounts.
+            session.PumpFrames(4);
+            var oldBody = BodyRef(app).Current;
+            Assert.NotNull(oldBody);
+
+            var find = FindState(app);
+            Member(find, "Open", true);
+            Search(app).SetQuery("marker");   // nothing in README.md matches
+            Member(find, "PendingReveal", true);
+
+            // Selecting sample.cs rebuilds the pane as a "Loading…" placeholder for the
+            // frame its content takes to land. The old TextArea is unmounted, but the
+            // body ref still points at it — a reveal serviced against that ghost is
+            // spent, and when the real text mounts a frame later nothing scrolls.
+            //
+            // Marshalled rather than called directly: Rerender's signal write rebuilds
+            // synchronously, and a rebuild *between* frames queues the content load
+            // early enough that the ghost reveal's post-frame callback runs after the
+            // text has landed, where re-reading the ref self-heals it. Selecting inside
+            // the frame — where a click handler runs in production — keeps the callback
+            // ahead of the load, which is the window the bug lives in.
+            HultUI.Application.InvokeOnMainThread(() => SelectFile(app, "sample.cs"));
+            session.PumpFrames(6);
+
+            var body = BodyRef(app).Current!;
+            Assert.NotSame(oldBody, body);
+            Assert.True(body.Text.Length > 100, "sample.cs's text never arrived");
+            Assert.True(ScrollY(body) > 0,
+                $"the body is still at the top ({ScrollY(body)}) — the reveal was spent on "
+                + "the previous file's unmounted body while this one was loading");
+        });
+    }
+
     // ── harness ──────────────────────────────────────────────────────────
+
+    private static void SelectFile(JunctionApp app, string path)
+    {
+        typeof(JunctionApp).GetField("_filesSelPath", Priv)!.SetValue(app, path);
+        typeof(JunctionApp).GetMethod("Rerender", Priv)!.Invoke(app, null);
+    }
 
     private static object FindState(JunctionApp app) =>
         typeof(JunctionApp).GetField("_filesFind", Priv)!.GetValue(app)!;

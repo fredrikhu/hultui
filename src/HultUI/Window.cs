@@ -407,6 +407,15 @@ public sealed class Window : IOverlayHost, IDisposable
 
     internal Element? Root => _root;
 
+    /// <summary>
+    /// True when the element is currently part of this window's live tree — reachable
+    /// from the root by walking <see cref="Element.Parent"/>. A <see cref="Core.Reactivity.Ref{T}"/>
+    /// keeps pointing at an element after a rebuild unmounts it, so a non-null ref is
+    /// not proof the element is on screen; anything holding work for an element across
+    /// frames (a deferred scroll, a focus) should check this before spending it.
+    /// </summary>
+    public bool IsInTree(Element element) => IsAttachedToRoot(element);
+
     internal void MarkStyleDirty()
     {
         _root?.MarkStyleDirty();

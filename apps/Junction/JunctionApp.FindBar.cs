@@ -131,12 +131,19 @@ public partial class JunctionApp
         // frame before the file's text arrived was therefore dropped and never retried: the
         // search reported its hits and nothing scrolled. The body landing triggers its own
         // rebuild, which is when this comes back round.
-        if (s.PendingReveal && body() is not null)
+        //
+        // "Is there a body" cannot be just a null check: a Ref keeps pointing at an element
+        // after it unmounts, so between a file being selected and its text arriving, body()
+        // answers with the previous file's TextArea. Spending the reveal there loses it the
+        // same way — the callback scrolls a detached element, and the real body lands with
+        // nothing owed.
+        if (s.PendingReveal && body() is { } b && _window.IsInTree(b))
         {
             s.PendingReveal = false;
             _window.RequestPostFrameCallback(reveal);
         }
     }
+
 
     private Element BuildFindBar(FindBarState s, string placeholder)
     {
