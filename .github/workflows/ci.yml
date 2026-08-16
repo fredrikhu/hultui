@@ -60,6 +60,17 @@ jobs:
       - name: Restore tools
         run: dotnet tool restore
 
+      # DocFX loads the source generator as an analyzer while reading metadata, and on a fresh
+      # checkout there is no Release build of it to load. That raises FailedToResolveAnalyzer,
+      # which --warningsAsErrors turns into a failed job — so this step is what makes the docs
+      # build pass at all, not an optimisation.
+      #
+      # Only the analyzer, not the solution: DocFX builds everything else itself, and this takes
+      # about a second where `dotnet build -c Release` (what the warning text suggests) would
+      # spend minutes of runner time repeating work.
+      - name: Build the source generator (DocFX loads it as an analyzer)
+        run: dotnet build src/HultUI.SourceGenerators/HultUI.SourceGenerators.csproj -c Release
+
       - name: Build documentation
         run: dotnet docfx docfx.json --warningsAsErrors
 
