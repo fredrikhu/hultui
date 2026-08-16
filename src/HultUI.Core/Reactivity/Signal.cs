@@ -18,15 +18,36 @@ public sealed class Signal<T> : IReactiveSource
     private T _value;
     private readonly IEqualityComparer<T> _comparer;
 
-    // Allocated on first subscribe, so a signal nobody reads carries no set.
+// Subscribers are 0/1/many: an inline field for the single subscriber almost every
+    // signal has — the effect wrapping the component that reads it — promoting to a set
+    // only when a second arrives. An app with hundreds of [Reactive] properties was paying
+    // a 176-byte HashSet per property to hold one entry.
     //
-    // A 0/1/many layout — an inline field for the single subscriber almost every signal
-    // has, promoting to a set only on the second — was tried and reverted. It regressed
-    // Junction's FindRevealDeliveryTests.ARevealThatFallsDueBeforeTheBodyExistsIsStillHonoured,
-    // where a reveal queued before its TextArea exists stopped being delivered. Isolated to
-    // the single-slot path specifically: the pooled snapshot below passes that test with the
-    // set always allocated. Worth another attempt with the ordering worked out, but not
-    // worth shipping a subscription bug to save 176 bytes per signal.
+    // The snapshot in NotifySubscribers is load-bearing, and not only for the many case.
+    // A first attempt notified the single subscriber straight off the field —
+    // `_single?.NotifyDirty()` — and that regressed Junction's
+    // FindRevealDeliveryTests.ARevealThatFallsDueBeforeTheBodyExistsIsStillHonoured: a find
+    // reveal queued before its TextArea exists stopped being delivered, because the file's
+    // text never arrived at all. Established by controlled variants, all differing only in
+    // this file:
+    //
+    //   always-HashSet + pooled snapshot ............. passes
+    //   single-slot   + direct notify ................ FAILS
+    //   single-slot   + snapshot on both paths ....... passes   ← what is here
+    //
+    // Ruled out along the way: the bookkeeping (a shadow set maintained by the same
+    // Subscribe/Unsubscribe calls agreed with the fast path at every single write, and no
+    // write ever lost a subscriber), the pool itself (the shipped always-HashSet version
+    // used it and passed), and flakiness (5/5 either way, and the failure was a hard 30s
+    // PumpUntil timeout rather than a race).
+    //
+    // What is still not explained is WHY: reading the field into a snapshot and reading it
+    // for a direct call both read it exactly once, so the two should be equivalent. The
+    // suspect is the path ComponentHost.ForceRebuild's comment describes — a source first
+    // read during a rebuild, where a freshly created per-key AsyncLoader subscribes
+    // mid-flush. Do not "simplify" the single-subscriber path back to a direct call
+    // without running that Junction test.
+    private IReactiveNode? _single;
     private HashSet<IReactiveNode>? _subscribers;
 
     private int _version;
@@ -75,18 +96,20 @@ public sealed class Signal<T> : IReactiveSource
 
     private void NotifySubscribers()
     {
-        if (_subscribers is null) return;
-
-        // A subscriber can subscribe or unsubscribe while being notified, so iterate a copy
-        // — rented rather than allocated, because this is the write path and every
-        // [Reactive] assignment runs it.
-        int count = _subscribers.Count;
+        // Snapshot before notifying, on both paths. A subscriber can subscribe or
+        // unsubscribe while being notified, and — see the note on the fields — notifying
+        // the single subscriber straight off the field instead of through a snapshot
+        // regressed Junction's FindRevealDeliveryTests. Rented rather than allocated,
+        // because this is the write path and every [Reactive] assignment runs it.
+        int count = _subscribers?.Count ?? (_single is null ? 0 : 1);
         if (count == 0) return;
 
         var snapshot = ArrayPool<IReactiveNode>.Shared.Rent(count);
         try
         {
-            _subscribers.CopyTo(snapshot, 0);
+            if (_subscribers is null) snapshot[0] = _single!;
+            else _subscribers.CopyTo(snapshot, 0);
+
             for (int i = 0; i < count; i++)
                 snapshot[i].NotifyDirty();
         }
@@ -100,13 +123,19 @@ public sealed class Signal<T> : IReactiveSource
 
     void IReactiveSource.Subscribe(IReactiveNode subscriber)
     {
-        _subscribers ??= [];
-        _subscribers.Add(subscriber);
+        if (_subscribers is not null) { _subscribers.Add(subscriber); return; }
+        if (_single is null) { _single = subscriber; return; }
+        if (ReferenceEquals(_single, subscriber)) return;
+
+        // Second subscriber: promote to the set and stop using the single slot.
+        _subscribers = [_single, subscriber];
+        _single = null;
     }
 
     void IReactiveSource.Unsubscribe(IReactiveNode subscriber)
     {
-        _subscribers?.Remove(subscriber);
+        if (_subscribers is not null) { _subscribers.Remove(subscriber); return; }
+        if (ReferenceEquals(_single, subscriber)) _single = null;
     }
 
     public override string ToString() => $"Signal({_value})";
