@@ -13,12 +13,25 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private readonly Stack<int> _saveStack = new();
     private TextPipeline? _pipeline;
 
-    // Pooled Skia objects to avoid per-draw-call allocations
+    // Pooled Skia objects to avoid per-draw-call allocations. The canvas drawing
+    // context (CanvasElement's callback surface) draws through the same pool — its
+    // callback runs inside this context's render pass, and everything here is reset
+    // before each use, so sharing is safe and keeps the pool in one place.
     private readonly SKPaint _pooledPaint = new();
     private readonly SKFont _pooledFont = new() { Subpixel = true };
     private readonly SKRoundRect _pooledRoundRect = new();
     private readonly SKPoint[] _pooledRadii = new SKPoint[4];
+    private readonly SKPath _pooledPath = new();
+    // Canvas text has always drawn SKTypeface.Default without subpixel positioning;
+    // a dedicated font keeps those pixels identical rather than inheriting the text
+    // renderer's settings.
+    private readonly SKFont _pooledCanvasFont = new(SKTypeface.Default, 12f);
+    private SkiaCanvasDrawingContext? _canvasContext;
     private bool _disposed;
+
+    internal SKPaint PooledPaint => _pooledPaint;
+    internal SKPath PooledPath => _pooledPath;
+    internal SKFont PooledCanvasFont => _pooledCanvasFont;
 
     // Cached positioned-blob per ShapedRun instance. Shaping itself is cached by
     // TextPipeline.MeasurementCache — this cache is only to skip the blob-builder
@@ -29,7 +42,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
-    private SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
+    internal SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
     public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null)
     {
@@ -581,7 +594,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     public ICanvasDrawingContext CreateCanvasContext(Rect bounds)
     {
-        return new SkiaCanvasDrawingContext(Canvas, bounds);
+        // One reusable instance: the context is only valid inside the canvas callback
+        // it is handed to, and callbacks cannot nest (a canvas has no children), so
+        // re-aiming the same object replaces a per-canvas-per-frame allocation.
+        _canvasContext ??= new SkiaCanvasDrawingContext(this);
+        _canvasContext.Bounds = bounds;
+        return _canvasContext;
     }
 
     // ── Text blob building (positioned from HarfBuzz-shaped glyphs) ──
@@ -635,7 +653,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // Valid until the next call — callers must not hold on to (or dispose) it.
     // Draw calls copy the geometry into the native command stream immediately,
     // so sequential reuse within a frame is safe.
-    private SKRoundRect ToSkRoundRect(SKRect rect, CornerRadius r)
+    internal SKRoundRect ToSkRoundRect(SKRect rect, CornerRadius r)
     {
         _pooledRadii[0] = new SKPoint(r.TopLeft, r.TopLeft);
         _pooledRadii[1] = new SKPoint(r.TopRight, r.TopRight);
@@ -666,5 +684,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Dispose();
         _pooledFont.Dispose();
         _pooledRoundRect.Dispose();
+        _pooledPath.Dispose();
+        _pooledCanvasFont.Dispose();
     }
 }
