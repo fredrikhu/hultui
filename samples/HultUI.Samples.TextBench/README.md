@@ -18,6 +18,7 @@ dotnet run -c Release --project samples/HultUI.Samples.TextBench
 |---|---|
 | `warm/…` | The same string laid out over and over — the steady state a scrolling list reaches, where everything downstream of the layout cache is already paid for. |
 | `cold/…` | Every call is a string the pipeline has never seen — a freshly built list of labels. Shaping dominates. |
+| `auto/…` | The same work with `TextDirection.Auto`, where the paragraph direction comes from the content. |
 | `caret/…` | The offset↔x mapping behind a caret, a click and a selection highlight, measured on an already-laid-out line. |
 | `recheck/…` | The warm rows again, on fresh pipelines: the harness's control group. |
 
@@ -62,6 +63,18 @@ per line.
 
 The `caret/…` rows are new in stage 2 and have no "before": caret x costs 3 ns,
 a hit test 12–16 ns, a selection range 11–38 ns.
+
+## Capture: BiDi stage 3 (2026-08-16)
+
+Every row above re-measured within noise of its stage-2 value — first-strong
+auto direction, direction-aware alignment and visual caret movement cost the
+existing paths nothing. Auto direction in particular is free, because it rides
+the UAX #9 analysis that was already happening:
+
+| scenario | | |
+|---|---:|---|
+| `auto/latin-cold` | 2.96 µs | vs `cold/latin-67` 2.95 µs — the classifier still answers before ICU |
+| `auto/mixed-cold` | 19.64 µs | vs `cold/mixed-38` 20.52 µs — same analysis, now also reporting its verdict |
 
 ### What the numbers caught
 

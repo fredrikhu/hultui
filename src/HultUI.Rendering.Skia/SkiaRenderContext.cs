@@ -250,12 +250,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Color = ToSkColor(style.TextColor);
         _pooledPaint.IsAntialias = true;
 
-        float alignFactor = style.TextAlign switch
-        {
-            TextAlign.Center => 0.5f,
-            TextAlign.Right => 1f,
-            _ => 0f,
-        };
+        // Start/End follow the direction the text actually resolved to, which for
+        // TextDirection.Auto is only known now that it has been laid out.
+        float alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
 
         foreach (var line in layout.Lines)
         {
@@ -296,12 +293,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
 
-        float alignFactor = style.TextAlign switch
-        {
-            TextAlign.Center => 0.5f,
-            TextAlign.Right => 1f,
-            _ => 0f,
-        };
+        // Start/End follow the direction the text actually resolved to, which for
+        // TextDirection.Auto is only known now that it has been laid out.
+        float alignFactor = TextAlignment.Factor(style.TextAlign, layout.IsRtlParagraph);
 
         foreach (var line in layout.Lines)
         {
@@ -570,6 +564,15 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         var line = SingleLine(lineText, style);
         return line is null ? 0 : line.OffsetAtX(x, PrefixMeasurer(line, style));
+    }
+
+    public bool TryMoveCaretVisually(
+        string lineText, ResolvedInheritedStyle style, int offset, bool right, out int result)
+    {
+        result = offset;
+        var line = SingleLine(lineText, style);
+        return line is not null
+            && line.TryMoveCaretVisually(offset, right, out result, PrefixMeasurer(line, style));
     }
 
     public IReadOnlyList<TextRangeBox> TextSelectionRanges(

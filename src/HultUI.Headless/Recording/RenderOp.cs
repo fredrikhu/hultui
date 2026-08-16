@@ -78,7 +78,7 @@ internal static class OpFormat
         if (s.FontWeight != FontWeight.Regular) sb.Append(" weight=").Append(s.FontWeight);
         if (s.FontSlant != FontSlant.Normal) sb.Append(' ').Append(s.FontSlant);
         if (s.Decoration != TextDecoration.None) sb.Append(' ').Append(s.Decoration);
-        if (s.TextAlign != TextAlign.Left) sb.Append(" align=").Append(s.TextAlign);
+        if (s.TextAlign != TextAlign.Start) sb.Append(" align=").Append(s.TextAlign);
         if (s.TextDirection != TextDirection.Ltr) sb.Append(' ').Append(s.TextDirection);
         if (s.LineHeight != 0f) sb.Append(" lineHeight=").Append(F(s.LineHeight));
         if (s.LetterSpacing != 0f) sb.Append(" letterSpacing=").Append(F(s.LetterSpacing));

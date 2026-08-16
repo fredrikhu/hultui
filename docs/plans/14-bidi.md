@@ -63,12 +63,30 @@ then correctness beats reuse. LTR text keeps every cache and fast path untouched
   once per paragraph and sliced per line rather than re-resolved per line and
   per break candidate — UAX #9 resolution is paragraph-scoped, so the old way
   was also wrong for neutrals next to a cut.
-- **Stage 3 — polish.** First-strong auto direction, bracket mirroring
-  (UAX #9 §3.1.3), RTL-aware default alignment, RTL scrollbar/gutter layout.
-  **Visual caret movement** belongs here too: Left/Right still move logically,
-  which is GTK's and Firefox's default but not Chrome's. The primitives stage 2
-  built are what an implementation would sit on; the open question is the
-  boundary convention, not the geometry.
+- **Stage 3 — polish.** ✅ Done, except for the last item, which turned out not
+  to belong here at all.
+  - **First-strong auto direction.** `TextDirection.Auto` resolves the paragraph
+    per UAX #9 P2/P3 — ICU's `UBIDI_DEFAULT_LTR` does it during the analysis
+    that was already happening, so it costs nothing extra, and
+    `TextLayout.IsRtlParagraph` reports what it decided. A managed first-strong
+    scan covers the no-ICU fallback. Text with no RTL in it never reaches any of
+    this: the classifier still answers first and the plain path is untouched.
+  - **Bracket mirroring (UAX #9 §3.1.3).** Already correct, and verified rather
+    than assumed: HarfBuzz mirrors during normalization, but *only* because
+    stage 1 set the buffer's direction explicitly instead of guessing.
+    `RtlGlyphOrderTests` pins it so the free lunch cannot be silently lost.
+  - **Direction-aware alignment.** `TextAlign` gained `Start` (the new default)
+    and `End`, which resolve against the direction the text actually resolved
+    to; `Left`/`Right` stay absolute. Nothing changes for LTR text, where Start
+    *is* Left.
+  - **Visual caret movement.** Left/Right now step by what is next on screen on
+    a line that mixes directions. `TextLine.TryMoveCaretVisually` declines on
+    lines with no RTL run, so LTR editing keeps the callers' own codepoint
+    stepping — surrogate pairs and clusters included — bit for bit.
+  - **RTL scrollbar/gutter layout — not this project.** Mirroring the interface
+    is logical-vs-physical box sides across the whole layout API, not a text
+    concern; the verdict and its reasoning are in docs/DECISIONS.md, and it is
+    listed as its own future capability.
 
 ## Non-goals
 

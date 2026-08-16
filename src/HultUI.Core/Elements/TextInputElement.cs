@@ -404,6 +404,19 @@ public class TextInputElement : BoxElement
             return;
         }
 
+        // On a line that mixes directions the arrow keys move the caret VISUALLY:
+        // pressing Right on the last Latin character before a Hebrew word lands on
+        // the right-hand end of that word, because that is what is next on screen.
+        // A line that reads left to right says so and keeps the logical step below.
+        if (_renderCtx is not null
+            && _renderCtx.TryMoveCaretVisually(_text, ResolvedInherited, _cursorPos, delta > 0, out int visual))
+        {
+            _cursorPos = SnapToBoundary(Math.Clamp(visual, 0, _text.Length));
+            if (!extendSelection)
+                _selectionStart = _cursorPos;
+            return;
+        }
+
         // Step by codepoint, not UTF-16 code unit, so emojis move as one.
         _cursorPos = delta < 0 ? StepLeft(_cursorPos) : StepRight(_cursorPos);
         if (!extendSelection)

@@ -103,6 +103,19 @@ public interface IRenderContext
     }
 
     /// <summary>
+    /// The caret position one step to the visual left or right of
+    /// <paramref name="offset"/>, for an arrow key on a line that mixes
+    /// directions. Returns false — the default — when the line reads left to right
+    /// throughout and the caller should keep its own stepping, which knows about
+    /// surrogate pairs and clusters.
+    /// </summary>
+    bool TryMoveCaretVisually(string lineText, ResolvedInheritedStyle style, int offset, bool right, out int result)
+    {
+        result = offset;
+        return false;
+    }
+
+    /// <summary>
     /// Visual x-ranges covering the logical range <c>[from, to)</c> of
     /// <paramref name="lineText"/> — one entry for text that reads left to right,
     /// more when the range crosses a direction boundary.

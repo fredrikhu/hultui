@@ -784,10 +784,42 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
             return;
         }
 
+        // Visual movement within the caret's own visual line, when that line mixes
+        // directions — see TextInputElement.MoveCursor. A move that would leave the
+        // line has nothing visual to say, so the logical step below carries the
+        // caret onto the next one.
+        if (TryMoveCursorVisually(delta > 0, out int visual))
+        {
+            _cursorPos = SnapToBoundary(Math.Clamp(visual, 0, _text.Length));
+            if (!extendSelection)
+                _selectionStart = _cursorPos;
+            _needsScrollToCursor = true;
+            return;
+        }
+
         _cursorPos = delta < 0 ? StepLeft(_cursorPos) : StepRight(_cursorPos);
         if (!extendSelection)
             _selectionStart = _cursorPos;
         _needsScrollToCursor = true;
+    }
+
+    private bool TryMoveCursorVisually(bool right, out int position)
+    {
+        position = _cursorPos;
+        if (_renderCtx is null) return false;
+
+        var style = ResolvedInherited;
+        var starts = GetLineStarts(GetWrapWidth(), style);
+        var (line, _) = CursorToLineCol(_cursorPos, GetWrapWidth(), style);
+        var (lineStart, lineEnd) = VisualLineRange(starts, line);
+        if (lineEnd <= lineStart) return false;
+
+        if (!_renderCtx.TryMoveCaretVisually(
+                _text[lineStart..lineEnd], style, _cursorPos - lineStart, right, out int rel))
+            return false;
+
+        position = lineStart + rel;
+        return position != _cursorPos;
     }
 
     private void MoveCursorTo(int pos, bool extendSelection)

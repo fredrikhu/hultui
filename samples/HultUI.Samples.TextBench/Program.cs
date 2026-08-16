@@ -173,6 +173,7 @@ static class Scenarios
     {
         var ltr = Style();
         var rtl = Style(TextDirection.Rtl);
+        var auto = Style(TextDirection.Auto);
 
         // ── warm: the same string laid out over and over, the steady state a
         // scrolling list reaches. Everything downstream of the cache lookup is
@@ -209,6 +210,17 @@ static class Scenarios
             var p = Pipeline();
             var texts = Unique(Hebrew, batch: 200);
             yield return new("cold/hebrew-25", 200, i => p.Layout(texts[Idx(i, texts.Length)], rtl, 10_000, null));
+        }
+
+        // Auto direction (stage 3): Latin text must not notice it exists — the
+        // classifier still answers before ICU does — and mixed text pays the same
+        // analysis it already paid, now also reporting what it resolved to.
+        {
+            var p = Pipeline();
+            var latinTexts = Unique(Latin, batch: 200);
+            var mixedTexts = Unique(Mixed, batch: 200);
+            yield return new("auto/latin-cold", 200, i => p.Layout(latinTexts[Idx(i, latinTexts.Length)], auto, 10_000, null));
+            yield return new("auto/mixed-cold", 200, i => p.Layout(mixedTexts[Idx(i, mixedTexts.Length)], auto, 10_000, null));
         }
 
         // ── caret: the offset↔x mapping a caret, a click and a selection

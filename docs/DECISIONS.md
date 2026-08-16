@@ -22,7 +22,7 @@ This document records all architectural and design decisions for the HultUI fram
 |-------|--------|------------------------|-----------|
 | Rendering | SkiaSharp | Silk.NET, Veldrid, MAUI Graphics | Battle-tested 2D, handles text/shaping, used by Avalonia. Can be swapped later behind abstraction |
 | Text shaping | HarfBuzz (via SkiaSharp.HarfBuzz) | Manual shaping | Industry standard, handles complex scripts |
-| Text segmentation | Native ICU (P/Invoke) | Skia built-in, ICU4N | Full UAX #14/#29 support (line break, grapheme) via the platform's ICU, shared loader in `IcuLibrary`. UAX #9 (BiDi) uses the same library: display reordering and interaction mapping shipped (docs/plans/14-bidi.md); auto-direction and mirroring are staged |
+| Text segmentation | Native ICU (P/Invoke) | Skia built-in, ICU4N | Full UAX #14/#29 support (line break, grapheme) via the platform's ICU, shared loader in `IcuLibrary`. UAX #9 (BiDi) uses the same library, including first-strong paragraph direction for `TextDirection.Auto`: text is complete (docs/plans/14-bidi.md), interface mirroring is not part of it |
 | Windowing/Input | SDL3 (ppy.SDL3-CS) | GLFW, platform-native | Cross-platform, provides GL context + input + clipboard + IME + drag-and-drop |
 | Source generators | Roslyn incremental generators | Fody, PostSharp | No runtime dependency, standard .NET tooling |
 | Test framework | xunit | NUnit, MSTest | Widely used, good async support |
@@ -186,6 +186,30 @@ Three reasons partial repaints don't pay here:
 Revisit only if a workload appears where frames are frequent, small-change, and
 expensive — the probe stays in the tree to make that check cheap.
 
+### Right-to-left *text* is done; right-to-left *UI* is a separate project
+
+BiDi (docs/plans/14-bidi.md) is finished as a **text** feature: mixed-direction
+lines reorder per UAX #9, brackets mirror, the paragraph direction can be
+auto-detected, and the caret, click targeting, selection and arrow keys all
+follow the visual order. `TextAlign.Start`/`End` follow the direction the text
+resolved to.
+
+Mirroring the **interface** — a `direction: rtl` that flips flex rows,
+`JustifyContent.Start`, absolute Left/Right, grid column order, logical
+padding/margin sides, and the scrollbar to the other edge — is deliberately not
+part of it. `LayoutEngine` has no notion of direction at all today (the word
+appears nowhere in its 1,100 lines), so this is not a switch to flip: it is
+logical-vs-physical box sides across the whole layout API, ~14 explicit
+right-edge placements in Core's elements, and every app's own left/right
+choices. It is a capability like Grid or animations, and belongs in the roadmap
+with its own design — not smuggled in behind a text change.
+
+The line between them is where the value is: a chat message, a commit subject or
+a file name in Hebrew renders and edits correctly **today**, inside an interface
+that stays left-to-right. That is what an LTR application showing user content
+needs. A fully mirrored interface is what an application *localized into* Hebrew
+or Arabic needs, and nothing in the tree asks for that yet.
+
 ---
 
 ## Future Considerations
@@ -199,3 +223,4 @@ expensive — the probe stays in the tree to make that check cheap.
 - **Units for measurements** - points, percentage, etc. What makes sense; cm/inches do not.
 - **Theme improvements** - Color.Themed(light, dark) or something like that. We need to make some design decisions here.
 - **Keyboard navigation** - E.g. tab to focus next element (and possibility to decide what is next), arrows to change between radiobox selection.
+- **Right-to-left interface mirroring** - Logical (start/end) box sides through the layout API, mirrored flex/grid/absolute placement, scrollbar and gutter on the other edge. Distinct from right-to-left *text*, which is done; see the note above.

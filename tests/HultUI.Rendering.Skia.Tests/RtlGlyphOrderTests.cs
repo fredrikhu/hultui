@@ -17,6 +17,28 @@ public class RtlGlyphOrderTests
         TextColor: new(0, 0, 0, 255), TextDirection: TextDirection.Ltr, Cursor: CursorType.Default);
 
     [Fact]
+    public void AMirroredCharacterInAnRtlRun_ShapesToItsMirrorGlyph()
+    {
+        // UAX #9 rule L4: a Bidi_Mirrored character renders as its mirror inside a
+        // right-to-left run — an opening parenthesis in Hebrew text must draw as a
+        // closing one, or brackets point the wrong way round the text they enclose.
+        // HarfBuzz applies this itself, but ONLY because the buffer's direction is
+        // set explicitly rather than guessed (see SkiaTextShaper). This pins that
+        // the framework gets L4 for free from that decision, and would notice if
+        // the explicit direction were ever dropped.
+        var fonts = new SkiaFontCollection();
+        var shaper = new SkiaTextShaper();
+        var font = fonts.Resolve(Style.FontFamily, Style.FontWeight, Style.FontSlant);
+
+        var openInRtl = shaper.Shape("(", font, 16f, rtl: true);
+        var closeInLtr = shaper.Shape(")", font, 16f);
+        var openInLtr = shaper.Shape("(", font, 16f);
+
+        Assert.Equal(closeInLtr.Glyphs[0].GlyphId, openInRtl.Glyphs[0].GlyphId);
+        Assert.NotEqual(openInLtr.Glyphs[0].GlyphId, openInRtl.Glyphs[0].GlyphId);
+    }
+
+    [Fact]
     public void AnRtlRun_ReturnsGlyphsLeftToRight_WithTheLastLogicalCharFirst()
     {
         var fonts = new SkiaFontCollection();

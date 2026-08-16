@@ -123,26 +123,16 @@ public sealed class TextPipeline
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
 
-        // Shape once, width-independently. The layout pass measures the same
-        // string many times per frame at different available widths (Phase 1
-        // measure vs Phase 6 arrange, plus flex-grow re-measures); without this,
-        // each distinct width re-itemized and re-shaped the text.
-        //
-        // This lookup also settles the BiDi question for free. The BiDi path
-        // (docs/plans/14-bidi.md) returns before ever populating this cache, so a
-        // hit here *proves* the string was classified free of right-to-left script
-        // the first time it was seen — and the classifier, which has to look at
-        // every character, runs once per string instead of once per layout call.
         // Text that can contain right-to-left script — or an Rtl paragraph style —
-        // takes the direction-aware path, cached under the same width-keyed cache
-        // as wrapped text with Direction in the key.
+        // takes the direction-aware path (docs/plans/14-bidi.md), cached under the
+        // same width-keyed cache as wrapped text, with Direction in the key.
         //
         // The classifier deliberately stays *before* the caches, running on every
         // call rather than once per string. Consulting the shape cache first would
-        // answer the same question for free on a hit (the BiDi path never
-        // populates that cache, so a hit proves the string is RTL-free) — measured,
-        // it buys 0.16 µs on a 4,700-character warm layout and costs every warm
-        // BiDi lookup ~45%, for a more tangled Layout. Not worth it.
+        // answer the same question for free on a hit (the BiDi path never populates
+        // that cache, so a hit proves the string is RTL-free) — measured, it buys
+        // 0.16 µs on a 4,700-character warm layout and costs every warm BiDi lookup
+        // ~45%, for a more tangled Layout. Not worth it.
         if (NeedsBidi(text, style))
         {
             var bidiKey = new MeasurementKey(text, style.FontFamily, style.FontSize, style.FontWeight,
@@ -516,6 +506,9 @@ public sealed class TextPipeline
     /// </remarks>
     private static bool NeedsBidi(string text, ResolvedInheritedStyle style)
     {
+        // Auto needs no special case: with nothing at or above U+0590 in the text,
+        // first-strong detection can only answer left-to-right, which is what the
+        // plain path already does.
         if (style.TextDirection == TextDirection.Rtl) return true;
         // Cast to ushort rather than calling the char overload directly: both are
         // the same vectorized range search, but ContainsAnyExceptInRange<char>
@@ -674,7 +667,7 @@ public sealed class TextPipeline
     {
         // One UAX #9 resolution for the whole paragraph; every line, break
         // candidate and prefix measurement below slices into it.
-        var levels = BidiAnalyzer.Levels(text, style.TextDirection == TextDirection.Rtl);
+        var (levels, rtlParagraph) = BidiAnalyzer.Levels(text, style.TextDirection);
         var breakPoints = LineBreaker.FindBreakOpportunities(text);
         var allBreaks = new List<int> { 0 };
         for (int i = 0; i < text.Length; i++)
@@ -742,7 +735,7 @@ public sealed class TextPipeline
             totalHeight += line.Height;
             maxLineWidth = Math.Max(maxLineWidth, line.Width);
         }
-        return new TextLayout(lines, new Size(maxLineWidth, totalHeight));
+        return new TextLayout(lines, new Size(maxLineWidth, totalHeight), rtlParagraph);
     }
 
     private int BidiFitPrefix(string text, int from, int to,

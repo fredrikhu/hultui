@@ -213,7 +213,7 @@ public static class ElementProperties
             rows.Add(new("Font", $"{resolved.FontFamily} {resolved.FontSize:0.#} {resolved.FontWeight}"));
             rows.Add(new("Color", Format(resolved.TextColor)));
             Add(rows, "Slant", resolved.FontSlant, FontSlant.Normal);
-            Add(rows, "Align", resolved.TextAlign, TextAlign.Left);
+            Add(rows, "Align", resolved.TextAlign, TextAlign.Start);
             Add(rows, "Decoration", resolved.Decoration, TextDecoration.None);
             Add(rows, "Direction", resolved.TextDirection, TextDirection.Ltr);
             Add(rows, "Line height", resolved.LineHeight, 0f);

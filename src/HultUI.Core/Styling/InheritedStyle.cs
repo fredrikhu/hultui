@@ -48,7 +48,7 @@ public readonly record struct ResolvedInheritedStyle(
     TextDirection TextDirection,
     CursorType Cursor,
     FontSlant FontSlant = FontSlant.Normal,
-    TextAlign TextAlign = TextAlign.Left,
+    TextAlign TextAlign = TextAlign.Start,
     TextDecoration Decoration = TextDecoration.None,
     float LineHeight = 0f,
     float LetterSpacing = 0f);
@@ -76,14 +76,49 @@ public enum FontSlant : byte
 public enum TextDirection : byte
 {
     Ltr,
-    Rtl
+    Rtl,
+
+    /// <summary>
+    /// Take the paragraph's direction from its first strong character (UAX #9
+    /// rules P2/P3) — what a chat message or a commit subject wants, where the
+    /// content decides and the UI cannot know in advance. Text with no strong
+    /// character at all reads left to right.
+    /// </summary>
+    Auto
 }
 
 public enum TextAlign : byte
 {
+    /// <summary>
+    /// Align to where reading starts: left in a left-to-right paragraph, right in
+    /// a right-to-left one. The default, and the only value that follows the text.
+    /// </summary>
+    Start,
     Left,
     Center,
-    Right
+    Right,
+
+    /// <summary>Align to where reading ends — right in Ltr, left in Rtl.</summary>
+    End
+}
+
+public static class TextAlignment
+{
+    /// <summary>
+    /// How much of a line's leftover width goes before it: 0 flush left, 0.5
+    /// centred, 1 flush right. <see cref="TextAlign.Start"/> and
+    /// <see cref="TextAlign.End"/> follow the paragraph's resolved direction —
+    /// which for <see cref="TextDirection.Auto"/> is only known once the text has
+    /// been analysed — while Left and Right stay absolute.
+    /// </summary>
+    public static float Factor(TextAlign align, bool rtlParagraph) => align switch
+    {
+        TextAlign.Left => 0f,
+        TextAlign.Center => 0.5f,
+        TextAlign.Right => 1f,
+        TextAlign.End => rtlParagraph ? 0f : 1f,
+        _ => rtlParagraph ? 1f : 0f,
+    };
 }
 
 [Flags]

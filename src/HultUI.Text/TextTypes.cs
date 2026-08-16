@@ -1,4 +1,5 @@
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 
 namespace HultUI.Text;
 
@@ -12,10 +13,20 @@ public sealed class TextLayout
     public IReadOnlyList<TextLine> Lines { get; }
     public Size Size { get; }
 
-    public TextLayout(IReadOnlyList<TextLine> lines, Size size)
+    /// <summary>
+    /// The paragraph direction this text actually resolved to. Only interesting
+    /// for <see cref="TextDirection.Auto"/>, where it is the answer to UAX #9
+    /// rules P2/P3 and cannot be known before laying the text out — but it is what
+    /// <see cref="TextAlign.Start"/> and <see cref="TextAlign.End"/> align to for
+    /// any direction.
+    /// </summary>
+    public bool IsRtlParagraph { get; }
+
+    public TextLayout(IReadOnlyList<TextLine> lines, Size size, bool isRtlParagraph = false)
     {
         Lines = lines;
         Size = size;
+        IsRtlParagraph = isRtlParagraph;
     }
 }
 
@@ -179,6 +190,53 @@ public sealed class TextLine
                 ranges[++write] = ranges[i];
         }
         ranges.RemoveRange(write + 1, ranges.Count - write - 1);
+    }
+
+    /// <summary>
+    /// The caret position one step to the visual left or right of
+    /// <paramref name="offset"/> — what an arrow key should do on a line that
+    /// mixes directions, where the next character in reading order can be on the
+    /// far side of the line.
+    /// </summary>
+    /// <returns>
+    /// False when this line has no right-to-left run in it, meaning visual and
+    /// logical movement are the same thing and the caller should keep doing
+    /// whatever it already did (which knows about surrogate pairs and clusters;
+    /// this does not).
+    /// </returns>
+    public bool TryMoveCaretVisually(int offset, bool right, out int result,
+        Func<string, float>? measurePrefix = null)
+    {
+        result = offset;
+        bool anyRtl = false;
+        foreach (var run in Runs)
+            if (run.IsRtl) { anyRtl = true; break; }
+        if (!anyRtl) return false;
+
+        // The nearest boundary strictly beyond the caret's current x, in the
+        // requested direction. Boundaries that share an x — the two sides of a
+        // direction change — are one caret position, so stepping never stalls.
+        const float Epsilon = 0.01f;
+        float x = CaretXAt(offset, measurePrefix);
+        float bestX = right ? float.MaxValue : float.MinValue;
+        bool found = false;
+
+        int start = 0;
+        foreach (var run in Runs)
+        {
+            int len = run.Text.Length;
+            for (int rel = 0; rel <= len; rel++)
+            {
+                float bx = RunX(run, rel, measurePrefix);
+                bool better = right ? bx > x + Epsilon && bx < bestX : bx < x - Epsilon && bx > bestX;
+                if (!better) continue;
+                bestX = bx;
+                result = start + rel;
+                found = true;
+            }
+            start += len;
+        }
+        return found;
     }
 
     // Line-relative x of the boundary before the run-relative logical index rel.
