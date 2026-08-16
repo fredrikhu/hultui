@@ -23,30 +23,28 @@ public sealed class Signal<T> : IReactiveSource
     // only when a second arrives. An app with hundreds of [Reactive] properties was paying
     // a 176-byte HashSet per property to hold one entry.
     //
-    // The snapshot in NotifySubscribers is load-bearing, and not only for the many case.
-    // A first attempt notified the single subscriber straight off the field —
-    // `_single?.NotifyDirty()` — and that regressed Junction's
-    // FindRevealDeliveryTests.ARevealThatFallsDueBeforeTheBodyExistsIsStillHonoured: a find
-    // reveal queued before its TextArea exists stopped being delivered, because the file's
-    // text never arrived at all. Established by controlled variants, all differing only in
-    // this file:
+    // A note on the snapshot in NotifySubscribers, and a correction.
     //
-    //   always-HashSet + pooled snapshot ............. passes
-    //   single-slot   + direct notify ................ FAILS
-    //   single-slot   + snapshot on both paths ....... passes   ← what is here
+    // A first attempt at this storage notified the single subscriber straight off the
+    // field (`_single?.NotifyDirty()`), and Junction's
+    // FindRevealDeliveryTests.ARevealThatFallsDueBeforeTheBodyExistsIsStillHonoured failed
+    // against it — reproducibly at the time, three runs, each a hard 30s PumpUntil timeout
+    // with the file's text never arriving. Reverting this file fixed it; reverting only the
+    // event-dispatch change did not. That was recorded here as "the snapshot is
+    // load-bearing".
     //
-    // Ruled out along the way: the bookkeeping (a shadow set maintained by the same
-    // Subscribe/Unsubscribe calls agreed with the fast path at every single write, and no
-    // write ever lost a subscriber), the pool itself (the shipped always-HashSet version
-    // used it and passed), and flakiness (5/5 either way, and the failure was a hard 30s
-    // PumpUntil timeout rather than a race).
+    // That conclusion does not hold. Re-tested afterwards, the direct-notify shape passes
+    // 3/3 in isolation with everything else identical, so whatever caused the original
+    // failure was not this line. The bookkeeping was independently cleared at the time: a
+    // shadow set maintained by the same Subscribe/Unsubscribe calls agreed with the fast
+    // path at every single write, and no write ever lost a subscriber.
     //
-    // What is still not explained is WHY: reading the field into a snapshot and reading it
-    // for a direct call both read it exactly once, so the two should be equivalent. The
-    // suspect is the path ComponentHost.ForceRebuild's comment describes — a source first
-    // read during a rebuild, where a freshly created per-key AsyncLoader subscribes
-    // mid-flush. Do not "simplify" the single-subscriber path back to a direct call
-    // without running that Junction test.
+    // So the storage below is trusted and the snapshot is kept as the conservative shape —
+    // it costs nothing measurable and matches the many-subscriber path — but NOT because a
+    // mechanism was ever demonstrated. The original failure is unexplained and currently
+    // unreproducible. If it returns, the sequence worth tracing is a source first read
+    // during a rebuild, where a freshly created per-key AsyncLoader subscribes mid-flush —
+    // see ComponentHost.ForceRebuild's comment.
     private IReactiveNode? _single;
     private HashSet<IReactiveNode>? _subscribers;
 
