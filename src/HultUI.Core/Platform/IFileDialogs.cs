@@ -60,6 +60,11 @@ public interface IFileDialogs
     /// already agreed to replace anything there.
     /// </summary>
     /// <param name="suggestedFileName">Pre-filled name, with extension.</param>
+    /// <param name="initialDirectory">Where the dialog opens. Null lets the platform decide,
+    /// which usually means wherever it was left last.</param>
+    /// <param name="filters">The file-type choices offered. Null offers no filtering.</param>
+    /// <param name="cancellationToken">Abandons the wait. The platform dialog may stay on
+    /// screen — cancelling here stops the caller waiting for it, not the dialog itself.</param>
     Task<string?> SaveFileAsync(string suggestedFileName, string? initialDirectory = null,
         IReadOnlyList<FileDialogFilter>? filters = null,
         CancellationToken cancellationToken = default);

@@ -80,7 +80,7 @@ internal static partial class UiaInterop
     /// <c>[UiaAppendRuntimeId, hi32, lo32]</c>. The <see cref="UiaAppendRuntimeId"/>
     /// sentinel tells UIA to prepend the window-unique prefix, so our suffix only
     /// needs to be unique within the window — the element's stable
-    /// <see cref="Elements.ElementId"/> provides that. UIA takes ownership of the
+    /// <see cref="HultUI.Core.Elements.ElementId"/> provides that. UIA takes ownership of the
     /// returned array and frees it. Returns <see cref="IntPtr.Zero"/> on failure
     /// (a valid "no runtime id" result).
     /// </summary>

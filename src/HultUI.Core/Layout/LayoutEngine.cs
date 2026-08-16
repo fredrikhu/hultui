@@ -28,6 +28,11 @@ public sealed partial class LayoutEngine
         ClearLayoutDirty(root);
     }
 
+    /// <param name="element">The subtree root to lay out.</param>
+    /// <param name="constraint">The space available to it.</param>
+    /// <param name="absoluteX">Window-space X of the content box this subtree sits in, threaded
+    /// down so every element can record an absolute box without a second pass.</param>
+    /// <param name="absoluteY">Window-space Y, as <paramref name="absoluteX"/>.</param>
     /// <param name="forcedWidth">If set, used instead of auto width (for root element or flex-resolved sizes)</param>
     /// <param name="forcedHeight">If set, used instead of auto height (for root element or flex-resolved sizes)</param>
     private Size ComputeLayout(Element element, LayoutConstraint constraint, float absoluteX, float absoluteY,
@@ -1116,6 +1121,9 @@ public sealed partial class LayoutEngine
     }
 }
 
+/// <param name="Element">The flex item itself.</param>
+/// <param name="MainSize">Its size along the container's main axis.</param>
+/// <param name="CrossSize">Its size along the cross axis.</param>
 /// <param name="BaseMain">The main size this item was measured at, kept so Phase 3.5 can
 /// tell which items flex resolution actually moved and re-measure only those.</param>
 internal record struct FlexItem(Element Element, float MainSize, float CrossSize, float BaseMain);

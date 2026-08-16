@@ -54,7 +54,7 @@ public sealed class TreeNode<T>
 /// <para>Ordering is <b>first appearance</b> by default, folders and leaves
 /// interleaved, so a deliberately ordered item list carries its order into the tree:
 /// a folder sits where its most recent item would have, and names containing no
-/// slash at all produce exactly the flat list back. Pass <paramref name="sort"/>
+/// slash at all produce exactly the flat list back. Pass <c>sort</c>
 /// (e.g. <see cref="FoldersFirst{T}"/>) to impose an order instead.</para>
 /// </summary>
 public static class Tree

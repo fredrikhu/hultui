@@ -262,8 +262,10 @@ public abstract class Element
     public string? AccessibleDescription { get; set; }
 
     /// <summary>
-    /// Set by <see cref="Window"/> on the root when a platform accessibility
-    /// bridge is active. Descendants discover it by walking up <see cref="Parent"/>
+    /// Set by <c>Window</c> on the root when a platform accessibility bridge is
+    /// active — named rather than linked because Window lives in the HultUI
+    /// assembly above this one, which Core does not reference.
+    /// Descendants discover it by walking up <see cref="Parent"/>
     /// in <see cref="NotifyAccessibilityPropertyChanged"/>.
     /// </summary>
     internal IElementPropertyObserver? AccessibilityObserver { get; set; }

@@ -12,7 +12,7 @@ namespace HultUI.SourceGenerators;
 /// <summary>
 /// Flags a layout-style mutation that will be silently dropped.
 ///
-/// <para><see cref="HultUI.Core.Layout.FlexStyle"/> and friends are plain classes with
+/// <para><c>HultUI.Core.Layout.FlexStyle</c> and friends are plain classes with
 /// auto-property setters, so <c>el.Flex.FlexBasis = x</c> does not mark anything dirty.
 /// During construction that is harmless — a new element starts fully dirty — but in a
 /// handler that runs after the first layout pass the next frame sees no reason to re-run

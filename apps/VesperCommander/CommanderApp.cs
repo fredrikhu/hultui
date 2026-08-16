@@ -175,7 +175,11 @@ public partial class CommanderApp : Component, IDisposable
         public byte[] Status = [];                   // 0 queued · 1 active · 2 done · 3 skipped · 4 failed
         public long TotalBytes, TotalBytesDone;
         public long FileBytes, FileBytesDone;        // current item
-        public long StartTick, PausedTick, PausedTotal;   // for rate / ETA (excludes paused time)
+        // For rate / ETA. PausedTick is when the current pause began; PausedTotal is how long
+        // earlier pauses lasted. Both come off the elapsed time, or a run held for a minute
+        // reports the rate it would have had if it had spent that minute copying — near zero,
+        // with an ETA to match.
+        public long StartTick, PausedTick, PausedTotal;
         public volatile bool Paused, Cancelled, SkipCurrent;
         public ManualResetEventSlim? Gate;           // set while paused at a conflict (bg waits)
         public bool ConflictOverwrite;               // the choice released through Gate
@@ -1611,7 +1615,11 @@ public partial class CommanderApp : Component, IDisposable
 
     private void ToggleTransferPause()
     {
-        if (_op is { } op) { op.Paused = !op.Paused; MarkDirty(); }
+        if (_op is not { } op) return;
+        if (op.Paused) op.PausedTotal += Environment.TickCount64 - op.PausedTick;   // resuming
+        else op.PausedTick = Environment.TickCount64;
+        op.Paused = !op.Paused;
+        MarkDirty();
     }
 
     /// <summary>Hide the progress overlay but keep the copy running (a conflict or

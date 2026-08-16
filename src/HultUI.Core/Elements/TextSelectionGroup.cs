@@ -36,6 +36,10 @@ public sealed class TextSelectionGroup
     /// nothing in the new one. Call this on every build — rebinding the same key is cheap and
     /// keeps a live selection intact across a rebuild.
     /// </summary>
+    /// <param name="modelKey">Identifies the content being bound. A different key means a
+    /// different document, and any live selection is dropped rather than carried onto text it
+    /// no longer refers to; the same key across a rebuild keeps it.</param>
+    /// <param name="count">How many lines the model has.</param>
     /// <param name="textAt">
     /// The text of line <c>i</c>, or <c>null</c> where the model has no line at that index —
     /// a collapsed region, or the blank half of a split diff opposite an added line. A null

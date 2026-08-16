@@ -19,6 +19,10 @@ public static class PathDisplay
     /// trailing segments that fits, joining them with an ellipsis. Returns the full
     /// path unchanged when it already fits or has too few segments to collapse.
     /// </summary>
+    /// <param name="path">The path to collapse.</param>
+    /// <param name="budget">The width to fit, in pixels.</param>
+    /// <param name="measure">Returns the pixel width of a string, in the font the result will
+    /// be drawn in — the collapse is only as accurate as this is.</param>
     /// <param name="separator">Path separator; defaults to the platform separator.</param>
     public static string Collapse(string path, float budget, Func<string, float> measure, char separator = '\0')
     {

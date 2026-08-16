@@ -28,7 +28,7 @@ namespace HultUI;
 /// re-run the load. Keep those UI-only rebuilds on <c>MarkDirty()</c> and reserve
 /// the generation bump for real data changes.</para>
 ///
-/// <para><b>Threading.</b> <paramref name="produce"/> runs off the UI thread and
+/// <para><b>Threading.</b> The <c>produce</c> delegate runs off the UI thread and
 /// must not touch elements or reactive state. Everything else — <see cref="Load"/>,
 /// the reads, and <c>onLoaded</c> — is UI-thread only. Under a headless session the
 /// hop is deterministic instead of pooled — the producer runs during the next

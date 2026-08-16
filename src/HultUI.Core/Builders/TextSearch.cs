@@ -83,6 +83,9 @@ public sealed class TextSearch
     /// Points the search at the text to search and runs it. Call again whenever the content
     /// changes — the search cannot tell that the lines behind the delegate have moved.
     /// </summary>
+    /// <param name="lineCount">How many lines there are to search.</param>
+    /// <param name="lanes">How many lanes each line has — 1 for ordinary text, 2 for a
+    /// side-by-side diff whose halves are searched as one document.</param>
     /// <param name="textAt">Line and lane to the text there, or null where that lane has no
     /// line (the blank half opposite an insertion, say). Null lines are skipped, so they
     /// contribute no matches.</param>

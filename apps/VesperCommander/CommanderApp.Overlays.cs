@@ -414,7 +414,9 @@ public partial class CommanderApp
     private static string TransferRate(TransferOp op)
     {
         if (op.Paused) return " · paused";
-        long elapsedMs = Environment.TickCount64 - op.StartTick;
+        // Time spent paused is not time spent transferring: leaving it in would make a run that
+        // was held for a while report a rate and an ETA it never had.
+        long elapsedMs = Environment.TickCount64 - op.StartTick - op.PausedTotal;
         if (elapsedMs < 400 || op.TotalBytesDone <= 0) return "";
         double bps = op.TotalBytesDone / (elapsedMs / 1000.0);
         if (bps < 1) return "";

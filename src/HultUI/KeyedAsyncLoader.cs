@@ -9,7 +9,7 @@ namespace HultUI;
 /// <para>Hand-rolling this as a plain <c>Dictionary&lt;string, AsyncLoader&lt;T&gt;&gt;</c>
 /// works until you notice it never evicts: browsing a few hundred files leaves a few
 /// hundred loaders alive, each pinning its last value (decoded images, whole file
-/// contents). This keeps the <paramref name="capacity"/> most-recently-used slots and
+/// contents). This keeps the <c>capacity</c> most-recently-used slots and
 /// drops the rest, optionally handing each evicted value to <c>onEvicted</c> so
 /// unmanaged payloads can be released.</para>
 ///

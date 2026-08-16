@@ -12,7 +12,8 @@ namespace HultUI;
 ///
 /// UIA clients call provider methods from worker threads, which means we must
 /// either snapshot everything (we do, for reads) or marshal writes onto the
-/// UI thread. This adapter uses a <see cref="ConcurrentQueue{T}"/> drained at
+/// UI thread. This adapter uses a
+/// <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/> drained at
 /// the start of each frame, so element mutations happen on the same thread as
 /// the render loop. (<c>WM_GETOBJECT</c> is serviced by the bridge's own
 /// window-procedure subclass, so no SDL message hook is involved.)

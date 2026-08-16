@@ -30,7 +30,8 @@ public interface IRenderContext
     void DrawText(string text, Rect bounds, ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines);
 
     /// <summary>
-    /// Draws text like <see cref="DrawText"/>, but colors the character ranges in
+    /// Draws text like <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?)"/>,
+    /// but colors the character ranges in
     /// <paramref name="spans"/> individually (uncovered ranges use the style's
     /// text color). Layout, wrapping, and truncation are identical to the plain
     /// overload. A null or empty <paramref name="spans"/> renders exactly like the
@@ -52,7 +53,8 @@ public interface IRenderContext
 
     /// <summary>
     /// Lays out <paramref name="text"/> into lines under the same wrapping rules
-    /// <see cref="DrawText"/> uses, and returns each line's source character range
+    /// <see cref="DrawText(string, Rect, ResolvedInheritedStyle, TextOverflow, int?)"/> uses,
+    /// and returns each line's source character range
     /// and vertical placement. Selectable text uses this to map pointer positions
     /// and selection offsets across wrapped lines. Returns an empty list for empty
     /// text.

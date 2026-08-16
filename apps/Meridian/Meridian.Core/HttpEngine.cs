@@ -67,7 +67,9 @@ public sealed class HttpEngine : IDisposable
     private sealed class ConnectPhaseException(InfraKind kind, string headline, string detail) : Exception(headline)
     {
         public InfraKind Kind => kind;
-        public string Headline => headline;
+        // Read back off the base rather than captured as well: handing the same string to
+        // Exception(headline) and to a field stores it twice, which is what CS9107 warns about.
+        public string Headline => Message;
         public string Detail => detail;
     }
 

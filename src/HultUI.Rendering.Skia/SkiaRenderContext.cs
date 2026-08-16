@@ -649,7 +649,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _saveStack.Push(Canvas.Save());
         // SKMatrix rows: (scaleX, skewX, transX), (skewY, scaleY, transY).
         var sk = new SKMatrix(m.M11, m.M21, m.M31, m.M12, m.M22, m.M32, 0f, 0f, 1f);
-        Canvas.Concat(ref sk);
+        Canvas.Concat(in sk);
     }
 
     public void Pop()
