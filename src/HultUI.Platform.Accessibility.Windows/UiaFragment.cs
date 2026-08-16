@@ -255,6 +255,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.Application => UiaInterop.UIA_WindowControlTypeId,
         AccessibilityRole.Link => UiaInterop.UIA_HyperlinkControlTypeId,
         AccessibilityRole.Slider => UiaInterop.UIA_SliderControlTypeId,
+        AccessibilityRole.ComboBox => UiaInterop.UIA_ComboBoxControlTypeId,
         // Toggle switches read as check boxes (with toggle state) to UIA.
         AccessibilityRole.Switch => UiaInterop.UIA_CheckBoxControlTypeId,
         // No dedicated UIA control type: headings/alerts are text, dialogs are

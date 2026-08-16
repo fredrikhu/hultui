@@ -149,6 +149,7 @@ internal static partial class UiaInterop
     // ──── UIA control-type IDs
     public const int UIA_ButtonControlTypeId = 50000;
     public const int UIA_CheckBoxControlTypeId = 50002;
+    public const int UIA_ComboBoxControlTypeId = 50003;
     public const int UIA_EditControlTypeId = 50004;
     public const int UIA_GroupControlTypeId = 50026;
     public const int UIA_HyperlinkControlTypeId = 50005;

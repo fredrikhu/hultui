@@ -11,7 +11,7 @@ A cross-platform UI framework for C#/.NET. Build desktop applications with a flu
 - **Source generators** -- `[Reactive]` attribute generates Signal-backed properties
 - **Text rendering** -- HarfBuzz shaping, font fallback, emoji, Unicode line breaking
   (left-to-right only: BiDi reordering for Arabic/Hebrew is not implemented yet)
-- **Built-in controls** -- text input, checkbox, radio button, scroll view, canvas
+- **Built-in controls** -- text input, checkbox, radio button, dropdown, tabs, slider, scroll view, canvas
 - **Animations** -- tween-based system with easing, delays, and chaining
 - **Drag and drop** -- internal element drag and OS file/text drops
 - **Custom window chrome** -- borderless windows with custom title bars and edge resize
@@ -206,6 +206,7 @@ these two carry a whole product's worth of them.
 - [`HultUI.Samples.CustomChrome`](samples/HultUI.Samples.CustomChrome/) -- borderless window with custom title bar
 - [`HultUI.Samples.ThemedControl`](samples/HultUI.Samples.ThemedControl/) -- theming a control the app didn't write
 - [`HultUI.Samples.Clipboard`](samples/HultUI.Samples.Clipboard/) -- one selection copied in several formats
+- [`HultUI.Samples.Dropdown`](samples/HultUI.Samples.Dropdown/) -- single-select dropdowns, mouse and keyboard
 
 ## Requirements
 

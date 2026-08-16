@@ -7,6 +7,10 @@ internal sealed class OverlayEntry
     public float X { get; set; }
     public float Y { get; set; }
     public bool DismissOnOutsideClick { get; init; }
+    /// <summary>Runs when the host dismisses the overlay on an outside click — the one
+    /// close the owner did not initiate, so the one it has to be told about. An explicit
+    /// <c>CloseOverlay</c> does not raise it; the caller already knows.</summary>
+    public Action? OnDismissed { get; init; }
     public bool IsHitTestable { get; init; } = true;
     public bool StyleResolved { get; set; }
     public bool LayoutDone { get; set; }

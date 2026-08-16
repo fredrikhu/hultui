@@ -24,5 +24,6 @@ public enum AccessibilityRole : byte
     Group,
     Tree,
     TreeItem,
-    Application
+    Application,
+    ComboBox
 }

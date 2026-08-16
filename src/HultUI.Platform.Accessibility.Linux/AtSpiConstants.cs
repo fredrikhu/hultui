@@ -62,6 +62,7 @@ internal static class AtSpiConstants
     public const uint RoleInvalid = 0;
     public const uint RoleAlert = 2;
     public const uint RoleCheckBox = 7;
+    public const uint RoleComboBox = 11;
     public const uint RoleDialog = 16;
     public const uint RoleFiller = 20;
     public const uint RoleFrame = 23;
@@ -95,6 +96,7 @@ internal static class AtSpiConstants
         AccessibilityRole.ScrollView => RoleScrollPane,
         AccessibilityRole.Slider => RoleSlider,
         AccessibilityRole.Checkbox => RoleCheckBox,
+        AccessibilityRole.ComboBox => RoleComboBox,
         AccessibilityRole.RadioButton => RoleRadioButton,
         AccessibilityRole.Switch => RoleToggleButton,
         AccessibilityRole.Tab => RolePageTab,
@@ -116,6 +118,7 @@ internal static class AtSpiConstants
     {
         RoleAlert => "alert",
         RoleCheckBox => "check box",
+        RoleComboBox => "combo box",
         RoleDialog => "dialog",
         RoleFiller => "filler",
         RoleFrame => "frame",

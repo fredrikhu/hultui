@@ -60,7 +60,7 @@ public class DialogTests
         public Element? Shown { get; private set; }
         public bool Closed { get; private set; }
 
-        public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true)
+        public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null)
         {
             Shown = content;
             return new OverlayHandle { Id = 1 };

@@ -29,6 +29,7 @@ public sealed class Theme
     public RadioButtonTheme RadioButton { get => Get<RadioButtonTheme>(); init => Set(value); }
     public TooltipTheme Tooltip { get => Get<TooltipTheme>(); init => Set(value); }
     public ContextMenuTheme ContextMenu { get => Get<ContextMenuTheme>(); init => Set(value); }
+    public DropdownTheme Dropdown { get => Get<DropdownTheme>(); init => Set(value); }
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;

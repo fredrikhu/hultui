@@ -57,6 +57,14 @@ internal sealed class ContextMenuElement : Element
     internal float ItemTop(int index) =>
         index >= 0 && index < _itemYOffsets.Length ? _itemYOffsets[index] : 0f;
 
+    /// <summary>Places keyboard selection directly, without walking. The dropdown uses it
+    /// to open with its current value highlighted, and as the anchor for Home/End.</summary>
+    internal void SetHoveredIndex(int index)
+    {
+        _hoveredIndex = index;
+        MarkPaintDirty();
+    }
+
     /// <summary>Move keyboard selection up or down, skipping separators and disabled items.</summary>
     public void MoveSelection(int direction)
     {

@@ -1530,7 +1530,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
     // ──── Overlay system (IOverlayHost) ────
 
-    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true)
+    public OverlayHandle ShowOverlay(Element content, float x, float y, bool dismissOnOutsideClick = true, bool hitTestable = true, Action? onDismissed = null)
     {
         var id = _nextOverlayId++;
         var entry = new OverlayEntry
@@ -1541,6 +1541,7 @@ public sealed class Window : IOverlayHost, IDisposable
             Y = y,
             DismissOnOutsideClick = dismissOnOutsideClick,
             IsHitTestable = hitTestable,
+            OnDismissed = onDismissed,
         };
 
         // Set overlay host so elements inside the overlay can show/close overlays
@@ -1652,8 +1653,10 @@ public sealed class Window : IOverlayHost, IDisposable
                     _contextSubmenuOverlay = default;
                     _contextSubmenuElement = null;
                 }
+                var dismissed = _overlays[i].OnDismissed;
                 _overlays.RemoveAt(i);
                 _root?.MarkPaintDirty();
+                dismissed?.Invoke();
             }
         }
     }
