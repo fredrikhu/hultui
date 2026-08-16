@@ -204,6 +204,8 @@ these two carry a whole product's worth of them.
 - [`HultUI.Samples.ZIndex`](samples/HultUI.Samples.ZIndex/) -- z-index layering
 - [`HultUI.Samples.MultiWindow`](samples/HultUI.Samples.MultiWindow/) -- multi-window with shared state
 - [`HultUI.Samples.CustomChrome`](samples/HultUI.Samples.CustomChrome/) -- borderless window with custom title bar
+- [`HultUI.Samples.ThemedControl`](samples/HultUI.Samples.ThemedControl/) -- theming a control the app didn't write
+- [`HultUI.Samples.Clipboard`](samples/HultUI.Samples.Clipboard/) -- one selection copied in several formats
 
 ## Requirements
 

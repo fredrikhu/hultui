@@ -159,9 +159,11 @@ covers the need.
    shares nothing mutable with the original. `Theme.Light` and `Theme.Dark` are shared
    statics — `With` that mutated in place would leak one app's brand colour into every other
    consumer of `Theme.Light` in the process, including the inspector window.
-3. A sample control in `samples/` that ships its own theme, to prove the idiom is followable
-   from outside — the seam is the whole point, so exercising it from inside the framework
-   proves nothing.
+3. ~~A sample control in `samples/` that ships its own theme.~~ Done:
+   `samples/HultUI.Samples.ThemedControl`. Being a separate assembly caught something the
+   in-repo tests could not — `ApplyTheme` is `protected internal`, so an external overrider
+   must declare it `protected`, and the compiler rejects the form used everywhere inside
+   the framework.
 4. Headless tests: default derives from the palette; `With` overrides it; `With` does not
    mutate the source theme; a runtime theme switch re-runs `ApplyTheme` and repaints.
 5. Docs: a "theming a control you didn't write" section, and a note in `DECISIONS.md`
