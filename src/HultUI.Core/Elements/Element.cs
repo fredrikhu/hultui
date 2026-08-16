@@ -308,6 +308,33 @@ public abstract class Element
     // ──── Events ────
     private Dictionary<Type, List<EventHandlerEntry>>? _handlers;
 
+    /// <summary>
+    /// How many dispatches are currently walking this element's handler lists. While it is
+    /// non-zero, anything that changes a list replaces the instance instead of mutating it,
+    /// so the walk in progress keeps seeing the handlers that were attached when it started.
+    /// Nested because one dispatch can synchronously trigger another (a click handler that
+    /// moves focus fires blur).
+    /// </summary>
+    private int _dispatchDepth;
+
+    /// <summary>
+    /// The list to mutate for <paramref name="type"/>, copied first if a dispatch is walking
+    /// it. Copy-on-write is what lets <see cref="InvokeHandlers"/> iterate the live list with
+    /// no per-event snapshot: pointer storms and drags dispatch continuously, and that
+    /// snapshot was the highest-frequency allocation in the framework.
+    /// </summary>
+    private List<EventHandlerEntry> ListForMutation(Type type)
+    {
+        _handlers ??= [];
+        if (!_handlers.TryGetValue(type, out var list))
+            return _handlers[type] = [];
+
+        if (_dispatchDepth > 0)
+            _handlers[type] = list = [.. list];
+
+        return list;
+    }
+
     public void On<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent
     {
         On(EventPhase.Bubble, handler);
@@ -327,14 +354,10 @@ public abstract class Element
 
     private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned) where TEvent : ElementEvent
     {
-        _handlers ??= [];
-        var type = typeof(TEvent);
-        if (!_handlers.TryGetValue(type, out var list))
-        {
-            list = [];
-            _handlers[type] = list;
-        }
-        list.Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned));
+        // A handler can register another handler on the same element mid-dispatch, so this
+        // goes through the copy-on-write path like every other mutation.
+        ListForMutation(typeof(TEvent))
+            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned));
     }
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
@@ -354,17 +377,27 @@ public abstract class Element
         if (_handlers is null) return;
         if (!_handlers.TryGetValue(evt.GetType(), out var list)) return;
 
-        // Snapshot: a handler can MarkDirty → synchronous rebuild → PatchFrom, which
-        // swaps this element's app handlers mid-dispatch (CopyAppHandlersFrom). The
-        // event runs the handlers that were attached when dispatch started.
-        foreach (var entry in list.ToArray())
+        // No snapshot. A handler can MarkDirty → synchronous rebuild → PatchFrom, which
+        // swaps this element's app handlers mid-dispatch; _dispatchDepth makes every such
+        // mutation replace the list instance rather than touch this one, so `list` still
+        // holds exactly the handlers that were attached when dispatch started.
+        _dispatchDepth++;
+        try
         {
-            if (entry.Phase == phase || phase == EventPhase.Target)
+            for (int i = 0; i < list.Count; i++)
             {
+                var entry = list[i];
+                if (entry.Phase != phase && phase != EventPhase.Target)
+                    continue;
+
                 EventDispatcher.HandlerInvocationCount++;
                 entry.Handler(evt);
                 if (evt.StopPropagation) break;
             }
+        }
+        finally
+        {
+            _dispatchDepth--;
         }
     }
 
@@ -724,12 +757,29 @@ public abstract class Element
         if (_handlers is not null)
         {
             List<Type>? empty = null;
+            // Collect first, apply after: this runs mid-dispatch often enough (a handler
+            // marks dirty and the rebuild lands here) that mutating while enumerating the
+            // dictionary is not worth relying on.
+            List<(Type Type, List<EventHandlerEntry> List)>? replacements = null;
+
             foreach (var (type, list) in _handlers)
             {
+                if (_dispatchDepth > 0)
+                {
+                    var kept = list.FindAll(static e => e.Owned);
+                    if (kept.Count == 0) (empty ??= []).Add(type);
+                    else (replacements ??= []).Add((type, kept));
+                    continue;
+                }
+
                 list.RemoveAll(static e => !e.Owned);
                 if (list.Count == 0)
                     (empty ??= []).Add(type);
             }
+
+            if (replacements is not null)
+                foreach (var (type, kept) in replacements)
+                    _handlers[type] = kept;
             if (empty is not null)
                 foreach (var type in empty)
                     _handlers.Remove(type);
@@ -743,10 +793,7 @@ public abstract class Element
             {
                 if (entry.Owned)
                     continue;
-                _handlers ??= [];
-                if (!_handlers.TryGetValue(type, out var target))
-                    _handlers[type] = target = [];
-                target.Add(entry);
+                ListForMutation(type).Add(entry);
             }
         }
     }

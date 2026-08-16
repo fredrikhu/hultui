@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Generic;
 using HultUI.Core.Threading;
 
@@ -16,7 +17,18 @@ public sealed class Signal<T> : IReactiveSource
 
     private T _value;
     private readonly IEqualityComparer<T> _comparer;
+
+    // Allocated on first subscribe, so a signal nobody reads carries no set.
+    //
+    // A 0/1/many layout — an inline field for the single subscriber almost every signal
+    // has, promoting to a set only on the second — was tried and reverted. It regressed
+    // Junction's FindRevealDeliveryTests.ARevealThatFallsDueBeforeTheBodyExistsIsStillHonoured,
+    // where a reveal queued before its TextArea exists stopped being delivered. Isolated to
+    // the single-slot path specifically: the pooled snapshot below passes that test with the
+    // set always allocated. Worth another attempt with the ordering worked out, but not
+    // worth shipping a subscription bug to save 176 bytes per signal.
     private HashSet<IReactiveNode>? _subscribers;
+
     private int _version;
 
     public Signal(T initialValue, IEqualityComparer<T>? comparer = null)
@@ -65,10 +77,25 @@ public sealed class Signal<T> : IReactiveSource
     {
         if (_subscribers is null) return;
 
-        // Snapshot to avoid mutation during iteration
-        var snapshot = new List<IReactiveNode>(_subscribers);
-        foreach (var subscriber in snapshot)
-            subscriber.NotifyDirty();
+        // A subscriber can subscribe or unsubscribe while being notified, so iterate a copy
+        // — rented rather than allocated, because this is the write path and every
+        // [Reactive] assignment runs it.
+        int count = _subscribers.Count;
+        if (count == 0) return;
+
+        var snapshot = ArrayPool<IReactiveNode>.Shared.Rent(count);
+        try
+        {
+            _subscribers.CopyTo(snapshot, 0);
+            for (int i = 0; i < count; i++)
+                snapshot[i].NotifyDirty();
+        }
+        finally
+        {
+            // Cleared on return: a pooled buffer holding the last notified nodes would keep
+            // whole component trees alive until the buffer was next rented.
+            ArrayPool<IReactiveNode>.Shared.Return(snapshot, clearArray: true);
+        }
     }
 
     void IReactiveSource.Subscribe(IReactiveNode subscriber)
