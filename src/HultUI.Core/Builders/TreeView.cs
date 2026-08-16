@@ -149,6 +149,66 @@ public static class Tree
         }
     }
 
+    /// <summary>
+    /// Merges every folder that holds nothing but one sub-folder into that sub-folder, so
+    /// the chain <c>src</c> → <c>HultUI.Core</c> → <c>Elements</c> becomes a single row
+    /// labelled <c>src/HultUI.Core/Elements</c>.
+    ///
+    /// <para>This is what keeps a tree of deep paths worth having. A commit touching three
+    /// files four directories down is nine rows of chrome without it — and the folders it
+    /// drops carry no information: a folder with one sub-folder and nothing else is a step
+    /// on the way, not a grouping. Folders that genuinely branch are left alone, so the
+    /// rows that survive are exactly the ones where the tree divides.</para>
+    ///
+    /// <para>A merged node keeps the <b>deepest</b> path, so expansion state, reveal, and
+    /// everything else keyed on a folder's path still names the folder its rows sit in;
+    /// only <see cref="TreeNode{T}.Segment"/> grows the joined label. Nodes are rewritten
+    /// in place where they can be, so call this on a forest fresh out of
+    /// <see cref="Build{T}"/> rather than one something else is holding.</para>
+    /// </summary>
+    public static List<TreeNode<T>> Compact<T>(IReadOnlyList<TreeNode<T>> roots)
+    {
+        var result = new List<TreeNode<T>>(roots.Count);
+        foreach (var node in roots) result.Add(CompactNode(node, node.Depth));
+        return result;
+    }
+
+    private static TreeNode<T> CompactNode<T>(TreeNode<T> node, int depth)
+    {
+        node.Depth = depth;
+        if (!node.IsFolder) return node;
+
+        // Walk down while this folder's only child is itself a folder, joining the
+        // segments as we go. A single *leaf* child stops the walk: that is a folder
+        // holding one file, which is a grouping and stays one.
+        var deepest = node;
+        var segment = node.Segment;
+        while (deepest.Children is [{ IsFolder: true } only])
+        {
+            segment += '/' + only.Segment;
+            deepest = only;
+        }
+
+        // The counts are the same all the way down a single-child chain, so the merged
+        // node can take them from either end.
+        var merged = ReferenceEquals(deepest, node) ? node : new TreeNode<T>
+        {
+            Segment = segment,
+            Path = deepest.Path,
+            IsFolder = true,
+            Depth = depth,
+            LeafCount = deepest.LeafCount,
+            FlaggedCount = deepest.FlaggedCount,
+        };
+        if (!ReferenceEquals(merged, node)) merged.Children.AddRange(deepest.Children);
+
+        // Everything below moved up by however many levels the chain lost.
+        var children = merged.Children;
+        for (var i = 0; i < children.Count; i++)
+            children[i] = CompactNode(children[i], depth + 1);
+        return merged;
+    }
+
     /// <summary>Folders before leaves, both alphabetical by segment (case-insensitive) —
     /// the file-manager convention for path trees.</summary>
     public static Comparison<TreeNode<T>> FoldersFirst<T>() => static (a, b) =>
@@ -250,6 +310,7 @@ public sealed class TreeView<T>
     private IReadOnlyList<T>? _boundItems;
     private Comparison<TreeNode<T>>? _boundSort;
     private List<TreeNode<T>> _roots = [];
+    private bool _compactFolders;
 
     /// <param name="onChanged">Raised when expansion changes outside a bind — the
     /// app's <c>MarkDirty</c>, so a toggle repaints without every caller remembering
@@ -260,6 +321,22 @@ public sealed class TreeView<T>
     /// tree convention. A size guard (<c>node =&gt; node.LeafCount &lt;= 30</c>) opens
     /// small trees fully and folds only where a flat list was unreadable anyway.</summary>
     public Func<TreeNode<T>, bool>? DefaultExpanded { get; set; }
+
+    /// <summary>Whether single-child folder chains collapse into one row — see
+    /// <see cref="Tree.Compact{T}"/>. Worth it for path trees, where the chains are long
+    /// and empty; pointless for ref names, which are two or three segments deep. Setting
+    /// it drops the bound tree so the next <see cref="Bind"/> rebuilds under the new
+    /// shape.</summary>
+    public bool CompactFolders
+    {
+        get => _compactFolders;
+        set
+        {
+            if (_compactFolders == value) return;
+            _compactFolders = value;
+            _boundItems = null;
+        }
+    }
 
     /// <summary>The current forest. Rebuilt by <see cref="Bind"/> when the items change.</summary>
     public IReadOnlyList<TreeNode<T>> Roots => _roots;
@@ -278,6 +355,7 @@ public sealed class TreeView<T>
         _boundItems = items;
         _boundSort = sort;
         _roots = Tree.Build(items, nameOf, flag, sort);
+        if (_compactFolders) _roots = Tree.Compact(_roots);
     }
 
     /// <summary>Forgets the items and the tree. Expansion overrides are kept, so the

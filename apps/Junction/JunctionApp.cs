@@ -146,6 +146,14 @@ public partial class JunctionApp : Component, IDisposable
     // selected commits (Base = oldest, Head = newest). Null in single-commit mode.
     private (string BaseHash, string HeadHash)? _detailRange;
     private string? _selectedFilePath;    // file selected in the Commit view
+    // The Commit view's file list is a folder tree (JunctionApp.ChangeTree.cs). The
+    // cursor is the highlighted row and may sit on a folder; _selectedFilePath stays the
+    // file the diff pane shows, so crossing a folder doesn't blank it. _commitFileRows is
+    // the visible-row order, rebuilt each Build so the arrow keys step what's on screen.
+    private readonly TreeView<GitFileChange> _commitFilesTree;
+    private List<TreeNode<GitFileChange>> _commitFileRows = [];
+    private string? _commitCursorPath;
+    private string? _commitTreeKey;       // the commit (or range) the expansion belongs to
 
     // Changes (staging) state. Multi-selection à la Windows lists, the same model as
     // the History list above: the three _changeSel* fields are the FOCUS caret — the
@@ -168,6 +176,18 @@ public partial class JunctionApp : Component, IDisposable
     private bool _changeSelConflicted;
     private readonly HashSet<ChangeRef> _changeSelection = new();
     private ChangeRef? _changeAnchor;
+    // The focus caret. It may sit on a folder row, which the three _changeSel* fields
+    // above deliberately do not follow: the right pane keeps showing the file it was
+    // showing, rather than blanking every time the caret crosses a folder.
+    private ChangeRef? _changeCaret;
+    // One folder tree per section (JunctionApp.ChangeTree.cs). Separate trees because
+    // they are separate lists: collapsing `src` among the staged files says nothing
+    // about the same folder among the unstaged ones.
+    private readonly Dictionary<ChangeSection, TreeView<GitFileChange>> _changeTrees = new();
+    private string? _changeTreeRepo;   // the repository the expansion state belongs to
+    // How many files the selection covers, counted once per build so every row that
+    // offers an action can label itself with it without walking the list again.
+    private int _changeSelFileCount;
     // Scroll the keyboard-focused file row into view (the list isn't focused, so it
     // won't follow the caret on its own).
     private readonly Ref<ScrollViewElement> _changeScrollRef = new();
@@ -282,7 +302,12 @@ public partial class JunctionApp : Component, IDisposable
     /// and they select independently.</summary>
     private enum ChangeSection { Conflicted, Staged, Unstaged }
 
-    private readonly record struct ChangeRef(string Path, ChangeSection Section);
+    /// <summary>A row in the Changes list: a file, or — since the three lists group by
+    /// folder — the folder gathering some of them. A folder row selects, stages and
+    /// unstages as everything below it, so it needs an identity of its own; a file and
+    /// the folder of the same name could never both exist in git, but the flag keeps the
+    /// two kinds of row from ever comparing equal by accident.</summary>
+    private readonly record struct ChangeRef(string Path, ChangeSection Section, bool IsFolder = false);
 
     // Identity of the two sides of an in-progress merge: "ours" = HEAD (the branch
     // being merged into), "theirs" = MERGE_HEAD (the branch being merged in).
@@ -321,6 +346,7 @@ public partial class JunctionApp : Component, IDisposable
         _diffFind = new FindBarState(MarkDirty);
         _filesFind = new FindBarState(MarkDirty);
         _filesTree = new TreeView<string>(MarkDirty);
+        _commitFilesTree = NewChangeTree();
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;

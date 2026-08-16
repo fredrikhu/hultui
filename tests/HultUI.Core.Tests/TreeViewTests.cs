@@ -122,6 +122,55 @@ public class TreeViewTests
         Assert.Equal(["folder", "leaf", "other"], view.Rows().Select(r => r.Segment));
     }
 
+    // ──── Compaction ────
+
+    [Fact]
+    public void CompactFolders_JoinsTheChains_AndKeepsTheDeepestPathAsTheKey()
+    {
+        var view = View();
+        view.CompactFolders = true;
+        view.DefaultExpanded = _ => true;
+        view.Bind(["src/Core/Elements/Element.cs"], n => n);
+
+        Assert.Equal(["src/Core/Elements", "Element.cs"], view.Rows().Select(r => r.Segment));
+        // Toggling the joined row is toggling the folder it stands for, so the state
+        // survives a rebind the same way an ordinary folder's does.
+        view.Toggle(view.Roots[0]);
+        Assert.Equal(["src/Core/Elements"], view.Rows().Select(r => r.Segment));
+        view.Bind(["src/Core/Elements/Element.cs", "src/Core/Elements/Text.cs"], n => n);
+        Assert.Equal(["src/Core/Elements"], view.Rows().Select(r => r.Segment));
+    }
+
+    [Fact]
+    public void SettingCompactFolders_RebuildsATreeThatWasAlreadyBound()
+    {
+        var view = View();
+        view.DefaultExpanded = _ => true;
+        string[] items = ["a/b/c.txt"];
+        view.Bind(items, n => n);
+        Assert.Equal(["a", "b", "c.txt"], view.Rows().Select(r => r.Segment));
+
+        // Bind is memoized on the list instance, so the flag has to invalidate it —
+        // otherwise the same list would keep answering with the old shape.
+        view.CompactFolders = true;
+        view.Bind(items, n => n);
+
+        Assert.Equal(["a/b", "c.txt"], view.Rows().Select(r => r.Segment));
+    }
+
+    [Fact]
+    public void ExpandAncestors_StillReachesARowUnderJoinedFolders()
+    {
+        var view = View();
+        view.CompactFolders = true;
+        view.Bind(["a/b/c/deep.txt", "a/b/c/other.txt", "top.txt"], n => n);
+
+        view.ExpandAncestors("a/b/c/deep.txt");
+
+        Assert.Equal(["a/b/c", "deep.txt", "other.txt", "top.txt"],
+            view.Rows().Select(r => r.Segment));
+    }
+
     // ──── TreeView: keyboard steps ────
 
     private static (TreeView<string> view, List<TreeNode<string>> rows) SteppingTree()

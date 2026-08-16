@@ -299,7 +299,82 @@ public class TreeTests
         Assert.Equal("origin", Assert.Single(rows).Segment);
     }
 
+    // ── Compaction ───────────────────────────────────────────────────────
+    //
+    // What makes a tree of deep paths worth having: the folders that don't divide
+    // anything become one row with a joined label. Junction's Commit and Changes lists
+    // are the callers — a commit four directories down was more chrome than content.
+
+    [Fact]
+    public void AChainOfOnlyChildFoldersBecomesOneRow()
+    {
+        var rows = Compacted("src/HultUI.Core/Elements/Element.cs");
+
+        Assert.Equal(new[] { "src/HultUI.Core/Elements", "Element.cs" }, rows.Select(n => n.Segment));
+        // The label is the only thing that joined: the row still *is* the deepest
+        // folder, so expansion, reveal and every other path-keyed lookup still find it.
+        Assert.Equal("src/HultUI.Core/Elements", rows[0].Path);
+        Assert.Equal(new[] { 0, 1 }, rows.Select(n => n.Depth));
+    }
+
+    [Fact]
+    public void AFolderThatBranchesKeepsItsOwnRow()
+    {
+        var rows = Compacted("src/Core/a.cs", "src/Text/b.cs");
+
+        // `src` holds two folders, so it divides something and stays; each child was a
+        // chain of its own and joined.
+        Assert.Equal(new[] { "src", "Core", "a.cs", "Text", "b.cs" }, rows.Select(n => n.Segment));
+        Assert.Equal(new[] { 0, 1, 2, 1, 2 }, rows.Select(n => n.Depth));
+    }
+
+    [Fact]
+    public void AFolderHoldingOneFileIsAGroupingAndSurvives()
+    {
+        // The walk stops at a leaf child. `docs` holding one file is a folder with a
+        // file in it — joining the two would say the file *is* the folder.
+        var rows = Compacted("docs/README.md");
+
+        Assert.Equal(new[] { "docs", "README.md" }, rows.Select(n => n.Segment));
+    }
+
+    [Fact]
+    public void CompactionOnlyReachesTheFoldersAboveTheBranch()
+    {
+        var rows = Compacted("a/b/c/one.cs", "a/b/d/two.cs");
+
+        // `a/b` runs together down to where it splits; below the split each arm joins
+        // on its own. Nothing above or below crosses the branch.
+        Assert.Equal(new[] { "a/b", "c", "one.cs", "d", "two.cs" }, rows.Select(n => n.Segment));
+        Assert.Equal(new[] { "a/b", "a/b/c", "a/b/c/one.cs", "a/b/d", "a/b/d/two.cs" },
+            rows.Select(n => n.Path));
+    }
+
+    [Fact]
+    public void ACompactedFolderKeepsTheCountsOfTheChainItReplaced()
+    {
+        var roots = Tree.Compact(Tree.Build(
+            new[] { "x/y/z/1", "x/y/z/2", "x/y/z/3" }, s => s, flag: s => s.EndsWith('1')));
+
+        var folder = Assert.Single(roots);
+        Assert.Equal(3, folder.LeafCount);
+        Assert.Equal(1, folder.FlaggedCount);
+    }
+
+    [Fact]
+    public void NamesWithNoFoldersAtAllAreUntouched()
+    {
+        var rows = Compacted("a.cs", "b.cs");
+
+        Assert.Equal(new[] { "a.cs", "b.cs" }, rows.Select(n => n.Segment));
+        Assert.All(rows, n => Assert.Equal(0, n.Depth));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
+
+    /// <summary>The compacted tree, fully expanded — what a caller's rows would be.</summary>
+    private static List<TreeNode<string>> Compacted(params string[] names) =>
+        Tree.Flatten(Tree.Compact(Tree.Build(names, s => s)), _ => true);
 
     private static List<TreeNode<string>> Build(params string[] names) =>
         Tree.Build(names, s => s);

@@ -16,6 +16,7 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Changes", "Open a repository first.");
 
+        SyncChangeTrees(_activeRepoPath);
         // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
         bool ws = _settings.Git.IgnoreWhitespace;
         _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}|w{ws}",
@@ -118,19 +119,49 @@ public partial class JunctionApp
     // selection set; see the field comments in JunctionApp.cs for the split and for
     // the one-section rule this list adds.
 
-    /// <summary>Every selectable file row in display order — conflicts, then staged,
-    /// then unstaged, exactly as <see cref="BuildChangesColumn"/> lays them out.
-    /// Keyboard navigation and Shift ranges index into this list.</summary>
-    private static List<ChangeRef> ChangeRows(ChangesData data)
+    /// <summary>Every row on screen in display order — conflicts, then staged, then
+    /// unstaged, each grouped into its folder tree exactly as <see cref="BuildChangesColumn"/>
+    /// lays them out. Folder rows are rows like any other here: keyboard navigation and
+    /// Shift ranges index into this list, so a folder is somewhere the caret lands and
+    /// something a range picks up.</summary>
+    private List<ChangeRef> ChangeRows(ChangesData data)
     {
-        var rows = new List<ChangeRef>(data.Conflicted.Count + data.Staged.Count + data.Unstaged.Count);
-        foreach (var f in data.Conflicted) rows.Add(new ChangeRef(f.Path, ChangeSection.Conflicted));
-        foreach (var f in data.Staged) rows.Add(new ChangeRef(f.Path, ChangeSection.Staged));
-        foreach (var f in data.Unstaged) rows.Add(new ChangeRef(f.Path, ChangeSection.Unstaged));
+        var rows = new List<ChangeRef>();
+        foreach (var (section, files) in ChangeSections(data))
+            foreach (var node in ChangeTreeRows(section, files))
+                rows.Add(new ChangeRef(node.Path, section, node.IsFolder));
         return rows;
     }
 
-    private static HashSet<ChangeRef> ChangeRowSet(ChangesData data) => [.. ChangeRows(data)];
+    /// <summary>The three lists in display order, so the row walk and the build agree
+    /// about what follows what.</summary>
+    private static (ChangeSection Section, IReadOnlyList<GitFileChange> Files)[] ChangeSections(ChangesData data) =>
+    [
+        (ChangeSection.Conflicted, data.Conflicted),
+        (ChangeSection.Staged, data.Staged),
+        (ChangeSection.Unstaged, data.Unstaged),
+    ];
+
+    /// <summary>
+    /// Every row a selection may still name, regardless of what is expanded. Visibility is
+    /// the wrong question for pruning: collapsing a folder must not quietly drop the files
+    /// under it from the selection, and the files are still there to stage.
+    ///
+    /// <para>Folder rows are derived from the paths rather than from the trees for the
+    /// same reason — a folder's row exists whether or not its parent is open.</para>
+    /// </summary>
+    private static HashSet<ChangeRef> ChangeRowSet(ChangesData data)
+    {
+        var set = new HashSet<ChangeRef>();
+        foreach (var (section, files) in ChangeSections(data))
+            foreach (var f in files)
+            {
+                set.Add(new ChangeRef(f.Path, section));
+                for (var i = f.Path.IndexOf('/'); i >= 0; i = f.Path.IndexOf('/', i + 1))
+                    set.Add(new ChangeRef(f.Path[..i], section, IsFolder: true));
+            }
+        return set;
+    }
 
     /// <summary>Drops selected rows (and an anchor) that no longer exist.
     ///
@@ -148,16 +179,20 @@ public partial class JunctionApp
         if (_changeAnchor is { } a && !live.Contains(a)) _changeAnchor = null;
     }
 
-    /// <summary>The focus caret as a row, or null when no file is selected.</summary>
-    private ChangeRef? ChangeFocus() => _changeSelPath is { } p
-        ? new ChangeRef(p, _changeSelConflicted ? ChangeSection.Conflicted
-            : _changeSelStaged ? ChangeSection.Staged : ChangeSection.Unstaged)
-        : null;
+    /// <summary>The focus caret as a row, or null when nothing is selected.</summary>
+    private ChangeRef? ChangeFocus() => _changeCaret;
 
-    /// <summary>Moves the focus caret — the file the diff pane, Ctrl+D and the
-    /// line-level staging selection all follow — without touching the selection set.</summary>
+    /// <summary>Moves the focus caret without touching the selection set.
+    ///
+    /// <para>The three <c>_changeSel*</c> fields — the file the diff pane, Ctrl+D and the
+    /// line-level staging selection all follow — move with it only for a *file* row. A
+    /// caret on a folder leaves the open file where it is, so arrowing through the list
+    /// doesn't blank the right-hand pane every time it crosses a folder (the Files tab
+    /// behaves the same way).</para></summary>
     private void SetChangeFocus(ChangeRef row)
     {
+        _changeCaret = row;
+        if (row.IsFolder) return;
         _changeSelPath = row.Path;
         _changeSelStaged = row.Section == ChangeSection.Staged;
         _changeSelConflicted = row.Section == ChangeSection.Conflicted;
@@ -176,6 +211,7 @@ public partial class JunctionApp
         }
         else
         {
+            _changeCaret = null;
             _changeSelPath = null;
             _changeSelStaged = false;
             _changeSelConflicted = false;
@@ -253,13 +289,37 @@ public partial class JunctionApp
             case KeyCode.Home: MoveChangeSelection(int.MinValue / 2, shift, focusOnly, ctrl); return true;
             case KeyCode.End: MoveChangeSelection(int.MaxValue / 2, shift, focusOnly, ctrl); return true;
             case KeyCode.Space when ctrl: ToggleFocusedChangeSelection(); return true;
+            // The conventional folder keys, as in the Files tab and the ref tables.
+            case KeyCode.Right: return ChangeTreeStep(right: true);
+            case KeyCode.Left: return ChangeTreeStep(right: false);
             default: return false;
         }
     }
 
-    // Rows here are variable height (a file with a directory prefix is two lines), so
-    // a page is a count rather than a measured band — the same one the Commit view's
-    // file list uses.
+    /// <summary>←/→ on the caret's row via the tree model: right opens a closed folder and
+    /// otherwise descends, left closes an open one and otherwise steps out to the parent.
+    /// A step that lands elsewhere selects that row, exactly as ↑/↓ would — which is also
+    /// why stepping out of a folder never leaves the caret hidden inside a collapse.</summary>
+    private bool ChangeTreeStep(bool right)
+    {
+        if (ChangeFocus() is not { } focus) return true;
+        var data = _changes.Value;
+        var nodes = ChangeTreeRows(focus.Section, SectionFiles(data, focus.Section));
+        var i = nodes.FindIndex(n => n.IsFolder == focus.IsFolder && n.Path == focus.Path);
+        if (i < 0) return true;
+
+        var landed = ChangeTreeFor(focus.Section).Step(nodes, i, right);
+        if (landed == i) { MarkDirty(); return true; }   // it expanded or collapsed instead
+        var node = nodes[landed];
+        SetChangeSelection(new ChangeRef(node.Path, focus.Section, node.IsFolder));
+        _pendingScrollToSelected = true;
+        Rerender();
+        return true;
+    }
+
+    // One line per row now that the folder above carries the directory, so a page could
+    // be measured — but the count is what the Commit view's list uses and what the
+    // History list's page maths degrades to, and eight rows is a page either way.
     private const int ChangesPageSize = 8;
 
     private void MoveChangeSelection(int delta, bool extend = false, bool focusOnly = false, bool additive = false)
@@ -316,22 +376,51 @@ public partial class JunctionApp
         MarkDirty();   // the caret didn't move, so no new loader can be activated
     }
 
-    /// <summary>How many files a row action targets: the whole selection when the row
-    /// is inside a multi-selection, otherwise just that row. O(1), so rows can label
-    /// themselves with it.</summary>
-    private int ChangeActionCount(ChangeRef row) =>
-        _changeSelection.Count > 1 && _changeSelection.Contains(row) ? _changeSelection.Count : 1;
+    /// <summary>How many files a row action targets: every file the selection covers when
+    /// the row is inside it, otherwise the row's own — one for a file, all of them for a
+    /// folder. <paramref name="ownCount"/> comes from the caller's node, so labelling a
+    /// row stays O(1) and the whole list stays O(n).</summary>
+    private int ChangeActionCount(ChangeRef row, int ownCount) =>
+        _changeSelection.Contains(row) && _changeSelFileCount > 1 ? _changeSelFileCount : ownCount;
 
-    /// <summary>The files a row action acts on, in display order. Mirrors the History
-    /// list's right-click rule: inside a multi-selection the action takes the
-    /// selection, outside it takes the clicked row.</summary>
+    /// <summary>The files a row action acts on, in list order. Mirrors the History list's
+    /// right-click rule: inside a multi-file selection the action takes the selection,
+    /// outside it takes the clicked row — and a folder row is the files under it.</summary>
     private List<string> ChangeActionPaths(ChangeRef row)
     {
-        if (ChangeActionCount(row) == 1) return [row.Path];
-        return ChangeRows(_changes.Value)
-            .Where(_changeSelection.Contains)
-            .Select(r => r.Path)
-            .ToList();
+        var data = _changes.Value;
+        if (_changeSelection.Contains(row))
+        {
+            var selected = ChangeSelectionPaths(data);
+            if (selected.Count > 1) return selected;
+        }
+        if (!row.IsFolder) return [row.Path];
+        return FilesUnder(SectionFiles(data, row.Section), row.Path).Select(f => f.Path).ToList();
+    }
+
+    /// <summary>Every file the selection covers, in list order and named once each: a
+    /// folder row stands for its files, and a range that swept up both a folder and the
+    /// files under it must not stage any of them twice.</summary>
+    private List<string> ChangeSelectionPaths(ChangesData data)
+    {
+        var paths = new List<string>();
+        if (_changeSelection.Count == 0) return paths;
+        foreach (var (section, files) in ChangeSections(data))
+            foreach (var f in files)
+                if (ChangeSelectionCovers(section, f.Path))
+                    paths.Add(f.Path);
+        return paths;
+    }
+
+    /// <summary>True when the selection holds this file's own row, or any folder row
+    /// above it.</summary>
+    private bool ChangeSelectionCovers(ChangeSection section, string path)
+    {
+        if (_changeSelection.Contains(new ChangeRef(path, section))) return true;
+        for (var i = path.IndexOf('/'); i >= 0; i = path.IndexOf('/', i + 1))
+            if (_changeSelection.Contains(new ChangeRef(path[..i], section, IsFolder: true)))
+                return true;
+        return false;
     }
 
     /// <summary>Moves selected rows (and the caret and anchor) into another section,
@@ -339,13 +428,28 @@ public partial class JunctionApp
     private void RetargetChangeSelection(IReadOnlyList<string> paths, ChangeSection to)
     {
         var moved = new HashSet<string>(paths, StringComparer.Ordinal);
-        foreach (var r in _changeSelection.Where(r => moved.Contains(r.Path)).ToList())
+        foreach (var r in _changeSelection.Where(Moved).ToList())
         {
             _changeSelection.Remove(r);
             _changeSelection.Add(r with { Section = to });
         }
-        if (_changeAnchor is { } a && moved.Contains(a.Path)) _changeAnchor = a with { Section = to };
-        if (_changeSelPath is { } p && moved.Contains(p)) SetChangeFocus(new ChangeRef(p, to));
+        if (_changeAnchor is { } a && Moved(a)) _changeAnchor = a with { Section = to };
+        if (_changeCaret is { } c && Moved(c)) _changeCaret = c with { Section = to };
+        // The diff pane's file follows the move even when the caret sits on a folder
+        // above it — otherwise the pane would keep reading the section it just left.
+        if (_changeSelPath is { } p && moved.Contains(p))
+        {
+            _changeSelStaged = to == ChangeSection.Staged;
+            _changeSelConflicted = to == ChangeSection.Conflicted;
+        }
+        return;
+
+        // A folder row follows its files: it moves when everything under it did.
+        bool Moved(ChangeRef r) =>
+            !r.IsFolder
+                ? moved.Contains(r.Path)
+                : FilesUnder(SectionFiles(_changes.Value, r.Section), r.Path) is { Count: > 0 } under
+                  && under.All(f => moved.Contains(f.Path));
     }
 
     // ── Left column: file lists + composer ───────────────────────────────
@@ -366,12 +470,15 @@ public partial class JunctionApp
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(8, 8, 4, 8))
             .WithRef(_changeScrollRef);
 
+        // How many files the current selection covers, counted once for the whole build:
+        // every row that offers an action labels itself with it ("Stage 3 files").
+        _changeSelFileCount = ChangeSelectionPaths(data).Count;
+
         // Conflicts first — selecting one opens its resolution pane on the right.
         if (data.Conflicted.Count > 0)
         {
             scroll.AddChild(SectionHeader($"Conflicts · {data.Conflicted.Count}", Nocturne.DangerText, "", null));
-            foreach (var f in data.Conflicted)
-                scroll.AddChild(ConflictListRow(f));
+            AddChangeRows(scroll, ChangeSection.Conflicted, data.Conflicted);
         }
 
         if (data.Staged.Count == 0 && data.Unstaged.Count == 0)
@@ -385,13 +492,11 @@ public partial class JunctionApp
         {
             scroll.AddChild(SectionHeader($"Staged · {data.Staged.Count}", Nocturne.Accent300,
                 "Unstage all", data.Staged.Count > 0 ? UnstageAll : null, topGap: data.Conflicted.Count > 0));
-            foreach (var f in data.Staged)
-                scroll.AddChild(ChangeRow(f, isStaged: true));
+            AddChangeRows(scroll, ChangeSection.Staged, data.Staged);
 
             scroll.AddChild(SectionHeader($"Changes · {data.Unstaged.Count}", Nocturne.On(0.42),
                 "Stage all", data.Unstaged.Count > 0 ? StageAll : null, topGap: true));
-            foreach (var f in data.Unstaged)
-                scroll.AddChild(ChangeRow(f, isStaged: false));
+            AddChangeRows(scroll, ChangeSection.Unstaged, data.Unstaged);
         }
 
         // Assume-unchanged files are hidden from status, so surface them here with a
@@ -420,8 +525,88 @@ public partial class JunctionApp
         return row;
     }
 
-    private Element ChangeRow(GitFileChange f, bool isStaged)
+    /// <summary>Lays one section's tree into the column: folder rows and file rows in one
+    /// flat run, the same order <see cref="ChangeRows"/> walks for the keyboard.</summary>
+    private void AddChangeRows(Element scroll, ChangeSection section,
+        IReadOnlyList<GitFileChange> files)
     {
+        foreach (var node in ChangeTreeRows(section, files))
+            scroll.AddChild(node.IsFolder
+                ? ChangesFolderRow(section, node, files)
+                : section == ChangeSection.Conflicted
+                    ? ConflictListRow(node)
+                    : ChangeRow(node, isStaged: section == ChangeSection.Staged));
+    }
+
+    /// <summary>A folder row in one of the three lists. It selects, stages and unstages as
+    /// everything below it — one checkbox for a directory is the shortcut the flat list
+    /// could never offer — and its counts are the totals of the files it hides.</summary>
+    private Element ChangesFolderRow(ChangeSection section, TreeNode<GitFileChange> node,
+        IReadOnlyList<GitFileChange> files)
+    {
+        var tree = ChangeTreeFor(section);
+        var self = new ChangeRef(node.Path, section, IsFolder: true);
+        var selected = _changeSelection.Contains(self);
+        var focused = ChangeFocus() == self;
+        var expanded = tree.IsExpanded(node);
+        var bg = selected ? Nocturne.Accent900
+            : focused ? Nocturne.Neutral900
+            : Color.Transparent;
+        var n = ChangeActionCount(self, node.LeafCount);
+        var under = FilesUnder(files, node.Path);
+        var (additions, deletions) = FolderTotals(under);
+
+        // Conflicts have no staging checkbox — their resolution is per file — so that
+        // section's folders carry the twisty alone.
+        Element? check = null;
+        if (section != ChangeSection.Conflicted)
+        {
+            var isStaged = section == ChangeSection.Staged;
+            check = Box.New().FlexShrink(0).Cursor(CursorType.Pointer)
+                .Tooltip(isStaged ? $"Unstage {n} file{(n == 1 ? "" : "s")}"
+                                  : $"Stage {n} file{(n == 1 ? "" : "s")}")
+                .Children(Ui.Icon(isStaged ? Icons.CheckSquare : Icons.Square, 14f,
+                    isStaged ? Nocturne.Accent : Nocturne.On(0.38)));
+            check.OnClick(e =>
+            {
+                e.StopPropagation = true;
+                var paths = ChangeActionPaths(self);
+                if (isStaged) UnstagePaths(paths); else StagePaths(paths);
+            });
+        }
+
+        var row = ChangeFolderRow(node, expanded, lead: check, trail: ChangeCounts(additions, deletions));
+        // Selection, focus and open state all change how the row looks, and a collapse
+        // moves every row below it — see ChangeRow for why a patched row would otherwise
+        // keep the previous occupant's handlers.
+        row.Key = $"{section}:dir:{node.Path}{(selected ? "#s" : "")}{(focused ? "#f" : "")}{(expanded ? "#o" : "")}";
+        if (bg != Color.Transparent) row.Background(bg);
+        if (focused) row.WithRef(_changeFocusRef);
+
+        row.OnClick(e =>
+        {
+            OnChangeRowClick(self, e.Modifiers);
+            // A plain click on a folder opens or closes it, the way every tree behaves.
+            // A modifier click is building a selection and must leave the shape alone —
+            // collapsing under a Shift range would take rows out from under it.
+            if (e.Modifiers == KeyModifiers.None) tree.Toggle(node);
+        });
+        row.On<PointerDownEvent>(e =>
+        {
+            if (e.Button == 2 && !_changeSelection.Contains(self))
+            {
+                SetChangeSelection(self);
+                Rerender();
+            }
+        });
+        row.ContextMenu(() => ChangeFolderMenuItems(section, node));
+        if (!selected) row.HoverBg(Nocturne.Neutral900, bg);
+        return row;
+    }
+
+    private Element ChangeRow(TreeNode<GitFileChange> node, bool isStaged)
+    {
+        var f = node.Item;
         var self = new ChangeRef(f.Path, isStaged ? ChangeSection.Staged : ChangeSection.Unstaged);
         var selected = _changeSelection.Contains(self);
         // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
@@ -430,13 +615,11 @@ public partial class JunctionApp
         var bg = selected ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900
             : Color.Transparent;
-        var n = ChangeActionCount(self);
+        var n = ChangeActionCount(self, 1);
         var (letter, color) = StatusLetter(f.Kind);
-        var name = System.IO.Path.GetFileName(f.Path);
-        var dir = f.Path.Length > name.Length ? f.Path[..^name.Length] : "";
 
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
+            .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
         // Selection and focus in the key so either change gives a fresh element (see
         // FileTreeRow — the stale hover handler would otherwise clobber the highlight).
@@ -464,17 +647,12 @@ public partial class JunctionApp
         row.AddChild(Box.New().Width(14).FlexShrink(0)
             .Children(Ui.Mono(letter, 11f, color).FontWeight(FontWeight.Bold)));
 
-        var text = Flex.Column(gap: 0).FlexGrow(1);
-        text.AddChild(Text.New(name).FontSize(12f).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        if (dir.Length > 0)
-            text.AddChild(Text.New(dir).FontSize(9.5f).TextColor(Nocturne.On(0.40))
-                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        row.AddChild(text);
+        // The name alone: the folder row above it carries the directory.
+        row.AddChild(Text.New(node.Segment).FontSize(12f).FlexGrow(1).FlexShrink(1)
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
 
-        if (f.Additions > 0 || f.Deletions > 0)
-            row.AddChild(Flex.Row(gap: 4).FlexShrink(0).Children(
-                Text.New($"+{f.Additions}").FontSize(10f).TextColor(Nocturne.AddCount),
-                Text.New($"−{f.Deletions}").FontSize(10f).TextColor(Nocturne.DelCount)));
+        if (ChangeCounts(f.Additions, f.Deletions) is { } counts)
+            row.AddChild(counts);
 
         row.OnClick(e => OnChangeRowClick(self, e.Modifiers));
         // Right-click outside the selection collapses to that row first, then the
@@ -577,6 +755,39 @@ public partial class JunctionApp
             items.Add(ContextMenuItem.Separator());
             items.Add(Danger(Icons.CounterClockwise,
                 n > 1 ? $"Discard changes in {n} files" : "Discard changes",
+                () => PromptDiscardPaths(sel)));
+        }
+        return items;
+    }
+
+    /// <summary>A folder row's menu: the tree commands first, then the same staging
+    /// actions its files offer, aimed at everything below it.</summary>
+    private IReadOnlyList<ContextMenuItem> ChangeFolderMenuItems(ChangeSection section, TreeNode<GitFileChange> node)
+    {
+        var tree = ChangeTreeFor(section);
+        var expanded = tree.IsExpanded(node);
+        var self = new ChangeRef(node.Path, section, IsFolder: true);
+        var sel = ChangeActionPaths(self);
+        var n = sel.Count;
+
+        var items = new List<ContextMenuItem>
+        {
+            Item(expanded ? Icons.CaretRight : Icons.CaretDown, expanded ? "Collapse" : "Expand",
+                () => tree.Toggle(node)),
+            Item(Icons.FolderOpen, "Expand everything below", () => tree.SetSubtreeExpanded(node, true)),
+            Item(Icons.Folders, "Collapse everything below", () => tree.SetSubtreeExpanded(node, false)),
+            ContextMenuItem.Separator(),
+        };
+        if (section == ChangeSection.Staged)
+            items.Add(Item(Icons.MinusCircle, $"Unstage {n} file{(n == 1 ? "" : "s")}", () => UnstagePaths(sel)));
+        else if (section == ChangeSection.Unstaged)
+            items.Add(Item(Icons.PlusCircle, $"Stage {n} file{(n == 1 ? "" : "s")}", () => StagePaths(sel)));
+        items.Add(Item(Icons.Copy, "Copy folder path", () => CopyToClipboard(node.Path)));
+
+        if (section == ChangeSection.Unstaged)
+        {
+            items.Add(ContextMenuItem.Separator());
+            items.Add(Danger(Icons.CounterClockwise, $"Discard changes in {n} file{(n == 1 ? "" : "s")}",
                 () => PromptDiscardPaths(sel)));
         }
         return items;

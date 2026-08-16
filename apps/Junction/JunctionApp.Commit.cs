@@ -27,6 +27,7 @@ public partial class JunctionApp
             return BuildStubView("Commit", "Select a commit in History to inspect it.");
 
         _detailHash = hash;
+        SyncCommitFileTree(hash);
         PrefetchCommitDetail(hash);   // usually already loaded from the History selection
         var detail = _commitDetail.Value;
 
@@ -52,6 +53,7 @@ public partial class JunctionApp
     {
         _detailHash = null;
         _detailRange = range;
+        SyncCommitFileTree($"{range.BaseHash}..{range.HeadHash}");
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildRangeHeader(range));
@@ -196,9 +198,12 @@ public partial class JunctionApp
 
     private void PickInitialFile(CommitDetail detail)
     {
-        if (detail.Files.Count == 0) { _selectedFilePath = null; return; }
+        if (detail.Files.Count == 0) { _selectedFilePath = null; _commitCursorPath = null; return; }
         if (_selectedFilePath == null || detail.Files.All(f => f.Path != _selectedFilePath))
             _selectedFilePath = detail.Files[0].Path;
+        // The cursor starts on the open file; the build re-checks that its row is
+        // actually visible before drawing the highlight.
+        _commitCursorPath = _selectedFilePath;
     }
 
     // ── Header ───────────────────────────────────────────────────────────
@@ -284,37 +289,93 @@ public partial class JunctionApp
         scroll.AddChild(Text.New($"{files.Count} FILES CHANGED").FontSize(10f)
             .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8)));
 
-        foreach (var f in files)
+        // The rows are the visible part of the tree — folders and files in one flat
+        // list, which is what the keyboard steps through and what the scroll-into-view
+        // ref attaches to.
+        _commitFilesTree.Bind(files, f => f.Path, sort: ChangeTreeSort);
+        _commitFileRows = _commitFilesTree.Rows();
+        // A collapse (or a reload) can take the cursor's row away; fall back to the open
+        // file, then to the top of the list.
+        if (_commitCursorPath == null || _commitFileRows.All(r => r.Path != _commitCursorPath))
+            _commitCursorPath = _commitFileRows.Any(r => r.Path == _selectedFilePath)
+                ? _selectedFilePath
+                : _commitFileRows.FirstOrDefault()?.Path;
+
+        foreach (var node in _commitFileRows)
         {
-            var rowEl = FileTreeRow(f);
-            if (f.Path == _selectedFilePath) rowEl.WithRef(_fileSelRef);
+            var rowEl = node.IsFolder ? CommitFolderRow(node) : FileTreeRow(node);
+            if (node.Path == _commitCursorPath) rowEl.WithRef(_fileSelRef);
             scroll.AddChild(rowEl);
         }
         return scroll;
     }
 
-    private bool MoveFileByKey(KeyDownEvent e) => e.Key switch
+    /// <summary>Resets the tree when the Commit view moves to another commit (or range).
+    /// Folders someone collapsed belong to the list they were collapsed in; carrying the
+    /// state to the next commit would fold away files they never chose to hide.</summary>
+    private void SyncCommitFileTree(string key)
     {
-        KeyCode.Down => MoveFileSelection(1),
-        KeyCode.Up => MoveFileSelection(-1),
-        KeyCode.PageDown => MoveFileSelection(8),
-        KeyCode.PageUp => MoveFileSelection(-8),
-        KeyCode.Home => MoveFileSelection(int.MinValue / 2),
-        KeyCode.End => MoveFileSelection(int.MaxValue / 2),
-        _ => false,
-    };
+        if (_commitTreeKey == key) return;
+        _commitTreeKey = key;
+        _commitFilesTree.ClearOverrides();
+        _commitCursorPath = null;
+    }
 
-    private bool MoveFileSelection(int delta)
+    private bool MoveFileByKey(KeyDownEvent e)
     {
-        var files = _commitDetail.Value.Files;
-        if (files.Count == 0) return true;
-        var i = _selectedFilePath == null ? 0 : IndexOfPath(files, _selectedFilePath);
-        if (i < 0) i = 0;
-        i = Math.Clamp(i + delta, 0, files.Count - 1);
-        _selectedFilePath = files[i].Path;
+        if (_commitFileRows.Count == 0) return false;
+        var i = CommitCursorIndex();
+        switch (e.Key)
+        {
+            case KeyCode.Down: return MoveCommitCursor(i + 1);
+            case KeyCode.Up: return MoveCommitCursor(i - 1);
+            case KeyCode.PageDown: return MoveCommitCursor(i + 8);
+            case KeyCode.PageUp: return MoveCommitCursor(i - 8);
+            case KeyCode.Home: return MoveCommitCursor(0);
+            case KeyCode.End: return MoveCommitCursor(_commitFileRows.Count - 1);
+            // The conventional folder keys, via the tree model: right opens a closed
+            // folder and otherwise descends, left closes an open one and otherwise
+            // steps out to the parent.
+            case KeyCode.Right: return CommitTreeStep(i, right: true);
+            case KeyCode.Left: return CommitTreeStep(i, right: false);
+            case KeyCode.Enter or KeyCode.Space when _commitFileRows[i].IsFolder:
+                _commitFilesTree.Toggle(_commitFileRows[i]);   // MarkDirty via onChanged
+                return true;
+            default: return false;
+        }
+    }
+
+    private int CommitCursorIndex()
+    {
+        var target = _commitCursorPath ?? _selectedFilePath;
+        for (var i = 0; i < _commitFileRows.Count; i++)
+            if (_commitFileRows[i].Path == target) return i;
+        return 0;
+    }
+
+    /// <summary>Moves the cursor to a visible row. A file row opens too, so arrowing
+    /// through the list still previews each diff; a folder row only moves the highlight
+    /// and leaves the open file on screen — the same as the Files tab, and better than
+    /// blanking the pane every time the cursor crosses a folder.</summary>
+    private bool MoveCommitCursor(int index)
+    {
+        if (_commitFileRows.Count == 0) return true;
+        index = Math.Clamp(index, 0, _commitFileRows.Count - 1);
+        var node = _commitFileRows[index];
+        _commitCursorPath = node.Path;
         _pendingScrollToSelected = true;
+        if (node.IsFolder || node.Path == _selectedFilePath) { MarkDirty(); return true; }
+        _selectedFilePath = node.Path;
         // Rerender: selecting an image file activates a new per-file image-diff loader.
         Rerender();
+        return true;
+    }
+
+    private bool CommitTreeStep(int index, bool right)
+    {
+        var landed = _commitFilesTree.Step(_commitFileRows, index, right);
+        if (landed != index) MoveCommitCursor(landed);
+        else _pendingScrollToSelected = true;   // the step expanded or collapsed instead
         return true;
     }
 
@@ -325,35 +386,52 @@ public partial class JunctionApp
         return -1;
     }
 
-    private Element FileTreeRow(GitFileChange f)
+    private Element CommitFolderRow(TreeNode<GitFileChange> node)
     {
+        var expanded = _commitFilesTree.IsExpanded(node);
+        var cursor = node.Path == _commitCursorPath;
+
+        var row = ChangeFolderRow(node, expanded);
+        // Cursor and open state both change how the row looks, and a collapse moves
+        // every row below it — without them in the key a patched row would keep the
+        // previous occupant's handler and clicking one folder would toggle another.
+        row.Key = "d:" + node.Path + (cursor ? "#c" : "") + (expanded ? "#o" : "");
+        if (cursor) row.Background(Nocturne.Neutral800);
+        row.OnClick(_ =>
+        {
+            _commitCursorPath = node.Path;
+            _commitFilesTree.Toggle(node);   // MarkDirty via the model's onChanged
+        });
+        if (!cursor) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        return row;
+    }
+
+    private Element FileTreeRow(TreeNode<GitFileChange> node)
+    {
+        var f = node.Item;
         var selected = f.Path == _selectedFilePath;
+        var cursor = f.Path == _commitCursorPath;
         var (letter, color) = StatusLetter(f.Kind);
-        var name = System.IO.Path.GetFileName(f.Path);
-        var dir = f.Path.Length > name.Length ? f.Path[..^name.Length] : "";
 
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
+            .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
         // Include selection in the key so a selection change replaces the row outright:
         // the hover baseline differs per state, and a fresh element can't be left
         // showing the other state's hover tint.
-        row.Key = f.Path + (selected ? "#s" : "");
+        row.Key = f.Path + (selected ? "#s" : "") + (cursor ? "#c" : "");
         if (selected) row.Background(Nocturne.Accent900);
+        else if (cursor) row.Background(Nocturne.Neutral800);
 
         row.AddChild(Box.New().Width(16).FlexShrink(0)
             .Children(Ui.Mono(letter, 11f, color).FontWeight(FontWeight.Bold)));
-
-        var text = Flex.Column(gap: 0).FlexGrow(1);
-        text.AddChild(Text.New(name).FontSize(12f)
+        // Only the file name: the folder above it is the row that carries the directory,
+        // which is the whole point of grouping them.
+        row.AddChild(Text.New(node.Segment).FontSize(12f).FlexGrow(1).FlexShrink(1)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        if (dir.Length > 0)
-            text.AddChild(Text.New(dir).FontSize(9.5f).TextColor(Nocturne.On(0.40))
-                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        row.AddChild(text);
 
-        row.OnClick(_ => { _selectedFilePath = f.Path; Rerender(); });
-        if (!selected) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+        row.OnClick(_ => { _commitCursorPath = f.Path; _selectedFilePath = f.Path; Rerender(); });
+        if (!selected && !cursor) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
     }
 

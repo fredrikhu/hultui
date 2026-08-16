@@ -50,21 +50,21 @@ public partial class JunctionApp
     }
 
     // A conflict entry in the file list (no checkbox — you resolve via the pane).
-    private Element ConflictListRow(GitFileChange f)
+    private Element ConflictListRow(TreeNode<GitFileChange> node)
     {
         // Conflicts are the third section of the same file list, so they select like
-        // the other two (and never alongside them — see the one-section rule).
+        // the other two (and never alongside them — see the one-section rule) and group
+        // into the same folder tree.
+        var f = node.Item;
         var self = new ChangeRef(f.Path, ChangeSection.Conflicted);
         var selected = _changeSelection.Contains(self);
         var focused = ChangeFocus() == self;
         var bg = selected ? Nocturne.Accent900
             : focused ? Nocturne.Neutral900
             : Color.Transparent;
-        var name = System.IO.Path.GetFileName(f.Path);
-        var dir = f.Path.Length > name.Length ? f.Path[..^name.Length] : "";
 
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(6, 8, 6, 8)).CornerRadius(Nocturne.RadiusRow)
+            .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
         row.Key = "c:" + f.Path + (selected ? "#s" : "") + (focused ? "#f" : "");
         if (bg != Color.Transparent) row.Background(bg);
@@ -73,13 +73,8 @@ public partial class JunctionApp
         row.AddChild(Box.New().Width(14).FlexShrink(0)
             .Children(Ui.Icon(Icons.Warning, 12f, Nocturne.DangerIcon)));
 
-        var text = Flex.Column(gap: 0).FlexGrow(1).FlexShrink(1);
-        text.AddChild(Text.New(name).FontSize(12f)
+        row.AddChild(Text.New(node.Segment).FontSize(12f).FlexGrow(1).FlexShrink(1)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        if (dir.Length > 0)
-            text.AddChild(Text.New(dir.TrimEnd('/', '\\')).FontSize(9.5f).TextColor(Nocturne.On(0.40))
-                .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        row.AddChild(text);
 
         row.AddChild(Ui.Tag("conflict", Nocturne.Alpha(Nocturne.DangerText, 0.16), Nocturne.DangerText, 9.5f).FlexShrink(0));
 
