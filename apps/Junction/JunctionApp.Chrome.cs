@@ -71,13 +71,13 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusMd)
             .Cursor(CursorType.Pointer)
-            .Tooltip("Search & commands (Ctrl K)");
+            .Tooltip("Search & commands (Ctrl P)");
         search.AddChild(Ui.Icon(Icons.MagnifyingGlass, 13f, Nocturne.On(0.55)));
         // Narrow windows collapse the search box to just its icon.
         if (!_compactChrome)
         {
             search.AddChild(Text.New("Search & commands").FontSize(12f).TextColor(Nocturne.On(0.55)));
-            search.AddChild(Kbd("Ctrl K"));
+            search.AddChild(Kbd("Ctrl P"));
         }
         search.OnClick(_ => TogglePalette());
         search.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.08), Nocturne.Bg);

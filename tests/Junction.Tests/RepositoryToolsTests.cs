@@ -110,7 +110,7 @@ public class RepositoryToolsTests
         // header's Worktrees button are how people who already found them get there.
         Hosted(1440, 900, (repo, session, app) =>
         {
-            session.Window.PressKey(KeyCode.K, KeyModifiers.Ctrl);
+            session.Window.PressKey(KeyCode.P, KeyModifiers.Ctrl);
             session.PumpFrames(3);
             foreach (var label in new[] { "Worktrees…", "Submodules…", "Remotes…", "Reflog (recover lost commits)…" })
                 Assert.True(Contains(session, label), $"the palette no longer offers \"{label}\"");

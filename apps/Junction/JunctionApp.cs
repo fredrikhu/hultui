@@ -988,8 +988,15 @@ public partial class JunctionApp : Component, IDisposable
             return;
         }
 
-        // ⌘K / Ctrl+K toggles the palette from anywhere.
-        if (ctrl && e.Key == KeyCode.K)
+        // ⌘P / Ctrl+P toggles the palette from anywhere — the same key Vesper uses, so the
+        // shortcut does not change meaning between the two apps. Ctrl+K, which Junction used
+        // before, still works: it was the advertised key for ten releases.
+        //
+        // Both are caught here, ahead of the per-view handlers, and that is load-bearing rather
+        // than tidy: those switch on the bare key and ignore modifiers, so Ctrl+P reaching the
+        // Branches view would push the selected branch (KeyCode.P is Push there). Any new
+        // Ctrl+<letter> shortcut has to be intercepted at this level for the same reason.
+        if (ctrl && e.Key is KeyCode.P or KeyCode.K)
         {
             TogglePalette();
             e.StopPropagation = true;
