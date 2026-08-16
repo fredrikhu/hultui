@@ -352,12 +352,24 @@ public abstract class Element
     internal void OnOwn<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent =>
         AddHandler(EventPhase.Bubble, handler, owned: true);
 
-    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned) where TEvent : ElementEvent
+    /// <summary>
+    /// Registers a handler that promises to mark dirty itself whenever it changes
+    /// anything visible. The input pipeline renders a frame whenever an ordinary
+    /// handler ran (a handler may mutate without marking — the imperative-mutation
+    /// safety net); a passive one is exempt, so a high-frequency listener that
+    /// usually does nothing — a drag tracker on a surface root, gated on
+    /// "is a drag active" — does not turn every pointer move over an idle window
+    /// into a frame. Same reconciliation lifecycle as <see cref="On{TEvent}(Action{TEvent})"/>.
+    /// </summary>
+    public void OnPassive<TEvent>(Action<TEvent> handler) where TEvent : ElementEvent =>
+        AddHandler(EventPhase.Bubble, handler, owned: false, passive: true);
+
+    private void AddHandler<TEvent>(EventPhase phase, Action<TEvent> handler, bool owned, bool passive = false) where TEvent : ElementEvent
     {
         // A handler can register another handler on the same element mid-dispatch, so this
         // goes through the copy-on-write path like every other mutation.
         ListForMutation(typeof(TEvent))
-            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned));
+            .Add(new EventHandlerEntry(phase, evt => handler((TEvent)evt), owned, passive));
     }
 
     internal bool HasEventHandler<TEvent>() where TEvent : ElementEvent =>
@@ -390,7 +402,14 @@ public abstract class Element
                 if (entry.Phase != phase && phase != EventPhase.Target)
                     continue;
 
-                EventDispatcher.HandlerInvocationCount++;
+                // Only handlers that may mutate without marking count toward the input
+                // pipeline's "a handler ran, render a frame" safety net. Owned handlers
+                // are the framework's own machinery and passive ones have promised to
+                // mark dirty themselves — counting either turns a high-frequency no-op
+                // listener (a drag tracker on a surface root) into a full frame per
+                // pointer move over an idle window.
+                if (!entry.Owned && !entry.Passive)
+                    EventDispatcher.HandlerInvocationCount++;
                 entry.Handler(evt);
                 if (evt.StopPropagation) break;
             }
@@ -809,4 +828,5 @@ public abstract class Element
         Size.Zero;
 }
 
-internal readonly record struct EventHandlerEntry(EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false);
+internal readonly record struct EventHandlerEntry(
+    EventPhase Phase, Action<ElementEvent> Handler, bool Owned = false, bool Passive = false);

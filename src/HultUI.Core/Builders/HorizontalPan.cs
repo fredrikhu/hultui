@@ -155,8 +155,13 @@ public sealed class HorizontalPan
     /// the root of the surface is the usual choice. Safe to call on every build.</summary>
     public void AttachDrag(Element root)
     {
-        root.On<PointerMoveEvent>(ev => { if (IsDragging) DragTo(ev.Position.X); });
-        root.On<PointerUpEvent>(_ => IsDragging = false);
+        // Passive: these run on every pointer move over the whole surface and do
+        // nothing outside a drag; when they do act, DragTo marks dirty through
+        // onChanged. Registered as ordinary app handlers they would force a frame
+        // per move over an idle window (the input safety net counts handlers that
+        // ran), which is exactly the idle-rerender bug this wording exists to stop.
+        root.OnPassive<PointerMoveEvent>(ev => { if (IsDragging) DragTo(ev.Position.X); });
+        root.OnPassive<PointerUpEvent>(_ => IsDragging = false);
     }
 
     /// <summary>Maps a pointer x onto the offset, for a scrollbar drag.</summary>
