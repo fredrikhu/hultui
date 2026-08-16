@@ -1,4 +1,5 @@
 using HultUI;
+using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -32,7 +33,10 @@ public partial class JunctionApp
     // the browser at that revision.
 
     private string? _filesSelPath;
-    private readonly HashSet<string> _filesExpanded = new(StringComparer.Ordinal);
+    // Expansion, flattening and the ←/→ steps live in the framework's tree model;
+    // what stays here is what the model deliberately leaves out: the cursor, the
+    // selection, and what a row looks like. Created in the ctor (needs MarkDirty).
+    private readonly TreeView<string> _filesTree;
     private string? _filesTreeKey;   // the commit the expansion/selection belongs to
 
     // Keyboard navigation of the tree. The cursor may sit on a folder (to expand /
@@ -40,7 +44,7 @@ public partial class JunctionApp
     // the *file* whose contents show. _filesFlat is the visible-row order rebuilt each
     // Build, so the arrow keys can step through exactly what's on screen.
     private string? _filesCursorPath;
-    private readonly List<(TreeNode node, int depth)> _filesFlat = [];
+    private List<TreeNode<string>> _filesFlat = [];
     private readonly Ref<ScrollViewElement> _filesTreeScrollRef = new();
     // Find in the open file. The body is one TextArea rather than a row list, so matches
     // become spans at absolute offsets into the flattened text — see FileBodyTextAndSpans.
@@ -106,7 +110,7 @@ public partial class JunctionApp
     {
         if (_filesTreeKey == key) return;
         _filesTreeKey = key;
-        _filesExpanded.Clear();
+        _filesTree.ClearOverrides();
         // Keep the selected path across commits when it still exists — checked in
         // PickInitialTreeFile once the new tree lands.
     }
@@ -116,18 +120,7 @@ public partial class JunctionApp
         if (paths.Count == 0) { _filesSelPath = null; return; }
         if (_filesSelPath == null || !paths.Contains(_filesSelPath))
             _filesSelPath = paths[0];
-        ExpandAncestors(_filesSelPath!);
-    }
-
-    private void ExpandAncestors(string path)
-    {
-        var parts = path.Split('/');
-        var acc = "";
-        for (int i = 0; i < parts.Length - 1; i++)
-        {
-            acc = acc.Length == 0 ? parts[i] : acc + "/" + parts[i];
-            _filesExpanded.Add(acc);
-        }
+        _filesTree.ExpandAncestors(_filesSelPath!);
     }
 
     private Element BuildFilesHeader(int fileCount)
@@ -156,49 +149,10 @@ public partial class JunctionApp
     }
 
     // ── Tree ─────────────────────────────────────────────────────────────
+    // The nodes are the framework's TreeNode<string> (Item = the file's path); the
+    // folders-first ordering git trees conventionally get is Tree.FoldersFirst.
 
-    private sealed class TreeNode
-    {
-        public string Name = "";
-        public string Path = "";
-        public bool IsDir;
-        public List<TreeNode> Children = [];
-    }
-
-    /// <summary>Builds a nested folder/file tree from git's flat sorted path list.</summary>
-    private static TreeNode BuildTree(IReadOnlyList<string> paths)
-    {
-        var root = new TreeNode { IsDir = true };
-        foreach (var path in paths)
-        {
-            var parts = path.Split('/');
-            var node = root;
-            var acc = "";
-            for (int i = 0; i < parts.Length; i++)
-            {
-                acc = acc.Length == 0 ? parts[i] : acc + "/" + parts[i];
-                bool leaf = i == parts.Length - 1;
-                var existing = node.Children.FirstOrDefault(c => c.Name == parts[i] && c.IsDir != leaf);
-                if (existing == null)
-                {
-                    existing = new TreeNode { Name = parts[i], Path = acc, IsDir = !leaf };
-                    node.Children.Add(existing);
-                }
-                node = existing;
-            }
-        }
-        SortTree(root);
-        return root;
-    }
-
-    // Folders first, then files; both alphabetical (git's order is byte-wise).
-    private static void SortTree(TreeNode node)
-    {
-        node.Children.Sort((a, b) =>
-            a.IsDir != b.IsDir ? (a.IsDir ? -1 : 1)
-            : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-        foreach (var c in node.Children) SortTree(c);
-    }
+    private static readonly Comparison<TreeNode<string>> FilesTreeSort = Tree.FoldersFirst<string>();
 
     private Element BuildFileTreePane(IReadOnlyList<string> paths, bool loading)
     {
@@ -222,48 +176,43 @@ public partial class JunctionApp
         }
         else
         {
-            foreach (var child in BuildTree(paths).Children)
-                FlattenVisible(child, depth: 0);
+            _filesTree.Bind(paths, p => p, sort: FilesTreeSort);
+            _filesFlat = _filesTree.Rows();
             // Keep the keyboard cursor on a row that still exists; otherwise fall back
             // to the selected file (or the first row).
-            if (_filesCursorPath == null || !_filesFlat.Any(r => r.node.Path == _filesCursorPath))
-                _filesCursorPath = _filesSelPath ?? _filesFlat.FirstOrDefault().node?.Path;
-            foreach (var (node, depth) in _filesFlat)
-                scroll.AddChild(TreeRow(node, depth));
+            if (_filesCursorPath == null || !_filesFlat.Any(r => r.Path == _filesCursorPath))
+                _filesCursorPath = _filesSelPath ?? _filesFlat.FirstOrDefault()?.Path;
+            foreach (var node in _filesFlat)
+                scroll.AddChild(TreeRow(node));
         }
         pane.AddChild(scroll);
         return pane;
     }
 
-    /// <summary>Appends a node and its expanded descendants to <see cref="_filesFlat"/>
-    /// in on-screen row order, so arrow keys can step through exactly what's visible.</summary>
-    private void FlattenVisible(TreeNode node, int depth)
+    private Element TreeRow(TreeNode<string> node)
     {
-        _filesFlat.Add((node, depth));
-        if (node.IsDir && _filesExpanded.Contains(node.Path))
-            foreach (var child in node.Children)
-                FlattenVisible(child, depth + 1);
-    }
-
-    private Element TreeRow(TreeNode node, int depth)
-    {
-        bool selected = !node.IsDir && node.Path == _filesSelPath;
-        bool expanded = node.IsDir && _filesExpanded.Contains(node.Path);
+        bool selected = !node.IsFolder && node.Path == _filesSelPath;
+        bool expanded = node.IsFolder && _filesTree.IsExpanded(node);
         bool cursor = node.Path == _filesCursorPath;
+        int depth = node.Depth;
 
         var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
             .Height(FileTreeRowHeight).FlexShrink(0)
             .Padding(new Thickness(0, 6, 0, 6 + depth * 12))
             .CornerRadius(Nocturne.RadiusSm)
             .Cursor(CursorType.Pointer).Tooltip(node.Path);
-        row.Key = (node.IsDir ? "d:" : "f:") + node.Path
+        row.Key = (node.IsFolder ? "d:" : "f:") + node.Path
             + (selected ? "#s" : "") + (expanded ? "#e" : "") + (cursor ? "#c" : "");
+        // Tree semantics for assistive tech: each row is a tree item, and folders
+        // carry their open/closed state.
+        row.Role = AccessibilityRole.TreeItem;
+        if (node.IsFolder) row.AccessibleExpanded = expanded;
         // Selected file wins the accent fill; the keyboard cursor on any other row
         // (a folder, or a file not yet opened) gets a subtler highlight.
         if (selected) row.Background(Nocturne.Accent900);
         else if (cursor) row.Background(Nocturne.Neutral800);
 
-        if (node.IsDir)
+        if (node.IsFolder)
         {
             row.AddChild(Ui.Icon(expanded ? Icons.CaretDown : Icons.CaretRight, 10f, Nocturne.On(0.5)).FlexShrink(0));
             row.AddChild(Ui.Icon(Icons.Folders, 11f, Nocturne.Accent300).FlexShrink(0));
@@ -274,23 +223,23 @@ public partial class JunctionApp
             // The shared file-type glyphs, same as Vesper's panes: a Unicode stand-in
             // could only tell images from everything-else, so a .csproj, a .zip and a
             // .cs all looked alike in a tree that is mostly source files.
-            row.AddChild(FileIcons.Draw(FileIcons.KindFor(node.Name), JunctionFileIconPalette, size: Ui.IconBox(12f))
+            row.AddChild(FileIcons.Draw(FileIcons.KindFor(node.Segment), JunctionFileIconPalette, size: Ui.IconBox(12f))
                 .FlexShrink(0));
         }
 
-        row.AddChild(Text.New(node.Name).FontSize(12f)
-            .TextColor(node.IsDir ? Nocturne.Text : Nocturne.On(selected ? 0.9 : 0.72))
+        row.AddChild(Text.New(node.Segment).FontSize(12f)
+            .TextColor(node.IsFolder ? Nocturne.Text : Nocturne.On(selected ? 0.9 : 0.72))
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
 
         // Both clicks of a double-click reach the same handler, as count 1 then count 2.
         // A folder must ignore the second, or the pair toggles it open and shut again;
         // a file uses it the way a file manager does, to launch what was just selected.
-        if (node.IsDir)
+        if (node.IsFolder)
             row.OnClick(e =>
             {
                 if (e.ClickCount >= 2) return;
                 _filesCursorPath = node.Path;
-                ToggleFolder(node.Path);
+                _filesTree.Toggle(node);   // MarkDirty via the model's onChanged
             });
         else
             row.OnClick(e =>
@@ -302,12 +251,6 @@ public partial class JunctionApp
         row.ContextMenu(() => FilesTreeMenuItems(node));
         if (!selected && !cursor) row.HoverBg(Nocturne.Neutral900, Color.Transparent);
         return row;
-    }
-
-    private void ToggleFolder(string path)
-    {
-        if (!_filesExpanded.Add(path)) _filesExpanded.Remove(path);
-        MarkDirty();
     }
 
     private void SelectTreeFile(string path)
@@ -338,8 +281,8 @@ public partial class JunctionApp
             case KeyCode.PageUp: MoveFilesCursor(idx - FilesTreePage()); return true;
             case KeyCode.Home: MoveFilesCursor(0); return true;
             case KeyCode.End: MoveFilesCursor(_filesFlat.Count - 1); return true;
-            case KeyCode.Right: FilesTreeExpand(idx); return true;
-            case KeyCode.Left: FilesTreeCollapse(idx); return true;
+            case KeyCode.Right: FilesTreeStep(idx, right: true); return true;
+            case KeyCode.Left: FilesTreeStep(idx, right: false); return true;
             // Enter launches, like a file manager; Space is the quieter half that only
             // opens the file in the pane, for walking a tree without starting programs.
             case KeyCode.Enter: FilesTreeActivate(idx, launch: true); return true;
@@ -352,7 +295,7 @@ public partial class JunctionApp
     {
         string? target = _filesCursorPath ?? _filesSelPath;
         for (int i = 0; i < _filesFlat.Count; i++)
-            if (_filesFlat[i].node.Path == target) return i;
+            if (_filesFlat[i].Path == target) return i;
         return 0;
     }
 
@@ -367,57 +310,32 @@ public partial class JunctionApp
     private void MoveFilesCursor(int newIdx)
     {
         newIdx = Math.Clamp(newIdx, 0, _filesFlat.Count - 1);
-        var node = _filesFlat[newIdx].node;
+        var node = _filesFlat[newIdx];
         _filesCursorPath = node.Path;
         _pendingFilesTreeScroll = true;
-        if (!node.IsDir && node.Path != _filesSelPath)
+        if (!node.IsFolder && node.Path != _filesSelPath)
             SelectTreeFile(node.Path);   // Rerender: opens the file (tracked, see SelectTreeFile)
         else
             MarkDirty();
     }
 
-    private void MoveFilesCursorToPath(string path)
+    /// <summary>←/→ via the model's tree step: expand/collapse happens in the model
+    /// (which marks dirty through onChanged); a step that lands on another row goes
+    /// through the cursor move so a file landing opens it, like a click would.</summary>
+    private void FilesTreeStep(int idx, bool right)
     {
-        for (int i = 0; i < _filesFlat.Count; i++)
-            if (_filesFlat[i].node.Path == path) { MoveFilesCursor(i); return; }
-    }
-
-    private void FilesTreeExpand(int idx)
-    {
-        var node = _filesFlat[idx].node;
-        if (!node.IsDir) return;                       // files: nothing to expand
-        if (_filesExpanded.Add(node.Path))             // collapsed → expand
-        {
-            _pendingFilesTreeScroll = true;
-            MarkDirty();
-        }
-        else                                           // already expanded → step into it
-        {
-            MoveFilesCursor(idx + 1);
-        }
-    }
-
-    private void FilesTreeCollapse(int idx)
-    {
-        var node = _filesFlat[idx].node;
-        if (node.IsDir && _filesExpanded.Remove(node.Path))   // expanded folder → collapse
-        {
-            _pendingFilesTreeScroll = true;
-            MarkDirty();
-            return;
-        }
-        // Otherwise jump to the parent folder (one path segment up).
-        int slash = node.Path.LastIndexOf('/');
-        if (slash > 0) MoveFilesCursorToPath(node.Path[..slash]);
+        int landed = _filesTree.Step(_filesFlat, idx, right);
+        if (landed != idx) MoveFilesCursor(landed);
+        else _pendingFilesTreeScroll = true;
     }
 
     private void FilesTreeActivate(int idx, bool launch)
     {
-        var node = _filesFlat[idx].node;
+        var node = _filesFlat[idx];
         _filesCursorPath = node.Path;
         _pendingFilesTreeScroll = true;
-        if (node.IsDir) { ToggleFolder(node.Path); return; }   // MarkDirty inside
-        SelectTreeFile(node.Path);                             // Rerender inside
+        if (node.IsFolder) { _filesTree.Toggle(node); return; }   // MarkDirty via onChanged
+        SelectTreeFile(node.Path);                                // Rerender inside
         if (launch) LaunchFilesPath(node.Path);
     }
 
@@ -644,15 +562,15 @@ public partial class JunctionApp
     private static string NotOnDisk(string relPath) =>
         $"{System.IO.Path.GetFileName(relPath)} isn't in the working tree";
 
-    private IReadOnlyList<ContextMenuItem> FilesTreeMenuItems(TreeNode node)
+    private IReadOnlyList<ContextMenuItem> FilesTreeMenuItems(TreeNode<string> node)
     {
         var onDisk = WorktreePath(node.Path) is { } full ? full : null;
         var items = new List<ContextMenuItem>();
 
         if (onDisk != null)
         {
-            items.Add(Item(node.IsDir ? Icons.FolderOpen : Icons.RocketLaunch,
-                node.IsDir ? "Open folder" : "Open",
+            items.Add(Item(node.IsFolder ? Icons.FolderOpen : Icons.RocketLaunch,
+                node.IsFolder ? "Open folder" : "Open",
                 () => LaunchFilesPath(node.Path)));
             items.Add(Item(Icons.FolderOpen, ShellLauncher.RevealLabel, () => RevealFilesPath(node.Path)));
         }
@@ -663,7 +581,7 @@ public partial class JunctionApp
             items.Add(Unavailable(Icons.RocketLaunch, "Open — not in the working tree"));
         }
 
-        if (!node.IsDir)
+        if (!node.IsFolder)
         {
             items.Add(ContextMenuItem.Separator());
             // Blame reads the commit's blob, not the disk, so this is offered whether or not

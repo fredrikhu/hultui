@@ -1,4 +1,5 @@
 using System.Reflection;
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
@@ -110,15 +111,23 @@ public class FilesLaunchTests
         (string?)typeof(JunctionApp).GetMethod("WorktreePath", BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(app, [relPath]);
 
-    /// <summary>Builds the private TreeNode the menu builder takes. Reflected rather than
-    /// clicked because a right-click would only reach the same call through the pointer.</summary>
+    /// <summary>Builds the framework TreeNode the menu builder takes — through the tree
+    /// model's own factories, since the node type's shape is not this test's business.
+    /// Constructed rather than clicked because a right-click would only reach the same
+    /// call through the pointer.</summary>
     private static IReadOnlyList<ContextMenuItem> Menu(JunctionApp app, string path, bool isDir)
     {
-        var nodeType = typeof(JunctionApp).GetNestedType("TreeNode", BindingFlags.NonPublic)!;
-        var node = Activator.CreateInstance(nodeType)!;
-        nodeType.GetField("Path")!.SetValue(node, path);
-        nodeType.GetField("Name")!.SetValue(node, System.IO.Path.GetFileName(path));
-        nodeType.GetField("IsDir")!.SetValue(node, isDir);
+        TreeNode<string> node;
+        if (isDir)
+        {
+            // The folder gathering a child path, walked down to the requested depth.
+            node = Tree.Build([path + "/x"], p => p)[0];
+            while (node.Path != path) node = node.Children[0];
+        }
+        else
+        {
+            node = Tree.Flat([path], p => p)[0];
+        }
 
         return (IReadOnlyList<ContextMenuItem>)typeof(JunctionApp)
             .GetMethod("FilesTreeMenuItems", BindingFlags.NonPublic | BindingFlags.Instance)!

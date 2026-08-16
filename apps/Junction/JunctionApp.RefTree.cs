@@ -14,8 +14,8 @@ namespace Junction;
 /// tree-shaped keyboard steps.
 ///
 /// <para>Both tables stay virtualized. The tree is only ever data (see
-/// <see cref="RefTree"/>); what reaches <c>VirtualListElement</c> is one flat list of
-/// equal-height <see cref="RefNode{T}"/> rows — folder rows and ref rows alike — so
+/// <see cref="Tree"/>); what reaches <c>VirtualListElement</c> is one flat list of
+/// equal-height <see cref="TreeNode{T}"/> rows — folder rows and ref rows alike — so
 /// the row count follows what is expanded, not how deep the tree is, and nothing
 /// off-screen is ever built.</para>
 /// </summary>
@@ -53,21 +53,21 @@ public partial class JunctionApp
         return set;
     }
 
-    private bool IsFolderExpanded<T>(string kind, RefNode<T> node) =>
+    private bool IsFolderExpanded<T>(string kind, TreeNode<T> node) =>
         RefExpandedSet(kind).TryGetValue(node.Path, out var open)
             ? open
             : node.LeafCount <= RefFolderAutoCollapse;
 
-    private void ToggleFolder<T>(string kind, RefNode<T> node)
+    private void ToggleFolder<T>(string kind, TreeNode<T> node)
     {
         RefExpandedSet(kind)[node.Path] = !IsFolderExpanded(kind, node);
         MarkDirty();
     }
 
-    private void SetSubtreeExpanded<T>(string kind, RefNode<T> node, bool open)
+    private void SetSubtreeExpanded<T>(string kind, TreeNode<T> node, bool open)
     {
         var set = RefExpandedSet(kind);
-        foreach (var folder in RefTree.Folders(node)) set[folder.Path] = open;
+        foreach (var folder in Tree.Folders(node)) set[folder.Path] = open;
         MarkDirty();
     }
 
@@ -75,14 +75,14 @@ public partial class JunctionApp
     /// depth-0 leaves when the flat list is selected. One row type either way, so the row
     /// template, the selection index and the virtual list don't care which mode is on.
     /// </summary>
-    private List<RefNode<T>> RefRows<T>(
+    private List<TreeNode<T>> RefRows<T>(
         IReadOnlyList<T> items, string kind, Func<T, string> nameOf, Func<T, bool>? flag, bool filtering)
     {
-        if (!_refTreeView) return RefTree.Flat(items, nameOf);
-        var roots = RefTree.Build(items, nameOf, flag);
+        if (!_refTreeView) return Tree.Flat(items, nameOf);
+        var roots = Tree.Build(items, nameOf, flag);
         // A running search has to be able to show every match, so it opens the tree
         // outright. The collapsed set is untouched and comes back when the query clears.
-        return RefTree.Flatten(roots, filtering ? _ => true : node => IsFolderExpanded(kind, node));
+        return Tree.Flatten(roots, filtering ? _ => true : node => IsFolderExpanded(kind, node));
     }
 
     // ── Flat / tree toggle ───────────────────────────────────────────────
@@ -136,7 +136,7 @@ public partial class JunctionApp
     /// virtual list positions rows (and hands assistive tech their bounds) from one item
     /// height, and the scroll-into-view maths is index × height.</summary>
     private Element RefFolderRow<T>(
-        string kind, RefNode<T> node, int index, bool focused, float height, Action<int> select)
+        string kind, TreeNode<T> node, int index, bool focused, float height, Action<int> select)
     {
         var expanded = IsFolderExpanded(kind, node);
         var remote = node.AllFlagged;
@@ -172,11 +172,11 @@ public partial class JunctionApp
 
     /// <summary>What a folder row says to a screen reader. The virtual list never realizes
     /// off-screen rows as elements, so this label is all assistive tech gets.</summary>
-    private string RefFolderLabel<T>(string kind, RefNode<T> node) =>
+    private string RefFolderLabel<T>(string kind, TreeNode<T> node) =>
         $"{node.Segment}, folder, {node.LeafCount} refs, " +
         (IsFolderExpanded(kind, node) ? "expanded" : "collapsed");
 
-    private IReadOnlyList<ContextMenuItem> RefFolderMenuItems<T>(string kind, RefNode<T> node)
+    private IReadOnlyList<ContextMenuItem> RefFolderMenuItems<T>(string kind, TreeNode<T> node)
     {
         var expanded = IsFolderExpanded(kind, node);
         return
@@ -197,7 +197,7 @@ public partial class JunctionApp
     /// folder and otherwise steps into it, left closes an open folder and otherwise steps out
     /// to the parent. Returns the row to land on (the caller keeps the selection semantics
     /// its list already has).</summary>
-    private int RefTreeStep<T>(IReadOnlyList<RefNode<T>> rows, string kind, int sel, bool right)
+    private int RefTreeStep<T>(IReadOnlyList<TreeNode<T>> rows, string kind, int sel, bool right)
     {
         if (sel < 0 || sel >= rows.Count) return sel;
         var node = rows[sel];

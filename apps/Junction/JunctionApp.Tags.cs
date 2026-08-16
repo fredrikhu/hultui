@@ -57,11 +57,11 @@ public partial class JunctionApp
     /// (<c>v1/rc1</c>, <c>release/2024-06</c>); the ones that carry no slash — the usual
     /// <c>v1.2.3</c> — stay at the top level, so a plain semver repo looks the same in
     /// either mode.</summary>
-    private List<RefNode<GitTag>> TagRowsOf(IReadOnlyList<GitTag> all) =>
+    private List<TreeNode<GitTag>> TagRowsOf(IReadOnlyList<GitTag> all) =>
         RefRows(FilterTags(all), RefKindTag, t => t.Name, flag: null,
             filtering: _tagQuery.Trim().Length > 0);
 
-    private List<RefNode<GitTag>> TagRows() => TagRowsOf(_tags.Value.All);
+    private List<TreeNode<GitTag>> TagRows() => TagRowsOf(_tags.Value.All);
 
     /// <summary>The tag under the caret, or null when the caret is on a folder row.</summary>
     private GitTag? SelectedTag()
@@ -131,7 +131,7 @@ public partial class JunctionApp
         return row;
     }
 
-    private Element BuildTagScroll(List<RefNode<GitTag>> rows)
+    private Element BuildTagScroll(List<TreeNode<GitTag>> rows)
     {
         if (rows.Count == 0)
         {
@@ -145,10 +145,10 @@ public partial class JunctionApp
 
         // Virtualized like the branch table, and fed the same way: the expanded tree
         // flattened into one row list, indexed by node identity.
-        var indexOf = new Dictionary<RefNode<GitTag>, int>(rows.Count);
+        var indexOf = new Dictionary<TreeNode<GitTag>, int>(rows.Count);
         for (var i = 0; i < rows.Count; i++) indexOf[rows[i]] = i;
 
-        return VirtualListElement<RefNode<GitTag>>.New()
+        return VirtualListElement<TreeNode<GitTag>>.New()
             .ItemHeight(TagRowHeight)
             .Items(rows)
             .RenderWith(n => TagRow(n, indexOf[n]))
@@ -173,7 +173,7 @@ public partial class JunctionApp
         ? $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {t.Message}, {ShortHash(t.Hash)} {t.Subject}"
         : $"{t.Name}, {(t.Annotated ? "annotated" : "lightweight")}, {ShortHash(t.Hash)} {t.Subject}";
 
-    private Element TagRow(RefNode<GitTag> node, int index)
+    private Element TagRow(TreeNode<GitTag> node, int index)
     {
         var focused = index == _tagSel;
         return node.IsFolder
@@ -181,7 +181,7 @@ public partial class JunctionApp
             : TagLeafRow(node, index, focused);
     }
 
-    private Element TagLeafRow(RefNode<GitTag> node, int index, bool focused)
+    private Element TagLeafRow(TreeNode<GitTag> node, int index, bool focused)
     {
         var t = node.Item;
         var depth = node.Depth;

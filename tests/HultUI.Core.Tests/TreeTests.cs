@@ -1,15 +1,18 @@
+using HultUI.Core.Builders;
 using Xunit;
 
-namespace Junction.Tests;
+namespace HultUI.Core.Tests;
 
 /// <summary>
-/// The ref-name → folder-tree grouping and the expanded-tree flattening behind the
-/// Branches and Tags trees. Both are pure functions over a list of names, which is
-/// why they are tested here rather than through the hosted views: the awkward cases
-/// (a ref that is also a folder prefix, names that are nothing but separators, a
-/// thousand refs under one remote) are one line each at this level.
+/// The name → folder-tree grouping and the expanded-tree flattening behind every
+/// tree-shaped list (Junction's Branches, Tags and Files trees). Both are pure
+/// functions over a list of names, which is why they are tested here rather than
+/// through hosted views: the awkward cases (a ref that is also a folder prefix,
+/// names that are nothing but separators, a thousand refs under one remote) are one
+/// line each at this level. Moved with the algorithm when Junction's RefTree was
+/// promoted into the framework; the stateful half is covered in TreeViewTests.
 /// </summary>
-public class RefTreeTests
+public class TreeTests
 {
     // ── Building ─────────────────────────────────────────────────────────
 
@@ -155,7 +158,7 @@ public class RefTreeTests
     [Fact]
     public void AnEmptyInputBuildsAnEmptyTree()
     {
-        Assert.Empty(RefTree.Build<string>([], s => s));
+        Assert.Empty(Tree.Build<string>([], s => s));
     }
 
     [Fact]
@@ -165,7 +168,7 @@ public class RefTreeTests
 
         var a = roots[0];
         Assert.Equal(3, a.LeafCount);
-        Assert.Equal(2, a.Children.OfType<RefNode<string>>().Single(n => n.IsFolder).LeafCount);
+        Assert.Equal(2, a.Children.OfType<TreeNode<string>>().Single(n => n.IsFolder).LeafCount);
         Assert.Equal(1, roots[1].LeafCount);
     }
 
@@ -174,7 +177,7 @@ public class RefTreeTests
     {
         // What lets the branch tree put a cloud on a folder of nothing but
         // remote-tracking refs, and leave it off a folder that mixes them.
-        var roots = RefTree.Build(
+        var roots = Tree.Build(
             new[] { "origin/a", "origin/b", "local/c", "local/origin-ish" },
             s => s,
             s => s.StartsWith("origin/", StringComparison.Ordinal));
@@ -221,7 +224,7 @@ public class RefTreeTests
     [Fact]
     public void FlatteningAFullyOpenTreeVisitsEveryNodeDepthFirst()
     {
-        var rows = RefTree.Flatten(Build("main", "feature/a", "feature/b"), _ => true);
+        var rows = Tree.Flatten(Build("main", "feature/a", "feature/b"), _ => true);
 
         Assert.Equal(new[] { "main", "feature", "a", "b" }, rows.Select(n => n.Segment));
         Assert.Equal(new[] { 0, 0, 1, 1 }, rows.Select(n => n.Depth));
@@ -233,7 +236,7 @@ public class RefTreeTests
         // The whole point: a folder of a thousand refs is one row, not a thousand.
         var roots = Build("main", "feature/a", "feature/b", "feature/deep/c");
 
-        var rows = RefTree.Flatten(roots, n => n.Segment != "feature");
+        var rows = Tree.Flatten(roots, n => n.Segment != "feature");
 
         Assert.Equal(new[] { "main", "feature" }, rows.Select(n => n.Segment));
     }
@@ -243,7 +246,7 @@ public class RefTreeTests
     {
         var roots = Build("feature/a", "feature/deep/c", "feature/b");
 
-        var rows = RefTree.Flatten(roots, n => n.Path != "feature/deep");
+        var rows = Tree.Flatten(roots, n => n.Path != "feature/deep");
 
         Assert.Equal(new[] { "feature", "a", "deep", "b" }, rows.Select(n => n.Segment));
     }
@@ -255,8 +258,8 @@ public class RefTreeTests
         // presentations: with no separators anywhere the tree *is* the list.
         string[] names = ["main", "develop", "gh-pages"];
 
-        var tree = RefTree.Flatten(RefTree.Build(names, s => s), _ => true);
-        var flat = RefTree.Flat(names, s => s);
+        var tree = Tree.Flatten(Tree.Build(names, s => s), _ => true);
+        var flat = Tree.Flat(names, s => s);
 
         Assert.Equal(flat.Select(n => n.Path), tree.Select(n => n.Path));
         Assert.Equal(flat.Select(n => n.Depth), tree.Select(n => n.Depth));
@@ -265,7 +268,7 @@ public class RefTreeTests
     [Fact]
     public void TheFlatRowsCarryTheWholeNameAsTheirLabel()
     {
-        var rows = RefTree.Flat(new[] { "feature/a/b" }, s => s);
+        var rows = Tree.Flat(new[] { "feature/a/b" }, s => s);
 
         var row = Assert.Single(rows);
         Assert.False(row.IsFolder);
@@ -279,9 +282,9 @@ public class RefTreeTests
     {
         var roots = Build("a/b/c", "a/d/e", "a/f");
 
-        Assert.Equal(new[] { "a", "a/b", "a/d" }, RefTree.Folders(roots[0]).Select(n => n.Path));
+        Assert.Equal(new[] { "a", "a/b", "a/d" }, Tree.Folders(roots[0]).Select(n => n.Path));
         // A leaf contributes nothing — there is nothing under it to expand.
-        Assert.Empty(RefTree.Folders(roots[0].Children.Single(n => !n.IsFolder)));
+        Assert.Empty(Tree.Folders(roots[0].Children.Single(n => !n.IsFolder)));
     }
 
     [Fact]
@@ -289,8 +292,8 @@ public class RefTreeTests
     {
         var names = Enumerable.Range(0, 1000).Select(i => $"origin/feature/PROJ-{i}").ToArray();
 
-        var roots = RefTree.Build(names, s => s);
-        var rows = RefTree.Flatten(roots, _ => false);
+        var roots = Tree.Build(names, s => s);
+        var rows = Tree.Flatten(roots, _ => false);
 
         Assert.Equal(1000, roots[0].LeafCount);
         Assert.Equal("origin", Assert.Single(rows).Segment);
@@ -298,10 +301,10 @@ public class RefTreeTests
 
     // ── helpers ──────────────────────────────────────────────────────────
 
-    private static List<RefNode<string>> Build(params string[] names) =>
-        RefTree.Build(names, s => s);
+    private static List<TreeNode<string>> Build(params string[] names) =>
+        Tree.Build(names, s => s);
 
-    private static IEnumerable<RefNode<string>> Walk(IEnumerable<RefNode<string>> nodes)
+    private static IEnumerable<TreeNode<string>> Walk(IEnumerable<TreeNode<string>> nodes)
     {
         foreach (var node in nodes)
         {

@@ -183,7 +183,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
-    private readonly Ref<VirtualListElement<RefNode<GitBranch>>> _branchScrollRef = new();
+    private readonly Ref<VirtualListElement<TreeNode<GitBranch>>> _branchScrollRef = new();
     private bool _pendingBranchSearchFocus;
 
     // Tags state, shaped like the branches state above.
@@ -192,7 +192,7 @@ public partial class JunctionApp : Component, IDisposable
     private string _tagQuery = "";
     private int _tagSel;
     private readonly Ref<TextInputElement> _tagSearchRef = new();
-    private readonly Ref<VirtualListElement<RefNode<GitTag>>> _tagScrollRef = new();
+    private readonly Ref<VirtualListElement<TreeNode<GitTag>>> _tagScrollRef = new();
     private bool _pendingTagSearchFocus;
 
     // Diff mode is a single app-level toggle shared by all diff panes.
@@ -320,6 +320,7 @@ public partial class JunctionApp : Component, IDisposable
         _diffPan = new HorizontalPan(MarkDirty);
         _diffFind = new FindBarState(MarkDirty);
         _filesFind = new FindBarState(MarkDirty);
+        _filesTree = new TreeView<string>(MarkDirty);
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
@@ -742,8 +743,8 @@ public partial class JunctionApp : Component, IDisposable
             // Opens every branch folder, so a capture can measure the worst case the
             // tree can reach: as many rows as the flat list, plus the folders.
             var set = RefExpandedSet(RefKindBranch);
-            foreach (var root in RefTree.Build(_branches.Value.Local, b => b.Name))
-                foreach (var folder in RefTree.Folders(root))
+            foreach (var root in Tree.Build(_branches.Value.Local, b => b.Name))
+                foreach (var folder in Tree.Folders(root))
                     set[folder.Path] = step[7..] == "all";
             MarkDirty();
         }

@@ -79,11 +79,11 @@ public partial class JunctionApp
     /// tree, or the same branches flat. Remote-tracking refs carry their remote as the first
     /// name segment (<c>origin/feature/x</c>), so the tree groups them under it for free —
     /// and the folder says so with a cloud, because every ref beneath it is remote.</summary>
-    private List<RefNode<GitBranch>> BranchRowsOf(IReadOnlyList<GitBranch> all) =>
+    private List<TreeNode<GitBranch>> BranchRowsOf(IReadOnlyList<GitBranch> all) =>
         RefRows(FilterBranches(all), RefKindBranch, b => b.Name, b => b.IsRemote,
             filtering: _branchQuery.Trim().Length > 0);
 
-    private List<RefNode<GitBranch>> BranchRows() => BranchRowsOf(_branches.Value.Local);
+    private List<TreeNode<GitBranch>> BranchRows() => BranchRowsOf(_branches.Value.Local);
 
     // ── Header (title · search · new branch) ─────────────────────────────
 
@@ -179,7 +179,7 @@ public partial class JunctionApp
         return box;
     }
 
-    private Element BuildBranchScroll(List<RefNode<GitBranch>> rows)
+    private Element BuildBranchScroll(List<TreeNode<GitBranch>> rows)
     {
         if (rows.Count == 0)
         {
@@ -198,10 +198,10 @@ public partial class JunctionApp
         // The template gets the row alone, so rows find their index through this map
         // (nodes are rebuilt per build, so identity is the natural key — and unlike a
         // name it can't collide when a ref is also a folder prefix).
-        var indexOf = new Dictionary<RefNode<GitBranch>, int>(rows.Count);
+        var indexOf = new Dictionary<TreeNode<GitBranch>, int>(rows.Count);
         for (var i = 0; i < rows.Count; i++) indexOf[rows[i]] = i;
 
-        return VirtualListElement<RefNode<GitBranch>>.New()
+        return VirtualListElement<TreeNode<GitBranch>>.New()
             .ItemHeight(BranchRowHeight)
             .Items(rows)
             .RenderWith(n => BranchRow(n, indexOf[n]))
@@ -227,7 +227,7 @@ public partial class JunctionApp
         ? $"{b.Name}, remote, {b.Subject}"
         : $"{b.Name}{(b.IsCurrent ? ", current" : "")}, ahead {b.AheadCount} behind {b.BehindCount}, {b.Subject}";
 
-    private Element BranchRow(RefNode<GitBranch> node, int index)
+    private Element BranchRow(TreeNode<GitBranch> node, int index)
     {
         var focused = index == _branchSel;
         return node.IsFolder
