@@ -28,9 +28,10 @@ public class FindRevealDeliveryTests
     {
         Hosted((session, app) =>
         {
-            // Nothing selected, so the Files view shows its placeholder and there is no
-            // TextArea to scroll — the state a reveal can arrive in when the file is still
-            // being read off-thread.
+            // The Files view has only just been reached: its tree load and the file's
+            // content load are queued but have not landed, so the pane is a placeholder
+            // and no TextArea has ever mounted — the state a reveal arrives in when the
+            // file is still being read.
             Assert.Null(BodyRef(app).Current);
 
             var find = FindState(app);
@@ -38,16 +39,22 @@ public class FindRevealDeliveryTests
             Search(app).SetQuery("marker");
             Member(find, "PendingReveal", true);
 
-            // The frame in which the request falls due, with no body to receive it.
-            session.PumpFrames(2);
+            // Seeded before the tree lands: PickInitialTreeFile keeps an existing
+            // selection it finds in the tree, and left to its own devices it would pick
+            // the tree's first path — the seed file, whose text has no marker in it.
+            typeof(JunctionApp).GetField("_filesSelPath", Priv)!.SetValue(app, "sample.cs");
 
-            // Now the file arrives, exactly as an off-thread read completing would deliver it.
-            SelectFile(app, "sample.cs");
-            session.PumpUntil(() => BodyRef(app).Current is { } b && b.Text.Length > 0,
-                TimeSpan.FromSeconds(30));
-            session.PumpFrames(4);
+            // Each pump lands one queued load: the tree, then the file's content. The
+            // reveal falls due on every frame in between, with no body to receive it;
+            // when the text finally mounts, the held request must come back round and
+            // scroll. No PumpUntil — the frames are exact now that loads land
+            // deterministically, which is the point: this test used to stage "no body
+            // yet" by racing the thread pool, and lost under machine load.
+            session.PumpFrames(6);
 
             var body = BodyRef(app).Current!;
+            Assert.NotNull(body);
+            Assert.True(body.Text.Length > 0, "the file's text never arrived");
             Assert.True(ScrollY(body) > 0,
                 $"the body is still at the top ({ScrollY(body)}) — the reveal was dropped when "
                 + "it arrived a frame before the text it was meant to scroll");
@@ -72,12 +79,6 @@ public class FindRevealDeliveryTests
     private static float ScrollY(TextAreaElement body) =>
         (float)typeof(TextAreaElement).GetProperty("ScrollOffsetY", Priv)!.GetValue(body)!;
 
-    private static void SelectFile(JunctionApp app, string path)
-    {
-        typeof(JunctionApp).GetField("_filesSelPath", Priv)!.SetValue(app, path);
-        typeof(JunctionApp).GetMethod("Rerender", Priv)!.Invoke(app, null);
-    }
-
     private static void Hosted(Action<HeadlessSession, JunctionApp> body)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
@@ -101,9 +102,10 @@ public class FindRevealDeliveryTests
             session.Application.SetRoot(app.Mount());
             session.PumpFrames(3);
 
+            // Stop pumping the moment the view flips: the test needs to arrange its find
+            // state before the Files view's queued loads land.
             session.Window.PressKey(KeyCode.Digit7);   // Files
             session.PumpUntil(() => app!.View == JunctionView.Files, TimeSpan.FromSeconds(20));
-            session.PumpFrames(2);
 
             body(session, app!);
         }

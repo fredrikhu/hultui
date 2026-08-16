@@ -67,9 +67,11 @@ session.PumpFrame(TimeSpan.FromMilliseconds(600)); // past ShowDelay (0.5 s)
 Assert.NotEmpty(window.OverlayContents);           // tooltip is open
 ```
 
-**The one escape from determinism:** `PumpUntil(condition)` / `PumpUntilCompleted(task)` pump repeatedly with a *real-time* timeout (default 5 s), yielding briefly between pumps so background work (`Task.Run`, `AsyncLoader`) can finish and post back to the UI queue. Use them exactly at async boundaries; keep everything else on explicit pumps.
+**`AsyncLoader` is deterministic under a session.** Its thread-pool hop becomes a queue the pump drains at the top of each frame: a load requested during frame N's build runs its producer at the start of frame N+1 and its value is applied in that same frame — one frame later, every run, regardless of machine load. So a chain of loads needs exactly one `PumpFrame()` per stage (tree → selection → content is three pumps), and no `PumpUntil`. The producer is *not* run inline during `Load` — that was tried and broke code that depends on the value arriving on a later frame.
 
-The corollary: a bare `for (…) session.PumpFrame();` loop is **not** a way to wait. It yields nothing and advances almost no wall-clock, so a `Task.Run` producer may not have finished by the last iteration — which reads as data that never arrives. Passing a `TimeSpan` advances *virtual* time for animations and timers; it does not give background threads real time either. Wait with `PumpUntil`, or sleep between pumps.
+**The one escape from determinism:** `PumpUntil(condition)` / `PumpUntilCompleted(task)` pump repeatedly with a *real-time* timeout (default 5 s), yielding briefly between pumps so background work the session does not control (raw `Task.Run`, real I/O posting back with `InvokeOnMainThread`) can finish. Use them exactly at those boundaries; keep everything else — `AsyncLoader` included — on explicit pumps.
+
+The corollary: a bare `for (…) session.PumpFrame();` loop is **not** a way to wait *on raw background threads*. It yields nothing and advances almost no wall-clock, so a `Task.Run` producer may not have finished by the last iteration — which reads as data that never arrives. Passing a `TimeSpan` advances *virtual* time for animations and timers; it does not give background threads real time either. Wait with `PumpUntil`, or sleep between pumps.
 
 ## Input Driver
 

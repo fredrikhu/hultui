@@ -30,7 +30,10 @@ namespace HultUI;
 ///
 /// <para><b>Threading.</b> <paramref name="produce"/> runs off the UI thread and
 /// must not touch elements or reactive state. Everything else — <see cref="Load"/>,
-/// the reads, and <c>onLoaded</c> — is UI-thread only.</para>
+/// the reads, and <c>onLoaded</c> — is UI-thread only. Under a headless session the
+/// hop is deterministic instead of pooled — the producer runs during the next
+/// <c>PumpFrame</c> and the result still lands a frame after the <see cref="Load"/>
+/// (see <see cref="AsyncWork"/>).</para>
 ///
 /// <example>
 /// <code>
@@ -82,7 +85,7 @@ public sealed class AsyncLoader<T>
         int gen = ++_generation;
         _loading.Value = true;
 
-        _ = Task.Run(() =>
+        AsyncWork.Schedule(() =>
         {
             T result;
             try

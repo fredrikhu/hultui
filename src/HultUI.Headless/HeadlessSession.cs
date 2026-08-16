@@ -22,6 +22,7 @@ public sealed class HeadlessSession : IDisposable
     private readonly HeadlessTimeProvider _time;
     private readonly HeadlessWindowingPlatform _platform;
     private readonly SynchronizationContext? _previousSyncContext;
+    private readonly Queue<Action> _deferredWork = new();
     private bool _disposed;
 
     /// <summary>The application under test. All normal app APIs (theme, InvokeOnMainThread, multi-window) work.</summary>
@@ -47,6 +48,14 @@ public sealed class HeadlessSession : IDisposable
         _platform = platform;
         Application = application;
         _previousSyncContext = application.InstallSynchronizationContext();
+
+        // AsyncLoader's thread-pool hop becomes a queue this session drains at the top
+        // of each PumpFrame. A load requested during frame N's build runs its producer
+        // at the start of frame N+1 and its completion is applied by that same frame's
+        // main-thread drain — the value arrives exactly one frame later, every run,
+        // instead of whenever the pool got to it.
+        AsyncWork.SetScheduler(_deferredWork.Enqueue);
+
         Window = Wrap(application.PrimaryWindow);
     }
 
@@ -111,12 +120,25 @@ public sealed class HeadlessSession : IDisposable
         ThrowIfDisposed();
         _time.Advance(delta);
         Application.ProcessPendingResizes();
+        DrainDeferredWork();
         Application.DrainMainThreadQueue();
         AnimationManager.Tick((float)delta.TotalSeconds);
         Application.InspectorHost?.Tick();
         bool rendered = Application.RenderDirtyWindows(forceRender);
         Application.CleanupClosedWindows();
         return rendered;
+    }
+
+    /// <summary>
+    /// Runs the AsyncLoader producers queued since the last frame. Only what was
+    /// pending when the drain began: work scheduled by a running item waits for the
+    /// next frame, preserving the one-frame-later contract.
+    /// </summary>
+    private void DrainDeferredWork()
+    {
+        int pending = _deferredWork.Count;
+        while (pending-- > 0)
+            _deferredWork.Dequeue()();
     }
 
     /// <summary>Pumps <paramref name="count"/> frames at <see cref="DefaultFrameDelta"/>.</summary>
@@ -137,8 +159,11 @@ public sealed class HeadlessSession : IDisposable
     /// Pumps frames until <paramref name="condition"/> is true. UI time is
     /// virtual (one <see cref="DefaultFrameDelta"/> per pump), but the timeout
     /// is real time and the loop yields briefly between pumps — this is the
-    /// one place determinism is deliberately relaxed, so background work
-    /// (Task.Run, AsyncLoader) can complete and post back to the pump.
+    /// one place determinism is deliberately relaxed, so background work the
+    /// session does not control (raw Task.Run, real I/O) can complete and post
+    /// back to the pump. AsyncLoader no longer needs the relaxation: its
+    /// producers run deterministically at the top of each frame, so a load is
+    /// applied a fixed number of pumps after the Build that requested it.
     /// Throws <see cref="TimeoutException"/> after <paramref name="timeout"/>
     /// (default 5 seconds).
     /// </summary>
@@ -184,6 +209,12 @@ public sealed class HeadlessSession : IDisposable
         // code left running, so nothing ticks into the next session.
         Application.Dispose();
         AnimationManager.Reset();
+
+        // Give AsyncLoader back its thread pool, and drop producers no frame will
+        // ever run — a real app started after this session must not enqueue into a
+        // queue nothing drains.
+        AsyncWork.SetScheduler(null);
+        _deferredWork.Clear();
 
         // Give the thread back its previous context (under xunit, the
         // AsyncTestSyncContext) — without this, later async tests deadlock
