@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Rendering.Skia</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI SkiaSharp renderer: GPU and raster backends, HarfBuzz shaping, font fallback, emoji.</Description>
   </PropertyGroup>
 
   <ItemGroup>

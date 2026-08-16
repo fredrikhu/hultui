@@ -16,6 +16,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Icons</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI icon library: cached, palette-tinted vector glyph rasterization (Phosphor set and file-type icons).</Description>
   </PropertyGroup>
 
   <ItemGroup>

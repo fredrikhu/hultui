@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Core</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI core: element tree, flexbox and grid layout, fine-grained reactivity (Signal/Computed/Effect), events, styling, dialogs, virtualization. Zero external dependencies.</Description>
   </PropertyGroup>
 
   <ItemGroup>

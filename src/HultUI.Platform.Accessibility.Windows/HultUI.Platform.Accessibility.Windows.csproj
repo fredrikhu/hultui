@@ -6,11 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Platform.Accessibility.Windows</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <IsPackable>false</IsPackable>
     <IsAotCompatible>true</IsAotCompatible>
     <!-- Source is portable; runtime APIs only execute on Windows via
          OperatingSystem.IsWindows() / SupportedOSPlatform checks. -->
     <SupportedOSPlatform>windows</SupportedOSPlatform>
+    <Description>HultUI Windows accessibility: UI Automation provider bridge, NativeAOT-compatible.</Description>
   </PropertyGroup>
 
   <ItemGroup>

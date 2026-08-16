@@ -5,9 +5,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Platform.Accessibility.Linux</RootNamespace>
-    <IsPackable>false</IsPackable>
     <IsAotCompatible>true</IsAotCompatible>
     <SupportedOSPlatform>linux</SupportedOSPlatform>
+    <Description>HultUI Linux accessibility: AT-SPI2 D-Bus bridge.</Description>
   </PropertyGroup>
 
   <ItemGroup>

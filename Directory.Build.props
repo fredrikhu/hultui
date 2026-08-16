@@ -1,0 +1,16 @@
+<Project>
+
+  <!-- Repo-wide defaults. Packing is opt-in: only src/ (which re-enables it in its
+       own Directory.Build.props) produces packages — apps, samples and tests never
+       accidentally ride along in a `dotnet pack` of the solution. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>preview</VersionSuffix>
+    <Authors>Fredrik Hult</Authors>
+    <Company>Fredrik Hult</Company>
+    <RepositoryUrl>https://github.com/fredrikhu/hului-revamped</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+</Project>

@@ -12,6 +12,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Syntax</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI syntax highlighting: TextMate-grammar tokenization producing TextSpan lists for code display.</Description>
   </PropertyGroup>
 
   <ItemGroup>

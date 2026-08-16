@@ -1,0 +1,28 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <!-- Every framework project packs, with shared metadata. Versioning: one version
+       for the whole family (VersionPrefix in the root props); project-to-project
+       references become exact-version package dependencies automatically.
+       NOTE: no PackageLicenseExpression yet — the repository has no LICENSE file,
+       and choosing one is a decision packing must not make. Packages build and
+       restore fine without it; pick a license before anything is published. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageProjectUrl>https://github.com/fredrikhu/hului-revamped</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>ui;gui;framework;flexbox;reactive;skia;sdl3;cross-platform</PackageTags>
+    <!-- The XML docs the API reference will harvest; missing-comment noise is not
+         a build error the framework wants (docs are added where they earn keep). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

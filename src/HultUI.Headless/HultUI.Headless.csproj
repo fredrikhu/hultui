@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>HultUI.Headless</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI headless testing: run a full application with no window or display — manual frame pump, virtual clock, input injection, accessibility-tree queries, raster capture.</Description>
   </PropertyGroup>
 
   <ItemGroup>

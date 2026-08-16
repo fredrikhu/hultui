@@ -7,6 +7,7 @@
     <RootNamespace>HultUI.Text</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI text pipeline: shaping-agnostic layout, UAX #14 line breaking and UAX #9 BiDi via platform ICU, word-level shape caching.</Description>
   </PropertyGroup>
 
   <ItemGroup>

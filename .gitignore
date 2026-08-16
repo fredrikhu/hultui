@@ -9,3 +9,5 @@ obj/
 # Inno Setup compiler output (installer builds)
 apps/Junction/Installer/Output/
 apps/VesperCommander/Installer/Output/
+
+artifacts/
