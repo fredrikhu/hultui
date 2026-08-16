@@ -164,7 +164,7 @@ for (int i = 0; i < items.Count; i++)
 }
 ```
 
-See [Reactivity Guide -- Keys and Event Handlers](REACTIVITY.md#keys-and-event-handlers) for a detailed explanation.
+See [Reactivity Guide -- Event handlers follow the latest build](REACTIVITY.md#event-handlers-follow-the-latest-build) for a detailed explanation.
 
 ---
 

@@ -32,6 +32,23 @@ pointing at `artifacts/packages`, referencing `HultUI` + `HultUI.Headless`, usin
 rendered text. That exercises restore, the embedded analyzer, and the runtime in
 one page of code. (First verified 2026-08-16.)
 
+## The documentation site
+
+`docfx.json` builds the guides in this folder plus an API reference harvested
+from the XML doc comments — 2,114 members across the ten packable projects — into
+`artifacts/docs`. The generated API pages land in `docs/api/`, which is ignored;
+nothing generated is committed.
+
+```bash
+dotnet tool restore && dotnet docfx docfx.json --serve
+```
+
+DocFX is pinned in `.config/dotnet-tools.json`, so the version is the same
+everywhere. CI runs the same command with `--warningsAsErrors` and uploads the
+site as an artifact — a bad cref or a stale link breaks the build instead of the
+site. `HultUI.SourceGenerators` is deliberately absent from the API reference:
+it is a build-time analyzer with no runtime surface for a consumer to call.
+
 ## Before anything is published
 
 - **License.** The repository has no LICENSE file, so the packages deliberately
@@ -41,5 +58,8 @@ one page of code. (First verified 2026-08-16.)
 - **Publishing** to nuget.org (or a private feed) is not wired anywhere and should
   be an explicit, tag-gated CI step when wanted — the release-tag convention
   (`vesper-v*`, `junction-v*`) has room for a `hultui-v*`.
+- **Hosting the docs site** is the same decision. CI builds it and keeps it as an
+  artifact; deploying it (GitHub Pages is the obvious target, and the workflow
+  needs `pages: write`) is a separate, deliberate step.
 - **Stability statement.** Everything is `0.1.0-preview`; nothing is API-stable
   yet, and the version says so.

@@ -1,0 +1,46 @@
+- name: Docs
+  href: index.md
+- name: Guides
+  items:
+    - name: Getting started
+      href: GETTING-STARTED.md
+    - name: Elements
+      href: ELEMENTS.md
+    - name: Layout
+      href: LAYOUT.md
+    - name: Grid
+      href: GRID.md
+    - name: Reactivity
+      href: REACTIVITY.md
+    - name: Animations
+      href: ANIMATIONS.md
+    - name: Drag and drop
+      href: DRAG-AND-DROP.md
+    - name: Multi-window
+      href: MULTI-WINDOW.md
+    - name: Custom window chrome
+      href: CUSTOM-CHROME.md
+    - name: Icons
+      href: ICONS.md
+- name: Testing and tooling
+  items:
+    - name: Headless testing
+      href: HEADLESS.md
+    - name: DevTools
+      href: DEVTOOLS.md
+    - name: Native AOT
+      href: NATIVE-AOT.md
+- name: Reference
+  items:
+    - name: Threading model
+      href: THREADING.md
+    - name: Design decisions
+      href: DECISIONS.md
+    - name: Packaging
+      href: PACKAGING.md
+    - name: Accessibility plan
+      href: ACCESSIBILITY-PLAN.md
+    - name: Self-hosted runners
+      href: SELF-HOSTED-RUNNERS.md
+- name: API
+  href: api/toc.yml

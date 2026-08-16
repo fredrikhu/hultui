@@ -181,9 +181,26 @@ out of a shipped build. See [DevTools](docs/DEVTOOLS.md).
 - [Multi-Window](docs/MULTI-WINDOW.md) -- multiple windows with shared state
 - [Icons](docs/ICONS.md) -- SVG icon rendering, the bundled Phosphor set, and file-type glyphs
 - [DevTools](docs/DEVTOOLS.md) -- element inspector (Ctrl+Shift+I) and performance HUD (F12)
+- [Threading Model](docs/THREADING.md) -- what the UI thread owns, and how to get back onto it
+- [Headless Testing](docs/HEADLESS.md) -- drive an app with a virtual clock and assert on what it rendered
 - [NativeAOT](docs/NATIVE-AOT.md) -- publishing a self-contained native executable
+- [Packaging](docs/PACKAGING.md) -- what ships, and the gates before anything is published
 - [Self-Hosted Runners](docs/SELF-HOSTED-RUNNERS.md) -- optional Windows and Proxmox build hosts
 - [Design Decisions](docs/DECISIONS.md) -- architectural rationale
+
+### Building the docs site
+
+The guides above plus a generated API reference for every public type build into
+one browsable site with [DocFX](https://dotnet.github.io/docfx/):
+
+```bash
+dotnet tool restore && dotnet docfx docfx.json --serve
+```
+
+CI builds it on every push with `--warningsAsErrors`, so a broken
+`<see cref="..."/>` or a link to a page that moved fails the build rather than
+the published site. Nothing is deployed anywhere yet -- see
+[docs/PACKAGING.md](docs/PACKAGING.md).
 
 ## Apps
 

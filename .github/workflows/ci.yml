@@ -47,3 +47,24 @@ jobs:
 
       - name: Run tests
         run: dotnet test HultUI.CrossPlatform.slnf -c Release
+
+  # The API reference is generated from the XML docs, so a bad <see cref="..."/>
+  # or a link to a page that moved is a build break here rather than a broken
+  # published site. Nothing is deployed — see docs/PACKAGING.md for the
+  # publishing decisions that are still open.
+  docs:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Build documentation
+        run: dotnet docfx docfx.json --warningsAsErrors
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: artifacts/docs
+          retention-days: 7

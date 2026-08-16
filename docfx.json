@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [
+            "src/HultUI/HultUI.csproj",
+            "src/HultUI.Core/HultUI.Core.csproj",
+            "src/HultUI.Text/HultUI.Text.csproj",
+            "src/HultUI.Rendering.Skia/HultUI.Rendering.Skia.csproj",
+            "src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj",
+            "src/HultUI.Platform.Accessibility.Windows/HultUI.Platform.Accessibility.Windows.csproj",
+            "src/HultUI.Platform.Accessibility.Linux/HultUI.Platform.Accessibility.Linux.csproj",
+            "src/HultUI.Headless/HultUI.Headless.csproj",
+            "src/HultUI.Icons/HultUI.Icons.csproj",
+            "src/HultUI.Syntax/HultUI.Syntax.csproj"
+          ]
+        }
+      ],
+      "dest": "docs/api",
+      "namespaceLayout": "nested",
+      "memberLayout": "separatePages",
+      "outputFormat": "apiPage"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [
+          "**/*.{md,yml}"
+        ],
+        "src": "docs",
+        "exclude": [
+          "design/**",
+          "plans/**",
+          "**/*HANDOVER*.md"
+        ]
+      }
+    ],
+    "output": "artifacts/docs",
+    "template": [
+      "default",
+      "modern"
+    ],
+    "globalMetadata": {
+      "_appName": "HultUI",
+      "_appTitle": "HultUI",
+      "_enableSearch": true,
+      "_disableContribution": true,
+      "pdf": false
+    }
+  }
+}

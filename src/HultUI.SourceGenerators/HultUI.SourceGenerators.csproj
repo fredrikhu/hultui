@@ -25,9 +25,8 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.*" />
   </ItemGroup>
 
-  <ItemGroup>
-    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
-    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
-  </ItemGroup>
+  <!-- AnalyzerReleases.Shipped.md / .Unshipped.md are picked up automatically by
+       the analyzer SDK; including them explicitly as well makes every consumer of
+       this project file (DocFX among them) see each one twice. -->
 
 </Project>
