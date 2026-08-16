@@ -46,9 +46,12 @@ public sealed class Signal<T> : IReactiveSource
     // rented buffer allocates zero bytes, so a single-subscriber write costs the same
     // either way, and only the rent/return call is saved. No measurable upside against an
     // unexplained failure is not a trade worth taking. The original failure remains
-    // unexplained and is not currently reproducible. If it returns, the sequence worth tracing is a source first read
-    // during a rebuild, where a freshly created per-key AsyncLoader subscribes mid-flush —
-    // see ComponentHost.ForceRebuild's comment.
+    // unexplained and is not currently reproducible — and it cannot recur in that form:
+    // AsyncLoader is deterministic under a headless session now (see AsyncWork), so the
+    // test no longer waits on the thread pool at all. If something like it returns, the
+    // sequence worth tracing is a source first read during a rebuild, where a freshly
+    // created per-key AsyncLoader subscribes mid-flush — see ComponentHost.ForceRebuild's
+    // comment.
     private IReactiveNode? _single;
     private HashSet<IReactiveNode>? _subscribers;
 
