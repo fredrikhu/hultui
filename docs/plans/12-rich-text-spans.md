@@ -113,9 +113,15 @@ element with links/inline images materializes later it composes on this pipeline
   `TextElement` wiring + tests. Success criterion: a bold word inside a wrapping
   paragraph wraps identically to a browser rendering the same text, and the
   existing render-log baselines for span-free text are byte-identical.
-- **Stage 3 — adoption.** Junction intraline diff moves from per-token elements to
-  one spanned line per row (fewer elements per row on the hottest list in the app);
-  markdown-ish commit-body rendering becomes possible.
+- **Stage 3 — adoption.** ~~Junction intraline diff moves from per-token elements
+  to one spanned line per row.~~ **Verified already true** (2026-08-16): the review's
+  "per-token elements for intraline highlights" described a state the code had
+  moved past — every diff row is one `Ui.Mono(...).Spans(spans)` element, with
+  intraline word-diff ranges merged over syntax spans by `MergeHighlight`
+  (JunctionApp.Diff.cs). The diff was this model's in-app precedent, not its
+  adoption target. New capabilities (decorations, metric spans) have no pending
+  consumer in the apps; they unlock link styling and markdown-ish rendering when
+  a feature wants them.
 
 ## Stage-2 status and known gaps (2026-08-16)
 
