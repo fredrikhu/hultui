@@ -103,6 +103,59 @@ public class DiffShortcutTests
     }
 
     [Fact]
+    public void FOpensTheFindBarOverTheDiff()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Assert.False(FindBarOpen(session), "the find bar starts open");
+
+            session.Window.PressKey(KeyCode.F);
+            PumpUntil(session, () => FindBarOpen(session), "f did not open the find bar");
+
+            // Esc closes it, and the letter goes back to opening it.
+            session.Window.PressKey(KeyCode.Escape);
+            PumpUntil(session, () => !FindBarOpen(session), "Esc did not close the find bar");
+            session.Window.PressKey(KeyCode.F);
+            PumpUntil(session, () => FindBarOpen(session), "f did not reopen the find bar");
+        });
+    }
+
+    [Fact]
+    public void TypingIntoTheCommitMessageNeitherOpensNorDrivesTheFindBar()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var field = LayoutProbe.Descendants<TextAreaElement>(Root(session)).FirstOrDefault()
+                ?? throw new Xunit.Sdk.XunitException("the commit composer is not on screen");
+            field.Focus();
+            session.PumpFrames(2);
+
+            session.Window.PressKey(KeyCode.F);
+            session.PumpFrames(3);
+            Assert.False(FindBarOpen(session),
+                "typing 'f' into the commit message opened the find bar");
+
+            // And with the bar open and a query in it, n / p are letters in that field rather
+            // than match navigation — the composer is a TextArea, which the guard used to
+            // miss, so typing "not quite" into it walked the matches instead.
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            PumpUntil(session, () => FindBarOpen(session), "Ctrl+F did not open the find bar");
+            session.Window.TypeText("line");
+            session.PumpFrames(3);
+            Assert.True(Search(app).Hits.Count > 1, "the fixture has too few matches to navigate");
+
+            var at = Search(app).Index;
+            field.Focus();
+            session.PumpFrames(2);
+            session.Window.PressKey(KeyCode.N);
+            session.Window.PressKey(KeyCode.P);
+            session.PumpFrames(3);
+
+            Assert.Equal(at, Search(app).Index);
+        });
+    }
+
+    [Fact]
     public void TheKeysStillWorkWhileTheDiffIsFullscreen()
     {
         DiffScrollTests.Hosted((session, app) =>
@@ -209,6 +262,21 @@ public class DiffShortcutTests
             throw new Xunit.Sdk.XunitException($"{message}.\n{e.Message}");
         }
     }
+
+    /// <summary>The diff's find state, which is what says where in the matches the bar is.</summary>
+    private static HultUI.Core.Builders.TextSearch Search(JunctionApp app)
+    {
+        var state = typeof(JunctionApp)
+            .GetField("_diffFind", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        return (HultUI.Core.Builders.TextSearch)state.GetType()
+            .GetField("Search", BindingFlags.Public | BindingFlags.Instance)!.GetValue(state)!;
+    }
+
+    /// <summary>The find bar by its key rather than by its placeholder: the placeholder is a
+    /// property of the field, not text in the tree, so looking for it finds nothing whether
+    /// the bar is there or not.</summary>
+    private static bool FindBarOpen(HeadlessSession session) =>
+        LayoutProbe.Descendants<Element>(Root(session), e => e.Key == "diff-find").Count > 0;
 
     private static bool Fullscreen(HeadlessSession session) =>
         LayoutProbe.Descendants<Element>(Root(session), e => e.Key == "fullscreen-diff").Count > 0;

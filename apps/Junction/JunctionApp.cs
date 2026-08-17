@@ -1087,11 +1087,24 @@ public partial class JunctionApp : Component, IDisposable
 
         if (typing) return;
 
-        // How the diff is shown — unified/split, wrapped, fullscreen — wherever one is on
-        // screen: the docked pane in Commit and Changes, and the fullscreen overlay. Ahead
-        // of the per-view keys below, so the diff answers for s / w / F11 whether or not its
-        // body holds the focus (the pane's own handler passes them up for exactly this).
+        // How the diff is shown — unified/split, wrapped, whitespace, fullscreen — wherever
+        // one is on screen: the docked pane in Commit and Changes, and the fullscreen
+        // overlay. Ahead of the per-view keys below, so the diff answers for s / w / i / F11
+        // whether or not its body holds the focus (the pane's own handler passes them up for
+        // exactly this).
         if (HandleDiffViewKey(e)) { e.StopPropagation = true; return; }
+
+        // f opens the find bar over whatever text is on screen — the bare-letter twin of the
+        // Ctrl+F handled further up, which has to run before the typing guard so it works
+        // from inside a field. This one is deliberately after it: an f typed into the commit
+        // message is an f. ActiveFindBar answers null where there is no text to search, so
+        // the letter stays free in the views that have none.
+        if (e.Key == KeyCode.F && ActiveFindBar() is { } findTarget)
+        {
+            OpenFindBar(findTarget);
+            e.StopPropagation = true;
+            return;
+        }
 
         // Backtick (the key left of 1) toggles the sidebar.
         if (e.Key == KeyCode.Backtick)

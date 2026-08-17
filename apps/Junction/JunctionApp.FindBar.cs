@@ -102,10 +102,12 @@ public partial class JunctionApp
             case KeyCode.Enter: FindNav(s, shift ? -1 : 1); return true;
             case KeyCode.C when alt: s.Search.ToggleMatchCase(); s.PendingReveal = true; return true;
             case KeyCode.R when alt: s.Search.ToggleRegex(); s.PendingReveal = true; return true;
-            // n / p walk the matches, but only when the query field does not have the
-            // keyboard — there they are letters.
-            case KeyCode.N when e.Target is not TextInputElement: FindNav(s, 1); return true;
-            case KeyCode.P when e.Target is not TextInputElement: FindNav(s, -1); return true;
+            // n / p walk the matches, but only when no field has the keyboard — in one they
+            // are letters. The commit composer counts: it is a TextArea, it sits in the same
+            // view as the diff, and typing "not quite" into it used to walk the matches
+            // instead of writing three of its characters.
+            case KeyCode.N when e.Target is not (TextInputElement or TextAreaElement): FindNav(s, 1); return true;
+            case KeyCode.P when e.Target is not (TextInputElement or TextAreaElement): FindNav(s, -1); return true;
             default: return false;
         }
     }

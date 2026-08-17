@@ -209,6 +209,9 @@ public partial class JunctionApp
             () => { ClosePalette(); ShowDiffView(); ToggleDiffFullscreen(); }));
         items.Add(new("action", "Action", Icons.FileCode, "Diff: ignore whitespace changes", "i",
             () => { ClosePalette(); ShowDiffView(); ToggleIgnoreWhitespace(); }));
+        // Find-in-text, which until now was only ever reachable by knowing Ctrl+F.
+        items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", "f · Ctrl+F",
+            () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) OpenFindBar(bar); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));
