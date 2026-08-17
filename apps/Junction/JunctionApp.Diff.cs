@@ -60,7 +60,7 @@ public partial class JunctionApp
             : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)");
         external.Key = diff is { IsBinary: true } ? "diff-external#off" : "diff-external";
         header.AddChild(external.FlexShrink(0));
-        header.AddChild(Ui.IconButton(Icons.ArrowsOut, () => { _diffFull = true; MarkDirty(); }, "Fullscreen diff").FlexShrink(0));
+        header.AddChild(Ui.IconButton(Icons.ArrowsOut, ToggleDiffFullscreen, "Fullscreen diff (F11)").FlexShrink(0));
         col.AddChild(header);
         if (_diffFind.Open)
         {
@@ -140,10 +140,59 @@ public partial class JunctionApp
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusRow);
-        seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => { _diffSplit = false; Persist(); MarkDirty(); }));
-        seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => { _diffSplit = true; Persist(); MarkDirty(); }));
-        seg.AddChild(DiffModeButton("Wrap", Icons.Rows, _diffWrap, ToggleDiffWrap));
+        // The key each button answers to is in its tooltip. Unified and Split share one —
+        // S moves between them — the way the Branches tree/list pair shares T.
+        seg.AddChild(DiffModeButton("Unified", Icons.Rows, !_diffSplit, () => SetDiffSplit(false), "s"));
+        seg.AddChild(DiffModeButton("Split", Icons.Columns, _diffSplit, () => SetDiffSplit(true), "s"));
+        seg.AddChild(DiffModeButton("Wrap", Icons.Rows, _diffWrap, ToggleDiffWrap, "w"));
         return seg;
+    }
+
+    private void SetDiffSplit(bool split)
+    {
+        if (_diffSplit == split) return;
+        _diffSplit = split;
+        Persist();
+        MarkDirty();
+    }
+
+    private void ToggleDiffFullscreen()
+    {
+        _diffFull = !_diffFull;
+        MarkDirty();
+    }
+
+    /// <summary>Whether a diff pane is on screen to be toggled — docked in Commit or
+    /// Changes, or filling the window. What gates the three view keys below, so that S and
+    /// W stay free letters everywhere else.</summary>
+    private bool DiffOnScreen => _diffFull || View is JunctionView.Commit or JunctionView.Changes;
+
+    /// <summary>Puts a diff on screen for the palette's diff commands, which can be run from
+    /// anywhere: a toggle applied to a view showing no diff would look like nothing
+    /// happening. Whichever diff view is already up is left alone.</summary>
+    private void ShowDiffView()
+    {
+        if (!DiffOnScreen) SetView(JunctionView.Commit);
+    }
+
+    /// <summary>
+    /// The diff pane's three view toggles as keys: <c>s</c> moves between unified and split,
+    /// <c>w</c> wraps long lines or lets them scroll sideways, <c>F11</c> fills the window
+    /// (Esc also leaves). Bare letters, like the other per-view keys in this app — which is
+    /// why they are gated on a diff actually being on screen, and why they must not grow a
+    /// Ctrl variant without being intercepted ahead of the per-view handlers (see
+    /// <c>HandleKeyDown</c>).
+    /// </summary>
+    private bool HandleDiffViewKey(KeyDownEvent e)
+    {
+        if (!DiffOnScreen) return false;
+        switch (e.Key)
+        {
+            case KeyCode.S: SetDiffSplit(!_diffSplit); return true;
+            case KeyCode.W: ToggleDiffWrap(); return true;
+            case KeyCode.F11: ToggleDiffFullscreen(); return true;
+            default: return false;
+        }
     }
 
     // "Ignore whitespace" (git --ignore-all-space). Lit while active; the tooltip
@@ -175,12 +224,12 @@ public partial class JunctionApp
         RefreshAll();          // diff loaders re-key on the flag and reload
     }
 
-    private Element DiffModeButton(string label, string glyph, bool active, Action onClick)
+    private Element DiffModeButton(string label, string glyph, bool active, Action onClick, string key)
     {
         var fg = active ? Nocturne.Accent : Nocturne.On(0.58);
         var b = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
-            .Tooltip(label);
+            .Tooltip($"{label} ({key})");
         if (active) b.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
         b.AddChild(Ui.Icon(glyph, 12f, fg));
         if (!_compactChrome)
@@ -470,7 +519,9 @@ public partial class JunctionApp
     }
 
     // Vertical scrolling is the list's own (KeyboardScroll); sideways is not, because the
-    // list cannot do it — see _diffScrollX.
+    // list cannot do it — see _diffScrollX. The view toggles (s / w / F11) are deliberately
+    // absent: they belong to every diff on screen, focused body or not, so they are handled
+    // once in HandleDiffViewKey and reach it by bubbling out of here.
     private void DiffPaneKey(KeyDownEvent e)
     {
         switch (e.Key)
@@ -478,10 +529,6 @@ public partial class JunctionApp
             case KeyCode.Escape when _diffFull:
                 _diffFull = false;
                 MarkDirty();
-                e.StopPropagation = true;
-                break;
-            case KeyCode.W:
-                ToggleDiffWrap();
                 e.StopPropagation = true;
                 break;
             default:
@@ -837,7 +884,7 @@ public partial class JunctionApp
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         bar.AddChild(DiffModeToggle());
         bar.AddChild(Ui.SecondaryButton("Exit fullscreen (Esc)", Icons.ArrowsIn,
-            () => { _diffFull = false; MarkDirty(); }, 12f));
+            ToggleDiffFullscreen, 12f).Tooltip("Esc or F11"));
         col.AddChild(bar);
 
         // Same three-way choice as the docked pane, so fullscreen is not the one place a

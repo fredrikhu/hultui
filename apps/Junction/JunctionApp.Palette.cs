@@ -198,6 +198,15 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.FileMagnifier, "Search file contents…", "", () => { ClosePalette(); OpenContentSearch(); }));
         items.Add(new("action", "Action", Icons.Funnel, "History: only the current branch", "",
             () => { ClosePalette(); SetView(JunctionView.History); ToggleCurrentBranchOnly(); }));
+        // The diff's view toggles. The hint is the key, so the palette teaches it rather
+        // than being the only way in; each switches to a diff view first, the way
+        // "Search file contents…" switches to History.
+        items.Add(new("action", "Action", Icons.Columns, "Diff: unified or split", "s",
+            () => { ClosePalette(); ShowDiffView(); SetDiffSplit(!_diffSplit); }));
+        items.Add(new("action", "Action", Icons.Rows, "Diff: wrap long lines", "w",
+            () => { ClosePalette(); ShowDiffView(); ToggleDiffWrap(); }));
+        items.Add(new("action", "Action", Icons.ArrowsOut, "Diff: fullscreen", "F11",
+            () => { ClosePalette(); ShowDiffView(); ToggleDiffFullscreen(); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));

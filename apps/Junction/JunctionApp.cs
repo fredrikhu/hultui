@@ -1087,6 +1087,12 @@ public partial class JunctionApp : Component, IDisposable
 
         if (typing) return;
 
+        // How the diff is shown — unified/split, wrapped, fullscreen — wherever one is on
+        // screen: the docked pane in Commit and Changes, and the fullscreen overlay. Ahead
+        // of the per-view keys below, so the diff answers for s / w / F11 whether or not its
+        // body holds the focus (the pane's own handler passes them up for exactly this).
+        if (HandleDiffViewKey(e)) { e.StopPropagation = true; return; }
+
         // Backtick (the key left of 1) toggles the sidebar.
         if (e.Key == KeyCode.Backtick)
         {
