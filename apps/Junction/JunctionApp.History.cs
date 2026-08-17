@@ -297,11 +297,16 @@ public partial class JunctionApp
             Ui.Icon(Icons.Funnel, 13f, Nocturne.On(0.55)),
             Text.New("Included").FontSize(11f).TextColor(Nocturne.On(0.55))));
 
+        var current = HasActiveRepo ? SummaryFor(_activeRepoPath).Branch : "";
+        var onlyCurrent = includeList is [var single] && single == current;
+        if (CurrentBranchFilterButton(current, onlyCurrent) is { } button)
+            bar.AddChild(button);
+
         if (includeList.Count == 0)
         {
             bar.AddChild(Ui.TagOutline("All branches", Nocturne.Accent, 10f));
         }
-        else
+        else if (!onlyCurrent)
         {
             var chips = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
             foreach (var name in includeList)
@@ -318,6 +323,62 @@ public partial class JunctionApp
         bar.AddChild(ContentSearchToggle());
         bar.AddChild(Text.New($"{commitCount} commits").FontSize(11f).TextColor(Nocturne.On(0.40)));
         return bar;
+    }
+
+    /// <summary>
+    /// One click for the filter people actually want: just the branch that is checked out.
+    /// Setting it a branch at a time from the Branches tab's eye toggles is the general
+    /// case, and the general case is three tab switches away from the common one.
+    ///
+    /// <para>It is a toggle — pressed again the log goes back to all branches — and it is
+    /// lit while the include set is exactly this branch, at which point it stands in for
+    /// the chip and the "Clear" beside it: one control saying one thing. Null on a detached
+    /// HEAD, which names no branch to filter on, and while the summary is still loading.</para>
+    /// </summary>
+    private Element? CurrentBranchFilterButton(string branch, bool active)
+    {
+        if (branch.Length == 0 || branch == "HEAD") return null;
+
+        var fg = active ? Nocturne.Accent : Nocturne.On(0.6);
+        var title = BranchName.Parse(branch).Title;
+
+        var b = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(4, 9, 4, 9))
+            .CornerRadius(Nocturne.RadiusMd)
+            .BorderColor(active ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
+            .Cursor(CursorType.Pointer)
+            .Tooltip(active
+                ? $"Showing only {branch} — click for every branch again"
+                : $"Show only the commits on {branch}");
+        if (active) b.Background(Nocturne.Alpha(Nocturne.Accent, 0.12));
+        b.AddChild(Ui.Icon(Icons.GitBranch, 12f, fg));
+        if (!_compactChrome)
+            b.AddChild(Text.New($"Only {title}").FontSize(11f).FontWeight(FontWeight.Medium)
+                .TextColor(fg).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        // Lit and unlit differ in fill and border, so the flip has to replace the element
+        // rather than patch over the other state's background; the branch is in the key
+        // because checking another one out changes what this button means.
+        b.Key = "onlycurrent:" + branch + (active ? "#a" : "");
+        b.OnClick(e => { e.StopPropagation = true; ToggleCurrentBranchOnly(); });
+        if (!active) b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+        return b;
+    }
+
+    /// <summary>Narrows the log to the checked-out branch, or widens it back to every
+    /// branch when it is already the only one included. Behind both the include bar's
+    /// button and the palette's "History: only the current branch".</summary>
+    private void ToggleCurrentBranchOnly()
+    {
+        if (!HasActiveRepo) return;
+        var branch = SummaryFor(_activeRepoPath).Branch;
+        if (branch.Length == 0 || branch == "HEAD") { Flash("HEAD is detached — no branch to filter on"); return; }
+
+        var set = IncludeSet(_activeRepoPath);
+        var only = set.Count == 1 && set.Contains(branch);
+        set.Clear();
+        if (!only) set.Add(branch);
+        BumpDataGen(_activeRepoPath);   // the log reloads with the new include set
+        MarkDirty();
     }
 
     // Toggles the content-search (pickaxe) bar. Lit while a query is applied so the

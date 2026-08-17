@@ -124,6 +124,46 @@ public class RefTreeViewTests
     }
 
     [Fact]
+    public void AChainOfSingleChildFoldersBecomesOneRow()
+    {
+        Hosted(tree: true, repo =>
+        {
+            // The naming scheme this UI is built around: every folder on the way down holds
+            // exactly one thing, so three rows of chrome used to lead to one branch.
+            repo.Git("branch", "feature/24.1/payments/PC-1043-refund");
+        }, (session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit5);
+            PumpUntilVisible(session, "PC-1043-refund");
+
+            Assert.True(Contains(session, "feature/24.1/payments, folder"),
+                "the single-child chain was not merged into one row.\n"
+                + session.Window.DumpAccessibilityTree());
+            // "feature, folder" would be the first row of the unmerged chain. Anchored on
+            // the comma so the merged label (which starts "feature/…") doesn't match it.
+            Assert.False(Contains(session, "feature, folder"), "the chain still has its own rows");
+        });
+    }
+
+    [Fact]
+    public void AFolderThatReallyBranchesIsLeftAlone()
+    {
+        Hosted(tree: true, repo =>
+        {
+            repo.Git("branch", "feature/login");
+            repo.Git("branch", "feature/logout");
+        }, (session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit5);
+            PumpUntilVisible(session, "feature, folder");
+
+            // Two children: a grouping, not a step on the way. Merging it would have to
+            // pick one of them, so it stays.
+            Assert.True(Contains(session, "feature, folder, 2 refs"));
+        });
+    }
+
+    [Fact]
     public void TagsGroupByTheirOwnSeparatorsToo()
     {
         Hosted(tree: true, repo =>

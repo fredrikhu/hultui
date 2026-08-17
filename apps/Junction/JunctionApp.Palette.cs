@@ -196,6 +196,8 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.GitBranch, "Create new branch…", "", () => { ClosePalette(); PromptNewBranch(); }));
         items.Add(new("action", "Action", Icons.TreeStructure, "Worktrees…", "", () => { ClosePalette(); OpenWorktrees(); }));
         items.Add(new("action", "Action", Icons.FileMagnifier, "Search file contents…", "", () => { ClosePalette(); OpenContentSearch(); }));
+        items.Add(new("action", "Action", Icons.Funnel, "History: only the current branch", "",
+            () => { ClosePalette(); SetView(JunctionView.History); ToggleCurrentBranchOnly(); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));

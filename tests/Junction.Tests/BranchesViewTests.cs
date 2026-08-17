@@ -1,7 +1,9 @@
 using System.Reflection;
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Headless;
+using Junction.Git;
 using Xunit;
 
 namespace Junction.Tests;
@@ -19,7 +21,9 @@ public class BranchesViewTests
     [Fact]
     public void TheRemoteChipKeepsItsLabelOnOneLineBesideALongTitle()
     {
-        Hosted(repo =>
+        // Flat, because that is where the chip lives: a row inside the "origin" folder
+        // drops it, the folder above having already said which remote these refs are on.
+        Hosted(tree: false, repo =>
         {
             repo.Git("remote", "add", "origin", "https://example.invalid/repo.git");
             repo.Git("update-ref", "refs/remotes/origin/dev", "HEAD");
@@ -69,8 +73,126 @@ public class BranchesViewTests
         });
     }
 
+    [Fact]
+    public void TheBranchListsScrollbarSitsAgainstTheRightEdgeOfThePanel()
+    {
+        // A scroll view draws its scrollbar inside its *padding* box, so the list's own
+        // side padding used to leave the bar floating 26px in from the panel edge with a
+        // strip of nothing beside it. The rows carry that gutter themselves now.
+        Hosted(repo =>
+        {
+            for (var i = 0; i < 40; i++) repo.Git("branch", $"feature/b{i:00}");
+        }, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit5);
+            var list = PumpForList(session);
+
+            var content = list.Layout.AbsoluteContentBox;
+            var border = list.Layout.AbsoluteBorderBox;
+            Assert.True(Math.Abs(border.Right - content.Right) < 0.5f,
+                $"the scrollbar track ends {border.Right - content.Right:0.0}px short of the list's " +
+                "right edge — the list has side padding again");
+        });
+    }
+
+    [Fact]
+    public void TheRowsColumnsLineUpWithTheHeadersNamingThem()
+    {
+        // Same claim from the table's side: the header row spans the panel, so a list that
+        // insets its rows lays their columns out in a narrower box and every one of them
+        // drifts left of its heading. The ahead/behind cell is fixed-width and centred at
+        // both ends, so its "↑n / ↓n" separator and the centred heading share one axis.
+        Hosted(repo => repo.Git("branch", "feature/login"), (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit5);
+            PumpForList(session);
+
+            var heading = LayoutProbe.Descendants<TextElement>(Root(session),
+                t => t.Content == "AHEAD / BEHIND" && t.Layout.AbsoluteBorderBox.Height > 0).Single();
+            var separator = LayoutProbe.Descendants<TextElement>(Root(session),
+                t => t.Content == "/" && t.Layout.AbsoluteBorderBox.Height > 0).First();
+
+            var drift = Center(separator) - Center(heading);
+            Assert.True(Math.Abs(drift) < 6f,
+                $"the ahead/behind numbers sit {drift:0}px off the heading above them — the rows and " +
+                "the table header are laid out in different boxes");
+        });
+
+        static float Center(Element e) => e.Layout.AbsoluteBorderBox.X + e.Layout.AbsoluteBorderBox.Width / 2f;
+    }
+
+    [Fact]
+    public void AWildcardQueryMatchesRefNamesTheWayGitBranchListDoes()
+    {
+        Hosted(repo =>
+        {
+            repo.Git("branch", "feature/login");
+            repo.Git("branch", "hotfix/login-crash");
+        }, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit5);
+            PumpForList(session);
+
+            SetField(app, "_branchQuery", "feature/*");
+            MarkDirty(app);
+            session.PumpFrames(3);
+
+            Assert.True(Shows(session, "login"), "the pattern hid the branch it matches");
+            Assert.False(Shows(session, "login-crash"),
+                "the pattern kept a branch outside it — the query is still a substring search");
+
+            // Anchored at both ends, so the two ends of the pattern mean something.
+            SetField(app, "_branchQuery", "*crash");
+            MarkDirty(app);
+            session.PumpFrames(3);
+            Assert.True(Shows(session, "login-crash"), "a leading star did not match");
+            Assert.False(Shows(session, "login"), "'*crash' matched a branch that does not end in it");
+        });
+    }
+
+    /// <summary>Waits for the virtualized table to realize its rows and hands back the list.</summary>
+    private static Element PumpForList(HeadlessSession session)
+    {
+        List<Element> found = [];
+        try
+        {
+            session.PumpUntil(() =>
+            {
+                found = LayoutProbe.Descendants<VirtualListElement<TreeNode<GitBranch>>>(Root(session),
+                        l => l.Layout.AbsoluteContentBox.Height > 0)
+                    .Cast<Element>().ToList();
+                return found.Count == 1 && found[0].Children.Count > 1;
+            }, TimeSpan.FromSeconds(20));
+        }
+        catch (TimeoutException e)
+        {
+            throw new Xunit.Sdk.XunitException($"the branch table never realized its rows.\n{e.Message}");
+        }
+        return found[0];
+    }
+
+    /// <summary>Whether a realized row is labelled exactly this. The table is virtualized,
+    /// so it is a claim about what is on screen, not about the underlying list — and it is
+    /// exact because "login" is a substring of "login-crash", which is the very distinction
+    /// an anchored pattern is being asked to make.</summary>
+    private static bool Shows(HeadlessSession session, string text) =>
+        LayoutProbe.Descendants<TextElement>(Root(session),
+            t => t.Content == text && t.Layout.AbsoluteBorderBox.Height > 0).Count > 0;
+
+    private static void SetField(JunctionApp app, string name, object? value) =>
+        typeof(JunctionApp).GetField(name,
+            BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, value);
+
+    private static void MarkDirty(JunctionApp app) =>
+        typeof(JunctionApp).GetMethod("MarkDirty",
+            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!.Invoke(app, null);
+
     // ── harness (same shape as TagsViewTests) ────────────────────────────
-    private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body)
+    private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body) =>
+        Hosted(tree: true, arrange, body);
+
+    private static void Hosted(bool tree, Action<TempRepo> arrange,
+        Action<TempRepo, HeadlessSession, JunctionApp> body)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         arrange(repo);
@@ -85,6 +207,7 @@ public class BranchesViewTests
                 ActiveRepoPath = repo.Path,
                 Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
                 ActiveWorkspaceId = "w1",
+                RefTreeView = tree,
             });
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();

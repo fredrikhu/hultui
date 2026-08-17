@@ -71,6 +71,48 @@ public class TagsViewTests
         });
     }
 
+    /// <summary>The same wildcard search the branch box has, on the semantics
+    /// <c>git tag --list &lt;pattern&gt;</c> uses: anchored at both ends, <c>*</c> crossing
+    /// the separators, <c>?</c> standing for one character.</summary>
+    [Fact]
+    public void AWildcardQueryMatchesTagNamesTheWayGitTagListDoes()
+    {
+        Hosted(repo =>
+        {
+            repo.Git("tag", "v1.0.0");
+            repo.Git("tag", "v2.0.0");
+            repo.Git("tag", "release/2024-06");
+        }, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit6);
+            PumpUntilVisible(session, "release/2024-06");
+
+            SetField(app, "_tagQuery", "v1.*");
+            MarkDirty(app);
+            session.PumpFrames(3);
+            Assert.True(Contains(session, "v1.0.0"), "the pattern hid the tag it matches");
+            Assert.False(Contains(session, "v2.0.0"), "the pattern kept a tag outside it");
+            Assert.False(Contains(session, "release/2024-06"), "the pattern kept a tag outside it");
+
+            // Anchored, so a pattern reaching into a folder has to say so.
+            SetField(app, "_tagQuery", "release/*");
+            MarkDirty(app);
+            session.PumpFrames(3);
+            Assert.True(Contains(session, "release/2024-06"), "the pattern did not reach into the folder");
+            Assert.False(Contains(session, "v1.0.0"), "'release/*' matched a tag outside that folder");
+
+            // '?' is exactly one character — a whole date is not one.
+            SetField(app, "_tagQuery", "release/2024-0?");
+            MarkDirty(app);
+            session.PumpFrames(3);
+            Assert.True(Contains(session, "release/2024-06"));
+            SetField(app, "_tagQuery", "release/2024-?");
+            MarkDirty(app);
+            session.PumpFrames(3);
+            Assert.False(Contains(session, "release/2024-06"), "'?' swallowed more than one character");
+        });
+    }
+
     [Fact]
     public void ARepositoryWithNoTagsSaysSo()
     {

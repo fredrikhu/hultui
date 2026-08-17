@@ -11,7 +11,13 @@ namespace Junction;
 
 public partial class JunctionApp
 {
-    private const float BranchRowHeight = 56f;
+    // A flat row can carry a second line (the version · team subtitle); inside a folder
+    // that line is what the folder rows already say, so the tree's rows are one line and
+    // pack tighter. The list wants one height for every row, and this is it.
+    private const float BranchRowFlat = 56f;
+    private const float BranchRowTree = 44f;
+
+    private float BranchRowHeight => _refTreeView ? BranchRowTree : BranchRowFlat;
 
     // Column widths for the branch table (Branch/LastCommit flex; rest fixed).
     private const float ColUpdated = 118f;
@@ -65,10 +71,21 @@ public partial class JunctionApp
         if (_branchSel >= count) _branchSel = Math.Max(0, count - 1);
     }
 
+    /// <summary>The branches the query keeps. A plain query is a substring, matched against
+    /// the ref name, its leaf title and the last commit's subject. A query carrying
+    /// <c>*</c> or <c>?</c> is a wildcard pattern matched against the whole ref name and
+    /// its title instead — <c>feature/*</c>, <c>*-hotfix</c>, <c>PC-1?4-*</c> — the same
+    /// thing <c>git branch --list &lt;pattern&gt;</c> means by it. Commit subjects are left
+    /// out of that: a pattern anchored to both ends of a sentence never matches one.
+    /// </summary>
     private List<GitBranch> FilterBranches(IReadOnlyList<GitBranch> all)
     {
         var q = _branchQuery.Trim();
         if (q.Length == 0) return all.ToList();
+        if (Glob.HasWildcard(q))
+            return all.Where(b =>
+                Glob.IsMatch(b.Name, q) ||
+                Glob.IsMatch(BranchName.Parse(b.Name).Title, q)).ToList();
         return all.Where(b =>
             b.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             BranchName.Parse(b.Name).Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -134,7 +151,7 @@ public partial class JunctionApp
         box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)).FlexShrink(0));
 
         var input = TextInput.New(_branchQuery);
-        input.PlaceholderText("Press / to search branches…")
+        input.PlaceholderText("Press / to search branches — * and ? match…")
             .OnTextChanged(OnBranchQueryChanged)
             .Height(Dimension.Px(30))
             .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
@@ -219,7 +236,11 @@ public partial class JunctionApp
             })
             .SelectedIndex(_branchSel)
             .FlexGrow(1)
-            .Padding(new Thickness(0, 26, 12, 26))
+            // No side padding here. A scroll view draws its scrollbar against the inside
+            // edge of its *padding* box, so a right pad parks the bar 26px shy of the
+            // panel edge with a strip of nothing beside it. The rows and the table header
+            // carry the 26px gutter themselves — which is also what lines their columns up.
+            .Padding(new Thickness(0, 0, 12, 0))
             .WithRef(_branchScrollRef);
     }
 
@@ -246,6 +267,10 @@ public partial class JunctionApp
         // as the History list: the selection is accent, the caret a neutral tint.
         var (remoteName, leaf) = b.IsRemote ? SplitRemote(b.Name) : ("", b.Name);
         var pb = BranchName.Parse(leaf);
+        // Inside a folder, the rows above already carry the whole prefix — the remote, the
+        // kind, the version, the team. Repeating them per row is what made the tree twice
+        // the height of the information in it, so a nested row is the leaf and nothing else.
+        var inFolder = depth > 0;
 
         var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
             .Height(BranchRowHeight).FlexShrink(0)
@@ -268,13 +293,23 @@ public partial class JunctionApp
             .FlexGrow(38).FlexBasis(Dimension.Px(0));
         if (depth > 0)
             branchCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
-        var (glyph, chipBg, chipFg) = pb.ChipLabel switch
+        if (inFolder)
         {
-            "FEAT" => (Icons.GitBranch, Nocturne.Accent800, Nocturne.Accent100),
-            "WIP" => (Icons.Flask, Nocturne.Accent2_800, Nocturne.Accent2_100),
-            _ => (Icons.GitBranch, Nocturne.Neutral800, Nocturne.Neutral100),
-        };
-        branchCell.AddChild(Ui.Chip(glyph, pb.ChipLabel, chipBg, chipFg));
+            // A plain branch glyph in the chip's place, so the leaf rows still start on a
+            // common gutter and read as refs rather than as more folders.
+            branchCell.AddChild(Ui.Icon(b.IsRemote ? Icons.Cloud : Icons.GitBranch, 12f,
+                Nocturne.On(0.45)).FlexShrink(0));
+        }
+        else
+        {
+            var (glyph, chipBg, chipFg) = pb.ChipLabel switch
+            {
+                "FEAT" => (Icons.GitBranch, Nocturne.Accent800, Nocturne.Accent100),
+                "WIP" => (Icons.Flask, Nocturne.Accent2_800, Nocturne.Accent2_100),
+                _ => (Icons.GitBranch, Nocturne.Neutral800, Nocturne.Neutral100),
+            };
+            branchCell.AddChild(Ui.Chip(glyph, pb.ChipLabel, chipBg, chipFg));
+        }
 
         var titleCol = Flex.Column(gap: 1).FlexShrink(1).FlexBasis(Dimension.Px(0)).FlexGrow(1);
         var titleRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
@@ -284,10 +319,11 @@ public partial class JunctionApp
             titleRow.AddChild(Ui.TagOutline(compareRole, Nocturne.Accent, 9f).FlexShrink(0));
         if (b.IsCurrent)
             titleRow.AddChild(Ui.TagOutline("current", Nocturne.Accent, 9f));
-        if (b.IsRemote)
+        // The remote's name is the folder this row sits under, so only a flat row says it.
+        if (b.IsRemote && !inFolder)
             titleRow.AddChild(Ui.Chip(Icons.Cloud, remoteName, Nocturne.Neutral800, Nocturne.Neutral300));
         titleCol.AddChild(titleRow);
-        if (pb.HasSub)
+        if (pb.HasSub && !inFolder)
             titleCol.AddChild(Text.New(pb.Sub).FontSize(10.5f).TextColor(Nocturne.On(0.42))
                 .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         branchCell.AddChild(titleCol);

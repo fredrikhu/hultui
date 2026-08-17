@@ -83,8 +83,11 @@ public readonly record struct BranchName(
         };
 
         var title = parts.Length > 1 ? parts[^1] : prefix;
-        var sub = parts.Length >= 3 ? $"{parts[1]}  ·  {parts[2]}"
-                : parts.Length == 2 ? parts[1]
+        // The segments *between* the prefix and the leaf — never the leaf itself. A
+        // two-part name (feature/login) has none: its second segment is the title, and
+        // a subtitle restating the line above it is a row saying one thing twice.
+        var sub = parts.Length >= 4 ? $"{parts[1]}  ·  {parts[2]}"
+                : parts.Length == 3 ? parts[1]
                 : "";
 
         return new BranchName(label, bg, fg, title, sub, name);

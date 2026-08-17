@@ -72,6 +72,66 @@ public class HistoryViewTests
         });
     }
 
+    /// <summary>
+    /// "Only &lt;branch&gt;" in the include bar: one click narrows the log to the branch that
+    /// is checked out, and a second widens it back. Setting that up a branch at a time from
+    /// the Branches tab's eye toggles was the only way to say it.
+    /// </summary>
+    [Fact]
+    public void TheOnlyCurrentBranchButtonNarrowsTheLogToTheCheckedOutBranchAndBack()
+    {
+        Hosted(repo =>
+        {
+            repo.Git("checkout", "-b", "side");
+            repo.Write("s.txt", "s\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "off to one side");
+            repo.Git("checkout", "main");
+            repo.Write("m.txt", "m\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "on the main line");
+        }, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit2);
+            Assert.Equal(JunctionView.History, app.View);
+
+            // Every branch by default, so the side branch's commit is on screen.
+            PumpUntil(session, () => Shows(session, "off to one side"),
+                "the log did not start out showing every branch");
+
+            Click(app, "ToggleCurrentBranchOnly");
+            // Both halves of the claim in one wait: the log reloads asynchronously, and an
+            // empty list mid-reload satisfies "the side commit is gone" all by itself.
+            PumpUntil(session, () => !Shows(session, "off to one side") && Shows(session, "on the main line"),
+                "filtering to the current branch did not leave exactly its own commits");
+
+            Click(app, "ToggleCurrentBranchOnly");
+            PumpUntil(session, () => Shows(session, "off to one side"),
+                "pressing the button again did not widen the log back to every branch");
+        });
+    }
+
+    private static void Click(JunctionApp app, string method) =>
+        typeof(JunctionApp).GetMethod(method,
+            BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);
+
+    private static bool Shows(HeadlessSession session, string subject) =>
+        LayoutProbe.Descendants<TextElement>(Root(session),
+            t => t.Content == subject && t.Layout.AbsoluteBorderBox.Height > 0).Count > 0;
+
+    private static void PumpUntil(HeadlessSession session, Func<bool> condition, string message)
+    {
+        try
+        {
+            session.PumpUntil(condition, TimeSpan.FromSeconds(20));
+        }
+        catch (TimeoutException e)
+        {
+            throw new Xunit.Sdk.XunitException($"{message}.\n{e.Message}\n"
+                + session.Window.DumpAccessibilityTree());
+        }
+    }
+
     // ── harness (same shape as TagsViewTests) ────────────────────────────
     private static void Hosted(Action<TempRepo> arrange, Action<TempRepo, HeadlessSession, JunctionApp> body)
     {

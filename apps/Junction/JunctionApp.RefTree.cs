@@ -79,7 +79,12 @@ public partial class JunctionApp
         IReadOnlyList<T> items, string kind, Func<T, string> nameOf, Func<T, bool>? flag, bool filtering)
     {
         if (!_refTreeView) return Tree.Flat(items, nameOf);
-        var roots = Tree.Build(items, nameOf, flag);
+        // Compacted: a folder whose only child is another folder is a step on the way, not
+        // a grouping, so `feature` → `24.1` → `payments` becomes one row reading
+        // "feature/24.1/payments". Ref names branch late and deep — three rows of chrome
+        // to reach one branch was the tree repeating itself, and the compacted node keeps
+        // the deepest path, so expansion state and the folder menu still name its rows.
+        var roots = Tree.Compact(Tree.Build(items, nameOf, flag));
         // A running search has to be able to show every match, so it opens the tree
         // outright. The collapsed set is untouched and comes back when the query clears.
         return Tree.Flatten(roots, filtering ? _ => true : node => IsFolderExpanded(kind, node));

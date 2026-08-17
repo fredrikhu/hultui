@@ -43,14 +43,30 @@ public partial class JunctionApp
         if (_tagSel >= count) _tagSel = Math.Max(0, count - 1);
     }
 
+    /// <summary>The tags the query keeps, on the same terms the branch search uses: a plain
+    /// query is a substring of the name, the commit subject or the annotation message; a
+    /// query carrying <c>*</c> or <c>?</c> is a wildcard pattern matched against the tag
+    /// name and its leaf segment — <c>v1.*</c>, <c>release/2024-??</c> — which is what
+    /// <c>git tag --list &lt;pattern&gt;</c> means by it. Subjects and messages stay out of
+    /// the pattern case: an anchored pattern never matches a sentence.</summary>
     private List<GitTag> FilterTags(IReadOnlyList<GitTag> all)
     {
         var q = _tagQuery.Trim();
         if (q.Length == 0) return all.ToList();
+        if (Glob.HasWildcard(q))
+            return all.Where(t => Glob.IsMatch(t.Name, q) || Glob.IsMatch(LeafOf(t.Name), q)).ToList();
         return all.Where(t =>
             t.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             t.Subject.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             t.Message.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    /// <summary>The last <c>/</c> segment — what the row is labelled inside a folder, and so
+    /// what a pattern typed while looking at that row should be matched against.</summary>
+    private static string LeafOf(string name)
+    {
+        var i = name.LastIndexOf('/');
+        return i >= 0 ? name[(i + 1)..] : name;
     }
 
     /// <summary>The rows the table shows. Tag names are slash-hierarchical too
@@ -97,7 +113,7 @@ public partial class JunctionApp
         box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)).FlexShrink(0));
 
         var input = TextInput.New(_tagQuery);
-        input.PlaceholderText("Press / to search tags…")
+        input.PlaceholderText("Press / to search tags — * and ? match…")
             .OnTextChanged(OnTagQueryChanged)
             .Height(Dimension.Px(30))
             .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
@@ -165,7 +181,9 @@ public partial class JunctionApp
             })
             .SelectedIndex(_tagSel)
             .FlexGrow(1)
-            .Padding(new Thickness(0, 26, 12, 26))
+            // No side padding, for the reason the branch list carries none: the scrollbar
+            // is drawn inside the padding box, so a right pad holds it off the edge.
+            .Padding(new Thickness(0, 0, 12, 0))
             .WithRef(_tagScrollRef);
     }
 

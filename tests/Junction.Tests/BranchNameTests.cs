@@ -41,7 +41,29 @@ public class BranchNameTests
 
         Assert.Equal("HOTFIX", b.ChipLabel);
         Assert.Equal("urgent-thing", b.Title);
-        Assert.Equal("urgent-thing", b.Sub);
+    }
+
+    [Fact]
+    public void ATwoPartNameHasNoSubtitleBecauseItsSecondPartIsTheTitle()
+    {
+        // The subtitle is the segments *between* the prefix and the leaf, and a two-part
+        // name has none. It used to repeat the leaf, so every ordinary feature/x branch
+        // printed its own name twice, one line under the other.
+        var b = BranchName.Parse("feature/login");
+
+        Assert.Equal("FEAT", b.ChipLabel);
+        Assert.Equal("login", b.Title);
+        Assert.Equal("", b.Sub);
+        Assert.False(b.HasSub);
+    }
+
+    [Fact]
+    public void AThreePartNameSubtitlesTheOneSegmentInTheMiddle()
+    {
+        var b = BranchName.Parse("feature/24.1/PC-9-thing");
+
+        Assert.Equal("PC-9-thing", b.Title);
+        Assert.Equal("24.1", b.Sub);
     }
 
     [Fact]
