@@ -207,6 +207,8 @@ public partial class JunctionApp
             () => { ClosePalette(); ShowDiffView(); ToggleDiffWrap(); }));
         items.Add(new("action", "Action", Icons.ArrowsOut, "Diff: fullscreen", "F11",
             () => { ClosePalette(); ShowDiffView(); ToggleDiffFullscreen(); }));
+        items.Add(new("action", "Action", Icons.FileCode, "Diff: ignore whitespace changes", "i",
+            () => { ClosePalette(); ShowDiffView(); ToggleIgnoreWhitespace(); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));

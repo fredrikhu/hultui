@@ -82,6 +82,27 @@ public class DiffShortcutTests
     }
 
     [Fact]
+    public void IIgnoresWhitespaceChangesAndSaysWhatThatCosts()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Assert.False(IgnoreWhitespace(app));
+
+            session.Window.PressKey(KeyCode.I);
+            // The diff reloads under `git -w`, so this is a wait rather than a pump: the
+            // strip appears with the reloaded diff, not with the keypress.
+            PumpUntil(session, () => Shows(session, "Ignoring whitespace"),
+                "i did not turn on ignore-whitespace");
+            Assert.True(IgnoreWhitespace(app));
+
+            session.Window.PressKey(KeyCode.I);
+            PumpUntil(session, () => !Shows(session, "Ignoring whitespace"),
+                "i did not turn ignore-whitespace back off");
+            Assert.False(IgnoreWhitespace(app));
+        });
+    }
+
+    [Fact]
     public void TheKeysStillWorkWhileTheDiffIsFullscreen()
     {
         DiffScrollTests.Hosted((session, app) =>
@@ -108,13 +129,19 @@ public class DiffShortcutTests
 
             var split = Split(app);
             var wrap = Wrap(app);
+            var ws = IgnoreWhitespace(app);
             session.Window.PressKey(KeyCode.S);
             session.Window.PressKey(KeyCode.W);
             session.Window.PressKey(KeyCode.F11);
             session.PumpFrames(4);
+            // I is the Branches tab's own key (include this branch in History), so it is
+            // pressed apart from the others: what must not happen is the diff taking it.
+            session.Window.PressKey(KeyCode.I);
+            session.PumpFrames(4);
 
             Assert.Equal(split, Split(app));
             Assert.Equal(wrap, Wrap(app));
+            Assert.Equal(ws, IgnoreWhitespace(app));
             Assert.False(Fullscreen(session), "F11 opened a fullscreen diff over the Branches tab");
         });
     }
@@ -132,10 +159,12 @@ public class DiffShortcutTests
 
             session.Window.PressKey(KeyCode.S);
             session.Window.PressKey(KeyCode.W);
+            session.Window.PressKey(KeyCode.I);
             session.PumpFrames(3);
 
             Assert.False(Split(app), "typing 's' into the commit message split the diff");
             Assert.False(Wrap(app), "typing 'w' into the commit message wrapped the diff");
+            Assert.False(IgnoreWhitespace(app), "typing 'i' into the commit message changed the diff");
         });
     }
 
@@ -164,6 +193,23 @@ public class DiffShortcutTests
         return tallest;
     }
 
+    private static bool Shows(HeadlessSession session, string text) =>
+        LayoutProbe.Descendants<TextElement>(Root(session),
+            t => t.Content?.Contains(text, StringComparison.Ordinal) == true
+                 && t.Layout.AbsoluteBorderBox.Height > 0).Count > 0;
+
+    private static void PumpUntil(HeadlessSession session, Func<bool> condition, string message)
+    {
+        try
+        {
+            session.PumpUntil(condition, TimeSpan.FromSeconds(20));
+        }
+        catch (TimeoutException e)
+        {
+            throw new Xunit.Sdk.XunitException($"{message}.\n{e.Message}");
+        }
+    }
+
     private static bool Fullscreen(HeadlessSession session) =>
         LayoutProbe.Descendants<Element>(Root(session), e => e.Key == "fullscreen-diff").Count > 0;
 
@@ -175,6 +221,16 @@ public class DiffShortcutTests
 
     private static bool Split(JunctionApp app) => Flag(app, "_diffSplit");
     private static bool Wrap(JunctionApp app) => Flag(app, "_diffWrap");
+
+    /// <summary>The setting behind the <c>-w</c> button. It lives on the settings object
+    /// rather than on the app, being persisted and read by every diff loader.</summary>
+    private static bool IgnoreWhitespace(JunctionApp app)
+    {
+        var settings = typeof(JunctionApp)
+            .GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+        var git = settings.GetType().GetProperty("Git")!.GetValue(settings)!;
+        return (bool)git.GetType().GetProperty("IgnoreWhitespace")!.GetValue(git)!;
+    }
 
     private static bool Flag(JunctionApp app, string name) =>
         (bool)typeof(JunctionApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!

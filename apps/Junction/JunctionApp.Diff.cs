@@ -163,8 +163,8 @@ public partial class JunctionApp
     }
 
     /// <summary>Whether a diff pane is on screen to be toggled — docked in Commit or
-    /// Changes, or filling the window. What gates the three view keys below, so that S and
-    /// W stay free letters everywhere else.</summary>
+    /// Changes, or filling the window. What gates the view keys below, so that S, W and I
+    /// stay free letters everywhere else.</summary>
     private bool DiffOnScreen => _diffFull || View is JunctionView.Commit or JunctionView.Changes;
 
     /// <summary>Puts a diff on screen for the palette's diff commands, which can be run from
@@ -176,12 +176,16 @@ public partial class JunctionApp
     }
 
     /// <summary>
-    /// The diff pane's three view toggles as keys: <c>s</c> moves between unified and split,
-    /// <c>w</c> wraps long lines or lets them scroll sideways, <c>F11</c> fills the window
-    /// (Esc also leaves). Bare letters, like the other per-view keys in this app — which is
-    /// why they are gated on a diff actually being on screen, and why they must not grow a
-    /// Ctrl variant without being intercepted ahead of the per-view handlers (see
-    /// <c>HandleKeyDown</c>).
+    /// The diff pane's view toggles as keys: <c>s</c> moves between unified and split,
+    /// <c>w</c> wraps long lines or lets them scroll sideways, <c>i</c> ignores whitespace
+    /// changes, <c>F11</c> fills the window (Esc also leaves). Bare letters, like the other
+    /// per-view keys in this app — which is why they are gated on a diff actually being on
+    /// screen, and why they must not grow a Ctrl variant without being intercepted ahead of
+    /// the per-view handlers (see <c>HandleKeyDown</c>).
+    ///
+    /// <para><c>i</c> rather than the <c>w</c> its button is drawn with: that <c>w</c> is
+    /// git's own <c>-w</c> notation, and the key was already spoken for by wrapping. Both
+    /// buttons name their key in their tooltip so the two are told apart where they sit.</para>
     /// </summary>
     private bool HandleDiffViewKey(KeyDownEvent e)
     {
@@ -190,6 +194,7 @@ public partial class JunctionApp
         {
             case KeyCode.S: SetDiffSplit(!_diffSplit); return true;
             case KeyCode.W: ToggleDiffWrap(); return true;
+            case KeyCode.I: ToggleIgnoreWhitespace(); return true;
             case KeyCode.F11: ToggleDiffFullscreen(); return true;
             default: return false;
         }
@@ -206,8 +211,8 @@ public partial class JunctionApp
             .BorderColor(on ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
             .Cursor(CursorType.Pointer)
             .Tooltip(on
-                ? "Ignoring whitespace — line staging is off while active"
-                : "Ignore whitespace changes");
+                ? "Ignoring whitespace (i) — line staging is off while active"
+                : "Ignore whitespace changes (i)");
         if (on) b.Background(Nocturne.Alpha(Nocturne.Accent, 0.14));
         b.AddChild(Ui.Mono("W", 12f, on ? Nocturne.Accent300 : Nocturne.On(0.55)));
         b.Key = "ws-toggle" + (on ? "#on" : "");
