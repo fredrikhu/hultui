@@ -57,6 +57,11 @@ public partial class CommanderApp : Component, IDisposable
         public SortMode Sort = SortMode.Name;      // per-tab sort column + direction (seeded
         public bool SortDescending;                // from the Options default at tab creation)
         public readonly HashSet<string> Marks = PathSet();
+        // Live only while a Shift+navigation sweep is running: the row it started from, and
+        // the marks that were already set when it did. Per tab, so switching tabs mid-sweep
+        // cannot carry one pane's anchor into another's listing.
+        public string? MarkAnchor;
+        public HashSet<string>? MarkBase;
         // Non-null while this tab browses a fed-in search result set instead of its folder
         // (CommanderApp.Results.cs). Dir still names the folder the search ran under.
         public ResultListing? Results;
@@ -421,7 +426,14 @@ public partial class CommanderApp : Component, IDisposable
     private int Gen(char side) => side == 'L' ? _genL : _genR;
     private Ref<VirtualListElement<FileEntry>> VList(char side) => side == 'L' ? _vlistL : _vlistR;
 
-    private void SetCursor(char side, int value) => ActiveTab(side).Cursor = value;
+    private void SetCursor(char side, int value)
+    {
+        // Any cursor move that is not part of a Shift sweep ends the sweep, so the next
+        // Shift+↓ starts a fresh range from wherever the cursor now is — clicking a row,
+        // paging without Shift, or landing somewhere after a folder change all count.
+        if (!_shiftMarking) EndMarkSweep(side);
+        ActiveTab(side).Cursor = value;
+    }
     private HashSet<string> Marks(char side) => ActiveTab(side).Marks;
     private void BumpGen(char side) { if (side == 'L') _genL++; else _genR++; }
 
@@ -863,9 +875,20 @@ public partial class CommanderApp : Component, IDisposable
         if (clearSearch) _search = "";   // arrows keep the filter; nav within the matches
         var list = Rows(side);
         if (list.Count == 0) return;
+        // A Shift sweep anchors before the move, so the range covers the row the cursor
+        // started on as well as the one it lands on.
+        if (_shiftMarking) BeginMarkSweep(side, list);
         int next = Math.Clamp(Cursor(side) + delta, 0, list.Count - 1);
-        if (next == Cursor(side)) { MarkDirty(); return; }
+        if (next == Cursor(side))
+        {
+            // Already at the end of the list: the row under the cursor still joins the
+            // range, so Shift+End on the last row marks it rather than doing nothing.
+            if (_shiftMarking) ApplyMarkSweep(side, list);
+            MarkDirty();
+            return;
+        }
         SetCursor(side, next);
+        if (_shiftMarking) ApplyMarkSweep(side, list);
         RequestScroll(side);
         MarkDirty();
     }
@@ -895,6 +918,84 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     // ── Marking ──────────────────────────────────────────────────────────
+
+    /// <summary>True only while a Shift+navigation key is moving the cursor, which is what
+    /// tells <see cref="MoveCursor"/> to drag the marks along behind it.</summary>
+    private bool _shiftMarking;
+
+    /// <summary>The navigation keys Shift extends a mark range with. Left/Right are in the
+    /// list for the grid views, where they are motion; in Detail they mean something else
+    /// entirely and <see cref="ShiftNav"/> declines them.</summary>
+    private static bool IsMarkNavKey(KeyCode key) =>
+        key is KeyCode.Up or KeyCode.Down or KeyCode.Left or KeyCode.Right
+            or KeyCode.PageUp or KeyCode.PageDown or KeyCode.Home or KeyCode.End;
+
+    /// <summary>
+    /// Shift + a navigation key: move the cursor and mark everything between where the
+    /// sweep began and where it now is. Returns false for keys this pane's view does not
+    /// treat as motion, which then go on to mean whatever they usually mean.
+    /// </summary>
+    private bool ShiftNav(char side, KeyCode key)
+    {
+        _shiftMarking = true;
+        try
+        {
+            if (ViewNav(side, key)) return true;   // Brief / Thumbnail: column and grid motion
+            switch (key)
+            {
+                case KeyCode.Down: MoveCursor(side, 1); return true;
+                case KeyCode.Up: MoveCursor(side, -1); return true;
+                case KeyCode.PageDown: MoveCursor(side, PageSize(side)); return true;
+                case KeyCode.PageUp: MoveCursor(side, -PageSize(side)); return true;
+                case KeyCode.Home: MoveCursor(side, int.MinValue / 2); return true;
+                case KeyCode.End: MoveCursor(side, int.MaxValue / 2); return true;
+                default: return false;             // Left/Right in Detail are not motion
+            }
+        }
+        finally { _shiftMarking = false; }
+    }
+
+    /// <summary>
+    /// Remembers where a sweep started: the row the cursor sits on, and the marks that were
+    /// already set. Both are needed to re-derive the answer from scratch on every step, which
+    /// is what lets the range shrink again when the user turns around — a sweep that only
+    /// ever added marks could not take them back, and one that cleared everything would
+    /// throw away marks made before the sweep began. Does nothing once a sweep is running.
+    /// </summary>
+    private void BeginMarkSweep(char side, IReadOnlyList<FileEntry> list)
+    {
+        var tab = ActiveTab(side);
+        if (tab.MarkAnchor != null && IndexOfPath(list, tab.MarkAnchor) >= 0) return;
+        int cur = Cursor(side);
+        if (cur < 0 || cur >= list.Count) return;
+        tab.MarkAnchor = list[cur].FullPath;
+        tab.MarkBase = PathSet();
+        foreach (var key in tab.Marks) tab.MarkBase.Add(key);
+    }
+
+    /// <summary>Marks = what was marked before the sweep, plus every row between the anchor
+    /// and the cursor. The ".." row never takes a mark, here as everywhere else.</summary>
+    private void ApplyMarkSweep(char side, IReadOnlyList<FileEntry> list)
+    {
+        var tab = ActiveTab(side);
+        if (tab.MarkBase is null) return;
+        int anchor = IndexOfPath(list, tab.MarkAnchor);
+        int cur = Cursor(side);
+        if (anchor < 0 || cur < 0 || cur >= list.Count) return;
+
+        tab.Marks.Clear();
+        foreach (var key in tab.MarkBase) tab.Marks.Add(key);
+        for (int i = Math.Min(anchor, cur); i <= Math.Max(anchor, cur); i++)
+            if (!list[i].IsParent) tab.Marks.Add(MarkKey(list[i]));
+    }
+
+    private void EndMarkSweep(char side)
+    {
+        var tab = ActiveTab(side);
+        tab.MarkAnchor = null;
+        tab.MarkBase = null;
+    }
+
     /// <summary>Toggle the mark on the focused row (never the ".." parent). When
     /// <paramref name="advance"/> (Insert), move the cursor down one afterwards.</summary>
     private void ToggleMark(char side, bool advance)
@@ -903,6 +1004,7 @@ public partial class CommanderApp : Component, IDisposable
         int cur = Cursor(side);
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
+        EndMarkSweep(side);   // a deliberate toggle is a new starting point, not part of a range
         if (!e.IsParent)
         {
             var marks = Marks(side);
@@ -921,6 +1023,7 @@ public partial class CommanderApp : Component, IDisposable
         var marks = Marks(side);
         var rows = Rows(side).Where(e => !e.IsParent).ToList();
         if (rows.Count == 0) return;
+        EndMarkSweep(side);
         bool allMarked = rows.All(e => marks.Contains(MarkKey(e)));
         foreach (var e in rows)
         {
@@ -2439,6 +2542,11 @@ public partial class CommanderApp : Component, IDisposable
 
         // Rebindable per-pane commands (bare / Shift chords) resolve through the keymap.
         if (MatchHotkey(e, wantGlobal: false, out var pcmd)) { Dispatch(pcmd); e.StopPropagation = true; return; }
+
+        // Shift + a navigation key extends the marked range. After the keymap, so a user who
+        // binds a Shift chord of their own still gets what they bound.
+        if (e.Modifiers.HasFlag(KeyModifiers.Shift) && IsMarkNavKey(e.Key) && ShiftNav(side, e.Key))
+        { e.StopPropagation = true; return; }
 
         // Brief / Thumbnail modes remap the arrow + paging keys (column / grid motion)
         // before the Detail switch, so e.g. Left navigates instead of opening the command line.
