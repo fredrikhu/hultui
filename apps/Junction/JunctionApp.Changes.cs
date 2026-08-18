@@ -30,7 +30,10 @@ public partial class JunctionApp
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         row.AddChild(BuildChangesColumn(data, fill: !showPane));
         if (showPane)
+        {
+            row.AddChild(_changesSplit.Handle(Nocturne.Divider, Nocturne.Accent));
             row.AddChild(BuildChangesRightPane(data));
+        }
         return row;
     }
 
@@ -461,7 +464,7 @@ public partial class JunctionApp
         var col = Flex.Column(gap: 0)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         if (fill) col.FlexGrow(1);
-        else col.Width(330).FlexShrink(0);
+        else col.Width(_changesSplit.Width).FlexShrink(0);
 
         // Merge state gets a pinned banner (status + Abort / Continue) above the list.
         if (data.IsMerging)

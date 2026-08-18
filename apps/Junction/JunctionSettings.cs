@@ -33,6 +33,14 @@ public sealed class JunctionSettingsData
     /// place in a list, and it is per-repo session state.</summary>
     public bool RefTreeView { get; set; } = true;
 
+    /// <summary>Widths of the file list beside the diff in the Commit and Changes tabs,
+    /// as the user last dragged them. Two figures rather than one: the Changes list carries
+    /// the commit composer under it and wants more room than a commit's flat file list.
+    /// Clamped on load — a settings file edited by hand should not be able to leave the
+    /// splitter somewhere it cannot be dragged back from.</summary>
+    public float CommitFileListWidth { get; set; } = 238f;
+    public float ChangesFileListWidth { get; set; } = 330f;
+
     // Junction: per-repo badge swatch id (path → swatch id), driving the repo's
     // initial tile everywhere. Missing entries fall back to a deterministic seed.
     public Dictionary<string, string> RepoBadges { get; set; } = new();
@@ -95,6 +103,8 @@ public sealed class JunctionSettingsData
         DiffWrap = DiffWrap,
         DiffSplit = DiffSplit,
         RefTreeView = RefTreeView,
+        CommitFileListWidth = CommitFileListWidth,
+        ChangesFileListWidth = ChangesFileListWidth,
         RepoBadges = new(RepoBadges),
         General = General.Clone(),
         Git = Git.Clone(),

@@ -140,6 +140,13 @@ public partial class JunctionApp : Component, IDisposable
     private string? _pendingRevealHash;
 
     // Commit-details state.
+    // The file lists in Commit and Changes are as wide as the user last dragged them.
+    // Bounded so a drag can neither hide the list nor squeeze the diff out of existence.
+    private const float MinFileListWidth = 150f;
+    private const float MaxFileListWidth = 720f;
+    private readonly PaneSplitter _commitSplit;
+    private readonly PaneSplitter _changesSplit;
+
     private readonly AsyncLoader<CommitDetail> _commitDetail = new(CommitDetail.Empty);
     private string? _detailHash;          // commit the loaded detail belongs to
     // Multi-select compare shown instead: diff between the oldest and newest
@@ -343,6 +350,12 @@ public partial class JunctionApp : Component, IDisposable
         _fileDialogs = fileDialogs ?? window.FileDialogs;
         // The diff's sideways offset is app state, so moving it has to rebuild the rows.
         _diffPan = new HorizontalPan(MarkDirty);
+        // Same for the two file-list widths: the panes are rebuilt at the current width, so
+        // a drag marks dirty rather than writing to an element that the next build replaces.
+        _commitSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
+            settings.CommitFileListWidth);
+        _changesSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
+            settings.ChangesFileListWidth);
         _diffFind = new FindBarState(MarkDirty);
         _filesFind = new FindBarState(MarkDirty);
         _filesTree = new TreeView<string>(MarkDirty);
@@ -571,6 +584,8 @@ public partial class JunctionApp : Component, IDisposable
         // A scrollbar drag ends wherever the button comes up, which is routinely off the
         // thumb, so the move and release are heard at the root rather than on the track.
         _diffPan.AttachDrag(root);
+        _commitSplit.AttachDrag(root);
+        _changesSplit.AttachDrag(root);
 
         void Overlay(string key, Element el) { el.Key = key; root.AddChild(el); }
 
@@ -915,6 +930,8 @@ public partial class JunctionApp : Component, IDisposable
         _settings.DiffWrap = _diffWrap;
         _settings.DiffSplit = _diffSplit;
         _settings.RefTreeView = _refTreeView;
+        _settings.CommitFileListWidth = _commitSplit.Width;
+        _settings.ChangesFileListWidth = _changesSplit.Width;
         JunctionSettings.Save(_settings);
     }
 
