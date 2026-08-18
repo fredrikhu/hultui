@@ -153,6 +153,27 @@ public partial class JunctionApp
         return box;
     }
 
+    /// <summary>The commit message split into lines, with the trailing blank ones dropped.
+    /// Falls back to the subject while the full message is still loading — the History list
+    /// has that much, and a header that says "Loading…" where the title goes reads as a
+    /// stall even when everything else on screen is right.</summary>
+    private static List<string> MessageLines(GitCommit? commit)
+    {
+        if (commit is null) return [];
+        var text = commit.Message.Length > 0 ? commit.Message : commit.Subject;
+        var lines = text.ReplaceLineEndings("\n").Split('\n').ToList();
+        while (lines.Count > 1 && lines[^1].Trim().Length == 0) lines.RemoveAt(lines.Count - 1);
+        return lines;
+    }
+
+    /// <summary>One line of the message: selectable, and with any issue references the
+    /// repository's <c>.issuetracker</c> recognises turned into links.</summary>
+    private TextElement MessageLine(string text, int index, float size, Color color, FontWeight weight) =>
+        IssueLinked(Text.New(text).FontSize(size).FontWeight(weight).TextColor(color)
+            .Selectable().SelectionGroup(_commitMsgGroup, index), text);
+
+    private readonly TextSelectionGroup _commitMsgGroup = new();
+
     private static string Short7(string hash) => hash.Length >= 7 ? hash[..7] : hash;
 
     /// <summary>Placeholder body shown while a newly selected commit's detail loads,
@@ -161,7 +182,8 @@ public partial class JunctionApp
     private Element BuildCommitBodyLoading()
     {
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
-        row.AddChild(ScrollView.New().Width(238).FlexShrink(0)
+        // The same width the loaded pane will use, so the layout does not jump when it lands.
+        row.AddChild(ScrollView.New().Width(_commitSplit.Width).FlexShrink(0)
             .Padding(new Thickness(8, 6, 8, 6))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0)));
         row.AddChild(Flex.Column(gap: 0).FlexGrow(1)
@@ -214,9 +236,16 @@ public partial class JunctionApp
             .Padding(new Thickness(12, 16, 12, 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
+        // Subject and body are one selection: they are one message, and a reader who drags
+        // from the title into the body expects to get what they dragged over. The group is
+        // bound to the message's lines, so the subject is line 0 of the same model.
+        var lines = MessageLines(commit);
+        _commitMsgGroup.Bind(commit?.Hash ?? hash, lines.Count, i => i >= 0 && i < lines.Count ? lines[i] : null);
+
         var row1 = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
         row1.AddChild(Ui.GhostButton("History", Icons.ArrowLeft, () => SetView(JunctionView.History)));
-        row1.AddChild(Text.New(commit?.Subject ?? "Loading…").FontSize(15f).FontWeight(FontWeight.Medium)
+        row1.AddChild(MessageLine(lines.Count > 0 ? lines[0] : commit?.Subject ?? "Loading…", 0, 15f,
+                Nocturne.Text, FontWeight.Medium)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         row1.AddChild(Ui.IconButton(Icons.CaretUp, () => MoveCommitSelection(-1), "Previous commit (Ctrl ↑)", 30f));
         row1.AddChild(Ui.IconButton(Icons.CaretDown, () => MoveCommitSelection(1), "Next commit (Ctrl ↓)", 30f));
@@ -236,6 +265,16 @@ public partial class JunctionApp
             Ui.Icon(Icons.GitBranch, 12f, Nocturne.On(0.55)),
             Text.New(CommitBranchTitle(commit)).FontSize(11.5f).TextColor(Nocturne.On(0.55))));
         box.AddChild(row2);
+
+        // The body, when there is one. Bounded and scrollable: a long release note of a
+        // commit message is not a reason for the diff to lose half its height.
+        if (lines.Count > 1)
+        {
+            var body = ScrollView.New().MaxHeight(132f).FlexShrink(0);
+            for (int i = 1; i < lines.Count; i++)
+                body.AddChild(MessageLine(lines[i], i, 12f, Nocturne.On(0.72), FontWeight.Regular));
+            box.AddChild(body);
+        }
 
         return box;
     }
@@ -269,6 +308,7 @@ public partial class JunctionApp
 
         if (!_hideDiff)
         {
+            row.AddChild(_commitSplit.Handle(Nocturne.Divider, Nocturne.Accent));
             detail.DiffByPath.TryGetValue(_selectedFilePath ?? "", out var diff);
             row.AddChild(BuildDiffPane(_selectedFilePath ?? "", diff));
         }
@@ -284,7 +324,7 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0))
             .WithRef(_fileScrollRef);
         if (fill) scroll.FlexGrow(1);
-        else scroll.Width(238).FlexShrink(0);
+        else scroll.Width(_commitSplit.Width).FlexShrink(0);
 
         scroll.AddChild(Text.New($"{files.Count} FILES CHANGED").FontSize(10f)
             .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8)));

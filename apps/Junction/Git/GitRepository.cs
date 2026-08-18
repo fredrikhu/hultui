@@ -89,15 +89,19 @@ public class GitRepository
     /// </summary>
     public GitCommit? GetCommit(string refOrHash)
     {
-        var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
+        // %B (the whole message) goes last and is not trimmed away with the rest: it runs to
+        // several lines and holds the blank line that separates subject from body, which is
+        // exactly what a reader wants to see and copy.
+        var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D", "%B"]);
         var result = GitProcess.Run(Path, "log", "-1", $"--format={format}", refOrHash);
         if (!result.Success) return null;
 
-        var line = result.Stdout.Trim();
-        if (string.IsNullOrEmpty(line)) return null;
+        var line = result.Stdout;
+        if (string.IsNullOrWhiteSpace(line)) return null;
 
         var parts = line.Split(FieldSep);
         if (parts.Length < 8) return null;
+        var message = parts.Length > 8 ? parts[8].TrimEnd() : "";
 
         var parentHashes = string.IsNullOrWhiteSpace(parts[6])
             ? []
@@ -118,7 +122,8 @@ public class GitRepository
             AuthorDate: date,
             Subject: parts[5],
             ParentHashes: parentHashes,
-            Refs: refs
+            Refs: refs,
+            Message: message
         );
     }
 

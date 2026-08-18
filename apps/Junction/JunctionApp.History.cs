@@ -670,7 +670,11 @@ public partial class JunctionApp
         if (!_compactChrome)
             foreach (var chip in RefChips(commit.Refs, remotes))
                 line1.AddChild(chip.FlexShrink(0));
-        line1.AddChild(Text.New(commit.Subject).FontSize(13f).TextColor(Nocturne.Text)
+        // The subject carries issue links too — the log is where you go looking for the
+        // commit that mentions a ticket, so making you open it first to reach the ticket is
+        // one step too many. Clicking a link opens the issue and leaves the row alone; the
+        // link handler stops the click before the row's own selection sees it.
+        line1.AddChild(IssueLinked(Text.New(commit.Subject).FontSize(13f).TextColor(Nocturne.Text), commit.Subject)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         body.AddChild(line1);
 
