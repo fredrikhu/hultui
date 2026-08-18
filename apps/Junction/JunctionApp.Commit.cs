@@ -308,7 +308,7 @@ public partial class JunctionApp
 
         if (!_hideDiff)
         {
-            row.AddChild(_commitSplit.Handle(Nocturne.Divider, Nocturne.Accent));
+            row.AddChild(_commitSplit.Handle(Nocturne.Alpha(Nocturne.Accent, 0.18), Nocturne.Alpha(Nocturne.Accent, 0.40)));
             detail.DiffByPath.TryGetValue(_selectedFilePath ?? "", out var diff);
             row.AddChild(BuildDiffPane(_selectedFilePath ?? "", diff));
         }

@@ -43,17 +43,21 @@ public sealed class PaneSplitter(Action onChanged, Action onCommitted, float min
     public void Restore(float width) => _width = Math.Clamp(width, min, max);
 
     /// <summary>The handle itself. Place it between the pane and its neighbour.</summary>
-    public Element Handle(Color line, Color lit)
+    /// <remarks>
+    /// It draws no line of its own. The pane to its left already borders that edge, and a
+    /// second line three pixels along — centred in a 6px box, so it lands on a half-pixel and
+    /// renders as a smear rather than a line — reads as a rendering fault next to the crisp
+    /// one, not as a grip. What the handle contributes is the target and the feedback: a
+    /// tint under the pointer that says it can be grabbed, and a stronger one while it is.
+    /// </remarks>
+    public Element Handle(Color hover, Color grabbed)
     {
         var handle = Box.New()
             .Width(HandleWidth).FlexShrink(0)
-            .AlignItems(AlignItems.Center)
             .Cursor(CursorType.ResizeEW)
             .Tooltip("Drag to resize");
-        // The divider itself sits inside the handle, so the widened target does not widen
-        // the line the eye follows. Lit while dragging, so the grab is visibly taken.
-        handle.AddChild(Box.New().Width(1).Height(Dimension.Percent(100))
-            .Background(IsDragging ? lit : line));
+        if (IsDragging) handle.Background(grabbed);
+        else handle.HoverBg(hover, Color.Transparent);
         handle.On<PointerDownEvent>(e =>
         {
             IsDragging = true;

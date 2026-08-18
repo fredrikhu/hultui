@@ -31,7 +31,7 @@ public partial class JunctionApp
         row.AddChild(BuildChangesColumn(data, fill: !showPane));
         if (showPane)
         {
-            row.AddChild(_changesSplit.Handle(Nocturne.Divider, Nocturne.Accent));
+            row.AddChild(_changesSplit.Handle(Nocturne.Alpha(Nocturne.Accent, 0.18), Nocturne.Alpha(Nocturne.Accent, 0.40)));
             row.AddChild(BuildChangesRightPane(data));
         }
         return row;
