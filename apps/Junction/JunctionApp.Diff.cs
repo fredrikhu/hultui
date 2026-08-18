@@ -703,16 +703,22 @@ public partial class JunctionApp
     /// rather than once per row per frame.</summary>
     private void RevealDiffHit()
     {
+        if (_diffFind.Search.Current is { } hit) RevealDiffLine(hit.Line);
+    }
+
+    /// <summary>Brings one row of the diff on screen, whoever asked — the find bar, or a
+    /// keyboard selection whose loose end has walked past the edge of the viewport.</summary>
+    private void RevealDiffLine(int line)
+    {
         if (_diffBodyRef.Current is not ScrollViewElement sv) return;
-        if (_diffFind.Search.Current is not { } hit) return;
 
         float top = 0f, height = DiffRowHeight;
         if (_diffWrap && _diffHeights.Length > 0)
         {
-            for (int i = 0; i < hit.Line && i < _diffHeights.Length; i++) top += _diffHeights[i];
-            if (hit.Line < _diffHeights.Length) height = _diffHeights[hit.Line];
+            for (int i = 0; i < line && i < _diffHeights.Length; i++) top += _diffHeights[i];
+            if (line < _diffHeights.Length) height = _diffHeights[line];
         }
-        else top = hit.Line * DiffRowHeight;
+        else top = line * DiffRowHeight;
 
         sv.ScrollRangeIntoView(top, height);
     }
@@ -727,6 +733,11 @@ public partial class JunctionApp
         _diffGroupUnified.Bind(key, rows.Count, i => At(i)?.Line?.Content);
         _diffGroupLeft.Bind(key, rows.Count, i => At(i)?.Left?.Content);
         _diffGroupRight.Bind(key, rows.Count, i => At(i)?.Right?.Content);
+        // Shift+↓ walks off the bottom of the viewport within a screenful; the list is the
+        // only thing that knows where its rows are, so it does the scrolling.
+        _diffGroupUnified.RevealLine = RevealDiffLine;
+        _diffGroupLeft.RevealLine = RevealDiffLine;
+        _diffGroupRight.RevealLine = RevealDiffLine;
 
         DiffRow? At(int i) => i >= 0 && i < rows.Count ? rows[i] : null;
     }
