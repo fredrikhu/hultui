@@ -296,10 +296,23 @@ public partial class JunctionApp
         // height.
         if (lines.Count > 1 && _commitMsgExpanded)
         {
-            var body = ScrollView.New().MaxHeight(132f).FlexShrink(0);
-            for (int i = 1; i < lines.Count; i++)
-                body.AddChild(MessageLine(lines[i], i, 12f, Nocturne.On(0.72), FontWeight.Regular));
-            box.AddChild(body);
+            // Skip the blank line git puts between subject and body. The header already
+            // sets the subject apart — its own row, its own weight, the metadata beneath —
+            // so drawing the separator as well leaves a gap that reads as a mistake.
+            // Interior blank lines stay: those are the author's paragraphs.
+            int first = 1;
+            while (first < lines.Count && lines[first].Trim().Length == 0) first++;
+
+            // Skipped for drawing only. The line stays in the model the selection group is
+            // bound to, so a copy still yields the message as git stores it — the group
+            // reads its text from there and tolerates a line with no label on screen.
+            if (first < lines.Count)
+            {
+                var body = ScrollView.New().MaxHeight(132f).FlexShrink(0);
+                for (int i = first; i < lines.Count; i++)
+                    body.AddChild(MessageLine(lines[i], i, 12f, Nocturne.On(0.72), FontWeight.Regular));
+                box.AddChild(body);
+            }
         }
 
         return box;

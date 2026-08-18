@@ -105,6 +105,38 @@ public class CommitMessageTests
         });
     }
 
+    /// <summary>The blank line git puts between subject and body is not drawn — the header
+    /// already separates the two — but it is still in the message, so a copy of the whole
+    /// thing round-trips what git stores rather than what the screen happened to show.</summary>
+    [Fact]
+    public void TheLeadingBlankLineIsNotDrawnButIsStillCopied()
+    {
+        Hosted((session, app) =>
+        {
+            Assert.DoesNotContain(MessageLabels(session), l => l.Content.Trim().Length == 0);
+
+            var subject = MessageLabels(session).First(l => l.Content == Subject);
+            var box = subject.Layout.AbsoluteContentBox;
+            session.Window.Click(box.X + 4f, box.Y + box.Height / 2f);
+            session.Window.KeyDown(KeyCode.A, KeyModifiers.Ctrl);
+            session.Window.KeyDown(KeyCode.C, KeyModifiers.Ctrl);
+
+            Assert.Equal($"{Subject}\n\nFirst body line.\nSecond body line.",
+                session.Window.Clipboard.GetText());
+        });
+    }
+
+    /// <summary>Blank lines *between* paragraphs are the author's, and stay. Without them
+    /// every message reads as one block however it was written.</summary>
+    [Fact]
+    public void AParagraphBreakInsideTheBodyIsDrawn()
+    {
+        Hosted((session, app) =>
+        {
+            Assert.Contains(MessageLabels(session), l => l.Content.Trim().Length == 0);
+        }, body: "First paragraph.\n\nSecond paragraph.");
+    }
+
     // ── Collapsing the body ──────────────────────────────────────────────
 
     [Fact]
