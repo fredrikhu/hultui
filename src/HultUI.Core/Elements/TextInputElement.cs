@@ -344,19 +344,9 @@ public class TextInputElement : BoxElement
     {
         if (evt.ClickCount == 2)
         {
-            // Double-click: select word under cursor
-            int pos = PositionFromPoint(evt.Position);
-            _selectionStart = FindWordBoundaryLeft(pos);
-            // FindWordBoundaryLeft skips back past the word, but if pos is mid-word
-            // we want the start of the current word
-            int wordStart = _selectionStart;
-            // Walk left from pos to find start of current word
-            int ws = pos;
-            while (ws > 0 && !char.IsWhiteSpace(_text[ws - 1])) ws--;
+            // Double-click: select the run of same-class characters under the cursor
+            var (ws, we) = WordBoundary.RangeAt(_text, PositionFromPoint(evt.Position));
             _selectionStart = ws;
-            // Walk right from pos to find end of current word
-            int we = pos;
-            while (we < _text.Length && !char.IsWhiteSpace(_text[we])) we++;
             _cursorPos = we;
             MarkPaintDirty();
         }

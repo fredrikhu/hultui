@@ -174,8 +174,42 @@ Text.New("content")
 | `Content` | `string` | `""` |
 | `Overflow` | `TextOverflow` | `TextOverflow.Clip` |
 | `MaxLines` | `int?` | `null` (unlimited) |
+| `Selectable` | `bool` | `false` |
+| `SelectionGroup` / `SelectionIndex` | `TextSelectionGroup?` / `int` | `null` / `-1` |
+| `Spans` | `IReadOnlyList<TextSpan>?` | `null` |
+| `Links` / `LinkActivated` | `IReadOnlyList<TextLink>?` / `Action<string>?` | `null` |
 
 `TextOverflow` values: `Clip`, `Ellipsis`.
+
+**Selection (opt-in via `.Selectable()`):**
+
+- Click-drag to select, Shift-click to extend, Ctrl+A / Ctrl+C, right-click Copy
+- Double-click selects the run of same-class characters under the pointer — letters, digits
+  and `_` are one class, whitespace another, punctuation and symbols a third. So a
+  double-click in code yields one identifier rather than everything up to the next space,
+  and one in the indentation yields the indentation.
+- Triple-click selects the line
+- Shift with ←/→/↑/↓/Home/End/PageUp/PageDown moves the loose end of the selection;
+  Ctrl+Shift+Home/End reach the ends of the document
+
+Give several labels the same `SelectionGroup` and their own `SelectionIndex` and one
+selection runs across all of them — the group holds it as line numbers, so it survives
+virtualized rows being recycled and copies lines that were never realized. Set the group's
+`RevealLine` so keyboard extension can scroll a line that has walked off screen into view.
+
+**Links:**
+
+`Links` marks ranges of `Content` as clickable; a click inside one calls `LinkActivated`
+with that range's target. Appearance is separate — give the same ranges a `TextSpan` to
+colour and underline them — so links stay part of the flowing, selectable text instead of
+becoming their own elements.
+
+```csharp
+Text.New(message)
+    .Selectable()
+    .Spans([new TextSpan(start, length, accent, Decoration: TextDecoration.Underline)])
+    .Links([new TextLink(start, length, url)], OpenInBrowser);
+```
 
 **Example:**
 

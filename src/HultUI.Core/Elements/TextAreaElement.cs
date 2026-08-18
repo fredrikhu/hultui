@@ -585,12 +585,8 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
     {
         if (evt.ClickCount == 2)
         {
-            int pos = PositionFromPoint(evt.Position);
-            int ws = pos;
-            while (ws > 0 && !IsWordBreak(_text[ws - 1])) ws--;
+            var (ws, we) = WordBoundary.RangeAt(_text, PositionFromPoint(evt.Position));
             _selectionStart = ws;
-            int we = pos;
-            while (we < _text.Length && !IsWordBreak(_text[we])) we++;
             _cursorPos = we;
             _needsScrollToCursor = true;
             MarkPaintDirty();

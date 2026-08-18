@@ -118,6 +118,48 @@ public class TextElement : Element
         }
     }
 
+    // ──── Clickable ranges (opt-in) ────
+
+    private IReadOnlyList<TextLink>? _links;
+    private bool _clickWired;
+
+    /// <summary>
+    /// Ranges of <see cref="Content"/> that act as links. Clicking inside one calls
+    /// <see cref="LinkActivated"/> with its target. Independent of
+    /// <see cref="Selectable"/> — a plain label can carry links, and a selectable one can
+    /// still be dragged across them. Style them with <see cref="Spans"/>.
+    /// </summary>
+    public IReadOnlyList<TextLink>? Links
+    {
+        get => _links;
+        set
+        {
+            _links = value;
+            if (value is { Count: > 0 }) WireClick();
+        }
+    }
+
+    /// <summary>Runs with the <see cref="TextLink.Target"/> of the link that was clicked.</summary>
+    public Action<string>? LinkActivated { get; set; }
+
+    // One click handler serves both opt-ins, whichever turns up first.
+    private void WireClick()
+    {
+        if (_clickWired) return;
+        _clickWired = true;
+        OnOwn<ClickEvent>(OnClick);
+    }
+
+    /// <summary>The link under a screen point, if any.</summary>
+    private TextLink? LinkAt(Point screenPos)
+    {
+        if (_links is not { Count: > 0 } || _renderCtx is null || _lines.Count == 0) return null;
+        int offset = PositionFromPoint(screenPos);
+        foreach (var link in _links)
+            if (link.Contains(offset)) return link;
+        return null;
+    }
+
     /// <summary>Highlight colour for the selected range.</summary>
     private Color _selectionColor = new(66, 135, 245, 80);
     public Color SelectionColor
@@ -191,7 +233,7 @@ public class TextElement : Element
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
-        OnOwn<ClickEvent>(OnClick);
+        WireClick();
         OnOwn<KeyDownEvent>(OnKeyDown);
         // A grouped label keeps its selection on blur: focus moves between the group's own
         // labels during a drag, and a virtualized row loses focus merely by scrolling out of
@@ -261,13 +303,18 @@ public class TextElement : Element
 
     private void OnClick(ClickEvent evt)
     {
+        // A plain click on a link follows it; a second click is the word-select gesture, so
+        // only the first one counts. Links work whether or not the label is selectable.
+        if (evt.ClickCount == 1 && LinkActivated is { } activate && LinkAt(evt.Position) is { } link)
+        {
+            activate(link.Target);
+            evt.StopPropagation = true;
+            return;
+        }
         if (!_selectable) return;
         if (evt.ClickCount == 2)
         {
-            int pos = PositionFromPoint(evt.Position);
-            int start = pos, end = pos;
-            while (start > 0 && !char.IsWhiteSpace(_content[start - 1])) start--;
-            while (end < _content.Length && !char.IsWhiteSpace(_content[end])) end++;
+            var (start, end) = WordBoundary.RangeAt(_content, PositionFromPoint(evt.Position));
             SelectLocalRange(start, end);
             MarkPaintDirty();
         }
@@ -282,6 +329,14 @@ public class TextElement : Element
     {
         if (!_selectable) return;
         bool ctrl = evt.Modifiers.HasFlag(KeyModifiers.Ctrl);
+        if (evt.Modifiers.HasFlag(KeyModifiers.Shift) && ExtendSelectionByKey(evt.Key, ctrl))
+        {
+            // Consumed: without this the list underneath would scroll on the same key and
+            // the selection would appear to jump two lines for every one the user asked for.
+            evt.StopPropagation = true;
+            MarkPaintDirty();
+            return;
+        }
         switch (evt.Key)
         {
             case KeyCode.C when ctrl:
@@ -295,6 +350,68 @@ public class TextElement : Element
                 MarkPaintDirty();
                 break;
         }
+    }
+
+    /// <summary>
+    /// Shift+navigation over the selection, the way a text editor moves its caret. Grouped,
+    /// the loose end travels through the whole model — past lines that were never realized —
+    /// because the group holds it as a line number rather than as a position in an element.
+    /// Ungrouped there is only this one line to move along. Returns false for keys that mean
+    /// nothing here, which then carry on to whoever else wants them.
+    /// </summary>
+    private bool ExtendSelectionByKey(KeyCode key, bool ctrl)
+    {
+        if (InGroup)
+        {
+            var g = SelectionGroup!;
+            // A label that has focus but no live anchor — clicked once, or arrived at by Tab
+            // — starts the selection where its own caret sits.
+            if (g.FocusIndex < 0) g.Anchor(SelectionIndex, _caret);
+            return key switch
+            {
+                KeyCode.Left => g.ExtendByCharacter(-1),
+                KeyCode.Right => g.ExtendByCharacter(1),
+                KeyCode.Up => g.ExtendByLine(-1),
+                KeyCode.Down => g.ExtendByLine(1),
+                KeyCode.PageUp => g.ExtendByLine(-LinesPerPage()),
+                KeyCode.PageDown => g.ExtendByLine(LinesPerPage()),
+                KeyCode.Home => ctrl ? g.ExtendToDocumentEdge(-1) : g.ExtendToLineEdge(-1),
+                KeyCode.End => ctrl ? g.ExtendToDocumentEdge(1) : g.ExtendToLineEdge(1),
+                _ => false,
+            };
+        }
+
+        int caret = key switch
+        {
+            KeyCode.Left => _caret - 1,
+            KeyCode.Right => _caret + 1,
+            KeyCode.Home or KeyCode.PageUp => 0,
+            KeyCode.End or KeyCode.PageDown => _content.Length,
+            _ => -1,
+        };
+        if (caret < 0 || caret > _content.Length) return false;
+        if (caret == _caret) return true;   // already at the edge; still ours to swallow
+        _caret = SnapToBoundary(caret);
+        return true;
+    }
+
+    /// <summary>
+    /// How many lines a page key should cover: what fits in the scrolling ancestor, less one
+    /// row of overlap, the way editors page. Falls back to a screenful-ish constant before
+    /// layout has run or outside a scroller.
+    /// </summary>
+    private int LinesPerPage()
+    {
+        float rowHeight = Layout.AbsoluteBorderBox.Height;
+        for (var e = Parent; e is not null; e = e.Parent)
+        {
+            if (e is not ScrollViewElement scroller) continue;
+            float viewport = scroller.Layout.AbsoluteContentBox.Height;
+            if (rowHeight > 0 && viewport > rowHeight)
+                return Math.Max(1, (int)(viewport / rowHeight) - 1);
+            break;
+        }
+        return 20;
     }
 
     /// <summary>Called by the window to extend the selection while the pointer is captured outside this label.</summary>
@@ -365,6 +482,10 @@ public class TextElement : Element
             SelectionColor = text.SelectionColor;
             SelectionGroup = text.SelectionGroup;
             SelectionIndex = text.SelectionIndex;
+            // Links and their handler come from the freshly built element, like any other
+            // app-supplied handler: a closure from the previous build captures stale state.
+            Links = text.Links;
+            LinkActivated = text.LinkActivated;
         }
     }
 
@@ -387,21 +508,27 @@ public class TextElement : Element
 
     public override void Render(IRenderContext ctx)
     {
+        // A label needs the drawn line layout kept only if something will hit-test against
+        // it: a selection, or a link. Links count as much as selection does — without the
+        // cache a click cannot be mapped to a character offset, so a link on an otherwise
+        // plain label would simply never fire.
+        bool hitTestable = _selectable || _links is { Count: > 0 };
+
         if (string.IsNullOrEmpty(Content))
         {
-            if (_selectable) { _renderCtx = ctx; _lines = []; }
+            if (hitTestable) { _renderCtx = ctx; _lines = []; }
             return;
         }
 
         var contentBox = Layout.AbsoluteContentBox;
         var style = ResolvedInherited;
 
-        if (_selectable)
+        if (hitTestable)
         {
             _renderCtx = ctx;
             _contentBox = contentBox;
             _lines = ctx.LayoutTextLines(Content, style, contentBox.Width, MaxLines);
-            if (HasSelection)
+            if (_selectable && HasSelection)
                 DrawSelection(ctx, style);
         }
 

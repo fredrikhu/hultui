@@ -65,11 +65,101 @@ public sealed class TextSelectionGroup
     /// <summary>Bumped whenever the selection changes, so a caller can tell it moved.</summary>
     public int Version { get; private set; }
 
+    /// <summary>The line the loose end of the selection sits on, or -1 when there is none.</summary>
+    public int FocusIndex => _focusIndex;
+
+    /// <summary>The offset within <see cref="FocusIndex"/> the loose end sits at.</summary>
+    public int FocusOffset => _focusOffset;
+
+    /// <summary>Length of line <paramref name="index"/>, or -1 where the model has no line there.</summary>
+    public int LengthAt(int index) =>
+        index < 0 || index >= Count ? -1 : _textAt?.Invoke(index)?.Length ?? -1;
+
+    /// <summary>
+    /// Optional hook that brings a line on screen. A keyboard extension walks past the
+    /// bottom of the viewport within a keystroke or two, and only the list showing the model
+    /// knows where its rows are — so the owner supplies this rather than the group guessing.
+    /// </summary>
+    public Action<int>? RevealLine { get; set; }
+
+    // The column a Shift+Up/Down aims for. Held here rather than in a label because the loose
+    // end moves between labels: stepping down through a short line and on to a long one has
+    // to land back at the column the user started from, the way an editor's caret does.
+    private int _preferredOffset = -1;
+
+    /// <summary>
+    /// Moves the loose end one character, crossing into the neighbouring line at either end.
+    /// <paramref name="direction"/> is -1 for left, +1 for right.
+    /// </summary>
+    public bool ExtendByCharacter(int direction)
+    {
+        if (_focusIndex < 0) return false;
+        int index = _focusIndex, offset = _focusOffset + direction;
+        if (offset < 0)
+        {
+            if (index == 0) return false;
+            index--;
+            offset = Math.Max(0, LengthAt(index));
+        }
+        else if (offset > Math.Max(0, LengthAt(index)))
+        {
+            if (index >= Count - 1) return false;
+            index++;
+            offset = 0;
+        }
+        return Move(index, offset, keepPreferred: false);
+    }
+
+    /// <summary>
+    /// Moves the loose end <paramref name="lines"/> lines (negative for up), keeping the
+    /// column the extension started from where the shorter lines in between allow.
+    /// </summary>
+    public bool ExtendByLine(int lines)
+    {
+        if (_focusIndex < 0 || lines == 0) return false;
+        int index = Math.Clamp(_focusIndex + lines, 0, Math.Max(0, Count - 1));
+        if (index == _focusIndex && (lines < 0 ? _focusOffset == 0 : _focusOffset == Math.Max(0, LengthAt(index))))
+            return false;
+
+        if (_preferredOffset < 0) _preferredOffset = _focusOffset;
+        int len = Math.Max(0, LengthAt(index));
+        // Clamped to the first or last line, the step still finishes at that line's edge
+        // rather than stopping dead, which is what an editor does.
+        int offset = index == _focusIndex ? (lines < 0 ? 0 : len) : Math.Min(_preferredOffset, len);
+        return Move(index, offset, keepPreferred: true);
+    }
+
+    /// <summary>Moves the loose end to the start (-1) or end (+1) of its own line.</summary>
+    public bool ExtendToLineEdge(int direction) =>
+        _focusIndex >= 0 &&
+        Move(_focusIndex, direction < 0 ? 0 : Math.Max(0, LengthAt(_focusIndex)), keepPreferred: false);
+
+    /// <summary>Moves the loose end to the first (-1) or last (+1) line of the model.</summary>
+    public bool ExtendToDocumentEdge(int direction)
+    {
+        if (_focusIndex < 0 || Count == 0) return false;
+        int index = direction < 0 ? 0 : Count - 1;
+        return Move(index, direction < 0 ? 0 : Math.Max(0, LengthAt(index)), keepPreferred: false);
+    }
+
+    private bool Move(int index, int offset, bool keepPreferred)
+    {
+        if (index == _focusIndex && offset == _focusOffset) return false;
+        if (_anchorIndex < 0) { _anchorIndex = _focusIndex; _anchorOffset = _focusOffset; }
+        _focusIndex = index;
+        _focusOffset = offset;
+        if (!keepPreferred) _preferredOffset = offset;
+        Version++;
+        RevealLine?.Invoke(index);
+        return true;
+    }
+
     /// <summary>Starts a selection at a line and offset, discarding any previous one.</summary>
     public void Anchor(int index, int offset)
     {
         _anchorIndex = _focusIndex = index;
         _anchorOffset = _focusOffset = offset;
+        _preferredOffset = offset;
         Version++;
     }
 
@@ -80,6 +170,7 @@ public sealed class TextSelectionGroup
         if (_focusIndex == index && _focusOffset == offset) return;
         _focusIndex = index;
         _focusOffset = offset;
+        _preferredOffset = offset;
         Version++;
     }
 
@@ -90,6 +181,7 @@ public sealed class TextSelectionGroup
         _anchorIndex = 0; _anchorOffset = 0;
         _focusIndex = Count - 1;
         _focusOffset = (_textAt?.Invoke(Count - 1))?.Length ?? 0;
+        _preferredOffset = _focusOffset;
         Version++;
     }
 
@@ -99,6 +191,7 @@ public sealed class TextSelectionGroup
         if (_anchorIndex < 0 && _focusIndex < 0) return;
         _anchorIndex = _focusIndex = -1;
         _anchorOffset = _focusOffset = 0;
+        _preferredOffset = -1;
         Version++;
     }
 

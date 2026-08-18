@@ -111,6 +111,11 @@ public static class ElementExtensions
     /// <summary>Per-range text colors (syntax highlighting); see <see cref="TextElement.Spans"/>.</summary>
     public static T Spans<T>(this T el, IReadOnlyList<Rendering.TextSpan>? spans) where T : TextElement { el.Spans = spans; return el; }
 
+    /// <summary>Clickable ranges within the text, and what to do when one is clicked.
+    /// Style them separately with <see cref="TextElement.Spans"/>; see <see cref="TextElement.Links"/>.</summary>
+    public static T Links<T>(this T el, IReadOnlyList<TextLink>? links, Action<string> onActivate) where T : TextElement
+    { el.Links = links; el.LinkActivated = onActivate; return el; }
+
     // ──── Image properties ────
     public static T ImageFit<T>(this T el, ImageFit fit) where T : ImageElement { el.Fit = fit; return el; }
     public static T ImageSource<T>(this T el, IImageSource source) where T : ImageElement { el.Source = source; return el; }

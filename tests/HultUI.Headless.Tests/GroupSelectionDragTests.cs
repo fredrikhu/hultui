@@ -182,4 +182,93 @@ public class GroupSelectionDragTests
         Assert.Contains("line number 1", copied);
         Assert.Contains("line number 3", copied);
     }
+
+    // ── Word/line select and shift-extend inside a group ─────────────────
+    // A grouped label's own double-click and shift handling has to be routed through the
+    // group: the label's private anchor/caret are ignored once it derives its highlight
+    // from the group, so writing to them selects nothing visible.
+
+    [Fact]
+    public void DoubleClick_SelectsTheWordUnderThePointer()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        // "line number 3" — land inside "number".
+        float y = ScreenMidY(scroll, rows[3]);
+        float x = rows[3].Layout.AbsoluteContentBox.X + CharX(rows[3], "line num");
+        session.Window.DoubleClick(x, y);
+
+        Assert.True(group.HasSelection);
+        Assert.Equal("number", group.SelectedText);
+    }
+
+    [Fact]
+    public void TripleClick_SelectsTheWholeLine()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        float y = ScreenMidY(scroll, rows[2]);
+        float x = rows[2].Layout.AbsoluteContentBox.X + CharX(rows[2], "line num");
+        session.Window.Click(x, y);
+        session.Window.Click(x, y);
+        session.Window.Click(x, y);
+
+        Assert.Equal("line number 2", group.SelectedText);
+    }
+
+    [Fact]
+    public void ShiftClick_ExtendsFromTheExistingAnchor()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        float x = rows[0].Layout.AbsoluteContentBox.X + 1f;
+        session.Window.Click(x, ScreenMidY(scroll, rows[1]));           // anchor on row 1
+        session.Window.MouseDown(x, ScreenMidY(scroll, rows[4]), MouseButton.Left, KeyModifiers.Shift);
+        session.Window.MouseUp(x, ScreenMidY(scroll, rows[4]), MouseButton.Left, KeyModifiers.Shift);
+
+        Assert.True(group.HasSelection);
+        Assert.Contains("line number 2", group.SelectedText);
+        Assert.Contains("line number 3", group.SelectedText);
+        Assert.False(rows[0].HasSelection);
+        Assert.False(rows[5].HasSelection);
+    }
+
+    [Fact]
+    public void ShiftDown_ExtendsTheSelectionByALine()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        float x = rows[0].Layout.AbsoluteContentBox.X + 1f;
+        session.Window.Click(x, ScreenMidY(scroll, rows[1]));
+
+        session.Window.KeyDown(KeyCode.Down, KeyModifiers.Shift);
+        session.Window.KeyDown(KeyCode.Down, KeyModifiers.Shift);
+
+        Assert.True(group.HasSelection);
+        Assert.Contains("number 1", group.SelectedText);
+        Assert.Contains("line number 2", group.SelectedText);
+        Assert.True(rows[3].HasSelection);
+        Assert.False(rows[4].HasSelection);
+    }
+
+    [Fact]
+    public void ShiftEnd_ExtendsToTheEndOfTheLine()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        float x = rows[0].Layout.AbsoluteContentBox.X + 1f;
+        session.Window.Click(x, ScreenMidY(scroll, rows[2]));
+        session.Window.KeyDown(KeyCode.End, KeyModifiers.Shift);
+
+        Assert.EndsWith("number 2", group.SelectedText);
+    }
+
+    // Width of a prefix in the label's own font, so a test can aim at a character offset.
+    private static float CharX(TextElement row, string prefix) =>
+        HultUI.Core.Rendering.TextMeasure.MeasureWidth(prefix, row.ResolvedInherited);
 }

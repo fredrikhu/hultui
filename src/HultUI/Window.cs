@@ -967,7 +967,13 @@ public sealed class Window : IOverlayHost, IDisposable
                             _groupDragToken = grp;
                             _activeTextGroup = grp;
                             _groupDragX = dragLabel.Layout.AbsoluteContentBox.X + 2f;
-                            grp.Anchor(dragLabel.SelectionIndex, dragLabel.CaretOffset);
+                            // Shift keeps the existing anchor and moves only the loose end,
+                            // so a click then a shift-click covers the span between them —
+                            // and a drag from there carries on extending from the same anchor.
+                            if (button.Modifiers.HasFlag(KeyModifiers.Shift) && grp.FocusIndex >= 0)
+                                grp.ExtendTo(dragLabel.SelectionIndex, dragLabel.CaretOffset);
+                            else
+                                grp.Anchor(dragLabel.SelectionIndex, dragLabel.CaretOffset);
                             RepaintGroup(grp);
                         }
                         else
@@ -1147,9 +1153,15 @@ public sealed class Window : IOverlayHost, IDisposable
                 }
                 if (key.IsDown)
                 {
+                    // Shift+navigation moves the loose end of a group selection, which
+                    // changes the highlight on labels other than the focused one — so the
+                    // whole realized group repaints, exactly as it does after a drag.
+                    int before = _activeTextGroup?.Version ?? 0;
                     EventDispatcher.Dispatch(
                         new KeyDownEvent { Key = key.KeyCode, Modifiers = key.Modifiers, IsRepeat = key.IsRepeat },
                         target);
+                    if (_activeTextGroup is { } keyed && keyed.Version != before)
+                        RepaintGroup(keyed);
                 }
                 else
                 {
