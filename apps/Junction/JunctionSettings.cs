@@ -33,6 +33,12 @@ public sealed class JunctionSettingsData
     /// place in a list, and it is per-repo session state.</summary>
     public bool RefTreeView { get; set; } = true;
 
+    /// <summary>Whether the Commit tab shows the body of the commit message under the
+    /// subject. Remembered for the same reason the diff's reading modes are: someone who
+    /// wants the message out of the way wants that for every commit they open, not for
+    /// one. The subject is always shown — collapsing hides the body, not the message.</summary>
+    public bool CommitMessageExpanded { get; set; } = true;
+
     /// <summary>Widths of the file list beside the diff in the Commit and Changes tabs,
     /// as the user last dragged them. Two figures rather than one: the Changes list carries
     /// the commit composer under it and wants more room than a commit's flat file list.
@@ -103,6 +109,7 @@ public sealed class JunctionSettingsData
         DiffWrap = DiffWrap,
         DiffSplit = DiffSplit,
         RefTreeView = RefTreeView,
+        CommitMessageExpanded = CommitMessageExpanded,
         CommitFileListWidth = CommitFileListWidth,
         ChangesFileListWidth = ChangesFileListWidth,
         RepoBadges = new(RepoBadges),

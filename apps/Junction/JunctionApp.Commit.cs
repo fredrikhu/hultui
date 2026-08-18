@@ -169,7 +169,12 @@ public partial class JunctionApp
     /// <summary>One line of the message: selectable, and with any issue references the
     /// repository's <c>.issuetracker</c> recognises turned into links.</summary>
     private TextElement MessageLine(string text, int index, float size, Color color, FontWeight weight) =>
-        IssueLinked(Text.New(text).FontSize(size).FontWeight(weight).TextColor(color)
+        // A blank line is drawn as a space, the way the diff draws its empty rows: empty
+        // text measures to no height at all, which silently closes up the paragraph breaks
+        // the author put in. The copy is unaffected — it comes from the group's model, not
+        // from what the label happens to be showing.
+        IssueLinked(Text.New(text.Length == 0 ? " " : text)
+            .FontSize(size).FontWeight(weight).TextColor(color)
             .Selectable().SelectionGroup(_commitMsgGroup, index), text);
 
     private readonly TextSelectionGroup _commitMsgGroup = new();
@@ -264,11 +269,32 @@ public partial class JunctionApp
         row2.AddChild(Flex.Row(gap: 5).AlignItems(AlignItems.Center).Children(
             Ui.Icon(Icons.GitBranch, 12f, Nocturne.On(0.55)),
             Text.New(CommitBranchTitle(commit)).FontSize(11.5f).TextColor(Nocturne.On(0.55))));
+
+        // The toggle rides at the end of the metadata row, not beside the subject: row 1
+        // already ends in two carets for stepping between commits, and a third would read
+        // as one of them. It only exists when there is a body to hide.
+        if (lines.Count > 1)
+        {
+            row2.AddChild(Box.New().FlexGrow(1));
+            // Lines with something on them, not lines: git puts a blank one between subject
+            // and body, and counting it tells the reader there is a third line of prose
+            // waiting for them when there are two.
+            int bodyLines = lines.Skip(1).Count(l => l.Trim().Length > 0);
+            row2.AddChild((_commitMsgExpanded
+                    ? Ui.GhostButton("Hide message", Icons.CaretUp, ToggleCommitMessage, 11.5f)
+                    // Collapsed, the button is also the only sign there is anything there,
+                    // so it says how much rather than just which way it opens.
+                    : Ui.GhostButton(bodyLines > 0 ? $"{bodyLines} more line{(bodyLines == 1 ? "" : "s")}" : "Show message",
+                        Icons.CaretDown, ToggleCommitMessage, 11.5f))
+                .FlexShrink(0)
+                .Tooltip(_commitMsgExpanded ? "Hide the message body (m)" : "Show the message body (m)"));
+        }
         box.AddChild(row2);
 
-        // The body, when there is one. Bounded and scrollable: a long release note of a
-        // commit message is not a reason for the diff to lose half its height.
-        if (lines.Count > 1)
+        // The body, when there is one and it is wanted. Bounded and scrollable: a long
+        // release note of a commit message is not a reason for the diff to lose half its
+        // height.
+        if (lines.Count > 1 && _commitMsgExpanded)
         {
             var body = ScrollView.New().MaxHeight(132f).FlexShrink(0);
             for (int i = 1; i < lines.Count; i++)
@@ -278,6 +304,24 @@ public partial class JunctionApp
 
         return box;
     }
+
+    /// <summary>Whether the Commit tab shows the message body under the subject.</summary>
+    private bool _commitMsgExpanded;
+
+    private void ToggleCommitMessage()
+    {
+        _commitMsgExpanded = !_commitMsgExpanded;
+        Persist();
+        MarkDirty();
+    }
+
+    /// <summary>True when the Commit tab is showing a commit whose message has a body —
+    /// what gates the <c>m</c> key, so the letter stays free everywhere it would do
+    /// nothing.</summary>
+    private bool CommitMessageHasBody =>
+        View == JunctionView.Commit && _detailRange == null
+        && MessageLines(_commitDetail.Value.Commit
+            ?? _history.Value.Commits.FirstOrDefault(c => c.Hash == _detailHash)).Count > 1;
 
     private string CommitBranchTitle(GitCommit? commit)
     {

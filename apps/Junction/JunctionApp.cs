@@ -363,6 +363,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
+        _commitMsgExpanded = _settings.CommitMessageExpanded;
         _refTreeView = _settings.RefTreeView;
 
         _activeWorkspaceId = _settings.ActiveWorkspaceId ?? _settings.Workspaces.FirstOrDefault()?.Id ?? "";
@@ -930,6 +931,7 @@ public partial class JunctionApp : Component, IDisposable
         _settings.DiffWrap = _diffWrap;
         _settings.DiffSplit = _diffSplit;
         _settings.RefTreeView = _refTreeView;
+        _settings.CommitMessageExpanded = _commitMsgExpanded;
         _settings.CommitFileListWidth = _commitSplit.Width;
         _settings.ChangesFileListWidth = _changesSplit.Width;
         JunctionSettings.Save(_settings);
@@ -1110,6 +1112,16 @@ public partial class JunctionApp : Component, IDisposable
         // whether or not its body holds the focus (the pane's own handler passes them up for
         // exactly this).
         if (HandleDiffViewKey(e)) { e.StopPropagation = true; return; }
+
+        // m folds the commit message away. Behind the typing guard above, like f — an m
+        // typed into a commit summary has to stay an m — and gated on the Commit tab
+        // actually showing a message with a body, so the letter is free elsewhere.
+        if (e.Key == KeyCode.M && CommitMessageHasBody)
+        {
+            ToggleCommitMessage();
+            e.StopPropagation = true;
+            return;
+        }
 
         // f opens the find bar over whatever text is on screen — the bare-letter twin of the
         // Ctrl+F handled further up, which has to run before the typing guard so it works

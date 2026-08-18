@@ -105,6 +105,86 @@ public class CommitMessageTests
         });
     }
 
+    // ── Collapsing the body ──────────────────────────────────────────────
+
+    [Fact]
+    public void TheBodyStartsShownAndTheButtonHidesIt()
+    {
+        Hosted((session, app) =>
+        {
+            Assert.Contains(MessageLabels(session), l => l.Content == "First body line.");
+
+            Toggle(session).Click();
+            session.PumpFrames(2);
+
+            // The body is gone; the subject, which is the message's title rather than a
+            // detail of it, stays.
+            Assert.DoesNotContain(MessageLabels(session), l => l.Content == "First body line.");
+            Assert.Contains(MessageLabels(session), l => l.Content == Subject);
+        });
+    }
+
+    [Fact]
+    public void CollapsedTheButtonSaysHowMuchIsHidden()
+    {
+        Hosted((session, app) =>
+        {
+            Toggle(session).Click();
+            session.PumpFrames(2);
+
+            // Two lines of prose, so it reads "2 more lines" — not 3, which is what
+            // counting git's blank separator line would give. Collapsed, the button is
+            // the only sign there is anything to open.
+            Assert.NotNull(session.Window.FindByText("2 more lines"));
+        });
+    }
+
+    [Fact]
+    public void TheKeyTogglesItToo()
+    {
+        Hosted((session, app) =>
+        {
+            session.Window.PressKey(KeyCode.M);
+            session.PumpFrames(2);
+            Assert.DoesNotContain(MessageLabels(session), l => l.Content == "First body line.");
+
+            session.Window.PressKey(KeyCode.M);
+            session.PumpFrames(2);
+            Assert.Contains(MessageLabels(session), l => l.Content == "First body line.");
+        });
+    }
+
+    /// <summary>The choice is a reading preference, so it outlives the commit it was made
+    /// on — and the settings object the app was handed carries it back out.</summary>
+    [Fact]
+    public void TheChoiceIsRemembered()
+    {
+        Hosted((session, app) =>
+        {
+            Toggle(session).Click();
+            session.PumpFrames(2);
+
+            var settings = (JunctionSettingsData)typeof(JunctionApp)
+                .GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            Assert.False(settings.CommitMessageExpanded);
+        });
+    }
+
+    /// <summary>A one-line commit has nothing to collapse, so there is no button — and the
+    /// letter stays free.</summary>
+    [Fact]
+    public void AMessageWithNoBodyOffersNoToggle()
+    {
+        Hosted((session, app) =>
+        {
+            Assert.Null(session.Window.FindByText("Hide message"));
+        }, body: null);
+    }
+
+    private static HeadlessElement Toggle(HeadlessSession session) =>
+        session.Window.FindByText("Hide message")
+        ?? throw new Xunit.Sdk.XunitException("the message has no collapse button");
+
     /// <summary>Every label taking part in the commit-message selection group.</summary>
     private static List<TextElement> MessageLabels(HeadlessSession session)
     {
@@ -122,7 +202,7 @@ public class CommitMessageTests
         }
     }
 
-    private static void Hosted(Action<HeadlessSession, JunctionApp> body)
+    private static void Hosted(Action<HeadlessSession, JunctionApp> run, string? body = Body)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         repo.Write(IssueTrackerFile.FileName, """
@@ -132,7 +212,8 @@ public class CommitMessageTests
             """);
         repo.Write("a.txt", "a\n");
         repo.Git("add", "-A");
-        repo.Git("commit", "-m", Subject, "-m", Body);
+        if (body is null) repo.Git("commit", "-m", Subject);
+        else repo.Git("commit", "-m", Subject, "-m", body);
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;
@@ -149,11 +230,11 @@ public class CommitMessageTests
             session.PumpFrames(3);
 
             session.Window.PressKey(KeyCode.Digit3);   // Commit
-            session.PumpUntil(() => MessageLabels(session).Any(l => l.Content == "Second body line."),
+            session.PumpUntil(() => MessageLabels(session).Any(l => l.Content == Subject),
                 TimeSpan.FromSeconds(30));
-            session.PumpFrames(2);
+            session.PumpFrames(4);
 
-            body(session, app);
+            run(session, app);
         }
         finally { app?.Dispose(); }
     }
