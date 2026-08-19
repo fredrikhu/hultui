@@ -16,7 +16,9 @@ public partial class JunctionApp
     private const float DotRadius = 5.5f;
     private const float RowHeight = 54f;
 
-    private static readonly Color[] LanePalette =
+    // A property, not a static readonly field: the ramp it reads changes with the theme, and
+    // a field would hold whichever one was current when this type was first touched.
+    private static Color[] LanePalette =>
     [
         Nocturne.Accent400,
         Nocturne.Neutral300,

@@ -51,6 +51,16 @@ public static class Ui
     }
     private static float _displayScale = 1f;
 
+    /// <summary>Drop cached glyph rasters after a theme change. They are rasterized in the
+    /// colour they were asked for, so a scheme change leaves every one of them tinted for the
+    /// palette that has just been replaced. Both caches: the chrome and dialog glyphs, and
+    /// the file-tree icons, which bake the accent and neutral ramps.</summary>
+    public static void InvalidateIconCache()
+    {
+        Phosphor.InvalidateCache();
+        HultUI.Icons.FileIcons.InvalidateCache();
+    }
+
     /// <summary>
     /// A Phosphor glyph as real vector artwork. <paramref name="name"/> is a Phosphor
     /// icon name — use the constants in <see cref="Icons"/> rather than a literal, so a

@@ -3,6 +3,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
+using HultUI.Themes;
 using VesperCommander.Theme;
 
 namespace VesperCommander;
@@ -17,8 +18,6 @@ public partial class CommanderApp
         ("Tools", "Tools", Glyphs.PageTools),
         ("Colors", "Colors", Glyphs.PageColors),
     ];
-
-    private static readonly string[] AccentPalette = ["#9184d9", "#7fb2d9", "#8fd0b0", "#d9a06b"];
 
     private const string PreviewPanelLabel = "Preview panel — takes over the pane you are not using";
 
@@ -217,6 +216,8 @@ public partial class CommanderApp
             new(3, "7-Zip path", "archiver external",
                 () => FieldRow("7-Zip path", ReadonlyField(_draft.SevenZipPath.Length > 0 ? _draft.SevenZipPath : "— using PATH —"))),
             // Colors
+            new(4, "Colour scheme", "theme gruvbox nord dracula solarized tokyo catppuccin everforest dark light",
+                () => ThemeGrid()),
             new(4, "Accent color", "theme swatch palette",
                 () => FieldRow("Accent", AccentRow())),
             new(4, "Glow on the active pane border", "highlight ring",
@@ -360,15 +361,85 @@ public partial class CommanderApp
 
     private void ColorsPage(BoxElement page)
     {
-        page.AddChild(SectionHeader("Colors", "Marked files stay red — the one convention we don't make configurable."));
-        page.AddChild(FieldRow("Accent", AccentRow()));
-        page.AddChild(FieldRow("Marked files", SwatchStatic(Nocturne.MarkRed, "fixed")));
-        page.AddChild(FieldRow("Directory names", SwatchStatic(Nocturne.Accent200, "accent-200")));
+        page.AddChild(SectionHeader("Colour scheme",
+            "Each card is painted in its own colours. Marked files stay red in all of them."));
+        page.AddChild(ThemeGrid());
         page.AddChild(Divider());
+        page.AddChild(FieldRow("Accent", AccentRow()));
         var toggles = Flex.Column(gap: 2);
         toggles.AddChild(ToggleRow(_draft.Glow, "Glow on the active pane border", () => Flip(ref _draft.Glow)));
         toggles.AddChild(ToggleRow(_draft.Zebra, "Alternating row tint", () => Flip(ref _draft.Zebra)));
         page.AddChild(toggles);
+    }
+
+    /// <summary>
+    /// The scheme picker: one card per theme, each drawn in that theme's own ground, text and
+    /// accents. A row of names would make the user apply each one to find out what it looks
+    /// like, which is four clicks per guess.
+    /// </summary>
+    private Element ThemeGrid()
+    {
+        var scroll = ScrollView.Vertical().MaxHeight(224);
+        // Room on the right for the scrollbar, which otherwise sits on top of the last column.
+        var col = Flex.Column(gap: 8).Padding(new Thickness(0, 10, 0, 0));
+        var themes = ThemeCatalog.All;
+
+        for (int i = 0; i < themes.Count; i += 3)
+        {
+            var row = Flex.Row(gap: 8).AlignItems(AlignItems.Stretch);
+            for (int c = i; c < Math.Min(i + 3, themes.Count); c++)
+                row.AddChild(ThemeCard(themes[c]).FlexGrow(1).FlexBasis(Dimension.Px(0)));
+            // Pad the last row so two cards don't stretch to the width of three.
+            for (int pad = themes.Count; pad < i + 3; pad++)
+                row.AddChild(Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0)));
+            col.AddChild(row);
+        }
+
+        scroll.AddChild(col);
+        return scroll;
+    }
+
+    private Element ThemeCard(NamedTheme t)
+    {
+        bool on = _draft.Theme == t.Id;
+        // The card previews the palette the app would actually use, accent override included,
+        // rather than the theme's raw seeds — otherwise picking an accent leaves every card
+        // showing a colour the app is not going to paint.
+        var p = Palette.For(t, _draft.Accent);
+
+        var card = Flex.Column(gap: 6)
+            .Padding(new Thickness(8, 9, 8, 9)).CornerRadius(Nocturne.RadiusMd)
+            .Background(p.Bg).Cursor(CursorType.Pointer)
+            // Selection reads off the card's own palette, so it stays visible on a light
+            // scheme where the app's accent would not be.
+            .BorderWidth(on ? 2f : 1f)
+            .BorderColor(on ? p.Accents[3] : ColorMath.Alpha(p.Text, 0.18));
+
+        var title = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        title.AddChild(Text.New(t.Name).FontSize(11.5f)
+            .FontWeight(on ? FontWeight.Medium : FontWeight.Regular)
+            .TextColor(p.Text).MaxLines(1).TextOverflow(TextOverflow.Ellipsis).FlexGrow(1));
+        if (on) title.AddChild(Ui.Icon(Glyphs.Check, 11f, p.Accents[3]));
+        card.AddChild(title);
+
+        // A strip of surface with a few dots on it: the raised bar every view in the app
+        // has, and the colours that land on top of it.
+        var strip = Flex.Row(gap: 5).AlignItems(AlignItems.Center).Height(20)
+            .Padding(new Thickness(0, 6, 0, 6)).CornerRadius(Nocturne.RadiusSm)
+            .Background(p.Surface);
+        foreach (var dot in new[] { p.Accent, p.Accents[1], p.DiffGreen, p.MarkRed, p.MarkAmber })
+            strip.AddChild(Box.New().Width(9).Height(9).CornerRadius(5f).Background(dot).FlexShrink(0));
+        card.AddChild(strip);
+
+        card.AddChild(Text.New(t.Blurb).FontSize(9.5f)
+            .TextColor(ColorMath.Alpha(p.Text, 0.55))
+            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+
+        card.OnClick(_ => SetDraft(() => _draft.Theme = t.Id));
+        card.AutomationId = "opt-theme:" + t.Id;
+        card.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        card.AccessibleName = t.Name;
+        return card;
     }
 
     private Element DefaultViewSeg() => Seg(
@@ -376,18 +447,24 @@ public partial class CommanderApp
         ("Brief", _draft.DefaultView == ViewMode.Brief, () => SetDraft(() => _draft.DefaultView = ViewMode.Brief)),
         ("Thumbnails", _draft.DefaultView == ViewMode.Thumbnails, () => SetDraft(() => _draft.DefaultView = ViewMode.Thumbnails)));
 
+    /// <summary>Accent swatches, applied on top of whichever scheme is selected. The first is
+    /// the scheme's own — so there is always a way back from an override.</summary>
     private Element AccentRow()
     {
-        var accents = Flex.Row(gap: 8);
-        for (int i = 0; i < AccentPalette.Length; i++)
+        var theme = ThemeCatalog.ById(_draft.Theme);
+        var accents = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
+        for (int i = 0; i < Palette.AccentOverrides.Length; i++)
         {
             int idx = i;
-            var sw = Swatch(Color.FromHex(AccentPalette[i]), _draft.Accent == i,
-                () => SetDraft(() => _draft.Accent = idx));
+            var color = i == 0 ? Palette.For(theme, 0).Accent : Color.FromHex(Palette.AccentOverrides[i]);
+            var sw = Swatch(color, _draft.Accent == i, () => SetDraft(() => _draft.Accent = idx));
             sw.AutomationId = "opt-accent:" + idx;
             sw.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+            sw.AccessibleName = i == 0 ? $"{theme.Name}'s own accent" : "Accent " + i;
             accents.AddChild(sw);
         }
+        accents.AddChild(Text.New(_draft.Accent == 0 ? "the scheme's own" : "overriding the scheme")
+            .FontSize(10.5f).TextColor(Nocturne.Neutral500));
         return accents;
     }
 
@@ -447,14 +524,6 @@ public partial class CommanderApp
             .BorderColor(selected ? Nocturne.Text : Color.Transparent).BorderWidth(2f);
         s.OnClick(_ => onClick());
         return s;
-    }
-
-    private static Element SwatchStatic(Color c, string note)
-    {
-        var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
-        row.AddChild(Box.New().Width(22).Height(22).CornerRadius(6f).Background(c));
-        row.AddChild(Ui.Mono(note, 11f, Nocturne.On(0.45)));
-        return row;
     }
 
     private static Element Stepper(int value, string unit, Action dec, Action inc) =>

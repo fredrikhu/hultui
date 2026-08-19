@@ -64,7 +64,11 @@ public sealed class Settings
     public string SevenZipPath = "";        // path to 7z.exe for 7z/rar/encryption; "" = try PATH
 
     // Colors
-    public int Accent;                      // index into the accent palette
+    /// <summary>Which colour scheme, by <c>NamedTheme.Id</c>. An id this build does not know
+    /// reads back as the default rather than as an error, so a settings file that has been
+    /// round-tripped through a newer build still opens.</summary>
+    public string Theme = "nocturne";
+    public int Accent;                      // 0 = the theme's own accent; 1..3 override it
     public bool Glow;
     public bool Zebra;
 

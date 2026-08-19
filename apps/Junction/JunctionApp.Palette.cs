@@ -215,6 +215,8 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", "f · Ctrl+F",
             () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) OpenFindBar(bar); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
+        items.Add(new("action", "Action", Icons.Palette, "Appearance: colour scheme…",
+            Nocturne.Theme.Name, () => { ClosePalette(); OpenAppearance(); }));
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));

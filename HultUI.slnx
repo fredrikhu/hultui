@@ -32,6 +32,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
+    <Project Path="src/HultUI.Themes/HultUI.Themes.csproj" />
     <Project Path="src/HultUI.Syntax/HultUI.Syntax.csproj" />
     <Project Path="src/HultUI.Icons/HultUI.Icons.csproj" />
     <Project Path="src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj" />
@@ -45,6 +46,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj" />
+    <Project Path="tests/HultUI.Themes.Tests/HultUI.Themes.Tests.csproj" />
     <Project Path="tests/HultUI.Syntax.Tests/HultUI.Syntax.Tests.csproj" />
     <Project Path="tests/HultUI.Icons.Tests/HultUI.Icons.Tests.csproj" />
     <Project Path="tests/HultUI.Text.Tests/HultUI.Text.Tests.csproj" />

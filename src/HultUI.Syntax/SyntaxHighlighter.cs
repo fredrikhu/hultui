@@ -9,10 +9,10 @@ using TmTheme = TextMateSharp.Themes.Theme;   // "Theme" alone collides with Hul
 namespace HultUI.Syntax;
 
 /// <summary>
-/// Syntax tokenizer backed by TextMateSharp (VS Code's TextMate grammars, Dark+
-/// theme), shared by every HultUI app that shows code — Vesper Commander's file
-/// preview and Junction's diff both run through here, so a file colours the same way
-/// in both.
+/// Syntax tokenizer backed by TextMateSharp (VS Code's TextMate grammars), shared by
+/// every HultUI app that shows code — Vesper Commander's file preview and Junction's
+/// diff both run through here, so a file colours the same way in both. Which theme
+/// colours it is process-wide and starts as Dark+; see <see cref="SetTheme"/>.
 ///
 /// <para>Text is tokenized in full — per-line state carries block comments and
 /// multi-line strings across line breaks, so a diff hunk alone would mis-colour — and
@@ -179,14 +179,50 @@ public static class SyntaxHighlighter
 
     // ── Registry / grammar resolution (all under Gate) ───────────────────
 
+    private static ThemeName _themeName = ThemeName.DarkPlus;
+
+    /// <summary>
+    /// Which of TextMateSharp's bundled themes colours code from here on. Named rather than
+    /// typed so callers do not need a TextMateSharp reference of their own; an unrecognised
+    /// name leaves the current theme alone and answers false.
+    ///
+    /// <para>Process-wide, like everything else on this type. An app calls it when its own
+    /// palette changes — a warm chrome around VS Code Dark+ code reads as two apps stacked
+    /// on each other — and then rebuilds, since spans already handed out keep their old
+    /// colours.</para>
+    /// </summary>
+    public static bool SetTheme(string name)
+    {
+        if (!Enum.TryParse<ThemeName>(name, ignoreCase: true, out var parsed)) return false;
+
+        lock (Gate)
+        {
+            if (parsed == _themeName && _registry != null) return true;
+            _themeName = parsed;
+            // Drop the registry rather than re-theming it in place: the colour ids a rule
+            // carries are indices into the theme's own colour table, so ColorById and every
+            // grammar's cached tokenization belong to the theme that produced them.
+            _registry = null;
+            _options = null;
+            _theme = null;
+            _defaultFg = null;
+            GrammarByExt.Clear();
+            ColorById.Clear();
+        }
+        // Which extensions are highlightable does not depend on the theme, so that cache
+        // survives — and it is read outside Gate, which clearing it under Gate would not fix.
+        return true;
+    }
+
     private static void EnsureRegistry()
     {
         if (_registry != null) return;
-        _options = new RegistryOptions(ThemeName.DarkPlus);
+        _options = new RegistryOptions(_themeName);
         _registry = new Registry(_options);
         _theme = _registry.GetTheme();
-        if (_theme.GetGuiColorDictionary().TryGetValue("editor.foreground", out var fg))
-            _defaultFg = ParseHex(fg);
+        _defaultFg = _theme.GetGuiColorDictionary().TryGetValue("editor.foreground", out var fg)
+            ? ParseHex(fg)
+            : null;
     }
 
     /// <summary>

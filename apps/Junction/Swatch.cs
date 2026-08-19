@@ -15,7 +15,9 @@ public readonly record struct Swatch(string Id, string Label, Color Solid, Color
 public static class Swatches
 {
     // oklch values from the handoff converted to sRGB (see styles.css swatches()).
-    public static readonly IReadOnlyList<Swatch> All =
+    // A property, not a static readonly field: the blurple and slate entries read the live
+    // ramp, which a field would freeze at whichever theme was current on first touch.
+    public static IReadOnlyList<Swatch> All =>
     [
         new("blurple", "Blurple", Nocturne.Accent,      Nocturne.Accent200,  Nocturne.Accent800),
         new("teal",    "Teal",    Hex("#5db4be"),       Hex("#93d8e0"),      Hex("#093a3f")),

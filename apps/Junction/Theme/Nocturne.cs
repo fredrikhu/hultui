@@ -1,64 +1,88 @@
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
+using HultUI.Themes;
 
 namespace Junction.Theme;
 
 /// <summary>
-/// The <b>Nocturne</b> design system — the source of truth for the Junction
-/// git client's look. Values mirror <c>styles.css</c> from the design handoff:
-/// a single blurple accent, tonal ramps generated on one shared lightness
-/// scale, and a set of diff/status literals that sit outside the ramps.
+/// The colour register the whole app draws from. Named for <b>Nocturne</b>, the design system
+/// Junction was built in and still opens in, but it is now a window onto whichever theme is
+/// selected — Gruvbox, Nord, Solarized and the rest live in <see cref="ThemeCatalog"/>, and
+/// <see cref="Palette"/> resolves one into the values below.
 ///
-/// <para>Colours that the design expresses as
-/// <c>color-mix(in srgb, X N%, transparent)</c> are reproduced here by scaling
-/// the source colour's alpha to <c>N%</c> (srcβ mix with transparent is exactly
-/// the colour at that alpha). Use <see cref="On"/> for the common text steps and
-/// <see cref="Alpha"/> for arbitrary tints.</para>
+/// <para>Every member is a property rather than a field, and that is load-bearing: a
+/// <c>static readonly</c> freezes at type-init, so a colour captured that way would keep the
+/// startup theme for the life of the process. Call <see cref="Use"/>, then rebuild.</para>
+///
+/// <para>Colours the design expresses as <c>color-mix(in srgb, X N%, transparent)</c> are
+/// reproduced by scaling the source colour's alpha to <c>N%</c> (a source-over mix with
+/// transparent is exactly the colour at that alpha). Use <see cref="On"/> for the common text
+/// steps and <see cref="Alpha"/> for arbitrary tints.</para>
 /// </summary>
 public static class Nocturne
 {
+    private static Palette _p = Palette.NocturneDefault;
+
+    /// <summary>The theme currently in force.</summary>
+    public static NamedTheme Theme => _p.Theme;
+
+    /// <summary>
+    /// Switch to <paramref name="themeId"/>; an unknown id falls back to Nocturne, which is
+    /// what a settings file written by a different build reads as.
+    ///
+    /// <para>Three things have to follow a call to this, and none of them happen here:
+    /// <c>Ui.InvalidateIconCache()</c> because glyphs are rasterized against the ramp,
+    /// <c>app.Theme = ToHultTheme()</c> because the framework's own widgets carry their own
+    /// copy, and a rebuild.</para>
+    /// </summary>
+    public static void Use(string? themeId)
+    {
+        _p = Palette.For(ThemeCatalog.ById(themeId));
+        HultUI.Syntax.SyntaxHighlighter.SetTheme(_p.Theme.SyntaxTheme);
+    }
+
     // ── Ground / surfaces ────────────────────────────────────────────────
-    public static readonly Color Bg = Hex("#161826");        // app ground
-    public static readonly Color Surface = Hex("#232532");   // raised bars, menus, palette
-    public static readonly Color Text = Hex("#e9e9ed");
-    public static readonly Color Accent = Hex("#9184d9");
-    public static readonly Color Accent2 = Hex("#a7a1db");
+    public static Color Bg => _p.Bg;              // app ground
+    public static Color Surface => _p.Surface;    // raised bars, menus, palette
+    public static Color Text => _p.Text;
+    public static Color Accent => _p.Accent;
+    public static Color Accent2 => _p.Accent2;
 
     /// <summary>1px hairline borders — text at 16%.</summary>
-    public static readonly Color Divider = Alpha(Text, 0.16);
+    public static Color Divider => Alpha(Text, 0.16);
 
     // ── Neutral ramp ─────────────────────────────────────────────────────
-    public static readonly Color Neutral100 = Hex("#f3f5fe");
-    public static readonly Color Neutral200 = Hex("#e4e7f5");
-    public static readonly Color Neutral300 = Hex("#cfd3e5");
-    public static readonly Color Neutral400 = Hex("#b2b6ca");
-    public static readonly Color Neutral500 = Hex("#9397ab");
-    public static readonly Color Neutral600 = Hex("#75798c");
-    public static readonly Color Neutral700 = Hex("#595d6c");
-    public static readonly Color Neutral800 = Hex("#3f424d");
-    public static readonly Color Neutral900 = Hex("#292b31");
+    public static Color Neutral100 => _p.Neutrals[0];
+    public static Color Neutral200 => _p.Neutrals[1];
+    public static Color Neutral300 => _p.Neutrals[2];
+    public static Color Neutral400 => _p.Neutrals[3];
+    public static Color Neutral500 => _p.Neutrals[4];
+    public static Color Neutral600 => _p.Neutrals[5];
+    public static Color Neutral700 => _p.Neutrals[6];
+    public static Color Neutral800 => _p.Neutrals[7];
+    public static Color Neutral900 => _p.Neutrals[8];
 
     // ── Accent ramp ──────────────────────────────────────────────────────
-    public static readonly Color Accent100 = Hex("#f5f4ff");
-    public static readonly Color Accent200 = Hex("#e7e5fe");
-    public static readonly Color Accent300 = Hex("#d2cefd");
-    public static readonly Color Accent400 = Hex("#b5abfc");
-    public static readonly Color Accent500 = Hex("#968ae0");
-    public static readonly Color Accent600 = Hex("#796cbf");
-    public static readonly Color Accent700 = Hex("#5d5294");
-    public static readonly Color Accent800 = Hex("#423a6a");
-    public static readonly Color Accent900 = Hex("#2b2741");
+    public static Color Accent100 => _p.Accents[0];
+    public static Color Accent200 => _p.Accents[1];
+    public static Color Accent300 => _p.Accents[2];
+    public static Color Accent400 => _p.Accents[3];
+    public static Color Accent500 => _p.Accents[4];
+    public static Color Accent600 => _p.Accents[5];
+    public static Color Accent700 => _p.Accents[6];
+    public static Color Accent800 => _p.Accents[7];
+    public static Color Accent900 => _p.Accents[8];
 
-    // ── Second-accent ramp (mono stand-in; reads like the accent) ────────
-    public static readonly Color Accent2_100 = Hex("#f5f4ff");
-    public static readonly Color Accent2_200 = Hex("#e7e5fe");
-    public static readonly Color Accent2_300 = Hex("#d2cefd");
-    public static readonly Color Accent2_400 = Hex("#b5afe8");
-    public static readonly Color Accent2_500 = Hex("#9690c9");
-    public static readonly Color Accent2_600 = Hex("#7972a9");
-    public static readonly Color Accent2_700 = Hex("#5c5783");
-    public static readonly Color Accent2_800 = Hex("#423e5d");
-    public static readonly Color Accent2_900 = Hex("#2b293a");
+    // ── Second-accent ramp ───────────────────────────────────────────────
+    public static Color Accent2_100 => _p.Accent2s[0];
+    public static Color Accent2_200 => _p.Accent2s[1];
+    public static Color Accent2_300 => _p.Accent2s[2];
+    public static Color Accent2_400 => _p.Accent2s[3];
+    public static Color Accent2_500 => _p.Accent2s[4];
+    public static Color Accent2_600 => _p.Accent2s[5];
+    public static Color Accent2_700 => _p.Accent2s[6];
+    public static Color Accent2_800 => _p.Accent2s[7];
+    public static Color Accent2_900 => _p.Accent2s[8];
 
     // ── Radii ────────────────────────────────────────────────────────────
     public const float RadiusSm = 4f;
@@ -67,31 +91,38 @@ public static class Nocturne
     public const float RadiusRow = 6f;    // small rows / segments
     public const float RadiusWindow = 12f;
 
-    // ── Diff literals (not tokens) ───────────────────────────────────────
-    public static readonly Color DiffAddBg = new(120, 178, 116, 33);   // rgba(120,178,116,0.13)
-    public static readonly Color DiffAddText = Hex("#bfe0ba");
-    public static readonly Color DiffAddSign = Hex("#7fbf79");
-    public static readonly Color DiffDelBg = new(200, 120, 120, 33);   // rgba(200,120,120,0.13)
-    public static readonly Color DiffDelText = Hex("#e3b9b9");
-    public static readonly Color DiffDelSign = Hex("#cf8f8f");
-    public static readonly Color DiffBlankBg = Alpha(Neutral900, 0.40);
-    // Intra-line (word-level) emphasis, drawn on top of the line background.
-    public static readonly Color DiffAddHl = new(120, 178, 116, 72);   // rgba(120,178,116,0.28)
-    public static readonly Color DiffDelHl = new(200, 120, 120, 72);
+    // ── Diff colours ─────────────────────────────────────────────────────
+    // The row tint and the intra-line highlight are one hue at two opacities, so a theme
+    // cannot end up with a wash and a highlight that disagree about what "added" looks like.
+    //
+    // The highlight is written as the alpha byte rather than a percentage: the handoff calls
+    // it 28% but shipped it as 72, and 0.28 × 255 truncates to 71. One unit is invisible, but
+    // "the default scheme is exactly what it was" is worth more than the tidier literal.
+    private const byte HlAlpha = 72;
+
+    public static Color DiffAddBg => Alpha(_p.AddBase, 0.13);
+    public static Color DiffAddHl => WithAlpha(_p.AddBase, HlAlpha);   // word-level emphasis
+    public static Color DiffAddText => _p.AddText;
+    public static Color DiffAddSign => _p.AddSign;
+    public static Color DiffDelBg => Alpha(_p.DelBase, 0.13);
+    public static Color DiffDelHl => WithAlpha(_p.DelBase, HlAlpha);
+    public static Color DiffDelText => _p.DelText;
+    public static Color DiffDelSign => _p.DelSign;
+    public static Color DiffBlankBg => Alpha(Neutral900, 0.40);
+
+    private static Color WithAlpha(Color c, byte a) => new(c.R, c.G, c.B, a);
 
     // ── Find-in-text highlight ───────────────────────────────────────────
-    // Amber rather than the accent or either diff colour: a search hit lands on top of a line
-    // that is already tinted green, red or accent, and a fourth colour drawn from those three
-    // says nothing about which is which. Every hit takes the dim tint; the one the cursor is
-    // on takes the bright one, so it is findable in a screenful of matches.
-    public static readonly Color MarkAmber = Hex("#e3b341");
-    public static readonly Color FindHitBg = Alpha(MarkAmber, 0.24);
-    public static readonly Color FindCurrentBg = Alpha(MarkAmber, 0.62);
+    // Every hit takes the dim tint; the one the cursor is on takes the bright one, so it is
+    // findable in a screenful of matches.
+    public static Color MarkAmber => _p.MarkAmber;
+    public static Color FindHitBg => Alpha(MarkAmber, 0.24);
+    public static Color FindCurrentBg => Alpha(MarkAmber, 0.62);
 
-    public static readonly Color DangerText = Hex("#e39a9a");   // destructive menu items
-    public static readonly Color DangerIcon = Hex("#cf8f8f");
-    public static readonly Color AddCount = Hex("#93c98d");     // +additions
-    public static readonly Color DelCount = Hex("#cf9494");     // −deletions
+    public static Color DangerText => _p.DangerText;   // destructive menu items
+    public static Color DangerIcon => _p.DangerIcon;
+    public static Color AddCount => _p.AddCount;       // +additions
+    public static Color DelCount => _p.DelCount;       // −deletions
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -100,8 +131,7 @@ public static class Nocturne
     public static Color On(double pct) => Alpha(Text, pct);
 
     /// <summary>An arbitrary colour scaled to <paramref name="pct"/> opacity (0..1).</summary>
-    public static Color Alpha(Color c, double pct) =>
-        new(c.R, c.G, c.B, (byte)Math.Clamp(pct * 255.0, 0, 255));
+    public static Color Alpha(Color c, double pct) => ColorMath.Alpha(c, pct);
 
     /// <summary>File-status letter colour (A/M/D/R/U), matching the design.</summary>
     public static Color StatusLetter(char st) => st switch
@@ -161,6 +191,4 @@ public static class Nocturne
             CheckMarkColor = Accent100,
         },
     };
-
-    private static Color Hex(string hex) => Color.FromHex(hex);
 }

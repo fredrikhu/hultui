@@ -1,0 +1,89 @@
+# Themes
+
+`HultUI.Themes` ships a set of named colour schemes — Gruvbox, Nord, Dracula, Solarized,
+Tokyo Night, Catppuccin, Everforest, Rosé Pine — plus the tonal-ramp maths that turns a
+handful of seed colours into the scales an app styles against. Junction and Vesper Commander
+both offer the whole set; the project references nothing but `HultUI.Core`, so a palette can
+be read without depending on how anything draws.
+
+## The shape of a theme
+
+A `NamedTheme` is about a dozen values, not forty:
+
+| Field | What it is |
+|---|---|
+| `Id` | Stable key, persisted in settings. **Never rename one** — a renamed id reads back as "unknown" and silently drops the user to the default. |
+| `Name`, `Blurb` | What the picker shows. |
+| `IsDark` | Whether the ground is darker than the text. Decides which way every ramp runs, so it is not cosmetic. |
+| `Bg`, `Surface`, `Text` | The ground, the raised bars and menus, the primary text. |
+| `Neutral` | The mid-tone the grey ramp is spun from. |
+| `Accent`, `Accent2` | Primary and secondary accents. |
+| `Red`, `Green`, `Amber` | Deletions, additions, search hits — the three that carry meaning. |
+| `SyntaxTheme` | Which TextMateSharp theme colours code. |
+
+The published schemes are terminal and editor palettes: sixteen flat colours, no ramps. The
+ramps are generated, which is why a scheme reads as itself here without matching any
+particular editor's rendering of it pixel for pixel.
+
+## Ramp numbering is relative to the background
+
+This is the part that is easy to get wrong.
+
+**Step 100 is always the step furthest from the app's background, and step 900 the one
+closest to it.** On a dark theme that runs light → dark. On a light theme it runs dark →
+light.
+
+That inversion is what lets a call site mean one thing everywhere:
+
+- `Neutral900` is the hover tint that barely lifts off the ground.
+- `Neutral300` is text you can read.
+- `Accent900` backs a selected row and `Accent200` is the label on it.
+
+Number a light theme's ramp the other way and every one of those flips — the selected row
+comes out near-black with near-black text on it. `ThemeCatalogTests` pins the direction, the
+monotonicity, and the `Accent200`-on-`Accent900` contrast for every scheme in the catalogue.
+
+The neutral ramp's last two steps are pulled toward the theme's own ground
+(`Ramp.GenerateNeutral`), because those steps are hover and zebra tints: they have to sit a
+hair off the background the app actually paints, and a generic hue at 20% lightness lands
+somewhere else entirely on a ground of `#1d2021`.
+
+## How an app adopts it
+
+Each app keeps a colour register — `Junction.Theme.Nocturne`, `VesperCommander.Theme.Nocturne`
+— that every view reads. It is a facade over a `Palette` resolved for the active theme.
+
+**Every member is a property, and that is load-bearing.** A `static readonly Color` freezes at
+type-init, so a colour captured that way keeps the startup theme for the life of the process.
+The same goes for arrays built out of the register (`LanePalette`, `Swatches.All`): they are
+`=>` properties for exactly this reason.
+
+The app's own design system is not generated. Nocturne's ramps were drawn by hand in the
+design handoff, so `Palette.NocturneDefault` is a literal transcription and `Palette.For`
+returns it directly for that id; everything else goes through the generator. `ThemeTests` in
+both app test projects pins the default palette channel-for-channel, which is what keeps
+"switchable" from quietly meaning "slightly different".
+
+## Switching at runtime
+
+`Nocturne.Use(id)` swaps the palette and points `SyntaxHighlighter` at the matching code
+theme. Three things must follow it, and none of them happen inside:
+
+1. **Invalidate the icon cache.** Glyphs are rasterized in the colour they were asked for
+   (`Ui.InvalidateIconCache()` in Junction, `Icons.InvalidateCache()` in Vesper).
+2. **Reassign `Application.Theme`** from `ToHultTheme()`. The framework's built-in widgets —
+   text fields, context menus, checkboxes — read their own copy, and `StyleResolver`
+   re-applies it every style pass.
+3. **Drop cached syntax spans.** A span is a plain colour once handed out; nothing about it
+   says which theme produced it, so every tokenized diff, preview and viewer keeps the old
+   palette until it is re-tokenized.
+
+Then rebuild.
+
+## Adding a scheme
+
+Add a `NamedTheme` to `ThemeCatalog` and put it in `All`. Transcribe the scheme's published
+ground, surface, foreground, accents and red/green/amber; pick the nearest bundled
+TextMateSharp theme for `SyntaxTheme`. The catalogue tests run against every entry
+automatically — they will tell you if the text does not clear 4.5:1 on the ground or the
+surface, if `IsDark` disagrees with the ground, or if two of the semantic colours collided.

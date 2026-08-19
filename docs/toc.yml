@@ -22,6 +22,8 @@
       href: CUSTOM-CHROME.md
     - name: Icons
       href: ICONS.md
+    - name: Themes
+      href: THEMES.md
 - name: Testing and tooling
   items:
     - name: Headless testing

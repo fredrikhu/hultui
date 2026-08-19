@@ -984,7 +984,7 @@ public partial class CommanderApp
                 // such gate — coloured them fine.
                 if (HultUI.Syntax.SyntaxHighlighter.CanHighlight(focused.Name)
                     && PreviewSpans(focused.Name, excerpt) is { } codeSpans)
-                    body.Spans(codeSpans);   // VS Code Dark+ tokens (null while tokenizing off-thread)
+                    body.Spans(codeSpans);   // the theme's code colours (null while tokenizing off-thread)
                 // Focus drives the ring; handlers capture only `this`, so they stay valid
                 // when reconciliation copies them onto the retained element. Blur can fire
                 // mid-reconcile (element removed while focused, e.g. Ctrl+Q away), so defer

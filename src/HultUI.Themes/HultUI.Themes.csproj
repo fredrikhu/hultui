@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A shipped set of named colour schemes, plus the ramp maths that turns a handful of
+    seed colours into the tonal scales an app styles against. Data and arithmetic only —
+    it references no element, renderer or window, so an app can read a palette without
+    taking a dependency on how it draws.
+
+    Split out of the apps rather than left in them: Junction and Vesper Commander had
+    forked the same palette file verbatim, and a dozen schemes maintained twice is a
+    dozen chances for them to drift.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Themes</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI named colour schemes: Gruvbox, Nord, Dracula, Solarized and friends, with tonal-ramp generation.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Core\HultUI.Core.csproj" />
+  </ItemGroup>
+
+</Project>

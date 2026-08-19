@@ -20,8 +20,10 @@ namespace Junction;
 public partial class JunctionApp
 {
 
-    /// <summary>Junction's Nocturne ramp, handed to the shared file-icon library.</summary>
-    private static readonly FileIconPalette JunctionFileIconPalette = new(
+    /// <summary>Junction's Nocturne ramp, handed to the shared file-icon library. A property,
+    /// not a static readonly field: the ramp it reads changes with the theme, and a field
+    /// would hold whichever one was current when this type was first touched.</summary>
+    private static FileIconPalette JunctionFileIconPalette => new(
         Nocturne.Accent400, Nocturne.Accent500, Nocturne.Accent600,
         Nocturne.Neutral400, Nocturne.Neutral500, Nocturne.Neutral600);
 

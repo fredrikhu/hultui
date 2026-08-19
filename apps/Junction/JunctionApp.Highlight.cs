@@ -25,6 +25,19 @@ public partial class JunctionApp
     private readonly Dictionary<string, FileHighlight> _highlights = new(StringComparer.Ordinal);
     private readonly HashSet<string> _highlightsPending = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Throw away spans coloured by the previous theme. Spans are plain colours once handed
+    /// out — nothing about one says which theme produced it — so a scheme change leaves every
+    /// tokenized diff carrying the old palette until the cache is dropped and the next build
+    /// asks again. Tokenizes in flight are left alone: they land in the cache keyed as they
+    /// were, and the entry is simply asked for again.
+    /// </summary>
+    private void RetokenizeCode()
+    {
+        _highlights.Clear();
+        _highlightsPending.Clear();
+    }
+
     /// <summary>The highlight for the diff the active view is showing for
     /// <paramref name="path"/>, or null while none is available (unsupported
     /// language, or still tokenizing — in which case a rebuild follows).</summary>

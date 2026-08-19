@@ -378,7 +378,7 @@ public partial class CommanderApp : Component, IDisposable
         _viewerPan = new HorizontalPan(MarkDirty);
         _viewerFind = new FindBarState(MarkDirty);
         _diffFind = new FindBarState(MarkDirty);
-        Nocturne.SetAccent(_settings.Accent);
+        Nocturne.Use(_settings.Theme, _settings.Accent);
         _app.Theme = Nocturne.ToHultTheme();
         RebuildKeymap();
         SevenZip.ExePath = _settings.SevenZipPath;
@@ -2018,16 +2018,32 @@ public partial class CommanderApp : Component, IDisposable
 
     private void SaveOptions()
     {
+        string wasTheme = Nocturne.Theme.SyntaxTheme;
         _settings = _draft.Clone();
         SettingsStore.Save(_settings);
         SeedFindDefaults();                         // the find dialog adopts the new defaults
         RebuildKeymap();                            // apply any rebinds
-        Nocturne.SetAccent(_settings.Accent);      // retheme the accent ramp
+        Nocturne.Use(_settings.Theme, _settings.Accent);   // repaint from the chosen scheme
         Icons.InvalidateCache();                    // icons bake the ramp — re-rasterize
         _app.Theme = Nocturne.ToHultTheme();        // refresh built-in widgets
+        if (Nocturne.Theme.SyntaxTheme != wasTheme) RetokenizeCode();
         _optionsOpen = false;
         _genL++; _genR++;          // re-sort / re-filter with the new settings
         MarkDirty();
+    }
+
+    /// <summary>
+    /// Throw away syntax spans coloured by the previous theme and ask for them again. Spans
+    /// are plain colours once handed out — nothing about them says which theme produced
+    /// them — so a scheme change leaves every tokenized view carrying the old palette until
+    /// something re-reads it.
+    /// </summary>
+    private void RetokenizeCode()
+    {
+        _previewSpanExcerpt = null;              // the preview re-asks on its next build
+        _previewSpans = null;
+        if (_viewerOpen) StartViewerHighlight(_viewerLines);
+        if (_diffOpen) ComputeDiff();            // the diff does not keep the lines it tokenized
     }
 
     private void ResetOptions() { _draft = new Settings(); MarkDirty(); }

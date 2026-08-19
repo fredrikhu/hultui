@@ -244,19 +244,15 @@ public enum ExternalToolPreset
 
 public sealed class AppearanceOptions
 {
-    public ThemeMode ThemeMode { get; set; } = ThemeMode.Dark;
+    /// <summary>Which colour scheme, by <c>NamedTheme.Id</c>. An id this build does not know
+    /// reads back as the default rather than as an error, so a settings file that has been
+    /// round-tripped through a newer build still opens.</summary>
+    public string Theme { get; set; } = "nocturne";
 
     public AppearanceOptions Clone() => new()
     {
-        ThemeMode = ThemeMode,
+        Theme = Theme,
     };
-}
-
-public enum ThemeMode
-{
-    System,
-    Dark,
-    Light,
 }
 
 public static class JunctionSettings

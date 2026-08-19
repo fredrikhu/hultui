@@ -344,6 +344,7 @@ public partial class JunctionApp : Component, IDisposable
         // otherwise Nocturne window. Program.cs sets this too, before the first frame; doing
         // it here as well means anything that hosts JunctionApp directly (tests, screenshot
         // harnesses) gets the same window the user sees. Mirrors CommanderApp.
+        Nocturne.Use(_settings.Appearance.Theme);
         _app.Theme = Nocturne.ToHultTheme();
         // The window's dialogs are the real ones on a desktop and the scriptable
         // headless pair under test, so nothing needs substituting for either.
@@ -597,6 +598,7 @@ public partial class JunctionApp : Component, IDisposable
         if (_reflogOpen) Overlay("reflog", BuildReflogPanel());
         if (_submodulesOpen) Overlay("submodules", BuildSubmodulesPanel());
         if (_remotesOpen) Overlay("remotes", BuildRemotesPanel());
+        if (_appearanceOpen) Overlay("appearance", BuildAppearance());
         if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
         if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
@@ -992,6 +994,14 @@ public partial class JunctionApp : Component, IDisposable
                 return;
             }
             if (HandleRebaseKey(e)) e.StopPropagation = true;
+            return;
+        }
+
+        // The scheme picker has no fields, so Esc (or Enter — there is nothing to confirm,
+        // the pick already applied) is all it needs.
+        if (_appearanceOpen)
+        {
+            if (e.Key is KeyCode.Escape or KeyCode.Enter) { CloseAppearance(); e.StopPropagation = true; }
             return;
         }
 
