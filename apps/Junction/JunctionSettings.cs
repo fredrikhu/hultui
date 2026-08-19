@@ -51,6 +51,14 @@ public sealed class JunctionSettingsData
     // initial tile everywhere. Missing entries fall back to a deterministic seed.
     public Dictionary<string, string> RepoBadges { get; set; } = new();
 
+    /// <summary>The <c>/</c>-terminated prefix of the last branch created — <c>feature/</c>,
+    /// <c>fredrik/fix/</c> — used to seed the next New branch prompt. A team's branches almost
+    /// always share a root, and retyping it is the whole of the friction in naming a branch.
+    /// Empty when the last branch had no prefix, which is itself the answer: someone who
+    /// creates <c>hotfix</c> at the top level gets an empty field next time, not a stale root
+    /// they have to clear.</summary>
+    public string LastBranchRoot { get; set; } = "";
+
     public GeneralOptions General { get; set; } = new();
     public GitOptions Git { get; set; } = new();
     public ExternalToolOptions ExternalTools { get; set; } = new();
@@ -61,6 +69,7 @@ public sealed class JunctionSettingsData
         RepositoryPaths ??= [];
         Workspaces ??= [];
         RepoBadges ??= new();
+        LastBranchRoot ??= "";
         General ??= new GeneralOptions();
         Git ??= new GitOptions();
         ExternalTools ??= new ExternalToolOptions();
@@ -113,6 +122,7 @@ public sealed class JunctionSettingsData
         CommitFileListWidth = CommitFileListWidth,
         ChangesFileListWidth = ChangesFileListWidth,
         RepoBadges = new(RepoBadges),
+        LastBranchRoot = LastBranchRoot,
         General = General.Clone(),
         Git = Git.Clone(),
         ExternalTools = ExternalTools.Clone(),

@@ -158,13 +158,14 @@ public partial class JunctionApp
         "Create",
         (name, checkout) => DoCreateBranch(name, startPoint: null, checkout: checkout),
         Validate: BranchName.Validate,
-        CheckboxLabel: "Check out after creating"));
+        CheckboxLabel: "Check out after creating"), initial: _settings.LastBranchRoot);
 
     private void DoCreateBranch(string name, string? startPoint, bool checkout)
     {
         if (ActiveRepo is not { } repo) return;
         var res = repo.CreateBranch(name, startPoint);
         if (!res.Success) { Flash(FirstLine(res.Stderr, "Create branch failed")); return; }
+        RememberBranchRoot(name);
         if (checkout)
         {
             var co = repo.Checkout(name);
@@ -174,6 +175,16 @@ public partial class JunctionApp
         RefreshAll();
     }
 
+    /// <summary>Records the created branch's root so the next prompt opens on it. Recorded
+    /// only after git accepted the name, so a rejected one cannot poison the seed.</summary>
+    private void RememberBranchRoot(string name)
+    {
+        var root = name[..(name.LastIndexOf('/') + 1)];   // "" when there is no slash
+        if (root == _settings.LastBranchRoot) return;
+        _settings.LastBranchRoot = root;
+        Persist();
+    }
+
     private void PromptCreateBranchAt(string startPoint, string startLabel) => OpenDialog(new DialogSpec(
         "Create branch",
         $"Creates a branch at {startLabel}.",
@@ -181,7 +192,7 @@ public partial class JunctionApp
         "Create",
         (name, checkout) => DoCreateBranch(name, startPoint, checkout: checkout),
         Validate: BranchName.Validate,
-        CheckboxLabel: "Check out after creating"));
+        CheckboxLabel: "Check out after creating"), initial: _settings.LastBranchRoot);
 
     private void PromptCreateTagAt(string commit, string commitLabel) => OpenDialog(new DialogSpec(
         "Create tag",
