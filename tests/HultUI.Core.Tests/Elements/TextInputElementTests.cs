@@ -250,6 +250,64 @@ public class TextInputElementTests
         Assert.Equal("Ho", input.Text);
     }
 
+    // ──── Word navigation ────
+    //
+    // Ctrl+arrow and a double-click share one classifier, so they agree about where a word
+    // ends. These cases are branch- and path-shaped on purpose: that is the text these
+    // fields actually hold, and the whitespace-only rule this replaced crossed the whole of
+    // "feature/my-branch" in a single hop.
+
+    [Fact]
+    public void CtrlLeft_StopsAtSlashesAndHyphens()
+    {
+        var input = CreateInput("feature/my-branch");
+        input.CursorPosition = 17;
+
+        int[] stops = [11, 10, 8, 7, 0];   // |branch, |-, |my, |/, |feature
+        foreach (int expected in stops)
+        {
+            EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Left, Modifiers = KeyModifiers.Ctrl }, input);
+            Assert.Equal(expected, input.CursorPosition);
+        }
+    }
+
+    [Fact]
+    public void CtrlRight_StopsAtSlashesAndHyphens()
+    {
+        var input = CreateInput("feature/my-branch");
+        input.CursorPosition = 0;
+
+        int[] stops = [7, 8, 10, 11, 17];
+        foreach (int expected in stops)
+        {
+            EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Right, Modifiers = KeyModifiers.Ctrl }, input);
+            Assert.Equal(expected, input.CursorPosition);
+        }
+    }
+
+    [Fact]
+    public void CtrlLeft_TakesTrailingSpaceWithTheWordBeforeIt()
+    {
+        var input = CreateInput("Hello World");
+        input.CursorPosition = 11;
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Left, Modifiers = KeyModifiers.Ctrl }, input);
+        Assert.Equal(6, input.CursorPosition);   // start of "World"
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Left, Modifiers = KeyModifiers.Ctrl }, input);
+        Assert.Equal(0, input.CursorPosition);   // over the space and "Hello" together
+    }
+
+    [Fact]
+    public void CtrlBackspace_DeletesOneSegmentNotTheWholeName()
+    {
+        var input = CreateInput("feature/my-branch");
+        input.CursorPosition = 17;
+
+        EventDispatcher.Dispatch(new KeyDownEvent { Key = KeyCode.Backspace, Modifiers = KeyModifiers.Ctrl }, input);
+        Assert.Equal("feature/my-", input.Text);
+    }
+
     [Fact]
     public void DoubleClick_SelectsWord()
     {

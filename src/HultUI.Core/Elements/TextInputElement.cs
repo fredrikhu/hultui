@@ -430,23 +430,9 @@ public class TextInputElement : BoxElement
         MoveCursorTo(FindWordBoundaryRight(_cursorPos), extendSelection);
     }
 
-    private int FindWordBoundaryLeft(int from)
-    {
-        if (from <= 0) return 0;
-        int i = from - 1;
-        while (i > 0 && char.IsWhiteSpace(_text[i])) i--;
-        while (i > 0 && !char.IsWhiteSpace(_text[i - 1])) i--;
-        return i;
-    }
+    private int FindWordBoundaryLeft(int from) => WordBoundary.WordLeft(_text, from);
 
-    private int FindWordBoundaryRight(int from)
-    {
-        if (from >= _text.Length) return _text.Length;
-        int i = from;
-        while (i < _text.Length && !char.IsWhiteSpace(_text[i])) i++;
-        while (i < _text.Length && char.IsWhiteSpace(_text[i])) i++;
-        return i;
-    }
+    private int FindWordBoundaryRight(int from) => WordBoundary.WordRight(_text, from);
 
     private void DeleteSelection()
     {

@@ -262,8 +262,14 @@ TextInput.New("initial text") // Pre-filled
 - Triple-click to select all
 - Ctrl+A to select all
 - Ctrl+C / Ctrl+X / Ctrl+V for clipboard
-- Ctrl+Left/Right for word navigation
+- Ctrl+Left/Right for word navigation, Ctrl+Backspace/Delete to erase a word
 - Horizontal scroll when text overflows the box
+
+A "word" means the same thing to every one of these as it does to a double-click:
+letters, digits and `_` form one class, whitespace another, and punctuation and symbols a
+third — so `feature/my-branch` and `src/core/Foo.cs` are several stops, not one. The rule
+lives in `WordBoundary` and is shared by `TextInputElement`, `TextAreaElement` and
+`TextElement`.
 
 **Example:**
 
