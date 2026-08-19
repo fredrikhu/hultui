@@ -431,9 +431,7 @@ public partial class CommanderApp
     private float PaneContentWidthEstimate()
     {
         float win = _window.LayoutWidth > 0 ? _window.LayoutWidth : 1240f;
-        float paneW = _settings.Preview == PreviewMode.Normal
-            ? (win - RailWidth - PreviewWidth - 2f) / 2f
-            : (win - RailWidth - 1f) / 2f;
+        float paneW = (win - RailWidth - 1f) / 2f;   // two 1fr columns either way
         return paneW - 4f;
     }
 }

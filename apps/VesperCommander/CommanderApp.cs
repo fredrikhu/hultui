@@ -361,7 +361,6 @@ public partial class CommanderApp : Component, IDisposable
     }
 
     private const float RailWidth = 44f;
-    private float PreviewWidth => _settings.PreviewWidth;
     private float RowHeight => _settings.Density == Density.Compact ? 20f : 24f;
 
     public CommanderApp(Application app, Window window, string startDir, string? startDirRight = null)
@@ -524,30 +523,30 @@ public partial class CommanderApp : Component, IDisposable
         {
         var rail = BuildRail(); rail.Key = "rail";
         body.AddChild(rail);
-        if (_settings.Preview == PreviewMode.Full)
+        if (_settings.PreviewPane)
         {
-            // Full preview: only the active pane browses; the preview fills the rest.
-            // Give both a 0 flex-basis so grow splits the row 50/50 regardless of
-            // content — otherwise the pane's large content basis starves an empty
-            // preview (e.g. on "..") into a sliver.
-            // Both panes and the preview are Tab-focusable; in Full mode only the active
-            // pane is built, so Tab cycles pane ↔ preview (document order: pane, preview).
-            body.AddChild(BuildPane(_active).FlexBasis(Dimension.Px(0)));
-            body.AddChild(VDivider());
-            var pv = BuildPreview(full: true); pv.Key = "preview";
+            // The preview stands in for the pane you are *not* browsing, and shows what the
+            // pane you are browsing has selected. So it swaps sides with you: press Tab and
+            // the column you just left becomes the preview. Anchoring it to one side instead
+            // would put it under the cursor half the time and leave you reading a file on the
+            // far side of the window from the list you are moving through.
+            //
+            // Give both a 0 flex-basis so grow splits the row 50/50 regardless of content —
+            // otherwise the pane's large content basis starves an empty preview (e.g. on "..")
+            // into a sliver.
+            var pane = BuildPane(_active).FlexBasis(Dimension.Px(0));
+            var pv = BuildPreview(); pv.Key = "preview";
             pv.FlexBasis(Dimension.Px(0));
-            body.AddChild(pv);
+
+            // Document order decides Tab order, so the left column is always first.
+            if (_active == 'L') { body.AddChild(pane); body.AddChild(VDivider()); body.AddChild(pv); }
+            else { body.AddChild(pv); body.AddChild(VDivider()); body.AddChild(pane); }
         }
         else
         {
             body.AddChild(BuildPane('L'));
             body.AddChild(VDivider());
             body.AddChild(BuildPane('R'));
-            if (_settings.Preview == PreviewMode.Normal)
-            {
-                body.AddChild(VDivider());
-                var pv = BuildPreview(full: false); pv.Key = "preview"; body.AddChild(pv);
-            }
         }
         }
         body.Key = "body";
@@ -1904,7 +1903,7 @@ public partial class CommanderApp : Component, IDisposable
             new("View: Detail", Key(Cmd.ViewDetail), () => SetView(side, ViewMode.Detail)),
             new("View: Brief", Key(Cmd.ViewBrief), () => SetView(side, ViewMode.Brief)),
             new("View: Thumbnails", Key(Cmd.ViewThumbnails), () => SetView(side, ViewMode.Thumbnails)),
-            new("Cycle preview panel", Key(Cmd.Preview), CyclePreview),
+            new("Toggle preview panel", Key(Cmd.Preview), TogglePreview),
 
             // File operations.
             new($"Copy to other pane ({n})", Key(Cmd.Copy), StartCopy),
@@ -2275,16 +2274,16 @@ public partial class CommanderApp : Component, IDisposable
         else if (e.IsDir) NavigateTo(side, e.FullPath);
     }
 
-    /// <summary>Cycle the preview panel Off → Side → Full (Ctrl+Q); persists.</summary>
-    private void CyclePreview()
+    /// <summary>Show or hide the preview panel (Ctrl+Q); persists.</summary>
+    private void TogglePreview()
     {
-        _settings.Preview = (PreviewMode)(((int)_settings.Preview + 1) % 3);
+        _settings.PreviewPane = !_settings.PreviewPane;
         _previewFocused = false;
         SettingsStore.Save(_settings);
         MarkDirty();
     }
 
-    // ── Preview focus (Full mode) ────────────────────────────────────────
+    // ── Preview focus ────────────────────────────────────────────────────
     // The preview text is a read-only, selectable TextArea. Tab moves keyboard focus
     // into it (the framework consumes Tab for traversal, so it never reaches the global
     // handler); while focused it handles its own selection, copy, and arrow / page /
@@ -2596,9 +2595,9 @@ public partial class CommanderApp : Component, IDisposable
         }
     }
 
-    /// <summary>Test-hosting seam: true once the visible pane(s) have loaded. In Full
-    /// preview only the active pane renders, so only it needs to be loaded.</summary>
-    public bool ListingsReady => _settings.Preview == PreviewMode.Full
+    /// <summary>Test-hosting seam: true once the visible pane(s) have loaded. With the
+    /// preview open only the active pane renders, so only it needs to be loaded.</summary>
+    public bool ListingsReady => _settings.PreviewPane
         ? (_active == 'L' ? _loadedL : _loadedR)
         : _loadedL && _loadedR;
 

@@ -4,7 +4,6 @@ using System.Text.Json.Serialization;
 namespace VesperCommander;
 
 public enum ConflictMode { Ask, KeepNewer, AutoRename }
-public enum PreviewMode { Off, Normal, Full }   // hidden · side column · fills the right pane
 public enum SortMode { Name, Ext, Size, Date }
 public enum Density { Compact, Comfortable }
 public enum DiffToolKind { Builtin, VSCode, Junction }
@@ -29,11 +28,22 @@ public sealed class Settings
     public SortMode Sort = SortMode.Name;
     public bool SortDescending;
     public Density Density = Density.Comfortable;
-    public int PreviewWidth = 300;
     public bool DirsFirst = true;
     public bool ShowHidden;
-    public PreviewMode Preview = PreviewMode.Normal;
     public ViewMode DefaultView = ViewMode.Detail;   // new tabs/panes open in this mode
+
+    /// <summary>Whether the preview panel is showing. It takes over the pane you are not
+    /// standing in, so it is a two-state toggle rather than the old off/side/full cycle: the
+    /// narrow side column it replaces was too narrow to read a file in and cost the panes the
+    /// width instead.
+    ///
+    /// <para>Deliberately a new key rather than the old <c>Preview</c> enum. That one
+    /// persisted as a number, and a number landing in a bool throws inside
+    /// <see cref="SettingsStore.Load"/>, whose catch hands back a default
+    /// <see cref="Settings"/> — one preview rename would quietly reset every other
+    /// preference. Unknown keys are ignored, so the stale pair just falls away on the next
+    /// save.</para></summary>
+    public bool PreviewPane;
 
     // Find files (Alt+F7) — the dialog seeds itself from these and writes a change back
     // when it closes, so a depth/exclude set once carries into the next search.

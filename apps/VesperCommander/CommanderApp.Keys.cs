@@ -63,7 +63,7 @@ public partial class CommanderApp
             case Cmd.CloseTab: CloseTab(side, TabIndex(side)); break;
             case Cmd.GoUpFolder: GoUp(side); break;
             case Cmd.IntoFolder: DescendCursor(side); break;
-            case Cmd.Preview: CyclePreview(); break;
+            case Cmd.Preview: TogglePreview(); break;
             case Cmd.Refresh: RefreshPane(side); break;
             case Cmd.ToggleHidden: ToggleHidden(); break;
             case Cmd.Swap: SwapPanes(); break;

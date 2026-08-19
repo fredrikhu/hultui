@@ -577,11 +577,8 @@ public partial class CommanderApp
     private float BreadcrumbBudget()
     {
         float win = _window.LayoutWidth > 0 ? _window.LayoutWidth : 1240f;
-        // Side: two panes + 300px preview. Off: two panes. Full: one pane + preview
-        // (both 1fr) — same per-pane width as Off.
-        float paneW = _settings.Preview == PreviewMode.Normal
-            ? (win - RailWidth - PreviewWidth - 2f) / 2f
-            : (win - RailWidth - 1f) / 2f;
+        // Two 1fr columns either way — two panes, or one pane and the preview.
+        float paneW = (win - RailWidth - 1f) / 2f;
         return paneW - 2f /*pane border*/ - 24f /*breadcrumb h-padding*/ - 6f - ViewToggleWidth;
     }
 
@@ -898,25 +895,22 @@ public partial class CommanderApp
     }
 
     // ── Preview column (kicker · text excerpt · metadata) ────────────────
-    // full: the panel fills the right pane's space (Ctrl+Q "full" mode) rather than
-    // sitting as a fixed 300px column.
-    private Element BuildPreview(bool full)
+    // Stands in for the inactive pane and reads the active pane's cursor, so it is always
+    // the file you are looking at, on the side you are not.
+    private Element BuildPreview()
     {
         var side = _active;
         var list = Rows(side);
         int cur = Cursor(side);
         var focused = cur >= 0 && cur < list.Count ? list[cur] : null;
 
+        // The 1px ring (accent while the preview holds keyboard focus) is always reserved,
+        // so tabbing into it never shifts the layout.
         var col = Flex.Column(gap: 0)
             .AlignItems(AlignItems.Stretch).Overflow(Overflow.Hidden)
-            .Background(Nocturne.Surface);
-        // Full mode reserves a 1px ring (accent when the preview holds keyboard focus)
-        // so tabbing into it never shifts the layout.
-        if (full)
-            col.FlexGrow(1).BorderWidth(1f)
-                .BorderColor(_previewFocused ? Nocturne.Accent800 : Color.Transparent);
-        else
-            col.Width(PreviewWidth).FlexShrink(0);
+            .Background(Nocturne.Surface)
+            .FlexGrow(1).BorderWidth(1f)
+            .BorderColor(_previewFocused ? Nocturne.Accent800 : Color.Transparent);
 
         var kicker = "Preview" + (focused != null && !focused.IsParent ? " · " + focused.Name : "");
         col.AddChild(Text.New(kicker.ToUpperInvariant()).FontSize(10f).FlexShrink(0)
@@ -991,16 +985,14 @@ public partial class CommanderApp
                 if (HultUI.Syntax.SyntaxHighlighter.CanHighlight(focused.Name)
                     && PreviewSpans(focused.Name, excerpt) is { } codeSpans)
                     body.Spans(codeSpans);   // VS Code Dark+ tokens (null while tokenizing off-thread)
-                // Focus drives the Full-mode ring; handlers capture only `this`, so
-                // they stay valid when reconciliation copies them onto the retained
-                // element. Blur can fire mid-reconcile (element removed while focused,
-                // e.g. Ctrl+Q away), so defer the repaint rather than re-enter the differ.
+                // Focus drives the ring; handlers capture only `this`, so they stay valid
+                // when reconciliation copies them onto the retained element. Blur can fire
+                // mid-reconcile (element removed while focused, e.g. Ctrl+Q away), so defer
+                // the repaint rather than re-enter the differ.
                 body.On<FocusEvent>(_ => { _previewFocused = true; HultUI.Application.InvokeOnMainThread(MarkDirty); });
                 body.On<BlurEvent>(_ => { _previewFocused = false; HultUI.Application.InvokeOnMainThread(MarkDirty); });
-                // Click always focuses to select; only Full mode joins the Tab cycle
-                // (TabIndex -1 keeps the side preview clickable but out of Tab traversal).
                 body.IsFocusable = true;
-                body.TabIndex = full ? 0 : -1;
+                body.TabIndex = 0;
                 wrap.AddChild(body);
                 col.AddChild(wrap);
             }

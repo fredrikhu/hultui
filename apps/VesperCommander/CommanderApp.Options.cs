@@ -20,6 +20,8 @@ public partial class CommanderApp
 
     private static readonly string[] AccentPalette = ["#9184d9", "#7fb2d9", "#8fd0b0", "#d9a06b"];
 
+    private const string PreviewPanelLabel = "Preview panel — takes over the pane you are not using";
+
     // ── Options window ───────────────────────────────────────────────────
     private Element BuildOptions()
     {
@@ -184,15 +186,8 @@ public partial class CommanderApp
                 () => FieldRow("Row density", Seg(
                     ("Compact", _draft.Density == Density.Compact, () => SetDraft(() => _draft.Density = Density.Compact)),
                     ("Comfortable", _draft.Density == Density.Comfortable, () => SetDraft(() => _draft.Density = Density.Comfortable))))),
-            new(1, "Preview width", "panel size px",
-                () => FieldRow("Preview width", Stepper(_draft.PreviewWidth, "px",
-                    () => SetDraft(() => _draft.PreviewWidth = Math.Max(220, _draft.PreviewWidth - 20)),
-                    () => SetDraft(() => _draft.PreviewWidth = Math.Min(460, _draft.PreviewWidth + 20))))),
-            new(1, "Preview panel", "off side full image",
-                () => FieldRow("Preview panel", Seg(
-                    ("Off", _draft.Preview == PreviewMode.Off, () => SetDraft(() => _draft.Preview = PreviewMode.Off)),
-                    ("Side", _draft.Preview == PreviewMode.Normal, () => SetDraft(() => _draft.Preview = PreviewMode.Normal)),
-                    ("Full", _draft.Preview == PreviewMode.Full, () => SetDraft(() => _draft.Preview = PreviewMode.Full))))),
+            new(1, "Preview panel", "off on image file inactive pane",
+                () => ToggleRow(_draft.PreviewPane, PreviewPanelLabel, () => Flip(ref _draft.PreviewPane), "Ctrl+Q")),
             new(1, "Default view", "brief thumbnail grid detail mode layout",
                 () => FieldRow("Default view", DefaultViewSeg())),
             new(1, "Directories first", "folders sort order",
@@ -287,14 +282,8 @@ public partial class CommanderApp
             ("Compact", _draft.Density == Density.Compact, () => SetDraft(() => _draft.Density = Density.Compact)),
             ("Comfortable", _draft.Density == Density.Comfortable, () => SetDraft(() => _draft.Density = Density.Comfortable)))));
         page.AddChild(FieldRow("Default view", DefaultViewSeg()));
-        page.AddChild(FieldRow("Preview width", Stepper(_draft.PreviewWidth, "px",
-            () => SetDraft(() => _draft.PreviewWidth = Math.Max(220, _draft.PreviewWidth - 20)),
-            () => SetDraft(() => _draft.PreviewWidth = Math.Min(460, _draft.PreviewWidth + 20)))));
-        page.AddChild(FieldRow("Preview panel", Seg(
-            ("Off", _draft.Preview == PreviewMode.Off, () => SetDraft(() => _draft.Preview = PreviewMode.Off)),
-            ("Side", _draft.Preview == PreviewMode.Normal, () => SetDraft(() => _draft.Preview = PreviewMode.Normal)),
-            ("Full", _draft.Preview == PreviewMode.Full, () => SetDraft(() => _draft.Preview = PreviewMode.Full)))));
         var toggles = Flex.Column(gap: 2);
+        toggles.AddChild(ToggleRow(_draft.PreviewPane, PreviewPanelLabel, () => Flip(ref _draft.PreviewPane), "Ctrl+Q"));
         toggles.AddChild(ToggleRow(_draft.DirsFirst, "Directories first", () => Flip(ref _draft.DirsFirst)));
         toggles.AddChild(ToggleRow(_draft.ShowHidden, "Show hidden and system files", () => Flip(ref _draft.ShowHidden)));
         page.AddChild(toggles);

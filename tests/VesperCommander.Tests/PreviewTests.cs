@@ -28,6 +28,10 @@ public class PreviewTests
         t.WriteLeft(name, content);
         t.WriteLeft("aaa-placeholder.txt", "x\n");   // somewhere else to start
         t.Open();
+        // The panel is off until asked for, and nothing reads a file while it is hidden.
+        // Set it rather than toggling: TogglePreview writes settings.json, which every
+        // fixture in the run loads.
+        t.Field<Settings>("_settings").PreviewPane = true;
         t.PutCursorOn('L', "aaa-placeholder.txt");
         t.Session.PumpFrames(2);
 
