@@ -18,15 +18,18 @@ public partial class CommanderApp
     /// <summary>What a shell command should act on: the marked set when there is one, else the
     /// row under the cursor — the same rule <see cref="OperationTargets"/> gives F5, F6 and F8,
     /// so a marked selection means the same thing everywhere. Null (with a notice posted) when
-    /// there is nothing the shell can act on.</summary>
-    private List<string>? ShellScope(char side, string noun)
+    /// there is nothing the shell can act on.
+    ///
+    /// <para><paramref name="anchor"/> is set when a pointer opened the menu on a particular
+    /// row, which the cursor rule can't express — see <see cref="ContextTargets"/>.</para></summary>
+    private List<string>? ShellScope(char side, string noun, FileEntry? anchor = null)
     {
         if (!ShellContextMenu.IsSupported)
         {
             Notice($"{noun} is a Windows shell feature");
             return null;
         }
-        var items = OperationTargets(side);
+        var items = anchor is null ? OperationTargets(side) : ContextTargets(side, anchor);
         if (items.Count == 0) return null;    // an empty folder, or the cursor on ".."
         if (items.Any(e => ArchivePath.InArchive(e.FullPath)))
         {
@@ -35,6 +38,24 @@ public partial class CommanderApp
             return null;
         }
         return items.Select(e => e.FullPath).ToList();
+    }
+
+    /// <summary>What a menu opened *on a row* acts on. A right-hold names one row with the
+    /// pointer, so that row is the target — unless it is one of the marked ones, where the
+    /// gesture means the whole marked set, the way it does in Explorer.
+    ///
+    /// <para>Without this the hold fell back to <see cref="OperationTargets"/>, which reads the
+    /// <em>cursor</em> row. The right press deliberately doesn't move the cursor (it starts a
+    /// mark sweep), so the menu opened for whatever row the cursor happened to be on — and when
+    /// that was "..", as it is on every freshly entered folder, <c>ShellScope</c> returned empty
+    /// and no menu appeared at all.</para></summary>
+    private IReadOnlyList<FileEntry> ContextTargets(char side, FileEntry anchor)
+    {
+        if (anchor.IsParent) return [];
+        var marks = Marks(side);
+        if (marks.Contains(MarkKey(anchor)))
+            return Listing(side).Where(e => !e.IsParent && marks.Contains(MarkKey(e))).ToList();
+        return [anchor];
     }
 
     private void Notice(string message)
@@ -72,10 +93,11 @@ public partial class CommanderApp
         ShowContextMenuAt(side, x, y);
     }
 
-    /// <summary>Open the shell menu at a point in window (layout) coordinates.</summary>
-    private void ShowContextMenuAt(char side, float winX, float winY)
+    /// <summary>Open the shell menu at a point in window (layout) coordinates.
+    /// <paramref name="anchor"/> is the row the pointer named, when a pointer opened it.</summary>
+    private void ShowContextMenuAt(char side, float winX, float winY, FileEntry? anchor = null)
     {
-        if (ShellScope(side, "Context menu") is not { } paths) return;
+        if (ShellScope(side, "Context menu", anchor) is not { } paths) return;
 
         // Layout space is logical; the window's client area is in physical pixels.
         float scale = _window.DisplayScale > 0 ? _window.DisplayScale : 1f;
@@ -98,12 +120,13 @@ public partial class CommanderApp
     private System.Threading.Timer? _holdTimer;
     private bool _holdArmed;
     private char _holdSide;
+    private FileEntry? _holdEntry;         // the row the press landed on — what the menu acts on
     private float _holdX, _holdY;
 
-    private void ArmContextHold(char side, float x, float y)
+    private void ArmContextHold(char side, FileEntry entry, float x, float y)
     {
         if (!ShellContextMenu.IsSupported) return;
-        _holdArmed = true; _holdSide = side; _holdX = x; _holdY = y;
+        _holdArmed = true; _holdSide = side; _holdEntry = entry; _holdX = x; _holdY = y;
         _holdTimer ??= new System.Threading.Timer(
             _ => HultUI.Application.InvokeOnMainThread(FireContextHold));
         _holdTimer.Change(HoldMs, System.Threading.Timeout.Infinite);
@@ -126,10 +149,15 @@ public partial class CommanderApp
 
     private void FireContextHold()
     {
-        if (!_holdArmed) return;
+        if (!_holdArmed || _holdEntry is not { } entry) return;
         _holdArmed = false;
+        // Revert first: it decides whether this row counts as marked, and a row that *was*
+        // marked before the press had its mark taken off by the optimistic toggle.
         RevertRightMark();
-        ShowContextMenuAt(_holdSide, _holdX, _holdY);
+        // Move the cursor onto the row the menu is about, so the highlight and the menu agree.
+        int idx = IndexOfPath(Rows(_holdSide), entry.FullPath);
+        if (idx >= 0) SetCursor(_holdSide, idx);
+        ShowContextMenuAt(_holdSide, _holdX, _holdY, entry);
     }
 
     /// <summary>Undo the marks this right-drag applied and end it. Movement cancels the hold,

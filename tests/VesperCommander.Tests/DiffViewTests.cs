@@ -1320,9 +1320,23 @@ public class DiffViewTests
         /// <see cref="Call"/>, for tests whose subject has no UI surface to drive.</summary>
         public object? Invoke(string method, params object?[] args) => Call(method, args);
 
-        private object? Call(string method, params object?[] args) =>
-            typeof(CommanderApp).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!
-                .Invoke(_app, args);
+        private object? Call(string method, params object?[] args)
+        {
+            var mi = typeof(CommanderApp).GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!;
+            // Fill in optional parameters the caller left off. Reflection, unlike the compiler,
+            // doesn't apply defaults — so without this a method growing an optional argument
+            // fails every test that already reaches it, with a parameter-count mismatch that
+            // says nothing about what changed.
+            var ps = mi.GetParameters();
+            if (args.Length < ps.Length)
+            {
+                var full = new object?[ps.Length];
+                Array.Copy(args, full, args.Length);
+                for (int i = args.Length; i < ps.Length; i++) full[i] = ps[i].DefaultValue;
+                args = full;
+            }
+            return mi.Invoke(_app, args);
+        }
 
         public void Dispose()
         {

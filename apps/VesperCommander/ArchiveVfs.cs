@@ -159,7 +159,12 @@ public static class ArchiveVfs
     /// <summary>Open a member's bytes for reading (extract / preview). Caller disposes.</summary>
     public static Stream? OpenEntry(string archiveFile, string internalPath, string? password, bool sevenZip)
     {
-        if (Resolve(archiveFile, internalPath, password, sevenZip) is not var (disk, inner)) return null;
+        // The nested walk stops *before* the last segment here. When the member itself is an
+        // archive — a zip inside a zip — what a read wants is that file's own bytes, not a
+        // listing of what is in it. Hopping would unpack it to temp and then look for a member
+        // called "", which is why extracting a zip out of a zip failed outright.
+        if (Resolve(archiveFile, internalPath, password, sevenZip, hopLast: false) is not var (disk, inner))
+            return null;
         return OpenEntryDirect(disk, inner, password, sevenZip);
     }
 
@@ -169,11 +174,43 @@ public static class ArchiveVfs
         if (ext is ".zip" && !sevenZip)
         {
             var zip = ZipFile.OpenRead(archiveFile);
-            var entry = zip.GetEntry(internalPath.Replace('\\', '/'));
+            var entry = FindMember(zip, internalPath);
             if (entry is null) { zip.Dispose(); return null; }
             return new ArchiveEntryStream(zip, entry.Open());
         }
         return sevenZip ? SevenZip.OpenEntry(archiveFile, internalPath, password) : null;
+    }
+
+    /// <summary>
+    /// The member at <paramref name="internalPath"/>, found the way the listing built that path.
+    ///
+    /// <para><c>ZipArchive.GetEntry</c> matches the stored name character for character, and the
+    /// paths this VFS hands around are not stored names — <see cref="ArchivePath.SafeMemberPath"/>
+    /// has folded away "." segments and turned every separator into "/". So a zip that stores
+    /// <c>./notes/a.txt</c> or the backslash-separated <c>notes\a.txt</c> (both of which real
+    /// zippers write) listed fine and then failed to extract, one member at a time, reported as
+    /// "archive member unreadable".</para>
+    ///
+    /// <para>Stored-name lookup is still tried first: it is the common case and goes through the
+    /// archive's own index. The scan behind it compares normalized to normalized, ordinal before
+    /// case-insensitive so that two members differing only in case still resolve to the right one.</para>
+    /// </summary>
+    private static ZipArchiveEntry? FindMember(ZipArchive zip, string internalPath)
+    {
+        string want = (ArchivePath.SafeMemberPath(internalPath) ?? internalPath.Replace('\\', '/')).TrimEnd('/');
+        if (want.Length == 0) return null;
+        if (zip.GetEntry(want) is { } direct) return direct;
+
+        ZipArchiveEntry? insensitive = null;
+        foreach (var e in zip.Entries)
+        {
+            if (ArchivePath.SafeMemberPath(e.FullName) is not { } full) continue;
+            var norm = full.TrimEnd('/');
+            if (string.Equals(norm, want, StringComparison.Ordinal)) return e;
+            if (insensitive is null && string.Equals(norm, want, StringComparison.OrdinalIgnoreCase))
+                insensitive = e;
+        }
+        return insensitive;
     }
 
     // ── Nested archives (archive inside an archive) ──────────────────────
@@ -196,15 +233,20 @@ public static class ArchiveVfs
     /// <summary>Where nested archives are unpacked for the session.</summary>
     internal static string NestedTempDir => Path.Combine(Path.GetTempPath(), "vesper-nested");
 
-    private static (string disk, string inner)? Resolve(string archiveFile, string internalPath, string? password, bool sevenZip)
+    /// <param name="hopLast">Whether a final segment that is itself an archive counts as a hop.
+    /// True for listing — descending into <c>outer.zip\inner.zip</c> should show what is inside
+    /// inner.zip. False for reading bytes, where that same path names a file to extract.</param>
+    private static (string disk, string inner)? Resolve(string archiveFile, string internalPath,
+        string? password, bool sevenZip, bool hopLast = true)
     {
         string current = archiveFile;
         var segs = internalPath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
         var acc = new List<string>();
-        foreach (var seg in segs)
+        for (int i = 0; i < segs.Length; i++)
         {
+            string seg = segs[i];
             acc.Add(seg);
-            if (IsArchiveFile(seg))
+            if (IsArchiveFile(seg) && (hopLast || i < segs.Length - 1))
             {
                 var temp = ExtractNested(current, string.Join('\\', acc), password, sevenZip);
                 if (temp == null) return null;   // couldn't extract the nested archive
@@ -506,12 +548,15 @@ public static class ArchiveVfs
     {
         using var zip = ZipFile.Open(archiveFile, ZipArchiveMode.Update);
         int removed = 0;
-        // Same case-insensitive matching as the listing, so what the pane showed under a
-        // folder is what leaves with it. Directory-marker entries end with '/', which the
-        // TrimEnd on `norm` folds into the exact match.
+        // Normalized the same way the listing normalized it — through SafeMemberPath, not just
+        // a separator swap — so a member the pane showed as "notes/a.txt" is still matched when
+        // the archive stored it as "./notes/a.txt". Matching is case-insensitive like the
+        // listing, so what the pane showed under a folder is what leaves with it. Directory
+        // markers end with '/', which the TrimEnd folds into the exact match.
         foreach (var entry in zip.Entries.ToList())
         {
-            var norm = entry.FullName.Replace('\\', '/').TrimEnd('/');
+            if (ArchivePath.SafeMemberPath(entry.FullName) is not { } full) continue;
+            var norm = full.TrimEnd('/');
             if (targets.Any(t => norm.Equals(t, StringComparison.OrdinalIgnoreCase)
                               || norm.StartsWith(t + "/", StringComparison.OrdinalIgnoreCase)))
             { entry.Delete(); removed++; }

@@ -776,20 +776,8 @@ public partial class CommanderApp : Component, IDisposable
         var input = raw.Trim().Trim('"');
         if (input.Length == 0) return "Enter a path.";
 
-        string resolved;
-        try
-        {
-            var p = Environment.ExpandEnvironmentVariables(input);
-            if (p == "~") p = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            else if (p.StartsWith("~/") || p.StartsWith("~\\"))
-                p = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), p[2..]);
-            // A bare drive ("d:") is drive-relative — it would resolve against the process's
-            // per-drive working directory, not the root the user almost certainly means.
-            if (p.Length == 2 && p[1] == ':' && char.IsAsciiLetter(p[0]))
-                p += System.IO.Path.DirectorySeparatorChar;
-            resolved = System.IO.Path.GetFullPath(p, Dir(side));
-        }
-        catch (Exception ex) { return ex.Message; }
+        string? resolved = ResolveTypedPath(side, input, out var resolveError);
+        if (resolved == null) return resolveError;
 
         if (Directory.Exists(resolved))
         {
@@ -813,6 +801,31 @@ public partial class CommanderApp : Component, IDisposable
             return null;
         }
         return $"Path not found: {resolved}";
+    }
+
+    /// <summary>Turn a path the user typed into an absolute one, without asking whether it
+    /// exists. "~" and %VAR% expand, a relative path (incl. "..") resolves against
+    /// <paramref name="side"/>'s folder, and a bare drive letter means that drive's root —
+    /// left alone it would resolve against the process's per-drive working directory, which
+    /// is almost never the folder anyone means. Null with <paramref name="error"/> set when
+    /// the text can't be made into a path at all.
+    ///
+    /// <para>Shared by Ctrl+G and the F5 / F6 destination box so both read a typed path the
+    /// same way.</para></summary>
+    private string? ResolveTypedPath(char side, string input, out string error)
+    {
+        error = "";
+        try
+        {
+            var p = Environment.ExpandEnvironmentVariables(input);
+            if (p == "~") p = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            else if (p.StartsWith("~/") || p.StartsWith("~\\"))
+                p = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), p[2..]);
+            if (p.Length == 2 && p[1] == ':' && char.IsAsciiLetter(p[0]))
+                p += System.IO.Path.DirectorySeparatorChar;
+            return System.IO.Path.GetFullPath(p, Dir(side));
+        }
+        catch (Exception ex) { error = ex.Message; return null; }
     }
 
     /// <summary>Ctrl+Shift+C — put the pane's current folder path on the clipboard. Uses the
@@ -1494,20 +1507,78 @@ public partial class CommanderApp : Component, IDisposable
             return;
         }
 
-        _confirm = new ConfirmSpec(
-            $"Move {(items.Count == 1 ? "item" : "items")}",
-            $"Move {SelectionLabel(side)} to\n{dest}",
-            "Move", Danger: true,
-            () =>
-            {
-                _confirm = null;
-                var op = new TransferOp(items) { IsMove = true, Source = side, DestDir = dest };
-                _op = op;
-                _progressOpen = true;
-                MarkDirty();
-                System.Threading.Tasks.Task.Run(() => RunTransfer(op));
-            });
+        OpenTransferPrompt(side, items, dest, move: true);
+    }
+
+    // ── The F5 / F6 destination dialog ───────────────────────────────────
+    // Both keys stop here before anything is written. The other pane's folder is filled in,
+    // so Enter still means what the key has always meant — but it is a text field, which is
+    // the point: a copy can be aimed somewhere neither pane is standing without walking a
+    // pane there first. Move used to show a fixed yes/no confirm and copy showed nothing at
+    // all; they are one dialog now with a different verb.
+    //
+    // The path is read the same way Ctrl+G reads one (ResolveTypedPath), so "..", "~",
+    // %TEMP% and a relative name all work, resolved against the *source* pane's folder.
+
+    // The exact destination the last confirm offered to create. A missing folder takes two
+    // confirms rather than one: a typo in a path is a quiet way to scatter empty folders
+    // across a disk, and the second press costs nothing when the folder really is new.
+    private string? _transferCreateOffered;
+
+    private void OpenTransferPrompt(char side, List<FileEntry> items, string dest, bool move, bool extract = false)
+    {
+        string verb = extract ? "Extract" : move ? "Move" : "Copy";
+        string label = items.Count == 1 ? $"\"{items[0].Name}\"" : $"{items.Count} items";
+        _namePromptValue = dest;
+        _namePromptError = null;
+        _transferCreateOffered = null;
+        _namePrompt = new NamePromptSpec(
+            $"{verb} {label}",
+            $"from {Dir(side)}",
+            verb,
+            target => CommitTransfer(side, items, target, move, extract),
+            Placeholder: "Destination folder");
+        _pendingNamePromptFocus = true;
         MarkDirty();
+    }
+
+    /// <summary>Commit the F5 / F6 dialog: resolve what was typed, then start the transfer.
+    /// Returns an error string (the dialog stays open showing it) or null on success.</summary>
+    private string? CommitTransfer(char side, List<FileEntry> items, string rawTarget, bool move, bool extract)
+    {
+        var typed = rawTarget.Trim().Trim('"');
+        if (typed.Length == 0) return "Enter a destination folder.";
+        if (ResolveTypedPath(side, typed, out var resolveError) is not { } dest) return resolveError;
+
+        // Adding *into* an archive is a different operation with its own backend (it repacks
+        // rather than writes files), and it is reached by pointing a pane at the archive.
+        if (ArchivePath.InArchive(dest))
+            return "Open the archive in the other pane to add to it.";
+        if (!extract && PathEquals(dest, Dir(side)) && !InResults(side))
+            return items.Count == 1 ? "That is where it already is." : "That is where they already are.";
+
+        if (!Directory.Exists(dest))
+        {
+            if (!PathEquals(_transferCreateOffered, dest))
+            {
+                _transferCreateOffered = dest;
+                return $"{dest} doesn't exist — {(extract ? "Extract" : move ? "Move" : "Copy")} again to create it.";
+            }
+            try { Directory.CreateDirectory(dest); }
+            catch (Exception ex) { return FileOps.Clean(ex.Message); }
+        }
+
+        if (extract) { StartArchiveTransfer(items, dest, side); return null; }
+
+        items = TransferItemsFrom(side, items, dest);
+        if (items.Count == 0) return "Nothing left to send to that folder.";
+
+        var op = new TransferOp(items) { IsMove = move, Source = side, DestDir = dest };
+        _op = op;
+        _progressOpen = true;
+        MarkDirty();
+        System.Threading.Tasks.Task.Run(() => RunTransfer(op));
+        return null;
     }
 
     // ── Copy (F5): background streamed transfer with the progress overlay ──
@@ -1530,11 +1601,7 @@ public partial class CommanderApp : Component, IDisposable
             if (CanAddToArchive(other)) StartArchiveAdd(side, other, items, move: false);
             return;
         }
-        var op = new TransferOp(items) { IsMove = false, Source = side, DestDir = dest };
-        _op = op;
-        _progressOpen = true;
-        MarkDirty();
-        System.Threading.Tasks.Task.Run(() => RunTransfer(op));
+        OpenTransferPrompt(side, items, dest, move: false);
     }
 
     /// <summary>The copy/move worker — runs off the UI thread, reporting progress and
@@ -2279,7 +2346,12 @@ public partial class CommanderApp : Component, IDisposable
         MarkDirty();
     }
 
-    /// <summary>Descend into the folder under the cursor (Ctrl+PageDown); ".." goes up.</summary>
+    /// <summary>Descend into the folder under the cursor (Ctrl+PageDown); ".." goes up.
+    ///
+    /// <para>An archive counts as a folder here, the same way it does for Enter: Ctrl+PageDown
+    /// is "go into this", and a zip is a thing you go into. The difference from Enter is what
+    /// it does <em>not</em> do — a plain file is left alone rather than handed to the shell, so
+    /// the chord is safe to lean on while walking a tree.</para></summary>
     private void DescendCursor(char side)
     {
         var list = Rows(side);
@@ -2288,6 +2360,8 @@ public partial class CommanderApp : Component, IDisposable
         var e = list[cur];
         if (e.IsParent) GoUp(side);
         else if (e.IsDir) NavigateTo(side, e.FullPath);
+        else if (ArchiveVfs.IsArchiveFile(e.FullPath) && (File.Exists(e.FullPath) || InArchive(side)))
+            NavigateTo(side, e.FullPath);   // incl. an archive nested inside the one being browsed
     }
 
     /// <summary>Show or hide the preview panel (Ctrl+Q); persists.</summary>

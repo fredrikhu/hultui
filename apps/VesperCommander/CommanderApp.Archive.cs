@@ -115,8 +115,8 @@ public partial class CommanderApp
         System.Threading.Tasks.Task.Run(() => RunTransfer(op));
     }
 
-    /// <summary>F5 while inside an archive — extract the selection to the other pane, via
-    /// the copy confirm (verb "Extract").</summary>
+    /// <summary>F5 while inside an archive — extract the selection to the other pane, through
+    /// the same destination dialog F5 shows anywhere else (verb "Extract").</summary>
     private void StartExtract()
     {
         char side = _active, other = side == 'L' ? 'R' : 'L';
@@ -124,11 +124,7 @@ public partial class CommanderApp
         if (items.Count == 0) return;
         var dest = Dir(other);
         if (InArchiveBlock(other) || LockedBlock(other, "extract into a locked tab") || ResultsBlock(other)) return;
-        string from = ArchivePath.TryParse(Dir(side)) is { } a ? System.IO.Path.GetFileName(a.ArchiveFile) : "the archive";
-        string label = items.Count == 1 ? $"\"{items[0].Name}\"" : $"{items.Count} items";
-        _confirm = new ConfirmSpec("Extract", $"Extract {label} from {from} to\n{dest}", "Extract", Danger: false,
-            () => { _confirm = null; StartArchiveTransfer(items, dest, side); });
-        MarkDirty();
+        OpenTransferPrompt(side, items, dest, move: false, extract: true);
     }
 
     /// <summary>Alt+F9 — extract the archive under the cursor (or, when already inside one,

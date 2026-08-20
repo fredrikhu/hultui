@@ -221,6 +221,7 @@ public class FindToPaneTests
         t.Press(KeyCode.L, KeyModifiers.Ctrl);
         t.Press(KeyCode.A, KeyModifiers.Ctrl);          // mark them all
         t.Press(KeyCode.F5);
+        t.Press(KeyCode.Enter);                          // the destination dialog
         t.Session.PumpUntil(() => t.Field<object?>("_op") == null, TimeSpan.FromSeconds(30));
 
         Assert.Equal("a", File.ReadAllText(Path.Combine(t.Right, "alpha.txt")));

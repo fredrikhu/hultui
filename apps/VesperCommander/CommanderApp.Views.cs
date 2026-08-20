@@ -415,7 +415,7 @@ public partial class CommanderApp
             if (ev.Button == 2)
             {
                 BeginRightMark(side, e);
-                ArmContextHold(side, ev.Position.X, ev.Position.Y);
+                ArmContextHold(side, e, ev.Position.X, ev.Position.Y);
                 return;
             }
             if (ev.Button != 0) return;
