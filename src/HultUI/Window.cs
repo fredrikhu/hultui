@@ -231,6 +231,19 @@ public sealed class Window : IOverlayHost, IDisposable
 
     public event Action? Closed;
 
+    /// <summary>
+    /// Raised when the OS makes this window the foreground one — the user clicked it, or
+    /// alt-tabbed back to it. Fires on the UI thread, once per activation.
+    ///
+    /// <para>This is the <em>window</em> becoming active, not an element taking keyboard
+    /// focus (<see cref="Element.Focus"/>). Apps use it to re-check the world they left
+    /// behind: a file another program may have changed while they were in the background,
+    /// a folder that may have been written to, a clipboard that may have new contents.</para>
+    /// </summary>
+    public event Action? Activated;
+
+    internal void RaiseActivated() => Activated?.Invoke();
+
     // ──── Env-driven tracing (HULTUI_TRACE=<path>) ────
     // When set, recording starts at window creation and the trace is written to
     // the given path when the window is disposed. Lets benchmarks and automation

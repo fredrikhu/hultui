@@ -167,6 +167,94 @@ public class TransferPromptTests
         Assert.NotNull(PromptError(t));
     }
 
+    /// <summary>Copying *into* an archive was the one destination F5 never asked about: it
+    /// skipped the confirm entirely and started packing on the keypress. It is just a path to
+    /// the dialog now.</summary>
+    [Fact]
+    public void CopyingIntoAnArchiveAsksFirstAndThenPacks()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.WriteLeft("a.txt", "A");
+        var zip = Path.Combine(t.Right, "box.zip");
+        using (var z = ZipFile.Open(zip, ZipArchiveMode.Create))
+            using (var w = new StreamWriter(z.CreateEntry("seed.txt").Open())) w.Write("s");
+        t.Open();
+        t.Invoke("NavigateTo", 'R', zip, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Any(r => r.Name == "seed.txt"), TimeSpan.FromSeconds(10));
+        t.PutCursorOn('L', "a.txt");
+
+        t.Press(KeyCode.F5);
+
+        Assert.True(PromptOpen(t));
+        Assert.Equal(zip, PromptValue(t));
+        using (var before = ZipFile.OpenRead(zip))
+            Assert.Null(before.GetEntry("a.txt"));       // nothing packed on the keypress
+
+        t.Press(KeyCode.Enter);
+        RunToCompletion(t);
+
+        using var after = ZipFile.OpenRead(zip);
+        Assert.NotNull(after.GetEntry("a.txt"));
+        Assert.NotNull(after.GetEntry("seed.txt"));      // and the archive keeps what it had
+    }
+
+    /// <summary>One archive can't be poured into another: the add writers read their sources
+    /// off disk, and an archive member has no disk file. Refused before the dialog opens, since
+    /// the destination is already known to be one — there is nothing to type your way out of.</summary>
+    [Fact]
+    public void ExtractingIntoAnotherArchiveIsRefusedBeforeTheDialogOpens()
+    {
+        using var t = new DiffViewTests.Fixture();
+        var from = Path.Combine(t.Left, "from.zip");
+        using (var z = ZipFile.Open(from, ZipArchiveMode.Create))
+            using (var w = new StreamWriter(z.CreateEntry("readme.txt").Open())) w.Write("hello");
+        var into = Path.Combine(t.Right, "into.zip");
+        using (var z = ZipFile.Open(into, ZipArchiveMode.Create))
+            using (var w = new StreamWriter(z.CreateEntry("seed.txt").Open())) w.Write("s");
+        t.Open();
+        t.Invoke("NavigateTo", 'R', into, null, false);
+        t.Session.PumpUntil(() => t.Rows('R').Any(r => r.Name == "seed.txt"), TimeSpan.FromSeconds(10));
+
+        t.PutCursorOn('L', "from.zip");
+        t.Press(KeyCode.Enter);
+        t.Session.PumpUntil(() => t.Rows('L').Any(r => r.Name == "readme.txt"), TimeSpan.FromSeconds(10));
+        t.PutCursorOn('L', "readme.txt");
+
+        t.Press(KeyCode.F5);
+
+        Assert.False(PromptOpen(t));
+        Assert.NotNull(t.Field<string?>("_notice"));
+        using var untouched = ZipFile.OpenRead(into);
+        Assert.Null(untouched.GetEntry("readme.txt"));
+    }
+
+    /// <summary>And typing one in reaches the same refusal, in the dialog this time — the box
+    /// must not accept a destination the key would have turned down.</summary>
+    [Fact]
+    public void TypingAnArchiveIntoTheExtractDialogIsRefusedToo()
+    {
+        using var t = new DiffViewTests.Fixture();
+        var from = Path.Combine(t.Left, "from.zip");
+        using (var z = ZipFile.Open(from, ZipArchiveMode.Create))
+            using (var w = new StreamWriter(z.CreateEntry("readme.txt").Open())) w.Write("hello");
+        var into = Path.Combine(t.Right, "into.zip");
+        using (var z = ZipFile.Open(into, ZipArchiveMode.Create))
+            using (var w = new StreamWriter(z.CreateEntry("seed.txt").Open())) w.Write("s");
+        t.Open();
+
+        t.PutCursorOn('L', "from.zip");
+        t.Press(KeyCode.Enter);
+        t.Session.PumpUntil(() => t.Rows('L').Any(r => r.Name == "readme.txt"), TimeSpan.FromSeconds(10));
+        t.PutCursorOn('L', "readme.txt");
+
+        t.Press(KeyCode.F5);
+        Retarget(t, into);
+        t.Press(KeyCode.Enter);
+
+        Assert.True(PromptOpen(t));
+        Assert.NotNull(PromptError(t));
+    }
+
     /// <summary>F5 inside an archive is Extract, and goes through the same box — the verb
     /// differs, the ability to aim it somewhere else does not.</summary>
     [Fact]

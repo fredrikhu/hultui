@@ -122,7 +122,13 @@ public partial class CommanderApp : Component, IDisposable
     private int _bookmarkSel;
 
     // Confirm dialog (delete, and the copy/move go-ahead) + in-progress transfer.
-    private sealed record ConfirmSpec(string Title, string Message, string ConfirmLabel, bool Danger, Action OnConfirm);
+    /// <summary><paramref name="OnCancel"/> runs when the dialog is dismissed rather than
+    /// confirmed — by the Cancel button or Escape, which are the same answer. Most confirms
+    /// have nothing to do in that case and leave it null; one that was asked *about* something
+    /// (an edit waiting to be written back) needs to record that it has now been answered, or
+    /// it asks again the next time it looks.</summary>
+    private sealed record ConfirmSpec(string Title, string Message, string ConfirmLabel, bool Danger,
+        Action OnConfirm, Action? OnCancel = null);
     private ConfirmSpec? _confirm;
 
     // Name prompt (F7 new folder, Shift+F6 rename): a titled dialog over a focused
@@ -371,6 +377,9 @@ public partial class CommanderApp : Component, IDisposable
         // window is dragged to a monitor with different scaling, which arrives as a resize.
         Icons.DisplayScale = window.DisplayScale;
         window.Resized += OnWindowResized;
+        // Coming back to the window is when a file taken out to an external editor gets
+        // re-checked (CommanderApp.ArchiveEdit.cs).
+        window.Activated += OnWindowActivated;
         _settings = SettingsStore.Load();
         SeedFindDefaults();
         // A sideways offset is app state, so moving it has to rebuild the rows.
@@ -879,6 +888,9 @@ public partial class CommanderApp : Component, IDisposable
         var e = list[cur];
         if (e.IsDir || e.IsParent) return;
         string template = Icons.KindFor(e) == IconKind.Image ? _settings.ImageEditor : _settings.Editor;
+        // An archive member has no file on disk to hand over: it is unpacked first, and offered
+        // back to the archive when Vesper next comes to the foreground.
+        if (ArchivePath.InArchive(e.FullPath)) { EditArchiveMember(e, template); return; }
         FileOps.LaunchEditor(template, e.FullPath);
     }
 
@@ -1251,7 +1263,7 @@ public partial class CommanderApp : Component, IDisposable
 
         if (intoArchive)
         {
-            StartArchiveAdd(side, side, items, move: cut);
+            StartArchiveAdd(side, Dir(side), items, move: cut);
             if (cut) { Clipboard.Clear(); _cutPending.Clear(); }
             return;
         }
@@ -1493,20 +1505,9 @@ public partial class CommanderApp : Component, IDisposable
         // members, two writes to different places, and F5 already copies out.
         if (InArchiveBlock(side)) return;
         if (ResultsBlock(other)) return;                             // nothing can be moved *into* results
-        // Moving *into* one adds, then deletes the sources that landed. Confirmed like any other
-        // move: what makes it a move rather than a copy is that the originals stop existing.
-        if (InArchive(other))
-        {
-            if (!CanAddToArchive(other)) return;
-            _confirm = new ConfirmSpec(
-                $"Move {(items.Count == 1 ? "item" : "items")} into archive",
-                $"Move {SelectionLabel(side)} into\n{dest}\n\nThe originals are deleted once they are in the archive.",
-                "Move", Danger: true,
-                () => { _confirm = null; StartArchiveAdd(side, other, items, move: true); });
-            MarkDirty();
-            return;
-        }
 
+        // An archive destination is not special-cased here any more: it is just a path the
+        // dialog can be pointed at, and CommitTransfer routes it to the add worker.
         OpenTransferPrompt(side, items, dest, move: true);
     }
 
@@ -1550,10 +1551,17 @@ public partial class CommanderApp : Component, IDisposable
         if (typed.Length == 0) return "Enter a destination folder.";
         if (ResolveTypedPath(side, typed, out var resolveError) is not { } dest) return resolveError;
 
-        // Adding *into* an archive is a different operation with its own backend (it repacks
-        // rather than writes files), and it is reached by pointing a pane at the archive.
+        // Into an archive: a different backend (it repacks rather than writing files), so the
+        // dialog hands off to the add worker instead of starting a transfer. Extracting there
+        // is refused — the add writers read their sources from disk, and an archive member has
+        // no disk file, so archive-to-archive would have to stage through a temp copy.
         if (ArchivePath.InArchive(dest))
-            return "Open the archive in the other pane to add to it.";
+        {
+            if (extract) return "Extract to a real folder — one archive can't be poured into another.";
+            if (ArchiveAddBlock(dest) is { } why) return why;
+            StartArchiveAdd(side, dest, items, move);
+            return null;
+        }
         if (!extract && PathEquals(dest, Dir(side)) && !InResults(side))
             return items.Count == 1 ? "That is where it already is." : "That is where they already are.";
 
@@ -1594,13 +1602,10 @@ public partial class CommanderApp : Component, IDisposable
 
         if (LockedBlock(other, "copy into a locked tab")) return;
         if (ResultsBlock(other)) return;
-        // The other pane is inside an archive: copy in rather than refuse. CanAddToArchive posts
-        // its own reason for the archives that can't take one (rar, or a format needing 7-Zip).
-        if (InArchive(other))
-        {
-            if (CanAddToArchive(other)) StartArchiveAdd(side, other, items, move: false);
-            return;
-        }
+        // Copying *into* an archive used to skip the dialog and start packing on the keypress —
+        // the one destination F5 never asked about. It is just a path now; CommitTransfer sees
+        // it is inside an archive and routes to the add worker, and the archives that can't
+        // take one (rar, or a format needing 7-Zip) say so in the dialog.
         OpenTransferPrompt(side, items, dest, move: false);
     }
 
@@ -2148,11 +2153,15 @@ public partial class CommanderApp : Component, IDisposable
     private void OpenNewFolderPrompt(char side)
     {
         _active = side;
-        if (LockedBlock(side, "create a folder here") || InArchiveBlock(side) || ResultsBlock(side)) return;
+        if (LockedBlock(side, "create a folder here") || ResultsBlock(side)) return;
+        // Inside a writable archive F7 makes a folder there instead of being refused;
+        // CanAddToArchive posts the reason for the ones that can't take one.
+        bool inArchive = InArchive(side);
+        if (inArchive && !CanAddToArchive(side)) return;
         _namePromptValue = "";
         _namePromptError = null;
         _namePrompt = new NamePromptSpec("New folder", Dir(side), "Create",
-            name => CreateFolder(side, name));
+            name => inArchive ? CreateFolderInArchive(side, name) : CreateFolder(side, name));
         _pendingNamePromptFocus = true;
         MarkDirty();
     }
@@ -2188,6 +2197,16 @@ public partial class CommanderApp : Component, IDisposable
 
     private void CloseNamePrompt() { _namePrompt = null; MarkDirty(); }
 
+    /// <summary>Dismiss the confirm dialog — the Cancel button and Escape are the same answer,
+    /// and a spec that cares about being answered "no" hears it here.</summary>
+    private void CancelConfirm()
+    {
+        var spec = _confirm;
+        _confirm = null;
+        spec?.OnCancel?.Invoke();
+        MarkDirty();
+    }
+
     /// <summary>Create a folder in <paramref name="side"/> and land on it. Returns an
     /// error string (surfaced in the dialog) or null on success.</summary>
     private string? CreateFolder(char side, string name)
@@ -2205,6 +2224,27 @@ public partial class CommanderApp : Component, IDisposable
         catch (Exception ex) { return ex.Message; }
         BumpGen(side);
         _pendingFocusChild[side == 'L' ? 0 : 1] = name;
+        return null;
+    }
+
+    /// <summary>F7 inside an archive: add the folder as a member and land on it. Returns an
+    /// error string (surfaced in the dialog) or null on success.
+    ///
+    /// <para>Written straight through rather than on the pack worker: an empty folder is a
+    /// name and no bytes, so there is nothing to show a progress bar about.</para></summary>
+    private string? CreateFolderInArchive(char side, string name)
+    {
+        name = name.Trim();
+        if (name.Length == 0) return "Enter a name";
+        if (ArchivePath.TryParse(Dir(side)) is not { } ap) return "Not inside an archive";
+
+        var err = ArchiveVfs.CreateFolder(ap.ArchiveFile, ap.Internal, name,
+            PasswordFor(Dir(side)), _sevenZip);
+        if (err != null) return err;
+
+        BumpGen(side);
+        // Land on the top level of what was made, which for a nested "a/b" is "a".
+        _pendingFocusChild[side == 'L' ? 0 : 1] = name.Replace('\\', '/').Trim('/').Split('/')[0];
         return null;
     }
 
@@ -2480,7 +2520,7 @@ public partial class CommanderApp : Component, IDisposable
         }
         if (_confirm is { } cf)
         {
-            if (e.Key == KeyCode.Escape) { _confirm = null; MarkDirty(); }
+            if (e.Key == KeyCode.Escape) CancelConfirm();
             else if (e.Key == KeyCode.Enter) cf.OnConfirm();
             e.StopPropagation = true; return;
         }
@@ -2704,10 +2744,12 @@ public partial class CommanderApp : Component, IDisposable
     public void Dispose()
     {
         _window.Resized -= OnWindowResized;
+        _window.Activated -= OnWindowActivated;
         SaveSession();
         (_lastImage as IDisposable)?.Dispose();
         _thumbsCache?.Dispose();
         _holdTimer?.Dispose();
+        CleanupArchiveEdits();      // remove the F4 edit copies
         ArchiveVfs.CleanupTemp();   // remove any nested-archive temp extractions
     }
 

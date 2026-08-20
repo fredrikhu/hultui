@@ -32,6 +32,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     private SDL3TextInputHost? _textInputHost;
 
     public bool ResizePending { get; set; }
+    public bool ActivatedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
 
     /// <summary>
@@ -328,6 +329,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                     if (_registry.TryGetValue(evt.window.windowID, out var closeWin))
                         onWindowClose?.Invoke(closeWin);
+                    break;
+
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_FOCUS_GAINED:
+                    // Flagged, not dispatched: the application loop raises Window.Activated
+                    // on the UI thread at a fixed point in the frame, so an app handler can
+                    // do real work (read a file, open a dialog) without running inside the
+                    // event pump.
+                    if (_registry.TryGetValue(evt.window.windowID, out var focusWin))
+                        focusWin.ActivatedPending = true;
                     break;
 
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:

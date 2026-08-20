@@ -17,38 +17,44 @@ public partial class CommanderApp
     private bool CanAddToArchive(char side)
     {
         if (!InArchive(side)) return false;
-        if (InNestedArchive(side))
-        {
-            // What the pane is showing is a temp extraction of the inner archive, so an add
-            // would go into the copy and leave the real archive untouched.
-            _notice = "Can't add to a nested archive — extract it first";
-            MarkDirty(); return false;
-        }
-        if (ArchivePath.TryParse(Dir(side)) is not { } ap) return false;
-        string ext = System.IO.Path.GetExtension(ap.ArchiveFile).ToLowerInvariant();
-        if (!ArchiveVfs.Caps(ext, _sevenZip).Write)
-        {
-            _notice = ext is ".rar"
-                ? "rar archives are read-only"
-                : "Adding to this format needs 7-Zip — set it in Tools → Archiver";
-            MarkDirty(); return false;
-        }
+        if (ArchiveAddBlock(Dir(side)) is { } why) { _notice = why; MarkDirty(); return false; }
         return true;
     }
 
-    /// <summary>Begin adding <paramref name="items"/> to the archive open in <paramref name="to"/>.
-    /// <paramref name="move"/> deletes the sources afterwards, and only after a clean add.</summary>
-    private void StartArchiveAdd(char from, char to, List<FileEntry> items, bool move)
+    /// <summary>Why a write into <paramref name="dir"/> — a path pointing inside an archive —
+    /// can't happen, or null when it can. Stated over a path rather than a pane because the
+    /// F5 / F6 destination box can name an archive folder neither pane is showing.</summary>
+    private string? ArchiveAddBlock(string dir)
+    {
+        if (ArchivePath.TryParse(dir) is not { } ap) return "That folder is not inside an archive";
+        if (!System.IO.File.Exists(ap.ArchiveFile)) return "That archive is no longer there";
+        // What a nested archive shows is a temp extraction of the inner file, so an add would
+        // go into the copy and leave the real archive untouched.
+        if (ap.Internal.Split(System.IO.Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)
+                .Any(ArchivePath.IsArchiveFile))
+            return "Can't add to a nested archive — extract it first";
+        string ext = System.IO.Path.GetExtension(ap.ArchiveFile).ToLowerInvariant();
+        if (!ArchiveVfs.Caps(ext, _sevenZip).Write)
+            return ext is ".rar"
+                ? "rar archives are read-only"
+                : "Adding to this format needs 7-Zip — set it in Tools → Archiver";
+        return null;
+    }
+
+    /// <summary>Begin adding <paramref name="items"/> to the archive folder at
+    /// <paramref name="destDir"/>. <paramref name="move"/> deletes the sources afterwards, and
+    /// only after a clean add.</summary>
+    private void StartArchiveAdd(char from, string destDir, List<FileEntry> items, bool move)
     {
         if (items.Count == 0) return;
-        if (ArchivePath.TryParse(Dir(to)) is not { } ap) return;
+        if (ArchivePath.TryParse(destDir) is not { } ap) return;
         if (_op != null)
         {
             _notice = "A transfer is already running — let it finish first";
             MarkDirty(); return;
         }
 
-        string? password = PasswordFor(Dir(to));
+        string? password = PasswordFor(destDir);
         bool sevenZipWriter = ArchiveVfs.WritesThroughSevenZip(ap.ArchiveFile, password);
 
         var op = new TransferOp(items)
@@ -56,7 +62,7 @@ public partial class CommanderApp
             IsPack = true,                       // shares the pack overlay: no per-entry skip
             IsMove = move,
             Source = from,
-            DestDir = Dir(to),
+            DestDir = destDir,
             PackTarget = System.IO.Path.GetFileName(ap.ArchiveFile),
             PackVerb = "Adding to",
             PackRowVerb = "adding",

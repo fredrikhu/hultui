@@ -211,6 +211,7 @@ public sealed class Application : IDisposable
             }
 
             ProcessPendingResizes();
+            ProcessPendingActivations();
 
             // Drain actions posted from background threads
             DrainMainThreadQueue();
@@ -270,6 +271,19 @@ public sealed class Application : IDisposable
                 }
                 window.Root?.MarkPaintDirty();
             }
+        }
+    }
+
+    /// <summary>Raises <see cref="Window.Activated"/> for windows the platform reported as
+    /// newly foregrounded. Runs before the main-thread queue drains, so a handler that posts
+    /// work gets it picked up in the same frame rather than the next one.</summary>
+    internal void ProcessPendingActivations()
+    {
+        foreach (var window in _windows)
+        {
+            if (!window.PlatformWindow.ActivatedPending) continue;
+            window.PlatformWindow.ActivatedPending = false;
+            if (window.IsOpen) window.RaiseActivated();
         }
     }
 

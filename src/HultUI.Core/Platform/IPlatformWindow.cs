@@ -51,6 +51,15 @@ public interface IPlatformWindow : IDisposable
     bool ResizePending { get; set; }
     long LastResizeRenderTick { get; set; }
 
+    // ──── Window activation ────
+    // Set by the platform when the OS makes this window the foreground one, and
+    // cleared by the application loop as it raises Window.Activated. A flag rather
+    // than a callback for the same reason resizes use one: the native event can
+    // arrive on a modal loop or between frames, and the framework wants it handed
+    // to app code on the UI thread at a known point in the frame.
+
+    bool ActivatedPending { get; set; }
+
     /// <summary>
     /// Invoked by platforms whose native resize runs a modal loop (Win32) to
     /// render a throttled frame mid-resize. Headless platforms never call it.

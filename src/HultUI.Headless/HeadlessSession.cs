@@ -120,6 +120,7 @@ public sealed class HeadlessSession : IDisposable
         ThrowIfDisposed();
         _time.Advance(delta);
         Application.ProcessPendingResizes();
+        Application.ProcessPendingActivations();
         DrainDeferredWork();
         Application.DrainMainThreadQueue();
         AnimationManager.Tick((float)delta.TotalSeconds);

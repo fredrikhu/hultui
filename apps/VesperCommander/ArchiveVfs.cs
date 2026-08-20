@@ -446,6 +446,86 @@ public static class ArchiveVfs
     public static bool WritesThroughSevenZip(string archiveFile, string? password) =>
         Path.GetExtension(archiveFile).ToLowerInvariant() is not ".zip" || password is not null;
 
+    /// <summary>
+    /// Add an empty folder <paramref name="name"/> under <paramref name="internalPath"/>.
+    /// Returns an error message or null.
+    ///
+    /// <para>A zip has no directories. What a folder is, in one, is either implied by a member
+    /// path or spelled out by a zero-length entry whose name ends in "/" — and since an empty
+    /// folder has no member to imply it, the marker is the only way to say it exists. The
+    /// listing already reads one back as a folder, so nothing else has to change.</para>
+    ///
+    /// <para>7-Zip packs by source path and has no switch for "store an empty folder called X",
+    /// so it gets one to pack: an empty directory built in a temp folder, handed to the same
+    /// <see cref="AddMembers"/> path everything else goes through. Slower and clumsier than the
+    /// zip marker, but it is the only way to say this through a command line.</para>
+    /// </summary>
+    public static string? CreateFolder(string archiveFile, string internalPath, string name,
+        string? password, bool sevenZip)
+    {
+        if (!File.Exists(archiveFile)) return "That archive is no longer there";
+        string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
+        if (!Caps(ext, sevenZip).Write)
+            return ext is ".rar"
+                ? "rar archives are read-only"
+                : "Adding to this format needs 7-Zip — set it in Tools → Archiver";
+
+        // The name is checked on its own before being joined, so a "../" in it is refused
+        // rather than quietly resolving against the folder the pane is showing.
+        if (SafeRelative(name) is not { } relative) return "That name can't be stored in an archive";
+
+        string prefix = internalPath.Replace('\\', '/').Trim('/');
+        string entry = prefix.Length == 0 ? relative : prefix + "/" + relative;
+
+        var existing = AllMembers(archiveFile, password, sevenZip);
+        if (existing != null && existing.Keys.Any(k =>
+                k.Equals(entry, StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith(entry + "/", StringComparison.OrdinalIgnoreCase)))
+            return $"\"{name}\" is already in the archive";
+
+        if (!WritesThroughSevenZip(archiveFile, password))
+        {
+            try
+            {
+                using var zip = ZipFile.Open(archiveFile, ZipArchiveMode.Update);
+                if (FindMember(zip, entry) != null) return $"\"{name}\" is already in the archive";
+                zip.CreateEntry(entry + "/");
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        // Build the folder on disk and let the normal add carry it in. A nested name ("a/b")
+        // becomes a nested empty tree whose *root* is the source, so 7-Zip stores both levels.
+        string root = relative.Split('/')[0];
+        string staging = Path.Combine(Path.GetTempPath(), "vesper-mkdir", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(staging, relative));
+            return AddMembers(archiveFile, internalPath, [(Path.Combine(staging, root), root)],
+                password, sevenZip);
+        }
+        catch (Exception ex) { return ex.Message; }
+        finally { try { Directory.Delete(staging, true); } catch { /* temp, best effort */ } }
+    }
+
+    /// <summary>A user-typed folder name reduced to a relative archive path, or null when it is
+    /// one we won't store. Separators are allowed so "a/b" makes both levels, the way it does on
+    /// disk; a trailing one is dropped, since "notes/" plainly means the folder "notes".
+    ///
+    /// <para>A <em>leading</em> one is refused rather than dropped. Trimming it would turn
+    /// "/rooted" into "rooted" and create it in the folder the pane happens to be showing —
+    /// silently answering a different question than the one typed. Same for a drive prefix and
+    /// for "..", which <see cref="ArchivePath.SafeMemberPath"/> rejects.</para></summary>
+    private static string? SafeRelative(string name)
+    {
+        var trimmed = name.Trim().Replace('\\', '/').TrimEnd('/');
+        if (trimmed.Length == 0) return null;
+        if (trimmed[0] == '/') return null;
+        if (trimmed.Length >= 2 && trimmed[1] == ':') return null;
+        return ArchivePath.SafeMemberPath(trimmed)?.TrimEnd('/');
+    }
+
     public static string? AddMembers(string archiveFile, string internalPath,
         IReadOnlyList<(string Source, string Entry)> items, string? password, bool sevenZip,
         PackProgress? progress = null)

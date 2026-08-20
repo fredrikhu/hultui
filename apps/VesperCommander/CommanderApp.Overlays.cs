@@ -233,7 +233,7 @@ public partial class CommanderApp
 
         var footer = DialogFooter();
         footer.AddChild(Box.New().FlexGrow(1));
-        footer.AddChild(SecondaryButton("Cancel", () => { _confirm = null; MarkDirty(); }));
+        footer.AddChild(SecondaryButton("Cancel", CancelConfirm));
         footer.AddChild(spec.Danger
             ? DangerButton(spec.ConfirmLabel, spec.OnConfirm)
             : PrimaryButton(spec.ConfirmLabel, spec.OnConfirm));

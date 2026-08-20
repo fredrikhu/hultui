@@ -16,6 +16,11 @@ public sealed partial class HeadlessWindow
     private float _mouseX;
     private float _mouseY;
 
+    /// <summary>Stand in for the OS foregrounding this window — what a click on the taskbar
+    /// or an alt-tab back to it does. <see cref="Window.Activated"/> is raised on the next
+    /// <c>PumpFrame</c>, the same point in the frame the real loop raises it.</summary>
+    public void Activate() => _platform.ActivatedPending = true;
+
     /// <summary>Moves the mouse, firing hover enter/leave and move events.</summary>
     public void MoveMouse(float x, float y, KeyModifiers modifiers = KeyModifiers.None)
     {

@@ -83,6 +83,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public event Action<InputEvent>? InputReceived;
 
     public bool ResizePending { get; set; }
+    public bool ActivatedPending { get; set; }
     public long LastResizeRenderTick { get; set; }
     public Action? LiveResizeFrame { get; set; }
 

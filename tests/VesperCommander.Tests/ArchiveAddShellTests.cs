@@ -22,6 +22,7 @@ public class ArchiveAddShellTests
 
         t.MarkLeft("stone.png");
         t.Press(KeyCode.F5);
+        t.AcceptDestination();
         t.SettleAdded();
 
         Assert.Equal(new[] { "readme.txt", "stone.png" }, t.Entries("assets.zip"));
@@ -41,6 +42,7 @@ public class ArchiveAddShellTests
 
         t.MarkLeft("stone.png");
         t.Press(KeyCode.F5);
+        t.AcceptDestination();
         t.SettleAdded();
 
         Assert.Equal(new[] { "textures/palette.png", "textures/stone.png" }, t.Entries("assets.zip"));
@@ -57,6 +59,7 @@ public class ArchiveAddShellTests
 
         t.MarkLeft("notes.txt");
         t.Press(KeyCode.F5);
+        t.AcceptDestination();
         t.WaitForOverwritePrompt();
 
         // Nothing has been written while the question is on screen.
@@ -80,6 +83,7 @@ public class ArchiveAddShellTests
 
         t.MarkLeft("notes.txt");
         t.Press(KeyCode.F5);
+        t.AcceptDestination();
         t.WaitForOverwritePrompt();
         t.Decide(overwrite: false, applyToRest: false);
         t.SettleNoticeStarting("Nothing added");
@@ -105,6 +109,7 @@ public class ArchiveAddShellTests
 
         t.MarkLeft("notes.txt");
         t.Press(KeyCode.F5);
+        t.AcceptDestination();
         t.WaitForOverwritePrompt();
 
         Assert.Equal(10, t.PromptTargetSize());
@@ -113,7 +118,9 @@ public class ArchiveAddShellTests
     }
 
     // ── F6 ───────────────────────────────────────────────────────────────
-    /// <summary>A move into an archive deletes the original — so it asks first, like any move.</summary>
+    /// <summary>A move into an archive deletes the original — so it asks first, like any move.
+    /// The question is the destination dialog now, showing the archive folder it would pack
+    /// into, rather than a fixed yes/no.</summary>
     [Fact]
     public void F6AsksBeforeMovingIntoAnArchive()
     {
@@ -126,7 +133,8 @@ public class ArchiveAddShellTests
         t.MarkLeft("stone.png");
         t.Press(KeyCode.F6);
 
-        Assert.NotNull(t.Confirm);
+        Assert.NotNull(t.Prompt);
+        Assert.Equal(Path.Combine(t.Left, "assets.zip"), t.PromptValue);
         Assert.True(File.Exists(t.SourcePath("stone.png")), "the original went before anyone agreed");
         Assert.Equal(new[] { "readme.txt" }, t.Entries("assets.zip"));
     }
@@ -276,6 +284,18 @@ public class ArchiveAddShellTests
         public void Press(KeyCode k, KeyModifiers m = KeyModifiers.None) => Fixture.Press(k, m);
         public string Notice => Fixture.Field<string?>("_notice") ?? "";
         public object? Confirm => Fixture.Field<object?>("_confirm");
+
+        /// <summary>The F5 / F6 destination dialog, and the path it is showing.</summary>
+        public object? Prompt => Fixture.Field<object?>("_namePrompt");
+        public string PromptValue => Fixture.Field<string>("_namePromptValue");
+
+        /// <summary>F5 / F6 stop at the destination dialog now. Accepting what it offers — the
+        /// other pane's folder — is what the key used to do on its own.</summary>
+        public void AcceptDestination()
+        {
+            Assert.NotNull(Prompt);
+            Press(KeyCode.Enter);
+        }
 
         /// <summary>The archive lives in the left pane's folder; sources do too, so a copy to the
         /// right pane crosses into the archive rather than between two real folders.</summary>
