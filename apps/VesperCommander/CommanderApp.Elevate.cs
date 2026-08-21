@@ -18,9 +18,10 @@ public partial class CommanderApp
 
     /// <summary>Offer an elevated retry for <paramref name="job"/>. <paramref name="what"/>
     /// describes the batch ("Copy 3 items"); <paramref name="onDone"/> runs on the UI thread
-    /// after the worker finishes. No-op (returns false) when elevation can't help — already
-    /// elevated, or unsupported on this OS.</summary>
-    private bool OfferElevation(ElevatedJob job, string what, Action? onDone = null)
+    /// after the worker finishes, and <paramref name="onCancel"/> when the user declines the
+    /// offer. No-op (returns false) when elevation can't help — already elevated, or
+    /// unsupported on this OS — so a caller holding resources for the retry can release them.</summary>
+    private bool OfferElevation(ElevatedJob job, string what, Action? onDone = null, Action? onCancel = null)
     {
         if (job.Items.Count == 0 || _elevating || !Elevation.IsSupported) return false;
 
@@ -31,7 +32,8 @@ public partial class CommanderApp
             $"{what} failed for {subject} — you don't have permission.\n"
                 + $"Retry as {Elevation.AdminNoun}? Your system will ask you to confirm.",
             $"Retry as {Elevation.AdminNoun}", Danger: false,
-            () => { _confirm = null; RunElevated(job, onDone); });
+            () => { _confirm = null; RunElevated(job, onDone); },
+            OnCancel: onCancel);
         MarkDirty();
         return true;
     }

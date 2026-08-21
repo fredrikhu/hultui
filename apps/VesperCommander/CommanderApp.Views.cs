@@ -426,6 +426,25 @@ public partial class CommanderApp
             MarkDirty();
         });
         el.On<PointerMoveEvent>(_ => { if (_rmarkActive) ApplyRightMark(side, e); });
+
+        // Press-and-drag hands the selection to the desktop (see CommanderApp.DragDrop).
+        // ".." is a way back, not a file, so it is neither dragged nor dropped onto.
+        if (!e.IsParent && CanDragOut)
+        {
+            el.Draggable();
+            el.OnDragStart(_ => StartFileDragOut(side, e));
+        }
+
+        // A folder row is its own drop target, so a drag can be aimed at a subfolder without
+        // opening it first. Files are not: dropping "onto" a file has no meaning here.
+        if (e.IsDir && !e.IsParent)
+        {
+            AttachDropTarget(el, side, e.FullPath, isRow: true);
+            // Tinted, not ringed: rows carry no border, and adding one would nudge every
+            // row below by a pixel the moment a drag passed over this one.
+            if (IsDropHighlighted(side, e.FullPath))
+                el.Background(Nocturne.Alpha(Nocturne.Accent, 0.28));
+        }
     }
 
     private float PaneContentWidthEstimate()

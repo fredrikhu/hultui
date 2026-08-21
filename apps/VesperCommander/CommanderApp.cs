@@ -199,6 +199,11 @@ public partial class CommanderApp : Component, IDisposable
         /// were headed for — the batch offered for an elevated retry when the run ends.</summary>
         public readonly List<(string Source, string Target, bool IsDir)> Denied = [];
 
+        /// <summary>Temp folder holding archive members extracted so the elevated worker has
+        /// a real file to copy (see StageForElevation). Null until one is needed; deleted once
+        /// the retry finishes or is declined.</summary>
+        public string? Staging;
+
         public TransferOp() { }
         public TransferOp(List<FileEntry> items)
         {
@@ -516,9 +521,23 @@ public partial class CommanderApp : Component, IDisposable
         return loader.Value.Entries;
     }
 
+    /// <summary>Keep the OS window title on the folder you are looking at. Vesper draws its
+    /// own chrome, so this is not the caption — it is what the task bar, Alt+Tab and every
+    /// window switcher show, and "Vesper Commander" three times over tells you nothing about
+    /// which of them is the one you want. Folder first, for the same reason.</summary>
+    private void SyncWindowTitle()
+    {
+        var tab = ActiveTab(_active);
+        var where = tab.Results != null ? "Results" : TabLabel(tab.Dir);
+        // Setting it is a no-op when unchanged, at both this layer and SDL's, so calling it
+        // once a build costs nothing and needs no separate invalidation path.
+        _window.Title = string.IsNullOrEmpty(where) ? "Vesper Commander" : $"{where} — Vesper Commander";
+    }
+
     // ── Build ────────────────────────────────────────────────────────────
     public override Element Build()
     {
+        SyncWindowTitle();
         var body = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
 
         // Full-shell views (diff / sync / viewer) replace the rail + panes entirely.
@@ -1701,14 +1720,54 @@ public partial class CommanderApp : Component, IDisposable
             {
                 op.Status[i] = 4; op.Failed++;
                 // Remember permission failures so the finish can offer an elevated retry.
-                if (FileOps.IsDenied(err) && !ArchivePath.InArchive(e.FullPath))
-                    op.Denied.Add((e.FullPath, System.IO.Path.Combine(op.DestDir, e.Name), e.IsDir));
+                // An archive member has no path the worker could open, so it is extracted to
+                // a temp file first and the retry copies that: only the write side of the
+                // failed copy ever needed rights — reading the archive did not.
+                if (FileOps.IsDenied(err))
+                {
+                    var retrySource = ArchivePath.InArchive(e.FullPath) ? StageForElevation(op, e) : e.FullPath;
+                    if (retrySource != null)
+                        op.Denied.Add((retrySource, System.IO.Path.Combine(op.DestDir, e.Name), e.IsDir));
+                }
             }
             else { op.Status[i] = 2; op.Done++; }           // done
             Repaint();
         }
 
         Application.InvokeOnMainThread(FinishTransfer);
+    }
+
+    /// <summary>Extract one archive member to a private temp folder and return the real
+    /// path, so an elevated retry has something it can copy. Returns null when the extraction
+    /// itself fails — then there is nothing to offer and the item stays failed.
+    ///
+    /// <para>Staging runs unprivileged on purpose. Reading the archive never needed rights, so
+    /// doing it here keeps the elevated step a plain copy between two plain paths: no archive
+    /// backend and no password go anywhere near the administrator process.</para></summary>
+    private string? StageForElevation(TransferOp op, FileEntry e)
+    {
+        try
+        {
+            op.Staging ??= Directory.CreateDirectory(System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), "VesperStaging-" + Guid.NewGuid().ToString("N"))).FullName;
+            var staged = System.IO.Path.Combine(op.Staging, e.Name);
+            if (FileOps.Exists(staged)) return staged;        // already extracted in this run
+            var err = FileOps.CopyStreamed(e, op.Staging, overwrite: true,
+                onBytes: _ => { }, cancelled: () => op.Cancelled,
+                sevenZip: _sevenZip, password: PasswordFor(e.FullPath));
+            return err == null ? staged : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Remove a transfer's staging folder. Best-effort: a leftover temp folder is
+    /// harmless, and it is under the OS's own temp directory either way.</summary>
+    private static void ClearStaging(TransferOp op)
+    {
+        var dir = op.Staging;
+        op.Staging = null;
+        if (dir == null) return;
+        try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
     }
 
     private static void WaitWhilePaused(TransferOp op)
@@ -1778,12 +1837,20 @@ public partial class CommanderApp : Component, IDisposable
         // Only carries the "apply to all" overwrite choice — a per-item "yes" isn't
         // re-asked here, so such an item reports "target exists" rather than silently
         // overwriting something the user didn't approve in this batch.
+        // A staged batch is always *copied* out of the temp folder, never moved out of it:
+        // its sources are files we made, and clearing them is our cleanup rather than the
+        // worker's. (Moving out of an archive is refused up front anyway — see StartMove.)
         if (op is { Denied.Count: > 0 } && !op.Cancelled)
         {
-            OfferElevation(
-                Job(op.IsMove ? "move" : "copy", op.Denied, overwrite: op.OverwriteAll ?? false),
-                op.IsMove ? "Move" : "Copy");
+            bool staged = op.Staging != null;
+            bool offered = OfferElevation(
+                Job(op.IsMove && !staged ? "move" : "copy", op.Denied, overwrite: op.OverwriteAll ?? false),
+                op.IsMove ? "Move" : "Copy",
+                onDone: () => ClearStaging(op),
+                onCancel: () => ClearStaging(op));
+            if (!offered) ClearStaging(op);
         }
+        else if (op != null) ClearStaging(op);
         MarkDirty();
     }
 

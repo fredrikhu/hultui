@@ -188,6 +188,13 @@ public partial class CommanderApp
             ev.StopPropagation = true;
         });
 
+        // The whole pane takes a drop into its own folder; a folder row inside it takes
+        // one into that folder instead (AttachEntryPointer), stopping the event so the more
+        // specific target wins. A drag hovering here rings the pane in the accent colour.
+        AttachDropTarget(pane, side, Dir(side), isRow: false);
+        if (IsDropHighlighted(side, Dir(side)))
+            pane.BorderColor(Nocturne.Accent).BorderWidth(1f);
+
         // Tab strip on top, then breadcrumb + column header as one block on the
         // pane ground; the header's bottom border is the only divider to the list.
         pane.AddChild(BuildTabStrip(side));
@@ -396,6 +403,11 @@ public partial class CommanderApp
         return row;
     }
 
+    /// <summary>How wide one tab's label is allowed to get before it ellipsizes. A deep
+    /// folder can be named anything, and one such tab used to push the "+" button and the
+    /// history cluster off the end of the strip — so the name is what gives, not the row.</summary>
+    private const float TabLabelMaxWidth = 140f;
+
     private Element TabChip(char side, int index, bool on)
     {
         var tab = Tabs(side)[index];
@@ -405,6 +417,7 @@ public partial class CommanderApp
             .Padding(new Thickness(2, 10, 4, 10))
             .CornerRadius(new CornerRadius(6, 6, 0, 0))
             .BorderColor(on ? Nocturne.Accent : Color.Transparent).BorderWidth(new Thickness(2, 0, 0, 0))
+            .MinWidth(56).Overflow(Overflow.Hidden)
             .Cursor(CursorType.Pointer);
         if (on) chip.Background(Nocturne.Bg);
 
@@ -413,9 +426,16 @@ public partial class CommanderApp
         // A tab holding a fed-in result set says so: its folder is only where the search ran.
         if (tab.Results != null)
             chip.AddChild(Ui.Icon(Glyphs.Search, 10f, ResultsTeal));
-        chip.AddChild(Text.New(tab.Results != null ? "Results" : TabLabel(tab.Dir)).FontSize(11.5f)
+        var label = tab.Results != null ? "Results" : TabLabel(tab.Dir);
+        // MaxWidth alone would still let the name wrap to a second line — wrapping is
+        // decided at measure time, before any width cap applies — so the one-line cap and
+        // the ellipsis have to be asked for as well. The full name stays reachable as the
+        // tooltip, which is the only place a truncated tab can still tell you what it is.
+        chip.AddChild(Text.New(label).FontSize(11.5f)
             .FontWeight(on ? FontWeight.Medium : FontWeight.Regular)
-            .TextColor(on ? Nocturne.Text : Nocturne.Neutral500));
+            .TextColor(on ? Nocturne.Text : Nocturne.Neutral500)
+            .MaxWidth(TabLabelMaxWidth).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+        chip.Tooltip(tab.Results != null ? $"Results from {tab.Dir}" : tab.Dir);
 
         chip.OnClick(_ => SwitchTab(side, index));
         chip.ContextMenu(() => TabMenu(side, index));
