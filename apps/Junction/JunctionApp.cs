@@ -558,8 +558,22 @@ public partial class JunctionApp : Component, IDisposable
 
     // ── Build ────────────────────────────────────────────────────────────
 
+    /// <summary>Keep the OS window title on the repository in front of you. Junction draws
+    /// its own chrome, so this is not the caption — it is what the task bar and Alt+Tab show,
+    /// and two Junction windows over two repos are otherwise indistinguishable there.</summary>
+    private void SyncWindowTitle()
+    {
+        var repo = HasActiveRepo ? System.IO.Path.GetFileName(
+            _activeRepoPath.TrimEnd(System.IO.Path.DirectorySeparatorChar,
+                                    System.IO.Path.AltDirectorySeparatorChar)) : null;
+        // A no-op when unchanged, here and in SDL, so once a build needs no invalidation path.
+        _window.Title = string.IsNullOrEmpty(repo) ? "Junction" : $"{repo} — Junction";
+    }
+
     public override Element Build()
     {
+        SyncWindowTitle();
+
         // Track the revision signal so a Rerender() re-runs Build through the
         // Effect (re-subscribing to the active repo's loaders — see _revision).
         _ = _revision.Value;

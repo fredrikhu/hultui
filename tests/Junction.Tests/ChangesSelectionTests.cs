@@ -274,6 +274,100 @@ public class ChangesSelectionTests
         });
     }
 
+    // ── Delete discards ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Delete is the key every file list uses to get rid of what the caret is on, and on the
+    /// Changes list "get rid of it" means discard. It goes through the same confirm the menu
+    /// does — a keystroke that destroyed a selection outright would be the worst thing on
+    /// this screen — and it aims at the whole selection, as the menu does.
+    /// </summary>
+    [Fact]
+    public void DeleteDiscardsTheWholeSelectionThroughTheSameConfirm()
+    {
+        Hosted(repo =>
+        {
+            repo.Write("tracked-1.txt", "one\n");
+            repo.Write("tracked-2.txt", "two\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "two tracked files");
+            repo.Write("tracked-1.txt", "one edited\n");
+            repo.Write("tracked-2.txt", "two edited\n");
+        }, (repo, session, app) =>
+        {
+            Assert.Equal(2, OpenChanges(repo, session, app).Count);
+            session.Window.PressKey(KeyCode.Down, KeyModifiers.Shift);
+            session.PumpFrame();
+
+            session.Window.PressKey(KeyCode.Delete);
+            session.PumpFrame();
+
+            // Still only a question: the edits are on disk until the dialog is answered.
+            Assert.Equal("one edited\n", repo.Read("tracked-1.txt"));
+            Assert.True(Contains(session, "2 files"),
+                "Delete did not raise the discard confirm naming both files.\n"
+                + session.Window.DumpAccessibilityTree());
+
+            session.Window.PressKey(KeyCode.Enter);
+            PumpUntilGit(session, () => repo.Repo.GetUnstagedChanges().Count == 0,
+                "confirming the Delete prompt did not discard both files");
+            Assert.Equal("one\n", repo.Read("tracked-1.txt"));
+            Assert.Equal("two\n", repo.Read("tracked-2.txt"));
+        });
+    }
+
+    /// <summary>Escape backs out of it, leaving the worktree untouched — the same escape
+    /// hatch the menu route has, since it is the same dialog.</summary>
+    [Fact]
+    public void EscapingTheDeletePromptLeavesTheWorkingTreeAlone()
+    {
+        Hosted(repo =>
+        {
+            repo.Write("tracked.txt", "one\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "a tracked file");
+            repo.Write("tracked.txt", "edited\n");
+        }, (repo, session, app) =>
+        {
+            OpenChanges(repo, session, app);
+
+            session.Window.PressKey(KeyCode.Delete);
+            session.PumpFrame();
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpFrames(3);
+
+            Assert.Equal("edited\n", repo.Read("tracked.txt"));
+        });
+    }
+
+    /// <summary>Discard is defined against the worktree, so a staged row says to unstage
+    /// first rather than silently doing nothing — and above all does not discard.</summary>
+    [Fact]
+    public void DeleteOnAStagedRowExplainsItselfInsteadOfDiscarding()
+    {
+        Hosted(repo =>
+        {
+            repo.Write("staged.txt", "one\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "a tracked file");
+            repo.Write("staged.txt", "edited\n");
+            repo.Git("add", "-A");
+        }, (repo, session, app) =>
+        {
+            OpenChanges(repo, session, app);
+            Assert.Equal("staged.txt", CaretPath(app));
+
+            session.Window.PressKey(KeyCode.Delete);
+            session.PumpFrames(3);
+
+            Assert.Equal("edited\n", repo.Read("staged.txt"));
+            Assert.Single(repo.Repo.GetStagedChanges());
+            Assert.True(Contains(session, "Unstage it first"),
+                "Delete on a staged row said nothing about why it did not discard.\n"
+                + session.Window.DumpAccessibilityTree());
+        });
+    }
+
     /// <summary>
     /// Conflicts are the third section of the same list, so they select like the rest —
     /// and taking one whole side generalizes to the selection the way staging does.

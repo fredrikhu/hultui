@@ -292,11 +292,33 @@ public partial class JunctionApp
             case KeyCode.Home: MoveChangeSelection(int.MinValue / 2, shift, focusOnly, ctrl); return true;
             case KeyCode.End: MoveChangeSelection(int.MaxValue / 2, shift, focusOnly, ctrl); return true;
             case KeyCode.Space when ctrl: ToggleFocusedChangeSelection(); return true;
+            case KeyCode.Delete when !ctrl && !shift: return DiscardByKey();
             // The conventional folder keys, as in the Files tab and the ref tables.
             case KeyCode.Right: return ChangeTreeStep(right: true);
             case KeyCode.Left: return ChangeTreeStep(right: false);
             default: return false;
         }
+    }
+
+    /// <summary>Delete on the Changes list discards what the caret's row covers — the
+    /// same action, and the same confirm, the row's context menu offers. It aims at the
+    /// whole selection when the caret sits inside one, exactly as the menu does.
+    ///
+    /// <para>Unstaged rows only. Discard means <c>git restore</c> / <c>git clean</c>, which
+    /// are defined against the worktree; a staged row has to be unstaged first, and saying
+    /// so beats a Delete that silently does nothing.</para></summary>
+    private bool DiscardByKey()
+    {
+        if (ChangeFocus() is not { } focus) return false;
+        if (focus.Section != ChangeSection.Unstaged)
+        {
+            Flash(focus.Section == ChangeSection.Staged
+                ? "Unstage it first — discard works on the worktree"
+                : "Resolve the conflict first");
+            return true;
+        }
+        PromptDiscardPaths(ChangeActionPaths(focus));
+        return true;
     }
 
     /// <summary>←/→ on the caret's row via the tree model: right opens a closed folder and

@@ -108,10 +108,14 @@ public partial class JunctionApp
         return rows;
     }
 
-    /// <summary>The oldest row (bottom of the list) can't squash/fixup — there is
-    /// nothing older to meld into. Mirrors git's own todo constraint.</summary>
+    /// <summary>The oldest row that survives (bottom of the list, skipping anything
+    /// dropped) can't squash/fixup — there is nothing older left to meld into. Mirrors
+    /// git's own todo constraint, which is checked against the todo we actually write:
+    /// dropped rows never reach it, so a drop can push a squash into first place.</summary>
     private bool RebaseHasBadMeld() =>
-        _rebase is { Rows.Count: > 0 } rb && rb.Rows[^1].Op is RebaseOp.Squash or RebaseOp.Fixup;
+        _rebase is { } rb
+        && rb.Rows.FindLast(r => r.Op != RebaseOp.Drop) is { } oldestKept
+        && oldestKept.Op is RebaseOp.Squash or RebaseOp.Fixup;
 
     private async void RunRebase()
     {
@@ -481,7 +485,7 @@ public partial class JunctionApp
         if (bad)
             bar.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Ui.Icon(Icons.Warning, 11f, WarnText),
-                Text.New("Oldest commit can't be squash/fixup").FontSize(11f).TextColor(WarnText)));
+                Text.New("Oldest kept commit can't be squash/fixup").FontSize(11f).TextColor(WarnText)));
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton("Cancel", null, CloseRebase, 12.5f));

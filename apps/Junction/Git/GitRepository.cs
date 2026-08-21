@@ -1169,6 +1169,12 @@ public class GitRepository
             }
         }
 
+        // Dropping every commit leaves no todo lines at all, and git rejects an empty
+        // todo with "error: nothing to do" rather than doing the obvious thing. `noop` is
+        // git's own placeholder for that plan: the rebase runs, replays nothing, and leaves
+        // the branch sitting on baseRef — which is exactly what dropping them all means.
+        if (lines.Count == 0) lines.Add("noop");
+
         var todoPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
             $"hultui-rebase-todo-{Guid.NewGuid():N}");
         File.WriteAllText(todoPath, string.Join('\n', lines) + '\n');
