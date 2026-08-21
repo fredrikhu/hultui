@@ -94,7 +94,8 @@ public sealed unsafe class EventTranslator
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_DROP_POSITION:
-                OnInputEvent?.Invoke(new InputEvent.DropPositionInput(evt->drop.x * s, evt->drop.y * s));
+                OnInputEvent?.Invoke(new InputEvent.DropPositionInput(evt->drop.x * s, evt->drop.y * s,
+                    TranslateKeyMod(SDL_GetModState())));
                 break;
 
             case (uint)SDL_EventType.SDL_EVENT_DROP_FILE:
@@ -114,7 +115,7 @@ public sealed unsafe class EventTranslator
             }
 
             case (uint)SDL_EventType.SDL_EVENT_DROP_COMPLETE:
-                OnInputEvent?.Invoke(new InputEvent.DropCompleteInput());
+                OnInputEvent?.Invoke(new InputEvent.DropCompleteInput(TranslateKeyMod(SDL_GetModState())));
                 break;
         }
     }

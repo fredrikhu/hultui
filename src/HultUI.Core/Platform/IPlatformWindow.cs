@@ -33,6 +33,14 @@ public interface IPlatformWindow : IDisposable
     bool IsOpen { get; }
     bool IsMaximized { get; }
 
+    /// <summary>
+    /// The native window title — what the OS shows in the task bar, the Alt+Tab
+    /// switcher and (for a decorated window) the caption. Settable after creation
+    /// so an app can reflect its current document; a borderless window still has
+    /// one, because the task bar and switcher read it even when no caption is drawn.
+    /// </summary>
+    string Title { get; set; }
+
     IClipboard Clipboard { get; }
     IFileDialogs FileDialogs { get; }
     ITextInputHost TextInputHost { get; }

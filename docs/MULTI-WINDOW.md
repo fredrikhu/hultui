@@ -80,6 +80,16 @@ window.IsOpen       // true if window is open and not disposed
 window.IsMaximized  // true if maximized (useful for custom chrome)
 ```
 
+### Title
+
+The title passed at creation is not fixed — assigning `Window.Title` re-titles the window the OS is already showing, so it can track whatever the window currently has open:
+
+```csharp
+window.Title = $"{Path.GetFileName(folder)} — Vesper Commander";
+```
+
+A borderless window has one too. No caption paints it, but the task bar, Alt+Tab and every window switcher read it — so an app with custom chrome should still keep it current, and draw its own caption text from the same string. Assigning the value it already has is a no-op all the way down to the platform, which makes it safe to set once per build rather than tracking a separate invalidation path.
+
 ---
 
 ## Shared State Between Windows

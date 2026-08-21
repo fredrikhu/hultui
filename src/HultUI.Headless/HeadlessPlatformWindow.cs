@@ -53,7 +53,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     /// <summary>The captured display list, or null when recording is off.</summary>
     public RenderLog? RenderLog { get; }
 
-    public string Title { get; }
+    public string Title { get; set; }
     public WindowStyle Style { get; }
     public bool IsOpen { get; private set; }
     public bool IsMaximized { get; private set; }

@@ -4,14 +4,26 @@ using HultUI.Core.Components;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Styling;
 
-using var app = new Application("Drag & Drop Demo", 650, 600);
-app.Theme = Theme.Dark;
-app.SetRoot(new DragDropDemo().Mount());
-app.Run();
+// Explicit, and STA: an outbound file drag is an OLE operation, and OLE refuses to
+// initialise on the MTA apartment .NET gives a main thread by default. The attribute is
+// inert on Linux and macOS. Without it Window.CanDragFilesOut reports false and the
+// "drag out" half of this demo disables itself.
+internal static class Program
+{
+    [STAThread]
+    private static void Main()
+    {
+        using var app = new Application("Drag & Drop Demo", 650, 700);
+        app.Theme = Theme.Dark;
+        app.SetRoot(new DragDropDemo(app.PrimaryWindow).Mount());
+        app.Run();
+    }
+}
 
 // ── Demo component ──
 
@@ -24,8 +36,15 @@ partial class DragDropDemo : Component
     private readonly ReactiveList<string> _rightItems = new(["Fig", "Grape"]);
     private readonly ReactiveList<string> _droppedFiles = new();
 
-    public DragDropDemo()
+    /// <summary>Files this demo offers to the rest of the desktop. Written to temp on first
+    /// use so the drag has something real to hand over.</summary>
+    private string[]? _exportable;
+
+    private readonly Window _window;
+
+    public DragDropDemo(Window window)
     {
+        _window = window;
         DropStatus = "Drag items between lists, or drop files from your desktop.";
     }
 
@@ -49,11 +68,70 @@ partial class DragDropDemo : Component
                 ),
 
                 // ── File drop zone ──
-                Section("OS File Drop",
+                Section("OS File Drop — Hold Shift While Dropping",
                     BuildFileDropZone()
+                ),
+
+                // ── Drag out to another application ──
+                Section("OS File Drag — Out to Another Application",
+                    BuildDragOutZone()
                 )
             )
         );
+    }
+
+    /// <summary>The outbound half: press and drag this to Explorer, an editor, or a mail
+    /// composer. The gesture is started from the DragStart handler — the moment the framework
+    /// has decided a drag is under way and the button is still down, which is what the OS
+    /// requires — and it runs modally until the drop lands or is cancelled.</summary>
+    private Element BuildDragOutZone()
+    {
+        bool available = _window.CanDragFilesOut;
+        var ground = available ? new Color(40, 40, 62) : new Color(26, 26, 32);
+        var edge = available ? new Color(99, 102, 241) : new Color(60, 60, 75);
+        var ink = available ? new Color(230, 230, 245) : new Color(120, 120, 140);
+
+        var zone = Box.New()
+            .MinHeight(72)
+            .Padding(new Thickness(16f))
+            .CornerRadius(8f)
+            .Background(ground);
+        zone.Box.BorderWidth = new Thickness(2f);
+        zone.BorderColor = edge;
+        zone.ReplaceChildren(Flex.Column(gap: 4).Children(
+            Text.New(available ? "Drag this out to another application" : "Not available on this platform")
+                .FontSize(14f).FontWeight(FontWeight.SemiBold).TextColor(ink),
+            Text.New(available
+                    ? "Two temp files are offered as a copy. Windows only, and only from an STA entry point."
+                    : "Window.CanDragFilesOut is false: no drag source here, so the gesture stays unarmed.")
+                .FontSize(11.5f).TextColor(new Color(140, 140, 165))));
+
+        if (!available) return zone;
+
+        zone.Inherited.Cursor = CursorType.Move;
+        zone.Draggable();
+        zone.On<DragStartEvent>(_ =>
+        {
+            // Copy and Link only. Move would oblige this demo to delete the originals on the
+            // strength of a value the target returned — see DRAG-AND-DROP.md.
+            var performed = _window.DragFilesOut(ExportableFiles(), DragEffect.Copy | DragEffect.Link);
+            DropStatus = performed == DragEffect.None
+                ? "The drag out was cancelled."
+                : $"The target took the files as {performed}.";
+            DragCount++;
+        });
+        return zone;
+    }
+
+    private string[] ExportableFiles()
+    {
+        if (_exportable is not null) return _exportable;
+        var dir = Path.Combine(Path.GetTempPath(), "hultui-dragdrop-sample");
+        Directory.CreateDirectory(dir);
+        var files = new[] { Path.Combine(dir, "hello.txt"), Path.Combine(dir, "notes.md") };
+        File.WriteAllText(files[0], "Dragged out of the HultUI drag & drop sample.\n");
+        File.WriteAllText(files[1], "# Notes\n\nThis file was handed over by Window.DragFilesOut.\n");
+        return _exportable = files;
     }
 
     private Element BuildItemList(string title, ReactiveList<string> items, ReactiveList<string> otherList)
@@ -164,8 +242,13 @@ partial class DragDropDemo : Component
 
         zone.On<DragOverEvent>(e =>
         {
-            // Accept any external drag (files or text)
+            // Accept any external drag (files or text). The modifiers are the ones held right
+            // now, not the ones held when the drag began — Shift is pressed part-way through.
             e.Accepted = true;
+            var wanted = e.Modifiers.HasFlag(KeyModifiers.Shift)
+                ? new Color(244, 114, 182)      // "move" — a different colour, so the key shows
+                : new Color(99, 102, 241);
+            if (zone.BorderColor != wanted) { zone.BorderColor = wanted; DragCount++; }
         });
 
         zone.On<DragEnterEvent>(_ =>
@@ -182,11 +265,12 @@ partial class DragDropDemo : Component
 
         zone.On<DropEvent>(e =>
         {
+            var verb = e.Modifiers.HasFlag(KeyModifiers.Shift) ? "Moved" : "Copied";
             if (e.DragData.HasFiles)
             {
                 foreach (var file in e.DragData.Files)
-                    _droppedFiles.Add(file);
-                DropStatus = $"Dropped {e.DragData.Files.Count} file(s)";
+                    _droppedFiles.Add($"[{verb.ToLowerInvariant()}] {file}");
+                DropStatus = $"{verb} {e.DragData.Files.Count} file(s) — Shift decides which";
             }
             else if (e.DragData.HasText)
             {

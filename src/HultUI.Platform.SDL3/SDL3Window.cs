@@ -10,7 +10,7 @@ using static SDL.SDL3;
 
 namespace HultUI.Platform.SDL3;
 
-public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
+public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource
 {
     private static bool _sdlInitialized;
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
@@ -43,6 +43,25 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
     public Action? LiveResizeFrame { get; set; }
 
     public SDL_WindowID WindowId { get; private set; }
+
+    private string _title = "";
+
+    /// <summary>The native title. Kept in a field as well as pushed to SDL so the
+    /// getter costs nothing and needs no UTF-8 round trip.</summary>
+    public string Title
+    {
+        get => _title;
+        set
+        {
+            value ??= "";
+            if (_title == value) return;
+            _title = value;
+            if (_window == null) return;
+            var bytes = MarshalUtf8(value);
+            fixed (byte* ptr = bytes)
+                SDL_SetWindowTitle(_window, ptr);
+        }
+    }
 
     /// <summary>Framebuffer width in physical pixels.</summary>
     public int PixelWidth { get; private set; }
@@ -202,6 +221,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
 
         if (_window == null)
             throw new InvalidOperationException($"SDL_CreateWindow failed: {GetError()}");
+
+        _title = title;
 
         _glContext = SDL_GL_CreateContext(_window);
         if (_glContext == null)
@@ -751,6 +772,23 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome
         var props = SDL_GetWindowProperties(_window);
         fixed (byte* name = SDL_PROP_WINDOW_WIN32_HWND_POINTER)
             return SDL_GetPointerProperty(props, name, IntPtr.Zero);
+    }
+
+    // ──── Native drag source ────
+
+    /// <summary>Windows only, and only from an STA thread — an outbound drag is an OLE
+    /// operation, and OLE will not initialise on an MTA one (which is what a .NET process gets
+    /// unless its entry point is marked <c>[STAThread]</c>). Elsewhere there is no portable way
+    /// through SDL to start a drag other applications can see. The capability reports itself
+    /// absent in all those cases rather than offering a gesture that would quietly do nothing.</summary>
+    public bool CanDragFiles =>
+        OperatingSystem.IsWindows() && GetWin32Hwnd() != IntPtr.Zero && WindowsFileDrag.IsAvailable;
+
+    public DragEffect DragFiles(IReadOnlyList<string> paths, DragEffect allowed)
+    {
+        if (!OperatingSystem.IsWindows()) return DragEffect.None;
+        var hwnd = GetWin32Hwnd();
+        return hwnd == IntPtr.Zero ? DragEffect.None : WindowsFileDrag.Drag(hwnd, paths, allowed);
     }
 
     internal static byte[] MarshalUtf8(string text)

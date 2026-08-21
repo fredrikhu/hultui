@@ -1,6 +1,6 @@
 # Drag and Drop
 
-HultUI supports both **internal drag** (moving elements within the app) and **OS-level drops** (files and text dragged from the desktop). Both use the same event types and `DragData` payload.
+HultUI supports **internal drag** (moving elements within the app), **OS-level drops** (files and text dragged in from the desktop), and **OS-level drags out** (handing files to another application). All three use the same event types and `DragData` payload.
 
 ---
 
@@ -44,12 +44,28 @@ When the user presses and moves the mouse more than 5 pixels from the press poin
 
 | Event | When it fires | Key properties |
 |-------|---------------|----------------|
-| `DragStartEvent` | Drag begins (source element) | `DragData`, `DragVisual` |
-| `DragOverEvent` | Drag hovers over an element (bubbles) | `DragData`, `Accepted` |
-| `DragEnterEvent` | Drag enters an element's bounds (bubbles) | `DragData` |
-| `DragLeaveEvent` | Drag leaves an element's bounds (bubbles) | `DragData` |
-| `DropEvent` | Data dropped on an accepting element (bubbles) | `DragData` |
-| `DragEndEvent` | Drag ends (source element) | `DragData`, `WasAccepted` |
+| `DragStartEvent` | Drag begins (source element) | `DragData`, `DragVisual`, `Modifiers` |
+| `DragOverEvent` | Drag hovers over an element (bubbles) | `DragData`, `Accepted`, `Modifiers` |
+| `DragEnterEvent` | Drag enters an element's bounds (bubbles) | `DragData`, `Modifiers` |
+| `DragLeaveEvent` | Drag leaves an element's bounds (bubbles) | `DragData`, `Modifiers` |
+| `DropEvent` | Data dropped on an accepting element (bubbles) | `DragData`, `Modifiers` |
+| `DragEndEvent` | Drag ends (source element) | `DragData`, `Modifiers`, `WasAccepted` |
+
+### Modifiers
+
+Every drag event carries the keyboard modifiers held **at that moment** — not the ones held when the press landed. Shift-to-move is decided part-way through a drag, after you have aimed, so a value captured at the start would be the wrong one:
+
+```csharp
+target.OnDragOver(e =>
+{
+    e.Accepted = e.DragData.HasFiles;
+    _hint = e.Modifiers.HasFlag(KeyModifiers.Shift) ? "Move here" : "Copy here";
+});
+
+target.OnDrop(e => Transfer(e.DragData.Files, move: e.Modifiers.HasFlag(KeyModifiers.Shift)));
+```
+
+During an **OS** drag the source application owns the input stream and no key event reaches you, so the modifiers are sampled from the live keyboard state instead and arrive attached to the drag events themselves. Reading them off `KeyDownEvent` would never see them.
 
 ### Accepting a Drop
 
@@ -114,6 +130,47 @@ var dropZone = Box.New()
 
 ---
 
+## Dragging Files Out to Other Applications
+
+`Window.DragFilesOut` hands a list of paths to the rest of the desktop as a file drag, so Explorer, an editor, or a mail composer can accept the drop:
+
+```csharp
+row.Draggable();
+row.OnDragStart(_ =>
+{
+    var performed = window.DragFilesOut(SelectedPaths(), DragEffect.Copy | DragEffect.Link);
+    if (performed == DragEffect.Move) DeleteSources();   // see the warning below
+});
+```
+
+Call it from a `DragStart` handler. That is the moment the framework has decided a drag is under way and the mouse button is still down, which is what the OS requires. Doing so **replaces** the in-window drag rather than running alongside it — no ghost is drawn, and no `DragOver`/`Drop`/`DragEnd` fires — because the OS owns the pointer for the whole gesture.
+
+**The call is modal.** Every OS implements an outbound drag as a nested loop that owns the mouse until the button comes up, so `DragFilesOut` does not return until the drop lands or is cancelled, and no frame renders meanwhile.
+
+**Passing `DragEffect.Move` is a promise.** The target will not delete your files; returning `Move` means it expects *you* to. An app that does not want to make that promise on the strength of a value the target reported should offer `Copy` (and `Link`) only, and keep move on an explicit command.
+
+### Availability
+
+`Window.CanDragFilesOut` reports whether the platform can start one. Check it before arming the gesture rather than offering a drag that goes nowhere:
+
+```csharp
+if (window.CanDragFilesOut) row.Draggable();
+```
+
+It is false on Linux and macOS (SDL exposes no portable drag source), false headlessly, and — on Windows — false unless the process's entry point is marked `[STAThread]`. An outbound drag is an OLE operation, and OLE refuses to initialise on the MTA apartment .NET gives a main thread by default:
+
+```csharp
+internal static class Program
+{
+    [STAThread]                     // inert on Linux/macOS; required on Windows
+    private static void Main(string[] args) { /* ... */ }
+}
+```
+
+Top-level statements produce an entry point with no attribute, so an app that wants this needs an explicit `Main`.
+
+---
+
 ## Visual Feedback
 
 Use `DragEnterEvent` and `DragLeaveEvent` to highlight drop targets:
@@ -127,6 +184,8 @@ zone.On<DropEvent>(_ => zone.BackgroundColor = new Color(30, 30, 40));
 ```
 
 These events bubble, so a container's handlers fire even when the cursor is over a child element inside it.
+
+A highlight handler that calls `MarkDirty()` is fine: rebuilding mid-drag replaces the element the hover landed on, and the framework re-resolves the target by hit-testing again — the drop still reaches the live tree rather than the orphan the rebuild left behind.
 
 ---
 
@@ -180,6 +239,11 @@ See [Reactivity Guide -- Event handlers follow the latest build](REACTIVITY.md#e
 | `.OnDragLeave(handler)` | Handle drag leave |
 | `.OnDragEnd(handler)` | Handle drag end (on source) |
 
+| Window member | Description |
+|---------------|-------------|
+| `Window.DragFilesOut(files, allowed)` | Start an OS-wide file drag; blocks, returns what the target did |
+| `Window.CanDragFilesOut` | Whether this platform/process can start one |
+
 ---
 
 ## Key Imports
@@ -188,3 +252,4 @@ See [Reactivity Guide -- Event handlers follow the latest build](REACTIVITY.md#e
 |-----------|-----------------|
 | `HultUI.Core.Events` | `DragStartEvent`, `DragOverEvent`, `DropEvent`, `DragEnterEvent`, `DragLeaveEvent`, `DragEndEvent`, `DragData` |
 | `HultUI.Core.Builders` | `.Draggable()`, `.OnDragStart()`, `.OnDrop()`, etc. |
+| `HultUI.Core.Platform` | `DragEffect` (`Copy`, `Move`, `Link`), `INativeDragSource` |

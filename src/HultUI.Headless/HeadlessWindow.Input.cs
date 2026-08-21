@@ -109,6 +109,30 @@ public sealed partial class HeadlessWindow
         MouseUp(to.X, to.Y, button, modifiers);
     }
 
+    /// <summary>
+    /// Simulates an OS-level file drop: the begin/position/file/complete sequence a
+    /// desktop drag from another application produces. <paramref name="modifiers"/>
+    /// is what the platform samples from the live keyboard — the only way Shift or
+    /// Ctrl reaches an external drag, since no key event is delivered during one.
+    /// </summary>
+    public void DropFiles(Point at, IEnumerable<string> paths, KeyModifiers modifiers = KeyModifiers.None)
+    {
+        _platform.RaiseInput(new InputEvent.DropBeginInput());
+        foreach (var path in paths)
+            _platform.RaiseInput(new InputEvent.DropFileInput(path));
+        _platform.RaiseInput(new InputEvent.DropPositionInput(at.X, at.Y, modifiers));
+        _platform.RaiseInput(new InputEvent.DropCompleteInput(modifiers));
+    }
+
+    /// <summary>Simulates an OS-level text drop at <paramref name="at"/>.</summary>
+    public void DropText(Point at, string text, KeyModifiers modifiers = KeyModifiers.None)
+    {
+        _platform.RaiseInput(new InputEvent.DropBeginInput());
+        _platform.RaiseInput(new InputEvent.DropTextInput(text));
+        _platform.RaiseInput(new InputEvent.DropPositionInput(at.X, at.Y, modifiers));
+        _platform.RaiseInput(new InputEvent.DropCompleteInput(modifiers));
+    }
+
     public void KeyDown(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, bool repeat = false)
         => _platform.RaiseInput(new InputEvent.KeyInput(key, modifiers, IsDown: true, IsRepeat: repeat));
 

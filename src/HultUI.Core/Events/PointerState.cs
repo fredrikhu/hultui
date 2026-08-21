@@ -174,6 +174,17 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         return (upEvent, clickEvent, doubleClickEvent);
     }
 
+    /// <summary>
+    /// Forget the press in progress without synthesizing a click. For gestures the OS takes
+    /// over mid-press — a native drag runs a modal loop and swallows the release — where the
+    /// press would otherwise stay armed and its :active styling stuck on the row.
+    /// </summary>
+    public void CancelPress()
+    {
+        ClearPressedChain();
+        _pressedElement = null;
+    }
+
     private void ClearPressedChain()
     {
         for (var el = _pressedElement; el is not null; el = el.Parent)

@@ -16,8 +16,11 @@ public abstract record InputEvent
     public record TextInputInput(string Text) : InputEvent;
     public record TextEditingInput(string Text, int SegmentStart, int SegmentLength) : InputEvent;
     public record DropBeginInput() : InputEvent;
-    public record DropPositionInput(float X, float Y) : InputEvent;
+    /// <summary>Modifiers are sampled from the live keyboard state, not from a key
+    /// event: during an OS drag the source application owns the input stream, so no
+    /// key press reaches us — but Shift/Ctrl still decide copy-vs-move.</summary>
+    public record DropPositionInput(float X, float Y, KeyModifiers Modifiers = KeyModifiers.None) : InputEvent;
     public record DropFileInput(string Path) : InputEvent;
     public record DropTextInput(string Text) : InputEvent;
-    public record DropCompleteInput() : InputEvent;
+    public record DropCompleteInput(KeyModifiers Modifiers = KeyModifiers.None) : InputEvent;
 }

@@ -93,6 +93,15 @@ public sealed class Window : IOverlayHost, IDisposable
     private Point _lastDragPos;
     private bool _dragAccepted;
     private bool _isExternalDrag;
+    // Modifiers as of the last drag input. Sampled per event rather than captured at
+    // the start, because Shift/Ctrl are routinely pressed *during* a drag to change
+    // what dropping means — and an OS drag delivers no key events at all, so its
+    // modifiers only ever arrive attached to the drop-position updates.
+    private KeyModifiers _dragModifiers;
+    // Set while DragFilesOut is running its modal loop. The internal drag that was starting
+    // when the handler called it is abandoned on the way back out: the OS owned the mouse for
+    // the whole gesture, so there is no release left for EndInternalDrag to see.
+    private bool _nativeDragRan;
 
     internal IPlatformWindow PlatformWindow { get; }
 
@@ -102,6 +111,18 @@ public sealed class Window : IOverlayHost, IDisposable
     private readonly IWindowChrome? _chrome;
     public long ResizeThrottleMs { get; set; } = 16;
     internal Application Application { get; }
+
+    /// <summary>
+    /// The native window title, live: assigning re-titles the window the OS already
+    /// shows. A borderless window has one too — the task bar and Alt+Tab read it even
+    /// though no caption paints it, so an app with custom chrome should still keep it
+    /// current (and draw its own caption text from the same string).
+    /// </summary>
+    public string Title
+    {
+        get => PlatformWindow.Title;
+        set => PlatformWindow.Title = value;
+    }
 
     public IClipboard Clipboard { get; }
 
@@ -797,7 +818,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 // If actively dragging (internal), update drag hover
                 if (_isDragging && !_isExternalDrag)
                 {
-                    UpdateDragHover(pos);
+                    UpdateDragHover(pos, move.Modifiers);
                     break;
                 }
 
@@ -808,7 +829,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     float dy = pos.Y - _dragStartPos.Y;
                     if (dx * dx + dy * dy >= DragThreshold * DragThreshold)
                     {
-                        StartInternalDrag(pos);
+                        StartInternalDrag(pos, move.Modifiers);
                         break;
                     }
                 }
@@ -866,7 +887,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 // End internal drag on button up
                 if (!button.IsDown && _isDragging && !_isExternalDrag)
                 {
-                    EndInternalDrag(pos);
+                    EndInternalDrag(pos, button.Modifiers);
                     break;
                 }
 
@@ -1212,6 +1233,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 _dragData = new DragData();
                 _dragHoveredElement = null;
                 _dragAccepted = false;
+                _dragModifiers = KeyModifiers.None;
                 break;
             }
 
@@ -1219,7 +1241,7 @@ public sealed class Window : IOverlayHost, IDisposable
             {
                 if (!_isExternalDrag) break;
                 var pos = new Point(dropPos.X, dropPos.Y);
-                UpdateDragHover(pos);
+                UpdateDragHover(pos, dropPos.Modifiers);
                 break;
             }
 
@@ -1237,9 +1259,9 @@ public sealed class Window : IOverlayHost, IDisposable
                 break;
             }
 
-            case InputEvent.DropCompleteInput:
+            case InputEvent.DropCompleteInput complete:
             {
-                EndExternalDrag();
+                EndExternalDrag(complete.Modifiers);
                 break;
             }
         }
@@ -1417,7 +1439,7 @@ public sealed class Window : IOverlayHost, IDisposable
         return null;
     }
 
-    private void StartInternalDrag(Point pos)
+    private void StartInternalDrag(Point pos, KeyModifiers modifiers)
     {
         _dragSource = _potentialDragSource!;
         _potentialDragSource = null;
@@ -1426,22 +1448,74 @@ public sealed class Window : IOverlayHost, IDisposable
         _dragData = new DragData();
         _dragHoveredElement = null;
         _dragAccepted = false;
+        _dragModifiers = modifiers;
 
-        var startEvt = new DragStartEvent { Position = pos, DragData = _dragData };
+        var startEvt = new DragStartEvent { Position = pos, DragData = _dragData, Modifiers = modifiers };
         EventDispatcher.DispatchDirect(startEvt, _dragSource);
+
+        // A DragStart handler is allowed to escalate the gesture to an OS-wide drag (see
+        // DragFilesOut). That runs modally and consumes the rest of it, so there is nothing
+        // left here to ghost, hover or end.
+        if (_nativeDragRan)
+        {
+            _nativeDragRan = false;
+            ResetDragState();
+            // The modal loop swallowed the button release, so the press is still armed and
+            // its :active styling still on — drop it rather than leave the row lit.
+            _pointerState.CancelPress();
+            PlatformWindow.SetCursor(CursorType.Default);
+            return;
+        }
 
         // Capture drag visual (custom or source element as default)
         _dragVisual = startEvt.DragVisual;
         _dragVisualLayoutDone = false;
 
         PlatformWindow.SetCursor(CursorType.Move);
-        UpdateDragHover(pos);
+        UpdateDragHover(pos, modifiers);
     }
 
-    private void UpdateDragHover(Point pos)
+    /// <summary>
+    /// Hand <paramref name="files"/> to the rest of the desktop as a drag other applications
+    /// can accept, and block until the drop resolves. Returns what the target did — or
+    /// <see cref="DragEffect.None"/> when the drag was cancelled, or when the platform cannot
+    /// start one (see <see cref="CanDragFilesOut"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>Call it from a <c>DragStart</c> handler. That is the moment the framework has
+    /// decided a drag is under way and the mouse button is still down, which is what the OS
+    /// requires; calling it from anywhere else starts a drag with nothing holding it. Doing so
+    /// replaces the in-window drag rather than running alongside it — no ghost is drawn, and no
+    /// DragOver/Drop/DragEnd fires — because the OS owns the pointer for the whole gesture.</para>
+    /// <para>Passing <see cref="DragEffect.Move"/> in <paramref name="allowed"/> promises to
+    /// delete the source files if Move comes back: the target will not have done it. An app
+    /// that does not want to make that promise should offer Copy (and Link) only.</para>
+    /// </remarks>
+    public DragEffect DragFilesOut(IReadOnlyList<string> files,
+        DragEffect allowed = DragEffect.Copy | DragEffect.Link)
+    {
+        if (PlatformWindow is not INativeDragSource source || !source.CanDragFiles) return DragEffect.None;
+        if (files.Count == 0) return DragEffect.None;
+
+        _nativeDragRan = true;
+        try { return source.DragFiles(files, allowed); }
+        finally
+        {
+            // A drag started from anywhere but DragStart has no internal drag to hand back to,
+            // so it tidies up here; StartInternalDrag clears the flag itself when it does.
+            if (!_isDragging) _nativeDragRan = false;
+        }
+    }
+
+    /// <summary>True when this platform can start a drag other applications can accept
+    /// (Windows today). An app can hide the affordance where it reports false.</summary>
+    public bool CanDragFilesOut => PlatformWindow is INativeDragSource { CanDragFiles: true };
+
+    private void UpdateDragHover(Point pos, KeyModifiers modifiers)
     {
         if (_root is null || _dragData is null) return;
         _lastDragPos = pos;
+        _dragModifiers = modifiers;
 
         var target = HitTester.HitTest(_root, pos);
 
@@ -1449,19 +1523,19 @@ public sealed class Window : IOverlayHost, IDisposable
         if (target != _dragHoveredElement)
         {
             if (_dragHoveredElement is not null)
-                EventDispatcher.Dispatch(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
+                EventDispatcher.Dispatch(new DragLeaveEvent { Position = pos, DragData = _dragData, Modifiers = modifiers }, _dragHoveredElement);
 
             _dragHoveredElement = target;
             _dragAccepted = false;
 
             if (target is not null)
-                EventDispatcher.Dispatch(new DragEnterEvent { Position = pos, DragData = _dragData }, target);
+                EventDispatcher.Dispatch(new DragEnterEvent { Position = pos, DragData = _dragData, Modifiers = modifiers }, target);
         }
 
         // Fire DragOver (bubbles) so ancestors can accept
         if (target is not null)
         {
-            var overEvt = new DragOverEvent { Position = pos, DragData = _dragData };
+            var overEvt = new DragOverEvent { Position = pos, DragData = _dragData, Modifiers = modifiers };
             EventDispatcher.Dispatch(overEvt, target);
             _dragAccepted = overEvt.Accepted;
         }
@@ -1470,12 +1544,21 @@ public sealed class Window : IOverlayHost, IDisposable
             _dragAccepted = false;
         }
 
+        // A handler is allowed to rebuild — highlighting the row under the cursor is the
+        // obvious thing to do with a DragEnter — and a rebuild detaches the element we just
+        // hit. Re-resolve so the remembered hover stays a live node: everything that fires
+        // later against it (the DragLeave pairing this enter, above all) reaches the tree
+        // rather than an orphan whose parent chain leads nowhere.
+        if (_dragHoveredElement is { Parent: null } && !ReferenceEquals(_dragHoveredElement, _root))
+            _dragHoveredElement = HitTester.HitTest(_root, pos);
+
         PlatformWindow.SetCursor(_dragAccepted ? CursorType.Move : CursorType.NotAllowed);
     }
 
-    private void EndInternalDrag(Point pos)
+    private void EndInternalDrag(Point pos, KeyModifiers modifiers)
     {
         if (_root is null || _dragData is null) { ResetDragState(); return; }
+        _dragModifiers = modifiers;
 
         var target = HitTester.HitTest(_root, pos);
 
@@ -1483,21 +1566,21 @@ public sealed class Window : IOverlayHost, IDisposable
         bool accepted = false;
         if (target is not null)
         {
-            var overEvt = new DragOverEvent { Position = pos, DragData = _dragData };
+            var overEvt = new DragOverEvent { Position = pos, DragData = _dragData, Modifiers = modifiers };
             EventDispatcher.Dispatch(overEvt, target);
             accepted = overEvt.Accepted;
 
             if (accepted)
-                EventDispatcher.Dispatch(new DropEvent { Position = pos, DragData = _dragData }, target);
+                EventDispatcher.Dispatch(new DropEvent { Position = pos, DragData = _dragData, Modifiers = modifiers }, target);
         }
 
         // Fire DragLeave on previously hovered element
         if (_dragHoveredElement is not null)
-            EventDispatcher.Dispatch(new DragLeaveEvent { Position = pos, DragData = _dragData }, _dragHoveredElement);
+            EventDispatcher.Dispatch(new DragLeaveEvent { Position = pos, DragData = _dragData, Modifiers = modifiers }, _dragHoveredElement);
 
         // Fire DragEnd on the source
         if (_dragSource is not null)
-            EventDispatcher.DispatchDirect(new DragEndEvent { Position = pos, DragData = _dragData, WasAccepted = accepted }, _dragSource);
+            EventDispatcher.DispatchDirect(new DragEndEvent { Position = pos, DragData = _dragData, Modifiers = modifiers, WasAccepted = accepted }, _dragSource);
 
         // Restore cursor
         var cursorTarget = HitTester.HitTest(_root, pos);
@@ -1506,13 +1589,40 @@ public sealed class Window : IOverlayHost, IDisposable
         ResetDragState();
     }
 
-    private void EndExternalDrag()
+    /// <summary>
+    /// Finish an OS drag. Deliberately the same shape as <see cref="EndInternalDrag"/>: the
+    /// drop target is hit-tested afresh at the last position and re-asked whether it accepts,
+    /// rather than trusting the element remembered from the last hover.
+    ///
+    /// <para>That element is not reliably still in the tree. A DragEnter/DragOver handler is
+    /// allowed to rebuild — highlighting the folder under the cursor is the obvious thing to
+    /// do with one — and a rebuild replaces the element the hover recorded. Dispatching the
+    /// drop at that detached node used to deliver it to an orphan, where it bubbled through a
+    /// parentless chain and reached none of the live ancestors that had accepted it: the drag
+    /// visibly highlighted its target and then dropped into nothing.</para>
+    /// </summary>
+    private void EndExternalDrag(KeyModifiers modifiers)
     {
-        if (_dragData is not null && _dragHoveredElement is not null && _dragAccepted)
-            EventDispatcher.Dispatch(new DropEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
+        // The last drop-position update is what carried a modifier sample; a platform
+        // that reports none on the release itself keeps whatever the drag was holding.
+        if (modifiers == KeyModifiers.None) modifiers = _dragModifiers;
 
-        if (_dragHoveredElement is not null && _dragData is not null)
-            EventDispatcher.Dispatch(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData }, _dragHoveredElement);
+        if (_root is not null && _dragData is not null)
+        {
+            var target = HitTester.HitTest(_root, _lastDragPos);
+            if (target is not null)
+            {
+                var overEvt = new DragOverEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers };
+                EventDispatcher.Dispatch(overEvt, target);
+                if (overEvt.Accepted)
+                    EventDispatcher.Dispatch(new DropEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers }, target);
+            }
+
+            // Leave goes to whatever the hover last recorded — that is the element whose
+            // enter it paired with, even if a rebuild has since detached it.
+            if (_dragHoveredElement is not null)
+                EventDispatcher.Dispatch(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers }, _dragHoveredElement);
+        }
 
         PlatformWindow.SetCursor(CursorType.Default);
         ResetDragState();
@@ -1529,6 +1639,7 @@ public sealed class Window : IOverlayHost, IDisposable
         _dragVisual = null;
         _dragVisualLayoutDone = false;
         _dragAccepted = false;
+        _dragModifiers = KeyModifiers.None;
     }
 
     // Dirty flags always propagate upward (Mark*Dirty walks to the root, and

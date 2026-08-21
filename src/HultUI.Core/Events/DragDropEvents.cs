@@ -7,6 +7,14 @@ public abstract class DragDropEvent : ElementEvent
 {
     public Point Position { get; init; }
     public DragData DragData { get; init; } = null!;
+
+    /// <summary>
+    /// Keyboard modifiers held at this moment of the drag — the live state, not the
+    /// state when the drag began, so a Shift pressed mid-drag shows up on the next
+    /// <see cref="DragOverEvent"/> and on the drop. This is what a file manager reads
+    /// to pick copy vs move, and what a list reads to decide "insert" vs "reorder".
+    /// </summary>
+    public KeyModifiers Modifiers { get; init; }
 }
 
 /// <summary>Fired on the source element when an internal drag begins.</summary>
