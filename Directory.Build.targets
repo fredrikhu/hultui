@@ -29,4 +29,31 @@
     <DefineConstants>$(DefineConstants);HULTUI_ELEMENT_ORIGIN</DefineConstants>
   </PropertyGroup>
 
+  <!--
+    Strict element lifetime: reading Layout or writing live-only state on an element that
+    reconciliation has replaced throws instead of quietly doing nothing (Element.IsDetached).
+
+    Every rebuild constructs a fresh tree whose values are patched into the live one and then
+    discarded, so app code that captures an element during a build is holding a corpse one
+    frame later. Reads go stale and writes are dropped, and neither says so - the symptom is a
+    control that has simply stopped responding. This is the check that names it.
+
+    Compiled in for Debug and out for Release: the checks sit on Layout, which every frame
+    reads for every element, and a shipped build should not pay for them. Override either way,
+    independently of the configuration:
+        dotnet build -c Release -p:HultUIStrictLifetime=true
+        dotnet build -c Debug   -p:HultUIStrictLifetime=false
+
+    Within a strict build, Element.StrictLifetimeChecks switches it off at runtime for a test
+    that means to inspect a discarded element.
+  -->
+  <PropertyGroup>
+    <HultUIStrictLifetime Condition="'$(HultUIStrictLifetime)' == '' and '$(Configuration)' == 'Debug'">true</HultUIStrictLifetime>
+    <HultUIStrictLifetime Condition="'$(HultUIStrictLifetime)' == ''">false</HultUIStrictLifetime>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HultUIStrictLifetime)' == 'true'">
+    <DefineConstants>$(DefineConstants);HULTUI_STRICT_LIFETIME</DefineConstants>
+  </PropertyGroup>
+
 </Project>

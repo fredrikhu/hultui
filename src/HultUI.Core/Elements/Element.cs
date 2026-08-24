@@ -102,7 +102,92 @@ public abstract class Element
     internal GridItemStyle GridItemRead => _gridItem ?? GridItemStyle.Default;
 
     // ──── Layout output ────
-    public LayoutResult Layout { get; internal set; }
+
+    private LayoutResult _layout;
+
+    /// <summary>
+    /// Where this element ended up: its box, in both local and absolute coordinates. Written
+    /// by the layout pass, read by rendering, hit testing and app code.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// In a strict-lifetime build, when this element has been replaced by reconciliation —
+    /// see <see cref="IsDetached"/>. Its layout was never computed and never will be, so the
+    /// value would be a zero box or whatever the last pass left behind.
+    /// </exception>
+    public LayoutResult Layout
+    {
+        get
+        {
+#if HULTUI_STRICT_LIFETIME
+            if (_detached) ThrowDetached(nameof(Layout));
+#endif
+            return _layout;
+        }
+        internal set => _layout = value;
+    }
+
+    // ──── Lifetime ────
+
+    private bool _detached;
+
+    /// <summary>
+    /// True once reconciliation has replaced this element with a live counterpart and
+    /// discarded it.
+    ///
+    /// <para>Every rebuild constructs a fresh element tree. The reconciler patches that tree's
+    /// values into the live one and throws the fresh elements away, so a reference to one is
+    /// live for exactly one frame. Reading such an element's <see cref="Layout"/> gives
+    /// geometry that was never computed, and writing its state — a scroll offset, a selection —
+    /// changes nothing anyone will see. Neither fails on its own, which is what makes it an
+    /// expensive mistake to find.</para>
+    ///
+    /// <para>Hold a <see cref="Reactivity.Ref{T}"/> instead: the reconciler repoints it at the
+    /// live element on every patch. Inside an event handler, <c>e.CurrentTarget</c> is already
+    /// the live element.</para>
+    /// </summary>
+    public bool IsDetached => _detached;
+
+    /// <summary>
+    /// Whether a detached-element access throws. Compiled in for strict-lifetime builds only
+    /// (Debug by default — see Directory.Build.targets), and switchable at runtime for a test
+    /// that means to inspect a discarded element.
+    /// </summary>
+    public static bool StrictLifetimeChecks { get; set; } = true;
+
+    /// <summary>
+    /// Marks this element as replaced. Called by the reconciler on the freshly built element
+    /// once its values have been patched into the live one.
+    /// </summary>
+    internal void MarkDetached() => _detached = true;
+
+    /// <summary>
+    /// Throws if this element has been replaced by reconciliation. For live-only state whose
+    /// setter would otherwise accept the write and drop it.
+    /// </summary>
+    internal void ThrowIfDetached(string member)
+    {
+#if HULTUI_STRICT_LIFETIME
+        if (_detached) ThrowDetached(member);
+#endif
+    }
+
+#if HULTUI_STRICT_LIFETIME
+    private void ThrowDetached(string member)
+    {
+        if (!StrictLifetimeChecks) return;
+
+        string where = Origin is { } origin ? $" created at {origin}" : "";
+        string? label = Name ?? AutomationId;
+        string what = label is null ? "" : $" '{label}'";
+        throw new InvalidOperationException(
+            $"{GetType().Name}{what}{where} was replaced by reconciliation, so its "
+            + $"{member} is meaningless — reads are stale and writes are dropped. "
+            + "This element came from a build that has since been patched into the live tree "
+            + "and discarded. Hold a Ref<T> and use its Current, or reach the live element "
+            + "through an event's CurrentTarget. "
+            + $"Set {nameof(Element)}.{nameof(StrictLifetimeChecks)} = false to allow it.");
+    }
+#endif
 
     // ──── Style / Inheritance ────
     private InheritedStyle? _inherited;

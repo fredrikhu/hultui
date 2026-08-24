@@ -101,6 +101,31 @@ HultUI (meta-package)
 | Function shorthand for stateless | Static methods returning Element. Concise for simple components |
 | Build() wrapped in Effect | Auto-rebuilds when signals read during Build() change |
 | Lightweight tree diffing | Match by type + key, patch in-place. Full vDOM diffing not needed since reactive system knows what changed |
+| Discarded build elements are marked, not forwarded | Patching keeps the live element and throws the incoming one away, so an element captured during a build is a corpse one frame later. `Element.IsDetached` says so, and in a strict-lifetime build reading its `Layout` or writing its scroll offset throws. Forwarding those accesses to the live counterpart was considered and rejected: after a keyed reorder the counterpart is a *different row*, so forwarding would quietly act on the wrong element — worse than failing. `Ref<T>` remains the way to hold an element across a frame |
+
+### The detached-element trap
+
+Every rebuild constructs a fresh tree. `TreeDiffer` patches its values into the live tree and
+discards it, so a reference app code captured during the build points at something that will
+never be laid out, rendered or hit-tested again. Both halves fail silently: reads return
+geometry that was never computed, writes land on state nothing consumes. The symptom is always
+"this control has stopped responding", with nothing in the log and nothing to breakpoint.
+
+Three defences, in descending order of how much they catch:
+
+1. **`Ref<T>`** — the fix. The reconciler repoints it at the live element on every patch. Inside
+   a handler, `e.CurrentTarget` is already live.
+2. **The runtime guard** (`HULTUI_STRICT_LIFETIME`, on in Debug) — sound, because the reconciler
+   is the one place that knows which elements it threw away. Names the element and its origin
+   line, so the message points at the build site rather than the crash site.
+3. **HULTUI003** — catches the one shape of the mistake that is decidable at compile time:
+   comparing an event's `Target` against an element from elsewhere.
+
+There is deliberately **no** analyzer for "element stored in a field". Deciding whether a given
+element came from a build needs interprocedural escape analysis — the value is routinely a
+method parameter — and the shape is legitimate elsewhere: `Window` holds the live root and the
+drag source, and the Benchmark sample holds a statically built tree it never reconciles. A rule
+firing on those would be noise, and warning noise is the failure these rules exist to prevent.
 
 ---
 

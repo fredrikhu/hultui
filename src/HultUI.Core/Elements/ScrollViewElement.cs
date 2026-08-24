@@ -18,6 +18,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         get => _scrollOffsetX;
         set
         {
+            ThrowIfDetached(nameof(ScrollOffsetX));
             float clamped = ClampX(value);
             if (clamped == _scrollOffsetX) return;
             _scrollOffsetX = clamped;
@@ -33,6 +34,9 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         get => _scrollOffsetY;
         set
         {
+            // Scrolling a discarded element is the shape this guard exists for: an overlay
+            // that captured the list during a build keeps setting an offset nothing reads.
+            ThrowIfDetached(nameof(ScrollOffsetY));
             float clamped = ClampY(value);
             if (clamped == _scrollOffsetY) return;
             _scrollOffsetY = clamped;

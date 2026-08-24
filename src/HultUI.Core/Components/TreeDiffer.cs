@@ -95,6 +95,17 @@ internal static class TreeDiffer
         // Child reconciliation may have altered a self-managing element's
         // internally-owned subtree (e.g. Tabs); let it re-assert its live state.
         existing.OnReconciled();
+
+        // The incoming element has now handed everything it had to the live one and is
+        // garbage. Saying so is what turns "my scrollbar does nothing" into a stack trace:
+        // app code that captured it during the build is holding a corpse, and both reading
+        // its layout and writing its state fail silently otherwise (Element.IsDetached).
+        //
+        // Marked here, at the end, because ReconcileChildren above still reads its children —
+        // and only when the two are actually different objects, so a Build() that returns a
+        // cached element is patched against itself without being declared dead.
+        if (!ReferenceEquals(existing, incoming))
+            incoming.MarkDetached();
     }
 
     private static void ReconcileChildren(Element existing, Element incoming)
