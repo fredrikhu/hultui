@@ -24,6 +24,12 @@ public sealed class Window : IOverlayHost, IDisposable
     private Element? _root;
     private Element? _lastHoveredElement;
     private IScrollbarDraggable? _scrollbarDragTarget;
+    // Middle-button pan: the scroll view holding the pointer while the middle button is
+    // down. Captured on press rather than re-hit-tested per move, so a pan that leaves the
+    // list (or crosses a child that scrolls too) keeps moving the view it started in.
+    private ScrollViewElement? _panScrollTarget;
+    private Point _panLastPos;
+    private Point _panOrigin;
     private TextInputElement? _textInputDragTarget;
     private TextAreaElement? _textAreaDragTarget;
     private TextElement? _textElementDragTarget;
@@ -790,6 +796,20 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
+                // Middle-button pan owns the pointer while it is down. The target was captured
+                // on press, and a rebuild in between reconciles it away — writing a scroll
+                // offset on that corpse lands on state nothing consumes (and throws under
+                // strict lifetime checks). Re-hit-test for the live view under the pointer
+                // when that happens, so the pan carries on instead of dying silently.
+                if (_panScrollTarget is not null)
+                {
+                    if (_panScrollTarget.IsDetached)
+                        _panScrollTarget = FindPanScrollAncestor(HitTester.HitTest(_root, pos));
+                    _panScrollTarget?.PanByPointer(pos.X - _panLastPos.X, pos.Y - _panLastPos.Y);
+                    _panLastPos = pos;
+                    break;
+                }
+
                 // If dragging in a text input, route move to the capture target
                 if (_textInputDragTarget is not null)
                 {
@@ -903,6 +923,19 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
+                // End a middle-button pan. A pan that travelled swallows its own click — the
+                // app never sees a middle click it did not mean to make — while a press that
+                // stayed put still clicks, so a middle click keeps whatever meaning the app
+                // gave it. The release itself is always dispatched either way, so nothing is
+                // left holding a pressed :active style.
+                bool panSuppressedClick = false;
+                if (!button.IsDown && button.Button == 1 && _panScrollTarget is not null)
+                {
+                    panSuppressedClick = Dist(pos, _panOrigin) >= DragThreshold;
+                    _panScrollTarget = null;
+                    PlatformWindow.SetCursor(_lastHoveredElement?.ResolvedInherited.Cursor ?? CursorType.Default);
+                }
+
                 // End text input drag on button up
                 if (!button.IsDown && _textInputDragTarget is not null)
                 {
@@ -953,6 +986,17 @@ public sealed class Window : IOverlayHost, IDisposable
                     // Check if click is on a scrollbar — walk up from target to find a ScrollViewElement
                     if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
                         break;
+
+                    // Middle button in anything that can scroll: pan it. Claimed before the
+                    // press is dispatched, but the press still goes out — a middle click that
+                    // never moves has to keep meaning whatever the app made it mean.
+                    if (button.Button == 1 && FindPanScrollAncestor(target) is { } pan)
+                    {
+                        _panScrollTarget = pan;
+                        _panLastPos = pos;
+                        _panOrigin = pos;
+                        PlatformWindow.SetCursor(CursorType.Move);
+                    }
 
                     // Move focus to a focusable element under the pointer. For the
                     // main tree this always runs (clicking empty space clears focus).
@@ -1037,9 +1081,9 @@ public sealed class Window : IOverlayHost, IDisposable
                 {
                     var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, effectiveBtnPos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(upEvt, target);
-                    if (clickEvt is not null)
+                    if (clickEvt is not null && !panSuppressedClick)
                         EventDispatcher.Dispatch(clickEvt, target);
-                    if (dblClickEvt is not null)
+                    if (dblClickEvt is not null && !panSuppressedClick)
                         EventDispatcher.Dispatch(dblClickEvt, target);
                 }
                 break;
@@ -1367,6 +1411,25 @@ public sealed class Window : IOverlayHost, IDisposable
                 return current;
             current = current.Parent;
         }
+        return null;
+    }
+
+    /// <summary>Straight-line distance between two points, for the "did this press travel?"
+    /// questions the pointer pipeline asks.</summary>
+    private static float Dist(Point a, Point b)
+    {
+        float dx = a.X - b.X, dy = a.Y - b.Y;
+        return MathF.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>The nearest scroll view above <paramref name="target"/> that opts into
+    /// middle-drag panning and has somewhere left to scroll. Nested lists resolve inwards,
+    /// which is what a pointer inside the inner one means.</summary>
+    private static ScrollViewElement? FindPanScrollAncestor(Element? target)
+    {
+        for (var current = target; current is not null; current = current.Parent)
+            if (current is ScrollViewElement { MiddleDragScroll: true, CanPanScroll: true } sv)
+                return sv;
         return null;
     }
 

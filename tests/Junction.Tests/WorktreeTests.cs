@@ -155,35 +155,44 @@ public class WorktreeTests
         }
     }
 
-    // ── Registration: the panel's half of the bargain ────────────────────
+    // ── The panel's half of the bargain ──────────────────────────────────
     //
-    // Opening a worktree registers its path as a repository (it is the same repo checked
-    // out elsewhere, which the rest of the app handles natively) and adds it to the active
-    // workspace. Removing or pruning it therefore has to undo exactly that — the symptom
-    // when it does not is a sidebar row pointing at a folder that is no longer on disk,
-    // which nothing else in the app ever cleans up.
+    // Opening a worktree registers nothing: the sidebar derives worktrees from
+    // `git worktree list` and nests them under the repository. So what a removal or a prune
+    // has to take away is the git-side entry, and what a *failed* one must leave alone is
+    // the row that still reaches the worktree. Older settings files can hold a worktree as
+    // a repository of its own, and the cleanup has to reach those too — the symptom when it
+    // does not is a sidebar row pointing at a folder that is gone, which nothing else in
+    // the app ever tidies up.
 
+    /// <summary>Opening a worktree switches to it and leaves the settings file alone. It
+    /// used to add the path as a repository of its own, and the sidebar then carried two
+    /// entries sharing one name, one history and one set of remotes.</summary>
     [Fact]
-    public void OpeningAWorktreeRegistersItAsARepository()
+    public void OpeningAWorktreeSwitchesToItWithoutRegisteringIt()
     {
         WithApp((repo, session, app, settings, linked) =>
         {
             Invoke(app, "OpenWorktree", linked);
             session.PumpFrames(2);
 
-            Assert.Contains(settings.RepositoryPaths, p => Same(p, linked));
-            Assert.Contains(settings.Workspaces[0].RepoPaths, p => Same(p, linked));
+            Assert.True(Same(ActiveRepoPath(app), linked));
+            Assert.DoesNotContain(settings.RepositoryPaths, p => Same(p, linked));
+            Assert.DoesNotContain(settings.Workspaces[0].RepoPaths, p => Same(p, linked));
         });
     }
 
+    /// <summary>An older settings file can still hold the worktree as a repository of its
+    /// own. Removing the worktree has to take that stale entry with it, or the sidebar keeps
+    /// a row pointing at a folder that is gone.</summary>
     [Fact]
-    public void RemovingAWorktreeAlsoRemovesTheRepositoryRowItRegistered()
+    public void RemovingAWorktreeAlsoRemovesAStaleRepositoryRegistration()
     {
         WithApp((repo, session, app, settings, linked) =>
         {
-            Invoke(app, "OpenWorktree", linked);
-            // Back to the main worktree: git refuses to remove the tree you are standing
-            // in, and the panel hides Remove on that row for the same reason.
+            RegisterAsRepository(settings, linked);
+            // Standing on the main worktree: git refuses to remove the tree you are in, and
+            // the panel hides Remove on that row for the same reason.
             Invoke(app, "SelectRepo", repo.Path);
             session.PumpFrames(2);
 
@@ -196,34 +205,32 @@ public class WorktreeTests
         });
     }
 
-    /// <summary>A failed removal must not deregister anything: the worktree is still
-    /// there, and the row that reaches it has to stay.</summary>
+    /// <summary>A failed removal must take nothing away: the worktree is still there, and
+    /// the row that reaches it has to stay on screen.</summary>
     [Fact]
-    public void AWorktreeThatRefusesToBeRemovedKeepsItsRepositoryRow()
+    public void AWorktreeThatRefusesToBeRemovedKeepsItsRow()
     {
         WithApp((repo, session, app, settings, linked) =>
         {
-            Invoke(app, "OpenWorktree", linked);
-            Invoke(app, "SelectRepo", repo.Path);
+            PumpUntilNestedRow(session, app, linked);
             Assert.True(repo.Repo.LockWorktree(linked, "held").Success);
-            session.PumpFrames(2);
 
             Invoke(app, "RemoveWorktreeAction", linked, true);   // locked: git refuses
-            session.PumpFrames(2);
+            session.PumpFrames(4);
 
             Assert.Equal(2, repo.Repo.GetWorktrees().Count);
-            Assert.Contains(settings.RepositoryPaths, p => Same(p, linked));
+            Assert.True(HasNestedRow(app, linked), "the row that reaches the worktree is gone");
 
             repo.Repo.UnlockWorktree(linked);
         });
     }
 
     [Fact]
-    public void PruningForgetsTheRepositoryRowsOfTheWorktreesItDropped()
+    public void PruningForgetsStaleRegistrationsOfTheWorktreesItDropped()
     {
         WithApp((repo, session, app, settings, linked) =>
         {
-            Invoke(app, "OpenWorktree", linked);
+            RegisterAsRepository(settings, linked);
             Invoke(app, "SelectRepo", repo.Path);
             session.PumpFrames(2);
             // Pulled out from under git — the state the Prune button exists for. Forced,
@@ -247,17 +254,15 @@ public class WorktreeTests
     {
         WithApp((repo, session, app, settings, linked) =>
         {
-            Invoke(app, "OpenWorktree", linked);
-            Invoke(app, "SelectRepo", repo.Path);
+            PumpUntilNestedRow(session, app, linked);
             Assert.True(repo.Repo.LockWorktree(linked, "unplugged").Success);
-            session.PumpFrames(2);
             Assert.True(TempRepo.ForceDelete(linked), "the fixture worktree would not delete");
 
             Invoke(app, "PruneWorktreesAction");
-            session.PumpFrames(2);
+            session.PumpFrames(4);
 
             Assert.Equal(2, repo.Repo.GetWorktrees().Count);
-            Assert.Contains(settings.RepositoryPaths, p => Same(p, linked));
+            Assert.True(HasNestedRow(app, linked), "the row that reaches the worktree is gone");
 
             repo.Repo.UnlockWorktree(linked);
         });
@@ -339,6 +344,46 @@ public class WorktreeTests
             repo.Repo.RemoveWorktree(linked, force: true);
             TempRepo.ForceDelete(linked);
         }
+    }
+
+    /// <summary>What an older settings file looks like: the worktree stored as a repository
+    /// of its own. Nothing writes this any more; the cleanup still has to reach it.</summary>
+    private static void RegisterAsRepository(JunctionSettingsData settings, string path)
+    {
+        settings.RepositoryPaths.Add(path);
+        settings.Workspaces[0].RepoPaths.Add(path);
+    }
+
+    /// <summary>Whether the sidebar is showing the worktree nested under its repository. The
+    /// row keys itself by path plus a suffix of "#"-flags for whatever changes how it
+    /// renders, hence the boundary match rather than a plain prefix.</summary>
+    private static bool HasNestedRow(JunctionApp app, string path)
+    {
+        var key = "wtchild:" + path;
+        return Descendants(app.Mount()).Any(e =>
+            e.Key == key || (e.Key?.StartsWith(key + "#", StringComparison.Ordinal) ?? false));
+    }
+
+    /// <summary>Worktrees load off the UI thread, so the nested row is legitimately absent
+    /// for the first frames.</summary>
+    private static void PumpUntilNestedRow(HeadlessSession session, JunctionApp app, string path)
+    {
+        try
+        {
+            session.PumpUntil(() => HasNestedRow(app, path), TimeSpan.FromSeconds(20));
+        }
+        catch (TimeoutException)
+        {
+            throw new Xunit.Sdk.XunitException("no nested row appeared for " + path);
+        }
+    }
+
+    private static IEnumerable<HultUI.Core.Elements.Element> Descendants(HultUI.Core.Elements.Element e)
+    {
+        yield return e;
+        foreach (var c in e.Children)
+            foreach (var d in Descendants(c))
+                yield return d;
     }
 
     private static void Invoke(JunctionApp app, string method, params object?[] args) =>

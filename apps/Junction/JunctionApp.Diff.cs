@@ -46,8 +46,14 @@ public partial class JunctionApp
         var header = Flex.Row(gap: 10).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(8, 12, 8, 12))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-        header.AddChild(Ui.Mono(path.Length > 0 ? path : "—", 12f, Nocturne.Text)
-            .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        // Selectable: the path is the one thing in this pane a reader regularly wants out of
+        // the app — into a terminal, a chat, a bug report — and reaching for the row's
+        // context menu to copy the whole path is a detour when only part of it is wanted.
+        // Keyed so the label reconciles as itself; a drag-selection lives on the element.
+        var pathLabel = Ui.Mono(path.Length > 0 ? path : "—", 12f, Nocturne.Text)
+            .Selectable().FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1);
+        pathLabel.Key = "diff-path";
+        header.AddChild(pathLabel);
         header.AddChild(DiffModeToggle());
         header.AddChild(IgnoreWhitespaceToggle());
         // A binary file has no two texts to compare, so the external-diff button is inert
@@ -896,8 +902,10 @@ public partial class JunctionApp
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         bar.AddChild(Ui.Icon(Icons.FileCode, 16f, Nocturne.Accent300));
-        bar.AddChild(Ui.Mono(path.Length > 0 ? path : "—", 13f, Nocturne.Text)
-            .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        var fullPathLabel = Ui.Mono(path.Length > 0 ? path : "—", 13f, Nocturne.Text)
+            .Selectable().FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1);
+        fullPathLabel.Key = "diff-full-path";
+        bar.AddChild(fullPathLabel);
         bar.AddChild(DiffModeToggle());
         bar.AddChild(Ui.SecondaryButton("Exit fullscreen (Esc)", Icons.ArrowsIn,
             ToggleDiffFullscreen, 12f).Tooltip("Esc or F11"));
@@ -983,7 +991,27 @@ public partial class JunctionApp
     private static (bool ok, string err) LaunchVsCodeDiff(
         GitRepository repo, string path, ExternalDiffMode mode, string? commitHash, string? baseHash = null)
     {
+        var request = BuildExternalDiffRequest(repo, path, mode, commitHash, baseHash);
+        var opts = new ExternalToolOptions
+        {
+            ExternalDiffToolPath = "code",
+            ExternalDiffToolArgs = "--wait --diff {left} {right}",
+        };
+        bool ok = ExternalDiffLauncher.TryLaunch(opts, request, out var err);
+        return (ok, err);
+    }
+
+    /// <summary>The two sides of the comparison, separated from launching anything so the
+    /// choice of sides can be tested without starting an editor.</summary>
+    private static ExternalDiffRequest BuildExternalDiffRequest(
+        GitRepository repo, string path, ExternalDiffMode mode, string? commitHash, string? baseHash = null)
+    {
         string leftLabel, rightLabel, left, right;
+        // Set for the one comparison whose right-hand side is a real file: the working tree.
+        // VS Code then edits the file in the repository instead of a temp copy that vanishes
+        // when the diff tab closes — reading an unstaged diff and fixing what you see there
+        // is the same motion, and it used to be silently thrown away.
+        string? rightPath = null;
         switch (mode)
         {
             case ExternalDiffMode.Commit:
@@ -1002,6 +1030,10 @@ public partial class JunctionApp
                 leftLabel = "index"; rightLabel = "working";
                 left = repo.GetIndexFileText(path) ?? repo.GetFileText("HEAD", path) ?? "";
                 right = repo.GetWorkingFileText(path) ?? "";
+                // A deleted file has no working copy; the launcher falls back to a temp file
+                // holding the empty right-hand side when this path isn't there.
+                rightPath = System.IO.Path.Combine(repo.Path,
+                    path.Replace('/', System.IO.Path.DirectorySeparatorChar));
                 break;
         }
 
@@ -1013,13 +1045,8 @@ public partial class JunctionApp
             LeftContent = left,
             RightLabel = rightLabel,
             RightContent = right,
+            RightPath = rightPath,
         };
-        var opts = new ExternalToolOptions
-        {
-            ExternalDiffToolPath = "code",
-            ExternalDiffToolArgs = "--wait --diff {left} {right}",
-        };
-        bool ok = ExternalDiffLauncher.TryLaunch(opts, request, out var err);
-        return (ok, err);
+        return request;
     }
 }

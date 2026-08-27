@@ -11,11 +11,18 @@ namespace Junction;
 
 public partial class JunctionApp
 {
-    private Element BuildSidebar() => _sidebarCollapsed ? BuildSidebarRail() : BuildSidebarExpanded();
+    private Element BuildSidebar()
+    {
+        // One walk per frame, shared by both shapes of the sidebar and by the keyboard
+        // handlers afterwards — see _sidebarRepos for why the order has to be this one.
+        var groups = SidebarRepoGroups();
+        _sidebarRepos = groups.Select(g => g.Path).ToList();
+        return _sidebarCollapsed ? BuildSidebarRail(groups) : BuildSidebarExpanded(groups);
+    }
 
     // ── Expanded (266px) ─────────────────────────────────────────────────
 
-    private Element BuildSidebarExpanded()
+    private Element BuildSidebarExpanded(List<RepoGroup> groups)
     {
         var aside = Flex.Column(gap: 0)
             .Width(266).FlexShrink(0)
@@ -40,12 +47,22 @@ public partial class JunctionApp
         foreach (var ws in _settings.Workspaces)
             scroll.AddChild(WorkspaceRow(ws));
 
-        // Repositories.
-        var repos = ActiveWorkspaceRepos;
-        scroll.AddChild(SectionLabel(Icons.Folders, "Repositories", repos.Count.ToString(),
+        // Repositories. A repository's linked worktrees are nested under it rather than
+        // listed beside it — see JunctionApp.SidebarWorktrees.
+        scroll.AddChild(SectionLabel(Icons.Folders, "Repositories", groups.Count.ToString(),
             SectionPlus(Icons.Plus, "Add or clone repository", OpenRepoAddPopover)));
-        foreach (var path in repos)
-            scroll.AddChild(RepoRow(path));
+        // Draggable, so the list can be put in the order the digit shortcuts should
+        // follow rather than the order the repositories happened to be added in.
+        for (int i = 0; i < groups.Count; i++)
+        {
+            scroll.AddChild(DraggableRepoRow(groups[i].Path, i));
+            foreach (var wt in groups[i].Worktrees)
+                scroll.AddChild(WorktreeChildRow(wt, groups[i].Path));
+            if (groups[i].Worktrees.Count > 0)
+                scroll.AddChild(AddWorktreeRow(groups[i].Path));
+        }
+        if (groups.Count > 0)
+            scroll.AddChild(RepoDropTail(groups.Count));
 
         // Co-usage suggestions.
         var suggestions = CoUsageSuggestions();
@@ -203,7 +220,7 @@ public partial class JunctionApp
 
     // ── Collapsed rail (58px) ────────────────────────────────────────────
 
-    private Element BuildSidebarRail()
+    private Element BuildSidebarRail(List<RepoGroup> groups)
     {
         var rail = Flex.Column(gap: 6)
             .Width(58).FlexShrink(0).AlignItems(AlignItems.Center)
@@ -214,9 +231,14 @@ public partial class JunctionApp
         rail.AddChild(Ui.IconButton(Icons.Sidebar, ToggleSidebar, "Expand", 32f));
         rail.AddChild(Box.New().Width(24).Height(1).Background(Nocturne.Divider));
 
-        foreach (var path in ActiveWorkspaceRepos)
+        foreach (var group in groups)
         {
-            var active = PathEquals(path, _activeRepoPath);
+            var path = group.Path;
+            // The rail has no room for a nested list, so a repository whose *worktree* is
+            // the active one still reads as active: the tile stands for the repository, and
+            // one of its checkouts is what the window is showing. The tooltip names which.
+            var activeChild = group.Worktrees.FirstOrDefault(w => PathEquals(w.Path, _activeRepoPath));
+            var active = PathEquals(path, _activeRepoPath) || activeChild != null;
             var name = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
             var (bg, fg) = RepoTile(path);
             var tile = Box.New()
@@ -224,9 +246,15 @@ public partial class JunctionApp
                 .Background(active ? Nocturne.Accent800 : Nocturne.Neutral900)
                 .BorderColor(active ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-                .Cursor(CursorType.Pointer).Tooltip(name)
+                .Cursor(CursorType.Pointer)
+                .Tooltip(activeChild != null ? $"{name} · {activeChild.RefLabel}" : name)
                 .Children(Text.New(string.IsNullOrEmpty(name) ? "?" : char.ToUpperInvariant(name[0]).ToString())
                     .FontSize(12f).FontWeight(FontWeight.SemiBold).TextColor(fg));
+            // Both colours and the tooltip change with the active flag, so the two states
+            // are different rows to the reconciler rather than one patched in place.
+            tile.Key = "rail:" + path + (active ? "#a" : "");
+            // Clicking the tile goes to the repository itself; the checkouts need the
+            // expanded sidebar, where they have rows of their own.
             tile.OnClick(_ => SelectRepo(path));
             rail.AddChild(tile);
         }

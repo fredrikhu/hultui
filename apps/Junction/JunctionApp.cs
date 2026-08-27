@@ -203,6 +203,14 @@ public partial class JunctionApp : Component, IDisposable
     private string _commitDescription = "";
     private readonly Ref<TextInputElement> _summaryRef = new();
     private readonly Ref<TextAreaElement> _descRef = new();
+    /// <summary>Whether the composer rewrites HEAD instead of adding a commit. Not persisted
+    /// and cleared after every commit: amending is a decision about one commit, and a checkbox
+    /// that survived would quietly rewrite the next one too.</summary>
+    private bool _amendCommit;
+    /// <summary>HEAD's message as it was poured into the fields when amend was switched on, so
+    /// switching it back off can take out exactly what it put in and leave anything typed
+    /// since then alone.</summary>
+    private string? _amendPrefill;
 
     // Branches (management) state.
     private readonly KeyedAsyncLoader<string, BranchesData> _branchesLoaders =
@@ -265,8 +273,6 @@ public partial class JunctionApp : Component, IDisposable
     private string? _toast;
     private CancellationTokenSource? _toastCts;
 
-    private bool _remoteOpRunning;
-
     private readonly record struct RepoSummary(string Branch, int Ahead, int Behind, int Dirty, string Version = "")
     {
         public static readonly RepoSummary Pending = new("…", 0, 0, 0);
@@ -295,12 +301,22 @@ public partial class JunctionApp : Component, IDisposable
         IReadOnlyList<GitFileChange> Unstaged,
         Dictionary<string, GitFileDiff> StagedDiffs,
         Dictionary<string, GitFileDiff> UnstagedDiffs,
-        bool IsMerging,
         IReadOnlyList<GitFileChange> Conflicted,
-        MergeSides? Merge,
-        IReadOnlyList<string> AssumeUnchanged)
+        ConflictSides? Sequencer,
+        IReadOnlyList<string> AssumeUnchanged,
+        // HEAD's full message, or null in a repository with no commits yet. Read here rather
+        // than on the UI thread because that is the one place in this view already off it,
+        // and it answers both of the amend checkbox's questions: whether there is anything to
+        // amend, and what to put in the fields when you say so.
+        string? HeadMessage = null)
     {
-        public static readonly ChangesData Empty = new([], [], new(), new(), false, [], null, []);
+        public static readonly ChangesData Empty = new([], [], new(), new(), [], null, []);
+
+        /// <summary>Whether a merge, rebase, cherry-pick or revert is half-finished. The
+        /// banner, the always-visible right pane and the "no changes" placeholder all key
+        /// off this rather than off the conflict count: an operation with every conflict
+        /// resolved is still an operation waiting to be continued or aborted.</summary>
+        public bool InSequencer => Sequencer != null;
     }
 
     /// <summary>Which of the Changes view's three lists a file row lives in. Part of a
@@ -316,11 +332,13 @@ public partial class JunctionApp : Component, IDisposable
     /// two kinds of row from ever comparing equal by accident.</summary>
     private readonly record struct ChangeRef(string Path, ChangeSection Section, bool IsFolder = false);
 
-    // Identity of the two sides of an in-progress merge: "ours" = HEAD (the branch
-    // being merged into), "theirs" = MERGE_HEAD (the branch being merged in).
-    private readonly record struct MergeSides(
-        string OursBranch, GitCommit? Ours,
-        string? TheirsBranch, GitCommit? Theirs);
+    /// <summary>The half-finished operation plus the two commits its conflicts are
+    /// between, resolved once per load so the resolution pane can name them.</summary>
+    /// <remarks>Which side is which comes from <see cref="SequencerState"/>, not from an
+    /// assumption here — during a rebase "ours" is the branch being rebased onto and
+    /// "theirs" is the user's own commit, the reverse of a merge.</remarks>
+    private readonly record struct ConflictSides(
+        SequencerState State, GitCommit? Ours, GitCommit? Theirs);
 
     private readonly record struct BranchesData(IReadOnlyList<GitBranch> Local)
     {
@@ -380,6 +398,8 @@ public partial class JunctionApp : Component, IDisposable
         // Global keys land on the host when nothing is focused (see App.cs for
         // the same rationale). Materialise the host so the handler is wired.
         Mount().On<KeyDownEvent>(HandleKeyDown);
+
+        RestartAutoFetch();
     }
 
     // Toggle compact chrome as the window crosses the breakpoint. Only rerender on
@@ -891,9 +911,14 @@ public partial class JunctionApp : Component, IDisposable
     /// With no active repo, lands on the first (delta &gt; 0) or last entry.</summary>
     private void NavigateRepo(int delta)
     {
-        var repos = ActiveWorkspaceRepos;
+        // SidebarRepos, not the workspace's raw list: a repository's linked worktrees are
+        // nested under it in the sidebar, and stepping through a list that included them
+        // would stop on rows the eye reads as belonging to the row above. Standing on a
+        // worktree, the step starts from the repository it hangs under.
+        var repos = SidebarRepos;
         if (repos.Count == 0) return;
         var idx = IndexOfPath(repos, _activeRepoPath);
+        if (idx < 0) idx = IndexOfPath(repos, SidebarRepoOf(_activeRepoPath));
         var next = idx < 0
             ? (delta > 0 ? 0 : repos.Count - 1)
             : Math.Clamp(idx + delta, 0, repos.Count - 1);
@@ -902,9 +927,20 @@ public partial class JunctionApp : Component, IDisposable
 
     private void SelectRepoByIndex(int index)
     {
-        var repos = ActiveWorkspaceRepos;
+        var repos = SidebarRepos;
         if (index < 0 || index >= repos.Count) return;
         SelectRepo(repos[index]);
+    }
+
+    /// <summary>The sidebar entry a path sits under — itself when it is one, otherwise the
+    /// repository whose worktree it is. Empty when nothing in the sidebar claims it.</summary>
+    private string SidebarRepoOf(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        foreach (var group in SidebarRepoGroups())
+            if (PathEquals(group.Path, path) || group.Worktrees.Any(w => PathEquals(w.Path, path)))
+                return group.Path;
+        return "";
     }
 
     private void SelectWorkspaceByIndex(int index)
@@ -1052,6 +1088,17 @@ public partial class JunctionApp : Component, IDisposable
         if (ctrl && e.Key == KeyCode.D && View is JunctionView.Commit or JunctionView.Changes)
         {
             OpenSelectedDiffExternally();
+            e.StopPropagation = true;
+            return;
+        }
+
+        // ⌘O / Ctrl+O opens the selected file itself with the desktop's own handler — the
+        // other half of Ctrl+D, for when the answer is "edit this" rather than "compare it".
+        // Intercepted here for the same reason as the two above: the per-view handlers switch
+        // on the bare key, and KeyCode.O is Open in the Files tree.
+        if (ctrl && e.Key == KeyCode.O && View is JunctionView.Commit or JunctionView.Changes)
+        {
+            OpenSelectedFile();
             e.StopPropagation = true;
             return;
         }
@@ -1306,6 +1353,12 @@ public partial class JunctionApp : Component, IDisposable
         _window.Resized -= OnWindowResize;
         _toastCts?.Cancel();
         _toastCts?.Dispose();
+        _autoFetchCts?.Cancel();
+        _autoFetchCts?.Dispose();
+        // AnimationManager's tween list is process-global, and a looping tween holds a
+        // callback into this app: leaving one running would tick a disposed window's
+        // MarkDirty for the rest of the process.
+        _remoteOpTween.Cancel();
         foreach (var w in _watchers.Values) w.Dispose();
         _watchers.Clear();
     }

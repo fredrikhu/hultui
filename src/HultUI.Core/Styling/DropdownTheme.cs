@@ -3,8 +3,11 @@ using HultUI.Core.Primitives;
 namespace HultUI.Core.Styling;
 
 /// <summary>
-/// The closed face of a <see cref="Elements.DropdownElement"/>. The open list reuses
-/// <see cref="ContextMenuTheme"/>, so a themed menu and a themed dropdown always match.
+/// The closed face of a <see cref="Elements.DropdownElement"/> — and, deliberately, of
+/// <see cref="Elements.DatePickerElement"/> and <see cref="Elements.TimePickerElement"/>
+/// too, so a form does not end up with three differently-shaped boxes in one row. The
+/// open list reuses <see cref="ContextMenuTheme"/> and the open calendar
+/// <see cref="CalendarTheme"/>, so a themed menu and a themed dropdown always match.
 /// </summary>
 public sealed class DropdownTheme : IThemeExtension<DropdownTheme>
 {

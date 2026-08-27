@@ -3,14 +3,14 @@ using System.Diagnostics;
 namespace Junction.Platform;
 
 /// <summary>
-/// Hands a path to the desktop: the OS default handler for "open this", and the file
-/// manager for "show me where this is".
+/// Hands a path to the desktop: the OS default handler for "open this", the file manager
+/// for "show me where this is", and a terminal for "let me do the rest by hand".
 ///
-/// <para>Deliberately not <see cref="Junction.Git.ExternalDiffLauncher"/>. That one runs a
-/// <i>configured</i> program and needs the PATH/PATHEXT walk to find a <c>code.cmd</c>; here
-/// there is no program to find — Windows is asked to apply the file association, and the two
-/// Unix desktops each have one well-known opener on PATH. Mixing the two would mean resolving
-/// a command that was never named.</para>
+/// <para>Deliberately not <see cref="Junction.Git.ExternalDiffLauncher"/>. That one runs the
+/// program the <i>user</i> named in settings, and so has to resolve an arbitrary command
+/// against PATH/PATHEXT to find a <c>code.cmd</c>. Nothing here is configurable: these are the
+/// desktop's own verbs and, for the terminal, the small fixed list of programs each platform
+/// ships. Letting the two share a resolver would mean resolving commands nobody named.</para>
 /// </summary>
 public static class ShellLauncher
 {
@@ -85,6 +85,71 @@ public static class ShellLauncher
         OperatingSystem.IsWindows() ? "Reveal in Explorer"
         : OperatingSystem.IsMacOS() ? "Reveal in Finder"
         : "Open containing folder";
+
+    /// <summary>The desktop's own name for the file manager <see cref="Open"/> puts a
+    /// folder in.</summary>
+    public static string FileManagerLabel =>
+        OperatingSystem.IsWindows() ? "Open in Explorer"
+        : OperatingSystem.IsMacOS() ? "Open in Finder"
+        : "Open in file manager";
+
+    /// <summary>
+    /// Opens a terminal with <paramref name="directory"/> as its working directory.
+    ///
+    /// <para>Unlike <see cref="Open"/> and <see cref="Reveal"/> there is no OS verb for
+    /// this, so a program does have to be named. Windows Terminal is tried first — it is
+    /// what a current Windows install actually opens, and its <c>wt.exe</c> is an
+    /// execution alias on PATH — and the machine's configured interpreter is the fallback
+    /// for a machine without it. The two Unix desktops each have one conventional opener.</para>
+    /// </summary>
+    public static bool OpenTerminal(string directory, out string error)
+    {
+        error = "";
+        foreach (var (program, args) in TerminalCandidates(directory))
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(program)
+                {
+                    // The working directory is the whole point of the request, and it is
+                    // also the fallback for the shells that take no directory argument.
+                    WorkingDirectory = directory,
+                    UseShellExecute = true,
+                };
+                foreach (var arg in args) psi.ArgumentList.Add(arg);
+                Process.Start(psi)?.Dispose();
+                return true;
+            }
+            catch (Exception ex) when (IsLaunchFailure(ex))
+            {
+                // Not installed on this machine — remember why and try the next.
+                error = ex.Message;
+            }
+        }
+        if (error.Length == 0) error = "No terminal found.";
+        return false;
+    }
+
+    private static IEnumerable<(string Program, string[] Args)> TerminalCandidates(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            yield return ("wt.exe", ["-d", directory]);
+            // COMSPEC is a full path, so this needs no PATH lookup of its own.
+            var comspec = Environment.GetEnvironmentVariable("ComSpec");
+            if (!string.IsNullOrEmpty(comspec)) yield return (comspec, []);
+            yield break;
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            yield return ("open", ["-a", "Terminal", directory]);
+            yield break;
+        }
+        // Debian's alternatives symlink, then the two desktops' own terminals.
+        yield return ("x-terminal-emulator", []);
+        yield return ("gnome-terminal", []);
+        yield return ("konsole", []);
+    }
 
     // A missing association, a missing opener, and a refused launch all arrive as one of
     // these; anything else is a bug here rather than a fact about the machine.

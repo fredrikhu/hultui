@@ -34,6 +34,43 @@ public class SettingsTests
         Assert.Equal("/a", s.ActiveRepoPath);
     }
 
+    /// <summary>Background fetch stays off until it is asked for: it reaches the network
+    /// on a timer, which is not a thing to start doing to someone's machine because they
+    /// upgraded. The command palette turns it on.</summary>
+    [Fact]
+    public void BackgroundFetchIsOffUntilItIsTurnedOn()
+    {
+        var s = new JunctionSettingsData { RepositoryPaths = ["/a"] };
+
+        s.Normalize();
+
+        Assert.False(s.General.AutoFetchEnabled);
+    }
+
+    [Fact]
+    public void TurningBackgroundFetchOnSurvivesTheNextLoad()
+    {
+        var s = new JunctionSettingsData { RepositoryPaths = ["/a"] };
+        s.General.AutoFetchEnabled = true;
+
+        s.Normalize();
+
+        Assert.True(s.General.AutoFetchEnabled);
+    }
+
+    [Fact]
+    public void TheAutoFetchIntervalIsClampedToSomethingSurvivable()
+    {
+        var s = new JunctionSettingsData();
+        s.General.AutoFetchIntervalMinutes = 0;
+        s.Normalize();
+        Assert.Equal(1, s.General.AutoFetchIntervalMinutes);
+
+        s.General.AutoFetchIntervalMinutes = 10_000;
+        s.Normalize();
+        Assert.Equal(120, s.General.AutoFetchIntervalMinutes);
+    }
+
     [Fact]
     public void AnEmptyConfigStaysEmptyRatherThanInventingAWorkspace()
     {

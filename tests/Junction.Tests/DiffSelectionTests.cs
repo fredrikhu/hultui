@@ -78,6 +78,32 @@ public class DiffSelectionTests
         }
     }
 
+    /// <summary>The path in the diff header is selectable too. It is the one thing in the
+    /// pane a reader regularly wants out of the app — into a terminal, a chat, a bug report —
+    /// and "Copy path" in the row's context menu only ever gives the whole of it.</summary>
+    [Fact]
+    public void TheFileNameInTheDiffHeaderCanBeSelected()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            var header = Descendants(Root(session)).OfType<TextElement>()
+                .FirstOrDefault(e => e.Key == "diff-path")
+                ?? throw new Xunit.Sdk.XunitException("no diff header path label on screen");
+
+            Assert.True(header.Selectable, "the header path is not selectable");
+            Assert.NotEqual("", header.Content);
+        });
+    }
+
+    private static IEnumerable<Element> Descendants(Element? e)
+    {
+        if (e is null) yield break;
+        yield return e;
+        foreach (var c in e.Children)
+            foreach (var d in Descendants(c))
+                yield return d;
+    }
+
     private static T Field<T>(JunctionApp app, string name) =>
         (T)typeof(JunctionApp).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
 

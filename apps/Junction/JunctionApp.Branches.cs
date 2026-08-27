@@ -642,38 +642,52 @@ public partial class JunctionApp
 
     private async void PushBranch(GitBranch b)
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        var (remote, _) = UpstreamOf(b);
-        _remoteOpRunning = true;
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Push);
         Flash($"Pushing {b.Name}…");
-        var res = await repo.PushToAsync(remote, b.Name, NoAskPass);
-        _remoteOpRunning = false;
-        Flash(res.Success ? $"Pushed {b.Name}" : FirstLine(res.Stderr, "Push failed"));
+        // A branch with no upstream is published rather than refused — same rule as the
+        // toolbar's Push, and this list is where unpublished branches actually live.
+        var (remote, _) = UpstreamOf(b);
+        bool publish = string.IsNullOrEmpty(b.TrackingBranch);
+        GitResult res;
+        try
+        {
+            res = publish
+                ? await repo.RunPushAsync(new PushPlan(remote, b.Name, SetUpstream: true, Problem: null), NoAskPass)
+                : await repo.PushToAsync(remote, b.Name, NoAskPass);
+        }
+        finally { EndRemoteOp(); }
+        Flash(res.Success
+            ? publish ? $"Published {b.Name} to {remote}" : $"Pushed {b.Name}"
+            : FirstLine(res.Stderr, "Push failed"));
         RefreshAll();
     }
 
     private async void PullBranch(GitBranch b)
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        _remoteOpRunning = true;
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Pull);
         Flash($"Pulling {b.Name}…");
         GitResult res;
-        if (b.IsCurrent)
+        try
         {
-            res = await repo.PullAsync(NoAskPass, new PullOptions
+            if (b.IsCurrent)
             {
-                Strategy = _settings.Git.PullStrategy,
-                AutoStash = _settings.Git.PullAutoStash,
-                Prune = _settings.Git.PruneOnFetch,
-            });
+                res = await repo.PullAsync(NoAskPass, new PullOptions
+                {
+                    Strategy = _settings.Git.PullStrategy,
+                    AutoStash = _settings.Git.PullAutoStash,
+                    Prune = _settings.Git.PruneOnFetch,
+                });
+            }
+            else
+            {
+                // Fast-forward the non-current branch to its upstream without checkout.
+                var (remote, remoteBranch) = UpstreamOf(b);
+                res = await repo.FastForwardBranchAsync(remote, remoteBranch, b.Name, NoAskPass);
+            }
         }
-        else
-        {
-            // Fast-forward the non-current branch to its upstream without checkout.
-            var (remote, remoteBranch) = UpstreamOf(b);
-            res = await repo.FastForwardBranchAsync(remote, remoteBranch, b.Name, NoAskPass);
-        }
-        _remoteOpRunning = false;
+        finally { EndRemoteOp(); }
         Flash(res.Success ? $"Pulled {b.Name}" : FirstLine(res.Stderr, "Pull failed"));
         RefreshAll();
     }

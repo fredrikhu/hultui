@@ -7,6 +7,7 @@ using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using Junction.Git;
+using Junction.Platform;
 using Junction.Theme;
 
 namespace Junction;
@@ -425,10 +426,44 @@ public partial class JunctionApp
             items.Add(inCur
                 ? Item(Icons.MinusCircle, $"Remove from {cur.Name}", () => ToggleRepoInWorkspace(path, cur.Id))
                 : Item(Icons.PlusCircle, $"Add to {cur.Name}", () => ToggleRepoInWorkspace(path, cur.Id)));
+        items.Add(ContextMenuItem.Separator());
+        // The two places you go when the answer is not in a git client: the folder, and
+        // a shell in it.
+        items.Add(Item(Icons.TreeStructure, "Worktrees…", () => OpenWorktreesFor(path)));
+        items.Add(ContextMenuItem.Separator());
+        items.Add(Item(Icons.FolderOpen, ShellLauncher.FileManagerLabel, () => OpenRepoFolder(path)));
+        items.Add(Item(Icons.Terminal, "Open in terminal", () => OpenRepoTerminal(path)));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(path)));
         items.Add(ContextMenuItem.Separator());
         items.Add(Danger(Icons.Trash, "Remove repository", () => RemoveRepo(path)));
         return items;
+    }
+
+    /// <summary>Opens the repository's folder in the desktop's file manager. Off the UI
+    /// thread for the same reason the Files tab's launcher is: a Windows association
+    /// lookup goes through COM and can stall for most of a second.</summary>
+    private async void OpenRepoFolder(string path)
+    {
+        var (ok, error) = await Task.Run(() =>
+        {
+            var started = ShellLauncher.Open(path, out var err);
+            return (started, err);
+        });
+        if (!ok)
+            Flash(string.IsNullOrEmpty(error) ? "Could not open the file manager" : error);
+    }
+
+    /// <summary>Opens a terminal in the repository's folder — for the handful of git
+    /// commands no client has a button for.</summary>
+    private async void OpenRepoTerminal(string path)
+    {
+        var (ok, error) = await Task.Run(() =>
+        {
+            var started = ShellLauncher.OpenTerminal(path, out var err);
+            return (started, err);
+        });
+        if (!ok)
+            Flash(string.IsNullOrEmpty(error) ? "Could not open a terminal" : error);
     }
 
     // ── id / url helpers (mirror the design) ─────────────────────────────

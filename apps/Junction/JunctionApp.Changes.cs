@@ -23,9 +23,9 @@ public partial class JunctionApp
             () => LoadChanges(ws), onLoaded: PickInitialChange);
         var data = _changes.Value;
 
-        // During a merge the right pane is always shown — it hosts the per-file
+        // Mid-operation the right pane is always shown — it hosts the per-file
         // conflict resolution — even on narrow windows where diffs normally hide.
-        bool showPane = !_hideDiff || data.IsMerging;
+        bool showPane = !_hideDiff || data.InSequencer;
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         row.AddChild(BuildChangesColumn(data, fill: !showPane));
@@ -41,9 +41,9 @@ public partial class JunctionApp
     // other selection shows the normal diff (open in VS Code with Ctrl+D).
     private Element BuildChangesRightPane(ChangesData data)
     {
-        if (data.IsMerging && _changeSelConflicted && _changeSelPath != null
+        if (data.InSequencer && _changeSelConflicted && _changeSelPath != null
             && data.Conflicted.Any(f => f.Path == _changeSelPath))
-            return BuildConflictResolutionPane(_changeSelPath, data.Merge);
+            return BuildConflictResolutionPane(_changeSelPath, data.Sequencer);
 
         GitFileDiff? diff = null;
         if (_changeSelPath != null && !_changeSelConflicted)
@@ -70,17 +70,21 @@ public partial class JunctionApp
         // Conflict state. Unmerged files leak into `git diff` as plain "Modified",
         // so pull them from status (GetConflictedFiles) and remove them from the
         // ordinary lists — they get their own resolution panel instead.
-        bool merging = repo.IsMerging();
-        IReadOnlyList<GitFileChange> conflicted = merging ? repo.GetConflictedFiles() : [];
-        MergeSides? merge = null;
-        if (merging)
+        //
+        // Any of the four sequencer operations can leave them: a rebase stopped on a
+        // conflict looked like a working tree full of ordinary modifications until this
+        // stopped asking specifically about merges.
+        var state = repo.GetSequencerState();
+        IReadOnlyList<GitFileChange> conflicted = state != null ? repo.GetConflictedFiles() : [];
+        ConflictSides? sequencer = null;
+        if (state != null)
         {
             var conflictPaths = conflicted.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
             unstaged = unstaged.Where(f => !conflictPaths.Contains(f.Path)).ToList();
             staged = staged.Where(f => !conflictPaths.Contains(f.Path)).ToList();
-            merge = new MergeSides(
-                repo.GetCurrentBranch(), repo.GetCommit("HEAD"),
-                repo.GetMergingBranchName(), repo.GetCommit("MERGE_HEAD"));
+            sequencer = new ConflictSides(state,
+                state.OursRef != null ? repo.GetCommit(state.OursRef) : null,
+                state.TheirsRef != null ? repo.GetCommit(state.TheirsRef) : null);
         }
 
         var stagedDiffs = repo.GetWorkingDiff(staged: true, ignoreWhitespace: ignoreWhitespace)
@@ -97,7 +101,8 @@ public partial class JunctionApp
         }
 
         var assumeUnchanged = repo.GetAssumeUnchangedFiles();
-        return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, merging, conflicted, merge, assumeUnchanged);
+        return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, conflicted, sequencer,
+            assumeUnchanged, repo.GetLastCommitMessage());
     }
 
     private void PickInitialChange(ChangesData data)
@@ -488,9 +493,10 @@ public partial class JunctionApp
         if (fill) col.FlexGrow(1);
         else col.Width(_changesSplit.Width).FlexShrink(0);
 
-        // Merge state gets a pinned banner (status + Abort / Continue) above the list.
-        if (data.IsMerging)
-            col.AddChild(BuildMergeBanner(data));
+        // A half-finished operation gets a pinned banner (status + Abort / Skip /
+        // Continue) above the list.
+        if (data.Sequencer is { } seq)
+            col.AddChild(BuildSequencerBanner(data, seq.State));
 
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(8, 8, 4, 8))
             .WithRef(_changeScrollRef);
@@ -508,7 +514,7 @@ public partial class JunctionApp
 
         if (data.Staged.Count == 0 && data.Unstaged.Count == 0)
         {
-            if (!data.IsMerging && data.Conflicted.Count == 0)
+            if (!data.InSequencer && data.Conflicted.Count == 0)
                 scroll.AddChild(Box.New().Padding(new Thickness(26)).JustifyContent(JustifyContent.Center)
                     .AlignItems(AlignItems.Center)
                     .Children(Text.New("No changes").FontSize(13f).TextColor(Nocturne.On(0.45))));
@@ -536,7 +542,7 @@ public partial class JunctionApp
         }
 
         col.AddChild(scroll);
-        col.AddChild(BuildComposer(data.Staged.Count));
+        col.AddChild(BuildComposer(data));
         return col;
     }
 
@@ -746,11 +752,19 @@ public partial class JunctionApp
             items.Add(Item(Icons.CheckSquare, "Stage all", StageAll));
         }
         items.Add(ContextMenuItem.Separator());
+        // The file itself, with whatever the desktop opens it with. Selecting first so the
+        // keyboard shortcut and the menu act on the same file — right-clicking a row the
+        // caret is not on would otherwise open the previously selected one.
+        items.Add(Item(Icons.RocketLaunch, "Open file", () =>
+        {
+            SelectChange(f.Path, isStaged);
+            LaunchFilesPath(f.Path);
+        }, "Ctrl O"));
         items.Add(Item(Icons.FileCode, "Open diff in VS Code", () =>
         {
             SelectChange(f.Path, isStaged);
             OpenSelectedDiffExternally();
-        }));
+        }, "Ctrl D"));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(f.Path)));
 
         // Ignore / assume-unchanged apply to the worktree (unstaged) list.
@@ -883,8 +897,15 @@ public partial class JunctionApp
 
     // ── Composer ─────────────────────────────────────────────────────────
 
-    private Element BuildComposer(int stagedCount)
+    private Element BuildComposer(ChangesData data)
     {
+        int stagedCount = data.Staged.Count;
+        // Nothing staged but plenty changed is the ordinary case for someone who never
+        // stages, so the commit button and Ctrl+Enter take the whole worktree rather than
+        // refusing. Conflicts are the exception: staging one is how you declare it resolved,
+        // and doing that to a file nobody looked at is not something a commit should decide.
+        bool commitAll = stagedCount == 0 && data.Unstaged.Count > 0 && data.Conflicted.Count == 0;
+
         var box = Flex.Column(gap: 8).FlexShrink(0)
             .Padding(new Thickness(12))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
@@ -913,6 +934,11 @@ public partial class JunctionApp
             .Height(Dimension.Px(30)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
             .TextColor(Nocturne.Text).WithRef(_summaryRef);
         sumBox.AddChild(summary);
+        // Every child of the composer is keyed, and that is all-or-nothing: a keyed child
+        // among unkeyed siblings makes the reconciler match the whole list by key, and the
+        // unkeyed ones are then *replaced* rather than patched — which threw away the field
+        // you were typing in after the first character.
+        sumBox.Key = "composer-summary";
         box.AddChild(sumBox);
 
         // Description
@@ -925,19 +951,97 @@ public partial class JunctionApp
             .Height(Dimension.Px(56))
             .TextColor(Nocturne.Text).WithRef(_descRef);
         descBox.AddChild(desc);
+        descBox.Key = "composer-description";
         box.AddChild(descBox);
+
+        // Amend, then sign. Amend is offered only where there is a commit to rewrite — a
+        // repository with no commits yet has nothing behind HEAD, and `git commit --amend`
+        // there fails with a message about an unborn branch.
+        if (data.HeadMessage is { Length: > 0 })
+        {
+            var amend = Checkbox.New(_amendCommit, "Amend last commit")
+                .OnCheckedChanged(v => ToggleAmend(v, data.HeadMessage));
+            amend.LabelGap = 8f;
+            amend.TextColor(Nocturne.On(0.7)).FontSize(11.5f);
+            // Checked and unchecked are different rows to the reconciler; without this the
+            // patched checkbox keeps the previous handler and its captured HEAD message.
+            box.AddChild(amend);
+        }
 
         // Sign toggle: bound to the persisted default; flipping it sticks.
         var sign = Checkbox.New(_settings.Git.SignCommits, "Sign commit (GPG/SSH)")
             .OnCheckedChanged(v => { _settings.Git.SignCommits = v; Persist(); MarkDirty(); });
         sign.LabelGap = 8f;
         sign.TextColor(Nocturne.On(0.7)).FontSize(11.5f);
+        sign.Key = "composer-sign";
         box.AddChild(sign);
 
-        var label = $"Commit {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}"
-            + (_settings.Git.SignCommits ? " (signed)" : "");
-        box.AddChild(Ui.PrimaryButton(label, Icons.GitCommit, DoCommit).Width(Dimension.Percent(100)));
+        // The button says what the click will actually do, including the two cases where
+        // that is not "commit what is staged" — there is no other place to learn either.
+        var label = _amendCommit
+            ? (stagedCount > 0
+                ? $"Amend last commit with {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}"
+                : commitAll
+                    ? $"Amend last commit with {data.Unstaged.Count} change{(data.Unstaged.Count == 1 ? "" : "s")}"
+                    : "Amend last commit (message only)")
+            : commitAll
+                ? $"Commit all {data.Unstaged.Count} change{(data.Unstaged.Count == 1 ? "" : "s")}"
+                : $"Commit {stagedCount} staged file{(stagedCount == 1 ? "" : "s")}";
+        if (_settings.Git.SignCommits) label += " (signed)";
+        var button = Ui.PrimaryButton(label, _amendCommit ? Icons.PencilSimple : Icons.GitCommit, DoCommit)
+            .Width(Dimension.Percent(100));
+        button.Key = "composer-commit";
+        box.AddChild(button);
         return box;
+    }
+
+    /// <summary>
+    /// Turns amend on or off, carrying HEAD's message in and back out with it.
+    ///
+    /// <para>Switching on fills empty fields from HEAD, which is the whole point: an amend
+    /// almost always keeps the message and adds to the tree, and retyping it is how a
+    /// message gets accidentally rewritten. Switching off takes that text back out — but
+    /// only while it is still <i>exactly</i> what was poured in, so an edit made in between
+    /// survives the toggle instead of being thrown away.</para>
+    /// </summary>
+    private void ToggleAmend(bool on, string? headMessage)
+    {
+        _amendCommit = on;
+        if (on)
+        {
+            if (!string.IsNullOrWhiteSpace(_commitSummary) || !string.IsNullOrWhiteSpace(_commitDescription))
+            {
+                _amendPrefill = null;   // there was already a message; leave it alone
+            }
+            else if (headMessage is { Length: > 0 })
+            {
+                var (sum, body) = SplitCommitMessage(headMessage);
+                _commitSummary = sum;
+                _commitDescription = body;
+                _amendPrefill = headMessage;
+            }
+        }
+        else if (_amendPrefill is { } prefill)
+        {
+            var (sum, body) = SplitCommitMessage(prefill);
+            if (_commitSummary == sum && _commitDescription == body)
+            {
+                _commitSummary = "";
+                _commitDescription = "";
+            }
+            _amendPrefill = null;
+        }
+        MarkDirty();
+    }
+
+    /// <summary>A commit message split the way the two fields hold it: the first line is the
+    /// summary, everything after the blank line that follows it is the description.</summary>
+    private static (string Summary, string Body) SplitCommitMessage(string message)
+    {
+        var text = message.ReplaceLineEndings("\n").TrimEnd();
+        var nl = text.IndexOf('\n');
+        if (nl < 0) return (text, "");
+        return (text[..nl], text[(nl + 1)..].TrimStart('\n'));
     }
 
     // ── Actions ──────────────────────────────────────────────────────────
@@ -994,24 +1098,51 @@ public partial class JunctionApp
     private void DoCommit()
     {
         if (ActiveRepo is not { } repo) return;
-        if (_changes.Value.Staged.Count == 0) { Flash("Nothing staged to commit"); return; }
+        var data = _changes.Value;
+
+        // Nothing staged: take the whole worktree, the way `git commit -a` does — except it
+        // also picks up untracked files, because "commit all my changes" from a list that
+        // shows untracked files alongside the rest can only mean the list. An amend with
+        // nothing staged is still a commit (of the message alone), so it is left to proceed.
+        bool stageEverything = false;
+        if (data.Staged.Count == 0)
+        {
+            if (data.Conflicted.Count > 0)
+            {
+                Flash("Resolve the conflicts first");
+                return;
+            }
+            if (data.Unstaged.Count > 0) stageEverything = true;
+            else if (!_amendCommit) { Flash("Nothing staged to commit"); return; }
+        }
         if (string.IsNullOrWhiteSpace(_commitSummary)) { Flash("Enter a commit summary"); return; }
 
         var message = _commitSummary.Trim();
         if (!string.IsNullOrWhiteSpace(_commitDescription))
             message += "\n\n" + _commitDescription.Trim();
 
-        var result = repo.Commit(message, sign: _settings.Git.SignCommits);
+        if (stageEverything && !repo.StageAll())
+        {
+            Flash("Stage failed");
+            return;
+        }
+
+        bool sign = _settings.Git.SignCommits;
+        bool amend = _amendCommit;
+        var result = amend ? repo.CommitAmend(message, sign) : repo.Commit(message, sign);
         if (result.Success)
         {
             _commitSummary = "";
             _commitDescription = "";
-            Flash(_settings.Git.SignCommits ? "Committed (signed)" : "Committed");
+            // The next commit is a new one unless it is asked for again — see _amendCommit.
+            _amendCommit = false;
+            _amendPrefill = null;
+            Flash((amend ? "Amended" : "Committed") + (sign ? " (signed)" : ""));
             RefreshAll();
         }
         else
         {
-            Flash(FirstLine(result.Stderr, "Commit failed"));
+            Flash(FirstLine(result.Stderr, amend ? "Amend failed" : "Commit failed"));
         }
     }
 }

@@ -164,9 +164,17 @@ public sealed class WorkspaceData
 
 public sealed class GeneralOptions
 {
+    /// <summary>Whether Junction fetches in the background so ahead/behind counts and
+    /// remote branches are current without anyone pressing Fetch. Off until asked for —
+    /// this reaches the network on a timer, which is not something to start doing to
+    /// someone's machine because they upgraded. Turned on from the command palette.</summary>
     public bool AutoFetchEnabled { get; set; }
     public int AutoFetchIntervalMinutes { get; set; } = 5;
-    public AutoFetchMode AutoFetchMode { get; set; } = AutoFetchMode.CurrentRepository;
+
+    /// <summary>All open repositories by default: the sidebar shows an ahead/behind count
+    /// for every repository in the workspace, and a count is only worth showing if it is
+    /// current. Fetching one of them would leave the rest quietly lying.</summary>
+    public AutoFetchMode AutoFetchMode { get; set; } = AutoFetchMode.AllOpenRepositories;
 
     public GeneralOptions Clone() => new()
     {

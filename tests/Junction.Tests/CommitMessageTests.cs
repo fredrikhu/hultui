@@ -213,6 +213,73 @@ public class CommitMessageTests
         }, body: null);
     }
 
+    // ── The hash ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The hash in the Commit header is the thing people come to it for — to paste into a
+    /// message, a ticket, or another terminal — and until now the only way to get it was
+    /// to go back to History and right-click the row. A click copies the full hash.
+    /// </summary>
+    [Fact]
+    public void ClickingTheHashCopiesTheWholeSha()
+    {
+        Hosted((session, app) =>
+        {
+            var repoHead = HeadHash(app);
+            var chip = ShaChip(session, repoHead);
+            var box = chip.Layout.AbsoluteBorderBox;
+
+            session.Window.Click(box.X + box.Width / 2f, box.Y + box.Height / 2f);
+            session.PumpFrames(2);
+
+            // The full forty characters, not the seven that were on screen: that is what
+            // every tool on the other end of the paste wants.
+            Assert.Equal(repoHead, session.Window.Clipboard.GetText());
+        });
+    }
+
+    /// <summary>The abbreviated form is a click away too, for the places a person reads it
+    /// rather than a machine.</summary>
+    [Fact]
+    public void TheHashMenuAlsoOffersTheShortForm()
+    {
+        Hosted((session, app) =>
+        {
+            var repoHead = HeadHash(app);
+            var chip = ShaChip(session, repoHead);
+            var items = chip.ContextMenuItems!();
+
+            var shortItem = items.First(i => i.Label.StartsWith("Copy short SHA", StringComparison.Ordinal));
+            shortItem.Action!();
+
+            Assert.Equal(repoHead[..7], session.Window.Clipboard.GetText());
+        });
+    }
+
+    private static string HeadHash(JunctionApp app)
+    {
+        var repo = (GitRepository)typeof(JunctionApp)
+            .GetProperty("ActiveRepo", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(app)!;
+        return repo.GetCommit("HEAD")!.Hash;
+    }
+
+    /// <summary>The header's hash chip, found by the mono label inside it.</summary>
+    private static Element ShaChip(HeadlessSession session, string hash)
+    {
+        var wanted = "commit " + hash[..7];
+        Element? found = null;
+        Walk(Root(session), null);
+        return found ?? throw new Xunit.Sdk.XunitException($"no \"{wanted}\" chip in the Commit header");
+
+        void Walk(Element? e, Element? parent)
+        {
+            if (e is null || found is not null) return;
+            if (e is TextElement t && t.Content == wanted) { found = parent; return; }
+            foreach (var c in e.Children) Walk(c, e);
+        }
+    }
+
     private static HeadlessElement Toggle(HeadlessSession session) =>
         session.Window.FindByText("Hide message")
         ?? throw new Xunit.Sdk.XunitException("the message has no collapse button");

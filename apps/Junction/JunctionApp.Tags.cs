@@ -400,11 +400,12 @@ public partial class JunctionApp
 
     private async void PushTag(GitTag t)
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        _remoteOpRunning = true;
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Push);
         Flash($"Pushing {t.Name}…");
-        var res = await repo.PushTagAsync(DefaultRemote(), t.Name, NoAskPass);
-        _remoteOpRunning = false;
+        GitResult res;
+        try { res = await repo.PushTagAsync(DefaultRemote(), t.Name, NoAskPass); }
+        finally { EndRemoteOp(); }
         Flash(res.Success ? $"Pushed {t.Name}" : FirstLine(res.Stderr, "Push failed"));
         RefreshAll();
     }
@@ -424,11 +425,12 @@ public partial class JunctionApp
 
     private async void DeleteRemoteTag(GitTag t, string remote)
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        _remoteOpRunning = true;
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Other);
         Flash($"Deleting {t.Name} on {remote}…");
-        var res = await repo.DeleteRemoteTagAsync(remote, t.Name, NoAskPass);
-        _remoteOpRunning = false;
+        GitResult res;
+        try { res = await repo.DeleteRemoteTagAsync(remote, t.Name, NoAskPass); }
+        finally { EndRemoteOp(); }
         Flash(res.Success ? $"Deleted {t.Name} on {remote}" : FirstLine(res.Stderr, "Delete failed"));
         RefreshAll();
     }

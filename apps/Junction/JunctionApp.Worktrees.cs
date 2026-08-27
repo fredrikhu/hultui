@@ -25,6 +25,14 @@ public partial class JunctionApp
     private AsyncLoader<IReadOnlyList<GitWorktree>> _worktrees =>
         _worktreeLoaders.For(_activeRepoPath);
 
+    /// <summary>Opens the panel on a repository other than the active one — the sidebar's
+    /// repository menu, where the row you right-clicked is the one you meant.</summary>
+    private void OpenWorktreesFor(string path)
+    {
+        SelectRepo(path);
+        OpenWorktrees();
+    }
+
     private void OpenWorktrees()
     {
         if (!HasActiveRepo) { Flash("Open a repository first"); return; }
@@ -41,14 +49,15 @@ public partial class JunctionApp
         MarkDirty();
     }
 
-    private IReadOnlyList<GitWorktree> LoadWorktrees() => RepoFor(_activeRepoPath).GetWorktrees();
 
     // ── Panel ────────────────────────────────────────────────────────────
 
     private Element BuildWorktreesPanel()
     {
-        _worktrees.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadWorktrees);
-        var list = _worktrees.Value;
+        // The same load the sidebar runs for every repository it lists, under the same key,
+        // so opening this panel on a repository whose worktrees are already on screen is a
+        // cache hit rather than another `git worktree list`.
+        var list = WorktreesFor(_activeRepoPath);
         var loading = _worktrees.IsLoading && list.Count == 0;
 
         var backdrop = Box.New()
@@ -217,22 +226,24 @@ public partial class JunctionApp
 
     // ── Actions ────────────────────────────────────────────────────────────
 
-    /// <summary>Opens a linked worktree as a repository in Junction: registers its
-    /// path (a worktree is just the same repo at another directory, which the rest
-    /// of the app handles natively), adds it to the active workspace, and selects
-    /// it. Closes the panel.</summary>
+    /// <summary>Switches the window to a linked worktree — the same repository at another
+    /// directory, which the rest of the app handles natively. Closes the panel.
+    ///
+    /// <para>Deliberately registers nothing. A worktree used to be added to the workspace as
+    /// a repository of its own, and the sidebar then carried two entries sharing one name,
+    /// one history and one set of remotes — a repository that does not exist. The sidebar
+    /// derives worktrees from <c>git worktree list</c> and nests them under the repository
+    /// instead (see <see cref="SidebarRepoGroups"/>), so there is nothing to add here and
+    /// nothing left over to remove afterwards.</para></summary>
     private void OpenWorktree(string path)
     {
-        if (!_settings.RepositoryPaths.Any(p => PathEquals(p, path)))
-            _settings.RepositoryPaths.Add(path);
-        var ws = ActiveWorkspace;
-        if (ws != null && !ws.RepoPaths.Any(p => PathEquals(p, path)))
-            ws.RepoPaths.Add(path);
-        Persist();
         CloseWorktrees();
         SelectRepo(path);
-        Flash($"Opened worktree {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}");
+        Flash($"Opened worktree {WorktreeName(path)}");
     }
+
+    private static string WorktreeName(string path) =>
+        System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(path));
 
     private void RemoveWorktreeAction(string path, bool force)
     {
@@ -240,13 +251,13 @@ public partial class JunctionApp
         var res = repo.RemoveWorktree(path, force);
         if (res.Success)
         {
-            // The other half of OpenWorktree: the folder is gone from disk, so the
-            // registration it added has to go too — otherwise the sidebar keeps a repo
-            // row pointing at nothing. ForgetRepo is the same undo the sidebar's
-            // "Remove repository" runs, reselection and all.
+            // The folder is gone from disk. Nothing registers a worktree any more, but a
+            // settings file written by an older build still can, and a leftover row would
+            // point at nothing — ForgetRepo is the same undo the sidebar's "Remove
+            // repository" runs, reselection and all.
             ForgetRepo(path);
             Persist();
-            Flash($"Removed worktree {System.IO.Path.GetFileName(path.TrimEnd('/', '\\'))}");
+            Flash($"Removed worktree {WorktreeName(path)}");
         }
         else
             Flash(FirstLine(res.Stderr, "Remove failed — worktree may have changes (try Force remove)"));

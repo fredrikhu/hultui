@@ -30,6 +30,8 @@ public sealed class Theme
     public TooltipTheme Tooltip { get => Get<TooltipTheme>(); init => Set(value); }
     public ContextMenuTheme ContextMenu { get => Get<ContextMenuTheme>(); init => Set(value); }
     public DropdownTheme Dropdown { get => Get<DropdownTheme>(); init => Set(value); }
+    public CalendarTheme Calendar { get => Get<CalendarTheme>(); init => Set(value); }
+    public TimeFieldTheme TimeField { get => Get<TimeFieldTheme>(); init => Set(value); }
 
     // Semantic colors
     public Color Background { get; init; } = Color.White;

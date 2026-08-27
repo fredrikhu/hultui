@@ -1,6 +1,17 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Middle-drag scrolling** — holding the middle button in any `ScrollViewElement` (and so any
+  `VirtualList`) pans the content like a hand tool: it follows the pointer one-to-one on
+  whichever axes still have somewhere to go. On by default (`MiddleDragScroll`), because in a
+  list the middle button otherwise does nothing at all; a view with nothing to scroll never
+  claims the press, so the button keeps whatever meaning the app gave it (Vesper closes tabs
+  with it). A pan that travels past the drag threshold swallows its own click, a press that
+  stays put still clicks, and the release is dispatched either way so nothing is left holding
+  a pressed `:active` style. The pan target is captured on press rather than re-hit-tested per
+  move, so a drag that leaves the list keeps moving the view it started in. 7 headless tests.
+- **Date and time pickers** — `CalendarElement` (a month grid: header, weekday headings, six-by-seven days, drawn rather than composed — forty-two boxes rebuilt to move a hover highlight is forty-two allocations, and flex is the wrong tool for a grid of equal cells), `DatePickerElement` (a field that opens the calendar in an overlay and keeps focus itself, forwarding the arrows in, per the W3C combobox pattern), and `TimePickerElement` (a segmented HH:mm[:ss][ AM/PM] spinner: Left/Right pick a segment, Up/Down step it, digits type into it, the wheel nudges it, A/P set the half of the day). `Today` and `Culture` are properties rather than reads of the ambient clock and locale, so a rendered picker can be compared against a baseline that does not expire and does not depend on the developer's country. Themed by `CalendarTheme` and `TimeFieldTheme`; both fields borrow `DropdownTheme` for their box so a form does not end up with three differently-shaped controls in a row. Builders: `MonthCalendar` (not `Calendar` — `System.Globalization.Calendar` owns that name in exactly the files that format dates), `DatePicker`, `TimePicker`. 48 headless tests; `samples/HultUI.Samples.DateTime`.
+- **Repeating tweens** — `TweenBuilder.Repeat(n)` / `.Loop()` / `.Yoyo()`. The cycle and its phase are derived from elapsed time rather than accumulated per cycle, so a repeat holds its period: a restart that dropped the frame's overshoot would quantise every cycle up to a whole number of frames, and a spinner built that way visibly slows down and drifts. A finite repeat ends on its end value; a loop never renders the terminal frame at all. Junction's Fetch/Pull/Push buttons are the first consumer.
 - **Headless mode** (`HultUI.Headless`) — apps run with no window, GL context, or display. `IPlatformWindow`/`IWindowChrome`/`IWindowingPlatform` in `HultUI.Core.Platform` decouple `Window`/`Application` from SDL3 (which now implements them); `InputEvent` moved to `HultUI.Core.Events`. `SkiaRasterRenderSurface` renders into a CPU `SKSurface` reusing the same render/measure contexts as the GL path, with `Snapshot`/`ReadPixels`. `HeadlessSession` drives a manual frame pump on a virtual clock, so animations and tooltip delays advance deterministically; `PointerState` takes a `TimeProvider` so double-click timing does too. Input injects through the same funnel as real SDL events (`Click`/`TypeText`/`Drag`/`Wheel`/`PressKey`); queries run against fresh accessibility-tree snapshots (`GetByText`/`FindByRole`/`FindByAutomationId`), so a test can only find what assistive tech can. 42 tests, green on Windows and on a display-less Linux runner. Docs: `docs/HEADLESS.md`.
 - **Display-list snapshot testing** — `RecordingRenderContext` decorates the real render context and captures every drawing call as readable text, so a regression diff says what moved instead of handing you two images, and baselines delta-compress in git. `FixedMetricsMeasureContext` derives text geometry from font size alone for baselines that hold across operating systems. Rendering still happens, so pixel capture works alongside it.
 - **Cross-platform CI** — `test-linux` job runs `HultUI.CrossPlatform.slnf` (the solution minus the Windows-only `HultUI.UiTests`) on `ubuntu-latest`, proving the framework is display-free. The FlaUI UI tests stay excluded from CI; the headless suite is what gates interaction coverage there now.
@@ -56,6 +67,11 @@ and benchmark work.
 - **Snapshot baselines in raw string literals carry the source file's line endings**
   (CRLF on Windows, LF on Linux under autocrlf), so a baseline can pass one CI leg and
   fail the other. Normalise with `ReplaceLineEndings("\n")`.
+- **Keys among siblings are all-or-nothing.** A single keyed child in an otherwise unkeyed
+  child list makes the reconciler match that whole list by key, and the unkeyed siblings are
+  then *replaced* rather than patched — losing focus, caret and scroll. Adding one key to
+  Junction's commit composer left the summary field discarding everything typed after the
+  first character. Key every sibling, or none.
 - **Inside `HultUI.*`, bare `Text` binds to the `HultUI.Text` namespace**, not the
   builder — alias `using Text = HultUI.Core.Builders.Text;` inside the namespace.
 - **`grep "warning CS"` does not match `warning CA1416`** — platform-analyzer warnings

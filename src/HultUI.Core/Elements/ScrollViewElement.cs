@@ -53,6 +53,17 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
     public bool ShowScrollbarX { get; set; }
     public bool ShowScrollbarY { get; set; } = true;
 
+    /// <summary>
+    /// Middle-button drag pans the content, the way a hand tool does: the content follows
+    /// the pointer one-to-one on whichever axes can still move. On by default, because in a
+    /// list the middle button otherwise does nothing at all — set it false where the middle
+    /// button already means something (a tab strip that closes tabs with it, say).
+    ///
+    /// <para>A pan is only claimed when this view can actually scroll, so a middle press in
+    /// a short list falls through to the app's own handlers untouched.</para>
+    /// </summary>
+    public bool MiddleDragScroll { get; set; } = true;
+
     public Color ScrollbarColor { get; set; } = new(128, 128, 128, 100);
     public Color ScrollbarThumbColor { get; set; } = new(128, 128, 128, 180);
     public float ScrollbarWidth { get; set; } = 6f;
@@ -113,6 +124,33 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         var viewportHeight = Layout.AbsoluteContentBox.Height;
         float maxScroll = Math.Max(0, _contentHeight - viewportHeight);
         return Math.Clamp(value, 0, maxScroll);
+    }
+
+    // ──── Middle-button pan ────
+
+    /// <summary>Whether either axis has anywhere left to go — what decides if a middle
+    /// press is a pan or just a middle press.</summary>
+    public bool CanPanScroll
+    {
+        get
+        {
+            var box = Layout.AbsoluteContentBox;
+            return _contentHeight > box.Height + 0.5f || _contentWidth > box.Width + 0.5f;
+        }
+    }
+
+    /// <summary>
+    /// Moves the content by a pointer delta — the pointer's movement, not the scroll's, so
+    /// the sign is inverted: dragging down brings the content down with the hand.
+    /// </summary>
+    /// <returns>True when something actually moved, so a caller can tell a pan from a
+    /// press that never left the spot.</returns>
+    public bool PanByPointer(float dx, float dy)
+    {
+        float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
+        ScrollOffsetX = beforeX - dx;
+        ScrollOffsetY = beforeY - dy;
+        return _scrollOffsetX != beforeX || _scrollOffsetY != beforeY;
     }
 
     // ──── Scroll into view ────
@@ -222,6 +260,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         if (source is ScrollViewElement sv)
         {
             ScrollSpeed = sv.ScrollSpeed;
+            MiddleDragScroll = sv.MiddleDragScroll;
             ShowScrollbarX = sv.ShowScrollbarX;
             ShowScrollbarY = sv.ShowScrollbarY;
             ScrollbarColor = sv.ScrollbarColor;

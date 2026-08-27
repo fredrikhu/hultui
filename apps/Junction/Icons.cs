@@ -141,4 +141,7 @@ public static class Icons
     public const string Warning = "warning";
     public const string Copy = "copy";
     public const string PencilSimple = "pencil-simple";
+    // Phosphor's set here carries no terminal or console glyph; a keyboard is the nearest
+    // thing to "you type the rest of this yourself".
+    public const string Terminal = "keyboard";
 }

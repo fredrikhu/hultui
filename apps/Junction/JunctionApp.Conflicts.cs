@@ -13,7 +13,7 @@ namespace Junction;
 
 public partial class JunctionApp
 {
-    // ── Merge-conflict resolution (Changes view) ─────────────────────────────
+    // ── Conflict resolution (Changes view) ───────────────────────────────────
     //
     // Conflicts appear in the file list like any other change; selecting one swaps
     // the diff pane for a resolution view. The conflicted working file is parsed
@@ -21,33 +21,82 @@ public partial class JunctionApp
     // both / hand-edited — then written back and staged. Whole-file escapes (checkout
     // --ours/--theirs, open in VS Code) remain for binary or already-merged files.
     // The identity of each side (branch · hash · subject · author) is shown below the
-    // regions; merge-level Abort / Continue live in a pinned banner above the list.
+    // regions; Abort / Skip / Continue live in a pinned banner above the list.
+    //
+    // All four sequencer operations land here — merge, rebase, cherry-pick, revert —
+    // because they leave the working tree in the same shape and differ only in what
+    // resumes them and in which side is which (see SequencerState). Rebase in
+    // particular inverts ours/theirs, which is why nothing below hard-codes the names.
 
-    // Pinned above the file list while a merge is in progress.
-    private Element BuildMergeBanner(ChangesData data)
+    // Pinned above the file list while an operation is half-finished.
+    private Element BuildSequencerBanner(ChangesData data, SequencerState state)
     {
         int left = data.Conflicted.Count;
-        var bar = Flex.Row(gap: 8).FlexShrink(0).AlignItems(AlignItems.Center)
+        // Two rows, not one. Rebase adds a Skip button that merge has no use for, and
+        // three buttons plus a status line do not fit the file-list column at its default
+        // width — the status was the half that lost, which is the half that says what is
+        // happening. Stacking keeps both legible however narrow the column is dragged.
+        var bar = Flex.Column(gap: 7).FlexShrink(0)
             .Padding(new Thickness(9, 12, 9, 12))
             .Background(Nocturne.Surface)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        bar.AddChild(Ui.Icon(Icons.GitMerge, 14f, Nocturne.DangerIcon).FlexShrink(0));
-        var label = left > 0
-            ? $"Merge · {left} conflict{(left == 1 ? "" : "s")} left"
-            : "Merge · all resolved";
-        bar.AddChild(Text.New(label).FontSize(12f).FontWeight(FontWeight.Medium)
-            .TextColor(Nocturne.Text).FlexGrow(1).FlexShrink(1)
-            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        var status = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
+        status.AddChild(Ui.Icon(SequencerGlyph(state.Op), 14f,
+            left > 0 ? Nocturne.DangerIcon : Nocturne.Accent).FlexShrink(0));
 
-        bar.AddChild(ConflictButton("Abort", Icons.X, DoMergeAbort, Nocturne.DangerText));
+        // "Rebase 3 of 7 · 2 conflicts left". The progress half only exists for a
+        // replay of several commits, and the conflict half only while some are left —
+        // a paused-but-clean rebase (an `edit` stop) is a real state and says so.
+        var bits = new List<string> { state.Name };
+        if (state.Progress.Length > 0) bits.Add(state.Progress);
+        var label = string.Join(" ", bits) + " · " + (left > 0
+            ? $"{left} conflict{(left == 1 ? "" : "s")} left"
+            : "all resolved");
+        status.AddChild(Text.New(label).FontSize(12f).FontWeight(FontWeight.Medium)
+            .TextColor(Nocturne.Text).FlexGrow(1).FlexShrink(1)
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+            .Tooltip(SequencerTooltip(state)));
+        bar.AddChild(status);
+
+        var op = state.Op;
+        var buttons = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        buttons.AddChild(ConflictButton("Abort", Icons.X, () => DoSequencerAbort(op), Nocturne.DangerText));
+        if (state.CanSkip)
+        {
+            var skip = ConflictButton("Skip", Icons.BendDownRight, () => DoSequencerSkip(op), Nocturne.On(0.7));
+            skip.Tooltip($"Drop this commit and carry on with the rest of the {state.Name.ToLowerInvariant()}");
+            buttons.AddChild(skip);
+        }
+        buttons.AddChild(Box.New().FlexGrow(1));
         bool canContinue = left == 0;
         var cont = ConflictButton("Continue", Icons.Play,
-            canContinue ? DoMergeContinue : null, canContinue ? Nocturne.Accent : Nocturne.On(0.3));
-        cont.Key = "merge-continue-" + (canContinue ? "on" : "off");
-        bar.AddChild(cont);
+            canContinue ? () => DoSequencerContinue(op) : null,
+            canContinue ? Nocturne.Accent : Nocturne.On(0.3));
+        cont.Key = "sequencer-continue-" + (canContinue ? "on" : "off");
+        if (!canContinue) cont.Tooltip("Resolve every conflict first");
+        buttons.AddChild(cont);
+        bar.AddChild(buttons);
         return bar;
     }
+
+    private static string SequencerGlyph(SequencerOp op) => op switch
+    {
+        SequencerOp.Rebase => Icons.ArrowsDownUp,
+        SequencerOp.CherryPick => Icons.GitCommit,
+        SequencerOp.Revert => Icons.CounterClockwise,
+        _ => Icons.GitMerge,
+    };
+
+    private static string SequencerTooltip(SequencerState state) => state.Op switch
+    {
+        SequencerOp.Rebase =>
+            $"Replaying {state.TheirsLabel} onto {state.OursLabel}. "
+            + "Your own commit is the \"theirs\" side of every conflict.",
+        SequencerOp.CherryPick => $"Picking onto {state.OursLabel}.",
+        SequencerOp.Revert => $"Reverting on {state.OursLabel}.",
+        _ => $"Merging {state.TheirsLabel} into {state.OursLabel}.",
+    };
 
     // A conflict entry in the file list (no checkbox — you resolve via the pane).
     private Element ConflictListRow(TreeNode<GitFileChange> node)
@@ -98,11 +147,17 @@ public partial class JunctionApp
         // right pane doesn't, so "Open in VS Code" stays on the clicked file.
         var sel = ChangeActionPaths(new ChangeRef(f.Path, ChangeSection.Conflicted));
         var n = sel.Count;
+        // Named after the operation in progress, because "theirs" during a rebase is the
+        // user's own commit — a menu that called it "incoming" would be inviting them to
+        // throw their work away.
+        var op = _changes.Value.Sequencer?.State.Op ?? SequencerOp.Merge;
+        var ours = $"Use ours ({OursRole(op).ToLowerInvariant()})";
+        var theirs = $"Use theirs ({TheirsRole(op).ToLowerInvariant()})";
         return
         [
-            Item(Icons.ArrowFatRight, n > 1 ? $"Use ours (current) for {n} files" : "Use ours (current)",
+            Item(Icons.ArrowFatRight, n > 1 ? $"{ours} for {n} files" : ours,
                 () => ResolveConflicts(sel, ours: true)),
-            Item(Icons.Cloud, n > 1 ? $"Use theirs (incoming) for {n} files" : "Use theirs (incoming)",
+            Item(Icons.Cloud, n > 1 ? $"{theirs} for {n} files" : theirs,
                 () => ResolveConflicts(sel, ours: false)),
             ContextMenuItem.Separator(),
             Item(Icons.FileCode, "Open in VS Code", () => OpenConflictInVsCode(f.Path)),
@@ -157,7 +212,7 @@ public partial class JunctionApp
 
     // The right pane for a selected conflicted file: per-region resolution plus the
     // identity of each side (what "ours" and "theirs" actually are).
-    private Element BuildConflictResolutionPane(string path, MergeSides? merge)
+    private Element BuildConflictResolutionPane(string path, ConflictSides? sides)
     {
         var key = $"{_activeRepoPath}|{path}|{DataGen(_activeRepoPath)}";
         SyncConflictChoices(key);
@@ -173,7 +228,9 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
         header.AddChild(Ui.Mono(path.Length > 0 ? path : "—", 12f, Nocturne.Text)
             .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        header.AddChild(Ui.Tag("merge conflict", Nocturne.Alpha(Nocturne.DangerText, 0.16), Nocturne.DangerText, 10f)
+        header.AddChild(Ui.Tag(
+                sides is { } s ? s.State.Name.ToLowerInvariant() + " conflict" : "conflict",
+                Nocturne.Alpha(Nocturne.DangerText, 0.16), Nocturne.DangerText, 10f)
             .FlexShrink(0));
         col.AddChild(header);
 
@@ -184,12 +241,14 @@ public partial class JunctionApp
         var inner = Flex.Column(gap: 12);
 
         // Which side is which comes first — you need to know what "ours" and
-        // "theirs" mean before choosing between them.
-        if (merge is { } sides)
+        // "theirs" mean before choosing between them, and during a rebase they are the
+        // opposite way round from everyone's intuition.
+        if (sides is { } sd)
         {
-            inner.AddChild(MergeSideCard("Incoming · theirs", sides.TheirsBranch, sides.Theirs,
+            var st = sd.State;
+            inner.AddChild(MergeSideCard($"{TheirsRole(st.Op)} · theirs", st.TheirsLabel, sd.Theirs,
                 Nocturne.Accent2_400, path));
-            inner.AddChild(MergeSideCard("Current · ours", sides.OursBranch, sides.Ours,
+            inner.AddChild(MergeSideCard($"{OursRole(st.Op)} · ours", st.OursLabel, sd.Ours,
                 Nocturne.Accent400, path));
         }
 
@@ -583,19 +642,65 @@ public partial class JunctionApp
         if (!ok) Flash(string.IsNullOrEmpty(err) ? "Could not open VS Code" : err);
     }
 
-    private void DoMergeContinue()
+    /// <summary>What the checked-out side is, in each operation's own words. "Current"
+    /// is right for three of the four; during a rebase the checked-out side is the branch
+    /// being replayed onto, which is anything but the user's current work.</summary>
+    private static string OursRole(SequencerOp op) => op switch
+    {
+        SequencerOp.Rebase => "New base",
+        _ => "Current",
+    };
+
+    private static string TheirsRole(SequencerOp op) => op switch
+    {
+        SequencerOp.Rebase => "Your commit",
+        SequencerOp.CherryPick => "Picked commit",
+        SequencerOp.Revert => "Reverted commit",
+        _ => "Incoming",
+    };
+
+    private void DoSequencerContinue(SequencerOp op)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.MergeContinue();
-        Flash(res.Success ? "Merge completed" : FirstLine(res.Stderr, "Resolve every conflict first"));
+        var res = repo.SequencerContinue(op);
+        // A rebase that continues into the *next* conflict exits non-zero too, so the
+        // failure message is only a failure when the operation actually ended.
+        if (res.Success)
+            Flash(repo.GetSequencerOp() == SequencerOp.None
+                ? $"{OpName(op)} completed"
+                : $"{OpName(op)} — next conflict");
+        else
+            Flash(FirstLine(res.Stderr, "Resolve every conflict first"));
         RefreshAll();
     }
 
-    private void DoMergeAbort()
+    private void DoSequencerAbort(SequencerOp op)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.MergeAbort();
-        Flash(res.Success ? "Merge aborted" : FirstLine(res.Stderr, "Abort failed"));
+        var res = repo.SequencerAbort(op);
+        Flash(res.Success ? $"{OpName(op)} aborted" : FirstLine(res.Stderr, "Abort failed"));
         RefreshAll();
     }
+
+    private void DoSequencerSkip(SequencerOp op)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var res = repo.SequencerSkip(op);
+        if (res.Success)
+            Flash(repo.GetSequencerOp() == SequencerOp.None
+                ? $"{OpName(op)} completed — commit skipped"
+                : "Commit skipped");
+        else
+            Flash(FirstLine(res.Stderr, "Skip failed"));
+        RefreshAll();
+    }
+
+    private static string OpName(SequencerOp op) => op switch
+    {
+        SequencerOp.Merge => "Merge",
+        SequencerOp.Rebase => "Rebase",
+        SequencerOp.CherryPick => "Cherry-pick",
+        SequencerOp.Revert => "Revert",
+        _ => "Operation",
+    };
 }

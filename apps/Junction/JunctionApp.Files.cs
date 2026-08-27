@@ -561,6 +561,19 @@ public partial class JunctionApp
             Flash(string.IsNullOrEmpty(error) ? "Could not open the file manager" : error);
     }
 
+    /// <summary>Ctrl+O in the Commit and Changes views, and the Changes list's "Open file":
+    /// hands the selected file to the desktop's own handler.
+    ///
+    /// <para>The Commit view lists a <i>commit's</i> files, so the file it names is only on
+    /// disk while the working tree still carries it — <see cref="LaunchFilesPath"/> says so
+    /// by name when it does not, rather than launching a path that is not there.</para></summary>
+    private void OpenSelectedFile()
+    {
+        var path = View == JunctionView.Changes ? _changeSelPath : _selectedFilePath;
+        if (string.IsNullOrEmpty(path)) { Flash("Select a file to open first"); return; }
+        LaunchFilesPath(path);
+    }
+
     private static string NotOnDisk(string relPath) =>
         $"{System.IO.Path.GetFileName(relPath)} isn't in the working tree";
 

@@ -214,6 +214,10 @@ public partial class JunctionApp
         // Find-in-text, which until now was only ever reachable by knowing Ctrl+F.
         items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", "f · Ctrl+F",
             () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) OpenFindBar(bar); }));
+        items.Add(new("action", "Action", Icons.ArrowsClockwise,
+            "Background fetch: " + (_settings.General.AutoFetchEnabled ? "on" : "off"),
+            _settings.General.AutoFetchEnabled ? $"every {_settings.General.AutoFetchIntervalMinutes} min" : "",
+            () => { ClosePalette(); ToggleAutoFetch(); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         items.Add(new("action", "Action", Icons.Palette, "Appearance: colour scheme…",
             Nocturne.Theme.Name, () => { ClosePalette(); OpenAppearance(); }));

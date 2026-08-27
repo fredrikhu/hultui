@@ -18,8 +18,11 @@ public sealed class Tween<T> : ITween
     private readonly Action<T> _setter;
     private readonly Action? _onComplete;
     private readonly Action? _markDirty;
+    private readonly int _cycles;      // <= 0: forever
+    private readonly bool _yoyo;
 
     private float _elapsed;
+    private int _cycle;                // how many cycles have finished
     private bool _complete;
 
     public bool IsComplete => _complete;
@@ -31,7 +34,9 @@ public sealed class Tween<T> : ITween
         Func<T, T, float, T> lerp,
         Action<T> setter,
         Action? onComplete,
-        Action? markDirty)
+        Action? markDirty,
+        int cycles = 1,
+        bool yoyo = false)
     {
         _from = from;
         _to = to;
@@ -42,6 +47,8 @@ public sealed class Tween<T> : ITween
         _setter = setter;
         _onComplete = onComplete;
         _markDirty = markDirty;
+        _cycles = cycles;
+        _yoyo = yoyo;
     }
 
     public void Tick(float deltaSeconds)
@@ -54,17 +61,40 @@ public sealed class Tween<T> : ITween
             return;
 
         float activeTime = _elapsed - _delay;
-        float t = Math.Clamp(activeTime / _duration, 0f, 1f);
-        float easedT = _easing(t);
-        T value = _lerp(_from, _to, easedT);
-        _setter(value);
+
+        // Which cycle we are in, and how far through it, derived from the elapsed time
+        // rather than accumulated per cycle. That is what keeps a repeat on period: a
+        // frame almost never lands on a cycle boundary, and a restart that dropped the
+        // overshoot would make every cycle a frame longer than the last — a spinner
+        // built that way visibly slows down.
+        float t;
+        bool last;
+        if (_duration > 0f)
+        {
+            int done = (int)(activeTime / _duration);
+            last = _cycles > 0 && done >= _cycles;
+            _cycle = last ? _cycles - 1 : done;
+            // A finished repeat holds its end value; a running one is a fraction into
+            // its current cycle, so a loop never renders the terminal frame at all.
+            t = last ? 1f : activeTime / _duration - done;
+        }
+        else
+        {
+            // A zero duration is "already at the end" — one cycle per tick.
+            t = 1f;
+            last = _cycles > 0 && _cycle + 1 >= _cycles;
+            if (!last) _cycle++;
+        }
+
+        // A yoyo's odd cycles run backwards, so the pair reads as one there-and-back
+        // motion rather than a snap to the start every period.
+        float progress = _yoyo && (_cycle & 1) == 1 ? 1f - t : t;
+        _setter(_lerp(_from, _to, _easing(progress)));
         _markDirty?.Invoke();
 
-        if (t >= 1f)
-        {
-            _complete = true;
-            _onComplete?.Invoke();
-        }
+        if (!last) return;
+        _complete = true;
+        _onComplete?.Invoke();
     }
 
     public void Cancel()

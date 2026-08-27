@@ -20,7 +20,16 @@ without redoing discovery.
 - Pull now goes through `GitRepository.PullAsync()` / `PullFromAsync()` with
   `PullOptions`.
 - Repository watching already exists through `GitWatcher`, with a hard-coded
-  300 ms debounce. Timed auto-fetch is owned by `TabbedApp`.
+  300 ms debounce.
+- **Timed auto-fetch is implemented** (`JunctionApp.RemoteOps.cs`), not by
+  `TabbedApp` — that type is from the pre-Nocturne shell and no longer exists.
+  `RestartAutoFetch` owns one loop for the whole app; it settles for 20 s after
+  launch, then sweeps the repositories `AutoFetchMode` names, skipping any sweep
+  while a user-initiated remote command holds git's lock. A sweep only
+  invalidates a repository's cached views when `RemoteRefsFingerprint` actually
+  changed, so a quiet remote never redraws what someone is reading. It stays
+  **off until asked for** — it reaches the network on a timer — and is toggled
+  from the command palette, since there is still no settings window.
 - The open repository flow uses `OpenRepositoryDialog`, a modal with a text
   input path field.
 - `JunctionColors` now delegates to the active dark/light palette.

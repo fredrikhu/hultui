@@ -11,6 +11,17 @@ public sealed class ExternalDiffRequest
     public required string LeftContent { get; init; }
     public required string RightLabel { get; init; }
     public required string RightContent { get; init; }
+
+    /// <summary>
+    /// The file on disk to hand the tool as the right-hand side, instead of a temp copy of
+    /// <see cref="RightContent"/>. Set it whenever the right side <i>is</i> a real file — a
+    /// working-tree comparison — so the editor opens the file itself and edits made while
+    /// reading the diff land in the repository rather than in a temp file that is deleted
+    /// when the tool closes.
+    /// </summary>
+    /// <remarks>Ignored when the path does not exist (a deleted file has no working copy),
+    /// which falls back to the temp-file behaviour.</remarks>
+    public string? RightPath { get; init; }
 }
 
 public static class ExternalDiffLauncher
@@ -33,9 +44,20 @@ public static class ExternalDiffLauncher
         var tempDir = Directory.CreateTempSubdirectory("hultgit-diff-");
         var safeName = SanitizeFileName(Path.GetFileName(request.RelativePath));
         var leftPath = Path.Combine(tempDir.FullName, $"{request.LeftLabel}-{safeName}");
-        var rightPath = Path.Combine(tempDir.FullName, $"{request.RightLabel}-{safeName}");
         File.WriteAllText(leftPath, request.LeftContent);
-        File.WriteAllText(rightPath, request.RightContent);
+
+        // The right side is the real file when the caller has one — see RightPath. Only the
+        // copy needs writing then, and the editor is looking at the working tree itself.
+        string rightPath;
+        if (!string.IsNullOrEmpty(request.RightPath) && File.Exists(request.RightPath))
+        {
+            rightPath = request.RightPath;
+        }
+        else
+        {
+            rightPath = Path.Combine(tempDir.FullName, $"{request.RightLabel}-{safeName}");
+            File.WriteAllText(rightPath, request.RightContent);
+        }
 
         var replacements = new Dictionary<string, string>
         {

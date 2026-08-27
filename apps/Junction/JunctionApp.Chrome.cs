@@ -163,19 +163,21 @@ public partial class JunctionApp
         // its icon-only build at the same position, which is exactly the case that
         // must reconcile by identity rather than by index.
         var actions = Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center);
-        var fetch = ActionButton("Fetch", Icons.ArrowsClockwise, DoFetch, primary: false, compact);
-        fetch.Key = "fetch";
+        var fetch = ActionButton("Fetch", Icons.ArrowsClockwise, DoFetch, primary: false, compact, RemoteOp.Fetch);
+        // Keyed on whether it is the one running: the busy build swaps the label and
+        // hands in an animated icon, so it has to reconcile as a different button.
+        fetch.Key = "fetch" + (_remoteOp == RemoteOp.Fetch ? "#busy" : "");
         actions.AddChild(fetch);
 
-        var pull = ActionButton("Pull", Icons.ArrowDown, DoPull, primary: false, compact);
-        pull.Key = "pull";
-        if (sum.Behind > 0)
+        var pull = ActionButton("Pull", Icons.ArrowDown, DoPull, primary: false, compact, RemoteOp.Pull);
+        pull.Key = "pull" + (_remoteOp == RemoteOp.Pull ? "#busy" : "");
+        if (sum.Behind > 0 && _remoteOp != RemoteOp.Pull)
             pull.AddChild(Text.New(sum.Behind.ToString()).FontSize(13f).TextColor(Nocturne.Accent300));
         actions.AddChild(pull);
 
-        var push = ActionButton("Push", Icons.ArrowUp, DoPush, primary: true, compact);
-        push.Key = "push";
-        if (sum.Ahead > 0)
+        var push = ActionButton("Push", Icons.ArrowUp, DoPush, primary: true, compact, RemoteOp.Push);
+        push.Key = "push" + (_remoteOp == RemoteOp.Push ? "#busy" : "");
+        if (sum.Ahead > 0 && _remoteOp != RemoteOp.Push)
             push.AddChild(Text.New(sum.Ahead.ToString()).FontSize(13f).TextColor(Nocturne.Accent));
         actions.AddChild(push);
 
@@ -194,21 +196,35 @@ public partial class JunctionApp
     // A toolbar git action. Full width shows an icon + label; compact drops the
     // label to an icon-only button (with the label as its tooltip) but keeps room
     // for a trailing ahead/behind count the caller may append.
-    private static BoxElement ActionButton(string label, string glyph, Action onClick, bool primary, bool compact)
+    //
+    // While its own command is running the icon is handed in already in motion (see
+    // RemoteOpIcon) and the label goes present-tense, so the button itself reports the
+    // work rather than leaving it to a toast that has already faded.
+    private BoxElement ActionButton(string label, string glyph, Action onClick, bool primary, bool compact,
+        RemoteOp op = RemoteOp.None)
     {
-        if (!compact)
-            return primary
-                ? Ui.PrimaryButton(label, glyph, onClick)
-                : Ui.SecondaryButton(label, glyph, onClick);
-
+        bool busy = op != RemoteOp.None && _remoteOp == op;
         var fg = primary ? Nocturne.Accent : Nocturne.Text;
+
+        if (!compact)
+        {
+            // Built without its glyph, then given the icon as a child: Ui.Icon's artwork
+            // is an ordinary element, so a transform on it moves the mark alone and
+            // leaves the label sitting still beside it.
+            var full = primary
+                ? Ui.PrimaryButton(busy ? RemoteOpLabel(op) : label, null, onClick)
+                : Ui.SecondaryButton(busy ? RemoteOpLabel(op) : label, null, onClick);
+            full.InsertChild(0, RemoteOpIcon(glyph, 14f, fg, op));
+            return full;
+        }
+
         var b = Flex.Row(gap: 5).Height(34).MinWidth(34)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Padding(new Thickness(0, 9, 0, 9))
             .CornerRadius(Nocturne.RadiusMd)
             .BorderColor(primary ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
-            .Cursor(CursorType.Pointer).Tooltip(label);
-        b.AddChild(Ui.Icon(glyph, 15f, fg));
+            .Cursor(CursorType.Pointer).Tooltip(busy ? RemoteOpLabel(op) : label);
+        b.AddChild(RemoteOpIcon(glyph, 15f, fg, op));
         b.OnClick(_ => onClick());
         return b.HoverBg(Nocturne.Alpha(fg, primary ? 0.12 : 0.07), Color.Transparent);
     }
@@ -265,41 +281,67 @@ public partial class JunctionApp
 
     private static Task<string?> NoAskPass(string _) => Task.FromResult<string?>(null);
 
+    // Every one of these ends its busy state in a finally. The state is no longer just a
+    // re-entrancy flag: it also owns a looping animation, so a git call that throws would
+    // otherwise leave the toolbar spinning and every later remote command refused, for the
+    // rest of the session.
     private async void DoFetch()
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        _remoteOpRunning = true;
-        Flash("Fetching…");
-        var result = await repo.FetchAsync(NoAskPass, _settings.Git.PruneOnFetch);
-        _remoteOpRunning = false;
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Fetch);
+        GitResult result;
+        try { result = await repo.FetchAsync(NoAskPass, _settings.Git.PruneOnFetch); }
+        finally { EndRemoteOp(); }
         Flash(result.Success ? "Fetched all remotes" : FirstLine(result.Stderr, "Fetch failed"));
         RefreshAll();
     }
 
     private async void DoPull()
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        _remoteOpRunning = true;
-        Flash("Pulling…");
-        var result = await repo.PullAsync(NoAskPass, new PullOptions
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Pull);
+        GitResult result;
+        try
         {
-            Strategy = _settings.Git.PullStrategy,
-            AutoStash = _settings.Git.PullAutoStash,
-            Prune = _settings.Git.PruneOnFetch,
-        });
-        _remoteOpRunning = false;
-        Flash(result.Success ? "Pulled latest changes" : FirstLine(result.Stderr, "Pull failed"));
+            result = await repo.PullAsync(NoAskPass, new PullOptions
+            {
+                Strategy = _settings.Git.PullStrategy,
+                AutoStash = _settings.Git.PullAutoStash,
+                Prune = _settings.Git.PruneOnFetch,
+            });
+        }
+        finally { EndRemoteOp(); }
+        if (result.Success)
+            Flash("Pulled latest changes");
+        else if (!StoppedOnConflict(repo, "Pull"))
+            Flash(FirstLine(result.Stderr, "Pull failed"));
         RefreshAll();
     }
 
+    /// <summary>
+    /// Pushes the checked-out branch, publishing it when it has nowhere to go yet.
+    ///
+    /// <para>A branch created locally has no upstream, and a bare <c>git push</c> answers
+    /// that with a fatal error and a command to run by hand — which is the one thing a git
+    /// client exists to save you from. The plan is worked out first (off the UI thread,
+    /// since it reads git config) so the toast can say <i>published</i> rather than
+    /// <i>pushed</i>: setting an upstream is a decision the user should see recorded.</para>
+    /// </summary>
     private async void DoPush()
     {
-        if (ActiveRepo is not { } repo || _remoteOpRunning) return;
-        _remoteOpRunning = true;
-        Flash("Pushing…");
-        var result = await repo.PushAsync(NoAskPass);
-        _remoteOpRunning = false;
-        Flash(result.Success ? "Pushed successfully" : FirstLine(result.Stderr, "Push failed"));
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Push);
+        PushPlan plan;
+        GitResult result;
+        try
+        {
+            plan = await Task.Run(() => repo.PlanPush());
+            result = await repo.RunPushAsync(plan, NoAskPass);
+        }
+        finally { EndRemoteOp(); }
+        Flash(result.Success
+            ? plan.SetUpstream ? $"Published {plan.Branch} to {plan.Remote}" : "Pushed successfully"
+            : FirstLine(result.Stderr, "Push failed"));
         RefreshAll();
     }
 

@@ -150,9 +150,9 @@ public partial class JunctionApp
             if (dropped > 0) bits.Add($"{dropped} dropped");
             Flash($"Rebased {branchTitle} — {string.Join(", ", bits)}");
         }
-        else
+        else if (!StoppedOnConflict(repo, "Rebase"))
         {
-            Flash(FirstLine(res.Stderr, "Rebase stopped — resolve conflicts or abort"));
+            Flash(FirstLine(res.Stderr, "Rebase failed"));
         }
         RefreshAll();
     }

@@ -26,6 +26,12 @@ public partial class JunctionApp
     private static ContextMenuItem Item(string glyph, string label, Action run) =>
         new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, Action = run };
 
+    /// <summary>The same row with its keyboard shortcut spelled out on the right — for an
+    /// action that also has a global key, so the menu teaches the key rather than being the
+    /// only way to reach it.</summary>
+    private static ContextMenuItem Item(string glyph, string label, Action run, string shortcut) =>
+        new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, Action = run, ShortcutHint = shortcut };
+
     private static ContextMenuItem Danger(string glyph, string label, Action run) =>
         new() { Icon = MenuIcon(glyph), Glyph = glyph, Label = label, Action = run, IsDanger = true };
 
@@ -177,12 +183,30 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
         var res = repo.CherryPick([.. hashesOldestFirst]);
-        Flash(res.Success
-            ? hashesOldestFirst.Count > 1
+        if (res.Success)
+            Flash(hashesOldestFirst.Count > 1
                 ? $"Cherry-picked {hashesOldestFirst.Count} commits"
-                : $"Cherry-picked {Short(hashesOldestFirst[0])}"
-            : FirstLine(res.Stderr, "Cherry-pick failed"));
+                : $"Cherry-picked {Short(hashesOldestFirst[0])}");
+        else if (!StoppedOnConflict(repo, "Cherry-pick"))
+            Flash(FirstLine(res.Stderr, "Cherry-pick failed"));
         RefreshAll();
+    }
+
+    /// <summary>
+    /// When a sequencer command exits non-zero because it stopped on a conflict rather
+    /// than because it failed, says so and opens the view that can resolve it.
+    ///
+    /// <para>Both cases are a non-zero exit, and telling them apart from stderr is a
+    /// losing game across git versions — so ask the repository what state it is in
+    /// instead. Returns true when it was a stop, meaning the caller should not also
+    /// report a failure.</para>
+    /// </summary>
+    private bool StoppedOnConflict(GitRepository repo, string what)
+    {
+        if (repo.GetSequencerOp() == SequencerOp.None) return false;
+        Flash($"{what} stopped on conflicts — resolve them below");
+        SetView(JunctionView.Changes);
+        return true;
     }
 
     // ── Patch export ─────────────────────────────────────────────────────
@@ -285,7 +309,10 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
         var res = repo.Rebase(onto);
-        Flash(res.Success ? $"Rebased onto {Short(onto)}" : FirstLine(res.Stderr, "Rebase failed"));
+        if (res.Success)
+            Flash($"Rebased onto {Short(onto)}");
+        else if (!StoppedOnConflict(repo, "Rebase"))
+            Flash(FirstLine(res.Stderr, "Rebase failed"));
         RefreshAll();
     }
 
@@ -293,7 +320,10 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
         var res = repo.Revert(hash);
-        Flash(res.Success ? $"Reverted {Short(hash)}" : FirstLine(res.Stderr, "Revert failed"));
+        if (res.Success)
+            Flash($"Reverted {Short(hash)}");
+        else if (!StoppedOnConflict(repo, "Revert"))
+            Flash(FirstLine(res.Stderr, "Revert failed"));
         RefreshAll();
     }
 
@@ -312,7 +342,7 @@ public partial class JunctionApp
         var res = repo.Merge(branch);
         if (res.Success)
             Flash($"Merged {branch}");
-        else if (repo.IsMerging())
+        else if (repo.GetSequencerOp() != SequencerOp.None)
         {
             // Conflicts — drop the user into the Changes view to resolve them.
             Flash($"Merge conflicts in {branch} — resolve below");

@@ -17,6 +17,50 @@ public class GitRepository
         Path = path;
     }
 
+    // ── .git directory ──
+
+    private string? _gitDir;
+
+    /// <summary>
+    /// The repository's actual git directory, absolute.
+    ///
+    /// <para>Asked of git rather than assembled as <c>&lt;path&gt;/.git</c>: in a linked
+    /// worktree <c>.git</c> is a <i>file</i> pointing at
+    /// <c>&lt;main&gt;/.git/worktrees/&lt;name&gt;</c>, and that is where the state files a
+    /// half-finished merge or rebase leaves behind actually live. Probing the wrong place
+    /// reports "nothing in progress" for a worktree mid-conflict — the state where getting
+    /// it wrong costs the most.</para>
+    ///
+    /// <para>Cached: a repository's git directory does not move under a running app, and
+    /// this is on the path of every status load.</para>
+    /// </summary>
+    private string GitDir()
+    {
+        if (_gitDir != null) return _gitDir;
+        var result = GitProcess.Run(Path, "rev-parse", "--absolute-git-dir");
+        var dir = result.Success ? result.Stdout.Trim() : "";
+        return _gitDir = dir.Length > 0 ? dir : System.IO.Path.Combine(Path, ".git");
+    }
+
+    /// <summary>A path inside the git directory (<c>MERGE_HEAD</c>, <c>rebase-merge/onto</c>).</summary>
+    private string GitPath(params string[] parts) =>
+        System.IO.Path.Combine([GitDir(), .. parts]);
+
+    /// <summary>The first line of a git-directory state file, trimmed; null when absent
+    /// or unreadable. These files are written by git one short value at a time.</summary>
+    private string? ReadGitFile(params string[] parts)
+    {
+        try
+        {
+            var full = GitPath(parts);
+            if (!File.Exists(full)) return null;
+            var text = File.ReadLines(full).FirstOrDefault()?.Trim();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
     // ── Branches ──
 
     public List<GitBranch> GetBranches()
@@ -833,6 +877,21 @@ public class GitRepository
             .ToList();
     }
 
+    /// <summary>
+    /// Every remote-tracking ref and what it points at, as one string.
+    ///
+    /// <para>A background fetch has to answer "did anything actually arrive?" before it
+    /// throws away a repository's cached views, and git's own output does not say so
+    /// reliably enough to parse. Comparing this before and after does, for the cost of one
+    /// <c>for-each-ref</c>.</para>
+    /// </summary>
+    public string RemoteRefsFingerprint()
+    {
+        var result = GitProcess.Run(Path, "for-each-ref",
+            "--format=%(objectname) %(refname)", "refs/remotes/", "refs/tags/");
+        return result.Success ? result.Stdout : "";
+    }
+
     public GitResult Fetch(bool prune = true)
     {
         var args = new List<string> { "fetch", "--all" };
@@ -905,6 +964,69 @@ public class GitRepository
     public Task<GitResult> PushAsync(Func<string, Task<string?>>? askPass = null)
     {
         return GitProcess.RunAsync(Path, askPass, "push");
+    }
+
+    /// <summary>The upstream a branch tracks ("origin/main"), or null when it tracks
+    /// nothing. Asked of the ref itself rather than of <c>@{u}</c>, which errors out
+    /// noisily for exactly the case this is here to detect.</summary>
+    public string? GetUpstream(string branch)
+    {
+        var result = GitProcess.Run(Path, "for-each-ref",
+            "--format=%(upstream:lstrip=2)", $"refs/heads/{branch}");
+        var name = result.Success ? result.Stdout.Trim() : "";
+        return name.Length > 0 ? name : null;
+    }
+
+    /// <summary>
+    /// Where an unpublished branch should go, in git's own order of preference:
+    /// <c>remote.pushDefault</c>, then <c>origin</c>, then the only remote there is.
+    /// Null when the repository has no remotes.
+    /// </summary>
+    public string? DefaultPushRemote()
+    {
+        var configured = GitProcess.Run(Path, "config", "--get", "remote.pushDefault");
+        if (configured.Success && configured.Stdout.Trim() is { Length: > 0 } name)
+            return name;
+
+        var remotes = GetRemotes();
+        if (remotes.Count == 0) return null;
+        return remotes.Contains("origin") ? "origin" : remotes[0];
+    }
+
+    /// <summary>
+    /// What pushing <paramref name="branch"/> (null: whatever is checked out) would do.
+    ///
+    /// <para>A branch created locally has no upstream, and a bare <c>git push</c> answers
+    /// that with a fatal error and a command to copy. Junction publishes it instead — the
+    /// answer is never "don't push", it is always "push, and record where" — so the
+    /// decision is made here, off the UI thread, and <see cref="RunPushAsync"/> carries
+    /// it out.</para>
+    /// </summary>
+    public PushPlan PlanPush(string? branch = null)
+    {
+        branch ??= GetCurrentBranch();
+        if (string.IsNullOrEmpty(branch) || branch == "HEAD")
+            return new PushPlan(null, "", false, "HEAD is detached — check out a branch to push.");
+
+        if (GetUpstream(branch) != null)
+            return new PushPlan(null, branch, false, null);
+
+        var remote = DefaultPushRemote();
+        return remote == null
+            ? new PushPlan(null, branch, false, $"{branch} has no upstream and this repository has no remote.")
+            : new PushPlan(remote, branch, true, null);
+    }
+
+    /// <summary>Carries out a <see cref="PlanPush"/>. Publishing uses
+    /// <c>--set-upstream</c>, so the branch tracks its new remote afterwards and every
+    /// later push, pull and ahead/behind count works without asking again.</summary>
+    public Task<GitResult> RunPushAsync(PushPlan plan, Func<string, Task<string?>>? askPass = null)
+    {
+        if (plan.Problem != null)
+            return Task.FromResult(new GitResult(1, "", plan.Problem));
+        return plan.SetUpstream && plan.Remote != null
+            ? GitProcess.RunAsync(Path, askPass, "push", "--set-upstream", plan.Remote, plan.Branch)
+            : GitProcess.RunAsync(Path, askPass, "push");
     }
 
     public Task<GitResult> PushToAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null)
@@ -991,7 +1113,7 @@ public class GitRepository
     /// </summary>
     public string? GetMergingBranchName()
     {
-        var msgPath = System.IO.Path.Combine(Path, ".git", "MERGE_MSG");
+        var msgPath = GitPath("MERGE_MSG");
         if (!File.Exists(msgPath)) return null;
         string first;
         try { first = File.ReadLines(msgPath).FirstOrDefault() ?? ""; }
@@ -1011,7 +1133,7 @@ public class GitRepository
     /// </summary>
     public bool IsMerging()
     {
-        return File.Exists(System.IO.Path.Combine(Path, ".git", "MERGE_HEAD"));
+        return File.Exists(GitPath("MERGE_HEAD"));
     }
 
     /// <summary>
@@ -1206,9 +1328,155 @@ public class GitRepository
     /// </summary>
     public bool IsRebasing()
     {
-        return Directory.Exists(System.IO.Path.Combine(Path, ".git", "rebase-merge"))
-            || Directory.Exists(System.IO.Path.Combine(Path, ".git", "rebase-apply"));
+        return Directory.Exists(GitPath("rebase-merge"))
+            || Directory.Exists(GitPath("rebase-apply"));
     }
+
+    // ── Sequencer (merge · rebase · cherry-pick · revert) ──
+    //
+    // Four commands that stop on a conflict and wait. Only the resume command and the
+    // meaning of the two sides differ, so everything above this layer works in terms of
+    // SequencerState rather than asking four separate questions.
+
+    /// <summary>Which half-finished operation the repository is sitting in, if any.
+    /// Checked in the order git itself resolves them: a rebase that hits a conflict while
+    /// picking leaves a CHERRY_PICK_HEAD behind too, and it is still a rebase.</summary>
+    public SequencerOp GetSequencerOp()
+    {
+        if (IsRebasing()) return SequencerOp.Rebase;
+        if (File.Exists(GitPath("CHERRY_PICK_HEAD"))) return SequencerOp.CherryPick;
+        if (File.Exists(GitPath("REVERT_HEAD"))) return SequencerOp.Revert;
+        if (File.Exists(GitPath("MERGE_HEAD"))) return SequencerOp.Merge;
+        return SequencerOp.None;
+    }
+
+    /// <summary>
+    /// The in-progress operation and the identity of its two conflict sides, or null when
+    /// the repository is in a normal state.
+    ///
+    /// <para>Reads git's own state files rather than shelling out per field: they are a few
+    /// bytes each, this runs on every status load, and the values are exactly what git will
+    /// act on when the operation resumes.</para>
+    /// </summary>
+    public SequencerState? GetSequencerState()
+    {
+        var op = GetSequencerOp();
+        if (op == SequencerOp.None) return null;
+
+        var current = GetCurrentBranch();
+        switch (op)
+        {
+            case SequencerOp.Merge:
+                return new SequencerState(op,
+                    OursRef: "HEAD", TheirsRef: "MERGE_HEAD",
+                    OursLabel: current, TheirsLabel: GetMergingBranchName() ?? "incoming",
+                    Branch: current, Step: 0, Total: 0);
+
+            case SequencerOp.Rebase:
+            {
+                // rebase-merge is the interactive/merge backend, rebase-apply the am one;
+                // they spell the same three facts differently.
+                bool merge = Directory.Exists(GitPath("rebase-merge"));
+                string dir = merge ? "rebase-merge" : "rebase-apply";
+                var headName = ReadGitFile(dir, "head-name");
+                var branch = headName != null && headName.StartsWith("refs/heads/")
+                    ? headName["refs/heads/".Length..]
+                    : headName == "detached HEAD" ? null : headName;
+                var onto = ReadGitFile(dir, "onto");
+                int step = ParseCount(ReadGitFile(dir, merge ? "msgnum" : "next"));
+                int total = ParseCount(ReadGitFile(dir, merge ? "end" : "last"));
+
+                // The inversion that makes rebase conflicts confusing: git replays YOUR
+                // commit onto the other branch, so the other branch is the checked-out
+                // side ("ours") and your own commit arrives as "theirs".
+                var ontoLabel = onto != null ? DescribeRef(onto) : "the new base";
+                var replaying = File.Exists(GitPath("REBASE_HEAD")) ? "REBASE_HEAD" : null;
+                return new SequencerState(op,
+                    OursRef: onto ?? "HEAD", TheirsRef: replaying,
+                    OursLabel: ontoLabel,
+                    TheirsLabel: branch != null ? branch + " (being replayed)" : "the commit being replayed",
+                    Branch: branch, Step: step, Total: total);
+            }
+
+            case SequencerOp.CherryPick:
+                return new SequencerState(op,
+                    OursRef: "HEAD", TheirsRef: "CHERRY_PICK_HEAD",
+                    OursLabel: current, TheirsLabel: "the commit being picked",
+                    Branch: current, Step: 0, Total: 0);
+
+            default:
+                return new SequencerState(op,
+                    OursRef: "HEAD", TheirsRef: "REVERT_HEAD",
+                    OursLabel: current, TheirsLabel: "the commit being reverted",
+                    Branch: current, Step: 0, Total: 0);
+        }
+    }
+
+    /// <summary>Resumes the given operation once every conflict is staged. A merge finishes
+    /// with a plain commit (git only gained <c>merge --continue</c> in 2.12, and it is an
+    /// alias for exactly that); the other three have their own continue.</summary>
+    public GitResult SequencerContinue(SequencerOp op) => op switch
+    {
+        SequencerOp.Merge => MergeContinue(),
+        SequencerOp.Rebase => RunSequencer("rebase", "--continue"),
+        SequencerOp.CherryPick => RunSequencer("cherry-pick", "--continue"),
+        SequencerOp.Revert => RunSequencer("revert", "--continue"),
+        _ => new GitResult(1, "", "Nothing in progress."),
+    };
+
+    /// <summary>Throws the operation away and puts the working tree back.</summary>
+    public GitResult SequencerAbort(SequencerOp op) => op switch
+    {
+        SequencerOp.Merge => MergeAbort(),
+        SequencerOp.Rebase => RunSequencer("rebase", "--abort"),
+        SequencerOp.CherryPick => RunSequencer("cherry-pick", "--abort"),
+        SequencerOp.Revert => RunSequencer("revert", "--abort"),
+        _ => new GitResult(1, "", "Nothing in progress."),
+    };
+
+    /// <summary>Drops the commit that conflicted and carries on with the rest.</summary>
+    public GitResult SequencerSkip(SequencerOp op) => op switch
+    {
+        SequencerOp.Rebase => RunSequencer("rebase", "--skip"),
+        SequencerOp.CherryPick => RunSequencer("cherry-pick", "--skip"),
+        SequencerOp.Revert => RunSequencer("revert", "--skip"),
+        _ => new GitResult(1, "", "This operation has nothing to skip."),
+    };
+
+    /// <summary>
+    /// Runs a sequencer command with the editors stubbed out.
+    ///
+    /// <para><c>--continue</c> wants to open <c>$GIT_EDITOR</c> on the commit message it has
+    /// prepared. There is no terminal behind a desktop app, so git would either fail with
+    /// "terminal is dumb" or block forever on a stdin nobody is typing into; <c>true</c>
+    /// exits 0 without touching the file, which git reads as "accepted as prepared" — the
+    /// same thing <c>--no-edit</c> means on the merge path.</para>
+    /// </summary>
+    private GitResult RunSequencer(params string[] args)
+    {
+        var env = new Dictionary<string, string>
+        {
+            ["GIT_EDITOR"] = "true",
+            ["GIT_SEQUENCE_EDITOR"] = "true",
+        };
+        return GitProcess.RunWithEnv(Path, env, args);
+    }
+
+    /// <summary>A branch or tag pointing at the given rev, else its short hash — so the
+    /// side of a rebase conflict reads as "main" rather than as forty hex digits.</summary>
+    private string DescribeRef(string rev)
+    {
+        var named = GitProcess.Run(Path, "name-rev", "--name-only", "--refs=refs/heads/*",
+            "--refs=refs/remotes/*", "--refs=refs/tags/*", rev);
+        var name = named.Success ? named.Stdout.Trim() : "";
+        // name-rev answers "undefined" when nothing points near the commit, and
+        // "main~3" when something does but not exactly — the latter is still useful.
+        if (name.Length > 0 && name != "undefined") return name;
+        return rev.Length > 7 ? rev[..7] : rev;
+    }
+
+    private static int ParseCount(string? text) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0;
 
     // ── Cherry-pick ──
 
@@ -1524,7 +1792,7 @@ public class GitRepository
 
     public bool IsBisecting()
     {
-        return File.Exists(System.IO.Path.Combine(Path, ".git", "BISECT_START"));
+        return File.Exists(GitPath("BISECT_START"));
     }
 
     public GitResult BisectStart(string badRef, string goodRef)
