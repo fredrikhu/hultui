@@ -1,15 +1,28 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
-- **Middle-drag scrolling** — holding the middle button in any `ScrollViewElement` (and so any
-  `VirtualList`) pans the content like a hand tool: it follows the pointer one-to-one on
-  whichever axes still have somewhere to go. On by default (`MiddleDragScroll`), because in a
-  list the middle button otherwise does nothing at all; a view with nothing to scroll never
-  claims the press, so the button keeps whatever meaning the app gave it (Vesper closes tabs
-  with it). A pan that travels past the drag threshold swallows its own click, a press that
-  stays put still clicks, and the release is dispatched either way so nothing is left holding
-  a pressed `:active` style. The pan target is captured on press rather than re-hit-tested per
-  move, so a drag that leaves the list keeps moving the view it started in. 7 headless tests.
+- **Middle-click autoscroll** — holding the middle button in any `ScrollViewElement` (and so
+  any `VirtualList`) anchors an origin and turns the pointer's distance from it into a
+  *speed*, the way Windows does: the view keeps moving while the button is held even though
+  no further input arrives, faster the further out, and it stops when the pointer comes back
+  inside the dead zone or the button is released. A ring is drawn at the anchor so the zone
+  you have to return to is the circle you can see. On by default (`MiddleClickAutoScroll`),
+  because in a list the middle button otherwise does nothing at all; a view with nothing to
+  scroll never claims the press, so the button keeps whatever meaning the app gave it (Vesper
+  closes tabs with it). A gesture that scrolled swallows its own click, a press that never
+  left the dead zone still clicks, and the release is dispatched either way so nothing is
+  left holding a pressed `:active` style. The scroll runs from the frame loop rather than
+  from pointer moves — `NeedsRender` keeps frames coming while the button is down — and the
+  captured view is re-resolved if a rebuild reconciles it away. 11 headless tests.
+- **Date and time picker polish** — the calendar's labels are centred in their cells.
+  `IRenderContext.DrawText` lays lines out from the top of the rect it is given
+  (`TextAlign` is horizontal only), so every label in a cell taller than its own line sat
+  high in it by the leftover height. The time field also stopped borrowing the dropdown's
+  horizontal padding (`TimeFieldTheme.PaddingX`): a dropdown's padding sits beside a sentence
+  of arbitrary length, and around a fixed handful of digits it read as a field several
+  characters wider than it had content for. Its segments are now centred in the field too —
+  measure reserved padding either side that the render never applied, so the digits sat flush
+  against the left border with all the slack on the right.
 - **Date and time pickers** — `CalendarElement` (a month grid: header, weekday headings, six-by-seven days, drawn rather than composed — forty-two boxes rebuilt to move a hover highlight is forty-two allocations, and flex is the wrong tool for a grid of equal cells), `DatePickerElement` (a field that opens the calendar in an overlay and keeps focus itself, forwarding the arrows in, per the W3C combobox pattern), and `TimePickerElement` (a segmented HH:mm[:ss][ AM/PM] spinner: Left/Right pick a segment, Up/Down step it, digits type into it, the wheel nudges it, A/P set the half of the day). `Today` and `Culture` are properties rather than reads of the ambient clock and locale, so a rendered picker can be compared against a baseline that does not expire and does not depend on the developer's country. Themed by `CalendarTheme` and `TimeFieldTheme`; both fields borrow `DropdownTheme` for their box so a form does not end up with three differently-shaped controls in a row. Builders: `MonthCalendar` (not `Calendar` — `System.Globalization.Calendar` owns that name in exactly the files that format dates), `DatePicker`, `TimePicker`. 48 headless tests; `samples/HultUI.Samples.DateTime`.
 - **Repeating tweens** — `TweenBuilder.Repeat(n)` / `.Loop()` / `.Yoyo()`. The cycle and its phase are derived from elapsed time rather than accumulated per cycle, so a repeat holds its period: a restart that dropped the frame's overshoot would quantise every cycle up to a whole number of frames, and a spinner built that way visibly slows down and drifts. A finite repeat ends on its end value; a loop never renders the terminal frame at all. Junction's Fetch/Pull/Push buttons are the first consumer.
 - **Headless mode** (`HultUI.Headless`) — apps run with no window, GL context, or display. `IPlatformWindow`/`IWindowChrome`/`IWindowingPlatform` in `HultUI.Core.Platform` decouple `Window`/`Application` from SDL3 (which now implements them); `InputEvent` moved to `HultUI.Core.Events`. `SkiaRasterRenderSurface` renders into a CPU `SKSurface` reusing the same render/measure contexts as the GL path, with `Snapshot`/`ReadPixels`. `HeadlessSession` drives a manual frame pump on a virtual clock, so animations and tooltip delays advance deterministically; `PointerState` takes a `TimeProvider` so double-click timing does too. Input injects through the same funnel as real SDL events (`Click`/`TypeText`/`Drag`/`Wheel`/`PressKey`); queries run against fresh accessibility-tree snapshots (`GetByText`/`FindByRole`/`FindByAutomationId`), so a test can only find what assistive tech can. 42 tests, green on Windows and on a display-less Linux runner. Docs: `docs/HEADLESS.md`.

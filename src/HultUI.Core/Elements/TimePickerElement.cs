@@ -373,7 +373,10 @@ public class TimePickerElement : Element
     {
         int? best = null;
         float bestDistance = float.MaxValue;
-        float x = 0f;
+        // The same lead the render uses, so the segment under the pointer is the one that
+        // was drawn there. Nearest-segment would paper over a mismatch, which is exactly why
+        // it has to be derived from one place rather than assumed to be zero.
+        float x = PartsLeadX(Layout.AbsoluteContentBox.Width);
         foreach (var part in Parts())
         {
             float right = x + part.Width;
@@ -393,6 +396,18 @@ public class TimePickerElement : Element
     }
 
     // ── Layout of the parts ──────────────────────────────────────────────
+
+    /// <summary>
+    /// How far in from the content edge the first segment starts: the parts, centred in
+    /// whatever width the field ended up with.
+    ///
+    /// <para>Measure reserves <see cref="TimeFieldTheme.PaddingX"/> either side, and the
+    /// render used to start flush at the content edge — which spent all of it on the right
+    /// and left the digits visibly off-centre in their own box. Centring also keeps them put
+    /// when a layout stretches the field past its natural width.</para>
+    /// </summary>
+    private float PartsLeadX(float contentWidth) =>
+        Math.Max(0f, (contentWidth - Parts().Sum(p => p.Width)) / 2f);
 
     /// <summary>One drawn run of the field: a segment or a separator, its text, and how
     /// much room it takes. Widths are in character cells rather than measured text, so the
@@ -476,7 +491,7 @@ public class TimePickerElement : Element
         // belongs to no segment.
         float content = Parts().Sum(p => p.Width);
         return new Size(
-            _boxTheme.Padding.Left + content + _boxTheme.Padding.Right,
+            _theme.PaddingX * 2 + content,
             _boxTheme.Padding.Top + digit.Height + _boxTheme.Padding.Bottom);
     }
 
@@ -494,7 +509,7 @@ public class TimePickerElement : Element
             TextAlign = TextAlign.Center,
         };
 
-        float x = content.X;
+        float x = content.X + PartsLeadX(content.Width);
         float top = box.Y + _boxTheme.Padding.Top;
         float height = box.Height - _boxTheme.Padding.Top - _boxTheme.Padding.Bottom;
 

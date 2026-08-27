@@ -422,7 +422,7 @@ public class CalendarElement : Element
         var title = _displayMonth.ToString(MonthFormat, Culture);
         var titleRect = new Rect(left + _theme.CellWidth, top,
             Math.Max(0, gridWidth - 2 * _theme.CellWidth), _theme.HeaderHeight);
-        ctx.DrawText(title, titleRect, style with { TextAlign = TextAlign.Center },
+        ctx.DrawText(title, Centred(ctx, titleRect, style), style with { TextAlign = TextAlign.Center },
             TextOverflow.Ellipsis, 1);
 
         Arrow(PrevGlyph, left, _prevHot);
@@ -434,7 +434,7 @@ public class CalendarElement : Element
             if (hot)
                 ctx.DrawRoundedRect(rect, new CornerRadius(_theme.CellCornerRadius),
                     _theme.HoverBackground, Color.Transparent, default);
-            ctx.DrawText(glyph, rect,
+            ctx.DrawText(glyph, Centred(ctx, rect, style),
                 style with { TextColor = _theme.MutedTextColor, TextAlign = TextAlign.Center },
                 TextOverflow.Clip, 1);
         }
@@ -453,8 +453,26 @@ public class CalendarElement : Element
         {
             int day = ((int)FirstDayOfWeek + i) % 7;
             var rect = new Rect(left + i * _theme.CellWidth, top, _theme.CellWidth, _theme.WeekdayHeight);
-            ctx.DrawText(names[day], rect, style, TextOverflow.Clip, 1);
+            ctx.DrawText(names[day], Centred(ctx, rect, style), style, TextOverflow.Clip, 1);
         }
+    }
+
+    /// <summary>
+    /// The band inside <paramref name="cell"/> that holds one line of text, centred.
+    ///
+    /// <para><see cref="IRenderContext.DrawText"/> lays lines out from the top of the rect it
+    /// is given — <see cref="TextAlign"/> is horizontal only — so a label handed a whole cell
+    /// sits high in it by exactly the leftover height. Every label this calendar draws lives
+    /// in a cell taller than its own line, so every one of them goes through here.</para>
+    ///
+    /// <para>The height comes from the font rather than from the string: measuring the digits
+    /// would let a row of "1"s sit differently from a row with a "7" in it.</para>
+    /// </summary>
+    private static Rect Centred(IRenderContext ctx, Rect cell, ResolvedInheritedStyle style)
+    {
+        float lineHeight = ctx.MeasureText("0", style).Height;
+        if (lineHeight <= 0f || lineHeight >= cell.Height) return cell;
+        return new Rect(cell.X, cell.Y + (cell.Height - lineHeight) / 2f, cell.Width, lineHeight);
     }
 
     private void RenderDays(IRenderContext ctx, float left, float top)
@@ -492,7 +510,7 @@ public class CalendarElement : Element
                 : selected ? _theme.SelectedTextColor
                 : outside ? _theme.MutedTextColor
                 : _theme.TextColor;
-            ctx.DrawText(date.Day.ToString(CultureInfo.InvariantCulture), cell,
+            ctx.DrawText(date.Day.ToString(CultureInfo.InvariantCulture), Centred(ctx, cell, baseStyle),
                 baseStyle with { TextColor = color }, TextOverflow.Clip, 1);
         }
     }

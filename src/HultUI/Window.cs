@@ -24,12 +24,28 @@ public sealed class Window : IOverlayHost, IDisposable
     private Element? _root;
     private Element? _lastHoveredElement;
     private IScrollbarDraggable? _scrollbarDragTarget;
-    // Middle-button pan: the scroll view holding the pointer while the middle button is
-    // down. Captured on press rather than re-hit-tested per move, so a pan that leaves the
-    // list (or crosses a child that scrolls too) keeps moving the view it started in.
-    private ScrollViewElement? _panScrollTarget;
-    private Point _panLastPos;
-    private Point _panOrigin;
+    // Middle-button autoscroll, the way Windows does it: the press anchors an origin and
+    // the pointer's distance from it becomes a speed, so the view keeps moving while the
+    // button is held and nothing else has to happen. The view is captured on press rather
+    // than re-hit-tested per frame, so a pointer dragged out over another list (or off the
+    // window entirely) keeps scrolling the one the gesture started in.
+    private ScrollViewElement? _autoScrollTarget;
+    private Point _autoScrollOrigin;
+    private Point _autoScrollPointer;
+    private long _autoScrollLastMs;
+    // Set once the pointer has been outside the dead zone, so a gesture that actually
+    // scrolled swallows its click while a plain middle click keeps it.
+    private bool _autoScrollRan;
+
+    /// <summary>How far the pointer must leave the origin before anything moves. Also the
+    /// radius the anchor marker is drawn at, so the zone you have to come back into to stop
+    /// is the circle you can see.</summary>
+    private const float AutoScrollDeadZone = 14f;
+
+    /// <summary>Layout units per second of scroll, per unit of pointer displacement past the
+    /// dead zone. Linear rather than one of the accelerating curves: it is the one shape
+    /// where the distance you are holding the pointer at predicts the speed you get.</summary>
+    private const float AutoScrollGain = 9f;
     private TextInputElement? _textInputDragTarget;
     private TextAreaElement? _textAreaDragTarget;
     private TextElement? _textElementDragTarget;
@@ -482,6 +498,9 @@ public sealed class Window : IOverlayHost, IDisposable
         // A static overlay (a tooltip) costs nothing once painted.
         || AnyOverlayContentDirty()
         || _postFrameCallbacks.Count > 0
+        // An autoscroll moves the view with no input arriving at all, so it has to ask for
+        // the frames itself — otherwise holding the pointer still would stop the scroll.
+        || _autoScrollTarget is not null
         // Render once when an assistive tech attaches, so the accessibility tree
         // gets built even if the app is otherwise idle (the build runs in the
         // render pass). After that frame _a11yWasActive is set and this clears.
@@ -526,6 +545,10 @@ public sealed class Window : IOverlayHost, IDisposable
 
         _tracer.MarkFrame();
         using var _frameTrace = _tracer.Begin("Frame", "Frame");
+
+        // Before style and layout, so this frame paints where the autoscroll has reached
+        // rather than a frame behind it.
+        TickAutoScroll();
 
         // Safety net: run any rebuild that was deferred because it was requested during
         // a reconcile (e.g. MarkDirty from a BlurEvent when a focused element was
@@ -638,6 +661,9 @@ public sealed class Window : IOverlayHost, IDisposable
         // Drag ghost overlay
         if (_isDragging && !_isExternalDrag)
             RenderDragGhost(ctx);
+
+        if (_autoScrollTarget is not null)
+            RenderAutoScrollAnchor(ctx);
 
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
@@ -796,17 +822,13 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
-                // Middle-button pan owns the pointer while it is down. The target was captured
-                // on press, and a rebuild in between reconciles it away — writing a scroll
-                // offset on that corpse lands on state nothing consumes (and throws under
-                // strict lifetime checks). Re-hit-test for the live view under the pointer
-                // when that happens, so the pan carries on instead of dying silently.
-                if (_panScrollTarget is not null)
+                // Autoscroll owns the pointer while the middle button is down. A move only
+                // moves the aiming point — the scrolling itself is per frame, in
+                // TickAutoScroll, because the view has to keep moving while the pointer is
+                // held still.
+                if (_autoScrollTarget is not null)
                 {
-                    if (_panScrollTarget.IsDetached)
-                        _panScrollTarget = FindPanScrollAncestor(HitTester.HitTest(_root, pos));
-                    _panScrollTarget?.PanByPointer(pos.X - _panLastPos.X, pos.Y - _panLastPos.Y);
-                    _panLastPos = pos;
+                    _autoScrollPointer = pos;
                     break;
                 }
 
@@ -923,16 +945,18 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
-                // End a middle-button pan. A pan that travelled swallows its own click — the
-                // app never sees a middle click it did not mean to make — while a press that
-                // stayed put still clicks, so a middle click keeps whatever meaning the app
-                // gave it. The release itself is always dispatched either way, so nothing is
-                // left holding a pressed :active style.
-                bool panSuppressedClick = false;
-                if (!button.IsDown && button.Button == 1 && _panScrollTarget is not null)
+                // End the autoscroll. One that actually ran swallows its own click — the app
+                // never sees a middle click it did not mean to make — while a press that
+                // never left the dead zone still clicks, so a middle click keeps whatever
+                // meaning the app gave it. The release itself is always dispatched either
+                // way, so nothing is left holding a pressed :active style.
+                bool autoScrollSuppressedClick = false;
+                if (!button.IsDown && button.Button == 1 && _autoScrollTarget is not null)
                 {
-                    panSuppressedClick = Dist(pos, _panOrigin) >= DragThreshold;
-                    _panScrollTarget = null;
+                    autoScrollSuppressedClick = _autoScrollRan;
+                    _autoScrollTarget = null;
+                    _autoScrollRan = false;
+                    _root!.MarkPaintDirty();   // take the anchor marker off the screen
                     PlatformWindow.SetCursor(_lastHoveredElement?.ResolvedInherited.Cursor ?? CursorType.Default);
                 }
 
@@ -987,14 +1011,17 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (!isOverlayHit && button.Button == 0 && TryStartScrollbarDrag(target, pos))
                         break;
 
-                    // Middle button in anything that can scroll: pan it. Claimed before the
-                    // press is dispatched, but the press still goes out — a middle click that
-                    // never moves has to keep meaning whatever the app made it mean.
-                    if (button.Button == 1 && FindPanScrollAncestor(target) is { } pan)
+                    // Middle button in anything that can scroll: anchor an autoscroll here.
+                    // Claimed before the press is dispatched, but the press still goes out —
+                    // a middle click that never leaves the dead zone has to keep meaning
+                    // whatever the app made it mean.
+                    if (button.Button == 1 && FindAutoScrollAncestor(target) is { } scroller)
                     {
-                        _panScrollTarget = pan;
-                        _panLastPos = pos;
-                        _panOrigin = pos;
+                        _autoScrollTarget = scroller;
+                        _autoScrollOrigin = pos;
+                        _autoScrollPointer = pos;
+                        _autoScrollLastMs = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+                        _autoScrollRan = false;
                         PlatformWindow.SetCursor(CursorType.Move);
                     }
 
@@ -1081,9 +1108,9 @@ public sealed class Window : IOverlayHost, IDisposable
                 {
                     var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, effectiveBtnPos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(upEvt, target);
-                    if (clickEvt is not null && !panSuppressedClick)
+                    if (clickEvt is not null && !autoScrollSuppressedClick)
                         EventDispatcher.Dispatch(clickEvt, target);
-                    if (dblClickEvt is not null && !panSuppressedClick)
+                    if (dblClickEvt is not null && !autoScrollSuppressedClick)
                         EventDispatcher.Dispatch(dblClickEvt, target);
                 }
                 break;
@@ -1414,23 +1441,70 @@ public sealed class Window : IOverlayHost, IDisposable
         return null;
     }
 
-    /// <summary>Straight-line distance between two points, for the "did this press travel?"
-    /// questions the pointer pipeline asks.</summary>
-    private static float Dist(Point a, Point b)
-    {
-        float dx = a.X - b.X, dy = a.Y - b.Y;
-        return MathF.Sqrt(dx * dx + dy * dy);
-    }
-
     /// <summary>The nearest scroll view above <paramref name="target"/> that opts into
-    /// middle-drag panning and has somewhere left to scroll. Nested lists resolve inwards,
-    /// which is what a pointer inside the inner one means.</summary>
-    private static ScrollViewElement? FindPanScrollAncestor(Element? target)
+    /// middle-click autoscroll and has somewhere left to scroll. Nested lists resolve
+    /// inwards, which is what a pointer inside the inner one means.</summary>
+    private static ScrollViewElement? FindAutoScrollAncestor(Element? target)
     {
         for (var current = target; current is not null; current = current.Parent)
-            if (current is ScrollViewElement { MiddleDragScroll: true, CanPanScroll: true } sv)
+            if (current is ScrollViewElement { MiddleClickAutoScroll: true, CanAutoScroll: true } sv)
                 return sv;
         return null;
+    }
+
+    /// <summary>
+    /// One frame of autoscroll. The pointer's offset from the anchor is a speed, not a
+    /// distance, so the view keeps moving while the button is held even though no further
+    /// input arrives — which is the whole difference between this and dragging the content
+    /// around by hand.
+    /// </summary>
+    /// <remarks>The target was captured on press and a rebuild in between can reconcile it
+    /// away; writing a scroll offset on that corpse lands on state nothing consumes (and
+    /// throws under strict lifetime checks), so a detached one is re-resolved from the
+    /// pointer and the gesture carries on.</remarks>
+    private void TickAutoScroll()
+    {
+        if (_autoScrollTarget is null || _root is null) return;
+
+        if (_autoScrollTarget.IsDetached)
+        {
+            _autoScrollTarget = FindAutoScrollAncestor(HitTester.HitTest(_root, _autoScrollPointer));
+            if (_autoScrollTarget is null) return;
+        }
+
+        long now = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        float dt = Math.Clamp((now - _autoScrollLastMs) / 1000f, 0f, 0.25f);
+        _autoScrollLastMs = now;
+
+        float vx = Ramp(_autoScrollPointer.X - _autoScrollOrigin.X);
+        float vy = Ramp(_autoScrollPointer.Y - _autoScrollOrigin.Y);
+        if (vx == 0f && vy == 0f) return;   // back inside the dead zone: parked, not finished
+
+        _autoScrollRan = true;
+        _autoScrollTarget.ScrollBy(vx * dt, vy * dt);
+
+        // Speed in layout units per second from the pointer's displacement on one axis,
+        // measured past the dead zone so the first unit of movement outside it crawls
+        // rather than jumping.
+        static float Ramp(float displacement)
+        {
+            float magnitude = Math.Abs(displacement) - AutoScrollDeadZone;
+            return magnitude <= 0f ? 0f : Math.Sign(displacement) * magnitude * AutoScrollGain;
+        }
+    }
+
+    /// <summary>The anchor an autoscroll is measured from: a ring at the dead zone's radius,
+    /// so the circle you have to bring the pointer back into to stop is the one on screen.
+    /// Drawn by the window rather than by the list, because it belongs to the gesture.</summary>
+    private void RenderAutoScrollAnchor(IRenderContext ctx)
+    {
+        var theme = Application.Theme;
+        float r = AutoScrollDeadZone;
+        var box = new Rect(_autoScrollOrigin.X - r, _autoScrollOrigin.Y - r, r * 2, r * 2);
+        ctx.DrawRoundedRect(box, new CornerRadius(r), theme.Surface, theme.Border, new Thickness(1f));
+        ctx.DrawRoundedRect(
+            new Rect(_autoScrollOrigin.X - 2f, _autoScrollOrigin.Y - 2f, 4f, 4f),
+            new CornerRadius(2f), theme.TextColor, Color.Transparent, default);
     }
 
     /// <summary>

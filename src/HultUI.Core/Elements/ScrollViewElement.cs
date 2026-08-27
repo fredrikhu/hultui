@@ -54,15 +54,17 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
     public bool ShowScrollbarY { get; set; } = true;
 
     /// <summary>
-    /// Middle-button drag pans the content, the way a hand tool does: the content follows
-    /// the pointer one-to-one on whichever axes can still move. On by default, because in a
-    /// list the middle button otherwise does nothing at all — set it false where the middle
-    /// button already means something (a tab strip that closes tabs with it, say).
+    /// Windows-style autoscroll: holding the middle button anchors an origin, and moving the
+    /// pointer away from it scrolls continuously in that direction — faster the further out,
+    /// stopping when the pointer comes back inside the dead zone or the button is released.
+    /// On by default, because in a list the middle button otherwise does nothing at all — set
+    /// it false where the middle button already means something (a tab strip that closes tabs
+    /// with it, say).
     ///
-    /// <para>A pan is only claimed when this view can actually scroll, so a middle press in
-    /// a short list falls through to the app's own handlers untouched.</para>
+    /// <para>Autoscroll is only claimed when this view can actually scroll, so a middle press
+    /// in a short list falls through to the app's own handlers untouched.</para>
     /// </summary>
-    public bool MiddleDragScroll { get; set; } = true;
+    public bool MiddleClickAutoScroll { get; set; } = true;
 
     public Color ScrollbarColor { get; set; } = new(128, 128, 128, 100);
     public Color ScrollbarThumbColor { get; set; } = new(128, 128, 128, 180);
@@ -126,11 +128,11 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         return Math.Clamp(value, 0, maxScroll);
     }
 
-    // ──── Middle-button pan ────
+    // ──── Autoscroll ────
 
     /// <summary>Whether either axis has anywhere left to go — what decides if a middle
-    /// press is a pan or just a middle press.</summary>
-    public bool CanPanScroll
+    /// press starts an autoscroll or is just a middle press.</summary>
+    public bool CanAutoScroll
     {
         get
         {
@@ -139,17 +141,15 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         }
     }
 
-    /// <summary>
-    /// Moves the content by a pointer delta — the pointer's movement, not the scroll's, so
-    /// the sign is inverted: dragging down brings the content down with the hand.
-    /// </summary>
-    /// <returns>True when something actually moved, so a caller can tell a pan from a
-    /// press that never left the spot.</returns>
-    public bool PanByPointer(float dx, float dy)
+    /// <summary>Moves the view by a scroll delta — positive is further down and further
+    /// right through the content, the same sense as <see cref="ScrollOffsetY"/>.</summary>
+    /// <returns>True when something actually moved, so a caller can tell a scroll that ran
+    /// from one already pinned against its end.</returns>
+    public bool ScrollBy(float dx, float dy)
     {
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
-        ScrollOffsetX = beforeX - dx;
-        ScrollOffsetY = beforeY - dy;
+        ScrollOffsetX = beforeX + dx;
+        ScrollOffsetY = beforeY + dy;
         return _scrollOffsetX != beforeX || _scrollOffsetY != beforeY;
     }
 
@@ -260,7 +260,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
         if (source is ScrollViewElement sv)
         {
             ScrollSpeed = sv.ScrollSpeed;
-            MiddleDragScroll = sv.MiddleDragScroll;
+            MiddleClickAutoScroll = sv.MiddleClickAutoScroll;
             ShowScrollbarX = sv.ShowScrollbarX;
             ShowScrollbarY = sv.ShowScrollbarY;
             ScrollbarColor = sv.ScrollbarColor;
