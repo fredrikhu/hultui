@@ -275,7 +275,14 @@ public partial class JunctionApp
     /// one-line clip nor the panning cell.</summary>
     private Element DiffCodeCell(TextElement label)
     {
-        if (_diffWrap) return label.FlexGrow(1);
+        // Wrapped, the cell takes what the fixed columns leave and nothing more. A zero basis
+        // is what says so: with the default `auto` the item is sized to its own content first,
+        // and the content width of a line holding one unbreakable token is that token — a
+        // minified bundle, a base64 blob, a long hash. The label then grew to a thousand
+        // pixels inside a three-hundred-pixel column, wrapped its text at the width it had
+        // taken rather than the one on screen, and let the pane clip the overflow. The row
+        // was the right height for the wrap nobody could see.
+        if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0));
         return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
     }
     private (bool Wrap, bool Split, float Width, int Rows) _diffHeightShape = (false, false, -1f, -1);

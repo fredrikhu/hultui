@@ -80,6 +80,13 @@ and benchmark work.
 - **Snapshot baselines in raw string literals carry the source file's line endings**
   (CRLF on Windows, LF on Linux under autocrlf), so a baseline can pass one CI leg and
   fail the other. Normalise with `ReplaceLineEndings("\n")`.
+- **`FlexGrow(1)` alone does not mean "take the leftover space".** The default `auto` basis
+  sizes the item to its own content first and grows from there, so an item whose content is
+  wide — a text line holding one unbreakable token, a base64 blob or a long hash — takes that
+  width and overflows its row. `FlexBasis(Px(0))` is what says "start from nothing and take
+  what is left"; the app already uses it where a column must not be pushed out. Wrapped text
+  makes it look like a wrapping bug, but the text had wrapped correctly at the width the
+  label had wrongly taken.
 - **Measure text at the width the label actually gets, padding included.** A wrapped row's
   height comes from measuring its line at the code column's width; the label's own horizontal
   padding is part of that column and not room the text can use. Junction subtracted the

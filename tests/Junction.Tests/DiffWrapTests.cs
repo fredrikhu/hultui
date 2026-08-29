@@ -344,6 +344,71 @@ public class DiffWrapTests
         });
     }
 
+    /// <summary>
+    /// A line whose content is one unbreakable token stays inside its column.
+    /// <para>
+    /// The text engine breaks such a token by character, so this was never about wrapping.
+    /// The code cell grew instead: <c>FlexGrow(1)</c> with the default <c>auto</c> basis
+    /// sizes an item to its own content first, and the content width of a line holding one
+    /// token is that token — a minified bundle, a base64 blob, a long hash. The label took a
+    /// thousand pixels inside a three-hundred-pixel column, wrapped its text at the width it
+    /// had taken rather than the one on screen, and the pane clipped the rest. Wrapping turns
+    /// panning off, so nothing could bring it back into view.
+    /// </para>
+    /// <para>The row was the right height throughout — the heights are measured at the column
+    /// width, which was never wrong. Only the label's box was, which is why this asks about
+    /// the box and about how wide the lines came out.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(1400)]
+    [InlineData(1100)]
+    public void ALineOfOneUnbreakableTokenStaysInsideItsColumn(int windowWidth)
+    {
+        // One token far wider than any column this window can offer, plus an ordinary line
+        // so the assertions below have something correct to sit beside.
+        var content = "    // a token that cannot break: " + new string('x', 160) + " end\n"
+            + "    " + new string('x', 160) + "\n"
+            + "    // ordinary code that wraps at spaces the way real source does, at length";
+
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Press(session, app, KeyCode.W);
+            session.PumpFrames(3);
+            session.Window.SetClientSize(windowWidth, 900);
+            session.PumpFrames(6);
+
+            var list = Body(app);
+            int checkedRows = 0;
+            foreach (var label in CodeLabels(session))
+            {
+                var row = RowOf(label, list);
+                if (row is null) continue;
+                var labelBox = label.Layout.AbsoluteContentBox;
+                var rowBox = row.Layout.AbsoluteBorderBox;
+                if (labelBox.Width <= 0) continue;
+                checkedRows++;
+
+                Assert.True(labelBox.X + labelBox.Width <= rowBox.X + rowBox.Width + 0.5f,
+                    $"the code cell is {labelBox.Width:0}px wide and runs "
+                    + $"{labelBox.X + labelBox.Width - rowBox.X - rowBox.Width:0}px past its row");
+
+                foreach (float lineWidth in LineWidths(label))
+                    Assert.True(lineWidth <= labelBox.Width + 0.5f,
+                        $"a {lineWidth:0}px line sits in a {labelBox.Width:0}px cell");
+            }
+            Assert.True(checkedRows > 1, $"only {checkedRows} rows were checked — this proves nothing");
+        }, content);
+    }
+
+    /// <summary>Each line's laid-out width, from the label's own line boxes.</summary>
+    private static IEnumerable<float> LineWidths(TextElement label)
+    {
+        var lines = (HultUI.Core.Rendering.TextLineBox[])
+            typeof(TextElement).GetField("_lines", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(label)!;
+        foreach (var line in lines) yield return line.Width;
+    }
+
     private static void Press(HeadlessSession session, JunctionApp app, KeyCode key)
     {
         var body = Field<HultUI.Core.Reactivity.Ref<Element>>(app, "_diffBodyRef").Current
