@@ -260,6 +260,57 @@ public class MiddleClickAutoScrollTests
         finally { app?.Dispose(); }
     }
 
+    /// <summary>
+    /// Scrolling a <i>wrapped</i> diff leaves every row still holding its own text.
+    /// <para>The two features meet here and nowhere else. Wrapped, each row is a different
+    /// height, measured in the build and handed to the virtualized list; the autoscroll then
+    /// walks the file continuously, realizing rows the whole way. Every wrapping fault this
+    /// month came down to a row measured at one width and laid out at another, and a gesture
+    /// that scrolls through hundreds of rows is the thing most likely to find the next one —
+    /// the static sweeps only ever looked at what happened to be on screen at rest.</para>
+    /// </summary>
+    [Fact]
+    public void ScrollingAWrappedDiffKeepsEveryRowHoldingItsOwnText()
+    {
+        WithTallDiff((session, app) =>
+        {
+            var list = Body(app);
+            Assert.True(list.CanAutoScroll, "the fixture's diff has nothing to scroll");
+
+            var box = list.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 90f);   // well out, so it covers ground
+
+            int checkedRows = 0;
+            for (int step = 0; step < 40; step++)
+            {
+                PumpFor(session, 0.05);
+                foreach (var row in Body(app).Children)
+                {
+                    var label = LayoutProbe.Descendants<TextElement>(row,
+                        t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
+                    if (label is null) continue;
+                    // The label's own line boxes, not its laid-out box: the row forces its
+                    // height on the label, so the box reads back as the row's either way.
+                    float drawn = LayoutProbe.DrawnText(label).Height;
+                    if (drawn <= 0) continue;
+                    checkedRows++;
+                    float rowHeight = row.Layout.AbsoluteBorderBox.Height;
+                    Assert.True(drawn <= rowHeight + 0.5f,
+                        $"while autoscrolling a wrapped diff, {drawn:0}px of text sat in a "
+                        + $"{rowHeight:0}px row at offset {Body(app).ScrollOffsetY:0}");
+                }
+            }
+
+            Assert.True(Body(app).ScrollOffsetY > 0, "the wrapped diff never scrolled");
+            Assert.True(checkedRows > 50, $"only {checkedRows} row observations — this proves nothing");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 90f, MouseButton.Middle);
+        }, wrap: true);
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     /// <summary>Clicks the fixture's one changed line — the trailing <c>EDIT</c> — with the
@@ -311,16 +362,27 @@ public class MiddleClickAutoScrollTests
     /// <remarks>Its own repository rather than the shared diff fixture: that one's working
     /// copy differs by a single line, so its diff is four rows tall with nothing to scroll —
     /// the gesture correctly does nothing there, which reads as a failure and is not one.</remarks>
-    private static void WithTallDiff(System.Action<HeadlessSession, JunctionApp> body)
+    private static void WithTallDiff(System.Action<HeadlessSession, JunctionApp> body,
+        bool wrap = false)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
-        const string Wide = "        a line long enough that no plausible pane width contains it, "
-            + "and then a good deal more besides so the sideways pan has somewhere to go";
+        // Every length between 45 and 200 characters, cycling. Uniform lines are no good for
+        // the wrapped case: a measurement a few pixels too generous only shows on a line whose
+        // length sits on the wrap boundary, and with every line the same length the whole file
+        // misses it together — the first draft of this fixture did exactly that and its wrapped
+        // test was green against the padding fault. They stay wide enough for the sideways pan.
+        var words = "a line long enough that no plausible pane width contains all of it and then some".Split(' ');
+        string LineOf(int length)
+        {
+            var sb = new System.Text.StringBuilder("        ");
+            for (int w = 0; sb.Length < length; w++) sb.Append(words[w % words.Length]).Append(' ');
+            return sb.ToString(0, length).TrimEnd();
+        }
         repo.Write("wide.txt", "first\n");
         repo.Git("add", "-A");
         repo.Git("commit", "-m", "a starting point");
         repo.Write("wide.txt", "first\n" + string.Join("\n",
-            Enumerable.Range(0, 300).Select(i => Wide + " " + i)) + "\n");
+            Enumerable.Range(0, 300).Select(i => LineOf(45 + i * 7 % 156))) + "\n");
 
         using var session = HeadlessSession.Create(1400, 900);
         JunctionApp? app = null;
@@ -332,6 +394,7 @@ public class MiddleClickAutoScrollTests
                 ActiveRepoPath = repo.Path,
                 Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
                 ActiveWorkspaceId = "w1",
+                DiffWrap = wrap,
             });
             session.Application.SetRoot(app.Mount());
             session.PumpFrames(3);
