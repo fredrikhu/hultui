@@ -1467,7 +1467,11 @@ public sealed class Window : IOverlayHost, IDisposable
         // view sat at the top.
         if (_autoScrollTarget.IsDetached || !IsAttachedToRoot(_autoScrollTarget))
         {
-            var live = FindAutoScrollAncestor(HitTester.HitTest(_root, _autoScrollPointer));
+            // Overlays first, the same order the press used to find the target. A dropdown's
+            // popup list is a real overlay: hit-testing only the main tree would re-resolve to
+            // whatever sits *underneath* it and scroll that instead.
+            var (overlay, _) = HitTestOverlays(_autoScrollPointer);
+            var live = FindAutoScrollAncestor(overlay ?? HitTester.HitTest(_root, _autoScrollPointer));
             // Nothing yet: the replacement is built but this tick runs before layout, so on
             // its first frame it has no content size and cannot say whether it scrolls. Keep
             // the old reference and ask again next frame rather than giving up — dropping it

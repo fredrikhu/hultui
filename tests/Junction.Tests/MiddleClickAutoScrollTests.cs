@@ -164,6 +164,102 @@ public class MiddleClickAutoScrollTests
     }
 
 
+    /// <summary>
+    /// Every view with a list of its own scrolls under the gesture.
+    /// <para>The diff is the surface the rest of this file is about, and it is not the only
+    /// one: History, Branches and Tags each carry their own virtualized list, and the Changes
+    /// view has a file list beside its diff. They are all the framework's scroll views, so
+    /// this is really asking whether each view <i>has</i> one on screen with somewhere to go
+    /// — which is the part a redesign can quietly change.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(KeyCode.Digit2, "History")]
+    [InlineData(KeyCode.Digit4, "Changes")]
+    [InlineData(KeyCode.Digit5, "Branches")]
+    [InlineData(KeyCode.Digit6, "Tags")]
+    public void EveryViewWithAListScrollsUnderTheGesture(KeyCode view, string name)
+    {
+        WithBusyRepo(view, (session, app) =>
+        {
+            var list = LargestScrollable(session)
+                ?? throw new Xunit.Sdk.XunitException($"{name}: nothing on screen can scroll");
+
+            var box = list.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+            float before = list.ScrollOffsetY;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.5);
+
+            var after = LargestScrollable(session)!;
+            Assert.True(after.ScrollOffsetY > before,
+                $"{name}: the list did not scroll under a held middle button");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
+    /// <summary>The scrollable view with the most content — the view's own list rather than
+    /// the sidebar, which also scrolls and is never what the pointer is over here.</summary>
+    private static ScrollViewElement? LargestScrollable(HeadlessSession session)
+    {
+        ScrollViewElement? best = null;
+        Walk(Root(session));
+        return best;
+
+        void Walk(Element? e)
+        {
+            if (e is null) return;
+            if (e is ScrollViewElement { CanAutoScroll: true } sv
+                && (best is null || sv.ContentHeight > best.ContentHeight))
+                best = sv;
+            foreach (var c in e.Children) Walk(c);
+        }
+    }
+
+    private static Element? Root(HeadlessSession session) =>
+        (Element?)typeof(HultUI.Window)
+            .GetField("_root", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(session.Window.Window);
+
+    /// <summary>A repository with enough commits, branches and tags that every view has a list
+    /// worth scrolling, opened on <paramref name="view"/>.</summary>
+    private static void WithBusyRepo(KeyCode view, System.Action<HeadlessSession, JunctionApp> body)
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        for (int i = 0; i < 60; i++)
+        {
+            repo.Write($"file-{i:00}.txt", $"content {i}\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", $"commit number {i}");
+            if (i % 2 == 0) repo.Git("branch", $"topic/branch-{i:00}");
+            if (i % 2 == 0) repo.Git("tag", $"v0.0.{i}");
+        }
+        // Something uncommitted, so the Changes view has a list of its own.
+        for (int i = 0; i < 40; i++) repo.Write($"pending-{i:00}.txt", "x\n");
+
+        using var session = HeadlessSession.Create(1400, 900);
+        JunctionApp? app = null;
+        try
+        {
+            app = new JunctionApp(session.Application, session.Window.Window, new JunctionSettingsData
+            {
+                RepositoryPaths = [repo.Path],
+                ActiveRepoPath = repo.Path,
+                Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
+                ActiveWorkspaceId = "w1",
+            });
+            session.Application.SetRoot(app.Mount());
+            session.PumpFrames(3);
+            session.Window.PressKey(view);
+            session.PumpUntil(() => LargestScrollable(session) is not null, System.TimeSpan.FromSeconds(30));
+            session.PumpFrames(6);
+            body(session, app);
+        }
+        finally { app?.Dispose(); }
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     /// <summary>Clicks the fixture's one changed line — the trailing <c>EDIT</c> — with the
