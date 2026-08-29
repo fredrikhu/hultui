@@ -80,6 +80,15 @@ and benchmark work.
 - **Snapshot baselines in raw string literals carry the source file's line endings**
   (CRLF on Windows, LF on Linux under autocrlf), so a baseline can pass one CI leg and
   fail the other. Normalise with `ReplaceLineEndings("\n")`.
+- **Measure text at the width the label actually gets, padding included.** A wrapped row's
+  height comes from measuring its line at the code column's width; the label's own horizontal
+  padding is part of that column and not room the text can use. Junction subtracted the
+  number/sign columns and not the label's 14px, so every line was wrapped 14px too wide and
+  any line that band was the difference for came out a visual line short and drew over the row
+  below. It reads as an intermittent fault — it only shows when a line's length lands in the
+  band. Measuring *narrower* than the truth is the safe direction: a row a line too tall is a
+  small gap, a row a line too short is overlapping text. The row builder and the measurement
+  must share named constants, since this is exactly what drifts.
 - **A resize relayouts but does not rebuild.** An app that skips the rebuild on an ordinary
   resize (Junction does, to keep a drag off the build path) is fine for every fixed-height
   row and wrong for any height *derived from the width* in the build — a wrapped diff row,

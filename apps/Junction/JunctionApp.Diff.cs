@@ -450,10 +450,23 @@ public partial class JunctionApp
     // with, rather than reconstructing the column model a second time and drifting from it.
     private float _diffFixedCols;
 
-    /// <summary>One code column's width inside a body of <paramref name="body"/> pixels —
-    /// what the fixed columns leave over, halved in split mode.</summary>
-    private float CodeWidthFor(float body) =>
-        Math.Max(0, _diffSplit ? (body - _diffFixedCols) / 2 : body - _diffFixedCols);
+    // The horizontal padding a code label carries, and the hairline between the two halves
+    // in split mode. Named rather than written twice, because the row builder and the height
+    // measurement have to agree about them exactly: text measured at a width the label never
+    // has wraps into fewer lines than it draws into, and the row is then a line too short and
+    // the overflow lands on the row below. That is a `sometimes`, not an always — it only
+    // shows when those few pixels are what a line needed to fit.
+    private const float UnifiedCodePadX = 14f;
+    private const float SplitCodePadX = 10f;
+    private const float SplitDividerWidth = 1f;
+
+    /// <summary>The width text actually wraps into in one code column of a body
+    /// <paramref name="body"/> pixels wide — what the fixed columns leave over, halved in
+    /// split mode, less the label's own padding, which is part of the column and not room
+    /// the text can use.</summary>
+    private float CodeWidthFor(float body) => _diffSplit
+        ? Math.Max(0, (body - _diffFixedCols - SplitDividerWidth) / 2 - SplitCodePadX)
+        : Math.Max(0, body - _diffFixedCols - UnifiedCodePadX);
 
     // The shape the width settle is armed for. Changing it forgets the width below, so a
     // new file or a switch to split gets its own corrective rebuild.
@@ -815,7 +828,7 @@ public partial class JunctionApp
             Ui.Mono(line.Content.Length == 0 ? " " : line.Content, DiffCodeSize, code)
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(spans)
-                .Padding(new Thickness(2, 14, 2, 0))));
+                .Padding(new Thickness(2, UnifiedCodePadX, 2, 0))));
 
         if (selectable)
         {
@@ -879,7 +892,7 @@ public partial class JunctionApp
             Ui.Mono(text, DiffCodeSize, code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(spans)
-                .Padding(new Thickness(2, 10, 2, 0))));
+                .Padding(new Thickness(2, SplitCodePadX, 2, 0))));
         return half;
     }
 

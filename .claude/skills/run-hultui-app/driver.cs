@@ -139,8 +139,20 @@ void Run(string step)
         case "click": Click(arg); break;
         case "drag": Drag(arg); break;
         case "waitfor": WaitFor(arg); break;
+        case "size": Resize(arg); break;
         default: throw new ArgumentException($"unknown step '{step}'");
     }
+}
+
+// Resizes the client area mid-run, so a frame can be compared against the same tree at
+// another width. Worth having as a step rather than as a second --size run: the bugs this
+// finds are the ones where a relayout uses something measured at the old width, and a fresh
+// process at the new width measures everything correctly and shows nothing.
+void Resize(string arg)
+{
+    var (w, h) = Split(arg, 'x');
+    session.Window.SetClientSize(int.Parse(w), int.Parse(h));
+    Settle(600);
 }
 
 void Shot(string name)

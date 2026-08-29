@@ -298,6 +298,52 @@ public class DiffWrapTests
 
 
 
+    /// <summary>
+    /// The rows are never measured at a width wider than the text actually gets.
+    /// <para>
+    /// This is the invariant behind the intermittent overlap, and it is one-sided. The code
+    /// label carries its own horizontal padding and the measurement did not subtract it, so
+    /// every line was wrapped at a width 14px wider than the label ever has. Any line whose
+    /// length landed in that band came out one visual line short and drew over the row below
+    /// — which is why it looked like it only happened sometimes, and only at some widths.
+    /// </para>
+    /// <para>
+    /// Measuring a little <i>narrower</i> is not the same fault: it predicts a line break
+    /// that does not happen, so the row is a line too tall and the extra shows as a small
+    /// gap. Nothing is clipped and nothing overlaps. So this asserts the direction plus a
+    /// sanity bound, rather than exact equality — a few pixels of layout slack between the
+    /// body and the row is not worth pinning, and pinning it would make the test fail on any
+    /// harmless change to the column model.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(1400)]
+    [InlineData(1120)]
+    [InlineData(1000)]
+    public void RowsAreNeverMeasuredWiderThanTheirTextActuallyGets(int windowWidth)
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Press(session, app, KeyCode.W);
+            session.PumpFrames(3);
+            session.Window.SetClientSize(windowWidth, 900);
+            session.PumpFrames(6);
+
+            var label = CodeLabels(session).FirstOrDefault(l => RowOf(l, Body(app)) is not null)
+                ?? throw new Xunit.Sdk.XunitException("no code label on screen");
+            float actual = label.Layout.AbsoluteContentBox.Width;
+            var shape = Field<(bool Wrap, bool Split, float Width, int Rows)>(app, "_diffHeightShape");
+
+            Assert.True(shape.Width <= actual + 0.5f,
+                $"rows were measured at {shape.Width:0.0}px but the text only gets {actual:0.0}px "
+                + "— every line that band is the difference for will draw outside its row");
+            // Not so narrow that the rows are wastefully tall: a whole missing column would
+            // pass the check above and is just as wrong.
+            Assert.True(shape.Width >= actual - 8f,
+                $"rows were measured at {shape.Width:0.0}px against {actual:0.0}px of text — too conservative");
+        });
+    }
+
     private static void Press(HeadlessSession session, JunctionApp app, KeyCode key)
     {
         var body = Field<HultUI.Core.Reactivity.Ref<Element>>(app, "_diffBodyRef").Current

@@ -66,6 +66,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `drag:<x1>,<y1>,<x2>,<y2>` or `drag:@<text>,<dx>[,<dy>]` | Press, move, release as separate events. |
 | `waitfor:<text>[,<seconds>]` | Pumps until an element with that name appears. Default 30s. |
 | `settle[:<ms>]` | Pumps frames for that long. Default 1200ms. |
+| `size:<w>x<h>` | Resizes the client area mid-run, then settles. |
 
 Two more that were run while writing this:
 
@@ -123,6 +124,10 @@ it opens and rewrites the user's real settings.
   restores the panes from its saved session, so it shows wherever it was last left. The
   driver calls the private `NavigateTo` for both panes after mounting, which is what the
   Vesper tests do too.
+- **Resize with `size:`, not with a second run.** A fresh process at the new width measures
+  everything correctly and shows nothing; the bugs worth finding are the ones where a
+  relayout reuses something measured at the old width. Junction's wrapped diff drew every
+  row over its neighbour that way, and only a resize *within* one session reproduced it.
 - **`settle` pumps frames; it does not sleep.** Work lands on the UI thread when the session
   pumps, so a wall-clock wait with no pumping finishes with the loaders exactly where they
   were.
