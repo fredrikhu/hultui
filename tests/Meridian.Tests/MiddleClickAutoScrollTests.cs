@@ -91,6 +91,41 @@ public class MiddleClickAutoScrollTests : IDisposable
         });
     }
 
+
+    /// <summary>
+    /// The gesture survives the view rebuilding under it.
+    /// <para>Meridian's rebuild <i>patches</i> its lists rather than replacing them, so the
+    /// captured target stays the right object and the failure that bit Junction and Vesper —
+    /// a replaced element dropped from the tree without being marked detached — cannot happen
+    /// here. Asserted rather than assumed: if this view ever starts replacing instead, the
+    /// gesture has to keep working, and this is what would notice.</para>
+    /// </summary>
+    [Fact]
+    public void ItKeepsScrollingAcrossARebuild()
+    {
+        Hosted((session, app) =>
+        {
+            var box = Scrollable(session).Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.2);
+            float early = Scrollable(session).ScrollOffsetY;
+            Assert.True(early > 0, "it never started scrolling");
+
+            typeof(MeridianApp).GetMethod("MarkDirty", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, null);
+            PumpFor(session, 0.4);
+
+            Assert.True(Scrollable(session).ScrollOffsetY > early,
+                $"the scroll stopped at {Scrollable(session).ScrollOffsetY:0} after the rebuild "
+                + $"(it was {early:0} before) — the gesture lost its target");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     /// <summary>Pumps <paramref name="seconds"/> of virtual time. PumpFrame advances the clock

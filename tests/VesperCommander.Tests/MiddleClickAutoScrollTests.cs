@@ -101,6 +101,43 @@ public class MiddleClickAutoScrollTests
         });
     }
 
+
+    /// <summary>
+    /// The gesture survives the pane rebuilding under it, keeping its place.
+    /// <para>A rebuild here <i>replaces</i> the list rather than patching it, and a replaced
+    /// element is dropped from the tree without being marked detached — so it goes on looking
+    /// alive. The window used to keep scrolling that corpse while the pane sat still. The
+    /// earlier tests in this file only passed because no rebuild happened to land inside their
+    /// short gestures; this one forces it.</para>
+    /// </summary>
+    [Fact]
+    public void ItKeepsScrollingAcrossARebuildThatReplacesTheList()
+    {
+        Hosted(fileCount: 400, (session, app, root) =>
+        {
+            var box = FileList(session).Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.2);
+            float early = FileList(session).ScrollOffsetY;
+            Assert.True(early > 0, "it never started scrolling");
+
+            var before = FileList(session);
+            Invoke(app, "MarkDirty");
+            PumpFor(session, 0.4);
+            Assert.False(ReferenceEquals(before, FileList(session)),
+                "the rebuild patched the list — this no longer covers the replacement path");
+
+            Assert.True(FileList(session).ScrollOffsetY > early,
+                $"the scroll stopped at {FileList(session).ScrollOffsetY:0} after the rebuild "
+                + $"(it was {early:0} before) — the gesture lost its target");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
 
     /// <summary>Pumps <paramref name="seconds"/> of virtual time. PumpFrame advances the clock
