@@ -97,11 +97,19 @@ and benchmark work.
   small gap, a row a line too short is overlapping text. The row builder and the measurement
   must share named constants, since this is exactly what drifts.
 - **A resize relayouts but does not rebuild.** An app that skips the rebuild on an ordinary
-  resize (Junction does, to keep a drag off the build path) is fine for every fixed-height
+  resize (both apps do, to keep a drag off the build path) is fine for every fixed-height
   row and wrong for any height *derived from the width* in the build — a wrapped diff row,
   say. Layout then stacks rows at the new width using heights measured at the old one, and
   the overflow draws over the row below. It only showed on a window resize: dragging the
-  pane's own splitter is app state and rebuilds anyway.
+  pane's own splitter is app state and rebuilds anyway. Junction's diff and Vesper's diff
+  *and* viewer all had it; Vesper's auto grid tracks did not save it, because the virtualized
+  body forces the measured height regardless of what the track would have grown to.
+- **Correcting a width takes two halves, and each is useless alone.** The column width is
+  read from a laid-out box, so a build started before layout sees the width from a frame ago
+  — one rebuild on resize measures at the *old* width and fixes nothing. The post-frame
+  settle that re-reads the width is what corrects it. But that settle is registered from a
+  build, so with no rebuild on resize it is never scheduled and never runs. Disable either
+  half and the fault comes back; both were verified that way in Vesper.
 - **A row grows to fit its text; the list still stacks it at the height it was given.** So
   "is this row tall enough" has to be asked of the label's own line boxes, not of its
   laid-out box — the box reads back as the row's either way, and a check against it passes

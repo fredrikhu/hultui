@@ -595,6 +595,78 @@ public class DiffViewTests
             "a broken line is still wider than the cell");
     }
 
+    /// <summary>
+    /// Narrowing the window re-measures the wrapped rows.
+    /// <para>
+    /// A wrapped row's height is a function of the width, and the rows are virtualized — the
+    /// list stacks them from heights measured in the build. An ordinary resize does not
+    /// rebuild here (only a scale change does), so the risk is that layout runs at the new
+    /// width against heights measured at the old one and every line that gained a visual line
+    /// lands on the row beneath it. That is exactly what Junction's diff did.
+    /// </para>
+    /// <para>Asked after the resize in both directions, because narrowing and widening fail
+    /// differently: narrowing overlaps, widening leaves gaps.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(900)]
+    [InlineData(1600)]
+    public void ResizingTheWindowReMeasuresTheWrappedRows(int width)
+    {
+        using var t = new Fixture();
+        // Lines long enough that a few hundred pixels changes how many rows they take.
+        var wide = string.Join(" ", System.Linq.Enumerable.Repeat("wrap me around the column", 20));
+        t.WriteLeft("a.txt", "one\n" + wide + "\n" + wide + "\nthree\n");
+        t.WriteRight("a.txt", "ONE\n" + wide + "\n" + wide + "\nTHREE\n");
+        t.Open(wrap: true);
+        t.OpenDiffOn("a.txt");
+
+        t.Session.Window.SetClientSize(width, 820);
+        t.Session.PumpFrames(6);
+
+        var rows = t.BodyRows();
+        Assert.True(rows.Count > 2, $"only {rows.Count} rows — this proves nothing");
+        for (int i = 1; i < rows.Count; i++)
+        {
+            var prev = rows[i - 1].Layout.AbsoluteBorderBox;
+            Assert.Equal(prev.Y + prev.Height, rows[i].Layout.AbsoluteBorderBox.Y, 1);
+        }
+
+        // And each row is still tall enough for the text it draws at the new width.
+        foreach (var row in rows)
+            foreach (var label in LayoutProbe.Descendants<HultUI.Core.Elements.TextElement>(
+                         row, e => e is { Selectable: true, SelectionIndex: >= 0 }))
+            {
+                var (height, _) = t.DrawnText(label);
+                if (height <= 0) continue;
+                Assert.True(height <= row.Layout.AbsoluteBorderBox.Height + 0.5f,
+                    $"at {width}px, {height:0}px of text sits in a {row.Layout.AbsoluteBorderBox.Height:0}px row");
+            }
+    }
+
+    /// <summary>An unbreakable run stays inside its cell after a resize too — the cell is a
+    /// grid fraction here rather than a flex item sized to its content, which is what let the
+    /// same token push Junction's column open, so this pins the difference.</summary>
+    [Fact]
+    public void AnUnbreakableRunStaysInsideItsCellAcrossAResize()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 400) + "\n");
+        t.WriteRight("a.txt", new string('R', 400) + "\n");
+        t.Open(wrap: true);
+        t.OpenDiffOn("a.txt");
+
+        foreach (int width in new[] { 900, 1400, 1050 })
+        {
+            t.Session.Window.SetClientSize(width, 820);
+            t.Session.PumpFrames(6);
+
+            var (cell, text) = t.FirstLineCell();
+            Assert.True(t.DrawnWidth(text) <= cell.Layout.AbsoluteContentBox.Width + 0.5f,
+                $"at {width}px the run is {t.DrawnWidth(text):0}px in a "
+                + $"{cell.Layout.AbsoluteContentBox.Width:0}px cell");
+        }
+    }
+
     [Fact]
     public void NAndPStillLandOnAChangeWhenRowsAreDifferentHeights()
     {

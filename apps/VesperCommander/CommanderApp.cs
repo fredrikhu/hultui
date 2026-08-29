@@ -666,6 +666,8 @@ public partial class CommanderApp : Component, IDisposable
 
     protected override void OnAfterBuild()
     {
+        SettleWrappedRowWidths();
+
         // Returning from a full-shell view: its Close ran while the diff/sync tree was
         // still up, so the pane it wants to focus only exists as of this build.
         if (_pendingPaneFocus is char paneSide)
@@ -2803,10 +2805,64 @@ public partial class CommanderApp : Component, IDisposable
         // A scale change retires the cached rasters; rebuild so every element picks up
         // sources cut for the new resolution instead of holding retired ones.
         float scale = _window.DisplayScale;
-        if (MathF.Abs(Icons.DisplayScale - scale) < 0.001f) return;
-        Icons.DisplayScale = scale;
-        MarkDirty();
+        bool scaleChanged = MathF.Abs(Icons.DisplayScale - scale) >= 0.001f;
+        if (scaleChanged) Icons.DisplayScale = scale;
+        // A wrapped view has to reach the build, and it takes both halves of this: the build
+        // here reads the width the body had a frame ago, and the settle registered by that
+        // build is what corrects it once the frame has been laid out at the new size. Without
+        // this call nothing rebuilds at all on a resize, so the settle is never registered
+        // and never runs — it is only ever scheduled from a build.
+        if (scaleChanged || (_settings.DiffWrap && (_diffOpen || _viewerOpen))) MarkDirty();
     }
+
+    /// <summary>
+    /// Asks for one more build when the wrapped rows on screen were measured at a width the
+    /// body no longer has.
+    /// </summary>
+    /// <remarks>
+    /// <para>Every other row in this app is a fixed height, which is why an ordinary resize
+    /// does not rebuild at all: layout alone repositions them. A wrapped row is the exception
+    /// — its height is measured in the build, at the column width, and handed to the
+    /// virtualized body, which stacks the rows from those numbers. Left alone after a resize,
+    /// the rows sit at the old widths while each line lays itself out at the new one, and
+    /// every line that gains a visual line draws over the row beneath it. The row track is
+    /// auto and would have grown to fit; it is the list forcing the measured height that
+    /// makes it visible.</para>
+    /// <para>Marking dirty from the resize itself is not enough, and that is exactly why this
+    /// runs after the frame: the width comes from the body's laid-out box, so a build started
+    /// before layout still reads the width the body had a frame ago. Reading it once the
+    /// frame is laid out is what makes the second build measure at the size on screen — and
+    /// it covers the first open too, where the body has no box yet and the width falls back
+    /// to the whole window's.</para>
+    /// <para>It cannot spin: a build measures at the width the body actually has, so after
+    /// one the two agree. The settled-width fields are only a guard for the case where a
+    /// rebuild somehow does not take. Junction's diff had the same gap and the same fix.</para>
+    /// </remarks>
+    private void SettleWrappedRowWidths()
+    {
+        if (!_settings.DiffWrap || !(_diffOpen || _viewerOpen)) return;
+        bool diff = _diffOpen;
+        _window.RequestPostFrameCallback(() =>
+        {
+            // Re-read inside the callback: the view can be closed between the build and the
+            // frame landing, and a stale answer would rebuild for a body that is gone.
+            if (!_settings.DiffWrap) return;
+            if (diff ? !_diffOpen : !_viewerOpen) return;
+
+            float live = diff ? DiffCodeWidth() : ViewerCodeWidth();
+            float measured = diff ? _diffHeightsWidth : _viewerHeightsWidth;
+            float asked = diff ? _diffSettledWidth : _viewerSettledWidth;
+            if (Math.Abs(live - measured) <= 0.5f) return;
+            if (Math.Abs(live - asked) <= 0.5f) return;   // already asked, at this width
+
+            if (diff) _diffSettledWidth = live; else _viewerSettledWidth = live;
+            MarkDirty();
+        });
+    }
+
+    // The column width each view last asked for a corrective rebuild at — see above.
+    private float _diffSettledWidth = float.NaN;
+    private float _viewerSettledWidth = float.NaN;
 
     public void Dispose()
     {

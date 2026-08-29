@@ -279,6 +279,32 @@ public class ViewerTests
             $"a {drawn.LineCount}-line block needs {drawn.Height:0.#}px but its row is {row:0.#}px — the text is clipped");
     }
 
+    /// <summary>The viewer re-measures its wrapped rows when the window resizes, for the same
+    /// reason the diff does: the row heights are measured in the build at the column width,
+    /// and layout alone would stack them from heights measured at the old one.</summary>
+    [Theory]
+    [InlineData(900)]
+    [InlineData(1600)]
+    public void ResizingTheWindowReMeasuresTheWrappedRows(int width)
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "short\n" + string.Join(' ', Enumerable.Repeat("wrap me", 300)) + "\nshort\n");
+        t.Open(wrap: true);
+        t.ViewFile("a.txt");
+
+        t.Session.Window.SetClientSize(width, 820);
+        t.Session.PumpFrames(6);
+
+        var label = t.Label(1);
+        var drawn = LayoutProbe.DrawnText(label);
+        Assert.True(drawn.LineCount > 3, $"the line only wrapped to {drawn.LineCount} lines — not a wrap test");
+
+        float row = LayoutProbe.Painted(t.RowOf(label)).Height;
+        Assert.True(row >= drawn.Height - 0.5f,
+            $"at {width}px a {drawn.LineCount}-line block needs {drawn.Height:0.#}px "
+            + $"but its row is {row:0.#}px — the text is clipped");
+    }
+
     [Fact]
     public void WrapIsTheSameSettingTheDiffUses()
     {
@@ -751,6 +777,10 @@ public class ViewerTests
             _session.PumpUntil(() => State != ViewerState.Loading, System.TimeSpan.FromSeconds(30));
             _session.PumpFrame();
         }
+
+        /// <summary>The session, so a test can resize the window — a wrapped row's height
+        /// depends on the width, which makes the resize part of the behaviour.</summary>
+        public HeadlessSession Session => _session;
 
         public void Press(KeyCode key, KeyModifiers modifiers = KeyModifiers.None)
         {
