@@ -104,6 +104,14 @@ and benchmark work.
   pane's own splitter is app state and rebuilds anyway. Junction's diff and Vesper's diff
   *and* viewer all had it; Vesper's auto grid tracks did not save it, because the virtualized
   body forces the measured height regardless of what the track would have grown to.
+- **`IsDetached` does not mean "no longer in the tree".** `TreeDiffer` marks the *incoming*
+  element of a patch, the one thrown away — so a patched element is still the right object and
+  correctly unflagged. An element that a rebuild *replaces* is dropped from the tree without
+  being marked at all, and looks perfectly alive. Anything holding an element across frames
+  has to ask `Window.IsInTree` as well; the middle-click autoscroll went on scrolling a
+  replaced list nobody could see. And when the live one cannot be found yet — a fresh element
+  has no layout until the pass after the tick that looks for it — keep the old reference and
+  ask again next frame rather than giving up, or one rebuild ends the gesture for good.
 - **A click belongs to the primary button.** `ClickEvent` used to be synthesized for whatever
   button was pressed, and `OnClick` takes no button — so every handler in every app fired on a
   middle click too. It only mattered once middle-drag became the way to scroll a list: a press

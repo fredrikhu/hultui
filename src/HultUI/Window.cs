@@ -1458,10 +1458,26 @@ public sealed class Window : IOverlayHost, IDisposable
     {
         if (_autoScrollTarget is null || _root is null) return;
 
-        if (_autoScrollTarget.IsDetached)
+        // Two ways the captured view stops being the live one, and IsDetached only covers the
+        // first. A patch marks the *incoming* element detached and keeps the retained one, so
+        // a target that was patched is still the right object. A rebuild that *replaces* the
+        // element instead drops the old one from the tree without marking anything — it looks
+        // perfectly alive, and scrolling it moves something nobody can see. Junction's diff
+        // does exactly that, once, part way through a gesture: the scroll stopped dead and the
+        // view sat at the top.
+        if (_autoScrollTarget.IsDetached || !IsAttachedToRoot(_autoScrollTarget))
         {
-            _autoScrollTarget = FindAutoScrollAncestor(HitTester.HitTest(_root, _autoScrollPointer));
-            if (_autoScrollTarget is null) return;
+            var live = FindAutoScrollAncestor(HitTester.HitTest(_root, _autoScrollPointer));
+            // Nothing yet: the replacement is built but this tick runs before layout, so on
+            // its first frame it has no content size and cannot say whether it scrolls. Keep
+            // the old reference and ask again next frame rather than giving up — dropping it
+            // here ended the gesture for good, one frame after any rebuild.
+            if (live is null) return;
+            // Carry the position over, so a rebuild during the gesture does not throw the
+            // reader back to the top. The same promise PatchFrom already keeps for a patched
+            // scroll view; a replaced one had nobody keeping it.
+            live.ScrollOffsetY = _autoScrollTarget.ScrollOffsetY;
+            _autoScrollTarget = live;
         }
 
         long now = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();

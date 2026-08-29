@@ -39,15 +39,100 @@ public class MiddleClickAutoScrollTests
         Assert.Equal(0, middle);    // and the middle button leaves it alone
     }
 
-    // Two tests are deliberately absent here: that a held middle button scrolls the diff, and
-    // that it parks in the dead zone. The gesture demonstrably works — a trace across a held
-    // press showed the offset climbing 166, 172, 178, 184 — but written as tests they pass and
-    // fail on alternate runs, because Junction's Changes view intermittently replaces the diff
-    // list mid-gesture and a replaced list starts at offset zero. That churn is real and not
-    // understood yet; it is not the syntax-highlight cache, which is per file rather than per
-    // visible range. The framework suite covers the gesture itself, and Vesper and Meridian
-    // cover it inside an app, so nothing here is left unproven by their absence — but the
-    // churn is worth chasing on its own, and a flaky test would only bury it.
+    /// <summary>Holding the middle button below the anchor scrolls the diff with no further
+    /// input — the gesture's whole substance, and the reason this pumps without moving.</summary>
+    [Fact]
+    public void HoldingTheMiddleButtonBelowTheAnchorScrollsTheDiff()
+    {
+        WithTallDiff((session, app) =>
+        {
+            var list = Body(app);
+            Assert.True(list.CanAutoScroll, "the fixture's diff has nothing to scroll");
+            Assert.Equal(0f, list.ScrollOffsetY);
+
+            var box = list.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f;
+            float anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.5);
+
+            Assert.True(Body(app).ScrollOffsetY > 0,
+                "holding the middle button below the anchor did not scroll the diff");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
+    /// <summary>
+    /// The gesture survives the view rebuilding under it, keeping its place.
+    /// <para>Junction's Changes view replaces the diff list part way through a gesture, and a
+    /// replaced element is dropped from the tree without being marked detached — so the window
+    /// went on scrolling a body nobody could see and the view sat at the top. This is the case
+    /// that found it, so it is the one worth keeping.</para>
+    /// </summary>
+    [Fact]
+    public void ItKeepsScrollingAcrossARebuildThatReplacesTheList()
+    {
+        WithTallDiff((session, app) =>
+        {
+            var box = Body(app).Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+
+            var first = Body(app);
+            PumpFor(session, 0.2);
+            float early = Body(app).ScrollOffsetY;
+            Assert.True(early > 0, "it never started scrolling");
+
+            // Force the rebuild rather than waiting for one, so this is a statement about
+            // surviving it rather than a race with whatever Junction happens to do.
+            typeof(JunctionApp).GetMethod("Rerender", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, null);
+            PumpFor(session, 0.4);
+
+            Assert.True(Body(app).ScrollOffsetY > early,
+                $"the scroll stopped at {Body(app).ScrollOffsetY:0} after the rebuild "
+                + $"(it was {early:0} before) — the gesture lost its target");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
+    /// <summary>Parks in the dead zone without ending the gesture, resumes on leaving it, and
+    /// stops for good on release.</summary>
+    [Fact]
+    public void ItStopsInTheDeadZoneAndAgainOnRelease()
+    {
+        WithTallDiff((session, app) =>
+        {
+            var box = Body(app).Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f;
+            float anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.3);
+            float ran = Body(app).ScrollOffsetY;
+            Assert.True(ran > 0, "the first leg did not scroll");
+
+            session.Window.MoveMouse(x, anchor + 2f);   // back inside the dead zone
+            PumpFor(session, 0.4);
+            Assert.Equal(ran, Body(app).ScrollOffsetY, 1);
+
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);   // out again
+            PumpFor(session, 0.3);
+            float resumed = Body(app).ScrollOffsetY;
+            Assert.True(resumed > ran, "leaving the dead zone again did not resume");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+            PumpFor(session, 0.5);
+            Assert.Equal(resumed, Body(app).ScrollOffsetY, 1);
+        });
+    }
 
     /// <summary>
     /// Sideways it does nothing, and that is not an oversight.
@@ -77,6 +162,7 @@ public class MiddleClickAutoScrollTests
             session.Window.MouseUp(x + DeadZone + 60f, y, MouseButton.Middle);
         });
     }
+
 
     // ── Harness ──────────────────────────────────────────────────────────
 
