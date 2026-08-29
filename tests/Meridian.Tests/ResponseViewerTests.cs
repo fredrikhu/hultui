@@ -355,6 +355,82 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         return scroll;
     }
 
+    /// <summary>
+    /// Narrowing the window re-wraps the body.
+    /// <para>
+    /// Meridian shows a response through a <see cref="TextAreaElement"/>, which owns its own
+    /// wrapping and caches the line starts against the width it wrapped at. That is the whole
+    /// reason this app is not exposed to the fault the other two were: their wrapped rows are
+    /// measured in a build and handed to a virtualized list, so a resize that skipped the
+    /// build left them stacked at the old width. Here the wrap is recomputed during layout.
+    /// </para>
+    /// <para>Pinned anyway, because it is a property of the control and not of this view: the
+    /// cache is keyed on the width, and a cache that failed to notice a width change would
+    /// look exactly like the bug the other apps had.</para>
+    /// </summary>
+    [Fact]
+    public void NarrowingTheWindowReWrapsTheBody()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-ok");
+            app.ActiveTab!.Result = Meridian.Core.SendResult.Ok(
+                TextResponse(string.Join(' ', Enumerable.Repeat("wrap me around the pane", 60))));
+            MarkDirty(app);
+            session.PumpFrames(3);
+
+            int wide = WrappedRowCount(session);
+            Assert.True(wide > 1, $"the body laid out as {wide} row(s) — it did not wrap at all");
+
+            // Both widths are below the orientation breakpoint, so the pane stays across the
+            // bottom and narrowing the window really does narrow it. Crossing the breakpoint
+            // instead moves the pane from a side column to the full width, which makes it
+            // *wider* — the first draft of this test read that as a failure to re-wrap.
+            session.Window.SetClientSize(760, 900);
+            session.PumpFrames(4);
+
+            int narrow = WrappedRowCount(session);
+            Assert.True(narrow > wide,
+                $"the body took {wide} rows at 1000px and {narrow} at 760px — narrowing did not re-wrap");
+        }, width: 1000);
+    }
+
+    /// <summary>
+    /// A run with nowhere to break is cut by character rather than run off the pane.
+    /// <para>The body has no sideways scrolling, so a line that overflows is simply
+    /// unreadable past the edge — a minified payload, a base64 blob or a long hash is exactly
+    /// the shape of response that produces one.</para>
+    /// </summary>
+    [Fact]
+    public void AnUnbreakableRunIsCutByCharacterRatherThanRunningOffThePane()
+    {
+        Hosted((session, app) =>
+        {
+            Click(session, "req-ok");
+            app.ActiveTab!.Result = Meridian.Core.SendResult.Ok(TextResponse(new string('x', 2000)));
+            MarkDirty(app);
+            session.PumpFrames(3);
+
+            // One logical line, so any row count above one is the character-level break.
+            Assert.True(WrappedRowCount(session) > 5,
+                $"2000 unbreakable characters laid out as {WrappedRowCount(session)} row(s) — they did not break");
+        });
+    }
+
+    /// <summary>How many rows the body wrapped into, asked of the control's own line-start
+    /// cache — the same list it scrolls and hit-tests against.</summary>
+    private static int WrappedRowCount(HeadlessSession session)
+    {
+        var el = session.Window.FindByAutomationId("response-body");
+        Assert.True(el != null, "response body area not found");
+        var area = (TextAreaElement)el!.Element;
+        var starts = (System.Collections.Generic.List<int>?)typeof(TextAreaElement)
+            .GetField("_lineStarts", System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Instance)!.GetValue(area);
+        Assert.True(starts is not null, "the body has not wrapped yet — pump a frame first");
+        return starts!.Count;
+    }
+
     /// <summary>400 filler lines then the marker, as text/plain so nothing re-indents it.
     /// <paramref name="wrapping"/> pads every line past any plausible pane width, so each one
     /// occupies several drawn rows while the line <i>count</i> stays the same.</summary>

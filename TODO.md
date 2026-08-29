@@ -104,6 +104,11 @@ and benchmark work.
   pane's own splitter is app state and rebuilds anyway. Junction's diff and Vesper's diff
   *and* viewer all had it; Vesper's auto grid tracks did not save it, because the virtualized
   body forces the measured height regardless of what the track would have grown to.
+- **A control that owns its own wrapping is immune to all of this.** Meridian shows response
+  bodies through `TextAreaElement`, which wraps during layout and caches its line starts
+  against the width it wrapped at, so a resize re-wraps with nothing for the app to do. The
+  fault only exists where an app measures wrapped heights itself and hands them to a
+  virtualized list. Worth reaching for the control before building the measuring machinery.
 - **Correcting a width takes two halves, and each is useless alone.** The column width is
   read from a laid-out box, so a build started before layout sees the width from a frame ago
   — one rebuild on resize measures at the *old* width and fixes nothing. The post-frame
