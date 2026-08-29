@@ -395,7 +395,7 @@ public partial class JunctionApp
         // that merely moves — a resize — needs no settle, because it is measured from a body
         // that has already been laid out.
         var settleKey = (_diffWrap, _diffSplit, rows.Count);
-        if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffWidthSettled = false; }
+        if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffSettledWidth = float.NaN; }
 
         var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count);
         if (_diffHeightShape != shape)
@@ -455,11 +455,18 @@ public partial class JunctionApp
     private float CodeWidthFor(float body) =>
         Math.Max(0, _diffSplit ? (body - _diffFixedCols) / 2 : body - _diffFixedCols);
 
-    // The wrap/split/row-count the width settle has already fired for. The corrective
-    // rebuild happens at most once per shape, so a width that flip-flops — a vertical
-    // scrollbar appearing as rows grow, then leaving as they shrink — cannot loop.
+    // The shape the width settle is armed for. Changing it forgets the width below, so a
+    // new file or a switch to split gets its own corrective rebuild.
     private (bool Wrap, bool Split, int Rows) _diffWidthSettleKey = (false, false, -1);
-    private bool _diffWidthSettled;
+
+    // The code width the last corrective rebuild was asked for. A rebuild measures the rows
+    // at the width the body actually has, so afterwards the two agree and this stops firing
+    // on its own; the guard only exists so a rebuild that somehow did not take cannot spin.
+    //
+    // It used to be a once-per-shape flag instead, and that was too coarse: a resize changes
+    // neither the wrap mode, the layout, nor the row count, so after the first settle nothing
+    // could ever correct the width again.
+    private float _diffSettledWidth = float.NaN;
 
     /// <summary>
     /// Ask for one more build when the scrollbar's presence, or the width the wrapped rows
@@ -488,12 +495,13 @@ public partial class JunctionApp
         {
             if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
             if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return; }
-            if (!_diffWrap || _diffWidthSettled) return;
+            if (!_diffWrap) return;
 
             // _diffHeightShape.Width is the width the heights on screen were measured at.
-            if (Math.Abs(CodeWidthFor(body.Layout.AbsoluteContentBox.Width) - _diffHeightShape.Width) <= 0.5f)
-                return;
-            _diffWidthSettled = true;
+            float observed = CodeWidthFor(body.Layout.AbsoluteContentBox.Width);
+            if (Math.Abs(observed - _diffHeightShape.Width) <= 0.5f) return;
+            if (Math.Abs(observed - _diffSettledWidth) <= 0.5f) return;   // already asked, at this width
+            _diffSettledWidth = observed;
             MarkDirty();
         });
     }

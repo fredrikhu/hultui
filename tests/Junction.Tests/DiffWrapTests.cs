@@ -194,6 +194,110 @@ public class DiffWrapTests
         });
     }
 
+    /// <summary>
+    /// Narrowing the window re-measures the wrapped rows.
+    /// <para>
+    /// A wrapped row's height <i>is</i> a function of the width: it is measured in the build
+    /// and handed to the virtual list, which stacks the rows from those numbers. Every other
+    /// row in this app is a fixed height, so an ordinary resize deliberately did not rebuild
+    /// — and a wrapped diff was then stacked at the old widths while each row laid its own
+    /// text out at the new one. Every line that gained a visual line drew outside its row and
+    /// over its neighbour, several rows at a time, and nothing afterwards corrected it.
+    /// </para>
+    /// <para>
+    /// The height has to come from the label's own line boxes rather than from its laid-out
+    /// box: the row forces its height on the label, so the box reads back as the row's and a
+    /// check against it passes straight through the bug. The lines are what actually get
+    /// drawn.
+    /// </para>
+    /// <para>
+    /// The width moves without crossing a responsive breakpoint, since crossing one rebuilds
+    /// for its own reasons and would hide what this covers.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NarrowingTheWindowReMeasuresTheWrappedRows()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Press(session, app, KeyCode.W);
+            session.PumpFrames(3);
+            int before = MostLines(session, app);
+            Assert.True(before > 1, "the fixture did not wrap at the starting width");
+
+            // 1400 → 1150. Both are well clear of the diff-hiding breakpoint, so nothing but
+            // the width itself changes.
+            session.Window.SetClientSize(1150, 900);
+            session.PumpFrames(6);
+
+            Assert.True(MostLines(session, app) > before,
+                "narrowing did not add a visual line — the fixture cannot show this bug");
+
+            var list = Body(app);
+            int checkedRows = 0;
+            foreach (var label in CodeLabels(session))
+            {
+                var row = RowOf(label, list);
+                if (row is null) continue;
+                float drawn = DrawnHeight(label);
+                if (drawn <= 0) continue;
+                checkedRows++;
+                float rowHeight = row.Layout.AbsoluteBorderBox.Height;
+                Assert.True(drawn <= rowHeight + 0.5f,
+                    $"after narrowing, {drawn:0}px of text sits in a {rowHeight:0}px row");
+            }
+            Assert.True(checkedRows > 3, $"only {checkedRows} rows were checked — this proves nothing");
+        });
+    }
+
+    /// <summary>The same for widening, where the failure is a row left taller than its text
+    /// rather than one overflowing: harmless to look at, and the same stale measurement.</summary>
+    [Fact]
+    public void WideningTheWindowReMeasuresThemToo()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Press(session, app, KeyCode.W);
+            session.PumpFrames(3);
+            float tallBefore = TallestCodeRow(session, app);
+
+            session.Window.SetClientSize(1900, 900);
+            session.PumpFrames(6);
+
+            // More room per line means fewer lines per row, so the tallest row has to shrink.
+            float tallAfter = TallestCodeRow(session, app);
+            Assert.True(tallAfter < tallBefore,
+                $"the tallest row was {tallBefore:0}px and is {tallAfter:0}px — the widening was not measured");
+        });
+    }
+
+    /// <summary>The measurement the rows were laid out with has to be the width they were
+    /// laid out into. This is the same fault one level down from the two tests above, and it
+    /// is the one that says <i>why</i> — a row can happen to be tall enough at a stale width
+    /// while the two numbers still disagree.</summary>
+    [Fact]
+    public void TheMeasuredWidthAgreesWithTheLaidOutOneAfterAResize()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Press(session, app, KeyCode.W);
+            session.PumpFrames(3);
+
+            session.Window.SetClientSize(1150, 900);
+            session.PumpFrames(6);
+
+            var body = Body(app);
+            float laidOut = (float)typeof(JunctionApp)
+                .GetMethod("CodeWidthFor", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(app, [body.Layout.AbsoluteContentBox.Width])!;
+            var shape = Field<(bool Wrap, bool Split, float Width, int Rows)>(app, "_diffHeightShape");
+
+            Assert.Equal(laidOut, shape.Width, 1);
+        });
+    }
+
+
+
     private static void Press(HeadlessSession session, JunctionApp app, KeyCode key)
     {
         var body = Field<HultUI.Core.Reactivity.Ref<Element>>(app, "_diffBodyRef").Current

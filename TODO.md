@@ -80,6 +80,18 @@ and benchmark work.
 - **Snapshot baselines in raw string literals carry the source file's line endings**
   (CRLF on Windows, LF on Linux under autocrlf), so a baseline can pass one CI leg and
   fail the other. Normalise with `ReplaceLineEndings("\n")`.
+- **A resize relayouts but does not rebuild.** An app that skips the rebuild on an ordinary
+  resize (Junction does, to keep a drag off the build path) is fine for every fixed-height
+  row and wrong for any height *derived from the width* in the build — a wrapped diff row,
+  say. Layout then stacks rows at the new width using heights measured at the old one, and
+  the overflow draws over the row below. It only showed on a window resize: dragging the
+  pane's own splitter is app state and rebuilds anyway.
+- **A row grows to fit its text; the list still stacks it at the height it was given.** So
+  "is this row tall enough" has to be asked of the label's own line boxes, not of its
+  laid-out box — the box reads back as the row's either way, and a check against it passes
+  straight through the bug. `LayoutProbe.DrawnText(label).Height` is the clamped one; summing
+  the element's `_lines` is not. Two tests written the first way were green against provably
+  broken code.
 - **Keys among siblings are all-or-nothing.** A single keyed child in an otherwise unkeyed
   child list makes the reconciler match that whole list by key, and the unkeyed siblings are
   then *replaced* rather than patched — losing focus, caret and scroll. Adding one key to

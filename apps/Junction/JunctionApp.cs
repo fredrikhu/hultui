@@ -415,8 +415,24 @@ public partial class JunctionApp : Component, IDisposable
         float scale = _window.DisplayScale;
         bool scaleChanged = MathF.Abs(Ui.DisplayScale - scale) >= 0.001f;
         Ui.DisplayScale = scale;
-        if (RecomputeResponsive() || scaleChanged) Rerender();
+        if (RecomputeResponsive() || scaleChanged || DiffWrapNeedsRemeasure()) Rerender();
     }
+
+    /// <summary>
+    /// Whether a wrapped diff is on screen, and so the resize has to reach the build.
+    ///
+    /// <para>Every other row in this app is a fixed height, which is why an ordinary resize
+    /// deliberately does not rebuild: layout alone repositions everything. A wrapped row is
+    /// the exception — its height <i>is</i> a function of the width, measured in the build
+    /// and handed to the virtual list as a per-row number. Resize without rebuilding and the
+    /// list lays out at the new width using heights measured at the old one, so every line
+    /// that now takes an extra visual line overflows onto the row beneath it.</para>
+    ///
+    /// <para>Narrowed by dragging the pane's own splitter this never showed, because that
+    /// drag is app state and rebuilds anyway; it took a window resize, which does not.</para>
+    /// </summary>
+    private bool DiffWrapNeedsRemeasure() =>
+        _diffWrap && (_diffFull || View is JunctionView.Commit or JunctionView.Changes);
 
     // Recompute the responsive flags from the current content width; returns true
     // if either flipped. Called on resize and when the sidebar collapses/expands
