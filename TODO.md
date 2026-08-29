@@ -104,6 +104,14 @@ and benchmark work.
   pane's own splitter is app state and rebuilds anyway. Junction's diff and Vesper's diff
   *and* viewer all had it; Vesper's auto grid tracks did not save it, because the virtualized
   body forces the measured height regardless of what the track would have grown to.
+- **A click belongs to the primary button.** `ClickEvent` used to be synthesized for whatever
+  button was pressed, and `OnClick` takes no button — so every handler in every app fired on a
+  middle click too. It only mattered once middle-drag became the way to scroll a list: a press
+  that never left the autoscroll's dead zone staged the diff line under it in Junction. Clicks
+  are now the primary button's alone, which is what the DOM does (`auxclick` for the rest) and
+  what half this framework's own controls were already doing by hand with
+  `if (evt.Button != 0) return`. A handler that really wants the middle or right button reads
+  it off PointerDown, where the button is.
 - **A control that owns its own wrapping is immune to all of this.** Meridian shows response
   bodies through `TextAreaElement`, which wraps during layout and caches its line starts
   against the width it wrapped at, so a resize re-wraps with nothing for the app to do. The

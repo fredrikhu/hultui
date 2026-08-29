@@ -33,9 +33,6 @@ public sealed class Window : IOverlayHost, IDisposable
     private Point _autoScrollOrigin;
     private Point _autoScrollPointer;
     private long _autoScrollLastMs;
-    // Set once the pointer has been outside the dead zone, so a gesture that actually
-    // scrolled swallows its click while a plain middle click keeps it.
-    private bool _autoScrollRan;
 
     /// <summary>How far the pointer must leave the origin before anything moves. Also the
     /// radius the anchor marker is drawn at, so the zone you have to come back into to stop
@@ -945,17 +942,13 @@ public sealed class Window : IOverlayHost, IDisposable
                     break;
                 }
 
-                // End the autoscroll. One that actually ran swallows its own click — the app
-                // never sees a middle click it did not mean to make — while a press that
-                // never left the dead zone still clicks, so a middle click keeps whatever
-                // meaning the app gave it. The release itself is always dispatched either
-                // way, so nothing is left holding a pressed :active style.
-                bool autoScrollSuppressedClick = false;
+                // End the autoscroll. Nothing has to be suppressed: a click is the primary
+                // button's alone (see PointerState), so the middle button never synthesizes
+                // one however far it travelled. The release is still dispatched, so nothing
+                // is left holding a pressed :active style.
                 if (!button.IsDown && button.Button == 1 && _autoScrollTarget is not null)
                 {
-                    autoScrollSuppressedClick = _autoScrollRan;
                     _autoScrollTarget = null;
-                    _autoScrollRan = false;
                     _root!.MarkPaintDirty();   // take the anchor marker off the screen
                     PlatformWindow.SetCursor(_lastHoveredElement?.ResolvedInherited.Cursor ?? CursorType.Default);
                 }
@@ -1021,7 +1014,6 @@ public sealed class Window : IOverlayHost, IDisposable
                         _autoScrollOrigin = pos;
                         _autoScrollPointer = pos;
                         _autoScrollLastMs = Application.Platform.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds();
-                        _autoScrollRan = false;
                         PlatformWindow.SetCursor(CursorType.Move);
                     }
 
@@ -1108,9 +1100,9 @@ public sealed class Window : IOverlayHost, IDisposable
                 {
                     var (upEvt, clickEvt, dblClickEvt) = _pointerState.HandlePointerUp(target, effectiveBtnPos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(upEvt, target);
-                    if (clickEvt is not null && !autoScrollSuppressedClick)
+                    if (clickEvt is not null)
                         EventDispatcher.Dispatch(clickEvt, target);
-                    if (dblClickEvt is not null && !autoScrollSuppressedClick)
+                    if (dblClickEvt is not null)
                         EventDispatcher.Dispatch(dblClickEvt, target);
                 }
                 break;
@@ -1480,7 +1472,6 @@ public sealed class Window : IOverlayHost, IDisposable
         float vy = Ramp(_autoScrollPointer.Y - _autoScrollOrigin.Y);
         if (vx == 0f && vy == 0f) return;   // back inside the dead zone: parked, not finished
 
-        _autoScrollRan = true;
         _autoScrollTarget.ScrollBy(vx * dt, vy * dt);
 
         // Speed in layout units per second from the pointer's displacement on one axis,

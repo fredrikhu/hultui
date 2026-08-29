@@ -17,8 +17,11 @@ namespace HultUI.Headless.Tests;
 /// only on pointer moves would pass a test that kept moving the pointer, and would sit still in
 /// front of a real user holding it steady.</para>
 ///
-/// <para>The other two worth pinning are the boundaries: a middle press that never leaves the
-/// dead zone still clicks (a tab strip closes tabs with it), and one that scrolled does not.</para>
+/// <para>The other boundary is what the middle button does <i>besides</i> scrolling: nothing.
+/// A click is the primary button's alone (see <c>PointerState</c>), so no middle press fires
+/// an <c>OnClick</c> handler however far it travelled — which is what keeps a press over a
+/// list from activating the row under it. The press itself still reaches PointerDown, which
+/// is where a handler that really wants the middle button belongs.</para>
 /// </summary>
 public class MiddleClickAutoScrollTests
 {
@@ -166,28 +169,55 @@ public class MiddleClickAutoScrollTests
 
     // ── The click boundary ───────────────────────────────────────────────
 
+    /// <summary>
+    /// A middle press that never leaves the dead zone scrolls nothing and clicks nothing.
+    /// <para>
+    /// It used to click, and that was the bug: <c>OnClick</c> takes no button, so every
+    /// handler in every app fired on a middle press too. Harmless while nobody pressed the
+    /// middle button over a list — and not harmless at all once middle-drag became the way to
+    /// scroll one. In Junction it staged the diff line under the pointer.
+    /// </para>
+    /// </summary>
     [Fact]
-    public void AMiddleClickThatNeverLeavesTheDeadZoneStillClicks()
+    public void AMiddlePressThatNeverLeavesTheDeadZoneScrollsNothingAndClicksNothing()
     {
         using var session = HeadlessSession.Create(width: 200, height: 300);
         var (scroll, rows) = BuildList(session);
-        int clicks = 0;
-        rows[0].On<ClickEvent>(e => { if (e.Button == 1) clicks++; });
+        int clicks = 0, presses = 0;
+        rows[0].On<ClickEvent>(_ => clicks++);
+        rows[0].On<PointerDownEvent>(e => { if (e.Button == 1) presses++; });
         session.PumpFrame();
 
         session.Window.Click(100, 20, MouseButton.Middle);
 
-        Assert.Equal(1, clicks);
+        Assert.Equal(0, clicks);
+        Assert.Equal(1, presses);   // the press still arrives, which is where middle belongs
         Assert.Equal(0f, scroll.ScrollOffsetY, 3);
     }
 
+    /// <summary>The primary button is unaffected — this is the control case for the one
+    /// above, so "no click" cannot pass by the click machinery being broken outright.</summary>
     [Fact]
-    public void AnAutoScrollThatRanSwallowsItsClick()
+    public void ALeftClickStillClicks()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var (_, rows) = BuildList(session);
+        int clicks = 0;
+        rows[0].On<ClickEvent>(_ => clicks++);
+        session.PumpFrame();
+
+        session.Window.Click(100, 20);
+
+        Assert.Equal(1, clicks);
+    }
+
+    [Fact]
+    public void AnAutoScrollThatRanClicksNothingEither()
     {
         using var session = HeadlessSession.Create(width: 200, height: 300);
         var (scroll, rows) = BuildList(session);
         int clicks = 0;
-        foreach (var row in rows) row.On<ClickEvent>(e => { if (e.Button == 1) clicks++; });
+        foreach (var row in rows) row.On<ClickEvent>(_ => clicks++);
         session.PumpFrame();
 
         HoldBelow(session, originY: 50, dy: 30, seconds: 0.3);
@@ -199,19 +229,19 @@ public class MiddleClickAutoScrollTests
     // ── Opting out, and lists with nowhere to go ─────────────────────────
 
     [Fact]
-    public void AutoScrollOffLeavesTheViewAloneAndKeepsTheClick()
+    public void AutoScrollOffLeavesTheViewAlone()
     {
         using var session = HeadlessSession.Create(width: 200, height: 300);
         var (scroll, rows) = BuildList(session, autoScroll: false);
-        int clicks = 0;
-        foreach (var row in rows) row.On<ClickEvent>(e => { if (e.Button == 1) clicks++; });
+        int presses = 0;
+        foreach (var row in rows) row.On<PointerDownEvent>(e => { if (e.Button == 1) presses++; });
         session.PumpFrame();
 
         HoldBelow(session, originY: 50, dy: 30, seconds: 0.5);
 
         Assert.Equal(0f, scroll.ScrollOffsetY, 3);
-        session.Window.Click(100, 20, MouseButton.Middle);
-        Assert.Equal(1, clicks);
+        // And the press still reaches the app, which is the whole of what opting out means.
+        Assert.True(presses > 0, "opting out swallowed the press as well as the scroll");
     }
 
     [Fact]
@@ -223,18 +253,17 @@ public class MiddleClickAutoScrollTests
         session.Window.SetRoot(scroll);
         session.PumpFrame();
 
-        int clicks = 0;
-        row.On<ClickEvent>(e => { if (e.Button == 1) clicks++; });
+        int presses = 0;
+        row.On<PointerDownEvent>(e => { if (e.Button == 1) presses++; });
         session.PumpFrame();
 
-        // A press that travels inside a list with nowhere to go is not an autoscroll, so its
-        // click survives — the middle button keeps meaning what the app made it mean.
+        // Nothing to scroll, so nothing is claimed and the press reaches the app as always.
         session.Window.MouseDown(100, 20, MouseButton.Middle);
-        session.Window.MoveMouse(100, 35);   // still inside the same row, so a click is due
+        session.Window.MoveMouse(100, 35);
         session.Window.MouseUp(100, 35, MouseButton.Middle);
 
         Assert.Equal(0f, scroll.ScrollOffsetY, 3);
-        Assert.Equal(1, clicks);
+        Assert.Equal(1, presses);
     }
 
     /// <summary>Runs the loop for <paramref name="seconds"/> of virtual time. PumpFrame

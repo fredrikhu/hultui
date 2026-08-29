@@ -133,7 +133,20 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         bool pressedRecycled = !sameTarget
             && _pressedElement is { Parent: null }
             && Distance(position, _pressedPosition) < DoubleClickMaxDistance;
-        if (button == _pressedButton && (sameTarget || pressedRecycled))
+        // Only the primary button synthesizes a click. Every other toolkit draws the line
+        // here — the DOM gives the middle and right buttons `auxclick`, not `click` — and so
+        // does most of this one already: Calendar, ContextMenu, DatePicker, Dropdown and
+        // TextArea each open with `if (evt.Button != 0) return`, one control at a time.
+        //
+        // What made it worth doing centrally: `OnClick` takes no button, so every handler in
+        // every app reads as "when this is activated" and fired on a middle click too. That
+        // was harmless while nobody pressed the middle button over a list, and stopped being
+        // harmless the moment middle-drag became the way to scroll one — a press that never
+        // left the autoscroll's dead zone staged the diff line under the pointer.
+        //
+        // The button is still on PointerDown and PointerUp, which is where a handler that
+        // really wants the middle or right button belongs (Vesper closes a tab from there).
+        if (button == PointerEvent.LeftButton && button == _pressedButton && (sameTarget || pressedRecycled))
         {
             var now = _time.GetUtcNow().UtcDateTime;
             var timeSinceLastClick = (now - _lastClickTime).TotalMilliseconds;
