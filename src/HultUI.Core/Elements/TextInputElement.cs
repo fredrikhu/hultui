@@ -119,18 +119,38 @@ public class TextInputElement : BoxElement
     public int CompositionSegmentLength => _composition.SegmentLength;
     public bool IsComposing => _composition.IsActive;
 
+    /// <summary>
+    /// Whether this input draws a box of its own. Set false — see the <c>Chromeless()</c>
+    /// builder — and the theme's background, border, corner radius and padding are left alone
+    /// so the caller owns them.
+    ///
+    /// <para>For an input that lives inside a control someone else composed — a search box with
+    /// a magnifier beside the text, a cell editor, the text half of a combo box. Without it
+    /// there is no way to get one: <c>ApplyTheme</c> runs on every style pass and re-imposes the
+    /// theme's box, so a background set on the instance survives exactly until the next pass and
+    /// then silently reverts. The colours that are about the <i>text</i> — placeholder, caret,
+    /// selection — still come from the theme, because those are not chrome.</para>
+    ///
+    /// <para>The element keeps whatever padding it was given (its own default, if none), since
+    /// a caller composing the box usually wants to space the parts itself.</para>
+    /// </summary>
+    public bool DrawsChrome { get; set; } = true;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var ti = theme.TextInput;
-        CornerRadius = ti.CornerRadius;
-        Box.Padding = ti.Padding;
-        Box.BorderWidth = ti.BorderWidth;
+        if (DrawsChrome)
+        {
+            CornerRadius = ti.CornerRadius;
+            Box.Padding = ti.Padding;
+            Box.BorderWidth = ti.BorderWidth;
+            BackgroundColor = ti.Background ?? theme.Background;
+            BorderColor = ti.BorderColor ?? theme.Border;
+        }
         // Theme font size is a default: an explicit builder FontSize wins and isn't
         // re-clobbered on the StyleResolver passes that aren't preceded by a rebuild
         // (matches TextAreaElement).
         Inherited.FontSize ??= ti.FontSize;
-        BackgroundColor = ti.Background ?? theme.Background;
-        BorderColor = ti.BorderColor ?? theme.Border;
         FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
         PlaceholderColor = ti.PlaceholderColor ?? theme.Secondary;
         SelectionColor = ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
@@ -640,6 +660,7 @@ public class TextInputElement : BoxElement
         if (source is TextInputElement input)
         {
             Placeholder = input.Placeholder;
+            DrawsChrome = input.DrawsChrome;
             PlaceholderColor = input.PlaceholderColor;
             SelectionColor = input.SelectionColor;
             CursorColor = input.CursorColor;

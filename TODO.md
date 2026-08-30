@@ -1,6 +1,21 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **A text input can hand its box to the caller** — `TextInputElement.DrawsChrome`, set through
+  the `Chromeless()` builder: the theme's background, border, corner radius and padding are left
+  alone so the surrounding control owns them. There was no way to get one before, and the way it
+  failed was the bad kind — `ApplyTheme` runs on every style pass, so a background set on the
+  instance survived until the next pass and then reverted, which reads as the setter not working
+  rather than as the theme winning a race. The text colours (placeholder, caret, selection) still
+  come from the theme, because those are not chrome. Written for the Fluent sample's search
+  field, which needs a magnifier inside the box, but it is the same shape any cell editor or
+  composed combo box needs. The sample also shows what it costs: the focus ring now belongs to
+  the wrapper, and an element only gets focus styles for its own focus, so focus has to be
+  carried in app state and focusing the field rebuilds the pane — which is fine, and is pinned by
+  a test that types into it and asserts the input was *patched* rather than replaced. 4 headless
+  tests + 2 in the sample. The `PatchFrom` one is worth a look if you write another: asserting a
+  chromeless input stays chromeless passes with the copy deleted, because the live element was
+  already chromeless — only a rebuild that changes its mind has anything to say.
 - **A scroll view that had not been painted could not be scrolled** — its extent was computed
   by the *renderer*, and the renderer culls: anything outside a clipping ancestor is skipped
   entirely, so such a view reported a content size of zero. That zero is not inert, because the

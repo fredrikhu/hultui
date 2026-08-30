@@ -2,6 +2,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
@@ -36,6 +37,7 @@ public sealed partial class FluentApp : Component
     [Reactive] public partial Page Current { get; set; }
     [Reactive] public partial bool Dark { get; set; }
     [Reactive] public partial int AccentIndex { get; set; }
+    [Reactive] public partial bool SearchFocused { get; set; }
 
     // Personalization
     [Reactive] public partial bool Transparency { get; set; }
@@ -157,12 +159,48 @@ public sealed partial class FluentApp : Component
     // Navigation pane
     // ──────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The pane's search field, magnifier and all.
+    ///
+    /// <para>Composed rather than themed: the box, the glyph and the spacing are this sample's,
+    /// and the framework's input sits inside it with <c>Chromeless()</c> so it draws no box of
+    /// its own. Focus has to be carried in app state because the ring belongs to the wrapper and
+    /// an element only gets focus styles for its own focus — two rebuilds per interaction, which
+    /// is why the text is left on the element rather than mirrored into a signal that would
+    /// rebuild the pane on every keystroke.</para>
+    /// </summary>
+    private Element SearchBox(FluentPalette p)
+    {
+        var input = TextInput.New("")
+            .Chromeless()
+            .PlaceholderText("Find a setting")
+            .Padding(Thickness.Zero)
+            .FlexGrow(1)
+            .AccessibleName("Find a setting");
+        input.On<FocusEvent>(_ => SearchFocused = true);
+        input.On<BlurEvent>(_ => SearchFocused = false);
+
+        return Box.New().FlexShrink(0)
+            .Height(Fluent.ControlHeight)
+            .CornerRadius(Fluent.ControlRadius)
+            .Background(SearchFocused ? p.ControlInputActive : p.ControlFill)
+            // Constant widths, colour only: WinUI thickens the underline on focus, but doing it
+            // here would move the content box by a pixel and make the row twitch as you tab
+            // through. The bottom edge is already the heavier one at rest.
+            .Border(new Thickness(1, 1, 2, 1), SearchFocused ? p.Accent : p.ControlStroke)
+            .Padding(new Thickness(0, 10, 0, 10))
+            .FlexDirection(FlexDirection.Row)
+            .Gap(8f)
+            .AlignItems(AlignItems.Center)
+            .Margin(new Thickness(0, 0, 8, 0))
+            .Children(
+                IconRenderer.Draw(Icons.Search, 16f, p.TextSecondary),
+                input);
+    }
+
     private Element NavPane(FluentPalette p)
     {
-        var search = TextInput.New("")
-            .PlaceholderText("Find a setting")
-            .Height(32f)
-            .Margin(new Thickness(0, 0, 8, 0));
+        var search = SearchBox(p);
 
         return Flex.Column(gap: 4)
             .Width(Fluent.NavPaneWidth).FlexShrink(0)

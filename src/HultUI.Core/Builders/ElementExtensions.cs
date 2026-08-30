@@ -125,6 +125,13 @@ public static class ElementExtensions
 
     // ──── TextInput properties ────
     public static T PlaceholderText<T>(this T el, string text) where T : TextInputElement { el.Placeholder = text; return el; }
+
+    /// <summary>Hands the box to the caller: no background, border, corner radius or themed
+    /// padding of its own, for an input composed into a control that draws its own — a search
+    /// box with a magnifier beside the text, a cell editor. Named unlike the property it sets
+    /// (<see cref="TextInputElement.DrawsChrome"/>): a same-named extension would be
+    /// unreachable, because <c>input.Chromeless()</c> would bind to invoking the bool.</summary>
+    public static T Chromeless<T>(this T el, bool value = true) where T : TextInputElement { el.DrawsChrome = !value; return el; }
     public static T OnTextChanged<T>(this T el, Action<string> handler) where T : TextInputElement { el.TextChanged = handler; return el; }
 
     // ──── TextArea properties ────

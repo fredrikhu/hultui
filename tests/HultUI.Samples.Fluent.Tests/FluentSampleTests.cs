@@ -51,20 +51,70 @@ public class FluentSampleTests
         Assert.Equal(app.Palette.TextPrimary, session.Application.Theme.TextColor);
     }
 
-    /// <summary>And the consequence, on a widget the sample did not draw: the nav pane's
-    /// search box is a framework <c>TextInputElement</c>, and it must be wearing the Fluent
-    /// control fill rather than the framework's own.</summary>
+    /// <summary>And the consequence, on a widget the sample did not draw: the gallery's text
+    /// box is a framework <c>TextInputElement</c> drawing its own box, and that box must be
+    /// wearing the Fluent control fill rather than the framework's own. Explicitly the *chromed*
+    /// one — the nav pane's search field is chromeless so the sample can put a magnifier in it,
+    /// and asserting on that would be asserting nothing.</summary>
     [Fact]
     public void AFrameworkWidgetTakesTheFluentColours()
     {
-        var (session, app, _root) = Start();
+        var (session, app, root) = Start();
         using var _ = session;
 
-        var input = FirstOfType<TextInputElement>(_root);
+        GoTo(session, "Controls gallery");
+        var input = FirstOfType<TextInputElement>(root, i => i.DrawsChrome);
 
         Assert.NotNull(input);
         Assert.Equal(app.Palette.ControlFill, input!.BackgroundColor);
         Assert.Equal(app.Palette.ControlStroke, input.BorderColor);
+    }
+
+    /// <summary>
+    /// The search box takes text, and keeps the caret while doing it.
+    ///
+    /// <para>Worth a test rather than a screenshot, because the magnifier costs something: the
+    /// focus ring belongs to the wrapper box, an element only gets focus styles for its own
+    /// focus, so focus has to be carried in app state — and that means focusing the field
+    /// rebuilds the pane underneath it. If that rebuild replaced the input instead of patching
+    /// it, focus would land nowhere and the typing would go missing. Asserting the same instance
+    /// is the point; the text is the symptom.</para>
+    /// </summary>
+    [Fact]
+    public void TheSearchBoxTakesTextAndKeepsItsCaretThroughTheRebuild()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+
+        var input = FirstOfType<TextInputElement>(root)!;
+        Assert.False(app.SearchFocused);
+
+        session.Window.Click(input);
+        session.PumpFrames(3);
+        Assert.True(app.SearchFocused);
+
+        session.Window.TypeText("display");
+        session.PumpFrames(3);
+
+        var live = FirstOfType<TextInputElement>(root)!;
+        Assert.Same(input, live);
+        Assert.Equal("display", live.Text);
+        Assert.True(app.SearchFocused);
+    }
+
+    /// <summary>And the box around it is the sample's, not the framework's — which is what lets
+    /// the magnifier sit inside it.</summary>
+    [Fact]
+    public void TheSearchInputDrawsNoBoxOfItsOwn()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+
+        var input = FirstOfType<TextInputElement>(root)!;
+
+        Assert.False(input.DrawsChrome);
+        Assert.NotEqual(app.Palette.ControlFill, input.BackgroundColor);
+        Assert.Equal(Thickness.Zero, input.Box.BorderWidth);
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -276,11 +326,11 @@ public class FluentSampleTests
 
     // ──────────────────────────────────────────────────────────────────────
 
-    private static T? FirstOfType<T>(Element root) where T : Element
+    private static T? FirstOfType<T>(Element root, Func<T, bool>? where = null) where T : Element
     {
-        if (root is T match) return match;
+        if (root is T match && (where is null || where(match))) return match;
         foreach (var child in root.Children)
-            if (FirstOfType<T>(child) is { } found)
+            if (FirstOfType(child, where) is { } found)
                 return found;
         return null;
     }
