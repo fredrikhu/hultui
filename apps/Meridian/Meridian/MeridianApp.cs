@@ -116,6 +116,14 @@ public partial class MeridianApp : Component, IDisposable
     {
         _app = app;
         _window = window;
+        // The built-in widgets read the Application theme rather than the colours this app
+        // paints with, and TextInputElement.ApplyTheme re-reads it on every style pass — so
+        // an unthemed Application leaves every text box and text area flat white in an
+        // otherwise Azimuth window. Program.cs sets this too, before the first frame; doing
+        // it here as well means anything that hosts MeridianApp directly (tests, the
+        // screenshot driver) gets the same window the user sees, rather than a frame that
+        // reads as a theming bug the app does not have. Mirrors JunctionApp and CommanderApp.
+        _app.Theme = Azimuth.ToHultTheme();
         // The window's dialogs are the real ones on a desktop and the scriptable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;

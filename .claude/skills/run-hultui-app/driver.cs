@@ -124,7 +124,14 @@ Element MountMeridian()
 {
     var a = new Meridian.MeridianApp(session.Application, session.Window.Window);
     instance = a as IDisposable;
-    return a.Mount();
+    var root = a.Mount();
+    // --dir opens a collection, the same as picking a folder in the app. Without one
+    // Meridian is an empty shell: no request list, no editor, nothing to drive.
+    if (dir.Length > 0)
+        typeof(Meridian.MeridianApp).GetMethod("OpenWorkspace",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(a, [dir]);
+    return root;
 }
 
 void Run(string step)
@@ -138,6 +145,7 @@ void Run(string step)
         case "key": Key(arg); break;
         case "click": Click(arg); break;
         case "drag": Drag(arg); break;
+        case "autoscroll": AutoScroll(arg); break;
         case "waitfor": WaitFor(arg); break;
         case "size": Resize(arg); break;
         default: throw new ArgumentException($"unknown step '{step}'");
@@ -213,6 +221,28 @@ void Drag(string arg)
     session.Window.MoveMouse(x2, y2);
     session.Window.MouseUp(x2, y2);
     session.PumpFrames(4);
+}
+
+// Holds the middle button away from where it was pressed and lets frames run, which is
+// the only way to see a Windows-style autoscroll: the pointer's distance from the anchor
+// is a *speed*, so the scrolling happens between input events rather than during them.
+// `drag` cannot show it — press, move and release with no frames in between leaves the
+// view exactly where it was, which reads as "the gesture does nothing".
+void AutoScroll(string arg)
+{
+    var bits = arg.Split(',');
+    float x, y;
+    int next;
+    if (bits[0].StartsWith('@')) { (x, y) = Center(Find(bits[0][1..])); next = 1; }
+    else { x = float.Parse(bits[0]); y = float.Parse(bits[1]); next = 2; }
+    float dy = float.Parse(bits[next]);
+    int ms = bits.Length > next + 1 ? int.Parse(bits[next + 1]) : 600;
+
+    session.Window.MouseDown(x, y, MouseButton.Middle);
+    session.Window.MoveMouse(x, y + dy);
+    Settle(ms);
+    session.Window.MouseUp(x, y + dy, MouseButton.Middle);
+    session.PumpFrames(2);
 }
 
 void WaitFor(string arg)

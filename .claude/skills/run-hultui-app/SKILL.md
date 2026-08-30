@@ -51,7 +51,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 |---|---|
 | `--app junction \| vesper \| meridian` | Which app to mount. Default `junction`. |
 | `--repo <path>` | Junction: the repository to open. Defaults to the git root of the working directory. |
-| `--dir <path>` / `--dir2 <path>` | Vesper: the left and right panes' folders. |
+| `--dir <path>` / `--dir2 <path>` | Vesper: the left and right panes' folders. Meridian: `--dir` opens a collection — without one it is an empty shell with nothing to drive. |
 | `--out <dir>` | Where PNGs land. Created if missing. Default `shots`. |
 | `--size 1400x900` | Window size in layout units. |
 
@@ -64,6 +64,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `key:<KeyCode>[+Ctrl][+Shift][+Alt]` | e.g. `key:Digit4`, `key:Down+Shift`, `key:F+Ctrl`. Names come from `KeyCode`. |
 | `click:<x>,<y>` or `click:@<text>` | `@` finds an element by its accessible name and clicks its centre. |
 | `drag:<x1>,<y1>,<x2>,<y2>` or `drag:@<text>,<dx>[,<dy>]` | Press, move, release as separate events. |
+| `autoscroll:<x>,<y>,<dy>[,<ms>]` or `autoscroll:@<text>,<dy>[,<ms>]` | Middle-button autoscroll: presses at the anchor, parks the pointer `dy` away, runs frames for `ms` (default 600), releases. `drag` cannot show this — the pointer's distance from the anchor is a *speed*, so the scrolling happens between input events, and a press-move-release with no frames in between leaves the view exactly where it was. |
 | `waitfor:<text>[,<seconds>]` | Pumps until an element with that name appears. Default 30s. |
 | `settle[:<ms>]` | Pumps frames for that long. Default 1200ms. |
 | `size:<w>x<h>` | Resizes the client area mid-run, then settles. |
@@ -76,6 +77,10 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app vesper --dir /tmp/de
   key:Down key:Down+Shift key:Down+Shift shot:vesper-marked
 
 dotnet run .claude/skills/run-hultui-app/driver.cs -- --app meridian --out /tmp/shots shot:meridian
+
+# Meridian on a collection, holding the middle button over the body editor for 900ms
+dotnet run .claude/skills/run-hultui-app/driver.cs -- --app meridian --dir /tmp/coll --out /tmp/shots \
+  'click:@POST Long' 'click:@Body json' shot:top autoscroll:350,500,60,900 shot:bottom
 ```
 
 ### Measuring a frame, not eyeballing it

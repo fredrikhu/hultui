@@ -168,6 +168,56 @@ public class TextAreaAutoScrollTests
         Assert.Equal(0f, list.ScrollOffsetY, 3);
     }
 
+    /// <summary>
+    /// A rebuild that replaces the area mid-gesture neither ends the scroll nor throws the
+    /// reader back to the top.
+    /// <para>The window captures its target on the press. A replaced element is dropped from
+    /// the tree without being marked detached — it looks perfectly alive, and scrolling it
+    /// moves something nobody can see — so the gesture re-resolves from the pointer and carries
+    /// its offset onto whatever it finds. That path was written for scroll views and reaches a
+    /// text area only through <see cref="IAutoScrollable.ScrollOffsetY"/>, which is the whole
+    /// reason the offset is on the interface rather than just <c>ScrollBy</c>.</para>
+    /// </summary>
+    [Fact]
+    public void ARebuildThatReplacesTheAreaKeepsTheGestureAndThePosition()
+    {
+        using var session = HeadlessSession.Create(width: 400, height: 300);
+        // Long enough that neither leg can reach the end and clamp, which would make the
+        // two offsets agree for the wrong reason.
+        string text = LinesOf(300);
+        var first = NewArea(text, readOnly: true).Height(ViewH).Width(300);
+        first.Key = "first";
+        session.Window.SetRoot(Flex.Column(gap: 0).Children(first));
+        session.PumpFrames(2);
+
+        var box = first.Layout.AbsoluteContentBox;
+        float x = box.X + box.Width / 2f, anchor = box.Y + box.Height / 2f;
+        session.Window.MouseDown(x, anchor, MouseButton.Middle);
+        session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+        // A long first leg against a short second one, so a replacement that started from
+        // the top could not reach the old offset again inside the time it is given.
+        Pump(session, 0.8);
+        float ran = first.ScrollOffsetY;
+        Assert.True(ran > 0, "the first leg did not scroll");
+
+        // A different key at the same slot, so the differ replaces rather than patches —
+        // which is what an app doing real work does often enough to matter.
+        var second = NewArea(text, readOnly: true).Height(ViewH).Width(300);
+        second.Key = "second";
+        session.Window.SetRoot(Flex.Column(gap: 0).Children(second));
+        session.PumpFrames(2);
+        Assert.NotSame(first, second);
+
+        Pump(session, 0.2);
+        session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+
+        Assert.True(second.ScrollOffsetY >= ran,
+            $"the replacement started at {second.ScrollOffsetY:0} against {ran:0} before the "
+            + "rebuild — the gesture threw the reader back up the file");
+        Assert.True(second.ScrollOffsetY > ran,
+            "the scroll stopped at the rebuild — the gesture lost its target");
+    }
+
     // -- Harness --------------------------------------------------------
 
     private static string LinesOf(int count) =>
