@@ -230,7 +230,17 @@ public sealed partial class FluentApp : Component
             _ => Pages.Home(this, p),
         };
 
-        var body = ScrollView.New().FlexGrow(1).Children(
+        // WinUI paints no scrollbar track at rest and rounds the thumb into a pill. It also
+        // rests at 2px and expands under the pointer; there is no hover state for a scrollbar
+        // here, so the width stays grabbable rather than becoming a 2px target you cannot hit.
+        var body = ScrollView.New().FlexGrow(1)
+            // Right padding rather than a framework knob: the bar is drawn at the inner edge of
+            // the content box, so padding insets it. WinUI leaves the same few pixels, and
+            // without them the pill's right half is clipped off by the window edge.
+            .Padding(new Thickness(0, 3, 0, 0));
+        body.ScrollbarColor = Color.Transparent;
+        body.ScrollbarThumbColor = p.ControlStrong;
+        body.Children(
             Flex.Column(gap: 0).FlexShrink(0)
                 .Padding(new Thickness(28, 36, 36, 36))
                 .MaxWidth(1064f)

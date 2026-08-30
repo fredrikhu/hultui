@@ -1,6 +1,30 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Three things the WinUI Gallery said we had wrong** — the sample was built from the published
+  colour table; this was the first time it was held up against the real thing, running on the
+  same machine. Captured with `PrintWindow(PW_RENDERFULLCONTENT)` and driven through UIA, so no
+  screen grabs and no synthesized input, and every finding below is a pixel measurement rather
+  than an impression.
+  - **The scrollbar thumb is a pill.** Ours drew `DrawRect` — square ends, plus an always-on
+    track. WinUI's resting bar is a 2px rounded thumb with *no* track, in
+    `ControlStrongFillColorDefault`, that widens under the pointer. `ScrollbarRadius` on
+    `ScrollViewElement` and `TextAreaElement` now defaults to half the width, so every app gets
+    the pill; set 0 for the old square ends. The expand-on-hover behaviour is not implemented,
+    which is why the sample keeps a grabbable 6px rather than a 2px target.
+  - **The two-tone control border ran the wrong way in dark mode.** Measured: a dark Gallery
+    button is fill `#2D2D2D`, top `#353535`, bottom `#303030` — the *top* is the highlight. The
+    rule is that the bottom edge always recedes, which in light means darker and in dark means
+    the top is brighter; the sample had the bottom heavier in both. Right for light, backwards
+    for dark, and invisible without the two windows side by side.
+  - **The off toggle's knob was too dim and its track too empty.** WinUI uses
+    `TextFillColorSecondary` (78.6% white) for the knob — brighter than the
+    `ControlStrongFillColorDefault` ring around it — and a faint `ControlAltFillColorSecondary`
+    in the track rather than nothing.
+  Confirmed *correct* while measuring, which is worth as much: the stroked chevron, black text
+  and a black knob on a dark-mode accent, the slider's accent-inside-a-ring thumb, 32px controls,
+  36px nav items and the 3x16 selection pill. 4 headless tests, 2 in the sample, each verified by
+  putting the fault back.
 - **A text input can hand its box to the caller** — `TextInputElement.DrawsChrome`, set through
   the `Chromeless()` builder: the theme's background, border, corner radius and padding are left
   alone so the surrounding control owns them. There was no way to get one before, and the way it

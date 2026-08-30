@@ -243,7 +243,54 @@ public class FluentSampleTests
 
         // 1px in total either way — the two-tone must not have become a 2px border.
         Assert.Equal(1f, outer.Box.BorderWidth.Bottom + inner.Box.BorderWidth.Bottom);
+
+        // And it runs the right way round. See TheBottomEdgeAlwaysRecedes.
+        Assert.True(Luma(outer.BorderColor) < Luma(inner.BorderColor));
     }
+
+    /// <summary>
+    /// The bottom edge of a control is always the darker of the two, in both palettes.
+    ///
+    /// <para>Measured against the WinUI Gallery rather than reasoned about, because reasoning
+    /// got it wrong: a dark-mode button there is fill #2D2D2D with a #353535 top and a #303030
+    /// bottom — the <i>top</i> is the highlight. The sample had the bottom as the heavier edge
+    /// in both modes, which is right for light and backwards for dark, and it is invisible until
+    /// you put the two windows side by side.</para>
+    /// </summary>
+    [Fact]
+    public void TheBottomEdgeAlwaysRecedes()
+    {
+        foreach (var dark in new[] { true, false })
+        {
+            var p = FluentPalette.For(dark, AccentPreset.Blue);
+            Assert.True(Luma(p.ControlStrokeBottom) < Luma(p.ControlStroke),
+                $"dark={dark}: bottom {p.ControlStrokeBottom} should be darker than top {p.ControlStroke}");
+        }
+    }
+
+    /// <summary>The off switch, also measured: the knob is TextFillColorSecondary (78.6% white),
+    /// brighter than the ControlStrongFillColorDefault ring around it, and the track carries a
+    /// faint fill rather than being a hole cut in the card.</summary>
+    [Fact]
+    public void TheOffToggleKnobIsBrighterThanItsRing()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+
+        GoTo(session, "Controls gallery");
+        var track = (BoxElement)session.Window.FindByRole(AccessibilityRole.Switch, "Airplane mode")!.Element;
+        var knob = (BoxElement)track.Children[0];
+
+        Assert.Equal(app.Palette.TextSecondary, knob.BackgroundColor);
+        Assert.Equal(app.Palette.ControlStrong, track.BorderColor);
+        Assert.Equal(app.Palette.ControlAltFill, track.BackgroundColor);
+        Assert.True(Luma(knob.BackgroundColor) > Luma(track.BorderColor));
+    }
+
+    /// <summary>Alpha-weighted, because half this palette is white or black at a percentage:
+    /// the knob and the ring around it are both pure white and differ only in how much of it
+    /// there is, and a luminance that ignores alpha calls them equal.</summary>
+    private static double Luma(Color c) => (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) * (c.A / 255.0);
 
     /// <summary>
     /// The expander opens, and its header gives up its bottom corners when it does. That is

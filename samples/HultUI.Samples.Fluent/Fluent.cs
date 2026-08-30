@@ -56,6 +56,11 @@ public sealed record FluentPalette
 
     public required Color ControlStrong { get; init; }       // ControlStrongFillColorDefault
 
+    /// <summary>The faint fill inside an unchecked toggle track or checkbox —
+    /// <c>ControlAltFillColorSecondary</c>. Barely visible on purpose, and missing it makes an
+    /// off switch look like a hole rather than a control.</summary>
+    public required Color ControlAltFill { get; init; }      // ControlAltFillColorSecondary
+
     // ── Subtle (nav items, icon buttons, list rows) ──
     public required Color SubtleHover { get; init; }        // SubtleFillColorSecondary
     public required Color SubtlePressed { get; init; }      // SubtleFillColorTertiary
@@ -101,9 +106,15 @@ public sealed record FluentPalette
             ControlHover = Hex("#3D3D3D"),
             ControlPressed = Hex("#343434"),
             ControlInputActive = Hex("#1F1F1F"),
-            ControlStroke = Hex("#454545"),
-            ControlStrokeBottom = Hex("#4F4F4F"),
+            // Measured off the WinUI Gallery: in dark mode the *top* edge is the brighter one
+            // and the bottom recedes (button fill #2D2D2D, top #353535, bottom #303030). The rule
+            // is that the bottom edge always reads as shadow — which in light means darker, and
+            // in dark means the top is the highlight. Having it the other way round is subtle
+            // and wrong, and it is the kind of thing only a side-by-side catches.
+            ControlStroke = Hex("#4C4C4C"),
+            ControlStrokeBottom = Hex("#484848"),
             ControlStrong = new Color(255, 255, 255, 139),
+            ControlAltFill = Hex("#292929"),
             SubtleHover = Hex("#2F2F2F"),
             SubtlePressed = Hex("#2A2A2A"),
             TextPrimary = Color.White,
@@ -140,6 +151,7 @@ public sealed record FluentPalette
             ControlStroke = Hex("#E1E1E1"),
             ControlStrokeBottom = Hex("#CFCFCF"),
             ControlStrong = new Color(0, 0, 0, 156),
+            ControlAltFill = Hex("#F2F2F2"),
             SubtleHover = Hex("#EDEDED"),
             SubtlePressed = Hex("#E5E5E5"),
             TextPrimary = Hex("#1A1A1A"),

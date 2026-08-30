@@ -224,13 +224,16 @@ public static class F
     {
         var knob = Box.New().FlexShrink(0)
             .Width(12f).Height(12f).CornerRadius(6f)
-            .Background(on ? p.TextOnAccent : p.ControlStrong)
+            // Measured off the WinUI Gallery: the off knob is TextFillColorSecondary (78.6% white),
+            // not the dimmer ControlStrongFillColorDefault the track border uses. The knob reads
+            // as text; the ring around it reads as a border.
+            .Background(on ? p.TextOnAccent : p.TextSecondary)
             .TranslateBy(on ? 20f : 0f, 0f)
             .Transition(TransitionProperty.Transform, 150f);
 
         return Box.New().FlexShrink(0)
             .Width(40f).Height(20f).CornerRadius(10f)
-            .Background(on ? p.Accent : Color.Transparent)
+            .Background(on ? p.Accent : p.ControlAltFill)
             .Border(new Thickness(1), on ? p.Accent : p.ControlStrong)
             .Padding(new Thickness(0, 3, 0, 3))
             .FlexDirection(FlexDirection.Row)

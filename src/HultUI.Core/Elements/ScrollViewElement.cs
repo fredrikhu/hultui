@@ -70,6 +70,16 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     public Color ScrollbarThumbColor { get; set; } = new(128, 128, 128, 180);
     public float ScrollbarWidth { get; set; } = 6f;
 
+    /// <summary>
+    /// Corner radius of the track and thumb. Defaults to half the width, which makes the thumb
+    /// a pill — every current platform draws it that way, and a square-ended bar is the single
+    /// most dated-looking thing in an otherwise modern window. Set 0 for square ends.
+    /// </summary>
+    public float ScrollbarRadius { get; set; } = -1f;
+
+    internal float EffectiveScrollbarRadius =>
+        ScrollbarRadius < 0 ? ScrollbarWidth / 2f : ScrollbarRadius;
+
     public ScrollViewElement()
     {
         // Default: vertical scroll. OverflowY=Scroll gives children unlimited
@@ -231,6 +241,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     public void RenderScrollbars(IRenderContext ctx)
     {
         var contentBox = Layout.AbsoluteContentBox;
+        var radius = new CornerRadius(EffectiveScrollbarRadius);
 
         // Vertical scrollbar
         if (ShowScrollbarY && _contentHeight > contentBox.Height)
@@ -243,14 +254,14 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
 
             // Track
-            ctx.DrawRect(
+            ctx.DrawRoundedRect(
                 new Rect(trackX, contentBox.Y, ScrollbarWidth, trackHeight),
-                ScrollbarColor);
+                radius, ScrollbarColor, Color.Transparent, default);
 
             // Thumb
-            ctx.DrawRect(
+            ctx.DrawRoundedRect(
                 new Rect(trackX, thumbY, ScrollbarWidth, thumbHeight),
-                ScrollbarThumbColor);
+                radius, ScrollbarThumbColor, Color.Transparent, default);
         }
 
         // Horizontal scrollbar
@@ -263,13 +274,13 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             float thumbX = contentBox.X + scrollRatio * (trackWidth - thumbWidth);
             float trackY = contentBox.Y + contentBox.Height - ScrollbarWidth;
 
-            ctx.DrawRect(
+            ctx.DrawRoundedRect(
                 new Rect(contentBox.X, trackY, trackWidth, ScrollbarWidth),
-                ScrollbarColor);
+                radius, ScrollbarColor, Color.Transparent, default);
 
-            ctx.DrawRect(
+            ctx.DrawRoundedRect(
                 new Rect(thumbX, trackY, thumbWidth, ScrollbarWidth),
-                ScrollbarThumbColor);
+                radius, ScrollbarThumbColor, Color.Transparent, default);
         }
     }
 
@@ -285,6 +296,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
             ScrollbarColor = sv.ScrollbarColor;
             ScrollbarThumbColor = sv.ScrollbarThumbColor;
             ScrollbarWidth = sv.ScrollbarWidth;
+            ScrollbarRadius = sv.ScrollbarRadius;
             // Preserve scroll offset — don't copy from incoming
         }
     }

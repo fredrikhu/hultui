@@ -124,6 +124,10 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     public Color ScrollbarColor { get; set; } = new(128, 128, 128, 100);
     public Color ScrollbarThumbColor { get; set; } = new(128, 128, 128, 180);
     public float ScrollbarWidth { get; set; } = 6f;
+
+    /// <summary>Corner radius of the track and thumb; defaults to half the width, the same pill
+    /// <see cref="ScrollViewElement.ScrollbarRadius"/> draws. Set 0 for square ends.</summary>
+    public float ScrollbarRadius { get; set; } = -1f;
     public float ScrollSpeed { get; set; } = 40f;
 
     protected internal override void ApplyTheme(Theme theme)
@@ -1178,8 +1182,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
             float thumbY = contentBox.Y + scrollRatio * (trackHeight - thumbHeight);
             float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
 
-            ctx.DrawRect(new Rect(trackX, contentBox.Y, ScrollbarWidth, trackHeight), ScrollbarColor);
-            ctx.DrawRect(new Rect(trackX, thumbY, ScrollbarWidth, thumbHeight), ScrollbarThumbColor);
+            var barRadius = new CornerRadius(ScrollbarRadius < 0 ? ScrollbarWidth / 2f : ScrollbarRadius);
+            ctx.DrawRoundedRect(new Rect(trackX, contentBox.Y, ScrollbarWidth, trackHeight),
+                barRadius, ScrollbarColor, Color.Transparent, default);
+            ctx.DrawRoundedRect(new Rect(trackX, thumbY, ScrollbarWidth, thumbHeight),
+                barRadius, ScrollbarThumbColor, Color.Transparent, default);
         }
     }
 
