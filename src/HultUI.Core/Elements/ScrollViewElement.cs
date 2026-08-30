@@ -128,7 +128,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
 
     /// <summary>
     /// The render-time hook. Separate from <see cref="UpdateScrollExtent"/> because
-    /// <see cref="VirtualListElement"/> also realizes and lays out its visible rows here, and
+    /// <see cref="VirtualListElement{T}"/> also realizes and lays out its visible rows here, and
     /// that cannot happen from inside the layout pass it would re-enter.
     /// </summary>
     internal virtual void UpdateContentSize() => UpdateScrollExtent();
