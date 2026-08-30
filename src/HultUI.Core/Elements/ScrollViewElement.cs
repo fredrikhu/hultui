@@ -6,7 +6,7 @@ using HultUI.Core.Rendering;
 
 namespace HultUI.Core.Elements;
 
-public partial class ScrollViewElement : BoxElement, IScrollbarDraggable
+public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 {
     protected float _scrollOffsetX;
     protected float _scrollOffsetY;

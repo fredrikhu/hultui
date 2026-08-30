@@ -455,9 +455,7 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
     {
         var el = session.Window.FindByAutomationId("response-body");
         Assert.True(el != null, "response body area not found");
-        return (float)typeof(TextAreaElement).GetProperty("ScrollOffsetY",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .GetValue(el!.Element)!;
+        return ((TextAreaElement)el!.Element).ScrollOffsetY;
     }
 
     private static void MarkDirty(MeridianApp app) =>

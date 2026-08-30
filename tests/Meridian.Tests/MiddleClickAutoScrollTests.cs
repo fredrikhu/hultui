@@ -33,6 +33,8 @@ public class MiddleClickAutoScrollTests : IDisposable
         // Enough requests that the sidebar's tree has somewhere to scroll.
         for (int i = 0; i < 200; i++)
             File.WriteAllText(Path.Combine(_root, $"req-{i:000}.req"), "GET http://127.0.0.1/ok\n");
+        // One request whose result the body tests replace with something long enough to scroll.
+        File.WriteAllText(Path.Combine(_root, "long.req"), "GET http://127.0.0.1/long\n");
     }
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
@@ -126,7 +128,92 @@ public class MiddleClickAutoScrollTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// The response body scrolls too — the surface every list in the app exists to open.
+    /// <para>It did not, and none of the tests above could tell. The body is a
+    /// <c>TextAreaElement</c>, which scrolls its own wrapped rows rather than child elements
+    /// and so is not a scroll view; the gesture looked for that class, found none walking up
+    /// from the body, and did nothing. Every list scrolled and the one pane a reader actually
+    /// holds the button on sat still.</para>
+    /// </summary>
+    [Fact]
+    public void HoldingTheMiddleButtonScrollsTheResponseBody()
+    {
+        Hosted((session, app) =>
+        {
+            var body = LongResponseBody(session, app);
+            Assert.True(body.CanAutoScroll, "the fixture's response fits the pane");
+
+            var box = body.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.5);
+
+            Assert.True(ResponseBody(session).ScrollOffsetY > 0,
+                "holding the middle button over the response body did not scroll it");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
+    /// <summary>And stops where the response ends, rather than running on past its last
+    /// line.</summary>
+    [Fact]
+    public void TheResponseBodyStopsAtItsLastLine()
+    {
+        Hosted((session, app) =>
+        {
+            var body = LongResponseBody(session, app);
+            var box = body.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 300f);
+            PumpFor(session, 4.0);
+            float end = ResponseBody(session).ScrollOffsetY;
+            Assert.True(end > 0, "nothing scrolled at all");
+
+            PumpFor(session, 1.0);
+            Assert.Equal(end, ResponseBody(session).ScrollOffsetY, 1);
+
+            session.Window.MouseUp(x, anchor + DeadZone + 300f, MouseButton.Middle);
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
+
+    /// <summary>Opens the long request and hands it a result four hundred lines long, so the
+    /// pane has somewhere to scroll without depending on what a server returned.</summary>
+    private static TextAreaElement LongResponseBody(HeadlessSession session, MeridianApp app)
+    {
+        var el = session.Window.FindByAutomationId("req-long");
+        Assert.True(el != null, "the long request is not in the tree");
+        el!.Click();
+        session.PumpFrames(2);
+
+        var text = string.Join('\n',
+            Enumerable.Range(0, 400).Select(i => $"line {i:000} of a response worth scrolling"));
+        app.ActiveTab!.Result = Meridian.Core.SendResult.Ok(new Meridian.Core.HttpResponseData(
+            200, "OK", [("Content-Type", "text/plain")], "text/plain",
+            new Meridian.Core.ResponseBody(Meridian.Core.BodyKind.Text, text, [], text.Length, false, null),
+            new Meridian.Core.PhaseTimings(default, default, default, default, default, default, false, "HTTP/1.1", null),
+            "http://127.0.0.1/long"));
+        typeof(MeridianApp).GetMethod("MarkDirty", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(app, null);
+        session.PumpFrames(3);
+        return ResponseBody(session);
+    }
+
+    /// <summary>Re-read each time, for the same reason <see cref="Scrollable"/> is.</summary>
+    private static TextAreaElement ResponseBody(HeadlessSession session)
+    {
+        var el = session.Window.FindByAutomationId("response-body");
+        Assert.True(el != null, "the response body is not on screen");
+        return (TextAreaElement)el!.Element;
+    }
+
 
     /// <summary>Pumps <paramref name="seconds"/> of virtual time. PumpFrame advances the clock
     /// itself, so nothing else here may advance it — that would run the scroll at double speed

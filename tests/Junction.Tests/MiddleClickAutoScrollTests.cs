@@ -311,7 +311,102 @@ public class MiddleClickAutoScrollTests
         }, wrap: true);
     }
 
+    /// <summary>
+    /// The Files view's body scrolls too.
+    /// <para>Every other surface in this file is a virtualized list, and that is what the
+    /// gesture used to look for. A file's text is a <c>TextAreaElement</c>, which scrolls its
+    /// own wrapped rows instead of child elements — so the sidebar's tree scrolled under a
+    /// held middle button and the file beside it did not.</para>
+    /// </summary>
+    [Fact]
+    public void HoldingTheMiddleButtonScrollsAFilesViewBody()
+    {
+        WithLongFile((session, app) =>
+        {
+            var body = FileBody(app);
+            Assert.True(body.CanAutoScroll, "the fixture's file fits the pane");
+
+            var box = body.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.5);
+
+            Assert.True(FileBody(app).ScrollOffsetY > 0,
+                "holding the middle button over a file's text did not scroll it");
+
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+        });
+    }
+
+    /// <summary>And the press leaves the reader's place in the text alone — a middle press on
+    /// a body is a scroll, never a caret move or the start of a selection.</summary>
+    [Fact]
+    public void TheGestureDoesNotDisturbTheSelectionInAFile()
+    {
+        WithLongFile((session, app) =>
+        {
+            var body = FileBody(app);
+            var box = body.Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, anchor = box.Y + 40f;
+
+            session.Window.MouseDown(x, anchor, MouseButton.Middle);
+            session.Window.MoveMouse(x, anchor + DeadZone + 40f);
+            PumpFor(session, 0.4);
+            session.Window.MouseUp(x, anchor + DeadZone + 40f, MouseButton.Middle);
+
+            var after = FileBody(app);
+            Assert.True(after.ScrollOffsetY > 0, "the gesture did not run, so this proves nothing");
+            Assert.Equal("", after.SelectedText);
+        });
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────
+
+    private static TextAreaElement FileBody(JunctionApp app) =>
+        ((HultUI.Core.Reactivity.Ref<TextAreaElement>)typeof(JunctionApp)
+            .GetField("_fileBodyRef", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(app)!).Current
+        ?? throw new Xunit.Sdk.XunitException("the Files view never mounted a body");
+
+    /// <summary>Mounts the app on the Files view with a four-hundred-line file open, which is
+    /// the state a reader is in when they reach for the middle button there.</summary>
+    private static void WithLongFile(System.Action<HeadlessSession, JunctionApp> body)
+    {
+        using var repo = TempRepo.CreateWithInitialCommit();
+        repo.Write("sample.cs", string.Join("\n",
+            Enumerable.Range(1, 400).Select(i => $"// line {i} of a file worth scrolling")) + "\n");
+        repo.Git("add", "-A");
+        repo.Git("commit", "-m", "add a sample file");
+
+        using var session = HeadlessSession.Create(1400, 900);
+        JunctionApp? app = null;
+        try
+        {
+            app = new JunctionApp(session.Application, session.Window.Window, new JunctionSettingsData
+            {
+                RepositoryPaths = [repo.Path],
+                ActiveRepoPath = repo.Path,
+                Workspaces = [new WorkspaceData { Id = "w1", Name = "Tests", RepoPaths = [repo.Path] }],
+                ActiveWorkspaceId = "w1",
+            });
+            session.Application.SetRoot(app.Mount());
+            session.PumpFrames(3);
+            session.Window.PressKey(KeyCode.Digit7);   // Files
+            typeof(JunctionApp).GetField("_filesSelPath", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(app, "sample.cs");
+            session.PumpUntil(
+                () => ((HultUI.Core.Reactivity.Ref<TextAreaElement>)typeof(JunctionApp)
+                    .GetField("_fileBodyRef", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(app)!).Current is { Text.Length: > 1000 },
+                System.TimeSpan.FromSeconds(30));
+            session.PumpFrames(3);
+            body(session, app);
+        }
+        finally { app?.Dispose(); }
+    }
+
 
     /// <summary>Clicks the fixture's one changed line — the trailing <c>EDIT</c> — with the
     /// given button in a fresh app, and returns how many lines ended up staged.</summary>

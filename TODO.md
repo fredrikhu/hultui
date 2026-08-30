@@ -1,6 +1,18 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Autoscroll reaches text areas** — the gesture matched on `ScrollViewElement`, which is
+  what carries a *list*. A wall of text is a `TextAreaElement`: it scrolls its own wrapped
+  rows rather than child elements, and is a `BoxElement`. So every list in every app scrolled
+  under a held middle button and the pane those lists exist to open sat still — Meridian's
+  response body most visibly, Junction's Files body beside it. A reader has no way to tell the
+  two kinds of scrolling thing apart, so the window now looks for `IAutoScrollable`
+  (`MiddleClickAutoScroll` / `CanAutoScroll` / `ScrollOffsetY` / `ScrollBy`) and both answer to
+  it; implement it on anything else that scrolls content it owns. `TextAreaElement.ScrollOffsetY`
+  became public and clamping on the way (it was internal, and three test files reflected at it).
+  The trap to remember is the shape, not the fix: a capability found by class name silently
+  excludes everything that does the same job differently. 8 framework tests, 2 in Meridian,
+  2 in Junction — each verified by putting the class-name match back.
 - **Middle-click autoscroll** — holding the middle button in any `ScrollViewElement` (and so
   any `VirtualList`) anchors an origin and turns the pointer's distance from it into a
   *speed*, the way Windows does: the view keeps moving while the button is held even though

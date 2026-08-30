@@ -274,9 +274,7 @@ public class FilesFindTests
 
     private static IReadOnlyList<TextSpan> BodySpans(JunctionApp app) => Body(app).Spans ?? [];
 
-    private static float ScrollY(JunctionApp app) =>
-        (float)typeof(TextAreaElement).GetProperty("ScrollOffsetY",
-            BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Body(app))!;
+    private static float ScrollY(JunctionApp app) => Body(app).ScrollOffsetY;
 
     private static bool IsFindTint(HultUI.Core.Primitives.Color c) =>
         c == Theme.Nocturne.FindHitBg || c == Theme.Nocturne.FindCurrentBg;

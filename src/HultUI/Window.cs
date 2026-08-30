@@ -29,7 +29,7 @@ public sealed class Window : IOverlayHost, IDisposable
     // button is held and nothing else has to happen. The view is captured on press rather
     // than re-hit-tested per frame, so a pointer dragged out over another list (or off the
     // window entirely) keeps scrolling the one the gesture started in.
-    private ScrollViewElement? _autoScrollTarget;
+    private IAutoScrollable? _autoScrollTarget;
     private Point _autoScrollOrigin;
     private Point _autoScrollPointer;
     private long _autoScrollLastMs;
@@ -1433,13 +1433,17 @@ public sealed class Window : IOverlayHost, IDisposable
         return null;
     }
 
-    /// <summary>The nearest scroll view above <paramref name="target"/> that opts into
+    /// <summary>The nearest scrollable surface above <paramref name="target"/> that opts into
     /// middle-click autoscroll and has somewhere left to scroll. Nested lists resolve
     /// inwards, which is what a pointer inside the inner one means.</summary>
-    private static ScrollViewElement? FindAutoScrollAncestor(Element? target)
+    /// <remarks>Matched on <see cref="IAutoScrollable"/> rather than on a scroll view, because
+    /// a text area scrolls its own wrapped rows without being one. Looking for the class meant
+    /// the gesture worked on every list in an app and did nothing on the wall of text those
+    /// lists were there to open — Meridian's response body, most visibly.</remarks>
+    private static IAutoScrollable? FindAutoScrollAncestor(Element? target)
     {
         for (var current = target; current is not null; current = current.Parent)
-            if (current is ScrollViewElement { MiddleClickAutoScroll: true, CanAutoScroll: true } sv)
+            if (current is IAutoScrollable { MiddleClickAutoScroll: true, CanAutoScroll: true } sv)
                 return sv;
         return null;
     }
@@ -1465,7 +1469,8 @@ public sealed class Window : IOverlayHost, IDisposable
         // perfectly alive, and scrolling it moves something nobody can see. Junction's diff
         // does exactly that, once, part way through a gesture: the scroll stopped dead and the
         // view sat at the top.
-        if (_autoScrollTarget.IsDetached || !IsAttachedToRoot(_autoScrollTarget))
+        var captured = (Element)_autoScrollTarget;
+        if (captured.IsDetached || !IsAttachedToRoot(captured))
         {
             // Overlays first, the same order the press used to find the target. A dropdown's
             // popup list is a real overlay: hit-testing only the main tree would re-resolve to

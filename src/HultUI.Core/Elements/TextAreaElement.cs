@@ -8,7 +8,7 @@ using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
 
-public class TextAreaElement : BoxElement, IScrollbarDraggable
+public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 {
     private string _text = "";
     private int _cursorPos;
@@ -619,8 +619,38 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
         MarkPaintDirty();
     }
 
-    /// <summary>Current vertical scroll offset in pixels.</summary>
-    internal float ScrollOffsetY => _scrollOffsetY;
+    /// <summary>Current vertical scroll offset in pixels. Setting it clamps to the
+    /// scrollable range, so a caller need not know the content height.</summary>
+    public float ScrollOffsetY
+    {
+        get => _scrollOffsetY;
+        set
+        {
+            float clamped = Math.Clamp(value, 0, MaxScrollY());
+            if (clamped == _scrollOffsetY) return;
+            _scrollOffsetY = clamped;
+            MarkPaintDirty();
+        }
+    }
+
+    // ---- Autoscroll (IAutoScrollable) ----
+
+    /// <inheritdoc cref="ScrollViewElement.MiddleClickAutoScroll"/>
+    public bool MiddleClickAutoScroll { get; set; } = true;
+
+    /// <summary>Whether the text is taller than the box holding it. Horizontal never counts:
+    /// the area wraps to its width, so there is no sideways axis to scroll.</summary>
+    public bool CanAutoScroll => TotalContentHeight() > Layout.AbsoluteContentBox.Height + 0.5f;
+
+    /// <summary>Moves the view down by <paramref name="dy"/>. The horizontal delta is
+    /// discarded rather than ignored quietly for lack of a use: wrapped text has no
+    /// overflow to the right to reach.</summary>
+    public bool ScrollBy(float dx, float dy)
+    {
+        float before = _scrollOffsetY;
+        ScrollOffsetY = before + dy;
+        return _scrollOffsetY != before;
+    }
 
     /// <summary>Largest valid vertical scroll offset (content height minus viewport).</summary>
     private float MaxScrollY() => Math.Max(0, TotalContentHeight() - Layout.AbsoluteContentBox.Height);
@@ -1231,6 +1261,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable
             TextChanged = area.TextChanged;
             ReadOnly = area.ReadOnly;
             Spans = area.Spans;
+            MiddleClickAutoScroll = area.MiddleClickAutoScroll;
 
             // Preserve the caret / selection across a reconcile patch. The Text setter
             // collapses the selection to an end-anchored caret, which would wipe a live

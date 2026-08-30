@@ -120,8 +120,7 @@ public class FindRevealDeliveryTests
         (HultUI.Core.Reactivity.Ref<TextAreaElement>)typeof(JunctionApp)
             .GetField("_fileBodyRef", Priv)!.GetValue(app)!;
 
-    private static float ScrollY(TextAreaElement body) =>
-        (float)typeof(TextAreaElement).GetProperty("ScrollOffsetY", Priv)!.GetValue(body)!;
+    private static float ScrollY(TextAreaElement body) => body.ScrollOffsetY;
 
     private static void Hosted(Action<HeadlessSession, JunctionApp> body)
     {
