@@ -120,11 +120,15 @@ and benchmark work.
   what half this framework's own controls were already doing by hand with
   `if (evt.Button != 0) return`. A handler that really wants the middle or right button reads
   it off PointerDown, where the button is.
-- **A control that owns its own wrapping is immune to all of this.** Meridian shows response
-  bodies through `TextAreaElement`, which wraps during layout and caches its line starts
-  against the width it wrapped at, so a resize re-wraps with nothing for the app to do. The
-  fault only exists where an app measures wrapped heights itself and hands them to a
-  virtualized list. Worth reaching for the control before building the measuring machinery.
+- **A control that owns its own wrapping is immune to all of this — but test that it does.**
+  Meridian shows response bodies through `TextAreaElement`, which wraps during layout and
+  caches its line starts against the width it wrapped at, so a resize re-wraps with nothing
+  for the app to do. The measured-height fault only exists where an app measures wrapped rows
+  itself and hands them to a virtualized list; reach for the control before building that
+  machinery. What "it wraps itself" does not buy you is the width being right: adding 14px to
+  the wrap width inside the control left every suite in the repository green, all four apps
+  and the framework, because nobody had asserted that a wrapped line fits the box it is in.
+  `TextAreaWrapWidthTests` does now.
 - **Correcting a width takes two halves, and each is useless alone.** The column width is
   read from a laid-out box, so a build started before layout sees the width from a frame ago
   — one rebuild on resize measures at the *old* width and fixes nothing. The post-frame
