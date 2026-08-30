@@ -1,6 +1,23 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The WinUI look, as a sample** — `samples/HultUI.Samples.Fluent`: a Windows 11
+  Settings-shaped app — borderless window, caption bar drawn as elements, NavigationView with
+  the 3x16 accent selection pill, a content frame with one rounded corner, settings cards,
+  toggle switches, InfoBars, an expander, a controls gallery, light/dark and six Windows accent
+  presets. No framework feature was added for the shape of it; the whole design language turned
+  out to be arithmetic (32px controls, 4px radii, 68px rows) plus the two details that actually
+  carry the resemblance. Those are worth naming because both are easy to lose: WinUI's control
+  border is a *vertical gradient*, darker along the bottom, which is what makes a Fluent button
+  look like it rests on the page — a box takes one border colour, so a button is two nested
+  boxes, outer drawing the bottom edge and inner the other three. And in dark mode the accent
+  is a pale blue with *black* text on it; getting that inversion backwards is the fastest way to
+  look like something else. Colours carry Microsoft's own names (`CardBackgroundFillColorDefault`,
+  `ControlStrokeColorSecondary`) so the sample can be checked against the published table.
+  Icons are Segoe Fluent Icons where the font is installed and Phosphor where it is not —
+  probed by file, because a missing family does not fail at the font stack, it silently draws
+  blank boxes. Mica is the one thing faked, and the About page says so. 9 tests, each verified
+  by putting the fault back; drivable as `--app fluent [--dark false] [--accent 0-5]`.
 - **The slider is themable** — `SliderTheme` (`TrackColor` / `FillColor` / `ThumbColor` /
   `ThumbBorderColor`, all nullable and all falling back to what the control already painted).
   It was the last interactive control reading `theme.Primary` and `theme.Border` straight,

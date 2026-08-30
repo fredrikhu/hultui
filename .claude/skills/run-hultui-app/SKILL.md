@@ -1,6 +1,6 @@
 ---
 name: run-hultui-app
-description: Run, drive, and screenshot the HultUI desktop apps — Junction, Vesper Commander, Meridian. Use when asked to run one of them, look at a UI change, take a screenshot, check how something renders, or interact with the app rather than its tests.
+description: Run, drive, and screenshot the HultUI desktop apps — Junction, Vesper Commander, Meridian — and the Fluent sample. Use when asked to run one of them, look at a UI change, take a screenshot, check how something renders, or interact with the app rather than its tests.
 ---
 
 Renders a HultUI app off-screen and writes PNGs of what it drew, via
@@ -23,8 +23,8 @@ dotnet --version   # 10.0.300 when this was written
 ```
 
 The driver is a .NET file-based app: the `#:project` lines at the top of `driver.cs` pull in
-`HultUI.Headless` and the three app projects, so `dotnet run` builds what it needs. First run
-takes ~40s; later ones are a few seconds.
+`HultUI.Headless`, the three app projects and the Fluent sample, so `dotnet run` builds what
+it needs. First run takes ~40s; later ones are a few seconds.
 
 ## Run (agent path)
 
@@ -49,11 +49,13 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 
 | Option | Meaning |
 |---|---|
-| `--app junction \| vesper \| meridian` | Which app to mount. Default `junction`. |
+| `--app junction \| vesper \| meridian \| fluent` | Which app to mount. Default `junction`. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample. |
 | `--repo <path>` | Junction: the repository to open. Defaults to the git root of the working directory. |
 | `--dir <path>` / `--dir2 <path>` | Vesper: the left and right panes' folders. Meridian: `--dir` opens a collection — without one it is an empty shell with nothing to drive. |
 | `--out <dir>` | Where PNGs land. Created if missing. Default `shots`. |
 | `--size 1400x900` | Window size in layout units. |
+| `--dark true\|false` | Fluent sample only: which mode to open in. Default dark. |
+| `--accent 0-5` | Fluent sample only: which Windows accent preset. 0 blue, 1 purple, 2 teal, 3 green, 4 orange, 5 red. |
 
 ### Steps
 
@@ -82,6 +84,11 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app meridian --out /tmp/
 # Meridian on a collection, holding the middle button over the body editor for 900ms
 dotnet run .claude/skills/run-hultui-app/driver.cs -- --app meridian --dir /tmp/coll --out /tmp/shots \
   'click:@POST Long' 'click:@Body json' shot:top autoscroll:350,500,60,900 shot:bottom
+
+# The Fluent sample, light mode, both of the pages worth looking at
+dotnet run .claude/skills/run-hultui-app/driver.cs -- --app fluent --dark false --size 1280x860 \
+  --out /tmp/shots 'click:@Personalization' shot:personalization \
+  'click:@Controls gallery' shot:gallery
 ```
 
 ### Measuring a frame, not eyeballing it

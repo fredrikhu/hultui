@@ -30,6 +30,7 @@
     <Project Path="samples/HultUI.Samples.Clipboard/HultUI.Samples.Clipboard.csproj" />
     <Project Path="samples/HultUI.Samples.Dropdown/HultUI.Samples.Dropdown.csproj" />
     <Project Path="samples/HultUI.Samples.DateTime/HultUI.Samples.DateTime.csproj" />
+    <Project Path="samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
@@ -54,6 +55,7 @@
     <Project Path="tests/HultUI.Rendering.Skia.Tests/HultUI.Rendering.Skia.Tests.csproj" />
     <Project Path="tests/HultUI.SourceGenerators.Tests/HultUI.SourceGenerators.Tests.csproj" />
     <Project Path="tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj" />
+    <Project Path="tests/HultUI.Samples.Fluent.Tests/HultUI.Samples.Fluent.Tests.csproj" />
     <Project Path="tests/HultUI.UiTests/HultUI.UiTests.csproj" />
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />

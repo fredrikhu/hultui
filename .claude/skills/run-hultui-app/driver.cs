@@ -2,6 +2,7 @@
 #:project ../../../apps/Junction/Junction.csproj
 #:project ../../../apps/VesperCommander/VesperCommander.csproj
 #:project ../../../apps/Meridian/Meridian/Meridian.csproj
+#:project ../../../samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj
 
 // Drives a HultUI app off-screen and writes PNGs of what it drew.
 //
@@ -26,6 +27,8 @@ using HultUI.Headless;
 
 string app = "junction", outDir = "shots", repo = "", dir = "", dir2 = "";
 int width = 1400, height = 900;
+bool fluentDark = true;
+int fluentAccent = 0;
 var steps = new List<string>();
 
 for (int i = 0; i < args.Length; i++)
@@ -37,6 +40,8 @@ for (int i = 0; i < args.Length; i++)
         case "--repo": repo = Path.GetFullPath(args[++i]); break;
         case "--dir": dir = Path.GetFullPath(args[++i]); break;
         case "--dir2": dir2 = Path.GetFullPath(args[++i]); break;
+        case "--dark": fluentDark = bool.Parse(args[++i]); break;
+        case "--accent": fluentAccent = int.Parse(args[++i]); break;
         case "--size":
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
@@ -66,7 +71,8 @@ try
         "junction" => MountJunction(),
         "vesper" or "vespercommander" => MountVesper(),
         "meridian" => MountMeridian(),
-        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian)"),
+        "fluent" => MountFluent(),
+        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | fluent)"),
     };
     session.Application.SetRoot(root);
     session.PumpFrames(3);
@@ -132,6 +138,16 @@ Element MountMeridian()
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .Invoke(a, [dir]);
     return root;
+}
+
+// The Fluent sample. `--dark false` opens it in light mode, and `--accent <0-5>` picks one of
+// the Windows accent presets, so both palettes can be captured without touching the source.
+Element MountFluent()
+{
+    var a = new HultUI.Samples.Fluent.FluentApp(session.Application, session.Window.Window);
+    if (!fluentDark) a.SetDark(false);
+    if (fluentAccent > 0) a.SetAccent(fluentAccent);
+    return a.Mount();
 }
 
 void Run(string step)

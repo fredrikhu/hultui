@@ -227,6 +227,7 @@ these two carry a whole product's worth of them.
 - [`HultUI.Samples.ThemedControl`](samples/HultUI.Samples.ThemedControl/) -- theming a control the app didn't write
 - [`HultUI.Samples.Clipboard`](samples/HultUI.Samples.Clipboard/) -- one selection copied in several formats
 - [`HultUI.Samples.Dropdown`](samples/HultUI.Samples.Dropdown/) -- single-select dropdowns, mouse and keyboard
+- [`HultUI.Samples.Fluent`](samples/HultUI.Samples.Fluent/) -- the Windows 11 / WinUI look, built from HultUI primitives
 
 ## Requirements
 
