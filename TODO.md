@@ -1,6 +1,24 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **A scroll view that had not been painted could not be scrolled** — its extent was computed
+  by the *renderer*, and the renderer culls: anything outside a clipping ancestor is skipped
+  entirely, so such a view reported a content size of zero. That zero is not inert, because the
+  offset setters clamp against it — setting `ScrollOffsetY` on one silently did nothing, which
+  is the worse of the two ways to be wrong. Wheeling was never the broken path (the wheel only
+  arrives once the pane is on screen, and being on screen is what made it measurable); what
+  broke is everything that scrolls a view *before* it is painted — restoring a saved offset,
+  revealing a search hit, scrolling an item into view on the frame the pane is built. A vertical
+  scroll view nested inside another vertical one hit it every time, because whatever sits above
+  it in the outer view is usually tall enough to push it outside the outer's clip on the first
+  frame; it arrived permanently unable to scroll, which is how this surfaced. The extent is now
+  computed by the layout pass, which is the pass that actually knows where the children ended
+  up. `UpdateScrollExtent` (pure: measure and clamp) split from `UpdateContentSize` (the render
+  hook), because `VirtualListElement` also realizes and lays out its visible rows there and that
+  cannot run from inside the layout pass it would re-enter. 5 headless tests, 3 of which fail
+  with the layout-pass call removed — and the two that do not are labelled as the coverage they
+  are. Still open, and a different complaint: an inner view swallows the wheel once it has
+  nothing left to give instead of handing the rest to the page.
 - **The WinUI look, as a sample** — `samples/HultUI.Samples.Fluent`: a Windows 11
   Settings-shaped app — borderless window, caption bar drawn as elements, NavigationView with
   the 3x16 accent selection pill, a content frame with one rounded corner, settings cards,

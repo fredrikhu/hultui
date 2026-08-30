@@ -322,16 +322,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         return lo;
     }
 
-    internal override void UpdateContentSize()
+    /// <summary>The extent comes from the row geometry rather than from the children, because
+    /// the children here are only the realized window onto the items. Safe to run from the
+    /// layout pass: it measures and clamps, and touches no children.</summary>
+    internal override void UpdateScrollExtent()
     {
-        // Set virtual content height from the row geometry (uniform or measured)
         EnsureOffsets();
         _contentHeight = TotalHeight;
         _contentWidth = Layout.AbsoluteContentBox.Width;
 
-        // Re-clamp scroll offset
         _scrollOffsetX = ClampX(_scrollOffsetX);
         _scrollOffsetY = ClampY(_scrollOffsetY);
+    }
+
+    internal override void UpdateContentSize()
+    {
+        UpdateScrollExtent();
 
         // Compute which items are visible and sync children
         int prevStart = _visibleStart;

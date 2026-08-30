@@ -136,6 +136,14 @@ public sealed partial class LayoutEngine
             }
         }
 
+        // How far a scroll view can scroll is a function of where its children ended up, so
+        // this is the pass that knows it. It used to be the renderer's job, and the renderer
+        // culls — a view clipped away by an ancestor was never painted, so it reported a
+        // content size of zero, and the offset setters clamp against that: scrolling it did
+        // nothing and said nothing. See ScrollViewElement.UpdateScrollExtent.
+        if (element is ScrollViewElement scrollView)
+            scrollView.UpdateScrollExtent();
+
         var resultSize = new Size(finalW + margin.Horizontal, finalH + margin.Vertical);
 
         // Update layout cache for subtree skipping on future passes

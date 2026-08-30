@@ -91,11 +91,23 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         MarkPaintDirty();
     }
 
-    internal virtual void UpdateContentSize()
+    /// <summary>
+    /// How far this view can scroll, from the children's laid-out boxes. Called by the layout
+    /// pass, for every scroll view in the tree, whether or not it is on screen.
+    ///
+    /// <para>This used to be computed by the renderer, which is the pass that <i>culls</i>:
+    /// anything falling outside a clipping ancestor is skipped, so a scroll view that had not
+    /// been painted reported a content size of zero. That zero is not inert, because the offset
+    /// setters clamp against it — setting <see cref="ScrollOffsetY"/> on such a view silently
+    /// did nothing, and silent failure is the worse of the two ways to be wrong. A vertical
+    /// scroll view nested inside another vertical one hit it every time: whatever sits above it
+    /// in the outer view is usually tall enough to push it outside the outer's clip on the
+    /// first frame, so it arrived permanently unable to scroll.</para>
+    /// </summary>
+    internal virtual void UpdateScrollExtent()
     {
         float maxRight = 0;
         float maxBottom = 0;
-        var contentBox = Layout.AbsoluteContentBox;
 
         foreach (var child in Children)
         {
@@ -113,6 +125,13 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         _scrollOffsetX = ClampX(_scrollOffsetX);
         _scrollOffsetY = ClampY(_scrollOffsetY);
     }
+
+    /// <summary>
+    /// The render-time hook. Separate from <see cref="UpdateScrollExtent"/> because
+    /// <see cref="VirtualListElement"/> also realizes and lays out its visible rows here, and
+    /// that cannot happen from inside the layout pass it would re-enter.
+    /// </summary>
+    internal virtual void UpdateContentSize() => UpdateScrollExtent();
 
     protected float ClampX(float value)
     {

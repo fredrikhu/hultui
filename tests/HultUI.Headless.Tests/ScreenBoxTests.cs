@@ -48,14 +48,9 @@ public class ScreenBoxTests
         Assert.Equal(120f, target.AncestorScrollOffset.Y);
     }
 
-    /// <summary>
-    /// Nested views compose, on both axes. A pane that scrolls inside a page that scrolls is
-    /// the case a single-level correction gets wrong, and it is not a rare layout.
-    ///
-    /// <para>The outer view scrolls horizontally on purpose. A vertical scroll view nested
-    /// directly inside another vertical one measures its content as zero and cannot scroll at
-    /// all — a known nesting limitation, and not what this test is about.</para>
-    /// </summary>
+    /// <summary>Nested views compose, on both axes. A pane that scrolls inside a page that
+    /// scrolls is the case a single-level correction gets wrong, and it is not a rare
+    /// layout.</summary>
     [Fact]
     public void NestedScrollViewsAccumulate()
     {
