@@ -1,6 +1,41 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The slider is themable** — `SliderTheme` (`TrackColor` / `FillColor` / `ThumbColor` /
+  `ThumbBorderColor`, all nullable and all falling back to what the control already painted).
+  It was the last interactive control reading `theme.Primary` and `theme.Border` straight,
+  so an app whose card borders are a hairline and whose slider track is a mid grey had to pick
+  which one to get right. Sizes stay per-instance on purpose:
+  `ApplyTheme` runs on every style pass, so a themed size would overwrite whatever the caller
+  set, and being a size it would need a layout invalidation with it. 3 headless tests, one of
+  which is the one that matters — an unthemed slider paints exactly what it did before.
+- **A dropdown's list is a stroked chevron away from Fluent** — `DropdownTheme.ChevronShape`
+  (`Triangle` | `Stroke`) and `ChevronStrokeWidth`. The drop mark was the glyph `▾` typed from
+  the control's own font; every current design system draws a thin V instead, and a glyph is
+  the wrong mechanism for it — the shape then depends on what the UI font's designer thought a
+  small solid triangle looks like, and on the font having one at all. `Stroke` is two
+  `DrawLine` calls at 0.62em. The default stays `Triangle`, because changing it would repaint
+  every dropdown and date picker in every app that never asked; opt in per theme. The
+  painting moved to a shared `ChevronPainter` — the dropdown and the date picker had a copy
+  each of the same constant and the same six lines, which is how two controls that are supposed
+  to look identical stop looking identical. 3 headless tests.
+- **Nothing knew where an element actually was** — `Element.ScreenBorderBox` /
+  `ScreenContentBox` / `AncestorScrollOffset`. A scroll view does not move its children: their
+  boxes are computed once and stay where the content puts them, and scrolling is a translate
+  applied at paint time and mirrored in the hit tester. So everything that positions itself
+  *against* an element needed to subtract the ancestors' scroll — and four places had their own
+  copy of that walk while three more had simply forgotten it. The three that had forgotten:
+  a dropdown and a date picker opened their popup wherever the control *would* be if nothing
+  had scrolled (on a long page, most of a screen away from the control it belongs to — this is
+  the one that was reported), a tooltip appeared beside the wrong row, and
+  `HeadlessWindow.Click(element)` fired into whatever else was at that point. That last one is
+  the worst shape a defect can have: a click that hits nothing is not an error, so the test
+  around it passed with its handler never having run. `DoubleClick`/`RightClick`/
+  `HeadlessElement.Click` all shared `CenterOf`, so all three were wrong the same way. The
+  screenshot driver had it too, and gained a `wheel:` step to reach anything below the fold.
+  7 headless tests, each verified by putting the offset back. Related, found while writing
+  them and *not* fixed: a vertical scroll view nested directly inside another vertical one
+  measures its content as zero and cannot scroll at all.
 - **Autoscroll reaches text areas** — the gesture matched on `ScrollViewElement`, which is
   what carries a *list*. A wall of text is a `TextAreaElement`: it scrolls its own wrapped
   rows rather than child elements, and is a `BoxElement`. So every list in every app scrolled

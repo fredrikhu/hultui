@@ -26,6 +26,7 @@ public sealed class Theme
     public ButtonTheme Button { get => Get<ButtonTheme>(); init => Set(value); }
     public TextInputTheme TextInput { get => Get<TextInputTheme>(); init => Set(value); }
     public CheckboxTheme Checkbox { get => Get<CheckboxTheme>(); init => Set(value); }
+    public SliderTheme Slider { get => Get<SliderTheme>(); init => Set(value); }
     public RadioButtonTheme RadioButton { get => Get<RadioButtonTheme>(); init => Set(value); }
     public TooltipTheme Tooltip { get => Get<TooltipTheme>(); init => Set(value); }
     public ContextMenuTheme ContextMenu { get => Get<ContextMenuTheme>(); init => Set(value); }

@@ -146,6 +146,7 @@ void Run(string step)
         case "click": Click(arg); break;
         case "drag": Drag(arg); break;
         case "autoscroll": AutoScroll(arg); break;
+        case "wheel": Wheel(arg); break;
         case "waitfor": WaitFor(arg); break;
         case "size": Resize(arg); break;
         default: throw new ArgumentException($"unknown step '{step}'");
@@ -245,6 +246,17 @@ void AutoScroll(string arg)
     session.PumpFrames(2);
 }
 
+// Turns the wheel at a point, so a step can reach something below the fold. Notches rather
+// than pixels: one notch is what a real wheel click sends, and a view that scales the delta
+// itself (most of them) is only exercised properly by the value it actually receives.
+void Wheel(string arg)
+{
+    var bits = arg.Split(',');
+    float x = float.Parse(bits[0]), y = float.Parse(bits[1]), notches = float.Parse(bits[2]);
+    session.Window.Wheel(x, y, 0f, notches);
+    session.PumpFrames(4);
+}
+
 void WaitFor(string arg)
 {
     var bits = arg.Split(',');
@@ -264,9 +276,13 @@ HeadlessElement Find(string text) =>
     ?? throw new InvalidOperationException(
         $"nothing on screen reads \"{text}\" — run with no steps, or add a dump step, to see the tree");
 
+// ScreenBorderBox, not the layout box: inside a scrolled view the two differ by the scroll
+// amount, and a `click:@Something` aimed at the layout box lands on whatever else is there and
+// silently does nothing. The steps here need a point rather than a click, so they cannot just
+// call session.Window.Click(element).
 (float X, float Y) Center(HeadlessElement e)
 {
-    var b = e.Element.Layout.AbsoluteBorderBox;
+    var b = e.Element.ScreenBorderBox;
     return (b.X + b.Width / 2f, b.Y + b.Height / 2f);
 }
 

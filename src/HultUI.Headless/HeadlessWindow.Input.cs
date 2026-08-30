@@ -157,12 +157,19 @@ public sealed partial class HeadlessWindow
             _platform.RaiseInput(new InputEvent.TextInputInput(ch.ToString()));
     }
 
+    /// <summary>
+    /// Where the element is on screen, which inside a scrolled view is not where its layout box
+    /// says it is — see <see cref="Element.ScreenBorderBox"/>. A click aimed at the layout box
+    /// lands on whatever else is at that point, and a click that hits nothing is not an error,
+    /// so getting this wrong shows up as a test passing with its handler never having run.
+    /// </summary>
     private static Point CenterOf(Element element)
     {
-        var box = element.Layout.AbsoluteBorderBox;
+        var box = element.ScreenBorderBox;
         if (box.Width <= 0 || box.Height <= 0)
             throw new InvalidOperationException(
                 "Element has no laid-out bounds — pump a frame after setting the root before interacting.");
+
         return new Point(box.X + box.Width / 2f, box.Y + box.Height / 2f);
     }
 }

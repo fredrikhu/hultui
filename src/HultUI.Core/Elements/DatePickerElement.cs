@@ -23,7 +23,6 @@ namespace HultUI.Core.Elements;
 /// </summary>
 public class DatePickerElement : Element
 {
-    private const string Chevron = "▾";
 
     private DateOnly? _value;
     private bool _focused;
@@ -178,7 +177,8 @@ public class DatePickerElement : Element
         // No theme call here: the host style-resolves overlay content when it is shown,
         // which is what hands the calendar its CalendarTheme.
 
-        var box = Layout.AbsoluteBorderBox;
+        // Screen box, not layout box — see the same line in DropdownElement.
+        var box = ScreenBorderBox;
         _popupHandle = OverlayHost.ShowOverlay(calendar, box.X, box.Bottom + _theme.PopupGap,
             dismissOnOutsideClick: true, hitTestable: true, onDismissed: OnPopupDismissed);
         _calendar = calendar;
@@ -276,12 +276,14 @@ public class DatePickerElement : Element
         float current = _value is null ? 0f
             : ctx.MeasureText(DisplayText, style, float.MaxValue, 1).Width;
         float placeholder = ctx.MeasureText(Placeholder, style, float.MaxValue, 1).Width;
-        var chevron = ctx.MeasureText(Chevron, style, float.MaxValue, 1);
+        // Height off the glyph either way, so the field does not resize with the mark's shape.
+        var glyph = ctx.MeasureText(ChevronPainter.Glyph, style, float.MaxValue, 1);
+        float chevronWidth = ChevronPainter.Width(_theme.ChevronShape, _theme.FontSize, ctx, style);
 
         float width = Math.Max(_theme.MinWidth,
             _theme.Padding.Left + Math.Max(Math.Max(sample, current), placeholder)
-            + _theme.ChevronGap + chevron.Width + _theme.Padding.Right);
-        return new Size(width, _theme.Padding.Top + chevron.Height + _theme.Padding.Bottom);
+            + _theme.ChevronGap + chevronWidth + _theme.Padding.Right);
+        return new Size(width, _theme.Padding.Top + glyph.Height + _theme.Padding.Bottom);
     }
 
     public override void Render(IRenderContext ctx)
@@ -297,19 +299,18 @@ public class DatePickerElement : Element
             TextColor = _value is null ? _theme.PlaceholderTextColor : _theme.TextColor,
         };
         var chevronStyle = style with { TextColor = _theme.ChevronColor };
-        var chevronSize = ctx.MeasureText(Chevron, chevronStyle);
+        float chevronWidth = ChevronPainter.Width(_theme.ChevronShape, _theme.FontSize, ctx, chevronStyle);
 
         float textLeft = box.X + _theme.Padding.Left;
-        float textRight = box.Right - _theme.Padding.Right - chevronSize.Width - _theme.ChevronGap;
+        float textRight = box.Right - _theme.Padding.Right - chevronWidth - _theme.ChevronGap;
         ctx.DrawText(DisplayText,
             new Rect(textLeft, box.Y + _theme.Padding.Top, Math.Max(0, textRight - textLeft),
                 box.Height - _theme.Padding.Top - _theme.Padding.Bottom),
             style, TextOverflow.Ellipsis, 1);
 
-        ctx.DrawText(Chevron,
-            new Rect(box.Right - _theme.Padding.Right - chevronSize.Width,
-                box.Y + (box.Height - chevronSize.Height) / 2, chevronSize.Width, chevronSize.Height),
-            chevronStyle, TextOverflow.Clip, 1);
+        ChevronPainter.Draw(ctx, _theme.ChevronShape,
+            new Rect(box.Right - _theme.Padding.Right - chevronWidth, box.Y, chevronWidth, box.Height),
+            _theme.ChevronColor, _theme.ChevronStrokeWidth, chevronStyle, _theme.FontSize);
     }
 
     internal override void PatchFrom(Element source)

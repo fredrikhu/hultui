@@ -77,8 +77,15 @@ The corollary: a bare `for (…) session.PumpFrame();` loop is **not** a way to 
 
 All coordinates are layout units — the space element bounds live in.
 
+An element-targeted click aims at `Element.ScreenBorderBox`, not at the layout box. A scroll
+view does not move its children's boxes; it offsets them when painting and hit-testing, so the
+centre of a laid-out box inside a scrolled view is not where that element is on screen. A
+click that misses hits nothing and reports nothing, so getting this wrong shows up as a test
+that passes with its handler never having run — scroll the target into view, then click it.
+When a test needs the point itself rather than the click, read `ScreenBorderBox` too.
+
 ```csharp
-window.Click(element);                    // center of laid-out bounds
+window.Click(element);                    // center of laid-out bounds, less ancestor scroll
 window.Click(x, y, MouseButton.Right);
 window.DoubleClick(element);
 window.Drag(from, to, steps: 8);          // fires drag threshold + per-move events

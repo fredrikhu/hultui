@@ -2058,9 +2058,12 @@ public sealed class Window : IOverlayHost, IDisposable
                     .TextColor(tt.TextColor)
             );
 
-        // Position below the owner element, centered horizontally
-        float x = owner.Layout.AbsoluteContentBox.X;
-        float y = owner.Layout.AbsoluteContentBox.Y + owner.Layout.Height + tt.Gap;
+        // Position below the owner element. Screen box rather than layout box: a tooltip on a
+        // row in a scrolled list would otherwise appear beside where that row would be if
+        // nothing had scrolled.
+        var ownerBox = owner.ScreenContentBox;
+        float x = ownerBox.X;
+        float y = ownerBox.Y + owner.Layout.Height + tt.Gap;
 
         _tooltipOverlay = ShowOverlay(tooltip, x, y, dismissOnOutsideClick: false, hitTestable: false);
     }

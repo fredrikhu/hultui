@@ -126,6 +126,60 @@ public abstract class Element
         internal set => _layout = value;
     }
 
+    /// <summary>
+    /// What every ancestor scroll view subtracts from this element's position when painting
+    /// and hit-testing.
+    ///
+    /// <para>A scroll view does not move its children — their layout boxes are computed once
+    /// and stay where the content says they are. Scrolling is a translate applied at paint
+    /// time and mirrored in the hit tester, so inside a scrolled view
+    /// <see cref="LayoutResult.AbsoluteBorderBox"/> is not where the element appears.</para>
+    /// </summary>
+    public Point AncestorScrollOffset
+    {
+        get
+        {
+            float x = 0, y = 0;
+            for (var parent = Parent; parent is not null; parent = parent.Parent)
+                if (parent is ScrollViewElement scroll)
+                {
+                    x += scroll.ScrollOffsetX;
+                    y += scroll.ScrollOffsetY;
+                }
+            return new Point(x, y);
+        }
+    }
+
+    /// <summary>
+    /// This element's border box in window coordinates — where it actually is on screen, with
+    /// every ancestor's scroll applied.
+    ///
+    /// <para>This is what anything positioning itself <i>against</i> an element wants: an
+    /// overlay, a tooltip, a synthesized click. Using the layout box instead is silently
+    /// correct until something scrolls and then silently wrong, which is how a dropdown ended
+    /// up opening a third of a page away from the control it belongs to.</para>
+    /// </summary>
+    public Rect ScreenBorderBox
+    {
+        get
+        {
+            var offset = AncestorScrollOffset;
+            var box = Layout.AbsoluteBorderBox;
+            return new Rect(box.X - offset.X, box.Y - offset.Y, box.Width, box.Height);
+        }
+    }
+
+    /// <summary><see cref="ScreenBorderBox"/> less this element's own border and padding.</summary>
+    public Rect ScreenContentBox
+    {
+        get
+        {
+            var offset = AncestorScrollOffset;
+            var box = Layout.AbsoluteContentBox;
+            return new Rect(box.X - offset.X, box.Y - offset.Y, box.Width, box.Height);
+        }
+    }
+
     // ──── Lifetime ────
 
     private bool _detached;

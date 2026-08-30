@@ -209,13 +209,9 @@ internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
             // The item sits in the list's content box at index * itemHeight, moved
             // by the list's own scroll and by every ancestor scroll view — the same
             // adjustment AccessibilityTreeBuilder bakes into materialized nodes.
-            var content = sv.Layout.AbsoluteContentBox;
-            float ancestorX = 0f, ancestorY = 0f;
-            for (var p = sv.Parent; p is not null; p = p.Parent)
-                if (p is ScrollViewElement asv) { ancestorX += asv.ScrollOffsetX; ancestorY += asv.ScrollOffsetY; }
-
-            float top = content.Y - ancestorY - sv.ScrollOffsetY + index * src.ItemHeight;
-            float left = content.X - ancestorX - sv.ScrollOffsetX;
+            var content = sv.ScreenContentBox;
+            float top = content.Y - sv.ScrollOffsetY + index * src.ItemHeight;
+            float left = content.X - sv.ScrollOffsetX;
             layoutRect = new Rect(left, top, content.Width, src.ItemHeight);
             return true;
         }

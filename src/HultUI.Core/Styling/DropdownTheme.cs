@@ -21,6 +21,18 @@ public sealed class DropdownTheme : IThemeExtension<DropdownTheme>
     public float FontSize { get; init; } = 13f;
     public float MinWidth { get; init; } = 120f;
     public float ChevronGap { get; init; } = 8f;
+
+    /// <summary>
+    /// Whether the mark is a solid triangle or two strokes meeting at a point. Defaults to the
+    /// triangle these controls have always drawn: it is a glyph from the control's own font,
+    /// so changing the default would repaint every dropdown in every app that never asked.
+    /// <see cref="ChevronShape.Stroke"/> is the shape Fluent, and most other current design
+    /// systems, use — drawn rather than typed, so it does not depend on the font having it.
+    /// </summary>
+    public ChevronShape ChevronShape { get; init; } = ChevronShape.Triangle;
+
+    /// <summary>Line width of the stroked chevron. Ignored by the triangle.</summary>
+    public float ChevronStrokeWidth { get; init; } = 1f;
     /// <summary>Vertical distance between the control and its opened list.</summary>
     public float PopupGap { get; init; } = 2f;
 
@@ -32,4 +44,14 @@ public sealed class DropdownTheme : IThemeExtension<DropdownTheme>
         PlaceholderTextColor = theme.Secondary,
         ChevronColor = theme.Secondary,
     };
+}
+
+/// <summary>The shape of a dropdown's drop mark. See <see cref="DropdownTheme.ChevronShape"/>.</summary>
+public enum ChevronShape : byte
+{
+    /// <summary>A small solid triangle, typed as a glyph from the control's font.</summary>
+    Triangle,
+
+    /// <summary>Two strokes meeting at a point, drawn by the renderer.</summary>
+    Stroke,
 }

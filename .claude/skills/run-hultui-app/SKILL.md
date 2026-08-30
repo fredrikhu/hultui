@@ -65,6 +65,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `click:<x>,<y>` or `click:@<text>` | `@` finds an element by its accessible name and clicks its centre. |
 | `drag:<x1>,<y1>,<x2>,<y2>` or `drag:@<text>,<dx>[,<dy>]` | Press, move, release as separate events. |
 | `autoscroll:<x>,<y>,<dy>[,<ms>]` or `autoscroll:@<text>,<dy>[,<ms>]` | Middle-button autoscroll: presses at the anchor, parks the pointer `dy` away, runs frames for `ms` (default 600), releases. `drag` cannot show this — the pointer's distance from the anchor is a *speed*, so the scrolling happens between input events, and a press-move-release with no frames in between leaves the view exactly where it was. |
+| `wheel:<x>,<y>,<notches>` | Turns the wheel at a point. Negative scrolls down. Reaches anything below the fold. |
 | `waitfor:<text>[,<seconds>]` | Pumps until an element with that name appears. Default 30s. |
 | `settle[:<ms>]` | Pumps frames for that long. Default 1200ms. |
 | `size:<w>x<h>` | Resizes the client area mid-run, then settles. |
@@ -142,6 +143,12 @@ it opens and rewrites the user's real settings.
 - **A 1px line centred in an even-width box lands on a half pixel** and rasterises two pixels
   wide at half intensity. Next to a crisp border it reads as a rendering fault. Scan the row
   (above) rather than trusting your eye.
+- **`@` targets are scroll-aware, and were not always.** A scroll view does not move its
+  children's layout boxes — it offsets them when painting and hit-testing — so the centre of
+  an element's box is not where it is on screen inside a scrolled view. The driver subtracts
+  every ancestor scroll offset before clicking; before it did, a `click:@Something` after a
+  `wheel:` step landed a third of a page away and silently did nothing. If you write another
+  helper that turns an element into a point, do the same.
 - **Not everything has an accessible name.** The pane splitter is a bare box with a cursor and
   no label, so `@` cannot find it — take a `shot`, read the x off it, and drag by coordinates.
 - **Junction's view keys are Digit1–Digit6**: Overview, History, Commit, Changes, Branches,

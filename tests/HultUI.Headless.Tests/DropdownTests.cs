@@ -227,4 +227,43 @@ public class DropdownTests
         session.Window.PressKey(KeyCode.Enter);
         Assert.Equal(0, dropdown.SelectedIndex);
     }
+
+    /// <summary>
+    /// The list opens under the control on a page that has been scrolled.
+    ///
+    /// <para>The popup is placed in window coordinates, and a scroll view does not move its
+    /// children's layout boxes — it offsets them when painting. Anchoring on the layout box
+    /// therefore put the list wherever the control <i>would</i> be if nothing had scrolled: on
+    /// a long page, most of a screen away from the control it belongs to. Asserted by clicking
+    /// the row where it appears, because "the list is somewhere" is not the property that
+    /// matters — being able to pick from it is.</para>
+    /// </summary>
+    [Fact]
+    public void OnAScrolledPageTheListOpensUnderTheControl()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var dropdown = Dropdown.New(Options, 0);
+        var scroll = ScrollView.New().Height(300f).Children(
+            Box.New().Height(600f).FlexShrink(0),
+            Box.New().Padding(new Thickness(10)).FlexShrink(0).Children(dropdown),
+            Box.New().Height(600f).FlexShrink(0));
+        session.Window.SetRoot(scroll);
+        session.PumpFrames(2);
+
+        scroll.ScrollOffsetY = 560f;      // brings the control near the top of the viewport
+        session.PumpFrames(2);
+        Assert.NotEqual(dropdown.Layout.AbsoluteBorderBox.Y, dropdown.ScreenBorderBox.Y);
+
+        session.Window.Click(dropdown);
+        session.PumpFrame();
+        var popup = Assert.IsType<ContextMenuElement>(Assert.Single(session.Window.OverlayContents));
+
+        // Same arithmetic as RowPoint, off the screen box rather than the layout box.
+        var box = dropdown.ScreenBorderBox;
+        session.Window.Click(box.X + 15, box.Bottom + 2 + popup.ItemTop(2) + 4);
+        session.PumpFrame();
+
+        Assert.Equal(2, dropdown.SelectedIndex);
+        Assert.Equal("Gamma", dropdown.SelectedItem);
+    }
 }

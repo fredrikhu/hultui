@@ -24,7 +24,6 @@ namespace HultUI.Core.Elements;
 /// </summary>
 public class DropdownElement : Element
 {
-    private const string Chevron = "▾";   // ▾
     private const string CheckMark = "✓"; // ✓
 
     private IReadOnlyList<string> _items = [];
@@ -52,6 +51,8 @@ public class DropdownElement : Element
     private float _minWidth = 120f;
     private float _chevronGap = 8f;
     private float _popupGap = 2f;
+    private ChevronShape _chevronShape = ChevronShape.Triangle;
+    private float _chevronStroke = 1f;
 
     /// <summary>The options, in display order. Setting a new list clamps the selection
     /// and closes an open list, whose rows would otherwise be stale.</summary>
@@ -149,6 +150,8 @@ public class DropdownElement : Element
         _minWidth = dt.MinWidth;
         _chevronGap = dt.ChevronGap;
         _popupGap = dt.PopupGap;
+        _chevronShape = dt.ChevronShape;
+        _chevronStroke = dt.ChevronStrokeWidth;
         _focusRingColor = theme.FocusRing;
     }
 
@@ -190,7 +193,9 @@ public class DropdownElement : Element
         popup.Box.MinWidth = Dimension.Px(Layout.Width);
         popup.SetHoveredIndex(_selectedIndex);
 
-        var box = Layout.AbsoluteBorderBox;
+        // Screen box, not layout box: an overlay is placed in window coordinates, and inside a
+        // scrolled page the two differ by however far the page has been scrolled.
+        var box = ScreenBorderBox;
         _popupHandle = OverlayHost.ShowOverlay(popup, box.X, box.Bottom + _popupGap,
             dismissOnOutsideClick: true, hitTestable: true, onDismissed: OnPopupDismissed);
         _popup = popup;
@@ -291,14 +296,16 @@ public class DropdownElement : Element
         // Widest of every option and the placeholder, so the control keeps its size
         // as the selection changes instead of reflowing its row.
         float maxText = ctx.MeasureText(Placeholder, style, float.MaxValue, 1).Width;
-        float lineHeight = ctx.MeasureText(Chevron, style, float.MaxValue, 1).Height;
+        // The row height still comes off the glyph even when the chevron is drawn: the control's
+        // height should not change with the shape of its drop mark.
+        float lineHeight = ctx.MeasureText(ChevronPainter.Glyph, style, float.MaxValue, 1).Height;
         foreach (var item in _items)
         {
             var size = ctx.MeasureText(item, style, float.MaxValue, 1);
             maxText = Math.Max(maxText, size.Width);
             lineHeight = Math.Max(lineHeight, size.Height);
         }
-        float chevronWidth = ctx.MeasureText(Chevron, style, float.MaxValue, 1).Width;
+        float chevronWidth = ChevronPainter.Width(_chevronShape, _fontSize, ctx, style);
 
         float width = Math.Max(_minWidth,
             _padding.Left + maxText + _chevronGap + chevronWidth + _padding.Right);
@@ -321,8 +328,8 @@ public class DropdownElement : Element
         };
         var chevronStyle = style with { TextColor = _chevronColor };
 
-        var chevronSize = ctx.MeasureText(Chevron, chevronStyle);
-        float textRight = box.Right - _padding.Right - chevronSize.Width - _chevronGap;
+        float chevronWidth = ChevronPainter.Width(_chevronShape, _fontSize, ctx, chevronStyle);
+        float textRight = box.Right - _padding.Right - chevronWidth - _chevronGap;
 
         var textRect = new Rect(
             box.X + _padding.Left,
@@ -331,12 +338,10 @@ public class DropdownElement : Element
             box.Height - _padding.Top - _padding.Bottom);
         ctx.DrawText(SelectedItem ?? Placeholder, textRect, style, TextOverflow.Ellipsis, 1);
 
-        var chevronRect = new Rect(
-            box.Right - _padding.Right - chevronSize.Width,
-            box.Y + (box.Height - chevronSize.Height) / 2,
-            chevronSize.Width,
-            chevronSize.Height);
-        ctx.DrawText(Chevron, chevronRect, chevronStyle, TextOverflow.Clip, 1);
+        var chevronArea = new Rect(
+            box.Right - _padding.Right - chevronWidth, box.Y, chevronWidth, box.Height);
+        ChevronPainter.Draw(ctx, _chevronShape, chevronArea, _chevronColor, _chevronStroke,
+            chevronStyle, _fontSize);
     }
 
     internal override void PatchFrom(Element source)
