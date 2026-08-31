@@ -261,7 +261,9 @@ public sealed partial class FluentApp : Component
         return Box.New().FlexGrow(1)
             .Background(p.Layer)
             .CornerRadius(new CornerRadius(Fluent.OverlayRadius, 0, 0, 0))
-            .Border(new Thickness(1, 0, 0, 1), p.CardStroke)
+            // LayerStroke, not CardStroke: this border sits on the backdrop rather than on the
+            // pane, and WinUI's translucent stroke lands darker there.
+            .Border(new Thickness(1, 0, 0, 1), p.LayerStroke)
             .Overflow(Overflow.Hidden)
             .Children(body);
     }

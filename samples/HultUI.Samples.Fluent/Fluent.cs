@@ -42,6 +42,23 @@ public sealed record FluentPalette
     public required Color Card { get; init; }               // CardBackgroundFillColorDefault
     public required Color CardHover { get; init; }          // CardBackgroundFillColorSecondary
     public required Color CardStroke { get; init; }         // CardStrokeColorDefault
+
+    /// <summary>
+    /// The same stroke where a surface meets the <see cref="Backdrop"/> rather than the
+    /// <see cref="Layer"/> — the content pane's own outline, and nothing else here.
+    ///
+    /// <para>One token, two values, because <c>CardStrokeColorDefault</c> is not a colour: it is
+    /// black at 10% (6% in light), and a WinUI border paints its background <i>inside</i> the
+    /// stroke, so the stroke lands on whatever is behind the element. A border here paints over
+    /// the element's own fill, the way CSS does with <c>border-box</c>, so the compositing has to
+    /// be done up front — once against each surface a stroke can sit on.</para>
+    ///
+    /// <para>Measured on the Gallery, and the difference is visible: a card on the #272727 pane
+    /// is outlined #232323, while the pane on the #202020 backdrop is outlined #1D1D1D —
+    /// <i>darker than the backdrop it sits on</i>. Using the card's value for both puts a line
+    /// lighter than the backdrop down the side of the window, which reads as a seam.</para>
+    /// </summary>
+    public required Color LayerStroke { get; init; }
     public required Color Divider { get; init; }            // DividerStrokeColorDefault
     public required Color Flyout { get; init; }             // AcrylicBackgroundFillColorDefault
 
@@ -110,7 +127,12 @@ public sealed record FluentPalette
             // Darker than the card, not lighter: CardStrokeColorDefault is black at 10% in dark
             // mode, so a card is outlined by a line that recedes into the page. Measured on real
             // Settings — page #1A2226, card #262D31, stroke #171F22, below both.
+            //
+            // Both values are that 10% black composited by hand: over Layer for a card, over
+            // Backdrop for the pane. FluentSampleTests derives them, so changing a surface
+            // without recomputing its stroke fails rather than drifting.
             CardStroke = Hex("#232323"),
+            LayerStroke = Hex("#1D1D1D"),
             Divider = Hex("#333333"),
             Flyout = Hex("#2C2C2C"),
             ControlFill = Hex("#373737"),
@@ -151,7 +173,8 @@ public sealed record FluentPalette
             Layer = Hex("#F9F9F9"),
             Card = Hex("#FBFBFB"),
             CardHover = Hex("#F6F6F6"),
-            CardStroke = Hex("#E5E5E5"),
+            CardStroke = Hex("#EAEAEA"),
+            LayerStroke = Hex("#E5E5E5"),
             Divider = Hex("#E5E5E5"),
             Flyout = Hex("#F9F9F9"),
             ControlFill = Color.White,

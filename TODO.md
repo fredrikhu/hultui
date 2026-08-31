@@ -1,6 +1,23 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The pane's outline is darker than the backdrop, not lighter** — reported by eye from a
+  side-by-side, and the cause is that `CardStrokeColorDefault` is not a colour: it is black at
+  10% (6% in light), and a WinUI border paints its background *inside* the stroke, so the stroke
+  composites over whatever is behind the element. One token, two values. Measured on the
+  Gallery: a card on the #272727 pane is outlined #232323, and the pane itself on the #202020
+  backdrop is outlined #1D1D1D — below the backdrop on both sides of it. The sample used the
+  card's value everywhere, which put a line *lighter* than the backdrop down the side of the
+  window; that reads as a seam rather than an edge, and it is the first thing that separates in
+  a side-by-side. New `LayerStroke`, used by the content frame and nothing else.
+  A border here paints over its own element's fill, the way CSS does with `border-box`, so the
+  compositing is done up front rather than by the renderer. The tests derive both values from
+  the alpha and the surface rather than comparing to a hex, so retuning `Layer` or `Backdrop`
+  without recomputing its stroke fails instead of drifting. The alphas are measured too, not
+  recalled: 35/39 and 29/32 in dark bracket `#19000000`, and because light Mica lets the
+  wallpaper through, the light theme was measured as ratios against its own neighbours —
+  236/251 and 232/247, both `#0F000000`. That also caught the light card stroke, which had been
+  derived over the backdrop rather than over the pane: #E5E5E5 where the rule says #EAEAEA.
 - **The border stopped being drawn at the corner** — reported by eye ("it looks like the border
   just kind of stops"), and a regression in the per-side border work below: clipping each side to
   its own 1px band is right for the straight run and wrong for the arc, which bulges out of both
@@ -295,6 +312,16 @@
 - AT-SPI refinements (remaining polish): (1) a `state-changed:defunct` still shows up in a *mid-stream* event monitor on first contact with each node — but that's a client cold-start artifact: the monitor connects after our startup `Cache.AddAccessible` burst and only subscribes to `object:` events, so it never warms its cache. A client (Orca) running from app launch receives the cache signals. Not fixable app-side for a cold listener; our app provably emits only the intended signals. (2) `Component` extents are now device-pixel-correct (bounds × display scale, via `IAccessibilityGeometryHost` — verified: at 2× the button reads `[24,84 752x76]` vs `[12,42 376x38]` at 1×). The remaining gap is *absolute screen* coordinates: under Wayland a client has no reliable window screen origin, so SCREEN and WINDOW coordType both resolve to window-relative pixels; Wayland is the only target, so this is not planned. (3) `TreeDiff.Reordered` (same children, new order) needs **no** signal — every query is served from the freshly rebuilt snapshot, so `GetChildren`/`GetChildAtIndex` already return the new order. Verified: a persistent pyatspi client observes each reorder with the reorder signal entirely disabled. A high-level AT that caches child order and only refreshes on events (Orca) would want an `object:children-changed` nudge; add it when an Orca test shows it's needed and confirms the form (`samples/AtSpiVerify/atspi_reorder.py` reproduces reorders). (4) end-to-end Orca *speech* pass (largely covered by the pyatspi verification, since Orca reads through the same API; the gap is Orca-specific event handling and actually listening).
 
 ## Deferred
+- **The card fill is probably too dark, but the measurements disagree** — on one capture of the
+  Gallery's All page the pane is #272727 and a tile is #343434, while ours is #2D2D2D; real
+  Settings gives a clean 5.1% white for a card over its page (#000000 -> #0D0D0D, exactly
+  `#0DFFFFFF`), which over our #272727 layer would be #323232. Both references say our card is
+  too dark. But the Gallery's own Color page shows its swatch cards at #2B2B2B on a #282727
+  page, a delta of 3 rather than 11, and that fits neither — so something about what
+  `PrintWindow` returns for a Mica window, or about which brush those swatches actually paint,
+  is not understood yet. Changing `Card` also forces `CardHover`, and the Gallery labels the
+  hover brush `CardBackgroundTertiary` while showing a warning on it. Not worth guessing at:
+  what would settle it is a hover measurement on a Settings card, which needs the real pointer.
 - **Automatic minimum size for flex items** (CSS `min-height:auto`) — content can still be crushed below its own size inside a bounded container. Needs a real recursive min-content pass in which scroll containers contribute zero; approximating it from the flex Phase 1 measurement was tried and reverted, because for a container that measurement is its full content extent, so an ancestor wrapping a scroll view gets pinned to the whole scrollable height (14,640px tall, 1007 draw calls instead of 47). `FlexShrinkTests` carries a skipped case. Add a shrink-heavy benchmark first — the current suite barely exercises the shrink path, so it would not catch the cost.
 - **Golden-image testing** — the raster surface already exposes `Snapshot`/`ReadPixels`. Blocked on font determinism: glyphs come from `SKFontManager.Default`, so an embedded, pinned font is needed before pixel baselines can hold across machines.
 - **Render-log element attribution** — recorded ops carry no element identity, so "what did this element draw?" means matching on coordinates. `ElementRenderer` has a single per-element call site to hook.

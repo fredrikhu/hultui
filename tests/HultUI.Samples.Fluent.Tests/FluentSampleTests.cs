@@ -509,6 +509,79 @@ public class FluentSampleTests
     }
 
     /// <summary>
+    /// Both strokes are that 10% black, composited against the surface each one sits on.
+    ///
+    /// <para>Derived rather than compared to a remembered hex, because the whole point is that
+    /// one token yields two colours. If someone retunes <c>Layer</c> or <c>Backdrop</c> and
+    /// leaves the strokes alone, this fails and says by how much — which is better than a
+    /// hairline drifting a level or two off and nobody noticing for a year.</para>
+    ///
+    /// <para>The alphas are measured, not recalled: on the Gallery a card border over the
+    /// #272727 pane reads #232323 (35/39 = 0.897) and the pane border over the #202020 backdrop
+    /// reads #1D1D1D (29/32 = 0.906), which bracket <c>#19000000</c>. Light Mica shows the
+    /// wallpaper through, so the light theme was measured as ratios against its own neighbours
+    /// instead: 236/251 and 232/247, both <c>#0F000000</c>.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AStrokeIsBlackCompositedAgainstWhateverIsBehindIt(bool dark)
+    {
+        var p = FluentPalette.For(dark, AccentPreset.Blue);
+        byte alpha = dark ? (byte)0x19 : (byte)0x0F;
+
+        Assert.Equal(BlackOver(alpha, p.Layer), p.CardStroke);
+        Assert.Equal(BlackOver(alpha, p.Backdrop), p.LayerStroke);
+    }
+
+    /// <summary>Black at <paramref name="alpha"/> over an opaque surface, rounded the way a
+    /// compositor rounds — truncating puts the dark pane stroke on #1C1C1C, one level under
+    /// what the Gallery actually paints.</summary>
+    private static Color BlackOver(byte alpha, Color surface)
+    {
+        float a = alpha / 255f;
+        static byte Ch(byte s, float a) => (byte)MathF.Round(s * (1f - a));
+        return new Color(Ch(surface.R, a), Ch(surface.G, a), Ch(surface.B, a));
+    }
+
+    /// <summary>
+    /// The pane's own outline is darker than the backdrop it sits on.
+    ///
+    /// <para>The visible half of the rule above, and the one that was wrong: the content frame
+    /// was drawn with the card's stroke, which is computed against the pane and therefore comes
+    /// out <i>lighter</i> than the backdrop. A line lighter than the surface on both sides of it
+    /// reads as a seam down the window rather than as an edge, and it is the first thing that
+    /// separates from the Gallery in a side-by-side.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ThePaneIsOutlinedDarkerThanTheBackdrop(bool dark)
+    {
+        var p = FluentPalette.For(dark, AccentPreset.Blue);
+
+        Assert.True(Luma(p.LayerStroke) < Luma(p.Backdrop),
+            $"pane stroke {p.LayerStroke} should be darker than the backdrop {p.Backdrop}");
+        Assert.True(Luma(p.LayerStroke) < Luma(p.CardStroke),
+            $"and darker than a card's stroke {p.CardStroke}, which sits on the lighter pane");
+    }
+
+    /// <summary>And the content frame is the element that reaches for it — the palette being
+    /// right is no use if the frame still asks for the card's stroke, which is what it did.</summary>
+    [Fact]
+    public void TheContentFrameDrawsThePaneStroke()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+
+        var shell = root.Children[0];
+        var frame = (BoxElement)shell.Children[1].Children[1];
+
+        Assert.Equal(app.Palette.Layer, frame.BackgroundColor);      // the right element
+        Assert.Equal(app.Palette.LayerStroke, frame.BorderColor);
+    }
+
+    /// <summary>
     /// Selecting a nav item and then pointing at it makes it <i>quieter</i>.
     ///
     /// <para><c>SubtleFillColorTertiary</c> is closer to the ground than Secondary — less white
