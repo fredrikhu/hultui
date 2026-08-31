@@ -32,6 +32,17 @@ public class BoxElement : Element
         set { if (_borderStyle == value) return; _borderStyle = value; MarkPaintDirty(); }
     }
 
+    /// <summary>A ring drawn outside the border box that takes up no room — see
+    /// <see cref="Primitives.Outline"/>. Use it for a selected or active state on an
+    /// auto-sized element, where adding a border would resize the element and shove its
+    /// siblings along.</summary>
+    private Outline _outline;
+    public Outline Outline
+    {
+        get => _outline;
+        set { if (_outline == value) return; _outline = value; MarkPaintDirty(); }
+    }
+
     private CornerRadius _cornerRadius;
     public CornerRadius CornerRadius
     {
@@ -75,6 +86,7 @@ public class BoxElement : Element
             BackgroundColor = box.BackgroundColor;
             BorderColor = box.BorderColor;
             BorderStyle = box.BorderStyle;
+            Outline = box.Outline;
             CornerRadius = box.CornerRadius;
             BackgroundGradient = box.BackgroundGradient;
             BoxShadows = box.BoxShadows;
@@ -120,6 +132,20 @@ public class BoxElement : Element
         else if (BackgroundColor.A > 0 || hasBorder)
         {
             ctx.DrawRoundedRect(box, CornerRadius, BackgroundColor, hasBorder ? BorderColor : Color.Transparent, w);
+        }
+
+        // Last, and outside everything: the ring is painted over the element's own box the way
+        // CSS paints an outline, and it is the only thing here drawn beyond the border box.
+        if (_outline.IsVisible)
+        {
+            // Uniform strokes are centred on the rect they are given, so the rect has to be
+            // inflated to the middle of the band rather than to its outer edge. The radius
+            // grows by the same amount, or the ring would square off at the corners while the
+            // box it surrounds stays round.
+            float mid = _outline.Offset + _outline.Width / 2f;
+            var ring = box.Inflate(new Thickness(mid));
+            ctx.DrawRoundedRect(ring, CornerRadius.Inflate(mid), Color.Transparent,
+                _outline.Color, new Thickness(_outline.Width));
         }
     }
 }

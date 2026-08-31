@@ -52,6 +52,20 @@ public static class ElementExtensions
         el.BorderStyle = style;
         return el;
     }
+    /// <summary>
+    /// A ring outside the border box that takes no space — for a selected or active state on
+    /// an element that sizes to its content. A border there would grow the element by twice
+    /// its width and shove every sibling along; this cannot, because layout never reads it.
+    /// </summary>
+    /// <param name="el">The box to ring.</param>
+    /// <param name="width">Ring thickness. Zero draws nothing, so a caller can switch it off
+    /// without branching.</param>
+    /// <param name="color">Ring colour.</param>
+    /// <param name="offset">Distance outward from the border edge. Negative pulls the ring
+    /// inward, so <c>-width</c> puts it exactly where a border would have been.</param>
+    public static T Outline<T>(this T el, float width, Color color, float offset = 0f) where T : BoxElement
+    { el.Outline = new Outline(width, color, offset); return el; }
+
     public static T CornerRadius<T>(this T el, CornerRadius r) where T : BoxElement { el.CornerRadius = r; return el; }
     public static T CornerRadius<T>(this T el, float uniform) where T : BoxElement { el.CornerRadius = new CornerRadius(uniform); return el; }
     // Re-read el.BoxShadows after the null-init so Add goes through the
