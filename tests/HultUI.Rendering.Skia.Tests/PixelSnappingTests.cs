@@ -220,4 +220,161 @@ public class PixelSnappingTests
         }
         Assert.True(partial > 0, "the arc should be antialiased, not stepped onto the pixel grid");
     }
+
+    // ── Fills ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Renders through <paramref name="draw"/> and returns coverage down a column.</summary>
+    private static int[] Column(float scale, int atDip, Action<HultUI.Core.Rendering.IRenderContext> draw, int fromDip = 7, int toDip = 14)
+    {
+        int px = (int)(40 * scale);
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(px, px, scale);
+        var ctx = surface.RenderContext;
+
+        ctx.BeginFrame(40, 40, scale, Color.White);
+        draw(ctx);
+        ctx.EndFrame();
+        surface.Present();
+        var p = surface.ReadPixels(out _, out _, out int rowBytes);
+
+        int x = (int)(atDip * scale);
+        int from = (int)(fromDip * scale), to = (int)(toDip * scale);
+        var profile = new int[to - from + 1];
+        for (int y = from; y <= to; y++)
+            profile[y - from] = 255 - p[y * rowBytes + x * 4 + 1];
+        return profile;
+    }
+
+    /// <summary>
+    /// A filled rule is whole pixels too — a caret, a selection band and a divider are all this.
+    ///
+    /// <para>Fills went unsnapped in the first pass, so a 1-DIP divider stayed soft while the
+    /// border beside it had gone crisp. The rects here are placed off the grid on purpose: at
+    /// 1.0x a rule at y=10.4 covered two pixels at 60% and 40%.</para>
+    ///
+    /// <para>How many pixels it lands on depends on where it starts, and that is the rule
+    /// working rather than failing. The size comes from the snapped edges, so a 1-DIP rule at
+    /// 1.5x is one device pixel at y=10.4 (15.6 and 17.1 round to 16 and 17) and two at y=10.0
+    /// (15 and 16.5 round to 15 and 17). Deriving a position-independent size instead is exactly
+    /// the mistake that opens seams between things that should tile — this test asserting a
+    /// single number for 1.5x was that mistake, and it failed against correct code.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(10.4f, 1.0f, 1)]
+    [InlineData(10.0f, 1.0f, 1)]
+    [InlineData(10.4f, 1.5f, 1)]
+    [InlineData(10.0f, 1.5f, 2)]
+    public void AFilledRuleIsWholePixels(float y, float scale, int expected)
+        => AssertCrisp(Column(scale, 20, c => c.DrawRect(new Rect(5, y, 30, 1f), Color.Red)),
+            expected, scale, $"filled rule at y={y}");
+
+    /// <summary>
+    /// A rule too thin for the grid still shows, and an empty one still does not.
+    ///
+    /// <para>Two halves of one rule, and they pull in opposite directions. Rounding both edges of
+    /// a 0.3-DIP rect to the same pixel erases it, and a caret or divider vanishing is worse than
+    /// it being soft. But the same clamp applied to a genuinely empty rect — an unselected range
+    /// is a zero-width one, drawn every frame a text field has focus — would smear a one-pixel
+    /// band across the screen. So the clamp is on "was asked for at all", not on "is small".</para>
+    /// </summary>
+    [Fact]
+    public void AThinRuleSurvivesAndAnEmptyOneStaysEmpty()
+    {
+        var thin = Column(1.0f, 20, c => c.DrawRect(new Rect(5, 10.6f, 30, 0.3f), Color.Red));
+        Assert.Equal(1, thin.Count(v => v >= 247));
+
+        var empty = Column(1.0f, 20, c => c.DrawRect(new Rect(5, 10.6f, 30, 0f), Color.Red));
+        Assert.True(empty.All(v => v < 8), $"an empty rect painted something: [{string.Join(" ", empty)}]");
+    }
+
+    /// <summary>An axis-aligned line snaps like a rule does — the context menu's separator is
+    /// one of these.</summary>
+    [Theory]
+    [InlineData(1.0f, 1)]
+    [InlineData(1.5f, 2)]
+    public void AHorizontalLineSnaps(float scale, int expected)
+        => AssertCrisp(Column(scale, 20,
+            c => c.DrawLine(new Point(5, 10.4f), new Point(35, 10.4f), Color.Red, 1f)),
+            expected, scale, "horizontal line");
+
+    /// <summary>A stroke width is rounded on its own, unlike a fill's — a line has a width
+    /// rather than two edges, so there is nothing to derive it from. That keeps a 1-DIP rule the
+    /// same weight wherever it sits, which for a menu separator matters more than tiling.</summary>
+    [Theory]
+    [InlineData(2f, 1.5f, 3)]
+    [InlineData(1f, 2.0f, 2)]
+    public void ALineKeepsItsWeightWhereverItSits(float width, float scale, int expected)
+        => AssertCrisp(Column(scale, 20,
+            c => c.DrawLine(new Point(5, 10.4f), new Point(35, 10.4f), Color.Red, width)),
+            expected, scale, $"{width}dip line");
+
+    /// <summary>
+    /// A diagonal line does not snap.
+    ///
+    /// <para>Every diagonal in the framework is a glyph drawn by hand — the checkmark in a
+    /// checkbox, the two legs of a chevron. Forcing their endpoints onto the grid kinks the
+    /// shape instead of sharpening it, and a checkmark with a bend in it is a worse result than
+    /// a soft one. So this is the one case here that <i>requires</i> partial coverage.</para>
+    /// </summary>
+    [Fact]
+    public void ADiagonalLineIsLeftAlone()
+    {
+        const float scale = 1.5f;
+        int px = (int)(40 * scale);
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(px, px, scale);
+        var ctx = surface.RenderContext;
+
+        ctx.BeginFrame(40, 40, scale, Color.White);
+        ctx.DrawLine(new Point(10.4f, 10.4f), new Point(29.6f, 25.3f), Color.Red, 1f);
+        ctx.EndFrame();
+        surface.Present();
+        var p = surface.ReadPixels(out _, out _, out int rowBytes);
+
+        int partial = 0;
+        for (int x = (int)(12 * scale); x < (int)(28 * scale); x++)
+            for (int y = (int)(10 * scale); y < (int)(26 * scale); y++)
+            {
+                int cov = 255 - p[y * rowBytes + x * 4 + 1];
+                if (cov is > 8 and < 247) partial++;
+            }
+        Assert.True(partial > 20, $"the diagonal should be antialiased along its length ({partial} partial pixels)");
+    }
+
+    /// <summary>
+    /// Two backgrounds meeting at one coordinate leave no seam.
+    ///
+    /// <para>The fill counterpart of the border case, and the reason backgrounds snap at all
+    /// rather than being left exact: two boxes abutting at a fractional coordinate each painted
+    /// half of the pixel they shared, which showed as a pale line between them. Snapping the
+    /// shared edge sends both to the same pixel.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(1.25f)]
+    [InlineData(1.5f)]
+    public void AdjacentBackgroundsLeaveNoSeam(float scale)
+    {
+        int px = (int)(40 * scale);
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(px, px, scale);
+        var ctx = surface.RenderContext;
+
+        ctx.BeginFrame(40, 40, scale, Color.White);
+        // The shared edge has to be off the grid, or there is nothing for snapping to do and this
+        // passes either way — at x=20 both 1.25x and 1.5x land on a whole pixel already, which is
+        // how the first version of this test managed to pass with background snapping removed.
+        ctx.DrawRoundedRect(new Rect(5, 10.4f, 15.4f, 10), CornerRadius.Zero, Color.Red, Color.Transparent, default);
+        ctx.DrawRoundedRect(new Rect(20.4f, 10.4f, 14.6f, 10), CornerRadius.Zero, Color.Red, Color.Transparent, default);
+        ctx.EndFrame();
+        surface.Present();
+        var p = surface.ReadPixels(out _, out _, out int rowBytes);
+
+        int y = (int)(15 * scale);
+        int seam = (int)MathF.Round(20.4f * scale, MidpointRounding.AwayFromZero);
+        foreach (int x in new[] { seam - 1, seam })
+        {
+            int cov = 255 - p[y * rowBytes + x * 4 + 1];
+            Assert.True(cov >= 247, $"seam at device x={x} (coverage {cov}) at {scale}x");
+        }
+    }
 }

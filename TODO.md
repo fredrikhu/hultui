@@ -1,6 +1,30 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **And the fills** — the follow-up the border pass left open, and the call sites decided the
+  shape of it rather than theory. `DrawRect` turns out to be carets, selection bands and dividers,
+  all hard-edged; those snap. `DrawLine` turns out to be almost entirely *diagonals* — the
+  checkmark in a checkbox, the two legs of a chevron — and snapping their endpoints kinks the
+  glyph instead of sharpening it, so only axis-aligned lines snap and a diagonal is explicitly
+  left alone. Backgrounds snap too, including gradients, so a gradient-filled box and a solid one
+  beside it do not sit half a pixel apart. Shadows, text and images are untouched: a blurred edge
+  has nothing to gain, and text stays subpixel-positioned because that is what keeps it smooth.
+  The clamp is on "was asked for at all", not on "is small". Rounding both edges of a 0.3-DIP rect
+  to the same pixel erases it, and a vanished caret is worse than a soft one — but the same clamp
+  on a genuinely empty rect would smear a one-pixel band, and an unselected range is a zero-width
+  rect drawn every frame a text field has focus.
+  A fill's size comes from its snapped edges, so it is position-dependent: a 1-DIP rule at 1.5x is
+  one device pixel at y=10.4 and two at y=10.0. That is the rule working — deriving a
+  position-independent size is exactly what opens seams between things that should tile — and the
+  test asserting a single number for 1.5x was that mistake, caught by failing against correct
+  code. A line is different and keeps a position-independent weight: it has a width rather than
+  two edges, so there is nothing to derive one from.
+  12 more tests, 31 in the rig now. Five faults put back, four caught; the fifth — backgrounds not
+  snapped — was not, because the seam in that test sat at x=20, which is already a whole pixel at
+  both 1.25x and 1.5x. Moved it off the grid.
+  Measured after: the sample's caret is two solid pixels and its focus underline two solid accent
+  pixels, both previously soft. The benchmark's render pass moved 0.3→0.2ms and 0.6→0.7ms, which
+  is under its noise floor — layout, untouched, moved 87.1→89.1 in the same runs.
 - **A border lands on whole device pixels** — the crispness half of the WinUI comparison, and it
   turned out not to be a fractional-scale problem at all. Measured first: a 1-DIP border on a box
   edge came out `128 128` at 100% — two half-covered pixels — `192 192` at 150%, `32 255 32` at
@@ -13,9 +37,8 @@
   flush; rounding them apart is the classic way to get a one-pixel seam. Because the edges land
   first, the width comes out the same on all four sides, which keeps the uniform fast path.
   Arcs are deliberately left antialiased — snapping a curve steps it, and the Gallery antialiases
-  its corners too (straight run two solid pixels, arc through #1F1F1F #1E1E1E #232323). Only
-  borders snap, plus the box a border sits on so fill and band agree; a plain background keeps its
-  exact geometry.
+  its corners too (straight run two solid pixels, arc through #1F1F1F #1E1E1E #232323). This first
+  pass snapped borders only; fills followed (below).
   The test rig came first and it had to, because every other pixel test in the project runs at
   scale 1 where the interesting half is invisible: 19 tests at 1.0, 1.25, 1.5 and 2.0, of which 13
   failed against the old renderer. Four faults were put back; three were caught and the fourth —

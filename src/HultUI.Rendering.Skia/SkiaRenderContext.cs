@@ -70,7 +70,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (fill.A == 0) return;
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(fill);
-        Canvas.DrawRect(ToSkRect(rect), _pooledPaint);
+        // Snapped: these are carets, selection bands and dividers, and every one of them is a
+        // hard-edged shape that reads as blurry when it lands between pixels.
+        Canvas.DrawRect(ToSkRect(SnapFill(rect)), _pooledPaint);
     }
 
     public void DrawBoxShadow(Rect box, CornerRadius radius, BoxShadow shadow)
@@ -115,6 +117,10 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         var stops = gradient.Stops;
         if (stops.Count == 0) return;
+
+        // Same grid as a solid background, or a gradient-filled box and a solid one beside it
+        // would sit half a pixel apart.
+        rect = SnapBox(rect);
 
         var colors = new SKColor[stops.Count];
         var positions = new float[stops.Count];
@@ -206,6 +212,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     private Thickness SnapThickness(Thickness w) =>
         new(SnapWidth(w.Top), SnapWidth(w.Right), SnapWidth(w.Bottom), SnapWidth(w.Left));
+
+    /// <summary>
+    /// A filled rect on the grid. Same edge-first rule as <see cref="SnapBox"/>, plus the clamp
+    /// that keeps a thin one visible: two edges of a sub-pixel rect can round to the same device
+    /// pixel and collapse it to nothing, which for a caret or a divider is a worse bug than the
+    /// softness being fixed. A rect that was already empty stays empty — an unselected range
+    /// must not turn into a one-pixel smear.
+    /// </summary>
+    private Rect SnapFill(Rect r)
+    {
+        float l = SnapCoord(r.X), t = SnapCoord(r.Y);
+        float w = r.Width <= 0f ? 0f : MathF.Max(1f / _scale, SnapCoord(r.X + r.Width) - l);
+        float h = r.Height <= 0f ? 0f : MathF.Max(1f / _scale, SnapCoord(r.Y + r.Height) - t);
+        return new Rect(l, t, w, h);
+    }
 
     public void DrawBorder(Rect box, CornerRadius radius, Color color, Thickness w, BorderStyle style)
     {
@@ -354,14 +375,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         bool stroked = stroke.A > 0 && (strokeWidth.Top > 0 || strokeWidth.Right > 0
                                         || strokeWidth.Bottom > 0 || strokeWidth.Left > 0);
-        // Snap the box only when there is a border on it, so the fill and the band agree to the
-        // pixel. A plain background keeps its exact geometry — snapping every fill would move
-        // element edges by up to half a device pixel for no visible gain.
+        // The box snaps whether or not it carries a border, so a background lands on the grid
+        // like everything else — and, because two boxes sharing a coordinate snap it to the same
+        // pixel, adjacent fills stay flush instead of showing a seam between them.
+        rect = SnapBox(rect);
         if (stroked)
-        {
-            rect = SnapBox(rect);
             strokeWidth = SnapThickness(strokeWidth);
-        }
 
         var skRect = ToSkRect(rect);
 
@@ -771,8 +790,34 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         _pooledPaint.Reset();
         _pooledPaint.Color = ToSkColor(color);
         _pooledPaint.IsStroke = true;
-        _pooledPaint.StrokeWidth = strokeWidth;
         _pooledPaint.IsAntialias = true;
+
+        // Only axis-aligned lines snap. Every diagonal here is a glyph drawn by hand — the
+        // checkmark in a checkbox, the two legs of a chevron — and forcing their endpoints onto
+        // the grid kinks the shape rather than sharpening it. A horizontal or vertical rule has
+        // no such shape to lose, so it gets the same treatment as a border: the band centred on
+        // a snapped half-pixel so a whole number of device pixels is covered.
+        bool horizontal = MathF.Abs(from.Y - to.Y) < 0.001f;
+        bool vertical = MathF.Abs(from.X - to.X) < 0.001f;
+        if (horizontal || vertical)
+        {
+            float w = SnapWidth(strokeWidth);
+            _pooledPaint.StrokeWidth = w;
+            float half = w / 2f;
+            if (horizontal)
+            {
+                float y = SnapCoord(from.Y - half) + half;
+                Canvas.DrawLine(SnapCoord(from.X), y, SnapCoord(to.X), y, _pooledPaint);
+            }
+            else
+            {
+                float x = SnapCoord(from.X - half) + half;
+                Canvas.DrawLine(x, SnapCoord(from.Y), x, SnapCoord(to.Y), _pooledPaint);
+            }
+            return;
+        }
+
+        _pooledPaint.StrokeWidth = strokeWidth;
         Canvas.DrawLine(from.X, from.Y, to.X, to.Y, _pooledPaint);
     }
 
