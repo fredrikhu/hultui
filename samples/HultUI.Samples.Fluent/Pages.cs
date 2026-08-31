@@ -165,13 +165,19 @@ public static class Pages
             bool selected = app.AccentIndex == i;
             var color = p.IsDark ? preset.Dark : preset.Light;
 
-            // The selected swatch gets a ring drawn as a second border rather than as a glow:
-            // an inner 2px band in the page colour, and the accent showing around it.
+            // The selected swatch gets a ring around it: the accent again, held off the square
+            // by a gap of the card behind it. As an outline rather than a thicker border,
+            // because a border is drawn inside the box — the ring used to be a 3px border in
+            // the *card* colour, which against a card background is invisible, so the only
+            // thing selecting a swatch did was shrink its colour from 38px to 34px. Measured.
+            // An outline also keeps both states the same size, and the row's 8px gap has room
+            // for the 4px it reaches, since only one swatch is ever selected.
             swatches.Add(F.Focusable(Box.New().FlexShrink(0)
                 .Width(40f).Height(40f)
                 .CornerRadius(Fluent.ControlRadius)
                 .Background(color)
-                .Border(new Thickness(selected ? 3 : 1), selected ? p.Card : p.CardStroke)
+                .Border(new Thickness(1), p.CardStroke)
+                .Outline(selected ? 2f : 0f, color, offset: 2f)
                 .Cursor(CursorType.Pointer)
                 .Opacity(selected ? 1f : 0.9f)
                 .OnHover(b => b.Opacity(1f))

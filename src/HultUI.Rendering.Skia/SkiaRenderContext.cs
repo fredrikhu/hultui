@@ -389,10 +389,28 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             _pooledPaint.Reset();
             _pooledPaint.Color = ToSkColor(fill);
             _pooledPaint.IsAntialias = true;
-            if (radius.IsZero)
-                Canvas.DrawRect(skRect, _pooledPaint);
+
+            // Pull the fill back under the border rather than out to the same edge. Two
+            // antialiased curves on one boundary do not compose into a clean line — they blend,
+            // and on a rounded box the fill showed *through* the border at the corners while the
+            // straight runs stayed clean. Half the border width is enough: the fill's soft edge
+            // then falls in the middle of the band and the border covers it outright. Half rather
+            // than the whole width so the fill still runs under most of the border, which is what
+            // a translucent border composites against.
+            var fillRect = skRect;
+            var fillRadius = radius;
+            if (stroked)
+            {
+                float inset = (strokeWidth.Top + strokeWidth.Right + strokeWidth.Bottom + strokeWidth.Left) / 8f;
+                fillRect = ToSkRect(new Rect(rect.X + inset, rect.Y + inset,
+                    MathF.Max(0f, rect.Width - inset * 2f), MathF.Max(0f, rect.Height - inset * 2f)));
+                fillRadius = Deflate(radius, inset);
+            }
+
+            if (fillRadius.IsZero)
+                Canvas.DrawRect(fillRect, _pooledPaint);
             else
-                Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
+                Canvas.DrawRoundRect(ToSkRoundRect(fillRect, fillRadius), _pooledPaint);
         }
 
         if (stroked)

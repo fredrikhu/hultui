@@ -377,4 +377,44 @@ public class PixelSnappingTests
             Assert.True(cov >= 247, $"seam at device x={x} (coverage {cov}) at {scale}x");
         }
     }
+
+    /// <summary>
+    /// A background does not paint outside its own border at the corners.
+    ///
+    /// <para>Reported by eye on the sample's accent swatches, and a regression from moving the
+    /// stroke inside the box: its outer edge then coincided exactly with the fill's antialiased
+    /// arc, and two antialiased curves on one boundary blend rather than one covering the other.
+    /// The straight runs stayed clean — they are hard-edged on both sides — so this shows only at
+    /// a corner, and only on a rounded box. Measured on the swatch: the border pixel was #3A5662
+    /// at the corner against #252525 along the edge, visibly tinted by the fill behind it.</para>
+    ///
+    /// <para>Red fill, blue border, white ground. Any blend of white and blue keeps B at 255,
+    /// because both have it; only red can pull it down. So B below 255 outside the box outline
+    /// is fill that escaped. The outline crosses the 45 degree diagonal 6 from the corner arc's
+    /// centre at (16,16) — at 11.76 — so pixel 11 is the last one wholly outside it.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(1.0f)]
+    [InlineData(1.5f)]
+    public void AFillDoesNotEscapePastARoundedBorder(float scale)
+    {
+        int px = (int)(40 * scale);
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(px, px, scale);
+        var ctx = surface.RenderContext;
+
+        ctx.BeginFrame(40, 40, scale, Color.White);
+        ctx.DrawRoundedRect(new Rect(10, 10, 20, 20), new CornerRadius(6f),
+            new Color(255, 0, 0), new Color(0, 0, 255), new Thickness(1f));
+        ctx.EndFrame();
+        surface.Present();
+        var p = surface.ReadPixels(out _, out _, out int rowBytes);
+
+        for (int d = (int)(10 * scale); d <= (int)(11.7f * scale); d++)
+        {
+            int i = d * rowBytes + d * 4;
+            Assert.True(p[i + 2] >= 253,
+                $"fill escaped at device ({d},{d}) at {scale}x: R{p[i]} G{p[i + 1]} B{p[i + 2]}");
+        }
+    }
 }

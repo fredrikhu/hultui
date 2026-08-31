@@ -1,6 +1,25 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Two things wrong with the accent swatches, one of them mine** — both reported by eye and both
+  confirmed by measuring the rendered frame, which is the only place either showed.
+  The selected swatch was not ringed, it was *shrunk*. Its ring was a 3px border in `p.Card`, and
+  a border draws inside the box — so against a card background it was invisible, and the only
+  visible effect of selecting a swatch was its colour going from 38px to 34px. Now an `Outline`
+  in the accent colour, held 2px off the square: both states measure 38px and the ring is the
+  thing the old comment said it wanted, "the accent showing around it".
+  The second was a regression from moving the border inside the box a commit earlier. With the
+  stroke's outer edge landing exactly on the fill's antialiased arc, two antialiased curves share
+  one boundary and blend instead of one covering the other — so the fill showed through the
+  border at the corners while the straight runs stayed clean. Measured on the blue swatch: the
+  border pixel read #3A5662 at the corner against #252525 along the edge. The fill is now pulled
+  back under the border by half its width, which puts its soft edge in the middle of the band;
+  half rather than the whole width, so the fill still runs under most of the border, which is
+  what a translucent border composites against. Back to #2E373B, and the test asserts the pixels
+  outside the box outline carry no fill at all — red fill, blue border, white ground, so any blue
+  channel under 255 out there is fill that escaped.
+  Neither was caught by the snapping rig, which is the point: it asserts single-colour edges, and
+  both of these are about two colours meeting. Four faults, all four caught.
 - **And the fills** — the follow-up the border pass left open, and the call sites decided the
   shape of it rather than theory. `DrawRect` turns out to be carets, selection bands and dividers,
   all hard-edged; those snap. `DrawLine` turns out to be almost entirely *diagonals* — the

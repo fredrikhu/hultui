@@ -626,6 +626,45 @@ public class FluentSampleTests
         Assert.Equal(Color.FromHex("#202020"), app.Palette.Backdrop);
     }
 
+    /// <summary>
+    /// The selected accent swatch is ringed, not shrunk.
+    ///
+    /// <para>It used to carry a 3px border in the <i>card</i> colour, and a border is drawn
+    /// inside the box — so against a card background the ring was invisible and the only visible
+    /// effect of selecting a swatch was its colour going from 38px to 34px. Measured off the
+    /// rendered frame, which is the only place it showed: nothing about the element tree looked
+    /// wrong.</para>
+    ///
+    /// <para>Now it is an outline, so the box does not move and the ring is the accent held off
+    /// the square by a gap of the card behind it. Both halves are asserted — a ring that also
+    /// resized the swatch would be half a fix.</para>
+    /// </summary>
+    [Fact]
+    public void TheSelectedAccentSwatchIsRingedRatherThanShrunk()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+        GoTo(session, "Personalization");
+
+        var selected = Swatch(session, AccentPreset.All[app.AccentIndex].Name);
+        var other = Swatch(session, AccentPreset.All[(app.AccentIndex + 1) % AccentPreset.All.Length].Name);
+
+        Assert.Equal(LayoutProbe.Painted(other).Width, LayoutProbe.Painted(selected).Width);
+        Assert.Equal(other.Layout.Border, selected.Layout.Border);
+
+        Assert.True(selected.Outline.IsVisible, "the selected swatch should carry a ring");
+        Assert.False(other.Outline.IsVisible, "and an unselected one should not");
+
+        // The accent, not the surface it sits on — the colour is what made the old ring vanish.
+        Assert.NotEqual(app.Palette.Card, selected.Outline.Color);
+        Assert.Equal(selected.BackgroundColor, selected.Outline.Color);
+        Assert.True(selected.Outline.Offset > 0f, "and held off the square by a gap");
+    }
+
+    private static BoxElement Swatch(HeadlessSession session, string name) =>
+        (BoxElement)(session.Window.FindByRole(AccessibilityRole.Button, name)
+            ?? throw new InvalidOperationException($"no \"{name}\" swatch on screen")).Element;
+
     // ──────────────────────────────────────────────────────────────────────
     // Theming
     // ──────────────────────────────────────────────────────────────────────
