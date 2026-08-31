@@ -180,22 +180,27 @@ public sealed partial class FluentApp : Component
         input.On<FocusEvent>(_ => SearchFocused = true);
         input.On<BlurEvent>(_ => SearchFocused = false);
 
+        // Two boxes for one border, the same trick the buttons use — a box takes a single border
+        // colour, and a text field's bottom edge is a different colour from its sides. Here it is
+        // not a subtle two-tone either: at rest the bottom is ControlStrong against #4C4C4C
+        // sides, and on focus it grows to a 2px accent while the sides stay put.
+        var inner = Flex.Row(gap: 8f).FlexGrow(1)
+            .AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, 10, 0, 10))
+            .CornerRadius(Fluent.ControlRadius)
+            .Border(new Thickness(1, 1, 0, 1), p.ControlStroke)
+            .Children(
+                IconRenderer.Draw(Icons.Search, 16f, p.TextSecondary),
+                input);
+
         return Box.New().FlexShrink(0)
             .Height(Fluent.ControlHeight)
             .CornerRadius(Fluent.ControlRadius)
             .Background(SearchFocused ? p.ControlInputActive : p.ControlFill)
-            // Constant widths, colour only: WinUI thickens the underline on focus, but doing it
-            // here would move the content box by a pixel and make the row twitch as you tab
-            // through. The bottom edge is already the heavier one at rest.
-            .Border(new Thickness(1, 1, 2, 1), SearchFocused ? p.Accent : p.ControlStroke)
-            .Padding(new Thickness(0, 10, 0, 10))
-            .FlexDirection(FlexDirection.Row)
-            .Gap(8f)
-            .AlignItems(AlignItems.Center)
+            .Border(new Thickness(0, 0, SearchFocused ? 2f : 1f, 0),
+                SearchFocused ? p.Accent : p.ControlStrong)
             .Margin(new Thickness(0, 0, 8, 0))
-            .Children(
-                IconRenderer.Draw(Icons.Search, 16f, p.TextSecondary),
-                input);
+            .Children(inner);
     }
 
     private Element NavPane(FluentPalette p)
@@ -245,7 +250,8 @@ public sealed partial class FluentApp : Component
         body.ScrollbarThumbColor = p.ControlStrong;
         body.Children(
             Flex.Column(gap: 0).FlexShrink(0)
-                .Padding(new Thickness(28, 36, 36, 36))
+                // Everything on the 4px grid the Spacing page insists on — 28 was not.
+                .Padding(new Thickness(32, 36, 36, 36))
                 .MaxWidth(1064f)
                 .Children(page));
 

@@ -430,6 +430,84 @@ public class FluentSampleTests
         Assert.Equal(app.Palette.TextOnAccent, symbol!.Inherited.TextColor);
     }
 
+    /// <summary>
+    /// The type ramp is four columns wide, not three.
+    ///
+    /// <para>The Gallery publishes each style as size, weight, <i>optical size</i> and
+    /// <i>line height</i> — 12/16 on Small for Caption, 14/20 on Text for Body, 28/36 on Display
+    /// for Title. Taking the size and the weight and letting the font's own metrics decide the
+    /// rest is how a ramp ends up nearly right: it shows up the moment a description wraps, and
+    /// in a page of settings cards most of them do.</para>
+    /// </summary>
+    [Fact]
+    public void TheTypeRampCarriesItsOpticalSizesAndLineHeights()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+        var p = app.Palette;
+
+        var caption = F.Caption(p, "x");
+        Assert.Equal(Fluent.SmallFont, caption.Inherited.FontFamily);
+        Assert.Equal(12f, caption.Inherited.FontSize);
+        Assert.Equal(16f, caption.Inherited.LineHeight);
+
+        var body = F.Body(p, "x");
+        Assert.Equal(14f, body.Inherited.FontSize);
+        Assert.Equal(20f, body.Inherited.LineHeight);
+
+        var title = F.Title(p, "x");
+        Assert.Equal(Fluent.DisplayFont, title.Inherited.FontFamily);
+        Assert.Equal(28f, title.Inherited.FontSize);
+        Assert.Equal(36f, title.Inherited.LineHeight);
+    }
+
+    /// <summary>
+    /// Focus moves the text box's bottom edge and its fill, and leaves the other three sides
+    /// exactly where they were.
+    ///
+    /// <para>Measured: a focused dark WinUI text box keeps <c>#303030</c> sides, takes a 2px
+    /// accent along the bottom, and its fill goes <i>darker</i> to
+    /// <c>ControlFillColorInputActive</c>. Lighting the whole ring is what this sample did, and
+    /// it is what anyone reaches for when the theme offers one focus colour — so the assertion
+    /// that matters is the negative one.</para>
+    /// </summary>
+    [Fact]
+    public void FocusDoesNotLightTheTextBoxSides()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+
+        var ti = session.Application.Theme.TextInput;
+        Assert.Equal(ti.BorderColor, ti.FocusBorderColor);
+        Assert.NotEqual(app.Palette.Accent, ti.FocusBorderColor);
+
+        Assert.Equal(app.Palette.ControlStrong, ti.UnderlineColor);
+        Assert.Equal(app.Palette.Accent, ti.FocusUnderlineColor);
+        Assert.Equal(2f, ti.FocusUnderlineThickness);
+        Assert.Equal(app.Palette.ControlInputActive, ti.FocusBackground);
+    }
+
+    /// <summary>
+    /// A card's outline recedes into the page rather than standing off it.
+    ///
+    /// <para><c>CardStrokeColorDefault</c> is black at 10% in dark mode, so the line around a
+    /// card is darker than both the card and the page behind it — measured on real Settings as
+    /// page #1A2226, card #262D31, stroke #171F22. A lighter outline is the intuitive choice and
+    /// makes a page of cards look like a page of buttons.</para>
+    /// </summary>
+    [Fact]
+    public void ACardIsOutlinedByALineThatRecedes()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+        var p = app.Palette;
+
+        Assert.True(Luma(p.CardStroke) < Luma(p.Card),
+            $"stroke {p.CardStroke} should be darker than the card {p.Card}");
+        Assert.True(Luma(p.CardStroke) < Luma(p.Layer),
+            $"stroke {p.CardStroke} should be darker than the page {p.Layer}");
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Theming
     // ──────────────────────────────────────────────────────────────────────

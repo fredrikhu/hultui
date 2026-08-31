@@ -99,7 +99,10 @@ public sealed record FluentPalette
             Layer = Hex("#272727"),
             Card = Hex("#2D2D2D"),
             CardHover = Hex("#323232"),
-            CardStroke = Hex("#373737"),
+            // Darker than the card, not lighter: CardStrokeColorDefault is black at 10% in dark
+            // mode, so a card is outlined by a line that recedes into the page. Measured on real
+            // Settings — page #1A2226, card #262D31, stroke #171F22, below both.
+            CardStroke = Hex("#232323"),
             Divider = Hex("#333333"),
             Flyout = Hex("#2C2C2C"),
             ControlFill = Hex("#373737"),
@@ -231,14 +234,27 @@ public sealed record FluentPalette
         {
             CornerRadius = new CornerRadius(Fluent.ControlRadius),
             Padding = new Thickness(5, 10, 6, 10),
-            // Heavier along the bottom, the same two-tone the buttons get. On focus the
-            // whole ring turns accent, which is one step louder than WinUI (it lights the
-            // bottom edge only) but is the shape a single border colour can express.
-            BorderWidth = new Thickness(1, 1, 2, 1),
+            BorderWidth = new Thickness(1),
             FontSize = Fluent.BodySize,
             Background = ControlFill,
             BorderColor = ControlStroke,
-            FocusBorderColor = Accent,
+
+            // Measured off the Gallery, and not what a button does. A dark WinUI text box has
+            // #303030 sides and a #9A9A9A bottom — ControlStrongFillColorDefault, not a slightly
+            // darker stroke. It is the loudest thing about the control at rest, and it is what a
+            // text field is recognised by; drawn as an ordinary border it looks disabled.
+            UnderlineColor = ControlStrong,
+            UnderlineThickness = 1f,
+
+            // On focus the accent grows along the bottom to 2px and the other three sides do not
+            // move at all. Lighting the whole ring is the obvious thing to do and is wrong.
+            FocusUnderlineColor = Accent,
+            FocusUnderlineThickness = 2f,
+            FocusBorderColor = ControlStroke,
+
+            // And the fill goes *darker* on a dark theme — ControlFillColorInputActive, which
+            // exists to make the field read as a hole you are typing into.
+            FocusBackground = ControlInputActive,
             PlaceholderColor = TextTertiary,
             SelectionColor = new Color(Accent.R, Accent.G, Accent.B, 90),
             CursorColor = TextPrimary,
@@ -320,10 +336,23 @@ public static class Fluent
     public const string BodyFont = "Segoe UI Variable Text";
     public const string DisplayFont = "Segoe UI Variable Display";
 
+    /// <summary>The third optical size, for 12px and below. Easy to miss — the Gallery's type
+    /// ramp assigns Caption to <i>Small</i>, not to Text, and using Text at 12px gives away that
+    /// the ramp was copied by size alone.</summary>
+    public const string SmallFont = "Segoe UI Variable Small";
+
+    // Size and line height, from the Gallery's type ramp. The line heights are the half that
+    // gets forgotten: the ramp is published as "12/16", "14/20", "20/28", "28/36", and leaving
+    // them to the font's own metrics puts multi-line body copy on the wrong rhythm — visible
+    // the moment a description wraps, which in a page of settings cards is most of them.
     public const float CaptionSize = 12f;
+    public const float CaptionLineHeight = 16f;
     public const float BodySize = 14f;
+    public const float BodyLineHeight = 20f;
     public const float SubtitleSize = 20f;
+    public const float SubtitleLineHeight = 28f;
     public const float TitleSize = 28f;
+    public const float TitleLineHeight = 36f;
 
     /// <summary>ControlCornerRadius — buttons, text boxes, cards, nav items.</summary>
     public const float ControlRadius = 4f;

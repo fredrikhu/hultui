@@ -97,6 +97,13 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     public Color FocusBorderColor { get; set; } = new(66, 135, 245, 255);
     public float CursorWidth { get; set; } = 1.5f;
 
+    // ──── Underline (see TextInputTheme.UnderlineColor) ────
+    public Color? UnderlineColor { get; set; }
+    public Color? FocusUnderlineColor { get; set; }
+    public float UnderlineThickness { get; set; } = 1f;
+    public float FocusUnderlineThickness { get; set; } = 2f;
+    public Color? FocusBackground { get; set; }
+
     public Action<string>? TextChanged { get; set; }
 
     /// <summary>When true the buffer can be selected, scrolled, and copied, but not
@@ -157,6 +164,11 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         BackgroundColor = ti.Background ?? theme.Background;
         BorderColor = ti.BorderColor ?? theme.Border;
         FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
+        UnderlineColor = ti.UnderlineColor;
+        FocusUnderlineColor = ti.FocusUnderlineColor;
+        UnderlineThickness = ti.UnderlineThickness;
+        FocusUnderlineThickness = ti.FocusUnderlineThickness;
+        FocusBackground = ti.FocusBackground;
         PlaceholderColor = ti.PlaceholderColor ?? theme.Secondary;
         SelectionColor = ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
         CursorColor = ti.CursorColor ?? theme.TextColor;
@@ -1044,9 +1056,22 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         }
 
         var origBorder = BorderColor;
-        if (_focused) BorderColor = FocusBorderColor;
+        var origBackground = BackgroundColor;
+        if (_focused)
+        {
+            BorderColor = FocusBorderColor;
+            if (FocusBackground is { } fb) BackgroundColor = fb;
+        }
         base.Render(ctx);
-        if (_focused) BorderColor = origBorder;
+        if (_focused)
+        {
+            BorderColor = origBorder;
+            BackgroundColor = origBackground;
+        }
+
+        TextFieldUnderline.Draw(ctx, Layout.AbsoluteBorderBox, CornerRadius,
+            (_focused ? FocusUnderlineColor ?? UnderlineColor : UnderlineColor) ?? Color.Transparent,
+            _focused ? FocusUnderlineThickness : UnderlineThickness);
 
         var contentBox = Layout.AbsoluteContentBox;
         var style = ResolvedInherited;

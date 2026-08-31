@@ -1,6 +1,33 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **A text box is not a button with a caret** — `TextInputTheme.UnderlineColor` /
+  `FocusUnderlineColor` / `UnderlineThickness` / `FocusUnderlineThickness` / `FocusBackground`,
+  read by both `TextInputElement` and `TextAreaElement`. Measured, because a text box turned out
+  to be the one control whose border is *not* the two-tone every other control has: at rest a
+  dark WinUI text box is `#303030` on three sides and `#9A9A9A` along the bottom —
+  `ControlStrongFillColorDefault`, a different token entirely, and the loudest thing about the
+  control. On focus the bottom becomes a 2px accent, the other three sides do not move, and the
+  fill goes *darker* to `ControlFillColorInputActive`. Lighting the whole ring is what the sample
+  did and what the single `FocusBorderColor` invites; all three assertions in the sample test are
+  therefore negative ones. Drawn as a clipped stroke rather than a single-sided border, because
+  the renderer draws those as plain rectangles and a bottom-only border on a rounded field pokes
+  out past both corners. Null underline draws nothing, so no existing app moves. 6 headless tests
+  + 1 in the sample.
+- **What the Design tab said we had wrong** — the type ramp is four columns, not three. The
+  Gallery publishes each style as size, weight, *optical size* and *line height*; the sample had
+  taken the first two. Caption belongs on **Segoe UI Variable Small**, not Text, and every style
+  carries a published line height (12/16, 14/20, 20/28, 28/36) that the sample was leaving to the
+  font's own metrics — visible the moment a description wraps, which in a page of settings cards
+  is most of them. Also from Design: a card's outline *recedes* — `CardStrokeColorDefault` is
+  black at 10% in dark mode, so it is darker than both the card and the page; the sample had it
+  lighter, which makes a page of cards look like a page of buttons. And the Spacing page's 4px
+  grid caught two off-grid values (a 28px page padding and a 1px label margin).
+  Checked and deliberately *not* changed: the Geometry page lists 8px `OverlayCornerRadius` for
+  "app windows, flyouts, cards and dialogs" and 4px `ControlCornerRadius` for "in-page elements
+  such as controls and list backplates". A real Settings card measures 4px, so the doc's "card"
+  is a top-level container and a settings row is a list backplate. The sample follows the app it
+  imitates rather than the sentence.
 - **The InfoBar's severity mark is a filled badge** — a 16px disc in the severity colour with the
   symbol knocked out of it in `TextOnAccent`, black on dark and white on light. The sample had
   the outlined ⓘ-style glyphs, which is the obvious mistake and survived until the two were put

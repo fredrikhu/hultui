@@ -32,30 +32,40 @@ public static class F
     // Type ramp
     // ──────────────────────────────────────────────────────────────────────
 
+    // Size, weight, optical size and line height together — the Gallery publishes the ramp as
+    // four columns and taking three of them is how a ramp ends up nearly right. Caption is on
+    // the Small cut rather than Text, and every style carries the published line height.
+
     public static TextElement Title(FluentPalette p, string s) =>
         Text.New(s).FontFamily(Fluent.DisplayFont).FontSize(Fluent.TitleSize)
+            .LineHeight(Fluent.TitleLineHeight)
             .FontWeight(FontWeight.SemiBold).TextColor(p.TextPrimary);
 
     public static TextElement Subtitle(FluentPalette p, string s) =>
         Text.New(s).FontFamily(Fluent.DisplayFont).FontSize(Fluent.SubtitleSize)
+            .LineHeight(Fluent.SubtitleLineHeight)
             .FontWeight(FontWeight.SemiBold).TextColor(p.TextPrimary);
 
     public static TextElement Body(FluentPalette p, string s) =>
-        Text.New(s).FontSize(Fluent.BodySize).TextColor(p.TextPrimary);
+        Text.New(s).FontSize(Fluent.BodySize).LineHeight(Fluent.BodyLineHeight)
+            .TextColor(p.TextPrimary);
 
     public static TextElement BodyStrong(FluentPalette p, string s) =>
-        Text.New(s).FontSize(Fluent.BodySize).FontWeight(FontWeight.SemiBold).TextColor(p.TextPrimary);
+        Text.New(s).FontSize(Fluent.BodySize).LineHeight(Fluent.BodyLineHeight)
+            .FontWeight(FontWeight.SemiBold).TextColor(p.TextPrimary);
 
     public static TextElement Secondary(FluentPalette p, string s) =>
-        Text.New(s).FontSize(Fluent.CaptionSize).TextColor(p.TextSecondary);
+        Text.New(s).FontFamily(Fluent.SmallFont).FontSize(Fluent.CaptionSize)
+            .LineHeight(Fluent.CaptionLineHeight).TextColor(p.TextSecondary);
 
     public static TextElement Caption(FluentPalette p, string s) =>
-        Text.New(s).FontSize(Fluent.CaptionSize).TextColor(p.TextTertiary);
+        Text.New(s).FontFamily(Fluent.SmallFont).FontSize(Fluent.CaptionSize)
+            .LineHeight(Fluent.CaptionLineHeight).TextColor(p.TextTertiary);
 
     /// <summary>The small bold label above a run of cards — "Related settings" and friends.
     /// BodyStrong, not a heading size: WinUI groups content with weight rather than scale.</summary>
     public static Element SectionHeader(FluentPalette p, string s) =>
-        BodyStrong(p, s).Margin(new Thickness(8, 0, 0, 1)).FlexShrink(0);
+        BodyStrong(p, s).Margin(new Thickness(8, 0, 0, 0)).FlexShrink(0);
 
     // ──────────────────────────────────────────────────────────────────────
     // Keyboard

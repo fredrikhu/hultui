@@ -136,6 +136,28 @@ public class TextInputElement : BoxElement
     /// </summary>
     public bool DrawsChrome { get; set; } = true;
 
+    // ──── Underline (see TextInputTheme.UnderlineColor) ────
+
+    public Color? UnderlineColor { get; set; }
+    public Color? FocusUnderlineColor { get; set; }
+    public float UnderlineThickness { get; set; } = 1f;
+    public float FocusUnderlineThickness { get; set; } = 2f;
+
+    /// <summary>Fill while focused; null keeps <see cref="BoxElement.BackgroundColor"/>.</summary>
+    public Color? FocusBackground { get; set; }
+
+    private void DrawUnderline(IRenderContext ctx)
+    {
+        // Chromeless means the caller owns the box, and the underline is part of the box.
+        if (!DrawsChrome) return;
+
+        var color = _focused ? FocusUnderlineColor ?? UnderlineColor : UnderlineColor;
+        if (color is not { } c) return;
+
+        TextFieldUnderline.Draw(ctx, Layout.AbsoluteBorderBox, CornerRadius, c,
+            _focused ? FocusUnderlineThickness : UnderlineThickness);
+    }
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var ti = theme.TextInput;
@@ -152,6 +174,11 @@ public class TextInputElement : BoxElement
         // (matches TextAreaElement).
         Inherited.FontSize ??= ti.FontSize;
         FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
+        UnderlineColor = ti.UnderlineColor;
+        FocusUnderlineColor = ti.FocusUnderlineColor;
+        UnderlineThickness = ti.UnderlineThickness;
+        FocusUnderlineThickness = ti.FocusUnderlineThickness;
+        FocusBackground = ti.FocusBackground;
         PlaceholderColor = ti.PlaceholderColor ?? theme.Secondary;
         SelectionColor = ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
         CursorColor = ti.CursorColor ?? theme.TextColor;
@@ -535,9 +562,20 @@ public class TextInputElement : BoxElement
 
         // Draw background/border
         var origBorder = BorderColor;
-        if (_focused) BorderColor = FocusBorderColor;
+        var origBackground = BackgroundColor;
+        if (_focused)
+        {
+            BorderColor = FocusBorderColor;
+            if (FocusBackground is { } fb) BackgroundColor = fb;
+        }
         base.Render(ctx);
-        if (_focused) BorderColor = origBorder;
+        if (_focused)
+        {
+            BorderColor = origBorder;
+            BackgroundColor = origBackground;
+        }
+
+        DrawUnderline(ctx);
 
         var contentBox = Layout.AbsoluteContentBox;
         var style = ResolvedInherited;
@@ -665,6 +703,11 @@ public class TextInputElement : BoxElement
             SelectionColor = input.SelectionColor;
             CursorColor = input.CursorColor;
             FocusBorderColor = input.FocusBorderColor;
+            UnderlineColor = input.UnderlineColor;
+            FocusUnderlineColor = input.FocusUnderlineColor;
+            UnderlineThickness = input.UnderlineThickness;
+            FocusUnderlineThickness = input.FocusUnderlineThickness;
+            FocusBackground = input.FocusBackground;
             CursorWidth = input.CursorWidth;
             TextChanged = input.TextChanged;
 
