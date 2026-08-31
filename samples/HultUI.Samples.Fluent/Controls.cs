@@ -409,7 +409,10 @@ public static class F
             .FlexDirection(FlexDirection.Row)
             .AlignItems(AlignItems.Center)
             .Cursor(CursorType.Pointer)
-            .OnHover(b => b.Background(selected ? p.CardHover : p.SubtleHover))
+            // Selected-and-hovered goes *quieter*, not louder — SubtleFillColorTertiary is closer
+            // to the ground than Secondary. Reaching for a brighter fill is the intuitive move
+            // and is what this had.
+            .OnHover(b => b.Background(selected ? p.SubtlePressed : p.SubtleHover))
             .OnPressed(b => b.Background(p.SubtlePressed))
             .Transition(TransitionProperty.Background, 90f)
             .OnClick(_ => onClick())

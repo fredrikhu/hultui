@@ -24,12 +24,15 @@ public sealed record FluentPalette
     public required bool IsDark { get; init; }
 
     // ── Backdrop ──
-    // Real Mica samples the desktop wallpaper, blurs it hard and desaturates what is left.
-    // There is no wallpaper behind an off-screen surface and no blur behind a sample, so
-    // this is the part that is deliberately faked: a base colour plus a very slight vertical
-    // tint, which is what Mica reduces to once the wallpaper is out of focus anyway.
-    public required Color BackdropTop { get; init; }
-    public required Color BackdropBottom { get; init; }
+    //
+    // The title bar and the nav pane sit on this. It is flat, and that is not a simplification:
+    // measured on the Gallery, the whole top and left is a uniform #202020. An earlier version
+    // of this sample put a slight vertical gradient here on the theory that Mica fades — it does
+    // not, and the gradient was the most visible wrong thing in the window.
+    //
+    // Real Mica samples the desktop wallpaper, blurs it hard and desaturates what is left. There
+    // is no wallpaper behind an off-screen surface, so this stands in for it as a flat colour.
+    public required Color Backdrop { get; init; }
 
     /// <summary>The content pane — WinUI's <c>LayerFillColorDefault</c>, one step off the
     /// backdrop so the page reads as sitting on the window rather than being it.</summary>
@@ -62,6 +65,12 @@ public sealed record FluentPalette
     public required Color ControlAltFill { get; init; }      // ControlAltFillColorSecondary
 
     // ── Subtle (nav items, icon buttons, list rows) ──
+    //
+    // Tertiary is always *closer to the ground* than secondary — less white over a dark theme,
+    // less black over a light one. So a nav item that is both selected and hovered gets quieter
+    // rather than louder, which is the opposite of the intuition that a second state should add
+    // emphasis, and is measurable: on the Gallery, hover is #2D2D2D and selected-hovered #292929
+    // against a #202020 ground.
     public required Color SubtleHover { get; init; }        // SubtleFillColorSecondary
     public required Color SubtlePressed { get; init; }      // SubtleFillColorTertiary
 
@@ -94,8 +103,7 @@ public sealed record FluentPalette
         ? new FluentPalette
         {
             IsDark = true,
-            BackdropTop = Hex("#26262A"),
-            BackdropBottom = Hex("#1C1C1F"),
+            Backdrop = Hex("#202020"),
             Layer = Hex("#272727"),
             Card = Hex("#2D2D2D"),
             CardHover = Hex("#323232"),
@@ -118,8 +126,8 @@ public sealed record FluentPalette
             ControlStrokeBottom = Hex("#484848"),
             ControlStrong = new Color(255, 255, 255, 139),
             ControlAltFill = Hex("#292929"),
-            SubtleHover = Hex("#2F2F2F"),
-            SubtlePressed = Hex("#2A2A2A"),
+            SubtleHover = Hex("#2D2D2D"),
+            SubtlePressed = Hex("#292929"),
             TextPrimary = Color.White,
             TextSecondary = new Color(255, 255, 255, 200),
             TextTertiary = new Color(255, 255, 255, 139),
@@ -139,8 +147,7 @@ public sealed record FluentPalette
         : new FluentPalette
         {
             IsDark = false,
-            BackdropTop = Hex("#F3F3F3"),
-            BackdropBottom = Hex("#EBEBEB"),
+            Backdrop = Hex("#F3F3F3"),
             Layer = Hex("#F9F9F9"),
             Card = Hex("#FBFBFB"),
             CardHover = Hex("#F6F6F6"),
@@ -155,8 +162,8 @@ public sealed record FluentPalette
             ControlStrokeBottom = Hex("#CFCFCF"),
             ControlStrong = new Color(0, 0, 0, 156),
             ControlAltFill = Hex("#F2F2F2"),
-            SubtleHover = Hex("#EDEDED"),
-            SubtlePressed = Hex("#E5E5E5"),
+            SubtleHover = Hex("#EAEAEA"),
+            SubtlePressed = Hex("#EEEEEE"),
             TextPrimary = Hex("#1A1A1A"),
             TextSecondary = Hex("#5D5D5D"),
             TextTertiary = Hex("#8A8A8A"),

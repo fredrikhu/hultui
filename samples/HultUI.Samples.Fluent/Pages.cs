@@ -343,13 +343,14 @@ public static class Pages
             SpecRow(p, Icons.Color, "Icons", IconRenderer.UseSegoe
                 ? "Segoe Fluent Icons"
                 : "Phosphor — Segoe Fluent Icons was not found on this machine"),
-            SpecRow(p, Icons.Layers, "Backdrop", "A vertical tint standing in for Mica"),
+            SpecRow(p, Icons.Layers, "Backdrop", "A flat colour standing in for Mica"),
             SpecRow(p, Icons.Personalize, "Accent", AccentPreset.All[app.AccentIndex].Name),
 
             Box.New().Height(24f).FlexShrink(0),
             F.InfoBar(p, F.Severity.Informational, "One thing is faked.",
                 "Mica samples the desktop wallpaper and blurs it. Nothing here can see the "
-                + "wallpaper, so the backdrop is a gradient in roughly the colour Mica lands on."));
+                + "wallpaper, so the backdrop is the flat colour Mica lands on — measured off "
+                + "the WinUI Gallery, where the whole top and left is a uniform #202020."));
 
     private static Element SpecRow(FluentPalette p, Icon icon, string label, string value) =>
         F.Card(p)

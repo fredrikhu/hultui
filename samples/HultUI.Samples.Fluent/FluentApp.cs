@@ -93,7 +93,7 @@ public sealed partial class FluentApp : Component
         var p = Palette;
 
         return Flex.Column(gap: 0)
-            .Background(Gradient.Vertical(p.BackdropTop, p.BackdropBottom))
+            .Background(p.Backdrop)
             .Children(
                 TitleBar(p),
                 Flex.Row(gap: 0).FlexGrow(1).Children(

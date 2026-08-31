@@ -11,6 +11,15 @@
   halfway round. The 5th renderer test is the one that matters: it asserts a top-and-left border
   paints the arc between them, and it is the only one of the five that fails when the corner
   halves are removed.
+- **The backdrop, measured rather than assumed** — the sample put a vertical gradient behind the
+  title bar and nav pane on the theory that Mica fades. It does not: the whole top and left of
+  the Gallery is a uniform `#202020`, cursor parked outside the window so nothing is a hover
+  artefact. One flat colour now, and the two nav-item states go with it — hover `#2D2D2D`,
+  selected-and-hovered `#292929`. That last pair is backwards from the intuition and was wrong
+  here for the same reason: `SubtleFillColorTertiary` is *closer to the ground* than Secondary,
+  so a second state makes an item quieter, not louder. The sample had it at `#323232`, brighter
+  than hover. Asserted in both themes, because "quieter" means darker on one and lighter on the
+  other.
 - **A per-side border follows the corner radius** — it used to paint each edge as a plain
   rectangle, which is exact on a square box and wrong on a rounded one: the bar runs corner to
   corner and sticks out past the arc in two square tabs. Every single-sided border on a rounded

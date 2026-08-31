@@ -508,6 +508,51 @@ public class FluentSampleTests
             $"stroke {p.CardStroke} should be darker than the page {p.Layer}");
     }
 
+    /// <summary>
+    /// Selecting a nav item and then pointing at it makes it <i>quieter</i>.
+    ///
+    /// <para><c>SubtleFillColorTertiary</c> is closer to the ground than Secondary — less white
+    /// on a dark theme, less black on a light one — so WinUI's selected-and-hovered fill is
+    /// darker than its hover fill, not brighter. Measured on the Gallery against a #202020
+    /// ground: hover #2D2D2D, selected-hovered #292929. Reaching for a brighter fill for the
+    /// second state is the intuitive move and is what this sample had.</para>
+    /// </summary>
+    [Fact]
+    public void ASelectedNavItemGetsQuieterUnderThePointer()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+        var p = app.Palette;
+
+        Assert.True(Luma(p.SubtlePressed) < Luma(p.SubtleHover),
+            $"dark: selected-hovered {p.SubtlePressed} should be quieter than hover {p.SubtleHover}");
+
+        // And in light, where "closer to the ground" means lighter rather than darker.
+        var light = FluentPalette.For(false, AccentPreset.Blue);
+        Assert.True(Luma(light.SubtlePressed) > Luma(light.SubtleHover),
+            $"light: selected-hovered {light.SubtlePressed} should be quieter than hover {light.SubtleHover}");
+    }
+
+    /// <summary>
+    /// The backdrop is one flat colour.
+    ///
+    /// <para>The title bar and the nav pane sit on it, and on the Gallery the whole top and left
+    /// is a uniform #202020. This sample used to put a slight vertical gradient there on the
+    /// theory that Mica fades; it does not, and the gradient was the most visible wrong thing in
+    /// the window.</para>
+    /// </summary>
+    [Fact]
+    public void TheBackdropIsFlat()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+
+        var shell = (BoxElement)root.Children[0];
+        Assert.Null(shell.BackgroundGradient);
+        Assert.Equal(app.Palette.Backdrop, shell.BackgroundColor);
+        Assert.Equal(Color.FromHex("#202020"), app.Palette.Backdrop);
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Theming
     // ──────────────────────────────────────────────────────────────────────
