@@ -109,7 +109,10 @@ public partial class JunctionApp
         var b = Flex.Row(gap: 5).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
             .Tooltip(tree ? "Group refs into folders (t)" : "One flat list (t)");
-        if (active) b.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
+        // An outline, not a border: these size to their content, so a border on the active
+        // one would make it 2px wider and slide every button beside it. Layout never reads
+        // an outline.
+        if (active) b.Background(Nocturne.Bg).Outline(1f, Nocturne.Accent);
         b.AddChild(Ui.Icon(glyph, 12f, fg));
         if (!_compactChrome)
             b.AddChild(Text.New(label).FontSize(11.5f).FontWeight(FontWeight.Medium).TextColor(fg)

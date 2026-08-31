@@ -114,7 +114,9 @@ public static class Ui
             .Padding(new Thickness(2, 7, 2, 7))
             .CornerRadius(Nocturne.RadiusMd * 0.75f)
             .FlexShrink(0);
-        if (outline) box.BorderColor(fg).BorderWidth(1f);
+        // An outline rather than a border, so an outlined chip and a filled one with the same
+        // label measure the same — a border would make every outlined chip 2px wider.
+        if (outline) box.Outline(1f, fg);
         else box.Background(bg);
         if (!string.IsNullOrEmpty(glyph)) box.AddChild(Icon(glyph, 9f, fg));
         box.AddChild(TagLabel(label, 9.5f, fg));

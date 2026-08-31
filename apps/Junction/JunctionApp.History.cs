@@ -455,7 +455,10 @@ public partial class JunctionApp
         var b = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(4, 9, 4, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
             .Tooltip(regex ? "-G: diff matches a regex" : "-S: literal string occurrences changed");
-        if (on) b.Background(Nocturne.Bg).BorderColor(Nocturne.Accent).BorderWidth(1f);
+        // An outline, not a border: these size to their content, so a border on the active
+        // one would make it 2px wider and slide every button beside it. Layout never reads
+        // an outline.
+        if (on) b.Background(Nocturne.Bg).Outline(1f, Nocturne.Accent);
         b.AddChild(Text.New(label).FontSize(11f).FontWeight(FontWeight.Medium).TextColor(fg));
         b.Key = "cmode:" + label + (on ? "#on" : "");
         b.OnClick(e => { e.StopPropagation = true; SetContentMode(regex); });

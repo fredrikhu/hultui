@@ -751,7 +751,11 @@ public partial class CommanderApp
         // Only once the user has actually jumped to a change. On opening, the index still
         // points at the first one, and ringing it made the top row read as a selected row in
         // a list — an interaction the view doesn't have.
-        if (current) row.BorderColor(Nocturne.Accent600).BorderWidth(1f);
+        // Offset -1 puts the ring exactly where the border was, in the row's outermost pixel:
+        // rows here touch, so a ring outside would be painted over by the next row. As a
+        // border it grew the row 2px, which in wrap mode (MinHeight, no fixed height) pushed
+        // every row below it down.
+        if (current) row.Outline(1f, Nocturne.Accent600, offset: -1f);
 
         // On a changed line, mark only the differing middle — the common prefix/suffix stay
         // plain, so the eye lands on what actually changed.

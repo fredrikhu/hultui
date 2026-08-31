@@ -1,6 +1,33 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **An outline, so a selected thing does not resize** — `Outline(width, color, offset)` on any
+  box: a ring drawn outside the border box that the layout engine never reads. CSS's `outline`,
+  and it exists for the reason CSS has one. A state that adds a border makes an element bigger,
+  and an element that sizes to its content then moves, along with everything packed beside it.
+  Junction's diff toolbar did exactly that — measured, the Split button slid 2px left the moment
+  Wrap was turned on, and Unified moved with it without changing state at all.
+  The tempting diagnosis is `content-box` sizing and it is wrong. HultUI is already border-box
+  (`finalW = resolvedWidth ?? content + padding + border`, so a declared width *is* the border
+  box) — but that only decides how a *declared* size is read, and these buttons declare none.
+  `content + padding + border` is what an auto-sized box is under either model; there is nothing
+  for a box model to reinterpret. Which is also why `ViewTab` needed the transparent-border
+  trick even here, and has a comment saying so: the big tabs never moved because someone
+  remembered. An outline cannot be forgotten wrong.
+  Geometry is CSS's: offset 0 puts the ring immediately outside the border edge, negative pulls
+  it in, so `offset: -width` lands exactly where a border was — which is what the diff *rows*
+  needed, since rows touch and a ring outside would be painted over by the next one.
+  Eleven tests. Four faults were put back to check them and two were not caught the first time:
+  the layout-neutrality test used declared widths, which is precisely the case where border-box
+  hides the problem, and the corner test asserted pixels that were reasoned out rather than
+  measured — it failed against correct code. Both rewritten: content-sized cells with a border
+  as the control, and a corner sampled off the real diagonal (grown 14–21, un-grown 12–19, both
+  ends asserted). A fifth fault — the border put back in Junction — is caught by three tests
+  that pin the toolbar's boxes across a toggle.
+  Eight call sites converted across Junction, Vesper and the Fluent sample. Three more matched
+  the pattern and were left alone after checking: the colour swatch, the Fluent accent swatch and
+  the Fluent search box all declare their size, so border-box already holds them still, and the
+  last two spend the border inward on purpose.
 - **The pane's outline is darker than the backdrop, not lighter** — reported by eye from a
   side-by-side, and the cause is that `CardStrokeColorDefault` is not a colour: it is black at
   10% (6% in light), and a WinUI border paints its background *inside* the stroke, so the stroke

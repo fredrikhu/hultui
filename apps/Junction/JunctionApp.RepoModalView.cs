@@ -246,7 +246,9 @@ public partial class JunctionApp
             var dot = Box.New()
                 .Width(30).Height(30).CornerRadius(15f)
                 .Background(s.Solid)
-                .BorderColor(on ? Nocturne.Text : Color.Transparent).BorderWidth(on ? 2f : 0f)
+                // Outside the dot, not inside it: a border ate 4px of the swatch, so picking a
+                // colour shrank the colour you were picking.
+                .Outline(on ? 2f : 0f, Nocturne.Text)
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Cursor(CursorType.Pointer).Tooltip(s.Label);
             if (on) dot.AddChild(Ui.Icon(Icons.CheckBold, 13f, Nocturne.Bg));

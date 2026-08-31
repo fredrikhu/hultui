@@ -412,8 +412,12 @@ public partial class CommanderApp
             .Background(p.Bg).Cursor(CursorType.Pointer)
             // Selection reads off the card's own palette, so it stays visible on a light
             // scheme where the app's accent would not be.
-            .BorderWidth(on ? 2f : 1f)
-            .BorderColor(on ? p.Accents[3] : ColorMath.Alpha(p.Text, 0.18));
+            .BorderWidth(1f)
+            .BorderColor(on ? p.Accents[3] : ColorMath.Alpha(p.Text, 0.18))
+            // The second px of the selected card's edge is a ring outside it. As a
+            // border it made the card taller than its unselected neighbours, and the
+            // row stretches to the tallest, so the whole row grew when selection moved.
+            .Outline(on ? 1f : 0f, on ? p.Accents[3] : Color.Transparent);
 
         var title = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         title.AddChild(Text.New(t.Name).FontSize(11.5f)

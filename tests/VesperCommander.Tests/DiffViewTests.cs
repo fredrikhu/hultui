@@ -852,11 +852,13 @@ public class DiffViewTests
         t.Open();
 
         t.OpenDiffOn("a.txt");
-        Assert.All(t.BodyRows(), row => Assert.Equal(0f, ((HultUI.Core.Elements.BoxElement)row).Box.BorderWidth.Top));
+        // The ring is an outline, not a border: as a border it grew the row 2px, which in wrap
+        // mode (MinHeight, no fixed height) pushed every row below it down.
+        Assert.All(t.BodyRows(), row => Assert.False(((HultUI.Core.Elements.BoxElement)row).Outline.IsVisible));
 
         t.Press(KeyCode.F8);
 
-        Assert.Contains(t.BodyRows(), row => ((HultUI.Core.Elements.BoxElement)row).Box.BorderWidth.Top > 0f);
+        Assert.Contains(t.BodyRows(), row => ((HultUI.Core.Elements.BoxElement)row).Outline.IsVisible);
     }
 
     // A narrow enough pane used to squeeze the LEFT/RIGHT tag until it folded to two lines.
