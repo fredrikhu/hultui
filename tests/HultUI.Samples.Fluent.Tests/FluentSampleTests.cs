@@ -1,6 +1,7 @@
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using HultUI.Headless;
 using Xunit;
@@ -354,6 +355,42 @@ public class FluentSampleTests
         Assert.True(app.ExpanderOpen);
         Assert.Equal(new CornerRadius(4f, 4f, 0f, 0f), open.CornerRadius);
         Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Switch, "Mail"));
+    }
+
+    /// <summary>
+    /// The composed controls are real controls: Tab reaches them, they ask for the focus
+    /// visual, and Space works them.
+    ///
+    /// <para>They are boxes, and a box is neither focusable nor listening to the keyboard — so
+    /// without this every button, switch and nav item in the sample is mouse-only, invisible to
+    /// Tab and to anything driving the app through the accessibility tree. It looks identical in
+    /// a screenshot either way, which is exactly why it needs a test.</para>
+    /// </summary>
+    [Fact]
+    public void TabReachesTheComposedControlsAndSpaceWorksThem()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+
+        GoTo(session, "Controls gallery");
+
+        var button = session.Window.FindByRole(AccessibilityRole.Button, "Accent button")!.Element;
+        Assert.True(button.IsFocusable);
+        Assert.True(button.ShowsFocusVisual);
+
+        // Tab along until it has focus, rather than assuming a position in the order.
+        for (int i = 0; i < 60 && session.Window.Window.FocusedElement != button; i++)
+        {
+            session.Window.PressKey(KeyCode.Tab);
+            session.PumpFrames(2);
+        }
+        Assert.Same(button, session.Window.Window.FocusedElement);
+
+        int before = app.ClickCount;
+        session.Window.PressKey(KeyCode.Space);
+        session.PumpFrames(2);
+
+        Assert.Equal(before + 1, app.ClickCount);
     }
 
     // ──────────────────────────────────────────────────────────────────────

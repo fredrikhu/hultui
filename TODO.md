@@ -1,6 +1,24 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The two-ring focus visual** — `FocusVisualTheme` (outer/inner colour and thickness, margin,
+  `KeyboardOnly`) and `Element.ShowsFocusVisual`, drawn by the window around whatever holds
+  focus. Two rings rather than one because a single ring can only contrast with one background:
+  white vanishes on a light card, dark vanishes on a dark button, and an indicator that
+  disappears on some controls is worse than none because you stop looking for it. The defaults
+  derive from the palette and get the relationship right in both — `TextColor` outside,
+  `Background` inside. `KeyboardOnly` is on by default and is the difference between a focus ring
+  and an irritation: a click focuses a control too, and a ring that lights on every click reads
+  as something stuck. The window drives it because the visual sits *outside* the element's
+  bounds — drawn from inside the subtree it would be clipped by any scroll view and painted over
+  by later siblings — and because only the window sees whether focus arrived from Tab or from a
+  press. Opt-in per element for the same reason it is drawn outside: it needs clearance the app
+  knows about, and a control already showing focus its own way would say it twice.
+  The sample's composed controls take it, and had to become controls first: a box is neither
+  focusable nor listening to the keyboard, so `F.Focusable` gives them Tab, the ring, and
+  Space/Enter. That is a real accessibility gap closed, not decoration — the whole gallery was
+  mouse-only, which looks identical in a screenshot, which is why it has a test.
+  7 headless tests + 1 in the sample, each verified by putting the fault back.
 - **One scrollbar, drawn once** — `Scrollbar`: the colours, the widths, the hover state, the
   thumb-length formula, the track-click centring, the drag maths and the painting, in one place.
   There were two copies. `ScrollViewElement` scrolls child elements and `TextAreaElement` scrolls

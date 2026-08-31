@@ -25,6 +25,11 @@ public sealed class Window : IOverlayHost, IDisposable
     private Element? _lastHoveredElement;
     private IScrollbarDraggable? _scrollbarDragTarget;
     private IScrollbarDraggable? _scrollbarHoverTarget;
+
+    // Whether the focus that is currently held arrived from the keyboard. The focus visual is
+    // gated on it: clicking a control focuses it too, and a ring that lights up on every click
+    // reads as something being stuck rather than as an aid.
+    private bool _focusFromKeyboard;
     // Middle-button autoscroll, the way Windows does it: the press anchors an origin and
     // the pointer's distance from it becomes a speed, so the view keeps moving while the
     // button is held and nothing else has to happen. The view is captured on press rather
@@ -668,6 +673,11 @@ public sealed class Window : IOverlayHost, IDisposable
         // Overlay layer (tooltips, context menus, popups)
         RenderOverlays(ctx);
 
+        // After the overlays: a focused control can live inside one, and the ring belongs on
+        // top of everything either way — it is drawn outside the control's own bounds, so a
+        // sibling painted later would otherwise cover half of it.
+        RenderFocusVisual(ctx);
+
         // DevTools overlay (second pass). This is pure observer tax — the element
         // count is a full tree walk and the HUD records its own draw commands —
         // so time it as "Overlay" to quantify how much the measurement perturbs
@@ -1002,6 +1012,10 @@ public sealed class Window : IOverlayHost, IDisposable
 
                 if (button.IsDown)
                 {
+                    // A press is the pointer taking over, whatever it lands on: the focus that
+                    // follows is not keyboard focus, and the ring stays down until the next Tab.
+                    _focusFromKeyboard = false;
+
                     // Dismiss overlays when clicking outside them
                     if (!isOverlayHit && _overlays.Count > 0)
                         DismissOverlaysOnOutsideClick();
@@ -1228,6 +1242,7 @@ public sealed class Window : IOverlayHost, IDisposable
                         _focusManager.MoveFocusPrevious(_root);
                     else
                         _focusManager.MoveFocusNext(_root);
+                    _focusFromKeyboard = true;
 
                     // Provide clipboard to text inputs when focused via Tab
                     if (_focusManager.FocusedElement is TextInputElement tabFocusedInput)
@@ -1971,6 +1986,48 @@ public sealed class Window : IOverlayHost, IDisposable
                 _root?.MarkPaintDirty();
                 return;
             }
+        }
+    }
+
+    /// <summary>
+    /// The two-ring focus visual around whatever has focus, if it asked for one.
+    ///
+    /// <para>Drawn by the window rather than by the element, because it sits <i>outside</i> the
+    /// element's bounds: an element painting it into its own subtree would have it clipped by
+    /// any scroll view or overflow-hidden ancestor, and covered by whatever is painted after it.
+    /// Everything else about it is the theme's business.</para>
+    ///
+    /// <para>Rings are drawn from the control's edge outwards — the thin inner one first, then
+    /// the thick outer one around it. Skia centres a stroke on the path, so each rect is
+    /// inflated to put the band where it belongs, and the corner radius is inflated with it so
+    /// the rings stay concentric with the control instead of squaring off at the corners.</para>
+    /// </summary>
+    private void RenderFocusVisual(IRenderContext ctx)
+    {
+        if (_focusManager.FocusedElement is not { } focused || !focused.ShowsFocusVisual)
+            return;
+
+        var fv = Application.Theme.FocusVisual;
+        if (fv.KeyboardOnly && !_focusFromKeyboard) return;
+
+        var box = focused.ScreenBorderBox;
+        if (box.Width <= 0 || box.Height <= 0) return;
+
+        float radius = focused is BoxElement b ? b.CornerRadius.TopLeft : 0f;
+
+        float innerMid = fv.Margin + fv.InnerThickness / 2f;
+        float outerMid = fv.Margin + fv.InnerThickness + fv.OuterThickness / 2f;
+
+        Draw(innerMid, fv.InnerThickness, fv.InnerColor);
+        Draw(outerMid, fv.OuterThickness, fv.OuterColor);
+
+        void Draw(float inflate, float thickness, Color color)
+        {
+            var rect = new Rect(
+                box.X - inflate, box.Y - inflate,
+                box.Width + inflate * 2f, box.Height + inflate * 2f);
+            ctx.DrawRoundedRect(rect, new CornerRadius(radius > 0 ? radius + inflate : 0f),
+                Color.Transparent, color, new Thickness(thickness));
         }
     }
 

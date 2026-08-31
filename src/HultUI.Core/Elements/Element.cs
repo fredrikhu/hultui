@@ -151,6 +151,16 @@ public abstract class Element
     }
 
     /// <summary>
+    /// Draw the theme's two-ring focus visual around this element while it has focus.
+    ///
+    /// <para>Opt-in, because the visual is drawn <i>outside</i> the element: in a tight row it
+    /// needs a pixel or two of clearance that only the app knows it has, and a control that
+    /// already shows focus its own way (a text box lighting its underline) would end up saying
+    /// it twice.</para>
+    /// </summary>
+    public bool ShowsFocusVisual { get; set; }
+
+    /// <summary>
     /// This element's border box in window coordinates — where it actually is on screen, with
     /// every ancestor's scroll applied.
     ///

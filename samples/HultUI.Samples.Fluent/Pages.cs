@@ -167,7 +167,7 @@ public static class Pages
 
             // The selected swatch gets a ring drawn as a second border rather than as a glow:
             // an inner 2px band in the page colour, and the accent showing around it.
-            swatches.Add(Box.New().FlexShrink(0)
+            swatches.Add(F.Focusable(Box.New().FlexShrink(0)
                 .Width(40f).Height(40f)
                 .CornerRadius(Fluent.ControlRadius)
                 .Background(color)
@@ -180,7 +180,7 @@ public static class Pages
                 .AccessibleName(preset.Name)
                 .Children(selected
                     ? IconRenderer.Draw(Icons.Success, 16f, p.TextOnAccent)
-                    : Box.New()));
+                    : Box.New()), () => app.SetAccent(index)));
         }
 
         return F.Card(p)
@@ -196,7 +196,7 @@ public static class Pages
     }
 
     private static Element LinkCard(FluentPalette p, Icon icon, string title, string description) =>
-        F.Card(p)
+        F.Focusable(F.Card(p)
             .MinHeight(60f)
             .Padding(new Thickness(10, 16, 10, 16))
             .FlexDirection(FlexDirection.Row)
@@ -211,7 +211,7 @@ public static class Pages
                 Flex.Column(gap: 2f).FlexGrow(1).Children(
                     F.Body(p, title),
                     F.Secondary(p, description)),
-                IconRenderer.Draw(Icons.ChevronRight, 12f, p.TextSecondary));
+                IconRenderer.Draw(Icons.ChevronRight, 12f, p.TextSecondary)), () => { });
 
     // ──────────────────────────────────────────────────────────────────────
     // Controls gallery

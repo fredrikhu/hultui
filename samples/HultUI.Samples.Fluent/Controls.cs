@@ -3,6 +3,7 @@ using HultUI.Icons;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -57,6 +58,32 @@ public static class F
         BodyStrong(p, s).Margin(new Thickness(8, 0, 0, 1)).FlexShrink(0);
 
     // ──────────────────────────────────────────────────────────────────────
+    // Keyboard
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Makes a control composed out of boxes behave like a control: reachable with Tab, showing
+    /// the theme's focus visual once it is, and activating on Space or Enter.
+    ///
+    /// <para>A box is not focusable and does not answer to the keyboard, so every one of these
+    /// would otherwise be mouse-only — invisible to Tab and to a screen reader driving it. The
+    /// focus visual is opt-in per element precisely so a composed control can ask for it; this
+    /// is the one line that asks.</para>
+    /// </summary>
+    public static T Focusable<T>(T el, Action activate) where T : Element
+    {
+        el.IsFocusable = true;
+        el.ShowsFocusVisual = true;
+        el.OnKeyDown(e =>
+        {
+            if (e.Key is not (KeyCode.Space or KeyCode.Enter)) return;
+            activate();
+            e.StopPropagation = true;
+        });
+        return el;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Surfaces
     // ──────────────────────────────────────────────────────────────────────
 
@@ -106,7 +133,7 @@ public static class F
         var chevron = IconRenderer.Draw(Icons.ChevronDown, 12f, p.TextSecondary);
         chevron.Rotate(expanded ? 180f : 0f).Transition(TransitionProperty.Transform, 160f);
 
-        var header = Card(p)
+        var header = Focusable(Card(p)
             .MinHeight(68f)
             .CornerRadius(expanded
                 ? new CornerRadius(Fluent.ControlRadius, Fluent.ControlRadius, 0, 0)
@@ -127,7 +154,7 @@ public static class F
                     description is null ? [Body(p, title)] : new[] { Body(p, title), Secondary(p, description) }),
                 Box.New().Width(32f).Height(32f).CornerRadius(Fluent.ControlRadius)
                     .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-                    .Children(chevron));
+                    .Children(chevron)), onToggle);
 
         if (!expanded) return header;
 
@@ -178,7 +205,7 @@ public static class F
                 ? [Body(p, label).TextColor(text)]
                 : new Element[] { IconRenderer.Draw(icon.Value, 16f, text), Body(p, label).TextColor(text) });
 
-        return Box.New().FlexShrink(0)
+        return Focusable(Box.New().FlexShrink(0)
             .Height(Fluent.ControlHeight)
             .CornerRadius(Fluent.ControlRadius)
             .Background(fill)
@@ -190,7 +217,7 @@ public static class F
             .OnClick(_ => onClick())
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(label)
-            .Children(inner);
+            .Children(inner), onClick);
     }
 
     /// <summary>A borderless square button — the title bar's and the InfoBar's. Fluent calls
@@ -199,7 +226,7 @@ public static class F
         FluentPalette p, Icon icon, string name, Action onClick,
         float size = 32f, float glyph = 16f, Color? tint = null, Color? hoverFill = null)
     {
-        return Box.New().FlexShrink(0)
+        return Focusable(Box.New().FlexShrink(0)
             .Width(size).Height(size)
             .CornerRadius(Fluent.ControlRadius)
             .Background(Color.Transparent)
@@ -210,7 +237,7 @@ public static class F
             .OnClick(_ => onClick())
             .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(name)
-            .Children(IconRenderer.Draw(icon, glyph, tint ?? p.TextPrimary));
+            .Children(IconRenderer.Draw(icon, glyph, tint ?? p.TextPrimary)), onClick);
     }
 
     /// <summary>
@@ -231,7 +258,7 @@ public static class F
             .TranslateBy(on ? 20f : 0f, 0f)
             .Transition(TransitionProperty.Transform, 150f);
 
-        return Box.New().FlexShrink(0)
+        return Focusable(Box.New().FlexShrink(0)
             .Width(40f).Height(20f).CornerRadius(10f)
             .Background(on ? p.Accent : p.ControlAltFill)
             .Border(new Thickness(1), on ? p.Accent : p.ControlStrong)
@@ -244,7 +271,7 @@ public static class F
             .OnClick(_ => onChanged(!on))
             .AccessibleRole(AccessibilityRole.Switch)
             .AccessibleName(name)
-            .Children(knob);
+            .Children(knob), () => onChanged(!on));
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -329,7 +356,7 @@ public static class F
                 IconRenderer.Draw(icon, 16f, p.TextPrimary),
                 Body(p, label).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
 
-        return Box.New().FlexShrink(0)
+        return Focusable(Box.New().FlexShrink(0)
             .Height(36f)
             .CornerRadius(Fluent.ControlRadius)
             .Background(selected ? p.SubtleHover : Color.Transparent)
@@ -342,6 +369,6 @@ public static class F
             .OnClick(_ => onClick())
             .AccessibleRole(AccessibilityRole.ListItem)
             .AccessibleName(label)
-            .Children(pill, row);
+            .Children(pill, row), onClick);
     }
 }
