@@ -230,15 +230,18 @@ public sealed partial class FluentApp : Component
             _ => Pages.Home(this, p),
         };
 
-        // WinUI paints no scrollbar track at rest and rounds the thumb into a pill. It also
-        // rests at 2px and expands under the pointer; there is no hover state for a scrollbar
-        // here, so the width stays grabbable rather than becoming a 2px target you cannot hit.
+        // The Windows 11 bar: a 2px hairline with no track while you read, widening to a 12px
+        // bar with a track when the pointer comes near. The hairline is only usable because the
+        // region that counts as "on the bar" is the expanded width, not the drawn one.
         var body = ScrollView.New().FlexGrow(1)
             // Right padding rather than a framework knob: the bar is drawn at the inner edge of
             // the content box, so padding insets it. WinUI leaves the same few pixels, and
             // without them the pill's right half is clipped off by the window edge.
             .Padding(new Thickness(0, 3, 0, 0));
-        body.ScrollbarColor = Color.Transparent;
+        body.ScrollbarWidth = 2f;                       // the resting indicator
+        body.ScrollbarExpandedWidth = 12f;              // and what it grows to under the pointer
+        body.ScrollbarColor = Color.Transparent;        // no track until then
+        body.ScrollbarTrackHoverColor = p.ControlFill;
         body.ScrollbarThumbColor = p.ControlStrong;
         body.Children(
             Flex.Column(gap: 0).FlexShrink(0)

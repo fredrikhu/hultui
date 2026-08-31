@@ -163,6 +163,7 @@ void Run(string step)
         case "drag": Drag(arg); break;
         case "autoscroll": AutoScroll(arg); break;
         case "wheel": Wheel(arg); break;
+        case "hover": Hover(arg); break;
         case "waitfor": WaitFor(arg); break;
         case "size": Resize(arg); break;
         default: throw new ArgumentException($"unknown step '{step}'");
@@ -271,6 +272,20 @@ void Wheel(string arg)
     float x = float.Parse(bits[0]), y = float.Parse(bits[1]), notches = float.Parse(bits[2]);
     session.Window.Wheel(x, y, 0f, notches);
     session.PumpFrames(4);
+}
+
+// Parks the pointer somewhere and lets frames run, for anything that only appears under it —
+// a hover fill, a tooltip, a scrollbar that expands. `click` moves the pointer too, but it also
+// presses, which is usually not what you want to photograph.
+void Hover(string arg)
+{
+    var bits = arg.Split(',');
+    float x, y;
+    int next;
+    if (bits[0].StartsWith('@')) { (x, y) = Center(Find(bits[0][1..])); next = 1; }
+    else { x = float.Parse(bits[0]); y = float.Parse(bits[1]); next = 2; }
+    session.Window.MoveMouse(x, y);
+    Settle(bits.Length > next ? int.Parse(bits[next]) : 400);
 }
 
 void WaitFor(string arg)

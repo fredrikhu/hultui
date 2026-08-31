@@ -117,6 +117,38 @@ public class FluentSampleTests
         Assert.Equal(Thickness.Zero, input.Box.BorderWidth);
     }
 
+    /// <summary>
+    /// The content pane's scrollbar is the Windows 11 one: a 2px hairline with no track, that
+    /// widens to a 12px bar with a track under the pointer.
+    ///
+    /// <para>The hairline is only defensible because the region that counts as "on the bar" is
+    /// the expanded width — asserted here, because dropping it would leave a 2px target and the
+    /// bar would look right in a screenshot and be unusable in the app.</para>
+    /// </summary>
+    [Fact]
+    public void TheContentScrollbarRestsAsAHairlineAndCanStillBeHit()
+    {
+        var (session, app, root) = Start();
+        using var _ = session;
+
+        // The gallery overflows; Home does not, and a scroll view with nothing to scroll has no
+        // bar to press.
+        GoTo(session, "Controls gallery");
+        var scroll = FirstOfType<ScrollViewElement>(root)!;
+
+        Assert.Equal(2f, scroll.ScrollbarWidth);
+        Assert.Equal(12f, scroll.ScrollbarExpandedWidth);
+        Assert.True(scroll.ScrollbarExpandOnHover);
+        Assert.Equal(Color.Transparent, scroll.ScrollbarColor);
+        Assert.Equal(app.Palette.ControlFill, scroll.ScrollbarTrackHoverColor);
+        Assert.Equal(app.Palette.ControlStrong, scroll.ScrollbarThumbColor);
+
+        // Eight pixels in from the bar's own edge: nowhere near the 2px hairline, still a press
+        // on the scrollbar.
+        var box = scroll.ScreenContentBox;
+        Assert.True(scroll.TryStartScrollbarDrag(new Point(box.Right - 8, box.Y + 40)));
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // NavigationView
     // ──────────────────────────────────────────────────────────────────────

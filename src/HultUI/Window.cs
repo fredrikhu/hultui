@@ -24,6 +24,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private Element? _root;
     private Element? _lastHoveredElement;
     private IScrollbarDraggable? _scrollbarDragTarget;
+    private IScrollbarDraggable? _scrollbarHoverTarget;
     // Middle-button autoscroll, the way Windows does it: the press anchors an origin and
     // the pointer's distance from it becomes a speed, so the view keeps moving while the
     // button is held and nothing else has to happen. The view is captured on press rather
@@ -452,6 +453,8 @@ public sealed class Window : IOverlayHost, IDisposable
     {
         _root = root;
         _maxButtonCache = null;
+        // The old tree is gone; anything held from it is a reference to a discarded element.
+        SetScrollbarHover(null);
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
         root.AccessibilityObserver = _a11yObserver;
@@ -889,15 +892,18 @@ public sealed class Window : IOverlayHost, IDisposable
                 // track overrides to the default arrow, so a scrollable element's own
                 // cursor (e.g. a TextArea's text caret) doesn't bleed onto its bar.
                 var cursor = target?.ResolvedInherited.Cursor ?? CursorType.Default;
+                IScrollbarDraggable? overScrollbar = null;
                 for (var el = target; el is not null; el = el.Parent)
                 {
                     if (el is IScrollbarDraggable sb && sb.IsPointOverScrollbar(pos))
                     {
                         cursor = CursorType.Default;
+                        overScrollbar = sb;
                         break;
                     }
                 }
                 PlatformWindow.SetCursor(cursor);
+                SetScrollbarHover(overScrollbar);
 
                 // Tooltip tracking
                 UpdateTooltipHover(target);
@@ -1527,6 +1533,22 @@ public sealed class Window : IOverlayHost, IDisposable
     /// Walks from the hit target up through ancestors looking for a ScrollViewElement
     /// whose scrollbar was clicked. Returns true if a drag was started or track was clicked.
     /// </summary>
+    /// <summary>
+    /// Moves the "pointer is on the bar" flag from whichever scroll view had it to this one.
+    ///
+    /// <para>One at a time: the bars do not overlap, and the walk above stops at the innermost
+    /// match. Tracking the flag here rather than letting each view work it out is what makes
+    /// the *leaving* case reliable — a view whose bar the pointer has left is, by definition,
+    /// no longer on the path being walked, so it will never hear about it on its own.</para>
+    /// </summary>
+    private void SetScrollbarHover(IScrollbarDraggable? next)
+    {
+        if (ReferenceEquals(_scrollbarHoverTarget, next)) return;
+        _scrollbarHoverTarget?.SetScrollbarHover(false);
+        _scrollbarHoverTarget = next;
+        next?.SetScrollbarHover(true);
+    }
+
     private bool TryStartScrollbarDrag(Element target, Point pos)
     {
         Element? current = target;

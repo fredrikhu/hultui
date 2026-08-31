@@ -68,6 +68,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `drag:<x1>,<y1>,<x2>,<y2>` or `drag:@<text>,<dx>[,<dy>]` | Press, move, release as separate events. |
 | `autoscroll:<x>,<y>,<dy>[,<ms>]` or `autoscroll:@<text>,<dy>[,<ms>]` | Middle-button autoscroll: presses at the anchor, parks the pointer `dy` away, runs frames for `ms` (default 600), releases. `drag` cannot show this — the pointer's distance from the anchor is a *speed*, so the scrolling happens between input events, and a press-move-release with no frames in between leaves the view exactly where it was. |
 | `wheel:<x>,<y>,<notches>` | Turns the wheel at a point. Negative scrolls down. Reaches anything below the fold. |
+| `hover:<x>,<y>[,<ms>]` or `hover:@<text>[,<ms>]` | Parks the pointer and runs frames (default 400ms), for anything that only exists under it — a hover fill, a tooltip, the scrollbar's expansion. `click` moves the pointer too, but it also presses. |
 | `waitfor:<text>[,<seconds>]` | Pumps until an element with that name appears. Default 30s. |
 | `settle[:<ms>]` | Pumps frames for that long. Default 1200ms. |
 | `size:<w>x<h>` | Resizes the client area mid-run, then settles. |

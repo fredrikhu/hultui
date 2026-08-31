@@ -28,4 +28,18 @@ public interface IScrollbarDraggable
     /// scrollbar track. The window uses this to show the default arrow over the bar instead
     /// of the element's own cursor (e.g. a TextArea's text caret).</summary>
     bool IsPointOverScrollbar(Point position);
+
+    /// <summary>
+    /// Told by the window when the pointer arrives on, or leaves, this bar — the hook a
+    /// Windows-style expand-on-hover hangs off.
+    ///
+    /// <para>It has to come from the window rather than from an ordinary pointer handler,
+    /// because the bar is painted <i>over</i> its own content: the element under the pointer
+    /// there is whatever the bar happens to cover, so a handler on the scroll view would only
+    /// fire when the bar sat over empty space. The window decides it by geometry, which it
+    /// already does one line earlier to choose the cursor.</para>
+    ///
+    /// <para>Default no-op, so an implementer that does not expand needs to say nothing.</para>
+    /// </summary>
+    void SetScrollbarHover(bool hovered) { }
 }

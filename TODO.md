@@ -1,6 +1,25 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The scrollbar expands under the pointer** — the behaviour half of the Gallery comparison.
+  `ScrollbarExpandOnHover` (on by default), `ScrollbarExpandedWidth` (12), `ScrollbarTrackHoverColor`
+  and `ScrollbarExpandDuration`: the track widens from the resting width to the expanded one and
+  the thumb to half of it — a 12px bar around a 6px thumb, the Windows proportion — over 120ms.
+  A view that says nothing about hover keeps its resting look exactly and only gains a wider
+  track when reached for. The Fluent sample takes the real thing: a 2px hairline with no track,
+  widening to 12px with one.
+  The load-bearing part is that the region counting as *on the bar* is the expanded width even at
+  rest. Without it a 2px bar is a 2px target, nothing would ever expand it, and the hairline
+  would be decoration rather than a control — it is asserted in both suites for that reason.
+  Hover has to be delivered by the window (`IScrollbarDraggable.SetScrollbarHover`, default
+  no-op) rather than by a pointer handler: the bar is painted *over* its own content, so the
+  element under the pointer there is whatever the bar covers, and a handler on the scroll view
+  would only fire where the bar happened to sit over empty space. The window already decides
+  this by geometry one line earlier, to pick the cursor. It also owns the leaving case — a view
+  the pointer has left is no longer on the path being walked, so it would never hear about it.
+  6 headless tests + 1 in the sample, each verified by putting the fault back. `TextAreaElement`
+  keeps its plain bar; its scrollbar is a second copy of this code and deserves extracting before
+  it gets a third feature.
 - **Three things the WinUI Gallery said we had wrong** — the sample was built from the published
   colour table; this was the first time it was held up against the real thing, running on the
   same machine. Captured with `PrintWindow(PW_RENDERFULLCONTENT)` and driven through UIA, so no
