@@ -43,12 +43,18 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private readonly Dictionary<ShapedRun, SKTextBlob?> _runBlobCache = new();
     private const int RunBlobCacheMaxSize = 2048;
 
+    // The device scale of the frame being drawn. The canvas carries it as a transform, so
+    // everything below works in layout units and never sees device pixels — except the border
+    // snapping, which is entirely about where a band lands on the device grid.
+    private float _scale = 1f;
+
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     internal SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
     public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null)
     {
+        _scale = scaleFactor > 0f ? scaleFactor : 1f;
         Canvas.ResetMatrix();
         Canvas.Scale(scaleFactor);
         Canvas.Clear(clearColor is { } c ? ToSkColor(c) : SKColors.Transparent);
@@ -165,9 +171,48 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         MathF.Max(0f, r.BottomRight - by),
         MathF.Max(0f, r.BottomLeft - by));
 
+    // ── Pixel snapping ───────────────────────────────────────────────────────────────────
+    //
+    // A stroke centred on a box edge straddles it: at 100% a 1px border came out as two
+    // half-covered pixels, and at 150% as two at three-quarters. Nothing was ever crisp, and
+    // half the width spilled outside the border box. WinUI paints two fully-covered pixels at
+    // 150% and nothing either side, which is what these put back.
+    //
+    // The rule is CSS's, and the order matters: snap the *edges* onto the device grid, then take
+    // the width from the snapped edges — never round position and size independently. Two boxes
+    // that share a coordinate snap it to the same pixel, so a gap cannot open between things
+    // that were flush. Rounding them apart is the classic way to get a one-pixel seam.
+    //
+    // Only borders are snapped, plus the box a border is drawn on so the two agree. Arcs are
+    // left alone: snapping a curve steps it, and WinUI antialiases its corners too.
+
+    /// <summary>A layout coordinate moved onto the nearest device pixel boundary.</summary>
+    private float SnapCoord(float dip) => MathF.Round(dip * _scale, MidpointRounding.AwayFromZero) / _scale;
+
+    /// <summary>A border width in whole device pixels. Never rounds a border away entirely —
+    /// a hairline asked for at all stays visible, the way CSS keeps a 0.5px border at 1x.</summary>
+    private float SnapWidth(float dip) => dip <= 0f
+        ? 0f
+        : MathF.Max(1f, MathF.Round(dip * _scale, MidpointRounding.AwayFromZero)) / _scale;
+
+    /// <summary>The box with every edge on the grid. Because the edges land first, a width
+    /// measured from them comes out the same on all four sides.</summary>
+    private Rect SnapBox(Rect box)
+    {
+        float l = SnapCoord(box.X), t = SnapCoord(box.Y);
+        float r = SnapCoord(box.X + box.Width), b = SnapCoord(box.Y + box.Height);
+        return new Rect(l, t, MathF.Max(0f, r - l), MathF.Max(0f, b - t));
+    }
+
+    private Thickness SnapThickness(Thickness w) =>
+        new(SnapWidth(w.Top), SnapWidth(w.Right), SnapWidth(w.Bottom), SnapWidth(w.Left));
+
     public void DrawBorder(Rect box, CornerRadius radius, Color color, Thickness w, BorderStyle style)
     {
         if (color.A == 0) return;
+
+        box = SnapBox(box);
+        w = SnapThickness(w);
 
         bool uniform = w.Top == w.Right && w.Right == w.Bottom && w.Bottom == w.Left;
         var skColor = ToSkColor(color);
@@ -274,8 +319,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             }
         }
 
-        // Uniform width, dashed or dotted: stroke the (rounded) outline with a dash
-        // path effect, matching DrawRoundedRect's centered-stroke geometry.
+        // Uniform width: stroke the outline inset by half the width, so the band lands inside
+        // the border box on whole device pixels rather than straddling the edge.
         float sw = w.Top;
         if (sw <= 0) return;
 
@@ -295,17 +340,29 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         };
         _pooledPaint.PathEffect = dash;
 
-        var skRect = ToSkRect(box);
+        float half = sw / 2f;
+        var skRect = ToSkRect(new Rect(box.X + half, box.Y + half, box.Width - sw, box.Height - sw));
         if (radius.IsZero)
             Canvas.DrawRect(skRect, _pooledPaint);
         else
-            Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
+            Canvas.DrawRoundRect(ToSkRoundRect(skRect, Deflate(radius, half)), _pooledPaint);
 
         _pooledPaint.PathEffect = null;
     }
 
     public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill, Color stroke, Thickness strokeWidth)
     {
+        bool stroked = stroke.A > 0 && (strokeWidth.Top > 0 || strokeWidth.Right > 0
+                                        || strokeWidth.Bottom > 0 || strokeWidth.Left > 0);
+        // Snap the box only when there is a border on it, so the fill and the band agree to the
+        // pixel. A plain background keeps its exact geometry — snapping every fill would move
+        // element edges by up to half a device pixel for no visible gain.
+        if (stroked)
+        {
+            rect = SnapBox(rect);
+            strokeWidth = SnapThickness(strokeWidth);
+        }
+
         var skRect = ToSkRect(rect);
 
         if (fill.A > 0)
@@ -319,7 +376,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                 Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
         }
 
-        if (stroke.A > 0 && (strokeWidth.Top > 0 || strokeWidth.Right > 0 || strokeWidth.Bottom > 0 || strokeWidth.Left > 0))
+        if (stroked)
         {
             // Use average stroke width for now (uniform border)
             float avgStroke = (strokeWidth.Top + strokeWidth.Right + strokeWidth.Bottom + strokeWidth.Left) / 4f;
@@ -329,10 +386,15 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             _pooledPaint.StrokeWidth = avgStroke;
             _pooledPaint.IsAntialias = true;
 
+            // Inset by half the width: a stroke is centred on the path it follows, so stroking
+            // the box's own outline would put half the band outside the border box.
+            float half = avgStroke / 2f;
+            var band = ToSkRect(new Rect(rect.X + half, rect.Y + half,
+                MathF.Max(0f, rect.Width - avgStroke), MathF.Max(0f, rect.Height - avgStroke)));
             if (radius.IsZero)
-                Canvas.DrawRect(skRect, _pooledPaint);
+                Canvas.DrawRect(band, _pooledPaint);
             else
-                Canvas.DrawRoundRect(ToSkRoundRect(skRect, radius), _pooledPaint);
+                Canvas.DrawRoundRect(ToSkRoundRect(band, Deflate(radius, half)), _pooledPaint);
         }
     }
 

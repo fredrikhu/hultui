@@ -1,6 +1,32 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **A border lands on whole device pixels** — the crispness half of the WinUI comparison, and it
+  turned out not to be a fractional-scale problem at all. Measured first: a 1-DIP border on a box
+  edge came out `128 128` at 100% — two half-covered pixels — `192 192` at 150%, `32 255 32` at
+  125%. Nothing was ever crisp, at any scale, because the stroke was centred on the box edge; it
+  straddled it and spilled half its width outside the border box. WinUI paints two fully-covered
+  pixels at 150% and nothing either side.
+  The rule is CSS's and the order is the whole trick: snap the *edges* onto the device grid, then
+  take the width from the snapped edges — never round position and size independently. Two boxes
+  sharing a coordinate snap it to the same pixel, so a gap cannot open between things that were
+  flush; rounding them apart is the classic way to get a one-pixel seam. Because the edges land
+  first, the width comes out the same on all four sides, which keeps the uniform fast path.
+  Arcs are deliberately left antialiased — snapping a curve steps it, and the Gallery antialiases
+  its corners too (straight run two solid pixels, arc through #1F1F1F #1E1E1E #232323). Only
+  borders snap, plus the box a border sits on so fill and band agree; a plain background keeps its
+  exact geometry.
+  The test rig came first and it had to, because every other pixel test in the project runs at
+  scale 1 where the interesting half is invisible: 19 tests at 1.0, 1.25, 1.5 and 2.0, of which 13
+  failed against the old renderer. Four faults were put back; three were caught and the fourth —
+  dropping the "a hairline never rounds away to nothing" clamp — was not, because no case had a
+  width under half a pixel. Added one.
+  The stroke moving from centred to inset also moved the `Outline` ring by half its width, which
+  the outline's own pixel tests caught. Its geometry is simpler for it: inflate to the ring's
+  outer edge and let the band fall inward.
+  Verified end to end: the sample's card border went from `#262626 / #232323 / #2C2C2C` — partial,
+  solid, partial — to one solid pixel at 100%, and to exactly two at 150%, matching the Gallery.
+  The app driver takes `--scale` now, so that check is repeatable rather than a one-off.
 - **An outline, so a selected thing does not resize** — `Outline(width, color, offset)` on any
   box: a ring drawn outside the border box that the layout engine never reads. CSS's `outline`,
   and it exists for the reason CSS has one. A state that adds a border makes an element bigger,

@@ -138,13 +138,13 @@ public class BoxElement : Element
         // CSS paints an outline, and it is the only thing here drawn beyond the border box.
         if (_outline.IsVisible)
         {
-            // Uniform strokes are centred on the rect they are given, so the rect has to be
-            // inflated to the middle of the band rather than to its outer edge. The radius
-            // grows by the same amount, or the ring would square off at the corners while the
-            // box it surrounds stays round.
-            float mid = _outline.Offset + _outline.Width / 2f;
-            var ring = box.Inflate(new Thickness(mid));
-            ctx.DrawRoundedRect(ring, CornerRadius.Inflate(mid), Color.Transparent,
+            // A border is drawn inside the rect it is given, so the rect is inflated to the
+            // ring's outer edge and the band falls inward from there. The radius grows by the
+            // same amount, or the ring would square off at the corners while the box it
+            // surrounds stays round.
+            float outer = _outline.Offset + _outline.Width;
+            var ring = box.Inflate(new Thickness(outer));
+            ctx.DrawRoundedRect(ring, CornerRadius.Inflate(outer), Color.Transparent,
                 _outline.Color, new Thickness(_outline.Width));
         }
     }

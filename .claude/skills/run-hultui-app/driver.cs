@@ -27,6 +27,7 @@ using HultUI.Headless;
 
 string app = "junction", outDir = "shots", repo = "", dir = "", dir2 = "";
 int width = 1400, height = 900;
+float scale = 1f;
 bool fluentDark = true;
 int fluentAccent = 0;
 var steps = new List<string>();
@@ -46,6 +47,9 @@ for (int i = 0; i < args.Length; i++)
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
             break;
+        // Windows runs most machines at 125% or 150%, and a frame captured at 1.0 cannot show
+        // what a hairline does on the pixel grid there — which is where borders go soft.
+        case "--scale": scale = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;
         default: steps.Add(args[i]); break;
     }
 }
@@ -62,7 +66,7 @@ Directory.CreateDirectory(scratchConfig);
 Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", scratchConfig);      // Junction
 Environment.SetEnvironmentVariable("VESPER_CONFIG_DIR", scratchConfig);    // Vesper Commander
 
-using var session = HeadlessSession.Create(width, height);
+using var session = HeadlessSession.Create(width, height, scale);
 IDisposable? instance = null;
 try
 {
