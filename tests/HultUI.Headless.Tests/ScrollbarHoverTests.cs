@@ -52,8 +52,8 @@ public class ScrollbarHoverTests
 
         var bars = Bars(session);
 
-        Assert.Contains("2x150", bars);   // track
-        Assert.Contains("2x25", bars);    // thumb
+        Assert.Contains(" 2x150", bars);   // track
+        Assert.Contains(" 2x25", bars);    // thumb
     }
 
     [Fact]
@@ -66,8 +66,8 @@ public class ScrollbarHoverTests
         session.PumpFrames(20);           // past the 120ms expansion
 
         var bars = Bars(session);
-        Assert.Contains("12x150", bars);  // track grows to the full width
-        Assert.Contains("6x25", bars);    // thumb to half of it, the Windows proportion
+        Assert.Contains(" 12x150", bars);  // track grows to the full width
+        Assert.Contains(" 6x25", bars);    // thumb to half of it, the Windows proportion
     }
 
     [Fact]
@@ -78,12 +78,12 @@ public class ScrollbarHoverTests
 
         PointAtTheBar(session);
         session.PumpFrames(20);
-        Assert.Contains("12x150", Bars(session));
+        Assert.Contains(" 12x150", Bars(session));
 
         PointAway(session);
         session.PumpFrames(20);
 
-        Assert.Contains("2x150", Bars(session));
+        Assert.Contains(" 2x150", Bars(session));
     }
 
     /// <summary>
@@ -114,7 +114,7 @@ public class ScrollbarHoverTests
         PointAtTheBar(session);
         session.PumpFrames(20);
 
-        Assert.Contains("6x150", Bars(session));
+        Assert.Contains(" 6x150", Bars(session));
         Assert.False(scroll.TryStartScrollbarDrag(new Core.Primitives.Point(190, 60)));
     }
 
@@ -135,5 +135,56 @@ public class ScrollbarHoverTests
         session.PumpFrames(20);
 
         Assert.Contains("#123456", Bars(session));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // The same bar on a text area
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A text area scrolls its own wrapped rows rather than child elements, so it shares no base
+    /// class with the scroll view below <c>BoxElement</c> — and used to carry its own copy of the
+    /// whole scrollbar. Both now paint the same <c>Scrollbar</c>, which is the only reason this
+    /// works without a second implementation of the expansion.
+    /// </summary>
+    [Fact]
+    public void ATextAreaBarExpandsTheSameWay()
+    {
+        using var session = HeadlessSession.Create(200, 150,
+            options: new HeadlessOptions { RecordDrawCalls = true });
+
+        var area = TextArea.New(string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}")))
+            .Height(150f).Width(200f);
+        area.ScrollbarWidth = RestWidth;
+        area.ScrollbarExpandedWidth = ExpandedWidth;
+        session.Application.SetRoot(area);
+        session.PumpFrames(2);
+
+        Assert.Contains(" 2x", Bars(session));
+
+        session.Window.MoveMouse(190, 60);
+        session.PumpFrames(20);
+
+        var bars = Bars(session);
+        Assert.Contains(" 12x", bars);   // the track
+        Assert.Contains(" 6x", bars);    // the thumb
+    }
+
+    /// <summary>And its reach is the expanded width too — the same reason, and the one thing
+    /// that would have been easy to leave behind in the copy that used to live there.</summary>
+    [Fact]
+    public void ATextAreaBarCanBeHitBesideTheHairline()
+    {
+        using var session = HeadlessSession.Create(200, 150);
+
+        var area = TextArea.New(string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}")))
+            .Height(150f).Width(200f);
+        area.ScrollbarWidth = RestWidth;
+        area.ScrollbarExpandedWidth = ExpandedWidth;
+        session.Application.SetRoot(area);
+        session.PumpFrames(2);
+
+        var box = area.Layout.AbsoluteContentBox;
+        Assert.True(area.IsPointOverScrollbar(new Core.Primitives.Point(box.Right - 8, box.Y + 40)));
     }
 }

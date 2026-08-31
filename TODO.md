@@ -1,6 +1,20 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **One scrollbar, drawn once** — `Scrollbar`: the colours, the widths, the hover state, the
+  thumb-length formula, the track-click centring, the drag maths and the painting, in one place.
+  There were two copies. `ScrollViewElement` scrolls child elements and `TextAreaElement` scrolls
+  its own wrapped rows, so they share no base class below `BoxElement`, and each had grown its
+  own version of the same arithmetic — they stayed in step through the rounded-corner change by
+  luck and a grep. The extraction was the price of asking for expand-on-hover in the text area:
+  the alternative was a third copy of it. Both elements keep their public `Scrollbar*` properties
+  as facades, so the two apps that set `ScrollbarWidth` per element are untouched, and the scroll
+  view now holds one bar per axis — pointing at the vertical bar no longer expands the horizontal
+  one with it. `IScrollbarDraggable.SetScrollbarHover` takes a position rather than a bool for
+  the same reason. Meridian's body editor and Junction's diffs got the expansion without a line
+  of app code. 2 more headless tests; the existing 8 carry the rest, and both of the assertions
+  that read a width from the draw log needed a leading space to be worth anything — `12x150`
+  contains `2x150`, so "the bar is 2px" was passing while it was 12.
 - **The scrollbar expands under the pointer** — the behaviour half of the Gallery comparison.
   `ScrollbarExpandOnHover` (on by default), `ScrollbarExpandedWidth` (12), `ScrollbarTrackHoverColor`
   and `ScrollbarExpandDuration`: the track widens from the resting width to the expanded one and

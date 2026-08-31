@@ -120,14 +120,29 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     /// <summary>True while the user is dragging to select text.</summary>
     public bool IsDragging => _isDragging;
 
-    // Scrollbar appearance
-    public Color ScrollbarColor { get; set; } = new(128, 128, 128, 100);
-    public Color ScrollbarThumbColor { get; set; } = new(128, 128, 128, 180);
-    public float ScrollbarWidth { get; set; } = 6f;
+    // Scrollbar appearance — facades over the shared Scrollbar, which is where the arithmetic,
+    // the painting and the hover expansion live. A text area has one bar, vertical.
+    private readonly Scrollbar _bar = new();
+
+    public Color ScrollbarColor { get => _bar.TrackColor; set => _bar.TrackColor = value; }
+    public Color ScrollbarThumbColor { get => _bar.ThumbColor; set => _bar.ThumbColor = value; }
+    public float ScrollbarWidth { get => _bar.Width; set => _bar.Width = value; }
+
+    /// <summary>See <see cref="ScrollViewElement.ScrollbarExpandOnHover"/>.</summary>
+    public bool ScrollbarExpandOnHover { get => _bar.ExpandOnHover; set => _bar.ExpandOnHover = value; }
+
+    /// <summary>See <see cref="ScrollViewElement.ScrollbarExpandedWidth"/>.</summary>
+    public float ScrollbarExpandedWidth { get => _bar.ExpandedWidth; set => _bar.ExpandedWidth = value; }
+
+    /// <summary>See <see cref="ScrollViewElement.ScrollbarTrackHoverColor"/>.</summary>
+    public Color? ScrollbarTrackHoverColor { get => _bar.TrackHoverColor; set => _bar.TrackHoverColor = value; }
+
+    /// <summary>See <see cref="ScrollViewElement.ScrollbarExpandDuration"/>.</summary>
+    public float ScrollbarExpandDuration { get => _bar.ExpandDuration; set => _bar.ExpandDuration = value; }
 
     /// <summary>Corner radius of the track and thumb; defaults to half the width, the same pill
     /// <see cref="ScrollViewElement.ScrollbarRadius"/> draws. Set 0 for square ends.</summary>
-    public float ScrollbarRadius { get; set; } = -1f;
+    public float ScrollbarRadius { get => _bar.Radius; set => _bar.Radius = value; }
     public float ScrollSpeed { get; set; } = 40f;
 
     protected internal override void ApplyTheme(Theme theme)
@@ -749,54 +764,37 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     public bool TryStartScrollbarDrag(Point position)
     {
         var contentBox = Layout.AbsoluteContentBox;
-        float totalHeight = TotalContentHeight();
-        if (totalHeight <= contentBox.Height) return false;   // nothing to scroll ⇒ no bar
+        var hit = _bar.HitTest(contentBox, TotalContentHeight(), _scrollOffsetY, position,
+            vertical: true, out float grab, out float trackOffset);
 
-        float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
-        if (position.X < trackX || position.X > trackX + ScrollbarWidth
-            || position.Y < contentBox.Y || position.Y > contentBox.Y + contentBox.Height)
-            return false;   // not on the scrollbar
-
-        float trackHeight = contentBox.Height;
-        float thumbHeight = Math.Max(20, trackHeight * (contentBox.Height / totalHeight));
-        float maxScroll = totalHeight - contentBox.Height;
-        float scrollRatio = _scrollOffsetY / Math.Max(1, maxScroll);
-        float thumbY = contentBox.Y + scrollRatio * (trackHeight - thumbHeight);
-
-        if (position.Y >= thumbY && position.Y <= thumbY + thumbHeight)
+        switch (hit)
         {
-            _draggingScrollbar = true;
-            _scrollbarGrabOffset = position.Y - thumbY;
+            case ScrollbarHit.Thumb:
+                _draggingScrollbar = true;
+                _scrollbarGrabOffset = grab;
+                return true;
+            case ScrollbarHit.Track:
+                _scrollOffsetY = trackOffset;
+                MarkPaintDirty();
+                return true;
+            default:
+                return false;
         }
-        else
-        {
-            // Track click — center the thumb on the pointer.
-            float clickRatio = Math.Clamp((position.Y - contentBox.Y - thumbHeight / 2) / (trackHeight - thumbHeight), 0, 1);
-            _scrollOffsetY = clickRatio * maxScroll;
-            MarkPaintDirty();
-        }
-        return true;
     }
 
-    public bool IsPointOverScrollbar(Point position)
-    {
-        var contentBox = Layout.AbsoluteContentBox;
-        if (TotalContentHeight() <= contentBox.Height) return false;   // no bar drawn
-        float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
-        return position.X >= trackX && position.X <= trackX + ScrollbarWidth
-            && position.Y >= contentBox.Y && position.Y <= contentBox.Y + contentBox.Height;
-    }
+    public bool IsPointOverScrollbar(Point position) =>
+        _bar.Contains(Layout.AbsoluteContentBox, TotalContentHeight(), position, vertical: true);
+
+    /// <summary>See <see cref="IScrollbarDraggable.SetScrollbarHover"/> — the window decides this
+    /// by geometry, because the bar is painted over the text it scrolls.</summary>
+    public void SetScrollbarHover(Point? position) =>
+        _bar.SetHover(position is { } p && IsPointOverScrollbar(p), this);
 
     public void UpdateScrollbarDrag(Point position)
     {
         if (!_draggingScrollbar) return;
-        var contentBox = Layout.AbsoluteContentBox;
-        float totalHeight = TotalContentHeight();
-        float trackHeight = contentBox.Height;
-        float thumbHeight = Math.Max(20, trackHeight * (contentBox.Height / totalHeight));
-        float thumbTop = position.Y - _scrollbarGrabOffset;
-        float scrollRatio = Math.Clamp((thumbTop - contentBox.Y) / (trackHeight - thumbHeight), 0, 1);
-        _scrollOffsetY = scrollRatio * (totalHeight - contentBox.Height);
+        _scrollOffsetY = _bar.OffsetFromDrag(
+            Layout.AbsoluteContentBox, TotalContentHeight(), position, _scrollbarGrabOffset, vertical: true);
         MarkPaintDirty();
     }
 
@@ -1172,22 +1170,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
 
         ctx.Pop(); // clip
 
-        // Draw scrollbar
-        if (totalHeight > contentBox.Height)
-        {
-            float trackHeight = contentBox.Height;
-            float thumbRatio = contentBox.Height / totalHeight;
-            float thumbHeight = Math.Max(20, trackHeight * thumbRatio);
-            float scrollRatio = _scrollOffsetY / Math.Max(1, maxScroll);
-            float thumbY = contentBox.Y + scrollRatio * (trackHeight - thumbHeight);
-            float trackX = contentBox.X + contentBox.Width - ScrollbarWidth;
-
-            var barRadius = new CornerRadius(ScrollbarRadius < 0 ? ScrollbarWidth / 2f : ScrollbarRadius);
-            ctx.DrawRoundedRect(new Rect(trackX, contentBox.Y, ScrollbarWidth, trackHeight),
-                barRadius, ScrollbarColor, Color.Transparent, default);
-            ctx.DrawRoundedRect(new Rect(trackX, thumbY, ScrollbarWidth, thumbHeight),
-                barRadius, ScrollbarThumbColor, Color.Transparent, default);
-        }
+        _bar.Paint(ctx, contentBox, totalHeight, _scrollOffsetY, vertical: true);
     }
 
     /// <summary>The subset of <see cref="Spans"/> overlapping the visible line

@@ -1,104 +1,119 @@
-using HultUI.Core.Animation;
-using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Elements;
 
-// Scrollbar drag interaction for ScrollViewElement
+// Scrollbar appearance and drag interaction for ScrollViewElement.
+//
+// The arithmetic and the painting live in Scrollbar, shared with TextAreaElement. What is here
+// is what only a scroll view knows: that it has two axes, and where its content size comes from.
 public partial class ScrollViewElement
 {
+    // One per axis, so pointing at the vertical bar expands the vertical bar and leaves the
+    // horizontal one where it was.
+    private readonly Scrollbar _vBar = new();
+    private readonly Scrollbar _hBar = new();
+
     public bool IsDraggingScrollbar { get; private set; }
 
     private enum DragAxis { None, Vertical, Horizontal }
     private DragAxis _dragAxis;
-    private float _dragGrabOffset; // offset from thumb top/left to click position
+    private float _dragGrabOffset;
 
-    // ──── Expand on hover ────
+    // ──── Appearance ────
+    //
+    // Facades over both bars: apps set these per element (Junction and Vesper both do), and a
+    // scroll view's two bars have never looked different from one another. Reads answer for the
+    // vertical one, which is the one that exists in almost every view.
 
-    private float _hoverT;                 // 0 at rest, 1 fully expanded
-    private TweenHandle _hoverTween;
-    private bool _scrollbarHovered;
+    public Color ScrollbarColor
+    {
+        get => _vBar.TrackColor;
+        set { _vBar.TrackColor = value; _hBar.TrackColor = value; }
+    }
+
+    public Color ScrollbarThumbColor
+    {
+        get => _vBar.ThumbColor;
+        set { _vBar.ThumbColor = value; _hBar.ThumbColor = value; }
+    }
+
+    public float ScrollbarWidth
+    {
+        get => _vBar.Width;
+        set { _vBar.Width = value; _hBar.Width = value; }
+    }
+
+    /// <summary>
+    /// Corner radius of the track and thumb. Defaults to half the width, which makes the thumb
+    /// a pill — every current platform draws it that way, and a square-ended bar is the single
+    /// most dated-looking thing in an otherwise modern window. Set 0 for square ends.
+    /// </summary>
+    public float ScrollbarRadius
+    {
+        get => _vBar.Radius;
+        set { _vBar.Radius = value; _hBar.Radius = value; }
+    }
 
     /// <summary>
     /// Whether the bar grows under the pointer. Windows 11 rests at a hairline and widens into a
     /// real bar with a track when you reach for it, which is how it stays out of the way without
     /// becoming impossible to grab.
     /// </summary>
-    public bool ScrollbarExpandOnHover { get; set; } = true;
+    public bool ScrollbarExpandOnHover
+    {
+        get => _vBar.ExpandOnHover;
+        set { _vBar.ExpandOnHover = value; _hBar.ExpandOnHover = value; }
+    }
 
     /// <summary>
-    /// Width of the whole bar while the pointer is on it. The thumb inside grows to half of it,
-    /// the proportion Windows uses (a 12px bar around a 6px thumb).
+    /// Width of the whole bar while the pointer is on it; the thumb inside grows to half of it.
     ///
     /// <para>It is also the width of the region that counts as "on the bar", at rest as well —
     /// otherwise a 2px resting bar would be a 2px target, and nothing would ever expand it.</para>
     /// </summary>
-    public float ScrollbarExpandedWidth { get; set; } = 12f;
+    public float ScrollbarExpandedWidth
+    {
+        get => _vBar.ExpandedWidth;
+        set { _vBar.ExpandedWidth = value; _hBar.ExpandedWidth = value; }
+    }
 
     /// <summary>Track colour while expanded. Null keeps <see cref="ScrollbarColor"/>, so a view
     /// that says nothing about hover just gets a wider version of the bar it already had.</summary>
-    public Color? ScrollbarTrackHoverColor { get; set; }
+    public Color? ScrollbarTrackHoverColor
+    {
+        get => _vBar.TrackHoverColor;
+        set { _vBar.TrackHoverColor = value; _hBar.TrackHoverColor = value; }
+    }
 
     /// <summary>How long the expansion takes, in seconds.</summary>
-    public float ScrollbarExpandDuration { get; set; } = 0.12f;
-
-    /// <summary>The reach of the bar: what the pointer has to be within for it to expand, and
-    /// what a press has to land in to count as a scrollbar press.</summary>
-    internal float ScrollbarHitWidth =>
-        ScrollbarExpandOnHover ? Math.Max(ScrollbarWidth, ScrollbarExpandedWidth) : ScrollbarWidth;
-
-    /// <summary>The bar's drawn width right now, part-way through the expansion.</summary>
-    internal float ScrollbarTrackWidthNow =>
-        ScrollbarExpandOnHover
-            ? ScrollbarWidth + (ScrollbarExpandedWidth - ScrollbarWidth) * _hoverT
-            : ScrollbarWidth;
-
-    /// <summary>The thumb's drawn width right now. Never narrower than at rest, so a view whose
-    /// resting bar is already wide keeps it and only gains the track around it.</summary>
-    internal float ScrollbarThumbWidthNow
+    public float ScrollbarExpandDuration
     {
-        get
-        {
-            if (!ScrollbarExpandOnHover) return ScrollbarWidth;
-            float expanded = Math.Max(ScrollbarWidth, ScrollbarExpandedWidth / 2f);
-            return ScrollbarWidth + (expanded - ScrollbarWidth) * _hoverT;
-        }
+        get => _vBar.ExpandDuration;
+        set { _vBar.ExpandDuration = value; _hBar.ExpandDuration = value; }
     }
 
-    internal Color ScrollbarTrackColorNow =>
-        ScrollbarTrackHoverColor is { } hover
-            ? Lerp.Color(ScrollbarColor, hover, _hoverT)
-            : ScrollbarColor;
+    // ──── Hover ────
 
     /// <summary>
-    /// Told by the window whether the pointer is on this bar. Kept as a method on
-    /// <see cref="IScrollbarDraggable"/> rather than an ordinary pointer handler because the bar
-    /// is painted over its own content: the element under the pointer there is whatever the bar
-    /// happens to cover, so the hover has to be decided by geometry, which is what the window
-    /// already does to pick the cursor.
+    /// Told by the window where the pointer is, or null when it is not on this view's bars.
+    ///
+    /// <para>The position rather than a bool, because a scroll view has two bars and only the
+    /// one under the pointer should expand. See <see cref="IScrollbarDraggable"/> for why the
+    /// window has to deliver this at all.</para>
     /// </summary>
-    public void SetScrollbarHover(bool hovered)
+    public void SetScrollbarHover(Point? position)
     {
-        if (hovered == _scrollbarHovered) return;
-        _scrollbarHovered = hovered;
+        var box = Layout.AbsoluteContentBox;
+        bool onVertical = ShowScrollbarY && position is { } p
+            && _vBar.Contains(box, _contentHeight, p, vertical: true);
+        bool onHorizontal = ShowScrollbarX && position is { } q
+            && _hBar.Contains(box, _contentWidth, q, vertical: false);
 
-        if (!ScrollbarExpandOnHover)
-            return;
-
-        float target = hovered ? 1f : 0f;
-        _hoverTween.Cancel();
-        if (ScrollbarExpandDuration <= 0f)
-        {
-            _hoverT = target;
-            MarkPaintDirty();
-            return;
-        }
-
-        _hoverTween = Animate.Value(_hoverT, target, v => { _hoverT = v; MarkPaintDirty(); })
-            .Duration(ScrollbarExpandDuration * MathF.Abs(target - _hoverT))
-            .Ease(Easing.EaseOutCubic)
-            .Start();
+        _vBar.SetHover(onVertical, this);
+        _hBar.SetHover(onHorizontal, this);
     }
+
+    // ──── Press, drag, release ────
 
     /// <summary>
     /// Tests if a pointer-down at the given position should start a scrollbar drag.
@@ -106,64 +121,44 @@ public partial class ScrollViewElement
     /// </summary>
     public bool TryStartScrollbarDrag(Point position)
     {
-        var contentBox = Layout.AbsoluteContentBox;
+        var box = Layout.AbsoluteContentBox;
 
-        // Test vertical scrollbar
-        if (ShowScrollbarY && _contentHeight > contentBox.Height)
+        if (ShowScrollbarY)
         {
-            float trackX = contentBox.X + contentBox.Width - ScrollbarHitWidth;
-            if (position.X >= trackX && position.X <= trackX + ScrollbarHitWidth &&
-                position.Y >= contentBox.Y && position.Y <= contentBox.Y + contentBox.Height)
+            var hit = _vBar.HitTest(box, _contentHeight, _scrollOffsetY, position, vertical: true,
+                out float grab, out float trackOffset);
+            if (hit != ScrollbarHit.None)
             {
-                float trackHeight = contentBox.Height;
-                float thumbRatio = contentBox.Height / _contentHeight;
-                float thumbHeight = Math.Max(20, trackHeight * thumbRatio);
-                float scrollRatio = _scrollOffsetY / Math.Max(1, _contentHeight - contentBox.Height);
-                float thumbY = contentBox.Y + scrollRatio * (trackHeight - thumbHeight);
-
-                if (position.Y >= thumbY && position.Y <= thumbY + thumbHeight)
+                if (hit == ScrollbarHit.Thumb)
                 {
-                    // Clicked on thumb — start drag
                     _dragAxis = DragAxis.Vertical;
-                    _dragGrabOffset = position.Y - thumbY;
+                    _dragGrabOffset = grab;
                     IsDraggingScrollbar = true;
                 }
                 else
                 {
-                    // Clicked on track — jump to position
-                    float clickRatio = (position.Y - contentBox.Y - thumbHeight / 2) / (trackHeight - thumbHeight);
-                    clickRatio = Math.Clamp(clickRatio, 0, 1);
-                    ScrollOffsetY = clickRatio * (_contentHeight - contentBox.Height);
+                    ScrollOffsetY = trackOffset;
                     MarkPaintDirty();
                 }
                 return true;
             }
         }
 
-        // Test horizontal scrollbar
-        if (ShowScrollbarX && _contentWidth > contentBox.Width)
+        if (ShowScrollbarX)
         {
-            float trackY = contentBox.Y + contentBox.Height - ScrollbarHitWidth;
-            if (position.Y >= trackY && position.Y <= trackY + ScrollbarHitWidth &&
-                position.X >= contentBox.X && position.X <= contentBox.X + contentBox.Width)
+            var hit = _hBar.HitTest(box, _contentWidth, _scrollOffsetX, position, vertical: false,
+                out float grab, out float trackOffset);
+            if (hit != ScrollbarHit.None)
             {
-                float trackWidth = contentBox.Width;
-                float thumbRatio = contentBox.Width / _contentWidth;
-                float thumbWidth = Math.Max(20, trackWidth * thumbRatio);
-                float scrollRatio = _scrollOffsetX / Math.Max(1, _contentWidth - contentBox.Width);
-                float thumbX = contentBox.X + scrollRatio * (trackWidth - thumbWidth);
-
-                if (position.X >= thumbX && position.X <= thumbX + thumbWidth)
+                if (hit == ScrollbarHit.Thumb)
                 {
                     _dragAxis = DragAxis.Horizontal;
-                    _dragGrabOffset = position.X - thumbX;
+                    _dragGrabOffset = grab;
                     IsDraggingScrollbar = true;
                 }
                 else
                 {
-                    float clickRatio = (position.X - contentBox.X - thumbWidth / 2) / (trackWidth - thumbWidth);
-                    clickRatio = Math.Clamp(clickRatio, 0, 1);
-                    ScrollOffsetX = clickRatio * (_contentWidth - contentBox.Width);
+                    ScrollOffsetX = trackOffset;
                     MarkPaintDirty();
                 }
                 return true;
@@ -176,22 +171,9 @@ public partial class ScrollViewElement
     /// <summary>True when the position (screen coords) falls on a visible scrollbar track.</summary>
     public bool IsPointOverScrollbar(Point position)
     {
-        var contentBox = Layout.AbsoluteContentBox;
-        if (ShowScrollbarY && _contentHeight > contentBox.Height)
-        {
-            float trackX = contentBox.X + contentBox.Width - ScrollbarHitWidth;
-            if (position.X >= trackX && position.X <= trackX + ScrollbarHitWidth &&
-                position.Y >= contentBox.Y && position.Y <= contentBox.Y + contentBox.Height)
-                return true;
-        }
-        if (ShowScrollbarX && _contentWidth > contentBox.Width)
-        {
-            float trackY = contentBox.Y + contentBox.Height - ScrollbarHitWidth;
-            if (position.Y >= trackY && position.Y <= trackY + ScrollbarHitWidth &&
-                position.X >= contentBox.X && position.X <= contentBox.X + contentBox.Width)
-                return true;
-        }
-        return false;
+        var box = Layout.AbsoluteContentBox;
+        return (ShowScrollbarY && _vBar.Contains(box, _contentHeight, position, vertical: true))
+            || (ShowScrollbarX && _hBar.Contains(box, _contentWidth, position, vertical: false));
     }
 
     /// <summary>
@@ -200,29 +182,12 @@ public partial class ScrollViewElement
     public void UpdateScrollbarDrag(Point position)
     {
         if (!IsDraggingScrollbar) return;
-
-        var contentBox = Layout.AbsoluteContentBox;
+        var box = Layout.AbsoluteContentBox;
 
         if (_dragAxis == DragAxis.Vertical)
-        {
-            float trackHeight = contentBox.Height;
-            float thumbRatio = contentBox.Height / _contentHeight;
-            float thumbHeight = Math.Max(20, trackHeight * thumbRatio);
-            float thumbTop = position.Y - _dragGrabOffset;
-            float scrollRatio = (thumbTop - contentBox.Y) / (trackHeight - thumbHeight);
-            scrollRatio = Math.Clamp(scrollRatio, 0, 1);
-            ScrollOffsetY = scrollRatio * (_contentHeight - contentBox.Height);
-        }
+            ScrollOffsetY = _vBar.OffsetFromDrag(box, _contentHeight, position, _dragGrabOffset, vertical: true);
         else if (_dragAxis == DragAxis.Horizontal)
-        {
-            float trackWidth = contentBox.Width;
-            float thumbRatio = contentBox.Width / _contentWidth;
-            float thumbWidth = Math.Max(20, trackWidth * thumbRatio);
-            float thumbLeft = position.X - _dragGrabOffset;
-            float scrollRatio = (thumbLeft - contentBox.X) / (trackWidth - thumbWidth);
-            scrollRatio = Math.Clamp(scrollRatio, 0, 1);
-            ScrollOffsetX = scrollRatio * (_contentWidth - contentBox.Width);
-        }
+            ScrollOffsetX = _hBar.OffsetFromDrag(box, _contentWidth, position, _dragGrabOffset, vertical: false);
 
         MarkPaintDirty();
     }
@@ -234,5 +199,11 @@ public partial class ScrollViewElement
     {
         IsDraggingScrollbar = false;
         _dragAxis = DragAxis.None;
+    }
+
+    internal void CopyScrollbarsFrom(ScrollViewElement source)
+    {
+        _vBar.CopyFrom(source._vBar);
+        _hBar.CopyFrom(source._hBar);
     }
 }

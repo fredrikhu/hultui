@@ -454,7 +454,7 @@ public sealed class Window : IOverlayHost, IDisposable
         _root = root;
         _maxButtonCache = null;
         // The old tree is gone; anything held from it is a reference to a discarded element.
-        SetScrollbarHover(null);
+        SetScrollbarHover(null, default);
         root.OverlayHost = this;
         root.FocusManager = _focusManager;
         root.AccessibilityObserver = _a11yObserver;
@@ -903,7 +903,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     }
                 }
                 PlatformWindow.SetCursor(cursor);
-                SetScrollbarHover(overScrollbar);
+                SetScrollbarHover(overScrollbar, pos);
 
                 // Tooltip tracking
                 UpdateTooltipHover(target);
@@ -1541,12 +1541,16 @@ public sealed class Window : IOverlayHost, IDisposable
     /// the *leaving* case reliable — a view whose bar the pointer has left is, by definition,
     /// no longer on the path being walked, so it will never hear about it on its own.</para>
     /// </summary>
-    private void SetScrollbarHover(IScrollbarDraggable? next)
+    private void SetScrollbarHover(IScrollbarDraggable? next, Point pos)
     {
-        if (ReferenceEquals(_scrollbarHoverTarget, next)) return;
-        _scrollbarHoverTarget?.SetScrollbarHover(false);
-        _scrollbarHoverTarget = next;
-        next?.SetScrollbarHover(true);
+        if (!ReferenceEquals(_scrollbarHoverTarget, next))
+        {
+            _scrollbarHoverTarget?.SetScrollbarHover(null);
+            _scrollbarHoverTarget = next;
+        }
+        // Told on every move, not only on the change: an element with more than one bar needs
+        // the position to know which of them the pointer is on now.
+        next?.SetScrollbarHover(pos);
     }
 
     private bool TryStartScrollbarDrag(Element target, Point pos)

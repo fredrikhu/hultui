@@ -39,7 +39,9 @@ public interface IScrollbarDraggable
     /// fire when the bar sat over empty space. The window decides it by geometry, which it
     /// already does one line earlier to choose the cursor.</para>
     ///
-    /// <para>Default no-op, so an implementer that does not expand needs to say nothing.</para>
+    /// <para>The position rather than a bool, because an element may have more than one bar and
+    /// only the one under the pointer should react. Null means the pointer is not on any of
+    /// them. Default no-op, so an implementer that does not expand need say nothing.</para>
     /// </summary>
-    void SetScrollbarHover(bool hovered) { }
+    void SetScrollbarHover(Point? position) { }
 }
