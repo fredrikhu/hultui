@@ -393,6 +393,43 @@ public class FluentSampleTests
         Assert.Equal(before + 1, app.ClickCount);
     }
 
+    /// <summary>
+    /// The InfoBar's severity mark is a filled disc with the symbol knocked out of it, not an
+    /// outlined glyph.
+    ///
+    /// <para>Measured off the Gallery: a 16px disc in the severity colour with the symbol in
+    /// <c>TextOnAccent</c> — black on dark, white on light. The obvious mistake is to reach for
+    /// the outlined ⓘ-style glyph, which is what this sample did until the two were put side by
+    /// side; the Segoe glyphs WinUI uses here (F13C–F13F) are the bare symbols with no ring of
+    /// their own, which is the tell.</para>
+    /// </summary>
+    [Fact]
+    public void TheInfoBarSeverityMarkIsAFilledDisc()
+    {
+        var (session, app, _root) = Start();
+        using var _ = session;
+
+        GoTo(session, "Controls gallery");
+        var bar = session.Window.FindByRole(
+            AccessibilityRole.Alert, "Saved. Your changes were written to disk.")!.Element;
+
+        if (!IconRenderer.UseSegoe)
+        {
+            // No icon font, no symbol to knock out — Phosphor has no bare "i". The fallback
+            // keeps the outlined icon, so there is no disc to find and that is correct.
+            Assert.Null(FirstOfType<BoxElement>(bar, b => b.BackgroundColor == app.Palette.Success));
+            return;
+        }
+
+        var disc = FirstOfType<BoxElement>(bar, b => b.BackgroundColor == app.Palette.Success);
+        Assert.NotNull(disc);
+        Assert.Equal(new CornerRadius(8f), disc!.CornerRadius);
+
+        var symbol = FirstOfType<TextElement>(disc);
+        Assert.NotNull(symbol);
+        Assert.Equal(app.Palette.TextOnAccent, symbol!.Inherited.TextColor);
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Theming
     // ──────────────────────────────────────────────────────────────────────

@@ -1,6 +1,17 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The InfoBar's severity mark is a filled badge** — a 16px disc in the severity colour with the
+  symbol knocked out of it in `TextOnAccent`, black on dark and white on light. The sample had
+  the outlined ⓘ-style glyphs, which is the obvious mistake and survived until the two were put
+  side by side. The tell is in the font: the Segoe glyphs WinUI uses here (`F13C`–`F13F`) are the
+  bare symbols — an exclamation mark, a cross, a tick, a letter i — with no ring or disc of their
+  own, so the disc has to be drawn behind them. Sized by measurement too: those glyphs sit well
+  inside their em box, so the first attempt at "10px" came out about five pixels tall and read as
+  a smudge; 16 matches. Without the icon font there is nothing to knock out (Phosphor has no bare
+  "i"), so the fallback keeps the outlined icon and the test asserts that branch too. Found while
+  writing it: the InfoBar's accessible name was `"{title}. {message}"` and every title already
+  ends in a full stop, so a screen reader read "Saved.. Your changes were written to disk."
 - **The two-ring focus visual** — `FocusVisualTheme` (outer/inner colour and thickness, margin,
   `KeyboardOnly`) and `Element.ShowsFocusVisual`, drawn by the window around whatever holds
   focus. Two rings rather than one because a single ring can only contrast with one background:

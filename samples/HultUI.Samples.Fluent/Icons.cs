@@ -57,6 +57,14 @@ public static class Icons
     public static readonly Icon Keyboard = new("", "keyboard");
     public static readonly Icon Notifications = new("", "tray-arrow-down");
     public static readonly Icon Startup = new("", "rocket-launch");
+    // The four InfoBar badges. WinUI draws these as a filled disc in the severity colour with
+    // the symbol knocked out of it, so the glyph here is the bare symbol — no ring, no disc.
+    // The disc is a box behind it; see F.SeverityBadge.
+    public static readonly Icon BadgeInfo = new("\uF13F", "check-circle");
+    public static readonly Icon BadgeSuccess = new("\uF13E", "check");
+    public static readonly Icon BadgeWarning = new("\uF13C", "warning");
+    public static readonly Icon BadgeError = new("\uF13D", "x");
+
     public static readonly Icon Info = new("", "check-circle");
     public static readonly Icon Success = new("", "check-circle");
     public static readonly Icon Warning = new("", "warning");

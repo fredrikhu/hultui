@@ -294,23 +294,57 @@ public static class F
 
     public enum Severity { Informational, Success, Warning, Error }
 
+    /// <summary>
+    /// The InfoBar's severity mark: a 16px disc filled with the severity colour and the symbol
+    /// knocked out of it in <see cref="FluentPalette.TextOnAccent"/> — black on a dark theme,
+    /// white on a light one.
+    ///
+    /// <para>Measured off the Gallery rather than guessed. The four Segoe glyphs it uses
+    /// (<c>F13C</c>–<c>F13F</c>) are the bare symbols — an exclamation mark, a cross, a tick, a
+    /// letter i — with no ring or disc of their own, which is why the disc has to be drawn
+    /// behind them. Reaching for the outlined <c>ⓘ</c>-style glyphs instead is the obvious
+    /// mistake, and it was the one this sample had made.</para>
+    ///
+    /// <para>Without the icon font there is nothing to knock out — Phosphor has no bare "i" —
+    /// so the fallback keeps the outlined icon it had. Better an honest circle-with-a-tick than
+    /// a disc with a hole the wrong shape in it.</para>
+    /// </summary>
+    private static Element SeverityBadge(FluentPalette p, Color tint, Icon badge, Icon outline)
+    {
+        if (!IconRenderer.UseSegoe)
+            return IconRenderer.Draw(outline, 20f, tint);
+
+        return Box.New().FlexShrink(0)
+            .Width(20f).Height(20f)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Children(
+                Box.New().FlexShrink(0)
+                    .Width(16f).Height(16f).CornerRadius(8f)
+                    .Background(tint)
+                    .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+                    // 16, not something smaller: the F13x glyphs sit well inside their em box,
+                    // so a "10px" symbol comes out around five pixels tall and reads as a
+                    // smudge in the middle of the disc. Matched to the Gallery by measurement.
+                    .Children(IconRenderer.Draw(badge, 16f, p.TextOnAccent)));
+    }
+
     /// <summary>An InfoBar: severity glyph, a bold title, the message beside it, and a
     /// dismiss button. The tinted background and the matching glyph colour are a pair —
     /// WinUI never uses one without the other.</summary>
     public static Element InfoBar(
         FluentPalette p, Severity severity, string title, string message, Action? onClose = null)
     {
-        var (tint, back, icon) = severity switch
+        var (tint, back, badge, outline) = severity switch
         {
-            Severity.Success => (p.Success, p.SuccessBg, Icons.Success),
-            Severity.Warning => (p.Caution, p.CautionBg, Icons.Warning),
-            Severity.Error => (p.Critical, p.CriticalBg, Icons.Error),
-            _ => (p.Accent, p.AttentionBg, Icons.Info),
+            Severity.Success => (p.Success, p.SuccessBg, Icons.BadgeSuccess, Icons.Success),
+            Severity.Warning => (p.Caution, p.CautionBg, Icons.BadgeWarning, Icons.Warning),
+            Severity.Error => (p.Critical, p.CriticalBg, Icons.BadgeError, Icons.Error),
+            _ => (p.Accent, p.AttentionBg, Icons.BadgeInfo, Icons.Info),
         };
 
         var children = new List<Element>
         {
-            IconRenderer.Draw(icon, 20f, tint),
+            SeverityBadge(p, tint, badge, outline),
             Flex.Row(gap: 8f).FlexGrow(1).FlexWrap(FlexWrap.Wrap).AlignItems(AlignItems.Center).Children(
                 BodyStrong(p, title),
                 Body(p, message).TextColor(p.TextPrimary)),
@@ -328,7 +362,9 @@ public static class F
             .Gap(13f)
             .AlignItems(AlignItems.Center)
             .AccessibleRole(AccessibilityRole.Alert)
-            .AccessibleName($"{title}. {message}")
+            // Titles already carry their own punctuation ("Saved.", "Low disk space."), so the
+            // format string must not add a second full stop — the screen reader reads it.
+            .AccessibleName($"{title} {message}")
             .Children([.. children]);
     }
 
