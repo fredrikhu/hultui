@@ -1,6 +1,16 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **The border stopped being drawn at the corner** — reported by eye ("it looks like the border
+  just kind of stops"), and a regression in the per-side border work below: clipping each side to
+  its own 1px band is right for the straight run and wrong for the arc, which bulges out of both
+  of the bands that meet at it. A single-sided border never showed it, which is why four pixel
+  tests missed it; the sample's content frame has all four sides and an 8px radius, so it showed
+  it four times. Each side now also strokes its half of every corner it touches, split on the
+  diagonal the way CSS splits a mitre, so two adjacent sides join and one side alone still stops
+  halfway round. The 5th renderer test is the one that matters: it asserts a top-and-left border
+  paints the arc between them, and it is the only one of the five that fails when the corner
+  halves are removed.
 - **A per-side border follows the corner radius** — it used to paint each edge as a plain
   rectangle, which is exact on a square box and wrong on a rounded one: the bar runs corner to
   corner and sticks out past the arc in two square tabs. Every single-sided border on a rounded

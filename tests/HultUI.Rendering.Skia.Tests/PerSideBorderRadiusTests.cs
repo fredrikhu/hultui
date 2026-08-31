@@ -87,6 +87,35 @@ public class PerSideBorderRadiusTests
         return (first, last);
     }
 
+    /// <summary>
+    /// Two adjacent sides join across the corner between them.
+    ///
+    /// <para>The case the sample's content frame is: a top and a left border on an 8px corner.
+    /// The arc lies inside neither edge's band — it bulges away from both — so unless each side
+    /// also draws its half of the corner, the border runs down to the curve, vanishes, and picks
+    /// up again afterwards. It reads as the border giving up, and it is invisible to any test
+    /// that only exercises one side.</para>
+    /// </summary>
+    [Fact]
+    public void TwoAdjacentSidesJoinAcrossTheirCorner()
+    {
+        using var surface = new SkiaRasterRenderSurface();
+        surface.Resize(Size, Size, 1f);
+        var ctx = surface.RenderContext;
+
+        ctx.BeginFrame(Size, Size, 1f, Color.White);
+        ctx.DrawBorder(new Rect(10, 10, 40, 40), new CornerRadius(10f), Color.Red,
+            new Thickness(2, 0, 0, 2), BorderStyle.Solid);
+        ctx.EndFrame();
+        surface.Present();
+        var px = surface.ReadPixels(out _, out _, out int rowBytes);
+
+        Assert.True(IsRed(px, rowBytes, x: 30, y: 11), "the top edge's straight run");
+        Assert.True(IsRed(px, rowBytes, x: 11, y: 30), "the left edge's straight run");
+        Assert.True(IsRed(px, rowBytes, x: 14, y: 13), "and the arc joining them");
+        Assert.False(IsRed(px, rowBytes, x: 10, y: 10), "but not the square corner outside it");
+    }
+
     /// <summary>The square-box path is untouched: a bar corner to corner, which is exact.</summary>
     [Fact]
     public void ASquareBoxStillPaintsTheWholeEdge()

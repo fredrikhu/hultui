@@ -191,23 +191,50 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
             }
 
             // Rounded box: the rects above would cut straight across the corner arcs and leave
-            // square ends sticking out of a rounded control — which is what a bottom-only border
-            // on a 4px-radius text field looked like. Stroke the real outline instead and clip
-            // it to one edge's band at a time, so each side follows the curve it belongs to and
-            // a corner is drawn by whichever of its two sides are present.
-            DrawRoundedEdge(SKRect.Create(x, y, bw, w.Top), w.Top);
-            DrawRoundedEdge(SKRect.Create(x, y + bh - w.Bottom, bw, w.Bottom), w.Bottom);
-            DrawRoundedEdge(SKRect.Create(x, y, w.Left, bh), w.Left);
-            DrawRoundedEdge(SKRect.Create(x + bw - w.Right, y, w.Right, bh), w.Right);
+            // square ends sticking out of a rounded control. Stroke the real outline instead,
+            // clipped to one region at a time.
+            //
+            // Two kinds of region, and both are needed. An edge's band covers its straight run.
+            // A corner's arc lies inside neither adjacent band — it bulges away from both — so
+            // each side also draws its half of the corners it touches, split on the corner box's
+            // diagonal the way CSS splits them. Without the corner halves a border between two
+            // present sides simply stops at the curve and starts again after it, which is what
+            // the sample's content frame looked like: a rounded panel with a border that gave up
+            // at the corner.
+            float tl = radius.TopLeft, tr = radius.TopRight;
+            float br = radius.BottomRight, bl = radius.BottomLeft;
+
+            if (w.Top > 0)
+            {
+                StrokeClipped(SKRect.Create(x, y, bw, w.Top), w.Top);
+                StrokeCorner(x, y, x + tl, y, x + tl, y + tl, w.Top);
+                StrokeCorner(x + bw, y, x + bw - tr, y, x + bw - tr, y + tr, w.Top);
+            }
+            if (w.Bottom > 0)
+            {
+                StrokeClipped(SKRect.Create(x, y + bh - w.Bottom, bw, w.Bottom), w.Bottom);
+                StrokeCorner(x, y + bh, x + bl, y + bh, x + bl, y + bh - bl, w.Bottom);
+                StrokeCorner(x + bw, y + bh, x + bw - br, y + bh, x + bw - br, y + bh - br, w.Bottom);
+            }
+            if (w.Left > 0)
+            {
+                StrokeClipped(SKRect.Create(x, y, w.Left, bh), w.Left);
+                StrokeCorner(x, y, x, y + tl, x + tl, y + tl, w.Left);
+                StrokeCorner(x, y + bh, x, y + bh - bl, x + bl, y + bh - bl, w.Left);
+            }
+            if (w.Right > 0)
+            {
+                StrokeClipped(SKRect.Create(x + bw - w.Right, y, w.Right, bh), w.Right);
+                StrokeCorner(x + bw, y, x + bw, y + tr, x + bw - tr, y + tr, w.Right);
+                StrokeCorner(x + bw, y + bh, x + bw, y + bh - br, x + bw - br, y + bh - br, w.Right);
+            }
             return;
 
-            void DrawRoundedEdge(SKRect band, float width)
+            // The outline, inset by half the stroke so it lands inside the border box — matching
+            // where the square-corner path puts its bars, so switching a control to a rounded
+            // corner does not also move its border half a pixel outwards.
+            void Stroke(float width)
             {
-                if (width <= 0) return;
-
-                // Inset by half the stroke so the band lands inside the border box, matching
-                // where the square-corner path puts it — otherwise switching a control to a
-                // rounded corner would also move its border half a pixel outwards.
                 float half = width / 2f;
                 var path = ToSkRect(new Rect(
                     box.X + half, box.Y + half, box.Width - width, box.Height - width));
@@ -217,10 +244,32 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
                 _pooledPaint.IsAntialias = true;
                 _pooledPaint.IsStroke = true;
                 _pooledPaint.StrokeWidth = width;
+                Canvas.DrawRoundRect(ToSkRoundRect(path, Deflate(radius, half)), _pooledPaint);
+            }
+
+            void StrokeClipped(SKRect clip, float width)
+            {
+                Canvas.Save();
+                Canvas.ClipRect(clip);
+                Stroke(width);
+                Canvas.Restore();
+            }
+
+            // One side's half of one corner: the triangle from the box's outer corner, along
+            // this side's edge to where the arc begins, and back along the diagonal.
+            void StrokeCorner(float ax, float ay, float bx, float by, float cx, float cy, float width)
+            {
+                if (Math.Abs(bx - ax) < 0.01f && Math.Abs(by - ay) < 0.01f) return;   // no radius here
+
+                using var tri = new SKPath();
+                tri.MoveTo(ax, ay);
+                tri.LineTo(bx, by);
+                tri.LineTo(cx, cy);
+                tri.Close();
 
                 Canvas.Save();
-                Canvas.ClipRect(band);
-                Canvas.DrawRoundRect(ToSkRoundRect(path, Deflate(radius, half)), _pooledPaint);
+                Canvas.ClipPath(tri, antialias: true);
+                Stroke(width);
                 Canvas.Restore();
             }
         }
