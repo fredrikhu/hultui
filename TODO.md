@@ -1,6 +1,18 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **A per-side border follows the corner radius** — it used to paint each edge as a plain
+  rectangle, which is exact on a square box and wrong on a rounded one: the bar runs corner to
+  corner and sticks out past the arc in two square tabs. Every single-sided border on a rounded
+  control had them — the sample's search box on all four corners, the buttons' two-tone halves,
+  the Effects sample's border cards. The rounded path now strokes the real outline clipped to one
+  edge's band at a time, so each side follows its own curve and a corner is drawn by whichever of
+  its two sides are present; the square path is untouched, because that is what every divider in
+  the shipped apps draws and moving it half a pixel would show up everywhere at once. This also
+  retires the workaround `TextFieldUnderline` was written around. 4 renderer pixel tests — and
+  the second one took two attempts: "the corner stays clear" alone would pass for a bar that had
+  merely been shortened, so it now asserts that the run *narrows* through the band (13–46 at the
+  top, 18–41 at the bottom), which is what tells a curve from a rectangle.
 - **A text box is not a button with a caret** — `TextInputTheme.UnderlineColor` /
   `FocusUnderlineColor` / `UnderlineThickness` / `FocusUnderlineThickness` / `FocusBackground`,
   read by both `TextInputElement` and `TextAreaElement`. Measured, because a text box turned out

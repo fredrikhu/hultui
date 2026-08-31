@@ -157,6 +157,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         return SKShader.CreateLinearGradient(start, end, colors, positions, SKShaderTileMode.Clamp);
     }
 
+    /// <summary>A corner radius pulled in by <paramref name="by"/>, so a stroke inset into the
+    /// box keeps its arcs concentric with the box's own instead of bulging.</summary>
+    private static CornerRadius Deflate(CornerRadius r, float by) => new(
+        MathF.Max(0f, r.TopLeft - by),
+        MathF.Max(0f, r.TopRight - by),
+        MathF.Max(0f, r.BottomRight - by),
+        MathF.Max(0f, r.BottomLeft - by));
+
     public void DrawBorder(Rect box, CornerRadius radius, Color color, Thickness w, BorderStyle style)
     {
         if (color.A == 0) return;
@@ -166,17 +174,55 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         if (!uniform)
         {
-            // Per-side widths: paint each edge as a rect inside the border box, so a
-            // single-sided or asymmetric border renders exactly (no averaging).
-            _pooledPaint.Reset();
-            _pooledPaint.Color = skColor;
-            _pooledPaint.IsAntialias = true;
             float x = box.X, y = box.Y, bw = box.Width, bh = box.Height;
-            if (w.Top > 0) Canvas.DrawRect(SKRect.Create(x, y, bw, w.Top), _pooledPaint);
-            if (w.Bottom > 0) Canvas.DrawRect(SKRect.Create(x, y + bh - w.Bottom, bw, w.Bottom), _pooledPaint);
-            if (w.Left > 0) Canvas.DrawRect(SKRect.Create(x, y, w.Left, bh), _pooledPaint);
-            if (w.Right > 0) Canvas.DrawRect(SKRect.Create(x + bw - w.Right, y, w.Right, bh), _pooledPaint);
+
+            if (radius.IsZero)
+            {
+                // Square box: paint each edge as a rect inside the border box, so a
+                // single-sided or asymmetric border renders exactly (no averaging).
+                _pooledPaint.Reset();
+                _pooledPaint.Color = skColor;
+                _pooledPaint.IsAntialias = true;
+                if (w.Top > 0) Canvas.DrawRect(SKRect.Create(x, y, bw, w.Top), _pooledPaint);
+                if (w.Bottom > 0) Canvas.DrawRect(SKRect.Create(x, y + bh - w.Bottom, bw, w.Bottom), _pooledPaint);
+                if (w.Left > 0) Canvas.DrawRect(SKRect.Create(x, y, w.Left, bh), _pooledPaint);
+                if (w.Right > 0) Canvas.DrawRect(SKRect.Create(x + bw - w.Right, y, w.Right, bh), _pooledPaint);
+                return;
+            }
+
+            // Rounded box: the rects above would cut straight across the corner arcs and leave
+            // square ends sticking out of a rounded control — which is what a bottom-only border
+            // on a 4px-radius text field looked like. Stroke the real outline instead and clip
+            // it to one edge's band at a time, so each side follows the curve it belongs to and
+            // a corner is drawn by whichever of its two sides are present.
+            DrawRoundedEdge(SKRect.Create(x, y, bw, w.Top), w.Top);
+            DrawRoundedEdge(SKRect.Create(x, y + bh - w.Bottom, bw, w.Bottom), w.Bottom);
+            DrawRoundedEdge(SKRect.Create(x, y, w.Left, bh), w.Left);
+            DrawRoundedEdge(SKRect.Create(x + bw - w.Right, y, w.Right, bh), w.Right);
             return;
+
+            void DrawRoundedEdge(SKRect band, float width)
+            {
+                if (width <= 0) return;
+
+                // Inset by half the stroke so the band lands inside the border box, matching
+                // where the square-corner path puts it — otherwise switching a control to a
+                // rounded corner would also move its border half a pixel outwards.
+                float half = width / 2f;
+                var path = ToSkRect(new Rect(
+                    box.X + half, box.Y + half, box.Width - width, box.Height - width));
+
+                _pooledPaint.Reset();
+                _pooledPaint.Color = skColor;
+                _pooledPaint.IsAntialias = true;
+                _pooledPaint.IsStroke = true;
+                _pooledPaint.StrokeWidth = width;
+
+                Canvas.Save();
+                Canvas.ClipRect(band);
+                Canvas.DrawRoundRect(ToSkRoundRect(path, Deflate(radius, half)), _pooledPaint);
+                Canvas.Restore();
+            }
         }
 
         // Uniform width, dashed or dotted: stroke the (rounded) outline with a dash
