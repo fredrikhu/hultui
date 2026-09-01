@@ -309,6 +309,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     private float TotalHeight =>
         _offsets is { } o ? o[^1] : _items.Count * _itemHeight;
 
+    /// <summary>
+    /// How far this list can scroll comes from the rows it holds <i>now</i>, not from the
+    /// extent the last layout pass left behind. Reconcile assigns the new items before a
+    /// component's OnAfterBuild runs, and OnAfterBuild — the natural place for "reveal the
+    /// selected row" — runs before the next layout. Clamping against the stale extent
+    /// therefore swallowed the request whole whenever the list had just grown: a pane that
+    /// listed a folder and asked to land on its 60th file stayed at the top, because at the
+    /// moment it asked, the extent still said the list was empty.
+    /// </summary>
+    protected override float ClampY(float value)
+    {
+        EnsureOffsets();
+        float viewportHeight = Layout.AbsoluteContentBox.Height;
+        return Math.Clamp(value, 0, Math.Max(0, TotalHeight - viewportHeight));
+    }
+
     /// <summary>The row containing <paramref name="y"/> in content coordinates.</summary>
     private int IndexAt(float y)
     {
@@ -333,6 +349,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
         _scrollOffsetX = ClampX(_scrollOffsetX);
         _scrollOffsetY = ClampY(_scrollOffsetY);
+        ApplyPendingReveal();
     }
 
     internal override void UpdateContentSize()

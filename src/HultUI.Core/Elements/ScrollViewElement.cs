@@ -120,6 +120,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         // Re-clamp offsets after content size change
         _scrollOffsetX = ClampX(_scrollOffsetX);
         _scrollOffsetY = ClampY(_scrollOffsetY);
+        ApplyPendingReveal();
     }
 
     /// <summary>
@@ -136,7 +137,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         return Math.Clamp(value, 0, maxScroll);
     }
 
-    protected float ClampY(float value)
+    protected virtual float ClampY(float value)
     {
         var viewportHeight = Layout.AbsoluteContentBox.Height;
         float maxScroll = Math.Max(0, _contentHeight - viewportHeight);
@@ -181,6 +182,18 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     public void ScrollRangeIntoView(float top, float height)
     {
         var viewportHeight = Layout.AbsoluteContentBox.Height;
+        if (viewportHeight <= 0)
+        {
+            // Asked to reveal a band before this view has been laid out — which is exactly
+            // where a component naturally asks: OnAfterBuild, right after the rebuild that
+            // put the row there and before the layout pass that measures it. "Scroll the
+            // minimum distance" has no answer without a viewport, and answering anyway
+            // parks the band a viewport off. Hold the request; the layout pass honours it
+            // the moment the geometry exists.
+            _pendingReveal = (top, height);
+            return;
+        }
+        _pendingReveal = null;
         float cur = _scrollOffsetY;
         float bottom = top + height;
         // Layout is unscrolled, so the band's coordinates don't move as we scroll;
@@ -188,6 +201,30 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         // (The setter clamps, so an over-shoot near the ends is corrected.)
         if (top < cur) ScrollOffsetY = top;
         else if (bottom > cur + viewportHeight) ScrollOffsetY = bottom - viewportHeight;
+    }
+
+    /// <summary>A reveal that arrived before this view knew its own size, waiting for the
+    /// layout pass that gives it one.</summary>
+    private (float Top, float Height)? _pendingReveal;
+
+    /// <summary>
+    /// Honours a held <see cref="ScrollRangeIntoView"/> now that the geometry is known.
+    /// Called from the layout pass, so it writes the offset field rather than the property:
+    /// the property marks paint dirty and notifies accessibility, neither of which belongs
+    /// in the middle of a layout.
+    /// </summary>
+    protected void ApplyPendingReveal()
+    {
+        if (_pendingReveal is not { } band) return;
+        float viewportHeight = Layout.AbsoluteContentBox.Height;
+        if (viewportHeight <= 0) return;   // still nothing to measure against; keep holding it
+
+        _pendingReveal = null;
+        float bottom = band.Top + band.Height;
+        float target = band.Top < _scrollOffsetY ? band.Top
+            : bottom > _scrollOffsetY + viewportHeight ? bottom - viewportHeight
+            : _scrollOffsetY;
+        _scrollOffsetY = ClampY(target);
     }
 
     /// <summary>
