@@ -213,6 +213,20 @@ public sealed class Window : IOverlayHost, IDisposable
     public float DisplayScale => PlatformWindow.DisplayScale;
 
     /// <summary>
+    /// The user's zoom on top of the OS scaling: 1.0 is "as the system says", 1.25 draws
+    /// everything a quarter larger and fits correspondingly less in the window. This is the
+    /// honest form of "bigger text" for an app laid out in fixed units — growing only the
+    /// font leaves every row height, gutter and icon behind, and the result is cramped text
+    /// in the same-sized furniture. Clamped by the platform to a usable range; the window
+    /// relayouts on the next frame, on the same path a resize takes.
+    /// </summary>
+    public float UserScale
+    {
+        get => PlatformWindow.UserScale;
+        set => PlatformWindow.UserScale = value;
+    }
+
+    /// <summary>
     /// Raised after the window's size changes (during and after an interactive
     /// resize). Fires on the UI thread; handlers see the updated
     /// <see cref="LayoutWidth"/>/<see cref="LayoutHeight"/>. Used by apps whose

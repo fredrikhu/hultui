@@ -69,9 +69,27 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     /// <summary>The raster surface, typed — for pixel readback.</summary>
     internal SkiaRasterRenderSurface RasterSurface => _raster;
 
-    public float LayoutWidth => _layoutWidth;
-    public float LayoutHeight => _layoutHeight;
-    public float DisplayScale => _scale;
+    // The client's pixel size is what stays fixed under a zoom, as it is on a real window:
+    // zooming in makes everything bigger and leaves fewer layout units on screen.
+    public float LayoutWidth => _layoutWidth / _userScale;
+    public float LayoutHeight => _layoutHeight / _userScale;
+    public float DisplayScale => _scale * _userScale;
+
+    private float _userScale = 1f;
+
+    /// <inheritdoc/>
+    public float UserScale
+    {
+        get => _userScale;
+        set
+        {
+            float clamped = Math.Clamp(value, 0.5f, 3f);
+            if (Math.Abs(clamped - _userScale) < 0.0001f) return;
+            _userScale = clamped;
+            _surface.Resize(PixelWidth, PixelHeight, DisplayScale);
+            ResizePending = true;
+        }
+    }
 
     public int PixelWidth => (int)MathF.Round(_layoutWidth * _scale);
     public int PixelHeight => (int)MathF.Round(_layoutHeight * _scale);
@@ -98,7 +116,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
                 $"Client size must be positive ({layoutWidth}x{layoutHeight}).");
         _layoutWidth = layoutWidth;
         _layoutHeight = layoutHeight;
-        _surface.Resize(PixelWidth, PixelHeight, _scale);
+        _surface.Resize(PixelWidth, PixelHeight, DisplayScale);
     }
 
     /// <summary>Changes the display scale, keeping the layout-unit size constant (the OS DPI-change behavior).</summary>
@@ -106,7 +124,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     {
         if (scale <= 0f) throw new ArgumentOutOfRangeException(nameof(scale));
         _scale = scale;
-        _surface.Resize(PixelWidth, PixelHeight, scale);
+        _surface.Resize(PixelWidth, PixelHeight, DisplayScale);
     }
 
     public void MakeCurrent() { }

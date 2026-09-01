@@ -26,8 +26,18 @@ public interface IPlatformWindow : IDisposable
     /// <summary>Client height in layout units (pixels / DisplayScale).</summary>
     float LayoutHeight { get; }
 
-    /// <summary>Scale factor from layout units to physical pixels.</summary>
+    /// <summary>Scale factor from layout units to physical pixels: the scale the OS asks
+    /// for, times <see cref="UserScale"/>.</summary>
     float DisplayScale { get; }
+
+    /// <summary>
+    /// The user's own zoom on top of the OS scaling — 1.0 for "as the system says". Raising
+    /// it draws the whole UI larger and fits less in the window, which is what someone asking
+    /// for bigger text on a 4K panel means: growing only the font would leave every fixed
+    /// row height, gutter and icon at its old size. Implementations clamp to a range the
+    /// window is still usable in.
+    /// </summary>
+    float UserScale { get; set; }
 
     WindowStyle Style { get; }
     bool IsOpen { get; }

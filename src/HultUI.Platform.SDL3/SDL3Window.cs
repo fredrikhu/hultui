@@ -70,12 +70,44 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public int PixelHeight { get; private set; }
 
     /// <summary>
-    /// OS-recommended content scale (1.0, 1.5, 2.0…). Drives how large the UI
-    /// appears and how many physical pixels each density-independent unit maps
-    /// to. This — not pixel density — is what makes the UI track the monitor's
-    /// scaling setting; on Windows pixel density stays 1.0 at every scale.
+    /// Content scale (1.0, 1.5, 2.0…): the OS-recommended one times the user's own zoom.
+    /// Drives how large the UI appears and how many physical pixels each density-independent
+    /// unit maps to. The OS part — not pixel density — is what makes the UI track the
+    /// monitor's scaling setting; on Windows pixel density stays 1.0 at every scale.
     /// </summary>
     public float DisplayScale { get; private set; } = 1f;
+
+    /// <summary>What the OS asks for on its own, before the user's zoom.</summary>
+    private float _osDisplayScale = 1f;
+    private float _userScale = 1f;
+
+    /// <summary>
+    /// The user's own zoom, multiplied onto the OS scale. 1.0 is "what the system says";
+    /// larger draws everything bigger and fits less on screen, which is the point — an app
+    /// that only grew its font would leave every fixed-size row, gutter and icon behind.
+    /// Clamped to a range a window is still usable in.
+    /// </summary>
+    public float UserScale
+    {
+        get => _userScale;
+        set
+        {
+            float clamped = Math.Clamp(value, MinUserScale, MaxUserScale);
+            if (Math.Abs(clamped - _userScale) < 0.0001f) return;
+            _userScale = clamped;
+            DisplayScale = _osDisplayScale * _userScale;
+            EventTranslator.InputScale = InputScale;
+            _surface?.Resize(PixelWidth, PixelHeight, DisplayScale);
+            // The pixel size did not change, but the layout viewport did: the app relayouts
+            // on the same path a real resize takes.
+            ResizePending = true;
+        }
+    }
+
+    /// <summary>Bounds on <see cref="UserScale"/>: below the first the chrome stops being
+    /// clickable, above the second a normal window holds almost nothing.</summary>
+    public const float MinUserScale = 0.5f;
+    public const float MaxUserScale = 3f;
 
     /// <summary>
     /// Physical pixels per SDL window coordinate (pixel_size / window_size).
@@ -652,7 +684,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (displayScale <= 0f) displayScale = 1f;
 
         if (pw == PixelWidth && ph == PixelHeight
-            && density == PixelDensity && displayScale == DisplayScale)
+            && density == PixelDensity && displayScale == _osDisplayScale)
             return false;
 
         // The window moved to a monitor with a different scaling setting, but
@@ -664,14 +696,15 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // there's nothing to do. Skipped while maximized (the OS owns the size)
         // and on the first sync (PixelWidth == 0, handled by the constructor).
         bool scaleOnlyChange = pw == PixelWidth && ph == PixelHeight
-            && displayScale != DisplayScale && PixelWidth > 0 && !IsMaximized;
+            && displayScale != _osDisplayScale && PixelWidth > 0 && !IsMaximized;
         float prevLayoutW = LayoutWidth;
         float prevLayoutH = LayoutHeight;
 
         PixelWidth = pw;
         PixelHeight = ph;
         PixelDensity = density;
-        DisplayScale = displayScale;
+        _osDisplayScale = displayScale;
+        DisplayScale = displayScale * _userScale;
         EventTranslator.InputScale = InputScale;
 
         if (scaleOnlyChange)
@@ -688,7 +721,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             PixelHeight = ph;
         }
 
-        _surface?.Resize(pw, ph, displayScale);
+        _surface?.Resize(pw, ph, DisplayScale);
         return true;
     }
 
