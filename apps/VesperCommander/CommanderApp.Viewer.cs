@@ -74,8 +74,9 @@ public partial class CommanderApp
 
     // The same size as the diff's code text, which is also what the shared monospace metrics
     // (_monoAdvance / _monoLineHeight, see CommanderApp.Diff.cs) were proven at — measuring
-    // the viewer at a different size would make those cached figures wrong.
-    private const float ViewerFontSize = DiffFontSize;
+    // the viewer at a different size would make those cached figures wrong. Both now come
+    // from the one text-font setting, so they cannot drift apart.
+    private float ViewerFontSize => DiffFontSize;
 
     /// <summary>Shift+F3 — open the cursor file in <paramref name="side"/> for reading.</summary>
     private void OpenViewer(char side)
@@ -195,7 +196,7 @@ public partial class CommanderApp
         // offsets mean nothing in the new one.
         _viewerGroup.Bind((_viewerPath, _viewerGen), lines.Length,
             i => i >= 0 && i < _viewerLines.Length ? _viewerLines[i] : null);
-        _viewerPan.ContentWidth = HorizontalPan.MeasureWidest(lines, ViewerFontSize, Fonts.Mono);
+        _viewerPan.ContentWidth = HorizontalPan.MeasureWidest(lines, ViewerFontSize, TextFont);
         StartViewerHighlight(lines);
         BindViewerSearch();
     }
@@ -296,7 +297,7 @@ public partial class CommanderApp
         // The label fills its cell exactly — no padding — so the column width is the wrap
         // width. Measuring against anything wider gives a row too short for its own text,
         // and the list forces the height it is given, so the overflow is simply clipped.
-        var style = TextMeasure.StyleFor(ViewerFontSize, Fonts.Mono);
+        var style = TextMeasure.StyleFor(ViewerFontSize, TextFont);
         // Shared with the diff: the monospace fast path answers "certainly one line" with a
         // multiplication and falls back to real measurement for anything it cannot settle.
         float text = WrappedHeight(_viewerLines[index], style, width);
@@ -498,7 +499,7 @@ public partial class CommanderApp
         // FlexGrow on the vertical axis — the main axis of the column box it sits in — so the
         // label is as tall as its row. Without it the label keeps its own text height and the
         // rest of the row belongs to the box, which is a strip that swallows presses.
-        var mono = Ui.Mono(text, ViewerFontSize, Nocturne.On(0.78)).FlexGrow(1);
+        var mono = Ui.Code(text, ViewerFontSize, TextFont, Nocturne.On(0.78)).FlexGrow(1);
         if (!ViewerWrap) mono.MaxLines(1).TextOverflow(TextOverflow.Clip);
         // Syntax colouring with any search hits tinted over it — see ViewerLineSpans.
         if (ViewerLineSpans(index, text) is { Count: > 0 } spans) mono.Spans(spans);

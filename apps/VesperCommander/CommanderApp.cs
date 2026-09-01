@@ -2160,7 +2160,14 @@ public partial class CommanderApp : Component, IDisposable
     private void SaveOptions()
     {
         string wasTheme = Nocturne.Theme.SyntaxTheme;
+        bool textFaceChanged = _draft.TextFont != _settings.TextFont
+            || Math.Abs(_draft.TextFontSize - _settings.TextFontSize) > 0.001f;
+        _draft.TextFont ??= "";
+        _draft.TextFontSize = Math.Clamp(_draft.TextFontSize, Settings.MinTextFontSize, Settings.MaxTextFontSize);
         _settings = _draft.Clone();
+        // The monospace advance and line height were proven at the old face; every wrapped
+        // row height in the viewer and the diff is measured against them.
+        if (textFaceChanged) InvalidateTextMetrics();
         SettingsStore.Save(_settings);
         SeedFindDefaults();                         // the find dialog adopts the new defaults
         RebuildKeymap();                            // apply any rebinds

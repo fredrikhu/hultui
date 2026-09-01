@@ -50,6 +50,23 @@ public sealed class Settings
     public int FindMaxDepth;                    // folder levels below the search root; 0 = unlimited
     public string FindExcludeFolders = "";      // ";"-separated folder patterns, e.g. ".git;.vs"
 
+    // Text
+    /// <summary>The face text files are read in — the viewer (Shift+F3) and the built-in
+    /// diff, which show the same kind of content and have always agreed on how. Empty means
+    /// the platform's monospace, which is what every earlier build used; a name this machine
+    /// has no font for falls back to it, so a settings file carried between machines opens
+    /// either way.</summary>
+    public string TextFont = "";
+
+    /// <summary>Point size for that same text. Row heights follow it, so the lines do not
+    /// crowd as it grows.</summary>
+    public float TextFontSize = 11.5f;
+
+    /// <summary>Bounds on <see cref="TextFontSize"/>, shared by the loader's clamp and the
+    /// stepper that offers it.</summary>
+    public const float MinTextFontSize = 8f;
+    public const float MaxTextFontSize = 24f;
+
     // Tools
     public DiffToolKind DiffTool = DiffToolKind.Builtin;
     // Built-in diff: wrap a line too wide for its column instead of scrolling sideways.
@@ -117,8 +134,15 @@ public static class SettingsStore
         {
             var path = FilePath;
             if (!File.Exists(path)) return new Settings();
-            return JsonSerializer.Deserialize(File.ReadAllText(path), SettingsJsonContext.Default.Settings)
-                   ?? new Settings();
+            var loaded = JsonSerializer.Deserialize(File.ReadAllText(path), SettingsJsonContext.Default.Settings)
+                         ?? new Settings();
+            // A hand-edited (or older) file must not be able to leave the viewer at a size
+            // with no glyphs in it, or with a null family the text pipeline would throw on.
+            loaded.TextFont ??= string.Empty;
+            loaded.TextFontSize = loaded.TextFontSize <= 0f
+                ? 11.5f
+                : Math.Clamp(loaded.TextFontSize, Settings.MinTextFontSize, Settings.MaxTextFontSize);
+            return loaded;
         }
         catch { return new Settings(); }
     }

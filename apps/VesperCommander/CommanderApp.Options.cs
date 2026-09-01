@@ -46,11 +46,17 @@ public partial class CommanderApp
         // Key the page subtree by which page (or the search view) it holds. A keyless
         // switch would patch the new page's controls onto the old ones by position,
         // bleeding retained state (focus, caret) across logically unrelated controls.
-        var page = Flex.Column(gap: 14).Padding(new Thickness(16, 20, 16, 20)).GridCell(0, 1);
+        // The page column scrolls. The dialog is a fixed 460 tall so switching pages does
+        // not resize the window, and the pages have outgrown that — a page that cannot
+        // scroll simply loses whatever falls past the bottom edge, silently, since there is
+        // no clipped edge to see. Only this column scrolls: the nav, header and footer stay.
+        var pageScroll = ScrollView.Vertical().GridCell(0, 1);
+        var page = Flex.Column(gap: 14).Padding(new Thickness(16, 20, 16, 20));
         page.Key = searching ? "opt-page:search" : "opt-page:" + _optionsPage;
         if (searching) OptionsSearchResults(page, _optSearch.Trim());
         else OptionsPage(page);
-        body.AddChild(page);
+        pageScroll.AddChild(page);
+        body.AddChild(pageScroll);
         card.AddChild(body);
 
         // Footer: Reset · Cancel · Save.
@@ -194,6 +200,10 @@ public partial class CommanderApp
             new(1, "Show hidden and system files", "dotfiles",
                 () => ToggleRow(_draft.ShowHidden, "Show hidden and system files", () => Flip(ref _draft.ShowHidden))),
             // Tools
+            new(3, "Text font", "viewer diff monospace face family typeface reading code",
+                () => FieldRow("Text font", TextFontField())),
+            new(3, "Text size", "viewer diff font size points bigger smaller reading code",
+                () => FieldRow("Text size", TextFontSizeStepper())),
             new(3, "Diff tool", "compare vscode junction builtin",
                 () => FieldRow("Diff tool", Seg(
                     ("Built-in", _draft.DiffTool == DiffToolKind.Builtin, () => SetDraft(() => _draft.DiffTool = DiffToolKind.Builtin)),
@@ -293,12 +303,12 @@ public partial class CommanderApp
     private void KeyboardPage(BoxElement page)
     {
         page.AddChild(SectionHeader("Keyboard", "Click a shortcut to rebind it; press the new keys, or Esc to cancel."));
-        var list = ScrollView.Vertical().MaxHeight(340);
+        // No scroll view of its own: the page column is one now, and a scroll inside a
+        // scroll takes the wheel away from the outer one for whichever it happens to be over.
         var col = Flex.Column(gap: 0);
         foreach (var (cmd, label) in Keybindings.Order)
             col.AddChild(KeyBindRow(cmd, label));
-        list.AddChild(col);
-        page.AddChild(list);
+        page.AddChild(col);
 
         var footer = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(6, 0, 0, 0));
         footer.AddChild(Text.New($"{Keybindings.Order.Length} rebindable commands").FontSize(11f).TextColor(Nocturne.Neutral500));
@@ -357,6 +367,54 @@ public partial class CommanderApp
                 ? "7-Zip found — 7z, rar (read), and encryption are available."
                 : "7-Zip not found — only built-in zip works. Set the path in settings.json.")
             .FontSize(11f).TextColor(_sevenZip ? Nocturne.On(0.45) : Nocturne.MarkRedDim));
+
+        page.AddChild(Divider());
+        page.AddChild(SectionHeader("Reading files",
+            "The viewer (Shift+F3) and the built-in diff. Leave the face empty for the system's monospace."));
+        page.AddChild(FieldRow("Text font", TextFontField()));
+        page.AddChild(FieldRow("Text size", TextFontSizeStepper()));
+        page.AddChild(TextFontPreview());
+    }
+
+    // ── Reading-file font (shared by the Tools page and settings search) ──
+
+    /// <summary>The face the viewer and the diff read files in. Editable, so it takes the
+    /// bordered wrapper and an explicit height (a bare flex TextInput paints nothing), and
+    /// no MarkDirty per keystroke — rebuilding with new text is what loses the caret. The
+    /// preview under it is rebuilt on save, which is when the choice takes effect.</summary>
+    private Element TextFontField()
+    {
+        var box = Box.New().FlexGrow(1)
+            .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(3f)
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral800).BorderWidth(1f);
+        box.Key = "opt-text-font";
+        var input = TextInput.New(_draft.TextFont)
+            .Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
+        input.PlaceholderText(Fonts.Mono);
+        input.OnTextChanged(v => _draft.TextFont = v);
+        input.AutomationId = "opt-text-font-input";
+        box.AddChild(input);
+        return box;
+    }
+
+    private Element TextFontSizeStepper() => Stepper($"{_draft.TextFontSize:0.#} pt",
+        () => SetDraft(() => _draft.TextFontSize =
+            Math.Max(Settings.MinTextFontSize, _draft.TextFontSize - 0.5f)),
+        () => SetDraft(() => _draft.TextFontSize =
+            Math.Min(Settings.MaxTextFontSize, _draft.TextFontSize + 0.5f)),
+        width: 68f, id: "opt-text-size");
+
+    /// <summary>A line of the real thing, in the face and size being chosen — the only
+    /// honest way to say whether this machine actually has the font that was typed.</summary>
+    private Element TextFontPreview()
+    {
+        var family = string.IsNullOrWhiteSpace(_draft.TextFont) ? Fonts.Mono : _draft.TextFont;
+        return Box.New()
+            .Padding(new Thickness(7, 10, 7, 10)).CornerRadius(3f)
+            .Background(Nocturne.Bg).Overflow(Overflow.Hidden)
+            .Children(Ui.Code("for (i = 0; i < n; i++) { total += size[i]; }  0O1lI",
+                    _draft.TextFontSize, family, Nocturne.On(0.78))
+                .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
     }
 
     private void ColorsPage(BoxElement page)

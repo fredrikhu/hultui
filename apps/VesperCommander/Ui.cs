@@ -40,6 +40,11 @@ public static class Ui
     public static TextElement Mono(string text, float size, Color color) =>
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);
 
+    /// <summary>A body of file text in the face and size the user chose, rather than in the
+    /// fixed monospace the chrome uses for names, sizes and dates.</summary>
+    public static TextElement Code(string text, float size, string family, Color color) =>
+        Text.New(text).FontFamily(family).FontSize(size).TextColor(color);
+
     /// <summary>Minimum height for a single-line <see cref="TextInputElement"/>: the theme
     /// hard-sets ~12px of vertical input padding, so a shorter box clips the 13.5px font's
     /// descenders. Every field should size to this (see <see cref="Field"/>).</summary>

@@ -687,6 +687,43 @@ public class ViewerTests
     /// rather than reaching for the private enum type.</summary>
     internal enum ViewerState { Loading, Ok, Binary, Missing, Unreadable }
 
+    /// <summary>
+    /// The viewer reads in the face and size the settings name. Both used to be constants,
+    /// and the row height was a third one — so this also checks that the rows grew with the
+    /// text rather than clipping it into the same 20 units.
+    /// </summary>
+    [Fact]
+    public void TheViewerUsesTheTextFontFromSettings()
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "one\ntwo\nthree\n");
+        t.Open();
+        t.Settings.TextFont = "Courier New";
+        t.Settings.TextFontSize = 18f;
+
+        t.ViewFile("a.txt");
+
+        var label = t.Label(0);
+        Assert.Equal(18f, label.ResolvedInherited.FontSize, 2);
+        Assert.Equal("Courier New", label.ResolvedInherited.FontFamily);
+        // 18pt text does not fit in the 20-unit row the 11.5pt default was drawn in.
+        Assert.True(t.RowOf(label).Layout.AbsoluteBorderBox.Height > 20f,
+            $"the row is {t.RowOf(label).Layout.AbsoluteBorderBox.Height} tall — the text outgrew it");
+    }
+
+    [Fact]
+    public void AnEmptyTextFontMeansThePlatformMonospace()
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "one\n");
+        t.Open();
+        t.Settings.TextFont = "";
+
+        t.ViewFile("a.txt");
+
+        Assert.Equal(Fonts.Mono, t.Label(0).ResolvedInherited.FontFamily);
+    }
+
     internal sealed class Fixture : System.IDisposable
     {
         public readonly string Root, Other;

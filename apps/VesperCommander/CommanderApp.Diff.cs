@@ -114,11 +114,28 @@ public partial class CommanderApp
         _diffTops = tops;
     }
 
+    /// <summary>
+    /// Drops everything measured in the old text face: the monospace advance and line height
+    /// the wrap shortcut leans on, and the per-row heights of both the diff and the viewer.
+    /// Called when the font setting changes — none of these caches is keyed on the face,
+    /// because until now it could not change.
+    /// </summary>
+    private void InvalidateTextMetrics()
+    {
+        _monoAdvance = -1f;
+        _monoLineHeight = 0f;
+        _diffHeightsWidth = -1f;
+        _diffTops = [];
+        _diffRowShape = (false, -1f, -1f);
+        _viewerHeightsWidth = -1f;
+        _viewerTops = [];
+    }
+
     private float DiffRowHeight(int index, float width)
     {
         if (!DiffWrap || _diffRows[index].Line is not { } line) return DiffLineH;
 
-        var style = TextMeasure.StyleFor(DiffFontSize, Fonts.Mono);
+        var style = TextMeasure.StyleFor(DiffFontSize, TextFont);
         // The label now fills its cell exactly, so the column width is the wrap width.
         float text = Math.Max(
             WrappedHeight(line.Left ?? "", style, width),
@@ -174,7 +191,7 @@ public partial class CommanderApp
     {
         if (_monoAdvance >= 0f) return;
 
-        var style = TextMeasure.StyleFor(DiffFontSize, Fonts.Mono);
+        var style = TextMeasure.StyleFor(DiffFontSize, TextFont);
         float advance = TextMeasure.MeasureWidth("M", style);
         if (advance <= 0f) { _monoAdvance = 0f; return; }   // no measure context yet
 
@@ -356,7 +373,7 @@ public partial class CommanderApp
 
         BuildDiffRowModel();
         _diffPan.ContentWidth = HorizontalPan.MeasureWidest(
-            outcome.Left.Concat(outcome.Right), DiffFontSize, Fonts.Mono);
+            outcome.Left.Concat(outcome.Right), DiffFontSize, TextFont);
         StartDiffHighlight(outcome.Left, outcome.Right);
     }
 
@@ -557,8 +574,17 @@ public partial class CommanderApp
     }
 
     // ── Diff rendering ───────────────────────────────────────────────────
-    private const float DiffLineH = 20f;
-    private const float DiffFontSize = 11.5f;
+
+    /// <summary>The height of one line row. Derived from the text size rather than fixed at
+    /// 20, so raising the font does not clip the glyphs into their own row: the eight units
+    /// around them are the padding the design chose at 11.5.</summary>
+    private float DiffLineH => MathF.Round(DiffFontSize) + 8f;
+
+    /// <summary>The size and the face every body of file text is drawn in — the diff and the
+    /// viewer both. Settings; the defaults are what they always were.</summary>
+    private float DiffFontSize => _settings.TextFontSize;
+    private string TextFont =>
+        string.IsNullOrWhiteSpace(_settings.TextFont) ? Fonts.Mono : _settings.TextFont;
     // The fixed tracks of a line row. Kept as constants because the horizontal extent has
     // to work out how much width is left for the two code columns.
     private const float DiffGutterW = 34f;
@@ -821,7 +847,7 @@ public partial class CommanderApp
         // Grows on the vertical axis — the main axis of the column boxes it sits in — so the
         // label is as tall as its row. Without it the label keeps its own text height and the
         // remainder of the row belongs to the box, which is a strip that swallows presses.
-        var mono = Ui.Mono(text ?? "", DiffFontSize, fg).FlexGrow(1);
+        var mono = Ui.Code(text ?? "", DiffFontSize, TextFont, fg).FlexGrow(1);
         if (!DiffWrap) mono.MaxLines(1).TextOverflow(TextOverflow.Clip);
         if (spans is { Count: > 0 }) mono.Spans(spans);
 
