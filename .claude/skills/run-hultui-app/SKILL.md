@@ -64,6 +64,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `shot:<name>` | Writes `<out>/<name>.png`. |
 | `dump` | Prints the accessibility tree — the fastest way to find a target. |
 | `key:<KeyCode>[+Ctrl][+Shift][+Alt]` | e.g. `key:Digit4`, `key:Down+Shift`, `key:F+Ctrl`. Names come from `KeyCode`. |
+| `type:<text>` | Types into whatever has the keyboard, as text input rather than synthesized key presses. Anything driven by a search box needs this — the filter runs off `OnTextChanged`, which a `key:` step never raises. Quote a step containing spaces. |
 | `click:<x>,<y>` or `click:@<text>` | `@` finds an element by its accessible name and clicks its centre. |
 | `drag:<x1>,<y1>,<x2>,<y2>` or `drag:@<text>,<dx>[,<dy>]` | Press, move, release as separate events. |
 | `autoscroll:<x>,<y>,<dy>[,<ms>]` or `autoscroll:@<text>,<dy>[,<ms>]` | Middle-button autoscroll: presses at the anchor, parks the pointer `dy` away, runs frames for `ms` (default 600), releases. `drag` cannot show this — the pointer's distance from the anchor is a *speed*, so the scrolling happens between input events, and a press-move-release with no frames in between leaves the view exactly where it was. |

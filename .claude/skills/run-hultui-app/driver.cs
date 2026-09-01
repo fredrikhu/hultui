@@ -163,6 +163,7 @@ void Run(string step)
         case "dump": Console.WriteLine(session.Window.DumpAccessibilityTree()); break;
         case "settle": Settle(arg.Length > 0 ? int.Parse(arg) : 1200); break;
         case "key": Key(arg); break;
+        case "type": Type(arg); break;
         case "click": Click(arg); break;
         case "drag": Drag(arg); break;
         case "autoscroll": AutoScroll(arg); break;
@@ -201,6 +202,15 @@ void Settle(int ms)
 {
     var until = DateTime.UtcNow.AddMilliseconds(ms);
     while (DateTime.UtcNow < until) session.PumpFrames(2);
+}
+
+// Types into whatever has the keyboard, the way a real keyboard does: text input events,
+// not synthesized key presses. Anything with a search box needs this — the filter runs off
+// OnTextChanged, which a KeyDown never raises.
+void Type(string text)
+{
+    session.Window.TypeText(text);
+    session.PumpFrames(3);
 }
 
 void Key(string arg)
