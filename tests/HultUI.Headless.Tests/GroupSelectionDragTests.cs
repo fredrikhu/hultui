@@ -218,6 +218,33 @@ public class GroupSelectionDragTests
         Assert.Equal("line number 2", group.SelectedText);
     }
 
+    // The second press selects the word and keeps the button down, so the drag after it goes
+    // on taking whole words — across rows, since the group spans them.
+    [Fact]
+    public void DoubleClickDrag_ExtendsByWholeWordsAcrossRows()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 200);
+        var (scroll, rows, group) = Build(session);
+
+        // Rows 0..4 are the ones inside the 100-tall viewport.
+        float y1 = ScreenMidY(scroll, rows[1]);
+        float x1 = rows[1].Layout.AbsoluteContentBox.X + CharX(rows[1], "line num");
+        session.Window.Click(x1, y1);
+        session.Window.MouseDown(x1, y1);              // second press: "number" is selected now
+        Assert.Equal("number", group.SelectedText);
+
+        // Still down: drag into the middle of "line" two rows below.
+        float y3 = ScreenMidY(scroll, rows[3]);
+        float x3 = rows[3].Layout.AbsoluteContentBox.X + CharX(rows[3], "li");
+        session.Window.MoveMouse(x3, y3);
+        session.Window.MouseUp(x3, y3);
+
+        var selected = group.SelectedText;
+        Assert.StartsWith("number 1", selected);       // the anchor word stayed whole
+        Assert.EndsWith("line", selected);             // and the far end took a whole word too
+        Assert.Contains("line number 2", selected);
+    }
+
     [Fact]
     public void ShiftClick_ExtendsFromTheExistingAnchor()
     {

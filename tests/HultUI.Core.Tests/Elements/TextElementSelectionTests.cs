@@ -84,7 +84,7 @@ public class TextElementSelectionTests
     public void DoubleClick_SelectsWord()
     {
         var label = CreateLabel("Hello World");
-        EventDispatcher.DispatchDirect(new ClickEvent { Position = CharPoint(label, 8), ClickCount = 2 }, label);
+        EventDispatcher.DispatchDirect(new PointerDownEvent { Position = CharPoint(label, 8), ClickCount = 2 }, label);
         Assert.Equal("World", label.SelectedText);
     }
 
@@ -92,8 +92,41 @@ public class TextElementSelectionTests
     public void TripleClick_SelectsAll()
     {
         var label = CreateLabel("Hello World");
-        EventDispatcher.DispatchDirect(new ClickEvent { Position = CharPoint(label, 3), ClickCount = 3 }, label);
+        EventDispatcher.DispatchDirect(new PointerDownEvent { Position = CharPoint(label, 3), ClickCount = 3 }, label);
         Assert.Equal("Hello World", label.SelectedText);
+    }
+
+    [Fact]
+    public void DoubleClickDrag_KeepsSelectingWholeWords()
+    {
+        var label = CreateLabel("Hello brave new world");
+        // Second press lands in "brave", then the pointer moves into "new" without releasing.
+        EventDispatcher.DispatchDirect(new PointerDownEvent { Position = CharPoint(label, 8), ClickCount = 2 }, label);
+        Assert.Equal("brave", label.SelectedText);
+        EventDispatcher.DispatchDirect(new PointerMoveEvent { Position = CharPoint(label, 13) }, label);
+        Assert.Equal("brave new", label.SelectedText);
+    }
+
+    [Fact]
+    public void DoubleClickDragBackwards_KeepsTheAnchorWordWhole()
+    {
+        var label = CreateLabel("Hello brave new world");
+        EventDispatcher.DispatchDirect(new PointerDownEvent { Position = CharPoint(label, 13), ClickCount = 2 }, label);
+        Assert.Equal("new", label.SelectedText);
+        EventDispatcher.DispatchDirect(new PointerMoveEvent { Position = CharPoint(label, 2) }, label);
+        Assert.Equal("Hello brave new", label.SelectedText);
+    }
+
+    [Fact]
+    public void ReleasingAfterADoubleClickDrag_KeepsTheDraggedRange()
+    {
+        var label = CreateLabel("Hello brave new world");
+        EventDispatcher.DispatchDirect(new PointerDownEvent { Position = CharPoint(label, 8), ClickCount = 2 }, label);
+        EventDispatcher.DispatchDirect(new PointerMoveEvent { Position = CharPoint(label, 13) }, label);
+        EventDispatcher.DispatchDirect(new PointerUpEvent { Position = CharPoint(label, 13) }, label);
+        // The click the release synthesizes must not snap the selection back to one word.
+        EventDispatcher.DispatchDirect(new ClickEvent { Position = CharPoint(label, 13), ClickCount = 2 }, label);
+        Assert.Equal("brave new", label.SelectedText);
     }
 
     [Fact]

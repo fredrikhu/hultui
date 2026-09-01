@@ -312,9 +312,9 @@ public class TextInputElementTests
     public void DoubleClick_SelectsWord()
     {
         var input = CreateInput("Hello World");
-        // Double-click somewhere in "Hello" — approximate position doesn't matter,
-        // the click handler uses PositionFromPoint which falls back to char approximation
-        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 5), ClickCount = 2 }, input);
+        // The second press somewhere in "Hello" — approximate position doesn't matter,
+        // the handler uses PositionFromPoint which falls back to char approximation
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(10, 5), ClickCount = 2 }, input);
         Assert.True(input.HasSelection);
         Assert.Equal("Hello", input.SelectedText);
     }
@@ -323,9 +323,40 @@ public class TextInputElementTests
     public void TripleClick_SelectsAll()
     {
         var input = CreateInput("Hello World");
-        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 5), ClickCount = 3 }, input);
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(10, 5), ClickCount = 3 }, input);
         Assert.True(input.HasSelection);
         Assert.Equal("Hello World", input.SelectedText);
+    }
+
+    // Where character `index` starts, under the estimated widths the no-render-context
+    // fallback hit test uses.
+    private static Point CharPoint(TextInputElement input, int index)
+    {
+        var cb = input.Layout.AbsoluteContentBox;
+        return new Point(cb.X + index * input.ResolvedInherited.FontSize * 0.6f, cb.Y + 2);
+    }
+
+    [Fact]
+    public void DoubleClickDrag_KeepsSelectingWholeWords()
+    {
+        var input = CreateInput("Hello brave world");
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = CharPoint(input, 2), Button = 0, ClickCount = 2 }, input);
+        Assert.Equal("Hello", input.SelectedText);
+
+        // Still held down: the pointer moves into "brave" and the whole word joins.
+        EventDispatcher.Dispatch(new PointerMoveEvent { Position = CharPoint(input, 8) }, input);
+        Assert.Equal("Hello brave", input.SelectedText);
+    }
+
+    [Fact]
+    public void DoubleClickDragBackwards_KeepsTheAnchorWordWhole()
+    {
+        var input = CreateInput("Hello brave world");
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = CharPoint(input, 8), Button = 0, ClickCount = 2 }, input);
+        Assert.Equal("brave", input.SelectedText);
+
+        EventDispatcher.Dispatch(new PointerMoveEvent { Position = CharPoint(input, 2) }, input);
+        Assert.Equal("Hello brave", input.SelectedText);
     }
 
     [Fact]

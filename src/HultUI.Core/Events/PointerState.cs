@@ -96,11 +96,28 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         for (var el = target; el is not null; el = el.Parent)
             el.SetInteractionPressed(true);
 
+        // The run of repeated clicks is counted here, on the press, not on the release that
+        // synthesizes the click. A double-click gesture that only resolves on release cannot
+        // be dragged: by the time the word is selected the button is already up. Counting on
+        // the press lets the second press select the word and the motion after it keep
+        // extending — and it is what the platforms do (Win32 measures the double-click
+        // interval between successive button-downs).
+        if (button == PointerEvent.LeftButton)
+        {
+            var now = _time.GetUtcNow().UtcDateTime;
+            bool continuesRun = (now - _lastClickTime).TotalMilliseconds < DoubleClickMaxMs
+                && Distance(position, _lastClickPosition) < DoubleClickMaxDistance;
+            _clickCount = continuesRun ? _clickCount + 1 : 1;
+            _lastClickTime = now;
+            _lastClickPosition = position;
+        }
+
         return new PointerDownEvent
         {
             Position = position,
             Button = button,
-            Modifiers = modifiers
+            Modifiers = modifiers,
+            ClickCount = button == PointerEvent.LeftButton ? _clickCount : 1
         };
     }
 
@@ -148,22 +165,8 @@ public sealed class PointerState(TimeProvider? timeProvider = null)
         // really wants the middle or right button belongs (Vesper closes a tab from there).
         if (button == PointerEvent.LeftButton && button == _pressedButton && (sameTarget || pressedRecycled))
         {
-            var now = _time.GetUtcNow().UtcDateTime;
-            var timeSinceLastClick = (now - _lastClickTime).TotalMilliseconds;
-            var distFromLastClick = Distance(position, _lastClickPosition);
-
-            if (timeSinceLastClick < DoubleClickMaxMs && distFromLastClick < DoubleClickMaxDistance)
-            {
-                _clickCount++;
-            }
-            else
-            {
-                _clickCount = 1;
-            }
-
-            _lastClickTime = now;
-            _lastClickPosition = position;
-
+            // The count was settled by the matching press; the release only reports it, so a
+            // handler that acts on the press and one that acts on the click see the same run.
             clickEvent = new ClickEvent
             {
                 Position = position,

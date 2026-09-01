@@ -404,7 +404,7 @@ public class TextAreaElementTests
     public void DoubleClick_SelectsWord()
     {
         var area = CreateArea("Hello World");
-        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 5), ClickCount = 2 }, area);
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(10, 5), ClickCount = 2 }, area);
         Assert.True(area.HasSelection);
         Assert.Equal("Hello", area.SelectedText);
     }
@@ -415,7 +415,7 @@ public class TextAreaElementTests
         var area = CreateArea("AB\nCD");
         // Cursor at position 1 → line 0
         area.CursorPosition = 1;
-        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 5), ClickCount = 3 }, area);
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(10, 5), ClickCount = 3 }, area);
         Assert.True(area.HasSelection);
         Assert.Contains("AB", area.SelectedText);
     }
@@ -426,12 +426,40 @@ public class TextAreaElementTests
         var area = CreateArea("AB\nCD");
         // Cursor at position 4 → line 1
         area.CursorPosition = 4;
-        EventDispatcher.Dispatch(new ClickEvent { Position = new Point(10, 20), ClickCount = 3 }, area);
+        EventDispatcher.Dispatch(new PointerDownEvent { Position = new Point(10, 20), ClickCount = 3 }, area);
         Assert.True(area.HasSelection);
         Assert.Contains("CD", area.SelectedText);
     }
 
     // ──── Pointer Drag ────
+
+    [Fact]
+    public void DoubleClickDrag_KeepsSelectingWholeWords()
+    {
+        var area = CreateArea("Hello brave world");
+        var cb = area.Layout.AbsoluteContentBox;
+        float cw = area.ResolvedInherited.FontSize * 0.6f;
+        EventDispatcher.Dispatch(
+            new PointerDownEvent { Position = new Point(cb.X + 2 * cw, cb.Y + 2), Button = 0, ClickCount = 2 }, area);
+        Assert.Equal("Hello", area.SelectedText);
+
+        EventDispatcher.Dispatch(new PointerMoveEvent { Position = new Point(cb.X + 8 * cw, cb.Y + 2) }, area);
+        Assert.Equal("Hello brave", area.SelectedText);
+    }
+
+    [Fact]
+    public void TripleClickDrag_KeepsSelectingWholeLines()
+    {
+        var area = CreateArea("AB\nCD\nEF");
+        var cb = area.Layout.AbsoluteContentBox;
+        float lh = area.ResolvedInherited.FontSize; // no render context: the fallback line height
+        EventDispatcher.Dispatch(
+            new PointerDownEvent { Position = new Point(cb.X + 1, cb.Y + 1), Button = 0, ClickCount = 3 }, area);
+        Assert.Equal("AB\n", area.SelectedText);
+
+        EventDispatcher.Dispatch(new PointerMoveEvent { Position = new Point(cb.X + 1, cb.Y + lh + 1) }, area);
+        Assert.Equal("AB\nCD\n", area.SelectedText);
+    }
 
     [Fact]
     public void PointerDown_StartsDrag()

@@ -86,6 +86,8 @@ public class TextElement : Element
     private int _anchor;  // fixed end of the selection
     private int _caret;   // moving end of the selection
     private bool _isDragging;
+    private SelectionUnit _dragUnit;
+    private (int Start, int End) _dragAnchor;
 
     // Cached from the last render so pointer handling can hit-test with the same
     // wrapped layout and font metrics that were drawn.
@@ -208,6 +210,10 @@ public class TextElement : Element
     // ── Cross-label (group) selection support, driven by the window ──
     internal int ContentLength => _content.Length;
     internal int CaretOffset => _caret;
+    /// <summary>The unit the press that started this drag selects by, and the range it
+    /// covers in this label — what the window's group drag anchors on.</summary>
+    internal SelectionUnit DragUnit => _dragUnit;
+    internal (int Start, int End) DragAnchorRange => _dragAnchor;
     /// <summary>Maps a screen point to a caret offset in this label's text.</summary>
     internal int OffsetAt(Point screenPos) => PositionFromPoint(screenPos);
     /// <summary>Sets this label's selection range directly (window group-drag driver).</summary>
@@ -285,9 +291,19 @@ public class TextElement : Element
     {
         if (!_selectable || evt.Button != 0) return;
         int pos = PositionFromPoint(evt.Position);
-        _caret = pos;
-        if (!evt.Modifiers.HasFlag(KeyModifiers.Shift))
-            _anchor = pos;
+        // The word (or the line) is taken here, on the press that completes the double or
+        // triple click, rather than on the release: the button is still down, so the motion
+        // after it goes on extending the selection in whole words.
+        _dragUnit = DragSelection.UnitFor(evt.ClickCount);
+        _dragAnchor = UnitRangeAt(pos, _dragUnit);
+        if (evt.Modifiers.HasFlag(KeyModifiers.Shift) && _dragUnit == SelectionUnit.Character)
+        {
+            _caret = pos;
+        }
+        else
+        {
+            (_anchor, _caret) = _dragAnchor;
+        }
         _isDragging = true;
         MarkPaintDirty();
     }
@@ -295,11 +311,29 @@ public class TextElement : Element
     private void OnPointerMove(PointerMoveEvent evt)
     {
         if (!_isDragging) return;
-        _caret = PositionFromPoint(evt.Position);
-        MarkPaintDirty();
+        DragTo(evt.Position);
     }
 
     private void OnPointerUp(PointerUpEvent evt) => _isDragging = false;
+
+    /// <summary>The range one drag step covers at <paramref name="offset"/> under
+    /// <paramref name="unit"/>. A label holds one line, so a triple click takes all of it.</summary>
+    internal (int Start, int End) UnitRangeAt(int offset, SelectionUnit unit) => unit switch
+    {
+        SelectionUnit.Word => WordBoundary.RangeAt(_content, offset),
+        SelectionUnit.Line => (0, _content.Length),
+        _ => (offset, offset),
+    };
+
+    private void DragTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (_dragUnit == SelectionUnit.Character)
+            _caret = pos;
+        else
+            (_anchor, _caret) = DragSelection.Extend(_dragAnchor, UnitRangeAt(pos, _dragUnit));
+        MarkPaintDirty();
+    }
 
     private void OnClick(ClickEvent evt)
     {
@@ -311,18 +345,8 @@ public class TextElement : Element
             evt.StopPropagation = true;
             return;
         }
-        if (!_selectable) return;
-        if (evt.ClickCount == 2)
-        {
-            var (start, end) = WordBoundary.RangeAt(_content, PositionFromPoint(evt.Position));
-            SelectLocalRange(start, end);
-            MarkPaintDirty();
-        }
-        else if (evt.ClickCount >= 3)
-        {
-            SelectLocalRange(0, _content.Length);
-            MarkPaintDirty();
-        }
+        // Word and line selection happen on the press that completes the multi-click, not
+        // here — see OnPointerDown.
     }
 
     private void OnKeyDown(KeyDownEvent evt)
@@ -418,8 +442,7 @@ public class TextElement : Element
     public void UpdateDragPosition(Point position)
     {
         if (!_isDragging) return;
-        _caret = PositionFromPoint(position);
-        MarkPaintDirty();
+        DragTo(position);
     }
 
     /// <summary>Called by the window when the pointer is released during a drag capture.</summary>

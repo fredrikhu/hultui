@@ -15,6 +15,8 @@ public class TextInputElement : BoxElement
     private int _selectionStart;
     private bool _focused;
     private bool _isDragging;
+    private SelectionUnit _dragUnit;
+    private (int Start, int End) _dragAnchor;
     private float _scrollOffset; // horizontal scroll for text wider than the box
     private IRenderContext? _renderCtx; // cached for hit-testing with real font metrics
     private CompositionState _composition;
@@ -208,7 +210,6 @@ public class TextInputElement : BoxElement
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
-        OnOwn<ClickEvent>(OnClick);
 
         ContextMenuItems = BuildContextMenuItems;
     }
@@ -365,10 +366,20 @@ public class TextInputElement : BoxElement
 
         int pos = PositionFromPoint(evt.Position);
 
+        // The word (or the whole value) is taken on the second press, not on the release that
+        // completes the double-click: the button is still down, so the drag that follows keeps
+        // extending the selection a word at a time.
+        _dragUnit = DragSelection.UnitFor(evt.ClickCount);
         bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
-        _cursorPos = pos;
-        if (!shift)
-            _selectionStart = pos;
+        if (shift && _dragUnit == SelectionUnit.Character)
+        {
+            _cursorPos = pos;
+        }
+        else
+        {
+            _dragAnchor = UnitRangeAt(pos);
+            (_selectionStart, _cursorPos) = _dragAnchor;
+        }
 
         _isDragging = true;
         MarkPaintDirty();
@@ -378,8 +389,7 @@ public class TextInputElement : BoxElement
     {
         if (!_isDragging) return;
 
-        _cursorPos = PositionFromPoint(evt.Position);
-        MarkPaintDirty();
+        DragTo(evt.Position);
     }
 
     private void OnPointerUp(PointerUpEvent evt)
@@ -387,23 +397,24 @@ public class TextInputElement : BoxElement
         _isDragging = false;
     }
 
-    private void OnClick(ClickEvent evt)
+    /// <summary>The range one drag step covers at <paramref name="pos"/>, under the unit the
+    /// press that started the drag settled on.</summary>
+    private (int Start, int End) UnitRangeAt(int pos) => _dragUnit switch
     {
-        if (evt.ClickCount == 2)
-        {
-            // Double-click: select the run of same-class characters under the cursor
-            var (ws, we) = WordBoundary.RangeAt(_text, PositionFromPoint(evt.Position));
-            _selectionStart = ws;
-            _cursorPos = we;
-            MarkPaintDirty();
-        }
-        else if (evt.ClickCount >= 3)
-        {
-            // Triple-click: select all
-            _selectionStart = 0;
-            _cursorPos = _text.Length;
-            MarkPaintDirty();
-        }
+        SelectionUnit.Word => WordBoundary.RangeAt(_text, pos),
+        // One line is the whole value here — an input holds no line breaks to divide it.
+        SelectionUnit.Line => (0, _text.Length),
+        _ => (pos, pos),
+    };
+
+    private void DragTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (_dragUnit == SelectionUnit.Character)
+            _cursorPos = pos;
+        else
+            (_selectionStart, _cursorPos) = DragSelection.Extend(_dragAnchor, UnitRangeAt(pos));
+        MarkPaintDirty();
     }
 
     /// <summary>
@@ -412,8 +423,7 @@ public class TextInputElement : BoxElement
     public void UpdateDragPosition(Point position)
     {
         if (!_isDragging) return;
-        _cursorPos = PositionFromPoint(position);
-        MarkPaintDirty();
+        DragTo(position);
     }
 
     /// <summary>

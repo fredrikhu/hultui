@@ -60,6 +60,9 @@ public sealed class Window : IOverlayHost, IDisposable
     private TextSelectionGroup? _groupDragToken;   // non-null while a group drag is in progress
     private TextSelectionGroup? _activeTextGroup;  // group holding a live selection (cleared on outside press)
     private float _groupDragX;                     // X the drag started at, for the gutter re-probe
+    private SelectionUnit _groupDragUnit;          // character / word / line, set by the press that started the drag
+    private int _groupDragAnchorIndex = -1;        // line the drag started on
+    private (int Start, int End) _groupDragAnchorRange; // the unit it started on, within that line
     private bool _disposed;
 
     // ──── Post-frame callbacks ────
@@ -1084,13 +1087,25 @@ public sealed class Window : IOverlayHost, IDisposable
                             _groupDragToken = grp;
                             _activeTextGroup = grp;
                             _groupDragX = dragLabel.Layout.AbsoluteContentBox.X + 2f;
+                            _groupDragUnit = dragLabel.DragUnit;
+                            _groupDragAnchorIndex = dragLabel.SelectionIndex;
+                            _groupDragAnchorRange = dragLabel.DragAnchorRange;
                             // Shift keeps the existing anchor and moves only the loose end,
                             // so a click then a shift-click covers the span between them —
                             // and a drag from there carries on extending from the same anchor.
-                            if (button.Modifiers.HasFlag(KeyModifiers.Shift) && grp.FocusIndex >= 0)
+                            if (button.Modifiers.HasFlag(KeyModifiers.Shift) && grp.FocusIndex >= 0
+                                && _groupDragUnit == SelectionUnit.Character)
+                            {
                                 grp.ExtendTo(dragLabel.SelectionIndex, dragLabel.CaretOffset);
+                            }
                             else
-                                grp.Anchor(dragLabel.SelectionIndex, dragLabel.CaretOffset);
+                            {
+                                // A double or triple press starts with its whole word or line
+                                // already selected, which is the range the label worked out.
+                                grp.Anchor(dragLabel.SelectionIndex, _groupDragAnchorRange.Start);
+                                if (_groupDragUnit != SelectionUnit.Character)
+                                    grp.ExtendTo(dragLabel.SelectionIndex, _groupDragAnchorRange.End);
+                            }
                             RepaintGroup(grp);
                         }
                         else
@@ -1380,7 +1395,23 @@ public sealed class Window : IOverlayHost, IDisposable
         if (_groupDragToken is null) return;
         var focus = FindGroupLabelAt(pos, _groupDragToken);
         if (focus is null || focus.SelectionIndex < 0) return;
-        _groupDragToken.ExtendTo(focus.SelectionIndex, focus.OffsetAt(pos));
+        int offset = focus.OffsetAt(pos);
+        if (_groupDragUnit == SelectionUnit.Character)
+        {
+            _groupDragToken.ExtendTo(focus.SelectionIndex, offset);
+        }
+        else
+        {
+            // Word- or line-granular drag: the pointer's unit is taken whole, and which end
+            // of the anchor unit stays put depends on which side of it the pointer is on —
+            // compared by (line, offset), since the drag runs across labels.
+            var hit = focus.UnitRangeAt(offset, _groupDragUnit);
+            bool before = focus.SelectionIndex < _groupDragAnchorIndex
+                || (focus.SelectionIndex == _groupDragAnchorIndex && hit.Start < _groupDragAnchorRange.Start);
+            _groupDragToken.Anchor(_groupDragAnchorIndex,
+                before ? _groupDragAnchorRange.End : _groupDragAnchorRange.Start);
+            _groupDragToken.ExtendTo(focus.SelectionIndex, before ? hit.Start : hit.End);
+        }
         RepaintGroup(_groupDragToken);
     }
 

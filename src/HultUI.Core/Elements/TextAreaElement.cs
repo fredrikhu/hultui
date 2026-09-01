@@ -15,6 +15,8 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private int _selectionStart;
     private bool _focused;
     private bool _isDragging;
+    private SelectionUnit _dragUnit;
+    private (int Start, int End) _dragAnchor;
     private float _scrollOffsetY;
     private IRenderContext? _renderCtx;
     private CompositionState _composition;
@@ -198,7 +200,6 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         OnOwn<PointerDownEvent>(OnPointerDown);
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerUpEvent>(OnPointerUp);
-        OnOwn<ClickEvent>(OnClick);
         OnOwn<ScrollEvent>(OnScroll);
 
         ContextMenuItems = BuildContextMenuItems;
@@ -592,9 +593,20 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         if (evt.Button != 0) return;
 
         int pos = PositionFromPoint(evt.Position);
+        // The word or the line is taken on the press that completes the double or triple
+        // click, so the drag that follows extends the selection in the same unit instead of
+        // dropping back to characters the moment the pointer moves.
+        _dragUnit = DragSelection.UnitFor(evt.ClickCount);
         bool shift = evt.Modifiers.HasFlag(KeyModifiers.Shift);
-        _cursorPos = pos;
-        if (!shift) _selectionStart = pos;
+        if (shift && _dragUnit == SelectionUnit.Character)
+        {
+            _cursorPos = pos;
+        }
+        else
+        {
+            _dragAnchor = UnitRangeAt(pos);
+            (_selectionStart, _cursorPos) = _dragAnchor;
+        }
         _preferredX = -1;
         _needsScrollToCursor = true;
         _isDragging = true;
@@ -604,37 +616,47 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     private void OnPointerMove(PointerMoveEvent evt)
     {
         if (!_isDragging) return;
-        _cursorPos = PositionFromPoint(evt.Position);
-        _preferredX = -1;
-        _needsScrollToCursor = true;
-        MarkPaintDirty();
+        DragTo(evt.Position);
     }
 
     private void OnPointerUp(PointerUpEvent evt) => _isDragging = false;
 
-    private void OnClick(ClickEvent evt)
+    /// <summary>The range one drag step covers at <paramref name="pos"/>, under the unit the
+    /// press that started the drag settled on.</summary>
+    private (int Start, int End) UnitRangeAt(int pos)
     {
-        if (evt.ClickCount == 2)
+        switch (_dragUnit)
         {
-            var (ws, we) = WordBoundary.RangeAt(_text, PositionFromPoint(evt.Position));
-            _selectionStart = ws;
-            _cursorPos = we;
-            _needsScrollToCursor = true;
-            MarkPaintDirty();
+            case SelectionUnit.Word:
+                return WordBoundary.RangeAt(_text, pos);
+            case SelectionUnit.Line:
+            {
+                // Visual lines: what is selected is the row that was clicked, which on
+                // wrapped text is not the whole logical line. The trailing break is part of
+                // it, so dragging down adds whole rows rather than row-plus-newline halves.
+                var style = ResolvedInherited;
+                float wrapWidth = GetWrapWidth();
+                var (line, _) = CursorToLineCol(pos, wrapWidth, style);
+                var starts = GetLineStarts(wrapWidth, style);
+                int lineStart = starts[line];
+                int lineEnd = line + 1 < starts.Count ? starts[line + 1] : _text.Length;
+                return (lineStart, lineEnd);
+            }
+            default:
+                return (pos, pos);
         }
-        else if (evt.ClickCount >= 3)
-        {
-            // Triple-click: select the current line
-            var style = ResolvedInherited;
-            float wrapWidth = GetWrapWidth();
-            var (line, _) = CursorToLineCol(_cursorPos, wrapWidth, style);
-            var starts = GetLineStarts(wrapWidth, style);
-            _selectionStart = starts[line];
-            int lineEnd = line + 1 < starts.Count ? starts[line + 1] : _text.Length;
-            _cursorPos = lineEnd;
-            _needsScrollToCursor = true;
-            MarkPaintDirty();
-        }
+    }
+
+    private void DragTo(Point position)
+    {
+        int pos = PositionFromPoint(position);
+        if (_dragUnit == SelectionUnit.Character)
+            _cursorPos = pos;
+        else
+            (_selectionStart, _cursorPos) = DragSelection.Extend(_dragAnchor, UnitRangeAt(pos));
+        _preferredX = -1;
+        _needsScrollToCursor = true;
+        MarkPaintDirty();
     }
 
     private void OnScroll(ScrollEvent evt)
@@ -756,10 +778,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     public void UpdateDragPosition(Point position)
     {
         if (!_isDragging) return;
-        _cursorPos = PositionFromPoint(position);
-        _preferredX = -1;
-        _needsScrollToCursor = true;
-        MarkPaintDirty();
+        DragTo(position);
     }
 
     public void EndDrag() => _isDragging = false;

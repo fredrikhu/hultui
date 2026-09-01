@@ -39,7 +39,17 @@ public abstract class PointerEvent : ElementEvent
     public KeyModifiers Modifiers { get; init; }
 }
 
-public sealed class PointerDownEvent : PointerEvent;
+public sealed class PointerDownEvent : PointerEvent
+{
+    /// <summary>
+    /// Which press of a repeated-click run this is: 1 for a single press, 2 for the press
+    /// that completes a double-click, 3 for a triple, and so on. Counted on the press rather
+    /// than on the release so a gesture that starts on the second press — word-granular
+    /// selection, which then keeps extending as the pointer moves — can begin before the
+    /// button comes back up. Non-primary buttons are always 1.
+    /// </summary>
+    public int ClickCount { get; init; } = 1;
+}
 public sealed class PointerUpEvent : PointerEvent;
 
 public sealed class PointerMoveEvent : PointerEvent
