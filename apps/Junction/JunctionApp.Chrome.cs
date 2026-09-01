@@ -324,23 +324,64 @@ public partial class JunctionApp
     /// <para>A branch created locally has no upstream, and a bare <c>git push</c> answers
     /// that with a fatal error and a command to run by hand — which is the one thing a git
     /// client exists to save you from. The plan is worked out first (off the UI thread,
-    /// since it reads git config) so the toast can say <i>published</i> rather than
-    /// <i>pushed</i>: setting an upstream is a decision the user should see recorded.</para>
+    /// since it reads git config) so the card can say <i>publish</i> rather than
+    /// <i>push</i>: setting an upstream is a decision the user should see recorded.</para>
+    ///
+    /// <para>It asks before it pushes. Not because a push is dangerous — it is the one
+    /// remote command that cannot lose anything — but because this is where force-with-lease
+    /// belongs: after a rebase or an amend the ordinary push is refused, and the only way
+    /// through it used to be a terminal. One card says what is about to leave, and offers
+    /// the lease as a deliberate second choice rather than a second button to mis-click.</para>
     /// </summary>
     private async void DoPush()
     {
         if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        var plan = await Task.Run(() => repo.PlanPush());
+        if (plan.Problem is { } problem) { Flash(problem); return; }
+        OpenDialog(new DialogSpec(
+            Title: plan.SetUpstream ? $"Publish {plan.Branch}" : $"Push {plan.Branch}",
+            Body: PushDialogBody(plan),
+            Placeholder: null,
+            ConfirmLabel: plan.SetUpstream ? "Publish" : "Push",
+            OnConfirm: (_, force) => RunPush(plan, force),
+            CheckboxLabel: ForceWithLeaseLabel,
+            CheckboxInitial: false));
+    }
+
+    /// <summary>The wording of the force option, shared by every push that offers it. It
+    /// names the safety rather than the danger, because the safety is the point: the lease
+    /// is what makes an overwrite refuse rather than erase.</summary>
+    internal const string ForceWithLeaseLabel =
+        "Force push (with lease) — replace the remote branch, unless it has moved since the last fetch";
+
+    /// <summary>What the push card says is about to happen. The ahead/behind counts are the
+    /// ones the sidebar is already showing, so the card cannot disagree with the chrome.</summary>
+    private string PushDialogBody(PushPlan plan)
+    {
+        if (plan.SetUpstream)
+            return $"{plan.Branch} has no upstream yet. Pushing publishes it to {plan.Remote} and tracks it from now on.";
+
+        var sum = HasActiveRepo ? SummaryFor(_activeRepoPath) : RepoSummary.Pending;
+        var counts = sum.Ahead == 0 && sum.Behind == 0
+            ? "Nothing to send — the branch and its upstream are level."
+            : sum.Behind == 0
+                ? $"{Commits(sum.Ahead)} to send."
+                : $"{Commits(sum.Ahead)} to send, {sum.Behind} behind the upstream — an ordinary push will be refused until you pull or force with the lease.";
+        return $"Pushes {plan.Branch} to its upstream. {counts}";
+
+        static string Commits(int n) => n == 1 ? "1 commit" : $"{n} commits";
+    }
+
+    private async void RunPush(PushPlan plan, bool forceWithLease)
+    {
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
         BeginRemoteOp(RemoteOp.Push);
-        PushPlan plan;
         GitResult result;
-        try
-        {
-            plan = await Task.Run(() => repo.PlanPush());
-            result = await repo.RunPushAsync(plan, NoAskPass);
-        }
+        try { result = await repo.RunPushAsync(plan, NoAskPass, forceWithLease); }
         finally { EndRemoteOp(); }
         Flash(result.Success
-            ? plan.SetUpstream ? $"Published {plan.Branch} to {plan.Remote}" : "Pushed successfully"
+            ? plan.SetUpstream ? $"Published {plan.Branch} to {plan.Remote}"
+            : forceWithLease ? $"Force-pushed {plan.Branch}" : "Pushed successfully"
             : FirstLine(result.Stderr, "Push failed"));
         RefreshAll();
     }

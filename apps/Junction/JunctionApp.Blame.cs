@@ -32,7 +32,9 @@ public partial class JunctionApp
     private readonly KeyedAsyncLoader<string, IReadOnlyList<GitBlameLine>> _blameLoaders =
         new([], capacity: 12, comparer: StringComparer.Ordinal);
 
-    private const float BlameRowHeight = 20f;
+    /// <summary>One blame row. Follows the code size the same way the diff's row does, so
+    /// the text does not outgrow the line it sits on.</summary>
+    private float BlameRowHeight => MathF.Round(DiffCodeSize) + 8f;
     private const float BlameGutterWidth = 250f;
 
     private void ToggleFilesBlame()
@@ -173,7 +175,7 @@ public partial class JunctionApp
         // read in the source view — which is one toggle away.
         row.AddChild(Box.New().FlexGrow(1).Overflow(Overflow.Hidden)
             .JustifyContent(JustifyContent.Center)
-            .Children(Ui.Mono(text.Length == 0 ? " " : text, 12f, Nocturne.On(0.85))
+            .Children(Ui.Code(text.Length == 0 ? " " : text, DiffCodeSize, CodeFont, Nocturne.On(0.85))
                 .Spans(spans).MaxLines(1)));
 
         row.OnClick(_ => OpenBlameCommit(line.CommitHash));

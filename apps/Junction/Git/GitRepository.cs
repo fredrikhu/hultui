@@ -1019,24 +1019,36 @@ public class GitRepository
 
     /// <summary>Carries out a <see cref="PlanPush"/>. Publishing uses
     /// <c>--set-upstream</c>, so the branch tracks its new remote afterwards and every
-    /// later push, pull and ahead/behind count works without asking again.</summary>
-    public Task<GitResult> RunPushAsync(PushPlan plan, Func<string, Task<string?>>? askPass = null)
+    /// later push, pull and ahead/behind count works without asking again.
+    ///
+    /// <para><paramref name="forceWithLease"/> adds <c>--force-with-lease</c>: it overwrites
+    /// the remote branch, but only while the remote is still where this repository last saw
+    /// it. A colleague who pushed in between makes the command fail instead of erasing their
+    /// work, which is the whole difference from a bare <c>--force</c> — and the reason
+    /// nothing here offers the bare one.</para></summary>
+    public Task<GitResult> RunPushAsync(PushPlan plan, Func<string, Task<string?>>? askPass = null,
+        bool forceWithLease = false)
     {
         if (plan.Problem != null)
             return Task.FromResult(new GitResult(1, "", plan.Problem));
-        return plan.SetUpstream && plan.Remote != null
-            ? GitProcess.RunAsync(Path, askPass, "push", "--set-upstream", plan.Remote, plan.Branch)
-            : GitProcess.RunAsync(Path, askPass, "push");
+        var args = new List<string> { "push" };
+        if (forceWithLease) args.Add("--force-with-lease");
+        if (plan.SetUpstream && plan.Remote != null)
+        {
+            args.Add("--set-upstream");
+            args.Add(plan.Remote);
+            args.Add(plan.Branch);
+        }
+        return GitProcess.RunAsync(Path, askPass, args.ToArray());
     }
 
-    public Task<GitResult> PushToAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null)
+    /// <inheritdoc cref="RunPushAsync" select="para"/>
+    public Task<GitResult> PushToAsync(string remote, string branch, Func<string, Task<string?>>? askPass = null,
+        bool forceWithLease = false)
     {
-        return GitProcess.RunAsync(Path, askPass, "push", remote, branch);
-    }
-
-    public Task<GitResult> ForcePushAsync(Func<string, Task<string?>>? askPass = null)
-    {
-        return GitProcess.RunAsync(Path, askPass, "push", "--force-with-lease");
+        return forceWithLease
+            ? GitProcess.RunAsync(Path, askPass, "push", "--force-with-lease", remote, branch)
+            : GitProcess.RunAsync(Path, askPass, "push", remote, branch);
     }
 
     // ── Branch management ──

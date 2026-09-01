@@ -27,6 +27,10 @@ public partial class JunctionApp
     private void CloseAppearance()
     {
         _appearanceOpen = false;
+        // The font name is typed, and writing the settings file once per keystroke is a
+        // file write per character; every other choice on this card persists as it is made,
+        // so the one that cannot writes here instead.
+        Persist();
         MarkDirty();
     }
 
@@ -78,7 +82,10 @@ public partial class JunctionApp
         card.AddChild(Text.New("Each card is painted in its own colours. Picking one applies it straight away.")
             .FontSize(13f).TextColor(Nocturne.On(0.72)));
 
-        var scroll = ScrollView.Vertical().MaxHeight(420);
+        // The card carries three sections now, so the grid takes what the window can spare
+        // rather than a fixed 420: at the smallest window this app allows, a fixed height
+        // pushed the scale and font controls off the bottom of the card entirely.
+        var scroll = ScrollView.Vertical().MaxHeight(Math.Clamp(_window.LayoutHeight - 410f, 110f, 420f));
         var col = Flex.Column(gap: 10).Padding(new Thickness(0, 10, 0, 0));
         var themes = ThemeCatalog.All;
         for (int i = 0; i < themes.Count; i += 3)
@@ -94,8 +101,158 @@ public partial class JunctionApp
         scroll.AddChild(col);
         card.AddChild(scroll);
 
+        card.AddChild(Box.New().Height(1).Background(Nocturne.Divider));
+        card.AddChild(BuildScaleSection());
+        card.AddChild(BuildCodeFontSection());
+
         backdrop.AddChild(card);
         return backdrop;
+    }
+
+    /// <summary>The steps the zoom is offered in. Discrete rather than a slider: these are
+    /// the sizes anyone actually wants, and each is one click away from the last.</summary>
+    private static readonly float[] UiScaleSteps = [0.8f, 0.9f, 1f, 1.1f, 1.25f, 1.5f, 1.75f, 2f];
+
+    private Element BuildScaleSection()
+    {
+        var col = Flex.Column(gap: 7);
+        col.AddChild(SectionTitle("Interface scale"));
+        col.AddChild(Text.New("Scales the whole interface — rows, icons and gutters along with the text — on top of what the system asks for.")
+            .FontSize(11.5f).TextColor(Nocturne.On(0.55)));
+
+        var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        foreach (var step in UiScaleSteps)
+            row.AddChild(ScaleChip(step));
+        col.AddChild(row);
+        return col;
+    }
+
+    private Element ScaleChip(float scale)
+    {
+        bool on = MathF.Abs(_settings.Appearance.UiScale - scale) < 0.001f;
+        var chip = Flex.Row().AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Padding(new Thickness(5, 10, 5, 10)).CornerRadius(Nocturne.RadiusMd)
+            .Cursor(CursorType.Pointer)
+            .Background(on ? Nocturne.Alpha(Nocturne.Accent, 0.14) : Nocturne.Bg)
+            // An outline rather than a border: these sit in a row, and a border on the
+            // selected one would be 2px wider than its neighbours and shift them.
+            .Outline(1f, on ? Nocturne.Accent : Nocturne.Divider);
+        chip.AddChild(Text.New($"{scale * 100f:0}%").FontSize(12f)
+            .FontWeight(on ? FontWeight.Medium : FontWeight.Regular)
+            .TextColor(on ? Nocturne.Accent : Nocturne.On(0.78)));
+        chip.OnClick(e => { e.StopPropagation = true; UseUiScale(scale); });
+        chip.AutomationId = $"ui-scale:{scale * 100f:0}";
+        chip.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+        chip.AccessibleName = $"{scale * 100f:0} percent";
+        return chip;
+    }
+
+    private Element BuildCodeFontSection()
+    {
+        var col = Flex.Column(gap: 7);
+        col.AddChild(SectionTitle("Code font"));
+        col.AddChild(Text.New("Used for the diff, the file viewer and blame. Leave the name empty for the system's monospace; a face this machine does not have falls back to it.")
+            .FontSize(11.5f).TextColor(Nocturne.On(0.55)));
+
+        var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
+
+        var field = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
+            .Height(32).Padding(new Thickness(0, 10, 0, 10)).FlexGrow(1)
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd);
+        var input = TextInput.New(_settings.Appearance.CodeFont)
+            .PlaceholderText(Fonts.Mono)
+            .OnTextChanged(UseCodeFont)
+            .Height(Dimension.Px(26)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .FontSize(12.5f).TextColor(Nocturne.Text);
+        input.AutomationId = "code-font-name";
+        field.AddChild(input);
+        row.AddChild(field);
+
+        row.AddChild(StepButton(Icons.Minus, "Smaller", () => NudgeCodeFontSize(-1f),
+            _settings.Appearance.CodeFontSize > JunctionSettingsData.MinCodeFontSize));
+        row.AddChild(Box.New().Width(38).AlignItems(AlignItems.Center)
+            .Children(Text.New($"{_settings.Appearance.CodeFontSize:0.#}")
+                .FontSize(12.5f).TextColor(Nocturne.Text)));
+        row.AddChild(StepButton(Icons.Plus, "Larger", () => NudgeCodeFontSize(1f),
+            _settings.Appearance.CodeFontSize < JunctionSettingsData.MaxCodeFontSize));
+        col.AddChild(row);
+
+        // The preview is drawn in the chosen face at the chosen size, which is the only
+        // honest way to say whether the machine actually has it.
+        col.AddChild(Box.New()
+            .Padding(new Thickness(7, 10, 7, 10)).CornerRadius(Nocturne.RadiusSm)
+            .Background(Nocturne.Bg).Overflow(Overflow.Hidden)
+            .Children(Ui.Code("if (hunk.Lines[i] != null) { stage(++count); }  0O1lI",
+                    _settings.Appearance.CodeFontSize, CodeFont, Nocturne.On(0.85))
+                .MaxLines(1).TextOverflow(TextOverflow.Ellipsis)));
+        return col;
+    }
+
+    private static Element SectionTitle(string text) =>
+        Text.New(text).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.Text);
+
+    private Element StepButton(string glyph, string tooltip, Action onClick, bool enabled)
+    {
+        if (!enabled) return Ui.DisabledIconButton(glyph, tooltip, 28f);
+        var b = Ui.IconButton(glyph, onClick, tooltip, 28f);
+        return b;
+    }
+
+    /// <summary>
+    /// Apply a zoom and remember it. Like the scheme cards above, it takes effect at once —
+    /// the whole window is behind this overlay, so the change is its own preview.
+    /// </summary>
+    private void UseUiScale(float scale)
+    {
+        scale = Math.Clamp(scale, JunctionSettingsData.MinUiScale, JunctionSettingsData.MaxUiScale);
+        if (MathF.Abs(_settings.Appearance.UiScale - scale) < 0.001f) return;
+        _settings.Appearance.UiScale = scale;
+        Persist();
+        // The window relayouts on the resize path; OnWindowResize picks up the new device
+        // scale and re-rasterizes the icons for it.
+        _window.UserScale = scale;
+        MarkDirty();
+    }
+
+    /// <summary>One step up or down the offered scales; <paramref name="direction"/> 0 goes
+    /// back to 100%, which is what Ctrl+0 means everywhere else.</summary>
+    private void NudgeUiScale(int direction)
+    {
+        if (direction == 0) { UseUiScale(1f); return; }
+        float current = _settings.Appearance.UiScale;
+        if (direction > 0)
+        {
+            foreach (var step in UiScaleSteps)
+                if (step > current + 0.001f) { UseUiScale(step); return; }
+        }
+        else
+        {
+            for (int i = UiScaleSteps.Length - 1; i >= 0; i--)
+                if (UiScaleSteps[i] < current - 0.001f) { UseUiScale(UiScaleSteps[i]); return; }
+        }
+    }
+
+    private void UseCodeFont(string family)
+    {
+        family = family.Trim();
+        if (_settings.Appearance.CodeFont == family) return;
+        _settings.Appearance.CodeFont = family;
+        InvalidateCodeMetrics();   // persisted when the card closes — see CloseAppearance
+        MarkDirty();
+    }
+
+    private void NudgeCodeFontSize(float delta) => UseCodeFontSize(_settings.Appearance.CodeFontSize + delta);
+
+    private void UseCodeFontSize(float size)
+    {
+        size = Math.Clamp(MathF.Round(size * 2f) / 2f,
+            JunctionSettingsData.MinCodeFontSize, JunctionSettingsData.MaxCodeFontSize);
+        if (MathF.Abs(_settings.Appearance.CodeFontSize - size) < 0.001f) return;
+        _settings.Appearance.CodeFontSize = size;
+        Persist();
+        InvalidateCodeMetrics();
+        MarkDirty();
     }
 
     private Element ThemeCard(NamedTheme t)

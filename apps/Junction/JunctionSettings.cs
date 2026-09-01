@@ -75,6 +75,13 @@ public sealed class JunctionSettingsData
         ExternalTools ??= new ExternalToolOptions();
         Appearance ??= new AppearanceOptions();
         General.AutoFetchIntervalMinutes = Math.Clamp(General.AutoFetchIntervalMinutes, 1, 120);
+        // A hand-edited (or older) settings file must not be able to leave the window at a
+        // scale nothing can be clicked at, or the diff at a size with no glyphs in it.
+        Appearance.CodeFont ??= "";
+        Appearance.UiScale = Appearance.UiScale <= 0f ? 1f : Math.Clamp(Appearance.UiScale, MinUiScale, MaxUiScale);
+        Appearance.CodeFontSize = Appearance.CodeFontSize <= 0f
+            ? 12f
+            : Math.Clamp(Appearance.CodeFontSize, MinCodeFontSize, MaxCodeFontSize);
 
         foreach (var ws in Workspaces)
             ws.Normalize();
@@ -107,6 +114,13 @@ public sealed class JunctionSettingsData
                 ActiveRepoPath = active.RepoPaths.FirstOrDefault();
         }
     }
+
+    /// <summary>Bounds on the interface zoom and the code size, shared by the loader's clamp
+    /// and the picker that offers the steps.</summary>
+    public const float MinUiScale = 0.75f;
+    public const float MaxUiScale = 2f;
+    public const float MinCodeFontSize = 9f;
+    public const float MaxCodeFontSize = 24f;
 
     public JunctionSettingsData Clone() => new()
     {
@@ -257,9 +271,28 @@ public sealed class AppearanceOptions
     /// round-tripped through a newer build still opens.</summary>
     public string Theme { get; set; } = "nocturne";
 
+    /// <summary>The user's zoom on top of whatever the OS asks for: 1.0 is "as the system
+    /// says", 1.25 draws the whole interface a quarter larger. A multiplier on the display
+    /// scale rather than a font size, because everything here is laid out in fixed units —
+    /// growing the text alone would leave the rows, gutters and icons around it behind.</summary>
+    public float UiScale { get; set; } = 1f;
+
+    /// <summary>The family the diff, the file viewer and the blame body are drawn in. Empty
+    /// means the platform's default monospace, which is what most people want and what every
+    /// earlier build used. A name no font on the machine answers to falls back the same way
+    /// any missing family does, so a settings file moved between machines still opens.</summary>
+    public string CodeFont { get; set; } = "";
+
+    /// <summary>Point size for that same code text. The row height of the diff follows it,
+    /// so the lines do not crowd as it grows.</summary>
+    public float CodeFontSize { get; set; } = 12f;
+
     public AppearanceOptions Clone() => new()
     {
         Theme = Theme,
+        UiScale = UiScale,
+        CodeFont = CodeFont,
+        CodeFontSize = CodeFontSize,
     };
 }
 

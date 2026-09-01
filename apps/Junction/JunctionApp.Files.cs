@@ -54,6 +54,14 @@ public partial class JunctionApp
     private readonly Ref<TextAreaElement> _fileBodyRef = new();
     private bool _pendingFilesTreeScroll;
 
+    // Find a file *by name* in the browsed tree — the other half of "find in file". Held
+    // across commits deliberately: stepping through history with a filter on is how you
+    // watch one file's neighbourhood change.
+    private string _filesQuery = "";
+    private readonly Ref<TextInputElement> _filesSearchRef = new();
+    private bool _pendingFilesSearchFocus;
+    private bool _filesCursorToFirstMatch;
+
     // Bounded: browsing walks a new commit tree and a new file body per selection,
     // each pinning its parsed lines/spans, so these must not accumulate forever.
     private readonly KeyedAsyncLoader<string, IReadOnlyList<string>> _treeLoaders =
@@ -163,6 +171,10 @@ public partial class JunctionApp
         if (_hideDiff) pane.FlexGrow(1);
         else pane.Width(300).FlexShrink(0);
 
+        var query = _filesQuery.Trim();
+        var shown = FilterFilePaths(paths, query);
+        pane.AddChild(BuildFilesSearch(paths.Count, shown.Count, query));
+
         var scroll = ScrollView.New().FlexGrow(1).Padding(new Thickness(6, 6, 6, 6))
             .WithRef(_filesTreeScrollRef);
         _filesFlat.Clear();
@@ -176,19 +188,143 @@ public partial class JunctionApp
             scroll.AddChild(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center)
                 .Children(Text.New("No files at this commit").FontSize(12.5f).TextColor(Nocturne.On(0.45))));
         }
+        else if (shown.Count == 0)
+        {
+            scroll.AddChild(Box.New().Padding(new Thickness(24)).JustifyContent(JustifyContent.Center)
+                .Children(Text.New($"No files match \u201c{query}\u201d")
+                    .FontSize(12.5f).TextColor(Nocturne.On(0.45))
+                    .MaxLines(2).TextOverflow(TextOverflow.Ellipsis)));
+        }
         else
         {
-            _filesTree.Bind(paths, p => p, sort: FilesTreeSort);
-            _filesFlat = _filesTree.Rows();
-            // Keep the keyboard cursor on a row that still exists; otherwise fall back
-            // to the selected file (or the first row).
-            if (_filesCursorPath == null || !_filesFlat.Any(r => r.Path == _filesCursorPath))
+            _filesTree.Bind(shown, p => p, sort: FilesTreeSort);
+            // A running search opens the tree outright — a match five folders down is no use
+            // behind a collapsed folder. The collapsed set is untouched and comes back when
+            // the query clears, which is what the Branches and Tags searches do too.
+            _filesFlat = _filesTree.Rows(expandAll: query.Length > 0);
+            // A query that has just changed puts the cursor on its first match, so Enter
+            // opens what the search found without arrowing to it. Otherwise the cursor
+            // only moves when the row it was on has gone.
+            if (_filesCursorToFirstMatch)
+            {
+                _filesCursorToFirstMatch = false;
+                _filesCursorPath = FirstFileRow() ?? _filesFlat.FirstOrDefault()?.Path;
+            }
+            else if (_filesCursorPath == null || !_filesFlat.Any(r => r.Path == _filesCursorPath))
                 _filesCursorPath = _filesSelPath ?? _filesFlat.FirstOrDefault()?.Path;
             foreach (var node in _filesFlat)
                 scroll.AddChild(TreeRow(node));
         }
         pane.AddChild(scroll);
         return pane;
+    }
+
+    /// <summary>The first file (not folder) among the visible rows — where the cursor goes
+    /// when a search has just changed what is on screen.</summary>
+    private string? FirstFileRow() => _filesFlat.FirstOrDefault(r => !r.IsFolder)?.Path;
+
+    /// <summary>
+    /// The paths the tree shows. A plain query is a case-insensitive substring of the whole
+    /// path, so typing "diff" finds src/Core/DiffEngine.cs as readily as a folder called
+    /// diff. A query carrying * or ? is a shell pattern matched against the path and against
+    /// the bare file name, so both *.cs and src/*.cs mean what they look like — the same
+    /// rule the branch and tag searches follow.
+    /// </summary>
+    private static List<string> FilterFilePaths(IReadOnlyList<string> paths, string query)
+    {
+        if (query.Length == 0) return [.. paths];
+        if (Glob.HasWildcard(query))
+            return paths.Where(p => Glob.IsMatch(p, query) || Glob.IsMatch(FileNameOf(p), query)).ToList();
+        return paths.Where(p => p.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private static string FileNameOf(string path)
+    {
+        int slash = path.LastIndexOf('/');
+        return slash < 0 ? path : path[(slash + 1)..];
+    }
+
+    private Element BuildFilesSearch(int total, int shown, string query)
+    {
+        var bar = Flex.Row(gap: 6).FlexShrink(0).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(6, 8, 6, 8))
+            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
+
+        var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
+            .Height(30).FlexGrow(1)
+            .Padding(new Thickness(0, 8, 0, 8))
+            .Background(Nocturne.Bg)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd);
+        box.AddChild(Ui.Icon(Icons.MagnifyingGlass, 12f, Nocturne.On(0.45)).FlexShrink(0));
+
+        var input = TextInput.New(_filesQuery)
+            .PlaceholderText("Press / to find a file")
+            .OnTextChanged(OnFilesQueryChanged)
+            .Height(Dimension.Px(26))
+            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .FontSize(12f)
+            .TextColor(Nocturne.Text)
+            .WithRef(_filesSearchRef);
+        input.AutomationId = "files-search";
+        input.On<KeyDownEvent>(FilesSearchKey);
+        box.AddChild(input);
+
+        if (query.Length > 0)
+        {
+            box.AddChild(Text.New($"{shown}/{total}").FontSize(10.5f)
+                .TextColor(Nocturne.On(0.42)).FlexShrink(0));
+            box.AddChild(Ui.Icon(Icons.X, 11f, Nocturne.On(0.5)).FlexShrink(0)
+                .Cursor(CursorType.Pointer)
+                .Tooltip("Clear (Esc)")
+                .OnClick(e => { e.StopPropagation = true; ClearFilesQuery(); }));
+        }
+        bar.AddChild(box);
+        return bar;
+    }
+
+    private void OnFilesQueryChanged(string q)
+    {
+        _filesQuery = q;
+        // The cursor follows the query. The *selected* file is left alone: the content pane
+        // should not flicker through every file that matches a half-typed query.
+        _filesCursorToFirstMatch = true;
+        MarkDirty();
+    }
+
+    private void ClearFilesQuery()
+    {
+        if (_filesQuery.Length == 0) return;
+        _filesQuery = "";
+        // Back to the file the pane is actually showing, which is where someone who has
+        // just abandoned a search expects to be.
+        _filesCursorToFirstMatch = false;
+        _filesCursorPath = _filesSelPath;
+        MarkDirty();
+    }
+
+    /// <summary>
+    /// Keys inside the file-search field. The tree is driven from here rather than by handing
+    /// focus back to it — the point of the box is to reach a file, and typing two letters,
+    /// pressing Down twice and opening what is under the cursor should not need the mouse in
+    /// between. This is what the Branches search does with its table.
+    /// </summary>
+    private void FilesSearchKey(KeyDownEvent e)
+    {
+        // Alt and Ctrl belong to the global repo/workspace shortcuts.
+        if (e.Modifiers.HasFlag(KeyModifiers.Alt) || e.Modifiers.HasFlag(KeyModifiers.Ctrl)) return;
+        if (e.Key == KeyCode.Escape)
+        {
+            ClearFilesQuery();
+            e.StopPropagation = true;
+            return;
+        }
+        // Home/End (and Shift+PageUp/Down) move the caret inside the query, not the cursor
+        // through the tree. Left/Right are the field's too — collapsing a folder from here
+        // would make the query uneditable.
+        if (IsFieldEditKey(e) || e.Key is KeyCode.Left or KeyCode.Right) return;
+        if (HandleFilesTreeKey(e))
+            e.StopPropagation = true;
     }
 
     private Element TreeRow(TreeNode<string> node)
@@ -474,7 +610,7 @@ public partial class JunctionApp
         var wrap = Box.New().FlexGrow(1).Overflow(Overflow.Hidden).Background(Nocturne.Bg)
             .Padding(new Thickness(6, 12, 6, 12));
         var area = TextArea.New(text).ReadOnly().FlexGrow(1)
-            .FontFamily(Fonts.Mono).FontSize(12f).TextColor(Nocturne.On(0.85)).LineHeight(1.5f);
+            .FontFamily(CodeFont).FontSize(DiffCodeSize).TextColor(Nocturne.On(0.85)).LineHeight(1.5f);
         area.ScrollbarWidth = 7f;
         if (spans != null) area.Spans(spans);
         area.Key = "filebody:" + (_filesSelPath ?? "");

@@ -1,3 +1,4 @@
+using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -70,6 +71,14 @@ public partial class JunctionApp
 
     private void ClearStageSelection() { _stageSel.Clear(); MarkDirty(); }
 
+    /// <summary>
+    /// Stages, unstages or discards the selected lines by synthesizing a patch and applying
+    /// it. The patch is built here — it has to be, it is made from the diff on screen — but
+    /// it is applied off the UI thread, and the selection is let go of straight away rather
+    /// than held until git answers: the answer is almost always yes, and a list that cannot
+    /// be touched while it is being waited for reads as a hang. A failure puts the message
+    /// git gave on screen and reloads, which brings the lines back.
+    /// </summary>
     private void ApplyStaging(GitFileDiff diff, StageOp op, IReadOnlyCollection<GitDiffLine> lines)
     {
         if (ActiveRepo is not { } repo) return;
@@ -85,18 +94,25 @@ public partial class JunctionApp
             StageOp.Unstage => (true, true),
             _ => (true, false),   // Discard: reverse-apply to the working tree
         };
-        var res = repo.ApplyPatch(patch, reverse, cached, unidiffZero: false);
-        if (res.Success)
+
+        int n = lines.Count;
+        _stageSel.Clear();
+        Flash($"{StageVerbPast(op)} {n} line{(n == 1 ? "" : "s")}");
+        MarkDirty();
+
+        var repoPath = _activeRepoPath;
+        _ = Task.Run(() =>
         {
-            int n = lines.Count;
-            _stageSel.Clear();
-            Flash($"{StageVerbPast(op)} {n} line{(n == 1 ? "" : "s")}");
-            RefreshAll();
-        }
-        else
-        {
-            Flash(FirstLine(res.Stderr, StageVerb(op) + " failed"));
-        }
+            GitResult res;
+            try { res = repo.ApplyPatch(patch, reverse, cached, unidiffZero: false); }
+            catch (Exception ex) { res = new GitResult(1, "", ex.Message); }
+            Application.InvokeOnMainThread(() =>
+            {
+                if (!res.Success) Flash(FirstLine(res.Stderr, StageVerb(op) + " failed"));
+                if (PathComparer.Equals(repoPath, _activeRepoPath)) RefreshAll();
+                else MarkDirty();
+            });
+        });
     }
 
     private static string StageVerb(StageOp op) =>

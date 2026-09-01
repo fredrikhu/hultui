@@ -1,3 +1,4 @@
+using HultUI;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -20,8 +21,8 @@ public partial class JunctionApp
         // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
         bool ws = _settings.Git.IgnoreWhitespace;
         _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}|w{ws}",
-            () => LoadChanges(ws), onLoaded: PickInitialChange);
-        var data = _changes.Value;
+            () => LoadChanges(ws), onLoaded: OnChangesLoaded);
+        var data = ChangesView;
 
         // Mid-operation the right pane is always shown — it hosts the per-file
         // conflict resolution — even on narrow windows where diffs normally hide.
@@ -235,7 +236,7 @@ public partial class JunctionApp
     /// order) to the selection, keeping only those in <paramref name="b"/>'s section.</summary>
     private void AddChangeRangeToSelection(ChangeRef a, ChangeRef b)
     {
-        var rows = ChangeRows(_changes.Value);
+        var rows = ChangeRows(ChangesView);
         var i = rows.IndexOf(a);
         var j = rows.IndexOf(b);
         if (i < 0 || j < 0) { _changeSelection.Add(b); return; }
@@ -333,7 +334,7 @@ public partial class JunctionApp
     private bool ChangeTreeStep(bool right)
     {
         if (ChangeFocus() is not { } focus) return true;
-        var data = _changes.Value;
+        var data = ChangesView;
         var nodes = ChangeTreeRows(focus.Section, SectionFiles(data, focus.Section));
         var i = nodes.FindIndex(n => n.IsFolder == focus.IsFolder && n.Path == focus.Path);
         if (i < 0) return true;
@@ -354,7 +355,7 @@ public partial class JunctionApp
 
     private void MoveChangeSelection(int delta, bool extend = false, bool focusOnly = false, bool additive = false)
     {
-        var rows = ChangeRows(_changes.Value);
+        var rows = ChangeRows(ChangesView);
         if (rows.Count == 0) return;
         var i = ChangeFocus() is { } f ? rows.IndexOf(f) : 0;
         if (i < 0) i = 0;
@@ -418,7 +419,7 @@ public partial class JunctionApp
     /// outside it takes the clicked row — and a folder row is the files under it.</summary>
     private List<string> ChangeActionPaths(ChangeRef row)
     {
-        var data = _changes.Value;
+        var data = ChangesView;
         if (_changeSelection.Contains(row))
         {
             var selected = ChangeSelectionPaths(data);
@@ -458,6 +459,9 @@ public partial class JunctionApp
     private void RetargetChangeSelection(IReadOnlyList<string> paths, ChangeSection to)
     {
         var moved = new HashSet<string>(paths, StringComparer.Ordinal);
+        // Read once: the view is derived (it applies the pending staging over git's answer),
+        // so asking for it per row would rebuild it per row.
+        var data = ChangesView;
         foreach (var r in _changeSelection.Where(Moved).ToList())
         {
             _changeSelection.Remove(r);
@@ -478,7 +482,7 @@ public partial class JunctionApp
         bool Moved(ChangeRef r) =>
             !r.IsFolder
                 ? moved.Contains(r.Path)
-                : FilesUnder(SectionFiles(_changes.Value, r.Section), r.Path) is { Count: > 0 } under
+                : FilesUnder(SectionFiles(data, r.Section), r.Path) is { Count: > 0 } under
                   && under.All(f => moved.Contains(f.Path));
     }
 
@@ -838,7 +842,7 @@ public partial class JunctionApp
     private void PromptDiscardPaths(IReadOnlyList<string> paths)
     {
         var wanted = new HashSet<string>(paths, StringComparer.Ordinal);
-        var files = _changes.Value.Unstaged.Where(f => wanted.Contains(f.Path)).ToList();
+        var files = ChangesView.Unstaged.Where(f => wanted.Contains(f.Path)).ToList();
         if (files.Count == 0) return;
 
         var untracked = files.Count(f => f.Kind == FileChangeKind.Untracked);
@@ -1061,44 +1065,185 @@ public partial class JunctionApp
         Rerender();
     }
 
-    /// <summary>Stages every given file in one git call and keeps them selected as they
-    /// move into the staged list.</summary>
+    // ── Optimistic staging ───────────────────────────────────────────────
+    //
+    // git add / git reset on a large repository takes long enough to feel, and until it had
+    // returned and the status had been read again the row stayed exactly where it was — so
+    // a click on a file did nothing visible for a beat, and the second click (on what was
+    // by then a different row) did something else. The move is made in the list first and
+    // the command run behind it: staging a file git has just listed succeeds essentially
+    // always, and the rare failure is corrected out loud — the row springs back and the
+    // error git gave is on screen — instead of being paid for by every click.
+
+    /// <summary>A file whose staging has been asked for but is not yet in git's index — or
+    /// is not yet out of it. Keyed by repository too: the overlay outlives a click, and the
+    /// same path exists in more than one open repository.</summary>
+    private readonly record struct StageKey(string Repo, string Path);
+
+    /// <summary>True: on its way into the staged list; false: on its way out of it.</summary>
+    private readonly Dictionary<StageKey, bool> _pendingStage = new();
+
+    /// <summary>Moves whose git command has come back successfully. They stay on screen
+    /// until the reload behind them lands, or the row would flick back to where it started
+    /// for the frames in between.</summary>
+    private readonly HashSet<StageKey> _settledStage = new();
+
+    /// <summary>The working copy as the user should see it: what git last told us, with
+    /// every staging that has been asked for already applied.</summary>
+    private ChangesData ChangesView => ApplyPendingStaging(_changes.Value);
+
+    /// <summary>Moves the pending files between the two lists. The file's row is carried
+    /// across unchanged — it is the same file with the same counts — and so is its diff,
+    /// which is what the pane beside the list would otherwise come up empty for.</summary>
+    private ChangesData ApplyPendingStaging(ChangesData data)
+    {
+        if (_pendingStage.Count == 0) return data;
+        var mine = _pendingStage.Where(kv => PathComparer.Equals(kv.Key.Repo, _activeRepoPath)).ToList();
+        if (mine.Count == 0) return data;
+
+        var staged = data.Staged.ToList();
+        var unstaged = data.Unstaged.ToList();
+        var stagedDiffs = new Dictionary<string, GitFileDiff>(data.StagedDiffs, StringComparer.Ordinal);
+        var unstagedDiffs = new Dictionary<string, GitFileDiff>(data.UnstagedDiffs, StringComparer.Ordinal);
+
+        foreach (var (key, toStaged) in mine)
+        {
+            var from = toStaged ? unstaged : staged;
+            var to = toStaged ? staged : unstaged;
+            var fromDiffs = toStaged ? unstagedDiffs : stagedDiffs;
+            var toDiffs = toStaged ? stagedDiffs : unstagedDiffs;
+
+            int i = from.FindIndex(f => f.Path == key.Path);
+            if (i < 0) continue;               // git already agrees, or the file is gone
+            var entry = from[i];
+            from.RemoveAt(i);
+            if (!to.Any(f => f.Path == key.Path))
+            {
+                to.Add(entry);
+                // Keep the lists in the path order git hands them over in, so a row does
+                // not jump to the bottom of its new list and then up again on the reload.
+                to.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
+            }
+            if (fromDiffs.Remove(key.Path, out var diff)) toDiffs[key.Path] = diff;
+        }
+        return data with
+        {
+            Staged = staged,
+            Unstaged = unstaged,
+            StagedDiffs = stagedDiffs,
+            UnstagedDiffs = unstagedDiffs,
+        };
+    }
+
+    /// <summary>Runs when a reload lands: retires the moves git has confirmed, then picks
+    /// the selection against the world as it now stands (moves still in flight included —
+    /// pruning against the raw data would delete the very rows they are moving).</summary>
+    private void OnChangesLoaded(ChangesData data)
+    {
+        foreach (var key in _settledStage) _pendingStage.Remove(key);
+        _settledStage.Clear();
+        PickInitialChange(ApplyPendingStaging(data));
+    }
+
+    /// <summary>Stages every given file and keeps them selected as they move into the
+    /// staged list. The move shows immediately; git is asked behind it.</summary>
     private void StagePaths(IReadOnlyList<string> paths)
     {
         if (ActiveRepo is not { } repo || paths.Count == 0) return;
-        var ok = repo.Stage(paths);
-        if (!ok) Flash("Stage failed");
-        else if (paths.Count > 1) Flash($"Staged {paths.Count} files");
         RetargetChangeSelection(paths, ChangeSection.Staged);
-        RefreshAll();
+        RunStaging(paths, toStaged: true, () => repo.Stage(paths),
+            ok: paths.Count > 1 ? $"Staged {paths.Count} files" : null, fail: "Stage failed");
     }
 
     private void UnstagePaths(IReadOnlyList<string> paths)
     {
         if (ActiveRepo is not { } repo || paths.Count == 0) return;
-        var ok = repo.Unstage(paths);
-        if (!ok) Flash("Unstage failed");
-        else if (paths.Count > 1) Flash($"Unstaged {paths.Count} files");
         RetargetChangeSelection(paths, ChangeSection.Unstaged);
-        RefreshAll();
+        RunStaging(paths, toStaged: false, () => repo.Unstage(paths),
+            ok: paths.Count > 1 ? $"Unstaged {paths.Count} files" : null, fail: "Unstage failed");
     }
 
     private void StageAll()
     {
-        ActiveRepo?.StageAll();
-        RefreshAll();
+        if (ActiveRepo is not { } repo) return;
+        var paths = ChangesView.Unstaged.Select(f => f.Path).ToList();
+        if (paths.Count == 0) return;
+        RunStaging(paths, toStaged: true, repo.StageAll, ok: null, fail: "Stage failed");
     }
 
     private void UnstageAll()
     {
-        ActiveRepo?.UnstageAll();
-        RefreshAll();
+        if (ActiveRepo is not { } repo) return;
+        var paths = ChangesView.Staged.Select(f => f.Path).ToList();
+        if (paths.Count == 0) return;
+        RunStaging(paths, toStaged: false, repo.UnstageAll, ok: null, fail: "Unstage failed");
     }
 
-    private void DoCommit()
+    /// <summary>
+    /// Staging commands run one after another, not all at once: each takes git's index lock,
+    /// and two racing for it makes one fail for a reason the user did nothing to cause — which
+    /// under an optimistic list means a row springing back for no visible reason. Anything
+    /// that has to see the index settled waits on this same chain; see <see cref="DoCommit"/>.
+    /// </summary>
+    private Task _stagingChain = Task.CompletedTask;
+
+    /// <summary>
+    /// Shows the move, then runs <paramref name="command"/> off the UI thread and reconciles
+    /// with what it says. A failure clears the overlay before the toast, so the rows are back
+    /// where git has them by the time the message is read.
+    /// </summary>
+    private void RunStaging(IReadOnlyList<string> paths, bool toStaged, Func<bool> command,
+        string? ok, string fail)
     {
+        var repoPath = _activeRepoPath;
+        var keys = paths.Select(p => new StageKey(repoPath, p)).ToList();
+        foreach (var key in keys) _pendingStage[key] = toStaged;
+        MarkDirty();
+        _stagingChain = RunStagingAsync(keys, command, ok, fail, repoPath);
+    }
+
+    private async Task RunStagingAsync(List<StageKey> keys, Func<bool> command,
+        string? ok, string fail, string repoPath)
+    {
+        // Read before the first await, so this is the chain as it stood when the click
+        // happened rather than the one this call is about to become.
+        var previous = _stagingChain;
+        try { await previous.ConfigureAwait(false); }
+        catch { /* the earlier command reported its own failure */ }
+
+        bool success;
+        string? error = null;
+        try { success = await Task.Run(command).ConfigureAwait(false); }
+        catch (Exception ex) { success = false; error = ex.Message; }
+
+        Application.InvokeOnMainThread(() =>
+        {
+            if (success)
+            {
+                foreach (var key in keys)
+                    if (_pendingStage.ContainsKey(key)) _settledStage.Add(key);
+                if (ok != null) Flash(ok);
+            }
+            else
+            {
+                foreach (var key in keys) { _pendingStage.Remove(key); _settledStage.Remove(key); }
+                Flash(error is null ? fail : FirstLine(error, fail));
+            }
+            if (PathComparer.Equals(repoPath, _activeRepoPath)) RefreshAll();
+            else MarkDirty();
+        });
+    }
+
+    private async void DoCommit()
+    {
+        // Staging is optimistic: the rows move before git has been asked. A commit pressed
+        // straight after one must therefore wait for the index to actually hold what the
+        // list is already showing — otherwise it commits whatever `git add` had reached.
+        try { await _stagingChain; }
+        catch { /* the staging call reported its own failure */ }
+
         if (ActiveRepo is not { } repo) return;
-        var data = _changes.Value;
+        var data = ChangesView;
 
         // Nothing staged: take the whole worktree, the way `git commit -a` does — except it
         // also picks up untracked files, because "commit all my changes" from a list that

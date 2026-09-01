@@ -390,6 +390,9 @@ public partial class JunctionApp : Component, IDisposable
 
         View = JunctionView.History;
 
+        // The user's zoom goes on before the first layout, so the window opens at the size
+        // they left it at rather than snapping a frame later.
+        _window.UserScale = _settings.Appearance.UiScale;
         _compactChrome = ContentWidth < CompactChromeContentWidth;
         _hideDiff = ContentWidth < HideDiffContentWidth;
         Ui.DisplayScale = _window.DisplayScale;
@@ -737,6 +740,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingTagSearchFocus = false;
             _tagSearchRef.Current?.Focus();
+        }
+
+        if (_pendingFilesSearchFocus)
+        {
+            _pendingFilesSearchFocus = false;
+            _filesSearchRef.Current?.Focus();
         }
 
         if (_pendingDialogFocus)
@@ -1098,6 +1107,21 @@ public partial class JunctionApp : Component, IDisposable
             return;
         }
 
+        // ⌘+ / ⌘- / ⌘0 — the zoom keys every browser and editor has, driving the same
+        // interface scale the Appearance overlay offers in steps. Handled here, above the
+        // typing guard, because zooming is not something to lose because a field has focus.
+        if (ctrl && e.Key is KeyCode.Equals or KeyCode.Minus or KeyCode.Digit0)
+        {
+            NudgeUiScale(e.Key switch
+            {
+                KeyCode.Equals => 1,
+                KeyCode.Minus => -1,
+                _ => 0,
+            });
+            e.StopPropagation = true;
+            return;
+        }
+
         // ⌘D / Ctrl+D opens the selected file's diff in VS Code (Commit/Changes
         // views) — the primary way to inspect a diff when the pane is hidden on
         // narrow windows, but available at any size.
@@ -1271,6 +1295,15 @@ public partial class JunctionApp : Component, IDisposable
         // keys to scroll and stops propagation before they reach this global handler.
         if (View == JunctionView.Files)
         {
+            // The same key History, Branches and Tags use to reach their search box. Here it
+            // finds a file in the browsed tree; Ctrl+F still finds text inside the open one.
+            if (e.Key == KeyCode.Slash)
+            {
+                _pendingFilesSearchFocus = true;
+                MarkDirty();
+                e.StopPropagation = true;
+                return;
+            }
             if (HandleFilesTreeKey(e))
                 e.StopPropagation = true;
             return;

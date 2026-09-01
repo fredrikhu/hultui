@@ -73,6 +73,11 @@ public static class Ui
     public static TextElement Mono(string text, float size, Color color) =>
         Text.New(text).FontFamily(Fonts.Mono).FontSize(size).TextColor(color);
 
+    /// <summary>A body of code in the family and size the user chose, rather than in the
+    /// fixed monospace the chrome uses for SHAs and branch names.</summary>
+    public static TextElement Code(string text, float size, string family, Color color) =>
+        Text.New(text).FontFamily(family).FontSize(size).TextColor(color);
+
     // ── Tags / chips ─────────────────────────────────────────────────────
     // All three keep their label on one line, whatever the row does around them.
     // FlexShrink(0) alone is not enough: in a tight row the chip is *measured*

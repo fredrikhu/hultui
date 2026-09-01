@@ -640,25 +640,48 @@ public partial class JunctionApp
 
     // CheckoutBranch(string) is shared with the command palette (JunctionApp.Palette.cs).
 
-    private async void PushBranch(GitBranch b)
+    /// <summary>Push one branch from the list. Asks first, on the same card the toolbar's
+    /// Push uses — a branch pushed from here can need the lease exactly as often, and the
+    /// row's own ahead/behind counts are what the card has to say about it.</summary>
+    private void PushBranch(GitBranch b)
     {
-        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
-        BeginRemoteOp(RemoteOp.Push);
-        Flash($"Pushing {b.Name}…");
+        if (!HasActiveRepo || RemoteOpRunning) return;
         // A branch with no upstream is published rather than refused — same rule as the
         // toolbar's Push, and this list is where unpublished branches actually live.
         var (remote, _) = UpstreamOf(b);
         bool publish = string.IsNullOrEmpty(b.TrackingBranch);
+        var body = publish
+            ? $"{b.Name} has no upstream yet. Pushing publishes it to {remote} and tracks it from now on."
+            : b.AheadCount == 0 && b.BehindCount == 0
+                ? $"Pushes {b.Name} to {remote}. Nothing to send — the branch and its upstream are level."
+                : $"Pushes {b.Name} to {remote}. {b.AheadCount} ahead, {b.BehindCount} behind.";
+        OpenDialog(new DialogSpec(
+            Title: publish ? $"Publish {b.Name}" : $"Push {b.Name}",
+            Body: body,
+            Placeholder: null,
+            ConfirmLabel: publish ? "Publish" : "Push",
+            OnConfirm: (_, force) => RunPushBranch(b, remote, publish, force),
+            CheckboxLabel: ForceWithLeaseLabel,
+            CheckboxInitial: false));
+    }
+
+    private async void RunPushBranch(GitBranch b, string remote, bool publish, bool forceWithLease)
+    {
+        if (ActiveRepo is not { } repo || RemoteOpRunning) return;
+        BeginRemoteOp(RemoteOp.Push);
+        Flash($"Pushing {b.Name}…");
         GitResult res;
         try
         {
             res = publish
-                ? await repo.RunPushAsync(new PushPlan(remote, b.Name, SetUpstream: true, Problem: null), NoAskPass)
-                : await repo.PushToAsync(remote, b.Name, NoAskPass);
+                ? await repo.RunPushAsync(new PushPlan(remote, b.Name, SetUpstream: true, Problem: null),
+                    NoAskPass, forceWithLease)
+                : await repo.PushToAsync(remote, b.Name, NoAskPass, forceWithLease);
         }
         finally { EndRemoteOp(); }
         Flash(res.Success
-            ? publish ? $"Published {b.Name} to {remote}" : $"Pushed {b.Name}"
+            ? publish ? $"Published {b.Name} to {remote}"
+            : forceWithLease ? $"Force-pushed {b.Name}" : $"Pushed {b.Name}"
             : FirstLine(res.Stderr, "Push failed"));
         RefreshAll();
     }

@@ -252,8 +252,33 @@ public partial class JunctionApp
         return b;
     }
 
-    private const int DiffRowHeight = 22;
-    private const float DiffCodeSize = 12f;
+    /// <summary>The height of one unwrapped diff row. Follows the code size rather than
+    /// being a number of its own, so raising the font does not crowd the lines: the ten
+    /// units above and below the glyphs are the padding the design chose at 12.</summary>
+    private float DiffRowHeight => MathF.Round(DiffCodeSize) + 10f;
+
+    /// <summary>Size and family for every body of code in the app — the diff, the file
+    /// viewer, the blame text. Both are settings; the defaults are what they always were.</summary>
+    private float DiffCodeSize => _settings.Appearance.CodeFontSize;
+    internal string CodeFont =>
+        string.IsNullOrWhiteSpace(_settings.Appearance.CodeFont) ? Fonts.Mono : _settings.Appearance.CodeFont;
+
+    /// <summary>A line of code in the user's chosen face and size.</summary>
+    private TextElement CodeText(string text, Color color) =>
+        Text.New(text).FontFamily(CodeFont).FontSize(DiffCodeSize).TextColor(color);
+
+    /// <summary>Drops everything measured in the old code face: the per-row heights of a
+    /// wrapped diff, the width of its longest line, and the monospace advance the wrap
+    /// shortcut leans on. Called when the family or the size changes — none of those caches
+    /// is keyed on the font, because until now it could not change.</summary>
+    private void InvalidateCodeMetrics()
+    {
+        _diffHeightShape = (false, false, -1f, -1);
+        _diffHeights = [];
+        _diffLongestFor = "";
+        _diffMonoAdvance = -1f;
+        _diffMonoLineHeight = 0f;
+    }
 
     /// <summary>Whether a line too wide for its column wraps rather than scrolling sideways.
     /// The two are alternatives: wrapping means every line is visible in full, so there is
@@ -298,7 +323,7 @@ public partial class JunctionApp
     private void RebuildDiffHeights(List<DiffRow> rows, float codeWidth)
     {
         var heights = new float[rows.Count];
-        var style = TextMeasure.StyleFor(DiffCodeSize, Fonts.Mono);
+        var style = TextMeasure.StyleFor(DiffCodeSize, CodeFont);
         for (int i = 0; i < rows.Count; i++)
         {
             var r = rows[i];
@@ -557,7 +582,7 @@ public partial class JunctionApp
         _diffPan.Reset();
         _diffPan.ContentWidth = HorizontalPan.MeasureWidest(
             rows.SelectMany(r => new[] { r.Line?.Content, r.Left?.Content, r.Right?.Content }),
-            12f, Fonts.Mono);
+            DiffCodeSize, CodeFont);
     }
 
     // Vertical scrolling is the list's own (KeyboardScroll); sideways is not, because the
@@ -831,11 +856,11 @@ public partial class JunctionApp
         row.AddChild(NumCell(line.OldLineNumber, 46f));
         row.AddChild(NumCell(line.NewLineNumber, 46f));
         row.AddChild(Box.New().Width(16).JustifyContent(JustifyContent.Center)
-            .Children(Ui.Mono(sign, 12f, signColor)));
+            .Children(CodeText(sign, signColor)));
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
         row.AddChild(DiffCodeCell(
-            Ui.Mono(line.Content.Length == 0 ? " " : line.Content, DiffCodeSize, code)
+            CodeText(line.Content.Length == 0 ? " " : line.Content, code)
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
                 .Spans(spans)
                 .Padding(new Thickness(2, UnifiedCodePadX, 2, 0))));
@@ -899,7 +924,7 @@ public partial class JunctionApp
         half.AddChild(NumCell(num, 44f));
         // Both halves share one offset, so the two files stay aligned as they move.
         half.AddChild(DiffCodeCell(
-            Ui.Mono(text, DiffCodeSize, code).Selectable()
+            CodeText(text, code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
                 .Spans(spans)
                 .Padding(new Thickness(2, SplitCodePadX, 2, 0))));
@@ -959,7 +984,11 @@ public partial class JunctionApp
         }
         if (View == JunctionView.Changes && _changeSelPath != null)
         {
-            var dict = _changeSelStaged ? _changes.Value.StagedDiffs : _changes.Value.UnstagedDiffs;
+            // ChangesView, not the raw load: a file whose staging is still in flight has
+            // already moved sides in the list, and its diff has to move with it or the pane
+            // beside the row it just left goes blank until git answers.
+            var changes = ChangesView;
+            var dict = _changeSelStaged ? changes.StagedDiffs : changes.UnstagedDiffs;
             dict.TryGetValue(_changeSelPath, out var d);
             return (_changeSelPath, d);
         }
