@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Events;
+using HultUI.Core.DevTools;
 using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -14,6 +15,22 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 {
     private static bool _sdlInitialized;
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
+
+    // ──── Graphics preload (HULTUI_GL_PRELOAD=1) ────
+    // Loading the GL driver — opengl32.dll plus the vendor ICD, and the WGL/GLX
+    // extension probe — costs ~130-150 ms on Windows, and SDL does it lazily inside
+    // the first SDL_CreateWindow for a window with SDL_WINDOW_OPENGL. Nothing else in
+    // start-up needs it, so BeginPreload starts it on a worker and the constructor
+    // joins just before it creates the window; whatever the caller does in between
+    // (settings, fonts, the first element tree) is time the load no longer costs.
+    //
+    // This is deliberately opt-in. SDL documents its video functions as main-thread
+    // work, and while WGL tolerates the load off-thread, the GLX path touches the
+    // Xlib display SDL opened on the main thread. Off by default until it has been
+    // exercised on X11 and Wayland.
+    private static Task<bool>? _glPreload;
+    private static SkiaTextServices? _preloadedText;
+    private static bool _preloadStarted;
 
     private SDL_Window* _window;
 
@@ -245,11 +262,17 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (style == WindowStyle.Borderless && !useWindowsNativeFrame)
             flags |= SDL_WindowFlags.SDL_WINDOW_BORDERLESS;
 
+        // Joins the driver load started by BeginPreload, if any. Without a preload
+        // this is a no-op and SDL_CreateWindow does the load itself, as before.
+        JoinPreload();
+
         var titleBytes = MarshalUtf8(title);
         fixed (byte* titlePtr = titleBytes)
         {
             _window = SDL_CreateWindow(titlePtr, width, height, flags);
         }
+        // Without a preload this covers the lazy GL driver load too — SDL does it here.
+        StartupTrace.Mark("SDL_CreateWindow");
 
         if (_window == null)
             throw new InvalidOperationException($"SDL_CreateWindow failed: {GetError()}");
@@ -264,9 +287,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // Disable driver-level vsync — on Wayland the compositor handles
         // vsync, and swap interval 1 can block during interactive resize.
         SDL_GL_SetSwapInterval(0);
+        StartupTrace.Mark("gl context");
 
-        // Create SkiaSharp surface with SDL3 GL proc resolver
-        _surface = new SkiaGLRenderSurface(GetGLProcAddress);
+        // Create SkiaSharp surface with SDL3 GL proc resolver, adopting the preloaded
+        // text pipeline when there is one (null → the surface builds its own).
+        _surface = new SkiaGLRenderSurface(GetGLProcAddress, TakePreloadedText());
+        StartupTrace.Mark("skia surface");
 
         // Text input is enabled on focus (see StartTextInput) — leaving it
         // always on would make the Win32 IMM/TSF consume dead keys and
@@ -313,6 +339,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
 
         IsOpen = true;
+        StartupTrace.Mark("platform window ready");
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
@@ -746,6 +773,66 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         };
     }
 
+    /// <summary>
+    /// Starts loading the OpenGL driver on a worker thread and builds the (GL-free)
+    /// text pipeline the first window will adopt, so both overlap with whatever the
+    /// caller does next. No-op unless <c>HULTUI_GL_PRELOAD=1</c>; calling it twice is
+    /// harmless. Must be called on the main thread — it initialises SDL's video
+    /// subsystem first, which SDL requires there.
+    /// </summary>
+    public static void BeginPreload()
+    {
+        if (_preloadStarted) return;
+        if (Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") != "1") return;
+        _preloadStarted = true;
+
+        EnsureSDLInitialized();
+
+        _glPreload = Task.Run(() =>
+        {
+            // A preload that fails is not an error to propagate: the constructor falls
+            // through to SDL_CreateWindow, which loads the driver itself and reports the
+            // real failure with the window it couldn't create.
+            try
+            {
+                bool ok = SDL_GL_LoadLibrary((byte*)null);
+                StartupTrace.Mark(ok ? "gl-driver loaded (worker)" : "gl-driver load FAILED (worker)");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                StartupTrace.Mark($"gl-driver load threw: {ex.GetType().Name}");
+                return false;
+            }
+        });
+
+        // Main-thread work that has no business waiting for a GPU: the font manager,
+        // the family lookup and the metrics path. The window will adopt this pipeline
+        // instead of building its own.
+        var text = new SkiaTextServices();
+        text.Warm();
+        _preloadedText = text;
+        StartupTrace.Mark("text pipeline warm");
+    }
+
+    /// <summary>The preloaded text pipeline, handed to the first window that asks and
+    /// then dropped — later windows keep building their own, as they always have.</summary>
+    private static SkiaTextServices? TakePreloadedText()
+        => Interlocked.Exchange(ref _preloadedText, null);
+
+    /// <summary>
+    /// Waits for <see cref="BeginPreload"/>'s driver load. On failure the wait is
+    /// still correct to fall through: SDL_CreateWindow will retry the load itself and
+    /// report the real error.
+    /// </summary>
+    private static void JoinPreload()
+    {
+        if (_glPreload is not { } preload) return;
+        _glPreload = null;
+        preload.Wait();
+        StartupTrace.Mark("gl-driver join");
+    }
+
     private static void EnsureSDLInitialized()
     {
         if (_sdlInitialized) return;
@@ -769,6 +856,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
+        StartupTrace.Mark("SDL_Init");
     }
 
     public static void ShutdownSDL()

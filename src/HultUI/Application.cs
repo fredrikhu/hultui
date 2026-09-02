@@ -22,6 +22,7 @@ public sealed class Application : IDisposable
     private Theme _theme = Theme.Light;
     private bool _disposed;
     private bool _quitRequested;
+    private bool _firstFrameTraced;
 
     /// <summary>The windowing platform this application runs on.</summary>
     internal IWindowingPlatform Platform => _platform;
@@ -123,6 +124,24 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>
+    /// Starts the graphics driver loading on a worker thread, so the work an app does
+    /// before its first window — settings, project discovery, theme, the first element
+    /// tree — overlaps with it instead of following it. Call it as the first statement
+    /// in <c>Main</c>, on the main thread; the <see cref="Application"/> constructor
+    /// joins the load before it creates the window.
+    ///
+    /// <para>Opt-in via <c>HULTUI_GL_PRELOAD=1</c> and a no-op otherwise, because
+    /// loading the driver off the main thread is outside SDL's documented threading
+    /// contract (see <c>SDL3Window.BeginPreload</c>). Set <c>HULTUI_STARTUP=1</c> to
+    /// print the phase timings it is meant to move.</para>
+    /// </summary>
+    public static void BeginGraphicsPreload()
+    {
+        StartupTrace.Mark("main entry");
+        SDL3Window.BeginPreload();
+    }
+
+    /// <summary>
     /// Creates an application with a primary window on the default (SDL3)
     /// windowing platform.
     /// </summary>
@@ -146,6 +165,7 @@ public sealed class Application : IDisposable
         // the tree can never be built on one thread and driven from another.
         UIThread.Bind();
         CreateWindow(title, width, height, style);
+        StartupTrace.Mark("application ready");
     }
 
     /// <summary>
@@ -312,6 +332,11 @@ public sealed class Application : IDisposable
             // frame has been presented, so the OS never composites the blank
             // GL surface. No-op after the first frame.
             window.PlatformWindow.EnsureShown();
+            if (StartupTrace.Enabled && !_firstFrameTraced)
+            {
+                _firstFrameTraced = true;
+                StartupTrace.Mark("first frame shown");
+            }
             anyRendered = true;
         }
         return anyRendered;
