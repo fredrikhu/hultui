@@ -96,11 +96,45 @@ qualitative: AOT needs **no runtime installed** and has **no JIT warmup**, and
 against the honest "no runtime needed" alternative — a self-contained non-AOT
 build that bundles the whole runtime — AOT is roughly **5× smaller**.
 
-Startup opens the window in a couple of seconds cold on a dev machine, but that
-figure is dominated by SDL3 window creation, Skia GPU context init, font loading,
-and the first render — not by runtime start. AOT's contribution is removing JIT
-warmup and eliminating assembly load, which matters most for the managed
-work on the first few frames.
+### Startup, measured
+
+Set `HULTUI_STARTUP=1` (stderr) or `HULTUI_STARTUP=<path>` (a file, which is what
+a GUI-subsystem binary needs) and any HultUI app prints its start-up phases, timed
+from when the OS started the process — so the runtime's own start, which no
+in-process stopwatch can see, is included. Junction, win-x64, warm runs on one
+Windows 11 machine (RTX 4080), time in ms since process start:
+
+| phase | AOT | JIT (Release) |
+|---|---|---|
+| `SDL_Init` returned | 31 | 59 |
+| `SDL_CreateWindow` returned | 179 | 212 |
+| GL context current | 181 | 214 |
+| Skia surface built | 186 | 229 |
+| platform window ready | 195 | 246 |
+| application ready | 196 | 251 |
+| **first frame presented** | **224** | **391** |
+
+AOT is worth ~165 ms here, and essentially all of it is JIT: the app's own stretch
+— building the element tree, the first layout, the first paint, revealing the
+window — falls from 139 ms to **29 ms**. Everything else the framework does is
+already close to free (the Skia surface 5 ms, the `Window` constructor 1 ms).
+
+What is left is not the framework's to spend. The ~150 ms inside the first
+`SDL_CreateWindow` is SDL loading the GL driver — `opengl32.dll` plus the vendor
+ICD plus the WGL extension probe — which it does lazily for the first window that
+asks for OpenGL. Creating the GL context afterwards is 2 ms and Skia's `GRContext`
+about 11 ms; the cost is the library load. It cannot be moved off the critical
+path by any arrangement of app code, because no window can exist until it
+finishes, and a window created without `SDL_WINDOW_OPENGL` cannot be upgraded
+later (SDL refuses, and Win32 sets a pixel format once per `HWND`). So an AOT
+start-up is roughly: 30 ms runtime + `SDL_Init`, 150 ms driver load, 17 ms
+context/surface/DPI plumbing, 29 ms app — within a few ms of the floor for a GL
+window on this machine.
+
+The very first run after a driver update pays more: the first frame compiles
+Skia's shader programs (~115 ms here rather than ~20 ms), after which the GPU
+driver's own on-disk program cache serves them. That cache is the driver's, not
+Skia's, and needs nothing from the app.
 
 ## AOT vs JIT throughput
 
