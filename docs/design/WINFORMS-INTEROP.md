@@ -39,6 +39,10 @@ WinForms events. Rendered at 1.5× DPI, and a posted click became a WinForms
 **E — four HultUI surfaces in one form**, each its own control and GL context,
 sharing one `Application`. All four rendered crisply and independently.
 
+**F — a real UI Automation client against the WGL control.** FlaUI (UIA3, the
+same interface a screen reader uses) attached from a separate process and read the
+HultUI tree off the WinForms control's HWND. See below — it works.
+
 The headline: **C and D both needed zero framework changes.**
 `IWindowingPlatform`, `IPlatformWindow`, `IRenderSurface`, `SkiaGLRenderSurface`
 and `Application(IWindowingPlatform, …)` are already public.
@@ -57,14 +61,15 @@ embedded case needs has a better WinForms-native answer than an SDL-bridged one:
 | IME / text input | SDL's IMM/TSF host | `ITextInputHost` over IMM32 |
 | Clipboard, file dialogs | SDL's | `WF.Clipboard`, `OpenFileDialog` |
 | Drag & drop | SDL's | `AllowDrop` / `DoDragDrop` |
-| UIA | free (SDL's HWND path) | needs a framework seam (below) |
+| UIA | free (SDL's HWND path) | needs a framework seam — **measured working**, below |
 | Window procedure | SDL subclasses it — must use a separate child HWND | untouched |
 
 **The design therefore drops SDL from the control entirely.** That removes the
 child-HWND trick, removes the WndProc contention with WinForms, and removes the
 two-way focus bridge — a HultUI control becomes an ordinary WinForms control that
-happens to paint with GL. The one thing it costs is UIA, which needs a small
-framework change rather than coming free.
+happens to paint with GL. The one thing it costs is that UIA needs a small
+framework change instead of coming free, and experiment F confirmed that change is
+all it needs.
 
 SDL stays for the *top-level* scenario (scenario A), where it already is the
 platform and nothing is gained by replacing it.
@@ -120,6 +125,68 @@ compositor. With N surfaces that serialises into N frame intervals. SDL sets swa
 interval 0 for exactly this reason; the WGL path must do it explicitly, and it is
 the difference between 0.26 ms and 8.3 ms per frame.
 
+## Does UIA survive on a WinForms control? Yes.
+
+The one risk that could have flipped the decision back to SDL adoption, spiked
+before committing. Experiment F reproduced exactly what
+`AccessibilityBridgeFactory`'s Windows branch does — action router, UIA host
+bridge, `WindowsAccessibilityBridge` over the HWND — but against the WinForms
+control's handle, then attached FlaUI (UIA3) from a *separate process* and read
+the tree back.
+
+**The HultUI element tree is exposed.** Looked up by `AutomationId`, across the
+process boundary:
+
+```
+heading-0 : found - type=Text   name='WGL surface 0'
+button-0  : found - type=Button name='Click me'
+count-0   : found - type=Text   name='clicks: 0'
+```
+
+**Patterns work, not just properties.** `IInvokeProvider.Invoke()` on `button-0`
+reached the HultUI click handler (`D: surface 0 click handler ran (1)`) and the
+count element's Name changed from `clicks: 0` to `clicks: 1` — so the action
+router marshals an AT-thread call onto the UI thread's frame drain correctly on
+this path too.
+
+**Bounds are right.** The bridge converts with `ClientToScreen` against whatever
+HWND it was handed, so the control's client origin is the correct origin and the
+rects land where a screen reader would draw its highlight, at 1.5× scale:
+
+```
+window rect     : X=177 Y=177 W=600 H=507
+host panel rect : X=185 Y=517 W=585 H=160
+button-0 rect   : X=203 Y=601 W=81  H=45     ← inside the hosting control
+```
+
+**No duplicate subtree.** The concern was that WinForms' own `AccessibleObject`
+on the control would answer alongside HultUI's provider and a screen reader would
+see the region twice. It does not:
+
+```
+Pane  id='embedPanel'                (the WinForms Panel)
+  Pane                               (the TableLayoutPanel)
+    Window id='2230124'              (the HultUI control — WinForms' own node)
+      Pane (HultUI fragment root)    (HultUI's tree hangs here)
+```
+
+One WinForms wrapper node, then HultUI's fragment root under it. The content is
+not doubled.
+
+Two cosmetic things for `HultUIControl` to fix, neither structural:
+
+- The control surfaces as `ControlType.Window` with the HWND value as its
+  AutomationId, because a bare `Control` has no name. Set `AccessibleName` /
+  `AccessibleRole` on it so the wrapper node reads sensibly.
+- `Sdl3UiaHostBridge` is misnamed — it carries nothing SDL-specific, which
+  experiment F proved by running it in a process where SDL was never initialised.
+  Rename it `UiaHostBridge` when the factory changes.
+
+Caveat on method: the bridge was attached eagerly by hand, whereas the factory
+builds it at `Window` construction and leaves it inert until an AT probes. Same
+code, different moment — but the lazy-activation path on a WinForms control has
+not been separately exercised.
+
 ## What is wrong today
 
 One thing blocks both scenarios:
@@ -135,7 +202,9 @@ And one thing degrades the embedded case:
 **`AccessibilityBridgeFactory` type-tests the concrete `SDL3Window`**
 ([AccessibilityBridgeFactory.cs:35](../../src/HultUI/AccessibilityBridgeFactory.cs)),
 so a WGL-backed platform window falls back to `NullAccessibilityBridge` — no UIA,
-and a screen reader sees an empty region where the HultUI content is.
+and a screen reader sees an empty region where the HultUI content is. This is a
+type test, not a real dependency: experiment F wired the bridge up by hand against
+a WinForms control's HWND and everything worked (below).
 
 ## The design
 
@@ -246,7 +315,10 @@ the escape hatch; not needed for the first cut.
 1. **`Application.RunFrame`** plus a docs section on host-owned loops, and
    `HeadlessSession.PumpFrame` rewired through it. Unblocks "open a HultUI window
    from a WinForms app" completely, with no new project. (~half a day)
-2. **`IWin32WindowHandle`** and the accessibility factory switch. (~1 hour)
+2. **`IWin32WindowHandle`** and the accessibility factory switch, plus the
+   `Sdl3UiaHostBridge` → `UiaHostBridge` rename. Experiment F is the acceptance
+   test; promote it into `tests/HultUI.UiTests` against a WinForms sample so the
+   embedded tree stays accessible. (~half a day)
 3. **`HultUI.WinForms` with `HultUIControl`**: HWND/GL lifetime, sizing, DPI,
    cursor, mouse input, the pump. This is the spike's experiment D promoted to
    production. (~2 days)
@@ -264,12 +336,6 @@ harness that is not `HeadlessSession`.
 
 ## Open questions
 
-- **UIA on a WGL control is unverified.** Step 2 makes the bridge *reachable*;
-  whether a screen reader reads the region correctly when the HWND is a WinForms
-  control rather than an SDL window has not been tested. It should work — the
-  bridge only needs an HWND and subclasses its window procedure — but WinForms
-  also has opinions about `AccessibleObject` on its controls, and the two may
-  need reconciling.
 - **Multiple `Application` instances silently rebind `Application.Current`.** The
   design says one per process, which is correct, but the failure mode for a caller
   who constructs a second is a silent rebind rather than an exception. A guard is
