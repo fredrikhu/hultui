@@ -9,6 +9,12 @@ using Xunit;
 
 namespace HultUI.UiTests;
 
+// The enclosing HultUI namespace is searched before this file's using directives, so
+// HultUI.Application and HultUI.Window would shadow FlaUI's. These aliases sit inside
+// the namespace scope, which is searched first, and name the intended types outright.
+using Application = FlaUI.Core.Application;
+using Window = FlaUI.Core.AutomationElements.Window;
+
 /// <summary>
 /// Drives the Accessibility sample through FlaUI (a standard UI Automation
 /// client) to prove HultUI's providers work with off-the-shelf automation

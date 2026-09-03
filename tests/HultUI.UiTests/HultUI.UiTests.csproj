@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI.WinForms\HultUI.WinForms.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Build the samples so their exes exist; don't reference their assemblies. -->
     <ProjectReference Include="..\..\samples\HultUI.Samples.Accessibility\HultUI.Samples.Accessibility.csproj"
                       ReferenceOutputAssembly="false" />

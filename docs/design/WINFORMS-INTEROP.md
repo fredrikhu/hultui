@@ -383,6 +383,17 @@ the escape hatch; not needed for the first cut.
    over the top. `WinFormsTextInputHost` arms and disarms an IMM32 context on focus and
    puts the candidate window at the caret.
 
+   Keys are named by **physical position**, as the SDL backend names them.
+   <c>KeyCode</c> is a position vocabulary — `KeyCode.Z` means "where Z sits on a US
+   keyboard" — and Win32 hands out virtual keys, which are the layout's interpretation
+   of that position. Taking those at face value made one framework key code mean two
+   different things depending on which backend hosted the application, so the
+   layout-dependent keys are translated back through their scan code and the rest
+   (arrows, function keys, editing keys, modifiers) are used as they come. The
+   consequence is the one HultUI already has everywhere else: on AZERTY the key
+   *labelled* Z sits where a US keyboard has W and reports `KeyCode.W`. Typed text is
+   unaffected — that arrives as characters through `WM_CHAR`, correct for the layout.
+
    **This step needed a framework change the design had not anticipated.**
    `FocusTraversal` wrapped unconditionally, so Tab inside a hosted tree could never
    leave it — "traversal can also leave the control" was not implementable as written.
@@ -466,6 +477,12 @@ harness that is not `HeadlessSession`.
 - **Non-NVIDIA drivers.** All numbers here are one GPU. The ~130 ms first-context
   cost is driver-dependent and worth re-measuring on Intel integrated graphics
   before quoting it to anyone.
+- **Layout independence is argued, not tested.** `KeyMapTests` guards the scan-code
+  table itself — no two codes naming the same key, every letter and digit covered, the
+  layout-independent keys mapping exactly — and runs in CI, because it opens no window.
+  What it cannot check is the behaviour under a non-QWERTY layout, since the mapping
+  reads the machine's active layout and a test that changed it would be changing the
+  developer's machine. Worth confirming by hand on an AZERTY or QWERTZ install.
 - Nothing here addresses WPF. The same two framework seams would serve an
   `HwndHost`-based WPF control and the airspace analysis is identical; separate
   document if it is ever wanted.
