@@ -64,8 +64,8 @@ public class SwapPanesTests
         Assert.False(CanGoBack(t, 'L'));
         Assert.True(CanGoBack(t, 'R'), "the Back stack stayed behind on the left");
 
-        // And it is a working stack, not merely a non-empty one.
-        t.Press(KeyCode.Tab);                       // focus the pane that now holds it
+        // And it is a working stack, not merely a non-empty one. The swap already moved
+        // the keyboard to the pane the stack arrived in, so Alt+← walks it directly.
         t.Press(KeyCode.Left, KeyModifiers.Alt);
         t.Session.PumpUntil(() => t.Dir('R') == t.Left);
         Assert.Equal(t.Left, t.Dir('R'));
@@ -144,10 +144,11 @@ public class SwapPanesTests
         Assert.Contains(t.Rows('R'), e => e.Name == "right-only.txt");
     }
 
-    /// <summary>The keyboard stays in the pane you are looking at: Ctrl+U moves the folders
-    /// past the cursor, it does not move the cursor to the other side of the screen.</summary>
+    /// <summary>The cursor travels with the folder it was in. Leaving it on the side it
+    /// started on meant Ctrl+U silently retargeted the keyboard at the other listing — the
+    /// reported "the focus doesn't follow the switched panel".</summary>
     [Fact]
-    public void TheActivePaneStaysWhereItWas()
+    public void TheActivePaneFollowsItsFolder()
     {
         using var t = new DiffViewTests.Fixture();
         t.WriteLeft("a.txt", "a");
@@ -157,7 +158,32 @@ public class SwapPanesTests
 
         t.Press(KeyCode.U, KeyModifiers.Ctrl);
 
+        Assert.Equal('R', t.Field<char>("_active"));
+        Assert.Equal(t.Left, t.Dir('R'));   // and that is where the left folder went
+
+        t.Press(KeyCode.U, KeyModifiers.Ctrl);
+
         Assert.Equal('L', t.Field<char>("_active"));
+    }
+
+    /// <summary>Not just the app's own idea of which pane is active — the keyboard itself
+    /// has to be in the pane element that now holds the folder, or the first arrow key
+    /// after a swap scrolls the other side.</summary>
+    [Fact]
+    public void TheKeyboardMovesToThePaneThatArrived()
+    {
+        using var t = new DiffViewTests.Fixture();
+        t.WriteLeft("a.txt", "a");
+        t.WriteRight("r.txt", "r");
+        t.Open();
+
+        t.Press(KeyCode.U, KeyModifiers.Ctrl);
+        t.Session.PumpFrames(2);
+
+        var right = t.Invoke("PaneRef", 'R');
+        var pane = (HultUI.Core.Elements.Element?)right!.GetType().GetProperty("Current")!.GetValue(right);
+        Assert.NotNull(pane);
+        Assert.Same(pane, t.Session.Window.Window.FocusedElement);
     }
 
     private static bool CanGoBack(DiffViewTests.Fixture t, char side) =>

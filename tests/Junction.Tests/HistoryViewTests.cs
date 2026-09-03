@@ -111,6 +111,56 @@ public class HistoryViewTests
         });
     }
 
+    /// <summary>
+    /// Typing into the history filter has to keep the keyboard in it. The field sits in the
+    /// include bar beside two buttons that carry keys, and a keyed child makes the reconciler
+    /// match that whole row by key — every unkeyed sibling is then replaced rather than
+    /// patched, so the field the caret was in stopped existing on the rebuild the first
+    /// keystroke asked for, and the rest of the word went nowhere.
+    ///
+    /// <para>The frame between the characters is the test: typed in one go, without a
+    /// rebuild in between, this passes against the broken code.</para>
+    /// </summary>
+    [Fact]
+    public void TheHistoryFilterKeepsTheKeyboardBetweenKeystrokes()
+    {
+        Hosted(repo =>
+        {
+            repo.Write("m.txt", "m\n");
+            repo.Git("add", "-A");
+            repo.Git("commit", "-m", "on the main line");
+        }, (repo, session, app) =>
+        {
+            session.Window.PressKey(KeyCode.Digit2);
+            Assert.Equal(JunctionView.History, app.View);
+            PumpUntil(session, () => Shows(session, "on the main line"), "the log never arrived");
+
+            session.Window.PressKey(KeyCode.Slash);       // focuses the filter
+            session.PumpFrames(2);
+            var field = SearchField(session);
+            // Assert.Same, not IsFocused: focus lives on the window, and the field's own
+            // interaction state does not track it.
+            Assert.Same(field, session.Window.Window.FocusedElement);
+
+            foreach (var ch in "main")
+            {
+                session.Window.TypeText(ch.ToString());
+                session.PumpFrames(2);                   // the rebuild each keystroke asks for
+            }
+
+            var after = SearchField(session);
+            Assert.Equal("main", after.Text);
+            Assert.Same(after, session.Window.Window.FocusedElement);
+        });
+    }
+
+    /// <summary>The history filter's field: the only text input in the include bar.</summary>
+    private static TextInputElement SearchField(HeadlessSession session) =>
+        LayoutProbe.Descendants<TextInputElement>(Root(session),
+                t => t.Layout.AbsoluteBorderBox.Height > 0)
+            .FirstOrDefault()
+        ?? throw new Xunit.Sdk.XunitException("the history view shows no text field");
+
     private static void Click(JunctionApp app, string method) =>
         typeof(JunctionApp).GetMethod(method,
             BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(app, null);

@@ -288,6 +288,13 @@ public partial class JunctionApp
 
     // ── Include-in-history bar ───────────────────────────────────────────
 
+    /// <remarks>Every child here carries a key, and that is not decoration. Two of them
+    /// already needed one — the branch-filter and pickaxe buttons, whose lit and unlit
+    /// states have to be replaced rather than patched — and a child with a key makes the
+    /// reconciler match this bar's children <i>only</i> by key, so every unkeyed sibling is
+    /// a new element on every build. The search box is one of those siblings: rebuilt from
+    /// scratch, it dropped the keyboard on each keystroke, which is what the report "the
+    /// filter text box loses focus for each keystroke" was. Key all of them or none.</remarks>
     private Element BuildIncludeBar(List<string> includeList, int commitCount)
     {
         var bar = Flex.Row(gap: 10)
@@ -295,9 +302,11 @@ public partial class JunctionApp
             .Padding(new Thickness(9, 16, 9, 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        bar.AddChild(Flex.Row(gap: 6).AlignItems(AlignItems.Center).Children(
+        var label = Flex.Row(gap: 6).AlignItems(AlignItems.Center).Children(
             Ui.Icon(Icons.Funnel, 13f, Nocturne.On(0.55)),
-            Text.New("Included").FontSize(11f).TextColor(Nocturne.On(0.55))));
+            Text.New("Included").FontSize(11f).TextColor(Nocturne.On(0.55)));
+        label.Key = "include-label";
+        bar.AddChild(label);
 
         var current = HasActiveRepo ? SummaryFor(_activeRepoPath).Branch : "";
         var onlyCurrent = includeList is [var single] && single == current;
@@ -306,7 +315,9 @@ public partial class JunctionApp
 
         if (includeList.Count == 0)
         {
-            bar.AddChild(Ui.TagOutline("All branches", Nocturne.Accent, 10f));
+            var all = Ui.TagOutline("All branches", Nocturne.Accent, 10f);
+            all.Key = "include-scope";
+            bar.AddChild(all);
         }
         else if (!onlyCurrent)
         {
@@ -317,13 +328,26 @@ public partial class JunctionApp
                 chips.AddChild(Ui.Tag(pb.Title, pb.ChipBg, pb.ChipFg, 10f));
             }
             chips.AddChild(Ui.GhostButton("Clear", Icons.X, ClearInclude, 11f));
+            // Same key as the "All branches" tag it stands in for: the two are alternatives
+            // for one slot, and they are different element types, so the reconciler swaps
+            // rather than patches either way.
+            chips.Key = "include-scope";
             bar.AddChild(chips);
         }
 
-        bar.AddChild(Box.New().FlexGrow(1));
-        bar.AddChild(BuildHistorySearch());
+        var spacer = Box.New().FlexGrow(1);
+        spacer.Key = "include-spacer";
+        bar.AddChild(spacer);
+
+        var search = BuildHistorySearch();
+        search.Key = "history-search";
+        bar.AddChild(search);
+
         bar.AddChild(ContentSearchToggle());
-        bar.AddChild(Text.New($"{commitCount} commits").FontSize(11f).TextColor(Nocturne.On(0.40)));
+
+        var count = Text.New($"{commitCount} commits").FontSize(11f).TextColor(Nocturne.On(0.40));
+        count.Key = "include-count";
+        bar.AddChild(count);
         return bar;
     }
 

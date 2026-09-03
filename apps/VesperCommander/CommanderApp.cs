@@ -2353,14 +2353,21 @@ public partial class CommanderApp : Component, IDisposable
     /// history), the listing already read for it, and the review-state override.
     ///
     /// <para>Swapping the loaders and generation counters as well is what makes the exchange
-    /// instant rather than a reload. Left behind on purpose: <c>_active</c> (the keyboard stays
-    /// in the pane you are looking at, so the swap moves the folders past the cursor rather
-    /// than moving the cursor), and the element Refs, which name screen positions rather than
-    /// panes. The scroll offsets those elements hold do belong to the old side, so both panes
-    /// are asked to re-reveal their cursor.</para></summary>
+    /// instant rather than a reload. <c>_active</c> travels with them: the folder you were
+    /// working in is now on the other side of the screen, and leaving the cursor behind put
+    /// it in the folder you were <i>not</i> looking at — the next keypress acted on the wrong
+    /// listing. Left behind are the element Refs, which name screen positions rather than
+    /// panes; the keyboard is handed to the pane element now holding the active side, and the
+    /// scroll offsets those elements carry belong to the old side, so both panes are asked to
+    /// re-reveal their cursor.</para></summary>
     private void SwapPanes()
     {
         ExitSearch(_active);
+        _active = _active == 'L' ? 'R' : 'L';
+        _previewFocused = false;
+        // The panes are rebuilt by this MarkDirty; focus the one that ends up active
+        // afterwards, when the element the Ref names is the one on screen.
+        _pendingPaneFocus = _active;
         (_tabsL, _tabsR) = (_tabsR, _tabsL);
         (_tabL, _tabR) = (_tabR, _tabL);
         // The listing, its generation and its loaded flag belong with the tabs they were read
