@@ -205,6 +205,9 @@ internal sealed class MainForm : Form
         var source = Box.New().Padding(new Thickness(16, 10)).CornerRadius(8f)
             .Background(Color.FromHex("#0F766E")).TextColor(Color.White)
             .Cursor(CursorType.Move)
+            // Required: only a Draggable element becomes a drag source, so without this
+            // the press is just a press and DragStart never fires.
+            .Draggable()
             .AutomationId("drag-source")
             .AccessibleName("Drag me to Explorer")
             .AccessibleRole(AccessibilityRole.Button)

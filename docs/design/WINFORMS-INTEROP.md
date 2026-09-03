@@ -414,7 +414,16 @@ the escape hatch; not needed for the first cut.
    what every other interaction here relies on. The test covers what survives that
    limit — the capability is genuinely present (a mistake in the `INativeDragSource`
    type test reports "no" rather than failing loudly) and a lazily created tab page
-   mounts — and the drop path itself is exercised by hand.
+   mounts.
+
+   Both directions were then exercised by hand, and the outbound one did not work first
+   time. The input translator takes mouse capture on the press, so that a drag begun
+   inside the control keeps receiving moves once the pointer leaves it — but OLE's drag
+   loop takes capture of its own and will not start while another window holds it, and
+   the drag begins from a `DragStart` handler raised during a mouse move, capture still
+   held. `DragFiles` hands capture over before calling `DoDragDrop`. Nothing automated
+   would have caught it, which is the cost of the gap above rather than an argument that
+   the gap does not matter.
 6. ~~**A sample**, and experiment F's FlaUI probe promoted into
    `tests/HultUI.UiTests`.~~ **Done.** `HultUI.Samples.WinFormsHost` is a form with a
    menu strip and a `DataGridView` beside a `TabControl` whose first two pages are

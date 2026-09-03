@@ -208,6 +208,13 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
     {
         if (!CanDragFiles || paths.Count == 0) return DragEffect.None;
 
+        // The drag begins from a DragStart handler, which the framework raises while
+        // handling a mouse move — and the input translator took mouse capture on the
+        // press so that a drag started inside the control keeps receiving moves outside
+        // it. OLE's drag loop takes capture of its own, and will not start while someone
+        // else holds it, so the capture is handed over here.
+        _control.Capture = false;
+
         var payload = new DataObject();
         payload.SetData(DataFormats.FileDrop, true, paths.ToArray());
         var result = _control.DoDragDrop(payload, DragDropInterop.ToWinForms(allowed));
