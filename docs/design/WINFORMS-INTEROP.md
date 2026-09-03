@@ -391,8 +391,30 @@ the escape hatch; not needed for the first cut.
    wrap)`, `FocusEdge(first)` and `ClearFocus()`. A window still wraps, because Tab has
    nowhere else to go there; a host passes `wrap: false` and reads the false return as
    its cue to move on. Six tests in `FocusBoundaryTests` pin both behaviours.
-5. **Clipboard, file dialogs, drag & drop** over their WinForms equivalents.
-   (~1 day)
+5. ~~**Clipboard, file dialogs, drag & drop** over their WinForms equivalents.~~
+   **Done.** Clipboard and dialogs landed with step 3, because `IPlatformWindow`
+   requires them; this step is drag and drop, in both directions and through WinForms
+   rather than SDL. Inbound: `AllowDrop` is on by default (matching SDL, where the OS
+   delivers every drop and the tree decides), and `OnDragEnter` announces the payload
+   *before* the first position — the position is what runs the hit test and tells the
+   element a drag has arrived, so a target inspecting the data any earlier would see an
+   empty payload. A drag that leaves without dropping ends at a position outside every
+   element, so no `Drop` is dispatched but the hovered element still gets its
+   `DragLeave`. Outbound: `WglPlatformWindow` implements `INativeDragSource` over
+   `Control.DoDragDrop`, which the framework discovers by type test exactly as it does
+   for SDL.
+
+   Effects are mapped member by member rather than cast. The two enums share their bit
+   values today, and a cast would keep working until one of them gained a member — at
+   which point a Move reported as a Copy would leave a source holding a file it had
+   promised to delete.
+
+   **An actual drop is not automated, and cannot be.** OLE drag-and-drop runs a nested
+   modal loop driven by the physical mouse; posted messages do not enter it, which is
+   what every other interaction here relies on. The test covers what survives that
+   limit — the capability is genuinely present (a mistake in the `INativeDragSource`
+   type test reports "no" rather than failing loudly) and a lazily created tab page
+   mounts — and the drop path itself is exercised by hand.
 6. ~~**A sample**, and experiment F's FlaUI probe promoted into
    `tests/HultUI.UiTests`.~~ **Done.** `HultUI.Samples.WinFormsHost` is a form with a
    menu strip and a `DataGridView` beside a `TabControl` whose first two pages are

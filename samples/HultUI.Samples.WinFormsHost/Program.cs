@@ -2,6 +2,7 @@ using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
+using HultUI.Core.Platform;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 using HultUI.WinForms;
@@ -74,6 +75,10 @@ internal sealed class MainForm : Form
         migrated.Controls.Add(Counter);
         var paletteTab = new TabPage("Also migrated") { Name = "tab-palette" };
         paletteTab.Controls.Add(Palette);
+        DragDrop = new HultUIControl { Name = "dragdrop", Dock = DockStyle.Fill, RootFactory = BuildDragDrop };
+        var dragTab = new TabPage("Drag and drop") { Name = "tab-dragdrop" };
+        dragTab.Controls.Add(DragDrop);
+
         var legacy = new TabPage("Not yet") { Name = "tab-legacy", Padding = new Padding(12) };
         legacy.Controls.Add(new CheckBox
         {
@@ -82,7 +87,7 @@ internal sealed class MainForm : Form
             AutoSize = true,
             Location = new System.Drawing.Point(12, 12),
         });
-        tabs.TabPages.AddRange([migrated, paletteTab, legacy]);
+        tabs.TabPages.AddRange([migrated, paletteTab, dragTab, legacy]);
 
         _split = new SplitContainer { Dock = DockStyle.Fill };
         var split = _split;
@@ -98,6 +103,7 @@ internal sealed class MainForm : Form
 
     private HultUIControl Counter { get; }
     private HultUIControl Palette { get; }
+    private HultUIControl DragDrop { get; }
 
     /// <summary>
     /// The splitter position is set here, not in the constructor: a SplitContainer clamps
@@ -158,6 +164,73 @@ internal sealed class MainForm : Form
             Flex.Row(gap: 10).AlignItems(AlignItems.Center).Children(
                 Box.New().Width(150).Children(first),
                 Box.New().Width(150).Children(second)));
+    }
+
+
+    /// <summary>
+    /// Drops from other applications, and a drag that leaves for them. Both go through
+    /// WinForms — AllowDrop and DoDragDrop — rather than through SDL, so a HultUI region
+    /// exchanges files with Explorer exactly as the rest of the form does.
+    /// </summary>
+    private Element BuildDragDrop()
+    {
+        var dropped = UiText.New("Nothing dropped yet.").FontSize(13f).AutomationId("drop-result");
+
+        var zone = Box.New().Padding(24).CornerRadius(10f)
+            .Background(Color.FromHex("#EEF2FF"))
+            .BorderWidth(2f).BorderColor(Color.FromHex("#C7D2FE"))
+            .AutomationId("drop-zone")
+            .AccessibleName("File drop zone")
+            .AccessibleRole(AccessibilityRole.Group)
+            .Children(UiText.New("Drop files here").FontSize(15f).FontWeight(FontWeight.Bold));
+
+        zone.OnDragEnter(_ => zone.BackgroundColor = Color.FromHex("#C7D2FE"));
+        zone.OnDragLeave(_ => zone.BackgroundColor = Color.FromHex("#EEF2FF"));
+        zone.OnDragOver(e => e.Accepted = e.DragData.Files.Count > 0);
+        zone.OnDrop(e =>
+        {
+            zone.BackgroundColor = Color.FromHex("#EEF2FF");
+            dropped.Content = e.DragData.Files.Count switch
+            {
+                0 => "Dropped, but with no files.",
+                1 => "Dropped: " + Path.GetFileName(e.DragData.Files[0]),
+                var n => $"Dropped {n} files, first " + Path.GetFileName(e.DragData.Files[0]),
+            };
+        });
+
+        // The other direction: a source that hands this application's own file to the
+        // desktop. DragFilesOut is modal, which is why it belongs in a DragStart handler
+        // — the mouse button is still down and the OS takes over from here.
+        var ownPath = Environment.ProcessPath ?? "";
+        var source = Box.New().Padding(new Thickness(16, 10)).CornerRadius(8f)
+            .Background(Color.FromHex("#0F766E")).TextColor(Color.White)
+            .Cursor(CursorType.Move)
+            .AutomationId("drag-source")
+            .AccessibleName("Drag me to Explorer")
+            .AccessibleRole(AccessibilityRole.Button)
+            .Children(UiText.New("Drag me to Explorer").FontWeight(FontWeight.Bold));
+
+        source.OnDragStart(_ =>
+        {
+            var window = DragDrop.Window;
+            if (window is { CanDragFilesOut: true } && ownPath.Length > 0)
+                window.DragFilesOut([ownPath], DragEffect.Copy);
+        });
+
+        // Reported rather than assumed: an outbound drag is an OLE operation and the
+        // capability says so for itself, so a reader can see whether this build has it.
+        var capability = UiText.New("outbound drag: checking…").FontSize(12f).AutomationId("drag-capability");
+        DragDrop.Mounted += (_, _) =>
+            capability.Content = "outbound drag available: "
+                + (DragDrop.Window?.CanDragFilesOut == true ? "yes" : "no");
+
+        return Flex.Column(gap: 16).Padding(20).Children(
+            UiText.New("Drag and drop").FontSize(19f).FontWeight(FontWeight.Bold),
+            UiText.New("Both directions go through WinForms, not SDL.").FontSize(13f),
+            zone,
+            dropped,
+            source,
+            capability);
     }
 
     /// <summary>A readable spread of hues without pulling in a colour-space helper.</summary>

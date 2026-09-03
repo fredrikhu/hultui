@@ -92,6 +92,50 @@ internal sealed class WinFormsInputTranslator
 
     private char? _pendingHighSurrogate;
 
+    // ──── drops from other applications ────
+
+    /// <summary>
+    /// Announces an incoming drag and hands over its payload.
+    /// </summary>
+    /// <remarks>
+    /// Payload before position, and that order matters: the first position update is
+    /// what runs the hit test and dispatches <c>DragEnter</c>/<c>DragOver</c> to the
+    /// element under the pointer, and a target that inspected the data then would see an
+    /// empty payload if the files had not arrived yet.
+    /// </remarks>
+    internal void EmitDropBegin(IReadOnlyList<string> files, string? text)
+    {
+        _emit(new InputEvent.DropBeginInput());
+        foreach (var path in files) _emit(new InputEvent.DropFileInput(path));
+        if (text is { Length: > 0 }) _emit(new InputEvent.DropTextInput(text));
+    }
+
+    internal void EmitDropPosition(Point clientPosition, KeyModifiers modifiers)
+    {
+        float s = 1f / _scale();
+        _emit(new InputEvent.DropPositionInput(clientPosition.X * s, clientPosition.Y * s, modifiers));
+    }
+
+    internal void EmitDropComplete(KeyModifiers modifiers)
+        => _emit(new InputEvent.DropCompleteInput(modifiers));
+
+    /// <summary>
+    /// Ends a drag that left without dropping.
+    /// </summary>
+    /// <remarks>
+    /// There is no cancel event to send — the framework has none — so the drag is ended
+    /// at a position outside every element. The hit test then finds no target, no
+    /// <c>Drop</c> is dispatched, the last hovered element still gets its
+    /// <c>DragLeave</c>, and the drag state resets. Same shape as the pointer-leave
+    /// handling above, and for the same reason: a control is left far more often than a
+    /// window is.
+    /// </remarks>
+    internal void EmitDropCancelled(KeyModifiers modifiers)
+    {
+        _emit(new InputEvent.DropPositionInput(-1f, -1f, modifiers));
+        _emit(new InputEvent.DropCompleteInput(modifiers));
+    }
+
     internal void EmitHorizontalWheel(int delta, Point clientPosition)
     {
         float s = 1f / _scale();

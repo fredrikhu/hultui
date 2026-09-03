@@ -45,6 +45,12 @@ public class HultUIControl : Control
         // question below is moot.
         SetStyle(ControlStyles.Selectable, true);
         TabStop = true;
+
+        // Drops are on by default, matching the SDL backend, where the OS delivers every
+        // drop and the tree decides what to do with it. Setting AllowDrop needs an STA
+        // thread; WinForms is always STA in practice, and a host that is not gets a
+        // control that renders rather than one that throws on construction.
+        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA) AllowDrop = true;
     }
 
     /// <summary>
@@ -212,6 +218,64 @@ public class HultUIControl : Control
         // has left, which no other control in the form would do.
         _window?.ClearFocus();
         base.OnLostFocus(e);
+    }
+
+    // ──── drops from other applications ────
+
+    /// <summary>
+    /// Announces the payload, then the pointer position — in that order, because the
+    /// position is what runs the hit test and tells the element under the pointer that a
+    /// drag has arrived, and a target inspecting the data then must already see it.
+    /// </summary>
+    protected override void OnDragEnter(DragEventArgs e)
+    {
+        base.OnDragEnter(e);
+        if (_platformWindow is not { } platform) return;
+
+        platform.Input.EmitDropBegin(DragDropInterop.Files(e.Data), DragDropInterop.Text(e.Data));
+        ReportDrag(platform, e);
+    }
+
+    protected override void OnDragOver(DragEventArgs e)
+    {
+        base.OnDragOver(e);
+        if (_platformWindow is { } platform) ReportDrag(platform, e);
+    }
+
+    protected override void OnDragLeave(EventArgs e)
+    {
+        // Left without dropping: end the drag over nothing, so no Drop is dispatched but
+        // the hovered element still gets its DragLeave and the drag state resets.
+        _platformWindow?.Input.EmitDropCancelled(Core.Events.KeyModifiers.None);
+        base.OnDragLeave(e);
+    }
+
+    protected override void OnDragDrop(DragEventArgs e)
+    {
+        if (_platformWindow is { } platform)
+        {
+            ReportDrag(platform, e);
+            platform.Input.EmitDropComplete(
+                DragDropInterop.ToModifiers(DragDropInterop.KeysFrom(e.KeyState)));
+        }
+        base.OnDragDrop(e);
+    }
+
+    /// <summary>
+    /// Forwards the pointer position and claims an effect.
+    /// </summary>
+    /// <remarks>
+    /// The effect has to be claimed for Windows to deliver the drop at all; whether the
+    /// drop is actually taken is still the tree's decision, made when a target sets
+    /// <c>DragOverEvent.Accepted</c>.
+    /// </remarks>
+    private void ReportDrag(WglPlatformWindow platform, DragEventArgs e)
+    {
+        var keys = DragDropInterop.KeysFrom(e.KeyState);
+        platform.Input.EmitDropPosition(
+            PointToClient(new Point(e.X, e.Y)),   // drag events report screen coordinates
+            DragDropInterop.ToModifiers(keys));
+        e.Effect = DragDropInterop.PreferredEffect(e.AllowedEffect, keys);
     }
 
     // ──── handle lifetime: the GL context lives and dies with the HWND ────

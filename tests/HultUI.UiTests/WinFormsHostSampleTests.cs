@@ -166,6 +166,40 @@ public sealed class WinFormsHostSampleTests : IDisposable
         Assert.Equal("b", HostedInput.Read(Find("field-two")));
     }
 
+    // ──── drag and drop ────
+
+    /// <summary>
+    /// Covers what can be covered without an OS drag.
+    /// </summary>
+    /// <remarks>
+    /// An actual drop cannot be automated the way the keyboard is: OLE drag-and-drop
+    /// runs a nested modal loop driven by the physical mouse, and posted messages do not
+    /// enter it. What is checked here is that the capability is really present — the
+    /// framework discovers it by type-testing the platform window for
+    /// <c>INativeDragSource</c>, so a mistake there reports "no" rather than failing
+    /// loudly — and that a lazily created page mounts at all. The drop <em>path</em>
+    /// itself (payload translation, position, effect) is exercised by hand.
+    /// </remarks>
+    [UiFact]
+    public void ALazyTabPage_MountsAndReportsItsDragCapability()
+    {
+        // The page's control has no handle until the tab is first shown, so this also
+        // covers mounting a second HultUI surface long after the first.
+        var tab = _window.FindFirstDescendant(cf => cf.ByName("Drag and drop"))
+            ?? throw new InvalidOperationException("no 'Drag and drop' tab");
+        tab.Click();
+
+        Retry.WhileNull(
+            () => _window.FindFirstDescendant(cf => cf.ByAutomationId("drop-zone")),
+            timeout: TimeSpan.FromSeconds(10),
+            throwOnTimeout: true,
+            timeoutMessage: "the lazily created tab page never mounted");
+
+        Assert.Equal(ControlType.Group, Find("drop-zone").ControlType);
+        Assert.Equal(ControlType.Button, Find("drag-source").ControlType);
+        Assert.Equal("outbound drag available: yes", Find("drag-capability").Name);
+    }
+
     private static void WaitFor(Func<bool> condition, string what)
         => Retry.WhileFalse(condition, timeout: TimeSpan.FromSeconds(5),
             throwOnTimeout: true, timeoutMessage: $"timed out waiting for {what}");

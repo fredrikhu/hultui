@@ -19,7 +19,7 @@ namespace HultUI.WinForms;
 /// procedure — which is the right relationship for a control living inside someone
 /// else's form.</para>
 /// </summary>
-internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle
+internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, INativeDragSource
 {
     private readonly HultUIControl _control;
     private readonly SkiaGLRenderSurface _surface;
@@ -179,6 +179,40 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle
     public void SetIcon(int width, int height, ReadOnlySpan<byte> rgbaPixels) { }
 
     public void SetCursor(CursorType cursor) => _control.Cursor = CursorMap.ToWinForms(cursor);
+
+    // ──── outbound drag (INativeDragSource) ────
+
+    /// <summary>
+    /// True when this control can start a drag other applications will see.
+    /// </summary>
+    /// <remarks>
+    /// An outbound drag is an OLE operation, and OLE will not initialise on an MTA
+    /// thread. WinForms requires STA for its own reasons, so this is all but always
+    /// true — but reporting the capability honestly lets an app hide a drag affordance
+    /// rather than offer one that quietly does nothing.
+    /// </remarks>
+    public bool CanDragFiles =>
+        !_disposed
+        && _control.IsHandleCreated
+        && Thread.CurrentThread.GetApartmentState() == ApartmentState.STA;
+
+    /// <summary>
+    /// Offers files to the rest of the desktop, blocking until the drop resolves.
+    /// </summary>
+    /// <remarks>
+    /// <c>DoDragDrop</c> runs a nested modal loop that owns the mouse until the button
+    /// comes up, so no frame renders while it is running — the framework documents this
+    /// and calls it from a DragStart handler, while the button is still down.
+    /// </remarks>
+    public DragEffect DragFiles(IReadOnlyList<string> paths, DragEffect allowed)
+    {
+        if (!CanDragFiles || paths.Count == 0) return DragEffect.None;
+
+        var payload = new DataObject();
+        payload.SetData(DataFormats.FileDrop, true, paths.ToArray());
+        var result = _control.DoDragDrop(payload, DragDropInterop.ToWinForms(allowed));
+        return DragDropInterop.ToFramework(result);
+    }
 
     public string? DescribeGraphics()
         => $"wgl hwnd=0x{Hwnd:X} {_pixelWidth}x{_pixelHeight}px scale={DisplayScale:0.##} " +
