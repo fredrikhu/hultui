@@ -28,6 +28,8 @@
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\HultUI.Samples.VirtualList\HultUI.Samples.VirtualList.csproj"
                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\HultUI.Samples.WinFormsHost\HultUI.Samples.WinFormsHost.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

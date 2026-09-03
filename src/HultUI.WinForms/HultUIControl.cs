@@ -164,6 +164,25 @@ public class HultUIControl : Control
         base.OnPreviewKeyDown(e);
     }
 
+    /// <summary>
+    /// Takes keyboard focus when clicked, the way every other control in the form does.
+    /// </summary>
+    /// <remarks>
+    /// Not free. WinForms gives a control focus on mouse-down by letting
+    /// <c>DefWindowProc</c> do it, and <c>DefWindowProc</c> does not focus a custom-painted
+    /// child window — so without this the control renders and handles pointer input while
+    /// never holding Win32 focus. The visible symptom is subtle and specific: clicking
+    /// into the tree works, typing works (a posted <c>WM_CHAR</c> reaches the window
+    /// procedure regardless), and then Tab does nothing, because the form's dialog-key
+    /// routing starts at the focused control and never reaches
+    /// <see cref="ProcessDialogKey"/>.
+    /// </remarks>
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (CanFocus && !Focused) Focus();
+        base.OnMouseDown(e);
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         _platformWindow?.Input.EmitKey(e.KeyData, isDown: true, isRepeat: false);

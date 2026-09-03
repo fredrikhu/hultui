@@ -56,24 +56,38 @@ internal sealed class MainForm : Form
         grid.Columns.Add("part", "Part");
         grid.Columns.Add("owner", "Owned by");
         grid.Rows.Add("Menu, grid, status bar", "WinForms");
-        grid.Rows.Add("The two panels on the right", "HultUI");
+        grid.Rows.Add("The first two tabs on the right", "HultUI");
         grid.Rows.Add("Focus, tab order, the message loop", "WinForms");
-        grid.Rows.Add("Layout, painting, hit-testing inside a panel", "HultUI");
+        grid.Rows.Add("Layout, painting, hit-testing inside a tab", "HultUI");
 
         Counter = new HultUIControl { Name = "counter", Dock = DockStyle.Fill, RootFactory = BuildCounter };
         Counter.Mounted += (_, _) => UpdateStatus();
 
         Palette = new HultUIControl { Name = "palette", Dock = DockStyle.Fill, RootFactory = BuildPalette };
 
-        _hultUiSide = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
-        var hultUiSide = _hultUiSide;
-        hultUiSide.Panel1.Controls.Add(Counter);
-        hultUiSide.Panel2.Controls.Add(Palette);
+        // Tabs are the migration shape: a page at a time moves to HultUI while the rest
+        // stays as it was. The palette page also proves the lazy case — a TabControl does
+        // not create a page's handle until the page is first shown, so that control mounts
+        // long after the first one.
+        var tabs = new TabControl { Name = "tabs", Dock = DockStyle.Fill };
+        var migrated = new TabPage("Migrated") { Name = "tab-migrated" };
+        migrated.Controls.Add(Counter);
+        var paletteTab = new TabPage("Also migrated") { Name = "tab-palette" };
+        paletteTab.Controls.Add(Palette);
+        var legacy = new TabPage("Not yet") { Name = "tab-legacy", Padding = new Padding(12) };
+        legacy.Controls.Add(new CheckBox
+        {
+            Name = "legacy-check",
+            Text = "An ordinary WinForms page, untouched",
+            AutoSize = true,
+            Location = new System.Drawing.Point(12, 12),
+        });
+        tabs.TabPages.AddRange([migrated, paletteTab, legacy]);
 
         _split = new SplitContainer { Dock = DockStyle.Fill };
         var split = _split;
         split.Panel1.Controls.Add(grid);
-        split.Panel2.Controls.Add(hultUiSide);
+        split.Panel2.Controls.Add(tabs);
 
         Controls.Add(split);
         Controls.Add(_status);
@@ -81,27 +95,26 @@ internal sealed class MainForm : Form
     }
 
     private readonly SplitContainer _split;
-    private readonly SplitContainer _hultUiSide;
 
     private HultUIControl Counter { get; }
     private HultUIControl Palette { get; }
 
     /// <summary>
-    /// Splitter positions are set here, not in the constructor: a SplitContainer clamps
-    /// SplitterDistance to the size it has at the time, and before layout that is not
-    /// the size it ends up with.
+    /// The splitter position is set here, not in the constructor: a SplitContainer clamps
+    /// SplitterDistance to the size it has at the time, and before layout that is not the
+    /// size it ends up with.
     /// </summary>
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
         _split.SplitterDistance = (int)(_split.Width * 0.42f);
-        _hultUiSide.SplitterDistance = (int)(_hultUiSide.Height * 0.45f);
     }
 
     private void Zoom(float by)
     {
         Counter.UserScale = Math.Clamp(Counter.UserScale + by, 0.5f, 3f);
-        Palette.UserScale = Counter.UserScale;
+        // Only if its page has been shown: an unmounted control has no window to scale.
+        if (Palette.Window is not null) Palette.UserScale = Counter.UserScale;
         UpdateStatus();
     }
 
@@ -139,7 +152,7 @@ internal sealed class MainForm : Form
 
         return Flex.Column(gap: 14).Padding(20).Children(
             UiText.New("Pointer and keyboard").FontSize(19f).FontWeight(FontWeight.Bold),
-            UiText.New("Tab in from the grid, through these, and out to the palette.")
+            UiText.New("Tab in from the grid, through these, and out to the tab strip.")
                 .FontSize(13f),
             Flex.Row(gap: 14).AlignItems(AlignItems.Center).Children(button, label),
             Flex.Row(gap: 10).AlignItems(AlignItems.Center).Children(

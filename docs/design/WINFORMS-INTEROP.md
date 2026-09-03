@@ -393,10 +393,34 @@ the escape hatch; not needed for the first cut.
    its cue to move on. Six tests in `FocusBoundaryTests` pin both behaviours.
 5. **Clipboard, file dialogs, drag & drop** over their WinForms equivalents.
    (~1 day)
-6. **A sample** under `samples/` — a form with a menu strip, a `DataGridView`, and
-   a `HultUIControl` filling a tab page, which is the actual migration shape — and
-   with it, experiment F's FlaUI probe promoted into `tests/HultUI.UiTests` so the
-   embedded tree cannot silently lose accessibility.
+6. ~~**A sample**, and experiment F's FlaUI probe promoted into
+   `tests/HultUI.UiTests`.~~ **Done.** `HultUI.Samples.WinFormsHost` is a form with a
+   menu strip and a `DataGridView` beside a `TabControl` whose first two pages are
+   `HultUIControl`s and whose third is untouched WinForms — a page at a time, which is
+   the shape a migration actually takes. The palette page also covers the lazy case: a
+   `TabControl` does not create a page's handle until it is first shown, so that control
+   mounts long after the first.
+
+   `WinFormsHostSampleTests` (7 tests, behind the same `HULTUI_UITESTS` gate as the
+   other real-window suites) drives it as a UI Automation client: the tree is readable,
+   `Invoke` reaches the handler, bounds are real screen coordinates, the host's own
+   `DataGridView` and `TabControl` are still in the tree beside it, typing lands,
+   Backspace takes the key path rather than the text path, and Tab moves through the
+   tree and then out of it.
+
+   Input is **posted** to the control's handle rather than synthesised: a posted message
+   is dispatched by the application's own loop, which is the path a real keystroke takes,
+   without moving the developer's mouse or needing to win a race for the physical input
+   queue. The handle comes from UI Automation — HultUI's own providers report no native
+   handle, so the first ancestor that does is the hosting control.
+
+   **The suite earned its place immediately.** It found that clicking a `HultUIControl`
+   never gave it Win32 focus: WinForms grants focus on mouse-down by deferring to
+   `DefWindowProc`, which does not focus a custom-painted child window. Everything looked
+   fine — the control rendered, clicks worked, typing worked, because a posted `WM_CHAR`
+   reaches the window procedure regardless — and only Tab was dead, because the form's
+   dialog-key routing starts at the focused control and never reached
+   `ProcessDialogKey`. `HultUIControl.OnMouseDown` now focuses explicitly.
 
 Step 1 is worth doing regardless of whether the control ships: a public frame step
 serves any host loop — a game loop, a plugin inside another application, a test
