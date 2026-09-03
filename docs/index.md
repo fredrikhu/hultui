@@ -32,3 +32,5 @@ applications built on it, and nothing about its API is stable yet.
   the things that were measured and then declined.
 - **[Packaging](PACKAGING.md)** — what ships, and what has to happen before
   anything is published.
+- **[WinForms interop](design/WINFORMS-INTEROP.md)** — hosting HultUI inside a
+  WinForms application, spiked and costed.

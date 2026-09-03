@@ -44,5 +44,7 @@
       href: ACCESSIBILITY-PLAN.md
     - name: Self-hosted runners
       href: SELF-HOSTED-RUNNERS.md
+    - name: WinForms interop
+      href: design/WINFORMS-INTEROP.md
 - name: API
   href: api/toc.yml
