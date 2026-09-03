@@ -470,7 +470,7 @@ public abstract class Element
 
     /// <summary>
     /// The list to mutate for <paramref name="type"/>, copied first if a dispatch is walking
-    /// it. Copy-on-write is what lets <see cref="InvokeHandlers"/> iterate the live list with
+    /// it. Copy-on-write is what lets <see cref="RunHandlers"/> iterate the live list with
     /// no per-event snapshot: pointer storms and drags dispatch continuously, and that
     /// snapshot was the highest-frequency allocation in the framework.
     /// </summary>
@@ -535,6 +535,28 @@ public abstract class Element
     internal IEnumerable<string> HandlerEventNames =>
         _handlers is null ? [] : _handlers.Keys.Select(static t => t.Name);
 
+    /// <summary>
+    /// Hold this element's handler lists still, and hand back the one for
+    /// <paramref name="eventType"/> — null when nothing listens for it. While pinned,
+    /// anything that changes a list replaces the instance instead of mutating it, so the
+    /// returned list keeps exactly the handlers that were attached at this moment, whatever
+    /// a rebuild does to the element in the meantime.
+    ///
+    /// <para><see cref="EventDispatcher.Dispatch"/> pins the whole path up front, which is
+    /// what makes "the handlers that were live when the event was dispatched" true for the
+    /// ancestors as well as for the element in flight. Always paired with
+    /// <see cref="UnpinHandlers"/> in a finally.</para>
+    /// </summary>
+    internal List<EventHandlerEntry>? PinHandlers(Type eventType)
+    {
+        _dispatchDepth++;
+        if (_handlers is null) return null;
+        return _handlers.TryGetValue(eventType, out var list) ? list : null;
+    }
+
+    /// <summary>Releases one <see cref="PinHandlers"/>.</summary>
+    internal void UnpinHandlers() => _dispatchDepth--;
+
     internal void InvokeHandlers(ElementEvent evt, EventPhase phase)
     {
         if (_handlers is null) return;
@@ -547,27 +569,44 @@ public abstract class Element
         _dispatchDepth++;
         try
         {
-            for (int i = 0; i < list.Count; i++)
-            {
-                var entry = list[i];
-                if (entry.Phase != phase && phase != EventPhase.Target)
-                    continue;
-
-                // Only handlers that may mutate without marking count toward the input
-                // pipeline's "a handler ran, render a frame" safety net. Owned handlers
-                // are the framework's own machinery and passive ones have promised to
-                // mark dirty themselves — counting either turns a high-frequency no-op
-                // listener (a drag tracker on a surface root) into a full frame per
-                // pointer move over an idle window.
-                if (!entry.Owned && !entry.Passive)
-                    EventDispatcher.HandlerInvocationCount++;
-                entry.Handler(evt);
-                if (evt.StopPropagation) break;
-            }
+            RunHandlers(evt, phase, list);
         }
         finally
         {
             _dispatchDepth--;
+        }
+    }
+
+    /// <summary>
+    /// Runs the handlers a caller already pinned (see <see cref="PinHandlers"/>), which is
+    /// how a bubbling dispatch reaches an ancestor: the list is the one that ancestor had
+    /// when the event started, not whatever an earlier handler in the same walk rebuilt it
+    /// into.
+    /// </summary>
+    internal void InvokeHandlers(ElementEvent evt, EventPhase phase, List<EventHandlerEntry>? pinned)
+    {
+        if (pinned is not null)
+            RunHandlers(evt, phase, pinned);
+    }
+
+    private void RunHandlers(ElementEvent evt, EventPhase phase, List<EventHandlerEntry> list)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            var entry = list[i];
+            if (entry.Phase != phase && phase != EventPhase.Target)
+                continue;
+
+            // Only handlers that may mutate without marking count toward the input
+            // pipeline's "a handler ran, render a frame" safety net. Owned handlers
+            // are the framework's own machinery and passive ones have promised to
+            // mark dirty themselves — counting either turns a high-frequency no-op
+            // listener (a drag tracker on a surface root) into a full frame per
+            // pointer move over an idle window.
+            if (!entry.Owned && !entry.Passive)
+                EventDispatcher.HandlerInvocationCount++;
+            entry.Handler(evt);
+            if (evt.StopPropagation) break;
         }
     }
 

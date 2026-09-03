@@ -509,6 +509,18 @@ and benchmark work.
   then *replaced* rather than patched — losing focus, caret and scroll. Adding one key to
   Junction's commit composer left the summary field discarding everything typed after the
   first character. Key every sibling, or none.
+- **An event runs the handlers that were live when it was dispatched.** `Dispatch` pins
+  each element on the path (`Element.PinHandlers`) before the walk starts, because the path
+  is *elements* and reconciliation keeps an element while changing what it is: a handler
+  that marks dirty can have an ancestor still to be bubbled through patched into something
+  else entirely, and reading its handler list at invoke time then ran the new build's
+  handlers. That is how one click both added a row and deleted it — Meridian's "add
+  assertion" starter ran `AddAssert`, the rebuild patched the button's parent into the new
+  row's ✕, and the same click bubbled into `RemoveAssert`. A corollary worth knowing: a
+  handler attached to an ancestor mid-dispatch does not run for the event that attached it.
+  Reachable in any all-unkeyed list, since `ReconcileIndexed` patches by position. Dispatch
+  cost is at parity: the path and the pinned lists are pooled, which pays for itself — the
+  old path `List<Element>` grew 4→8→16→32 on a deep tree.
 - **Inside `HultUI.*`, bare `Text` binds to the `HultUI.Text` namespace**, not the
   builder — alias `using Text = HultUI.Core.Builders.Text;` inside the namespace.
 - **`grep "warning CS"` does not match `warning CA1416`** — platform-analyzer warnings
