@@ -167,24 +167,54 @@ internal static class TreeDiffer
             parent.AddChild(newChildren[i]);
     }
 
+    /// <summary>
+    /// Keys identify children across builds; the children without one are still matched by
+    /// position, against the unkeyed old children in order — what <see cref="ReconcileIndexed"/>
+    /// does, counting only the unkeyed slots.
+    ///
+    /// <para>Matching by key alone made every unkeyed child a new element on every pass, so
+    /// one keyed sibling quietly rebuilt the whole row it sat in and threw away that row's
+    /// live element state. Focus is the visible half: a text field beside a keyed toggle
+    /// button lost the keyboard on each keystroke, because the field being typed into no
+    /// longer existed by the time the frame drew. "Key all the siblings or none" was the
+    /// rule that fell out of it, and this is that rule not being needed.</para>
+    /// </summary>
     private static void ReconcileKeyed(Element parent, Element[] oldChildren, Element[] newChildren)
     {
         var oldByKey = new Dictionary<string, Element>();
+        // Left null for a fully keyed list — the common shape, and the hot one: a virtualized
+        // list re-keys hundreds of rows per rebuild and has no unkeyed child to collect.
+        List<Element>? oldUnkeyed = null;
         foreach (var old in oldChildren)
         {
             if (old.Key is not null)
                 oldByKey[old.Key] = old;
+            else
+                (oldUnkeyed ??= []).Add(old);
         }
 
         var resultChildren = new List<Element>(newChildren.Length);
+        int unkeyedAt = 0;
 
         foreach (var incoming in newChildren)
         {
             Element? matched = null;
 
-            if (incoming.Key is not null && oldByKey.TryGetValue(incoming.Key, out var byKey) && CanPatch(byKey, incoming))
+            if (incoming.Key is not null)
             {
-                matched = byKey;
+                if (oldByKey.TryGetValue(incoming.Key, out var byKey) && CanPatch(byKey, incoming))
+                    matched = byKey;
+            }
+            else
+            {
+                // A key never matches an unkeyed child, so a leftover old keyed element is
+                // dropped rather than reused here — position is not what it was identified
+                // by. The slot is consumed either way, a type mismatch included, so one
+                // replacement in the middle does not shift everything after it.
+                if (oldUnkeyed is not null && unkeyedAt < oldUnkeyed.Count
+                    && CanPatch(oldUnkeyed[unkeyedAt], incoming))
+                    matched = oldUnkeyed[unkeyedAt];
+                unkeyedAt++;
             }
 
             if (matched is not null)

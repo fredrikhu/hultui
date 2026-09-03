@@ -196,6 +196,81 @@ public class TreeDifferTests
         Assert.Equal("b", existing.Children[1].Key); // "b" is new
     }
 
+    /// <summary>A row where one child carries a key and the rest do not — a toolbar with a
+    /// keyed toggle button in it. The unkeyed children are matched by position, so they are
+    /// patched rather than rebuilt: rebuilding them threw away live element state, which is
+    /// how a search field beside a keyed button lost the keyboard on every keystroke.
+    /// </summary>
+    [Fact]
+    public void Keyed_UnkeyedSiblingsAreMatchedByPosition()
+    {
+        var parent = Box.New();
+        var first = Box.New();
+        var toggle = Box.New(); toggle.Key = "toggle";
+        var field = Box.New();
+        var existing = Box.New().Children(first, toggle, field);
+        parent.AddChild(existing);
+
+        var newToggle = Box.New().Background(Color.Red); newToggle.Key = "toggle";
+        var incoming = Box.New().Children(Box.New(), newToggle, Box.New().Width(50));
+
+        TreeDiffer.Reconcile(parent, existing, incoming);
+
+        Assert.Equal(3, existing.Children.Count);
+        Assert.Same(first, existing.Children[0]);
+        Assert.Same(toggle, existing.Children[1]);
+        Assert.Same(field, existing.Children[2]);
+        Assert.Equal(Dimension.Px(50), field.Box.Width);   // patched, not replaced
+    }
+
+    /// <summary>Changing a key still replaces that child — the apps use it to force a
+    /// rebuild when an element's two states cannot be patched into one another — and the
+    /// unkeyed siblings around it are untouched by that.</summary>
+    [Fact]
+    public void Keyed_ChangedKeyReplacesOnlyThatChild()
+    {
+        var parent = Box.New();
+        var before = Box.New();
+        var toggle = Box.New(); toggle.Key = "toggle#off";
+        var after = Box.New();
+        var existing = Box.New().Children(before, toggle, after);
+        parent.AddChild(existing);
+
+        var newToggle = Box.New(); newToggle.Key = "toggle#on";
+        var incoming = Box.New().Children(Box.New(), newToggle, Box.New());
+
+        TreeDiffer.Reconcile(parent, existing, incoming);
+
+        Assert.Same(before, existing.Children[0]);
+        Assert.NotSame(toggle, existing.Children[1]);
+        Assert.Equal("toggle#on", existing.Children[1].Key);
+        Assert.Same(after, existing.Children[2]);
+    }
+
+    /// <summary>An unkeyed child appearing mid-row (the ✕ that shows up once a query is
+    /// typed) consumes a new position rather than shifting the ones before it.</summary>
+    [Fact]
+    public void Keyed_UnkeyedInsertKeepsEarlierSiblings()
+    {
+        var parent = Box.New();
+        var icon = Box.New();
+        var field = Box.New();
+        var toggle = Box.New(); toggle.Key = "toggle";
+        var existing = Box.New().Children(icon, field, toggle);
+        parent.AddChild(existing);
+
+        var newToggle = Box.New(); newToggle.Key = "toggle";
+        var incoming = Box.New().Children(Box.New(), Box.New(), Box.New(), newToggle);
+
+        TreeDiffer.Reconcile(parent, existing, incoming);
+
+        Assert.Equal(4, existing.Children.Count);
+        Assert.Same(icon, existing.Children[0]);
+        Assert.Same(field, existing.Children[1]);
+        Assert.NotSame(icon, existing.Children[2]);
+        Assert.Same(toggle, existing.Children[3]);
+    }
+
     [Fact]
     public void Nested_RecursivePatching()
     {

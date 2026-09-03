@@ -103,15 +103,17 @@ public class MiddleClickAutoScrollTests
 
 
     /// <summary>
-    /// The gesture survives the pane rebuilding under it, keeping its place.
-    /// <para>A rebuild here <i>replaces</i> the list rather than patching it, and a replaced
-    /// element is dropped from the tree without being marked detached — so it goes on looking
-    /// alive. The window used to keep scrolling that corpse while the pane sat still. The
-    /// earlier tests in this file only passed because no rebuild happened to land inside their
-    /// short gestures; this one forces it.</para>
+    /// The gesture survives the pane rebuilding under it, keeping its place. The earlier tests
+    /// in this file only passed because no rebuild happened to land inside their short
+    /// gestures; this one forces one.
+    /// <para>The pane's list is <i>patched</i> across that rebuild — it used to be replaced,
+    /// because a keyed sibling in the pane made the reconciler rebuild every unkeyed one, and
+    /// the window kept scrolling the dropped element while the pane sat still. Replacement is
+    /// still reachable (a changed type or key), and the re-acquisition that answers it is
+    /// covered where it lives, in <c>HultUI.Headless.Tests.MiddleClickAutoScrollTests</c>.</para>
     /// </summary>
     [Fact]
-    public void ItKeepsScrollingAcrossARebuildThatReplacesTheList()
+    public void ItKeepsScrollingAcrossARebuildOfTheList()
     {
         Hosted(fileCount: 400, (session, app, root) =>
         {
@@ -127,8 +129,9 @@ public class MiddleClickAutoScrollTests
             var before = FileList(session);
             Invoke(app, "MarkDirty");
             PumpFor(session, 0.4);
-            Assert.False(ReferenceEquals(before, FileList(session)),
-                "the rebuild patched the list — this no longer covers the replacement path");
+            Assert.True(ReferenceEquals(before, FileList(session)),
+                "the rebuild replaced the pane's list rather than patching it — a keyed "
+                + "sibling is the usual cause, and it costs the list its scroll and selection");
 
             Assert.True(FileList(session).ScrollOffsetY > early,
                 $"the scroll stopped at {FileList(session).ScrollOffsetY:0} after the rebuild "

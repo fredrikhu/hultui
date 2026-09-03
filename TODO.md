@@ -504,11 +504,15 @@ and benchmark work.
   straight through the bug. `LayoutProbe.DrawnText(label).Height` is the clamped one; summing
   the element's `_lines` is not. Two tests written the first way were green against provably
   broken code.
-- **Keys among siblings are all-or-nothing.** A single keyed child in an otherwise unkeyed
-  child list makes the reconciler match that whole list by key, and the unkeyed siblings are
-  then *replaced* rather than patched — losing focus, caret and scroll. Adding one key to
-  Junction's commit composer left the summary field discarding everything typed after the
-  first character. Key every sibling, or none.
+- **Keys among siblings used to be all-or-nothing** — fixed 2026-09-02, and worth knowing
+  because the workaround is still visible in the apps. A single keyed child made the
+  reconciler match its whole child list by key, so every unkeyed sibling was *replaced*
+  rather than patched and lost focus, caret and scroll: one key on Junction's commit
+  composer left the summary field discarding everything typed after the first character,
+  and the History include bar cost its `/` filter the same way. `ReconcileKeyed` now matches
+  the unkeyed children by position among themselves, the way `ReconcileIndexed` does, so
+  keys can be added one at a time again. The keys added to those two bars to work around it
+  are harmless and still correct; nothing needs unpicking.
 - **An event runs the handlers that were live when it was dispatched.** `Dispatch` pins
   each element on the path (`Element.PinHandlers`) before the walk starts, because the path
   is *elements* and reconciliation keeps an element while changing what it is: a handler
@@ -518,9 +522,12 @@ and benchmark work.
   assertion" starter ran `AddAssert`, the rebuild patched the button's parent into the new
   row's ✕, and the same click bubbled into `RemoveAssert`. A corollary worth knowing: a
   handler attached to an ancestor mid-dispatch does not run for the event that attached it.
-  Reachable in any all-unkeyed list, since `ReconcileIndexed` patches by position. Dispatch
-  cost is at parity: the path and the pinned lists are pooled, which pays for itself — the
-  old path `List<Element>` grew 4→8→16→32 on a deep tree.
+  Found 2026-09-02 by the differ change above, which is what turned a latent bug into two
+  failing app tests — Meridian's assertion starters and Junction's repo drag-reorder. It was
+  reachable before that in any all-unkeyed list, just harder to hit. Measured on both: event
+  dispatch is at parity (the path and the pinned lists are pooled, which pays for itself —
+  the old path `List<Element>` grew 4→8→16→32 on a deep tree), and a keyed reconcile of 500
+  rows costs ~3% more.
 - **Inside `HultUI.*`, bare `Text` binds to the `HultUI.Text` namespace**, not the
   builder — alias `using Text = HultUI.Core.Builders.Text;` inside the namespace.
 - **`grep "warning CS"` does not match `warning CA1416`** — platform-analyzer warnings

@@ -226,6 +226,40 @@ public class MiddleClickAutoScrollTests
         Assert.True(scroll.ScrollOffsetY > 0);
     }
 
+    /// <summary>
+    /// The gesture survives the view it captured being <i>replaced</i> rather than patched —
+    /// a rebuild that swaps the element rather than reusing it. A replaced element is dropped
+    /// from the tree without being marked detached, so it goes on looking alive: the window
+    /// kept scrolling that corpse while the view on screen sat still. It re-acquires whatever
+    /// scrollable now sits under the pointer and carries the offset across.
+    /// </summary>
+    [Fact]
+    public void AReplacedViewMidGestureIsReAcquiredRatherThanScrolledAsACorpse()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var (captured, _) = BuildList(session);
+
+        session.Window.MouseDown(100, 50, MouseButton.Middle);
+        session.Window.MoveMouse(100, 80);
+        Pump(session, 0.25);
+        Assert.True(captured.ScrollOffsetY > 0, "it never started scrolling");
+
+        // A whole new tree in the same shape: the element the press captured is no longer
+        // the one on screen, and nothing told it so.
+        var (live, _) = BuildList(session);
+        Assert.NotSame(captured, live);
+        Pump(session, 0.25);
+
+        Assert.True(live.ScrollOffsetY > 0, "the gesture did not find the view that replaced it");
+        // The discriminating half: without re-acquisition the offset keeps climbing on the
+        // element nobody can see, and the live one never leaves zero.
+        Assert.True(live.ScrollOffsetY > captured.ScrollOffsetY,
+            $"the scroll stayed on the replaced view (live {live.ScrollOffsetY:0}, "
+            + $"captured {captured.ScrollOffsetY:0})");
+
+        session.Window.MouseUp(100, 80, MouseButton.Middle);
+    }
+
     // ── Opting out, and lists with nowhere to go ─────────────────────────
 
     [Fact]
