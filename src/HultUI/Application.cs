@@ -201,7 +201,78 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>
-    /// Runs the application event loop until all windows are closed.
+    /// Whether the application still has work to do: no quit has been requested and
+    /// at least one of its own windows is open. <see cref="Run"/> loops on this, and
+    /// a host driving <see cref="RunFrame"/> from its own message loop uses it to
+    /// decide when to stop.
+    /// </summary>
+    /// <remarks>
+    /// The DevTools window is excluded deliberately: once the app's own windows are
+    /// gone there is nothing left to inspect, and an inspector left open would
+    /// otherwise keep a closed application running.
+    /// </remarks>
+    public bool IsRunning => !_quitRequested && _windows.Any(w => w.IsOpen && !w.IsDevToolsWindow);
+
+    /// <summary>
+    /// Runs one frame: pumps native events, applies pending resizes and activations,
+    /// drains work posted from background threads (and <c>await</c> continuations),
+    /// ticks animations, and renders every window that needs a frame. Returns true
+    /// when any window rendered.
+    ///
+    /// <para>This is the whole of <see cref="Run"/>'s loop body, exposed for hosts
+    /// that own their own message loop — a WinForms or WPF application embedding
+    /// HultUI, a game loop, a test harness. Such a host calls this once per tick and
+    /// watches <see cref="IsRunning"/> to know when to stop; it must <em>not</em>
+    /// call <see cref="Run"/>, which would block on a loop of its own.</para>
+    ///
+    /// <para>Nothing here waits: an idle frame returns immediately having rendered
+    /// nothing, and parking the thread until the next event is the caller's policy.
+    /// <see cref="Run"/> parks for ~16 ms; a host with its own timer or idle handler
+    /// does whatever suits it.</para>
+    ///
+    /// <para>Dirty tracking is respected, so an idle UI costs a walk and no drawing.
+    /// Pass <paramref name="forceRender"/> to render regardless — a host that must
+    /// repaint on demand (a <c>WM_PAINT</c> after occlusion, where the back buffer's
+    /// contents are undefined) needs it, and so does golden-image capture.</para>
+    /// </summary>
+    /// <param name="delta">Time since the previous frame, for animation.</param>
+    /// <param name="forceRender">Render every open window even when nothing is dirty.</param>
+    public bool RunFrame(TimeSpan delta, bool forceRender = false)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Poll and route all native events. A platform asking to quit ends the frame
+        // here, before anything touches a tree the platform may already have torn down.
+        if (!_platform.PumpEvents(onWindowClose: OnWindowCloseRequested))
+        {
+            _quitRequested = true;
+            return false;
+        }
+
+        ProcessPendingResizes();
+        ProcessPendingActivations();
+
+        // Drain actions posted from background threads
+        DrainMainThreadQueue();
+
+        // Tick animations (marks elements dirty as needed)
+        AnimationManager.Tick((float)delta.TotalSeconds);
+
+        // Run any inspector refresh its rate limit deferred, so the panel still
+        // catches up after the inspected window goes idle mid-interval.
+        _inspectorHost?.Tick();
+
+        bool anyRendered = RenderDirtyWindows(forceRender);
+
+        // Clean up closed windows
+        CleanupClosedWindows();
+
+        return anyRendered;
+    }
+
+    /// <summary>
+    /// Runs the application event loop until all windows are closed. A host that owns
+    /// its own message loop drives <see cref="RunFrame"/> instead.
     /// </summary>
     public void Run()
     {
@@ -212,49 +283,17 @@ public sealed class Application : IDisposable
 
         var frameStopwatch = Stopwatch.StartNew();
 
-        // The DevTools window is excluded from the liveness test: once the app's own
-        // windows are gone there is nothing left to inspect, and an inspector left
-        // open would otherwise keep a closed application running.
-        while (!_quitRequested && _windows.Any(w => w.IsOpen && !w.IsDevToolsWindow))
+        while (IsRunning)
         {
-            // Delta time
-            float deltaSeconds = (float)frameStopwatch.Elapsed.TotalSeconds;
+            var delta = frameStopwatch.Elapsed;
             frameStopwatch.Restart();
 
-            // Poll and route all native events
-            bool alive = _platform.PumpEvents(onWindowClose: w => OnWindowCloseRequested(w));
-
-            if (!alive)
-            {
-                _quitRequested = true;
-                break;
-            }
-
-            ProcessPendingResizes();
-            ProcessPendingActivations();
-
-            // Drain actions posted from background threads
-            DrainMainThreadQueue();
-
-            // Tick animations (marks elements dirty as needed)
-            AnimationManager.Tick(deltaSeconds);
-
-            // Run any inspector refresh its rate limit deferred, so the panel still
-            // catches up after the inspected window goes idle mid-interval.
-            _inspectorHost?.Tick();
-
-            // Render any dirty windows
-            bool anyRendered = RenderDirtyWindows(force: false);
-
-            // Animations that changed something visible marked it dirty in Tick
-            // above and rendered this iteration (anyRendered). One that didn't
-            // (a pure delay, e.g. the tooltip show timer) only needs ~60Hz ticks,
-            // so wait instead of busy-spinning until it fires.
-            if (!anyRendered)
+            // Animations that changed something visible marked it dirty during the
+            // frame and rendered in it. One that didn't (a pure delay, e.g. the
+            // tooltip show timer) only needs ~60Hz ticks, so wait instead of
+            // busy-spinning until it fires.
+            if (!RunFrame(delta))
                 _platform.WaitForEvents(16);
-
-            // Clean up closed windows
-            CleanupClosedWindows();
         }
     }
 
@@ -275,7 +314,7 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>Relayouts windows whose platform reported a resize, honoring the throttle.</summary>
-    internal void ProcessPendingResizes()
+    private void ProcessPendingResizes()
     {
         foreach (var window in _windows)
         {
@@ -297,7 +336,7 @@ public sealed class Application : IDisposable
     /// <summary>Raises <see cref="Window.Activated"/> for windows the platform reported as
     /// newly foregrounded. Runs before the main-thread queue drains, so a handler that posts
     /// work gets it picked up in the same frame rather than the next one.</summary>
-    internal void ProcessPendingActivations()
+    private void ProcessPendingActivations()
     {
         foreach (var window in _windows)
         {
@@ -308,7 +347,7 @@ public sealed class Application : IDisposable
     }
 
     /// <summary>Runs actions posted from background threads and await continuations.</summary>
-    internal void DrainMainThreadQueue()
+    private void DrainMainThreadQueue()
     {
         while (_mainThreadQueue.TryDequeue(out var action))
             action();
@@ -348,7 +387,7 @@ public sealed class Application : IDisposable
         window?.NotifyClosed();
     }
 
-    internal void CleanupClosedWindows()
+    private void CleanupClosedWindows()
     {
         for (int i = _windows.Count - 1; i >= 0; i--)
         {

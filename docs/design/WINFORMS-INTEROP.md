@@ -213,22 +213,41 @@ gains two small seams, neither of which mentions WinForms.
 
 ### Framework changes (the whole list)
 
-**1. A public frame step.**
+**1. A public frame step. — Implemented.**
 
 ```csharp
-/// <summary>
-/// Runs one frame: pumps native events, drains posted work and await
-/// continuations, ticks animations, renders every window that needs it.
-/// Returns false once no application window is open. For hosts that own
-/// their own message loop; Run() is a loop over this.
-/// </summary>
-public bool RunFrame(TimeSpan delta);
+/// Whether the application still has work to do: no quit requested and at least
+/// one of its own windows open. A host watches this to know when to stop.
+public bool IsRunning { get; }
+
+/// Runs one frame — pump, resizes, activations, posted work, animations, render.
+/// Returns true when any window rendered. Nothing here waits: parking the thread
+/// until the next event is the caller's policy.
+public bool RunFrame(TimeSpan delta, bool forceRender = false);
 ```
 
-`Run()` becomes a loop over `RunFrame` plus its idle `WaitForEvents` — which a
-host must *not* inherit, since parking the thread is the host loop's business.
-`HeadlessSession.PumpFrame` collapses into the same call, so the two frame
-sequences can no longer drift apart. Strictly required.
+Two members rather than the one this document first proposed. Liveness and
+"did anything render" are different questions and a host needs both — the first
+to decide when to stop, the second to decide whether to idle — so folding them
+into one return value would have forced a struct or an out parameter for no gain.
+
+`forceRender` was not in the original sketch either. A host needs it: after
+occlusion a `WM_PAINT` arrives with the GL back buffer's contents undefined, and
+it must be redrawn even though nothing in the tree is dirty.
+
+`Run()` is now a loop over `RunFrame` plus its idle `WaitForEvents`, and
+`HeadlessSession.PumpFrame` calls the same method instead of assembling its own
+copy of the sequence — so a test frame and a real one can no longer drift apart.
+With Headless no longer assembling frames, `ProcessPendingResizes`,
+`ProcessPendingActivations`, `DrainMainThreadQueue` and `CleanupClosedWindows`
+stopped needing to be `internal` and are now private.
+
+One thing a host must *not* do: call `InstallSynchronizationContext`. It stays
+internal deliberately. WinForms installs its own context on the UI thread, and
+replacing it would route the host's own `await`s through HultUI's frame queue —
+working, but surprising, and broken the moment the pump stops.
+`Application.InvokeOnMainThread` works either way, because `RunFrame` drains that
+queue itself.
 
 **2. HWND discovery for accessibility.** A minimal interface in
 `HultUI.Core/Platform`, discovered by type test the way `IWindowChrome` already
@@ -312,9 +331,11 @@ the escape hatch; not needed for the first cut.
 
 ## Staging
 
-1. **`Application.RunFrame`** plus a docs section on host-owned loops, and
-   `HeadlessSession.PumpFrame` rewired through it. Unblocks "open a HultUI window
-   from a WinForms app" completely, with no new project. (~half a day)
+1. ~~**`Application.RunFrame`** plus `HeadlessSession.PumpFrame` rewired through
+   it.~~ **Done.** `IsRunning` + `RunFrame(delta, forceRender)`, eight tests in
+   `HultUI.Headless.Tests/RunFrameTests.cs`, and the spike re-run on the public API
+   with the reflection deleted — every experiment behaves identically, and the host
+   no longer touches SDL at all, because `RunFrame` pumps the platform itself.
 2. **`IWin32WindowHandle`** and the accessibility factory switch, plus the
    `Sdl3UiaHostBridge` → `UiaHostBridge` rename. Experiment F is the acceptance
    test; promote it into `tests/HultUI.UiTests` against a WinForms sample so the

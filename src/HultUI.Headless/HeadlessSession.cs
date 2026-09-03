@@ -108,8 +108,9 @@ public sealed class HeadlessSession : IDisposable
     /// <summary>
     /// Pumps one frame: advances virtual time by <paramref name="delta"/>,
     /// drains main-thread work (InvokeOnMainThread, await continuations),
-    /// ticks animations, and renders each open window that needs a frame —
-    /// the same per-iteration sequence as <see cref="Application.Run"/>.
+    /// ticks animations, and renders each open window that needs a frame.
+    /// It runs <see cref="Application.RunFrame"/> itself rather than a copy of
+    /// it, so a test frame and a real one cannot drift apart.
     /// Dirty-tracking is respected: an idle UI renders nothing, so a missing
     /// dirty-flag bug fails a test here just as it would skip a repaint on
     /// screen. Pass <paramref name="forceRender"/> to render regardless.
@@ -119,15 +120,10 @@ public sealed class HeadlessSession : IDisposable
     {
         ThrowIfDisposed();
         _time.Advance(delta);
-        Application.ProcessPendingResizes();
-        Application.ProcessPendingActivations();
+        // Before the frame, so a producer's completion is applied by the same frame's
+        // main-thread drain inside RunFrame — the one-frame-later contract below.
         DrainDeferredWork();
-        Application.DrainMainThreadQueue();
-        AnimationManager.Tick((float)delta.TotalSeconds);
-        Application.InspectorHost?.Tick();
-        bool rendered = Application.RenderDirtyWindows(forceRender);
-        Application.CleanupClosedWindows();
-        return rendered;
+        return Application.RunFrame(delta, forceRender);
     }
 
     /// <summary>
