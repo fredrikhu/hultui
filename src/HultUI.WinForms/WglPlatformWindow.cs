@@ -42,17 +42,37 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
         _pixelWidth = Math.Max(control.ClientSize.Width, 1);
         _pixelHeight = Math.Max(control.ClientSize.Height, 1);
 
+        // Never load the driver on two threads at once: if a preload is still running,
+        // wait for it rather than racing it into the loader lock.
+        GraphicsPreload.Join();
+
+        // Timed because these two are where a first control's start-up goes, and the
+        // numbers are the only way to tell a working preload from a decorative one.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         (_context, _dc) = Wgl.CreateContext(Hwnd);
         Wgl.wglMakeCurrent(_dc, _context);
         VSyncDisabled = Wgl.DisableVSync();
+        MsContext = clock.Elapsed.TotalMilliseconds;
 
-        _surface = new SkiaGLRenderSurface(Wgl.GetProcAddress);
+        // Adopts the preloaded text pipeline when there is one; null builds a fresh one,
+        // which is what happens without a preload.
+        clock.Restart();
+        _surface = new SkiaGLRenderSurface(Wgl.GetProcAddress, GraphicsPreload.TakeText());
+        MsSurface = clock.Elapsed.TotalMilliseconds;
         _surface.Resize(_pixelWidth, _pixelHeight, DisplayScale);
 
         _input = new WinFormsInputTranslator(control, () => DisplayScale, evt => InputReceived?.Invoke(evt));
         TextInputHost = new WinFormsTextInputHost(() => Hwnd, () => DisplayScale);
         IsOpen = true;
     }
+
+    /// <summary>Milliseconds spent creating the GL context — the driver load, on the
+    /// first control of a process that did not preload.</summary>
+    internal double MsContext { get; }
+
+    /// <summary>Milliseconds spent building the Skia surface, including its text pipeline
+    /// when no preloaded one was available to adopt.</summary>
+    internal double MsSurface { get; }
 
     /// <summary>False when the driver had no <c>WGL_EXT_swap_control</c>; every swap
     /// then blocks on the compositor. Surfaced so a host can say so rather than wonder
@@ -223,7 +243,8 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
 
     public string? DescribeGraphics()
         => $"wgl hwnd=0x{Hwnd:X} {_pixelWidth}x{_pixelHeight}px scale={DisplayScale:0.##} " +
-           $"swapInterval={(VSyncDisabled ? 0 : 1)}";
+           $"swapInterval={(VSyncDisabled ? 0 : 1)} ctx={MsContext:0.0}ms surface={MsSurface:0.0}ms " +
+           $"preload={(GraphicsPreload.Succeeded ? $"{GraphicsPreload.ElapsedMilliseconds:0}ms" : "off")}";
 
     public void Dispose()
     {

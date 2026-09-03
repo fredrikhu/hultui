@@ -23,6 +23,10 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // First statement, before anything else: the graphics driver loads on a worker
+        // while the form is being built, instead of costing the first control ~140ms.
+        HultUIApplicationHost.BeginGraphicsPreload();
+
         // PerMonitorV2 (set in the csproj) matters: HultUI takes its scale from the
         // control's DeviceDpi, so a DPI-unaware host would render the tree at 1x on a
         // scaled display while the WinForms controls beside it scaled properly.

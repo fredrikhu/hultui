@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HultUI.Core.Elements;
 using HultUI.Core.Styling;
+using HultUI.WinForms.Interop;
 using WinFormsTimer = System.Windows.Forms.Timer;
 
 namespace HultUI.WinForms;
@@ -38,6 +39,37 @@ public static class HultUIApplicationHost
     /// DevTools.
     /// </summary>
     public static Application? Application => _application;
+
+    /// <summary>
+    /// Starts loading the graphics driver on a worker thread, so the first
+    /// <see cref="HultUIControl"/> shown does not pay for it. Call it as the first
+    /// statement in <c>Main</c>; everything the application does before that control
+    /// appears — reading settings, building the form, opening a file — then overlaps
+    /// with a load it would otherwise have waited for.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// [STAThread]
+    /// static void Main()
+    /// {
+    ///     HultUIApplicationHost.BeginGraphicsPreload();
+    ///     ApplicationConfiguration.Initialize();
+    ///     Application.Run(new MainForm());
+    /// }
+    /// </code>
+    /// </example>
+    /// <remarks>
+    /// <para>Safe to call more than once, safe to call and then never show a control,
+    /// and safe on a machine where it cannot work — a failure leaves the ordinary path
+    /// to pay the cost as before. The worker is a background thread and never delays
+    /// process exit.</para>
+    ///
+    /// <para>Unlike the SDL backend's equivalent this needs no opt-in flag. That one is
+    /// gated because loading off-thread steps outside SDL's documented threading
+    /// contract; here there is no SDL, and warming the driver from another thread is
+    /// ordinary WGL.</para>
+    /// </remarks>
+    public static void BeginGraphicsPreload() => GraphicsPreload.Begin();
 
     /// <summary>
     /// How often the frame pump ticks, in milliseconds. Default 8.

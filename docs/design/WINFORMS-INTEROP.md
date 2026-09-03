@@ -110,6 +110,31 @@ Steady-state rendering scales as expected — forced render of every surface:
 | 1 | 0.15 ms | 0.26 ms |
 | 4 | 0.70 ms | 1.11 ms |
 
+**Preloading moves almost all of it off the critical path.**
+`HultUIApplicationHost.BeginGraphicsPreload()`, called as the first statement in
+`Main`, warms the driver on a worker thread: a throwaway hidden window gets a pixel
+format and a context, made current long enough to bring the ICD up, then torn down. A
+window of its own, never the control's — a pixel format can be set only once per
+handle. The text pipeline is warmed alongside it, since it needs no GL and
+`SkiaGLRenderSurface` already accepts a prebuilt one.
+
+| First control | Context | Skia surface |
+|---|---|---|
+| No preload | 137 ms | 13 ms |
+| Preloaded | 13 ms | 3.6 ms |
+
+What cannot move is Skia's `GRContext`: it belongs to the GL context that created it,
+and a WGL context is current on one thread at a time, so it is built on the UI thread
+against the control's own context. That is the 3.6 ms tail.
+
+How much is actually saved depends on the host. Creating the first control joins the
+worker, so an application that shows one immediately still waits out the remainder —
+but it waits concurrently with whatever the UI thread did in the meantime, where before
+it paid the whole load serially afterwards. An application that reads settings or builds
+a form first hides the lot. Joining rather than racing costs nothing either way: the
+loader serialises the DLL load regardless, so a UI thread that got there first would
+block for the same time with none of the head start.
+
 **Sharing buys nothing; do not build it.** Sharing GL display lists
 (`wglShareLists`) and handing every surface one `SkiaTextServices` was measured
 and made no difference — per-surface cost stayed ~5 ms and the forced-render
