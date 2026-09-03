@@ -376,9 +376,21 @@ the escape hatch; not needed for the first cut.
    And the platform window is disposed synchronously in `OnHandleDestroyed` rather
    than left for the framework to reap a frame later, because by then the HWND its GL
    context is bound to is gone.
-4. **Keyboard, focus and IME**: `ITextInputHost` over IMM32, `ProcessDialogKey` /
-   `IsInputKey` so Tab and arrows reach HultUI's `FocusManager` and traversal can
-   also leave the control. (~1–2 days)
+4. ~~**Keyboard, focus and IME**~~ **Done.** `IsInputKey` claims arrows and Enter,
+   `ProcessDialogKey` owns the Tab boundary, `WM_CHAR` becomes text input (holding
+   back a lone high surrogate for its partner), and `WM_IME_COMPOSITION` is taken over
+   so the framework renders the preedit itself and Windows does not draw a second one
+   over the top. `WinFormsTextInputHost` arms and disarms an IMM32 context on focus and
+   puts the candidate window at the caret.
+
+   **This step needed a framework change the design had not anticipated.**
+   `FocusTraversal` wrapped unconditionally, so Tab inside a hosted tree could never
+   leave it — "traversal can also leave the control" was not implementable as written.
+   `FindNext`/`FindPrevious` and `FocusManager.MoveFocusNext`/`MoveFocusPrevious` gained
+   a `wrap` flag and a bool return, and `Window` gained public `MoveFocus(forward,
+   wrap)`, `FocusEdge(first)` and `ClearFocus()`. A window still wraps, because Tab has
+   nowhere else to go there; a host passes `wrap: false` and reads the false return as
+   its cue to move on. Six tests in `FocusBoundaryTests` pin both behaviours.
 5. **Clipboard, file dialogs, drag & drop** over their WinForms equivalents.
    (~1 day)
 6. **A sample** under `samples/` — a form with a menu strip, a `DataGridView`, and

@@ -46,6 +46,52 @@ internal sealed class WinFormsInputTranslator
     /// Horizontal wheel, which WinForms does not surface as an event — the control's
     /// window procedure hands us <c>WM_MOUSEHWHEEL</c> directly.
     /// </summary>
+    /// <summary>A key press or release, from the control's key handlers.</summary>
+    internal void EmitKey(Keys keyData, bool isDown, bool isRepeat)
+    {
+        var code = KeyMap.ToKeyCode(keyData & Keys.KeyCode);
+        if (code == KeyCode.Unknown) return;
+        _emit(new InputEvent.KeyInput(code, KeyMap.ToModifiers(keyData), isDown, isRepeat));
+    }
+
+    /// <summary>
+    /// Committed text, from <c>WM_CHAR</c>.
+    /// </summary>
+    /// <remarks>
+    /// Control characters are dropped: Win32 sends <c>WM_CHAR</c> for Backspace, Tab,
+    /// Escape and Enter as well as for typing, and the framework expects text input to
+    /// be text — those arrive as key events instead. A character outside the basic
+    /// plane comes as a surrogate pair in two messages, so a lone high surrogate is
+    /// held back until its partner arrives.
+    /// </remarks>
+    internal void EmitChar(char character)
+    {
+        if (char.IsHighSurrogate(character)) { _pendingHighSurrogate = character; return; }
+
+        if (_pendingHighSurrogate is { } high && char.IsLowSurrogate(character))
+        {
+            _pendingHighSurrogate = null;
+            _emit(new InputEvent.TextInputInput(new string([high, character])));
+            return;
+        }
+
+        _pendingHighSurrogate = null;
+        if (char.IsControl(character)) return;
+        _emit(new InputEvent.TextInputInput(character.ToString()));
+    }
+
+    /// <summary>Text the IME has committed — already a whole string, no surrogate dance.</summary>
+    internal void EmitText(string text)
+    {
+        if (text.Length > 0) _emit(new InputEvent.TextInputInput(text));
+    }
+
+    /// <summary>The in-flight IME composition, which the framework renders as a preedit.</summary>
+    internal void EmitComposition(string text, int cursor)
+        => _emit(new InputEvent.TextEditingInput(text, cursor, 0));
+
+    private char? _pendingHighSurrogate;
+
     internal void EmitHorizontalWheel(int delta, Point clientPosition)
     {
         float s = 1f / _scale();

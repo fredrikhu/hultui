@@ -50,6 +50,7 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle
         _surface.Resize(_pixelWidth, _pixelHeight, DisplayScale);
 
         _input = new WinFormsInputTranslator(control, () => DisplayScale, evt => InputReceived?.Invoke(evt));
+        TextInputHost = new WinFormsTextInputHost(() => Hwnd, () => DisplayScale);
         IsOpen = true;
     }
 
@@ -61,8 +62,8 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle
     /// <inheritdoc/>
     public nint Hwnd { get; }
 
-    internal void EmitHorizontalWheel(int delta, Point clientPosition)
-        => _input.EmitHorizontalWheel(delta, clientPosition);
+    /// <summary>The control's input translator, for the messages the control reads itself.</summary>
+    internal WinFormsInputTranslator Input => _input;
 
     /// <summary>
     /// Matches the surface to the control's client size. Called from the control's
@@ -135,7 +136,7 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle
 
     public IClipboard Clipboard { get; } = new WinFormsClipboard();
     public IFileDialogs FileDialogs { get; } = new WinFormsFileDialogs();
-    public ITextInputHost TextInputHost { get; } = new WinFormsTextInputHost();
+    public ITextInputHost TextInputHost { get; }
 
     public event Action<InputEvent>? InputReceived;
 
@@ -190,6 +191,7 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle
         IsOpen = false;
 
         _input.Detach();
+        (TextInputHost as IDisposable)?.Dispose();
 
         // The surface owns GPU resources, so it has to go while its context is current.
         MakeCurrent();

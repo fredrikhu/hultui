@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using HultUI.Core.Elements;
+using HultUI.WinForms.Interop;
 
 namespace HultUI.WinForms;
 
@@ -16,8 +17,10 @@ namespace HultUI.WinForms;
 /// live in one form, sharing a single <see cref="HultUIApplicationHost.Application"/>
 /// and the UI thread.</para>
 ///
-/// <para><b>Not yet:</b> keyboard input, focus traversal into and out of the tree, and
-/// IME. Pointer input works. See <c>docs/design/WINFORMS-INTEROP.md</c>.</para>
+/// <para>Keyboard behaves the way a WinForms control's does: Tab moves into the tree,
+/// through it, and back out into the form's own tab order; arrows, Enter and typing
+/// reach the focused element; and an East Asian IME composes inside it with its
+/// candidate window at the caret. See <c>docs/design/WINFORMS-INTEROP.md</c>.</para>
 /// </summary>
 [DesignerCategory("Code")]
 public class HultUIControl : Control
@@ -28,12 +31,20 @@ public class HultUIControl : Control
     private Window? _window;
     private Func<Element>? _rootFactory;
 
+    /// <summary>Which end of the tree focus should land on when Tab brings it in.</summary>
+    private bool _enteringBackwards;
+
     public HultUIControl()
     {
         // GL owns every pixel in this control: WinForms must not erase the background
         // or paint over it, or the surface flickers on every resize and repaint.
         SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
         SetStyle(ControlStyles.OptimizedDoubleBuffer, false);
+
+        // Without Selectable the control can never take keyboard focus, and every key
+        // question below is moot.
+        SetStyle(ControlStyles.Selectable, true);
+        TabStop = true;
     }
 
     /// <summary>
@@ -84,6 +95,104 @@ public class HultUIControl : Control
     {
         get => _platformWindow?.UserScale ?? 1f;
         set { if (_platformWindow is not null) _platformWindow.UserScale = value; }
+    }
+
+    /// <summary>
+    /// Whether Escape is delivered to the tree instead of to the form. Default true,
+    /// which is what a HultUI dropdown, context menu or dialog needs to be dismissable
+    /// from the keyboard.
+    /// </summary>
+    /// <remarks>
+    /// The cost is that a form's <c>CancelButton</c> does not fire while focus is inside
+    /// this control. There is no way to have both: the framework does not report whether
+    /// anything consumed a key, so forwarding Escape and also letting WinForms proceed
+    /// would close a dropdown <em>and</em> cancel the dialog behind it. Set false where
+    /// the form's Cancel semantics matter more than in-tree dismissal.
+    /// </remarks>
+    [DefaultValue(true)]
+    public bool HandlesEscape { get; set; } = true;
+
+    // ──── keyboard ────
+
+    /// <summary>
+    /// Claims the keys WinForms would otherwise treat as navigation and never deliver.
+    /// </summary>
+    /// <remarks>
+    /// Tab is deliberately absent: it goes to <see cref="ProcessDialogKey"/> instead, so
+    /// the decision about moving within the tree versus leaving it lives in one place.
+    /// </remarks>
+    protected override bool IsInputKey(Keys keyData)
+    {
+        if (_window is null) return base.IsInputKey(keyData);
+
+        return (keyData & Keys.KeyCode) switch
+        {
+            Keys.Up or Keys.Down or Keys.Left or Keys.Right => true,
+            Keys.Enter => true,
+            Keys.Escape => HandlesEscape,
+            _ => base.IsInputKey(keyData),
+        };
+    }
+
+    /// <summary>
+    /// Tab moves through the tree, and out of it once the tree is exhausted.
+    /// </summary>
+    /// <remarks>
+    /// A hosted tree is one stop in the host's tab order, not a trap.
+    /// <c>MoveFocus(wrap: false)</c> returning false means there is nothing further this
+    /// way, so the key goes back to WinForms and the next control in the form takes over.
+    /// </remarks>
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if (_window is null || (keyData & Keys.KeyCode) != Keys.Tab || !Focused)
+            return base.ProcessDialogKey(keyData);
+
+        bool forward = (keyData & Keys.Shift) == 0;
+        if (_window.MoveFocus(forward, wrap: false))
+            return true;
+
+        // Leaving: drop focus so no ring is left behind, then let WinForms move on.
+        _window.ClearFocus();
+        _enteringBackwards = false;
+        return base.ProcessDialogKey(keyData);
+    }
+
+    protected override void OnPreviewKeyDown(PreviewKeyDownEventArgs e)
+    {
+        // Read before focus arrives, so OnGotFocus knows which end to land on.
+        if ((e.KeyData & Keys.KeyCode) == Keys.Tab) _enteringBackwards = (e.KeyData & Keys.Shift) != 0;
+        base.OnPreviewKeyDown(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        _platformWindow?.Input.EmitKey(e.KeyData, isDown: true, isRepeat: false);
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        _platformWindow?.Input.EmitKey(e.KeyData, isDown: false, isRepeat: false);
+        base.OnKeyUp(e);
+    }
+
+    // ──── focus ────
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        base.OnGotFocus(e);
+        // Arriving from the form's tab order with nothing focused inside: land on the
+        // near end, so Shift+Tab reaches the last element rather than the first.
+        if (_window is { FocusedElement: null }) _window.FocusEdge(first: !_enteringBackwards);
+        _enteringBackwards = false;
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        // Otherwise a focus ring and a blinking caret stay behind in a control the user
+        // has left, which no other control in the form would do.
+        _window?.ClearFocus();
+        base.OnLostFocus(e);
     }
 
     // ──── handle lifetime: the GL context lives and dies with the HWND ────
@@ -159,15 +268,61 @@ public class HultUIControl : Control
 
     protected override void WndProc(ref Message m)
     {
-        // Horizontal wheel: tilt wheels and precision touchpads send it, and WinForms
-        // has no MouseHWheel event. HultUI scrolls sideways, so it is worth reading.
-        if (m.Msg == WM_MOUSEHWHEEL && _platformWindow is not null)
+        if (_platformWindow is { } platform)
         {
-            int delta = (short)((long)m.WParam >> 16);
-            var screen = new Point((short)(long)m.LParam, (short)((long)m.LParam >> 16));
-            _platformWindow.EmitHorizontalWheel(delta, PointToClient(screen));
-            m.Result = IntPtr.Zero;
-            return;
+            switch (m.Msg)
+            {
+                // Horizontal wheel: tilt wheels and precision touchpads send it, and
+                // WinForms surfaces no event for it. HultUI scrolls sideways, so it is
+                // worth reading.
+                case WM_MOUSEHWHEEL:
+                {
+                    int delta = (short)((long)m.WParam >> 16);
+                    var screen = new Point((short)(long)m.LParam, (short)((long)m.LParam >> 16));
+                    platform.Input.EmitHorizontalWheel(delta, PointToClient(screen));
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+
+                // Typed text. Keys the framework treats as keys — Backspace, Enter,
+                // Escape, Tab — also arrive here as control characters, and the
+                // translator drops those rather than inserting them.
+                case Imm.WM_CHAR:
+                    platform.Input.EmitChar((char)(long)m.WParam);
+                    m.Result = IntPtr.Zero;
+                    return;
+
+                // The control draws its own text, so it takes the composition over and
+                // renders it as the framework's preedit. The message is deliberately not
+                // passed on: letting DefWindowProc see GCS_COMPSTR would have Windows
+                // draw its own composition string on top of ours.
+                case Imm.WM_IME_COMPOSITION:
+                {
+                    long flags = (long)m.LParam;
+
+                    if ((flags & Imm.GCS_RESULTSTR) != 0
+                        && Imm.GetCompositionString(Handle, Imm.GCS_RESULTSTR) is { Length: > 0 } committed)
+                    {
+                        platform.Input.EmitComposition("", 0);
+                        platform.Input.EmitText(committed);
+                    }
+
+                    if ((flags & Imm.GCS_COMPSTR) != 0
+                        && Imm.GetCompositionString(Handle, Imm.GCS_COMPSTR) is { } composing)
+                    {
+                        platform.Input.EmitComposition(composing, Imm.GetCursorPosition(Handle));
+                    }
+
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+
+                case Imm.WM_IME_ENDCOMPOSITION:
+                    // Clears whatever preedit is on screen; anything committed arrived
+                    // with the composition message just before this one.
+                    platform.Input.EmitComposition("", 0);
+                    break;
+            }
         }
 
         base.WndProc(ref m);

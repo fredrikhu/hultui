@@ -404,6 +404,56 @@ public sealed class Window : IOverlayHost, IDisposable
     internal void SetFocus(Element? element) => _focusManager.SetFocus(element);
 
     /// <summary>
+    /// Moves keyboard focus one step through the tree, exactly as Tab and Shift+Tab do
+    /// — the focus ring is shown, and a newly focused text element is given the
+    /// clipboard. Returns false when focus did not move.
+    /// </summary>
+    /// <param name="forward">Tab order direction; false is Shift+Tab.</param>
+    /// <param name="wrap">
+    /// Whether the end of the tree returns to the other end. True is a window's
+    /// behaviour, and the default, because Tab has nowhere else to go. A host embedding
+    /// this tree in its own tab order passes false and reads the return value: false
+    /// means the tree is exhausted and focus should leave for whatever the host has
+    /// next.
+    /// </param>
+    public bool MoveFocus(bool forward, bool wrap = true)
+    {
+        if (_root is null) return false;
+
+        bool moved = forward
+            ? _focusManager.MoveFocusNext(_root, wrap)
+            : _focusManager.MoveFocusPrevious(_root, wrap);
+        if (!moved) return false;
+
+        _focusFromKeyboard = true;
+
+        // Text elements reach the clipboard through the window, so hand it over as they
+        // gain focus rather than making every one of them find it.
+        switch (_focusManager.FocusedElement)
+        {
+            case TextInputElement input: input.Clipboard = Clipboard; break;
+            case TextAreaElement area: area.Clipboard = Clipboard; break;
+            case TextElement { Selectable: true } label: label.Clipboard = Clipboard; break;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Gives focus to the first (or last) focusable element, for a host handing keyboard
+    /// focus into an embedded tree. Returns false when nothing in the tree is focusable.
+    /// </summary>
+    public bool FocusEdge(bool first)
+    {
+        if (_root is null) return false;
+        _focusManager.SetFocus(null);
+        return MoveFocus(forward: first, wrap: true);
+    }
+
+    /// <summary>Drops keyboard focus, so no element keeps a caret or focus ring — what a
+    /// host calls when its control loses focus to something else in the form.</summary>
+    public void ClearFocus() => _focusManager.ClearFocus();
+
+    /// <summary>
     /// Walks the element tree looking for an element with the given
     /// <see cref="ElementId"/>. Used by the accessibility host bridge to
     /// route UIA actions back to the originating element. Returns null if
@@ -1267,19 +1317,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (tabEvent.StopPropagation)
                         break;
 
-                    if (key.Modifiers.HasFlag(KeyModifiers.Shift))
-                        _focusManager.MoveFocusPrevious(_root);
-                    else
-                        _focusManager.MoveFocusNext(_root);
-                    _focusFromKeyboard = true;
-
-                    // Provide clipboard to text inputs when focused via Tab
-                    if (_focusManager.FocusedElement is TextInputElement tabFocusedInput)
-                        tabFocusedInput.Clipboard = Clipboard;
-                    else if (_focusManager.FocusedElement is TextAreaElement tabFocusedArea)
-                        tabFocusedArea.Clipboard = Clipboard;
-                    else if (_focusManager.FocusedElement is TextElement tabFocusedLabel && tabFocusedLabel.Selectable)
-                        tabFocusedLabel.Clipboard = Clipboard;
+                    MoveFocus(forward: !key.Modifiers.HasFlag(KeyModifiers.Shift));
                     break;
                 }
 

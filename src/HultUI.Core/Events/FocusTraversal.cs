@@ -10,7 +10,14 @@ namespace HultUI.Core.Events;
 /// </summary>
 internal static class FocusTraversal
 {
-    public static Element? FindNext(Element root, Element? current)
+    /// <param name="wrap">
+    /// Whether reaching the end returns to the first element. True is what a window
+    /// wants — Tab cycles forever, because there is nowhere else for focus to go. False
+    /// is what an <em>embedded</em> tree wants: returning null at the end is how the
+    /// host learns that Tab should leave the HultUI region and carry on into whatever
+    /// is next in its own tab order.
+    /// </param>
+    public static Element? FindNext(Element root, Element? current, bool wrap = true)
     {
         var focusable = CollectFocusable(root);
         if (focusable.Count == 0) return null;
@@ -22,10 +29,14 @@ internal static class FocusTraversal
         if (index < 0)
             return focusable[0];
 
-        return focusable[(index + 1) % focusable.Count];
+        int next = index + 1;
+        if (next >= focusable.Count)
+            return wrap ? focusable[0] : null;
+        return focusable[next];
     }
 
-    public static Element? FindPrevious(Element root, Element? current)
+    /// <inheritdoc cref="FindNext"/>
+    public static Element? FindPrevious(Element root, Element? current, bool wrap = true)
     {
         var focusable = CollectFocusable(root);
         if (focusable.Count == 0) return null;
@@ -37,7 +48,10 @@ internal static class FocusTraversal
         if (index < 0)
             return focusable[^1];
 
-        return focusable[(index - 1 + focusable.Count) % focusable.Count];
+        int previous = index - 1;
+        if (previous < 0)
+            return wrap ? focusable[^1] : null;
+        return focusable[previous];
     }
 
     private static List<Element> CollectFocusable(Element root)

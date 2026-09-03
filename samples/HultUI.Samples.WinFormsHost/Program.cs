@@ -108,7 +108,7 @@ internal sealed class MainForm : Form
     private void UpdateStatus()
         => _status.Text = $"HultUI application: {(HultUIApplicationHost.Application is null ? "not started" : "running")}"
             + $"   ·   control DPI {Counter.DeviceDpi}   ·   zoom {Counter.UserScale:0.0}x"
-            + "   ·   pointer input works; keyboard is the next slice";
+            + "   ·   Tab moves in, through and out of the HultUI panels";
 
     /// <summary>
     /// A factory rather than a prebuilt tree: WinForms can recreate a control's handle,
@@ -132,11 +132,19 @@ internal sealed class MainForm : Form
             label.Content = $"clicked {_clicks} time{(_clicks == 1 ? "" : "s")}";
         });
 
+        // Tab reaches these from the WinForms controls, moves between them, and leaves
+        // the control again once the tree is exhausted.
+        var first = TextInput.New().AutomationId("field-one").AccessibleName("First field");
+        var second = TextInput.New().AutomationId("field-two").AccessibleName("Second field");
+
         return Flex.Column(gap: 14).Padding(20).Children(
-            UiText.New("Pointer input").FontSize(19f).FontWeight(FontWeight.Bold),
-            UiText.New("Hover, click and the wheel arrive as ordinary WinForms events.")
+            UiText.New("Pointer and keyboard").FontSize(19f).FontWeight(FontWeight.Bold),
+            UiText.New("Tab in from the grid, through these, and out to the palette.")
                 .FontSize(13f),
-            Flex.Row(gap: 14).AlignItems(AlignItems.Center).Children(button, label));
+            Flex.Row(gap: 14).AlignItems(AlignItems.Center).Children(button, label),
+            Flex.Row(gap: 10).AlignItems(AlignItems.Center).Children(
+                Box.New().Width(150).Children(first),
+                Box.New().Width(150).Children(second)));
     }
 
     /// <summary>A readable spread of hues without pulling in a colour-space helper.</summary>

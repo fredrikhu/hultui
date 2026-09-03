@@ -38,22 +38,32 @@ public sealed class FocusManager
     public void ClearFocus() => SetFocus(null);
 
     /// <summary>
-    /// Move focus to the next focusable element in document order (Tab).
+    /// Move focus to the next focusable element in document order (Tab). Returns false
+    /// when focus did not move: there was nothing focusable, or the end was reached and
+    /// <paramref name="wrap"/> is false.
     /// </summary>
-    public void MoveFocusNext(Element root)
+    /// <param name="wrap">
+    /// Whether the end returns to the first element. True for a window, where Tab has
+    /// nowhere else to go. False for a tree embedded in a host that has its own tab
+    /// order after this one — a false return is the host's cue to move on.
+    /// </param>
+    public bool MoveFocusNext(Element root, bool wrap = true)
     {
-        var next = FocusTraversal.FindNext(root, FocusedElement);
-        if (next is not null)
-            SetFocus(next);
+        var next = FocusTraversal.FindNext(root, FocusedElement, wrap);
+        if (next is null) return false;
+        SetFocus(next);
+        return true;
     }
 
     /// <summary>
     /// Move focus to the previous focusable element in document order (Shift+Tab).
     /// </summary>
-    public void MoveFocusPrevious(Element root)
+    /// <inheritdoc cref="MoveFocusNext"/>
+    public bool MoveFocusPrevious(Element root, bool wrap = true)
     {
-        var prev = FocusTraversal.FindPrevious(root, FocusedElement);
-        if (prev is not null)
-            SetFocus(prev);
+        var prev = FocusTraversal.FindPrevious(root, FocusedElement, wrap);
+        if (prev is null) return false;
+        SetFocus(prev);
+        return true;
     }
 }
