@@ -31,6 +31,7 @@
     <Project Path="samples/HultUI.Samples.Dropdown/HultUI.Samples.Dropdown.csproj" />
     <Project Path="samples/HultUI.Samples.DateTime/HultUI.Samples.DateTime.csproj" />
     <Project Path="samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj" />
+    <Project Path="samples/HultUI.Samples.WinFormsHost/HultUI.Samples.WinFormsHost.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
@@ -38,6 +39,7 @@
     <Project Path="src/HultUI.Syntax/HultUI.Syntax.csproj" />
     <Project Path="src/HultUI.Icons/HultUI.Icons.csproj" />
     <Project Path="src/HultUI.Platform.SDL3/HultUI.Platform.SDL3.csproj" />
+    <Project Path="src/HultUI.WinForms/HultUI.WinForms.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Windows/HultUI.Platform.Accessibility.Windows.csproj" />
     <Project Path="src/HultUI.Platform.Accessibility.Linux/HultUI.Platform.Accessibility.Linux.csproj" />
     <Project Path="src/HultUI.Rendering.Skia/HultUI.Rendering.Skia.csproj" />

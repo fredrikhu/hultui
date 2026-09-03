@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.WinForms</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>HultUI for WinForms: mount a HultUI element tree as a System.Windows.Forms control, for applications migrating from WinForms a page at a time. Renders with OpenGL on the control's own window handle — no SDL — so focus, tab order and input stay WinForms' business.</Description>
+  </PropertyGroup>
+
+  <!-- The only Windows-Desktop-flavoured project in the repo. It is deliberately not
+       in HultUI.CrossPlatform.slnf or docfx.json: both run on Linux, where
+       net10.0-windows will not build. -->
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI\HultUI.csproj" />
+  </ItemGroup>
+
+</Project>

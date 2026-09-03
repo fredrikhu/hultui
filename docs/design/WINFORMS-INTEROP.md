@@ -361,9 +361,21 @@ the escape hatch; not needed for the first cut.
    passes on the SDL path. The *end-to-end* FlaUI test still lives in the spike:
    promoting it into `tests/HultUI.UiTests` needs a WinForms sample to point at, so
    it moves to step 6 with the sample it depends on.
-3. **`HultUI.WinForms` with `HultUIControl`**: HWND/GL lifetime, sizing, DPI,
-   cursor, mouse input, the pump. This is the spike's experiment D promoted to
-   production. (~2 days)
+3. ~~**`HultUI.WinForms` with `HultUIControl`**: HWND/GL lifetime, sizing, DPI,
+   cursor, mouse input, the pump.~~ **Done.** `src/HultUI.WinForms` and
+   `samples/HultUI.Samples.WinFormsHost`, a form with a menu strip, a `DataGridView`
+   and two `HultUIControl`s sharing one application. Verified by driving the sample
+   with a real UI Automation client: the tree reads, `Invoke` reaches the handler,
+   element bounds land exactly where the button is drawn, and everything renders
+   crisply at 144 DPI.
+
+   Two things worth knowing about the shape it took. `RootFactory` is a
+   `Func<Element>` rather than an element, because WinForms recreates a control's
+   handle on its own schedule and a new handle means a new GL context, surface and
+   framework window — the tree is rebuilt for the new window rather than moved to it.
+   And the platform window is disposed synchronously in `OnHandleDestroyed` rather
+   than left for the framework to reap a frame later, because by then the HWND its GL
+   context is bound to is gone.
 4. **Keyboard, focus and IME**: `ITextInputHost` over IMM32, `ProcessDialogKey` /
    `IsInputKey` so Tab and arrows reach HultUI's `FocusManager` and traversal can
    also leave the control. (~1–2 days)
