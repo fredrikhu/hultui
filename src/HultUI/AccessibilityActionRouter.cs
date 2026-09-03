@@ -14,7 +14,7 @@ namespace HultUI;
 /// of the next frame.
 /// </summary>
 /// <remarks>
-/// This is the logic that used to live inline in <see cref="Sdl3UiaHostBridge"/>;
+/// This is the logic that used to live inline in <see cref="UiaHostBridge"/>;
 /// it was lifted here so the Linux AT-SPI bridge can trigger the same actions
 /// through <see cref="IAccessibilityActionHost"/> without duplicating the
 /// element-lookup, dispatch, and marshalling code.

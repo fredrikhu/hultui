@@ -8,7 +8,7 @@ using HultUI.Platform.Accessibility.Windows;
 namespace HultUI;
 
 /// <summary>
-/// Hooks the Windows UIA bridge into our SDL-based event loop.
+/// Hooks the Windows UIA bridge into the frame loop.
 ///
 /// UIA clients call provider methods from worker threads, which means we must
 /// either snapshot everything (we do, for reads) or marshal writes onto the
@@ -16,15 +16,21 @@ namespace HultUI;
 /// <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/> drained at
 /// the start of each frame, so element mutations happen on the same thread as
 /// the render loop. (<c>WM_GETOBJECT</c> is serviced by the bridge's own
-/// window-procedure subclass, so no SDL message hook is involved.)
+/// window-procedure subclass, so no message hook is involved.)
+///
+/// <para>Nothing here is backend-specific: it reads the window's scale and tree
+/// and talks to the router, none of which knows what created the HWND. It was
+/// called <c>Sdl3UiaHostBridge</c> until a HultUI surface hosted on someone
+/// else's window ran it unchanged in a process where SDL was never
+/// initialised.</para>
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class Sdl3UiaHostBridge : IUiaHostBridge, IDisposable
+internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
 {
     private readonly Window _window;
     private readonly AccessibilityActionRouter _router;
 
-    public Sdl3UiaHostBridge(Window window, AccessibilityActionRouter router)
+    public UiaHostBridge(Window window, AccessibilityActionRouter router)
     {
         _window = window;
         _router = router;

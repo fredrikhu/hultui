@@ -249,7 +249,7 @@ working, but surprising, and broken the moment the pump stops.
 `Application.InvokeOnMainThread` works either way, because `RunFrame` drains that
 queue itself.
 
-**2. HWND discovery for accessibility.** A minimal interface in
+**2. HWND discovery for accessibility. — Implemented.** A minimal interface in
 `HultUI.Core/Platform`, discovered by type test the way `IWindowChrome` already
 is:
 
@@ -259,10 +259,27 @@ is:
 public interface IWin32WindowHandle { nint Hwnd { get; } }
 ```
 
-`SDL3Window` implements it by returning `GetWin32Hwnd()`; `AccessibilityBridgeFactory`
-switches its test from `is not SDL3Window` to `is not IWin32WindowHandle`. About
-fifteen lines, and it is the right shape independently of WinForms — the factory
-should not have known a concrete backend type in the first place.
+`SDL3Window` implements it by returning `GetWin32Hwnd()`, and
+`AccessibilityBridgeFactory` keys the Windows branch on the interface instead of on
+`SDL3Window`. It is the right shape independently of WinForms — the factory should
+not have known a concrete backend type in the first place.
+
+The Linux branch deliberately keeps its `SDL3Window` test. AT-SPI has no
+handle-shaped seam to key on — that bridge registers the application on the D-Bus
+session rather than attaching to a window — so there is nothing for a backend to
+implement, and "is this a real desktop window" is still the question being asked.
+Generalising it without a second Linux backend to generalise *over* would be
+guessing.
+
+`Sdl3UiaHostBridge` was renamed `UiaHostBridge` in the same change: it reads the
+window's scale and tree and talks to the router, none of which knows what created
+the HWND, and experiment F ran it unchanged in a process where SDL was never
+initialised.
+
+The spike then had its hand-wiring deleted — the platform window implements the one
+property and the factory does the rest — and the UI Automation probe still passes
+end to end. **Implementing `IWin32WindowHandle` is now the whole of what an embedded
+backend must do to be readable by a screen reader.**
 
 **3. Nothing else.** `Window`, `Element`, layout, styling, the reactive graph, the
 render pipeline and `SkiaGLRenderSurface` are untouched. In particular the
@@ -336,10 +353,14 @@ the escape hatch; not needed for the first cut.
    `HultUI.Headless.Tests/RunFrameTests.cs`, and the spike re-run on the public API
    with the reflection deleted — every experiment behaves identically, and the host
    no longer touches SDL at all, because `RunFrame` pumps the platform itself.
-2. **`IWin32WindowHandle`** and the accessibility factory switch, plus the
-   `Sdl3UiaHostBridge` → `UiaHostBridge` rename. Experiment F is the acceptance
-   test; promote it into `tests/HultUI.UiTests` against a WinForms sample so the
-   embedded tree stays accessible. (~half a day)
+2. ~~**`IWin32WindowHandle`** and the accessibility factory switch, plus the
+   `Sdl3UiaHostBridge` → `UiaHostBridge` rename.~~ **Done.** Four tests in
+   `HultUI.Headless.Tests/AccessibilityBridgeSelectionTests.cs` pin the selection
+   from both sides (a non-SDL window with a handle gets the live bridge; no handle,
+   and headless, stay on the Null one), and the gated real-window UIA suite still
+   passes on the SDL path. The *end-to-end* FlaUI test still lives in the spike:
+   promoting it into `tests/HultUI.UiTests` needs a WinForms sample to point at, so
+   it moves to step 6 with the sample it depends on.
 3. **`HultUI.WinForms` with `HultUIControl`**: HWND/GL lifetime, sizing, DPI,
    cursor, mouse input, the pump. This is the spike's experiment D promoted to
    production. (~2 days)
@@ -349,7 +370,9 @@ the escape hatch; not needed for the first cut.
 5. **Clipboard, file dialogs, drag & drop** over their WinForms equivalents.
    (~1 day)
 6. **A sample** under `samples/` — a form with a menu strip, a `DataGridView`, and
-   a `HultUIControl` filling a tab page, which is the actual migration shape.
+   a `HultUIControl` filling a tab page, which is the actual migration shape — and
+   with it, experiment F's FlaUI probe promoted into `tests/HultUI.UiTests` so the
+   embedded tree cannot silently lose accessibility.
 
 Step 1 is worth doing regardless of whether the control ships: a public frame step
 serves any host loop — a game loop, a plugin inside another application, a test

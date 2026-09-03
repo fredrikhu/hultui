@@ -105,7 +105,7 @@ public sealed class Window : IOverlayHost, IDisposable
     private long _lastA11yRebuildMs;
     private const long A11yCoalesceMs = 100;
     private readonly AccessibilityObserverAdapter _a11yObserver;
-    private Sdl3UiaHostBridge? _uiaHost;
+    private UiaHostBridge? _uiaHost;
     private AccessibilityActionRouter? _actionRouter;
 
     // ──── Drag & Drop state ────
@@ -375,7 +375,7 @@ public sealed class Window : IOverlayHost, IDisposable
         }
     }
 
-    internal void SetUiaHostBridge(Sdl3UiaHostBridge host) => _uiaHost = host;
+    internal void SetUiaHostBridge(UiaHostBridge host) => _uiaHost = host;
 
     /// <summary>
     /// Registers the platform-neutral action router whose queued invoke/toggle/

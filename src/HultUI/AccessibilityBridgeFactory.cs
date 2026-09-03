@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
+using HultUI.Core.Platform;
 using HultUI.Platform.Accessibility.Linux;
 using HultUI.Platform.Accessibility.Windows;
 using HultUI.Platform.SDL3;
@@ -27,41 +28,51 @@ internal static class AccessibilityBridgeFactory
         if (Environment.GetEnvironmentVariable("HULTUI_A11Y") == "0")
             return NullAccessibilityBridge.Instance;
 
-        // Only real OS windows have an accessibility surface to bridge to.
-        // Headless platform windows stay on the Null bridge everywhere — on
-        // Linux this also avoids probing the AT-SPI D-Bus session, which a
-        // display-less CI environment doesn't have.
-        if (window.PlatformWindow is not SDL3Window)
-            return NullAccessibilityBridge.Instance;
-
-        // Shared across platforms: it marshals AT-triggered actions onto the UI
-        // thread's per-frame drain. The active bridge triggers actions through it.
-        var router = new AccessibilityActionRouter(window);
-
         if (OperatingSystem.IsWindows())
-            return CreateWindows(window, router);
+            return CreateWindows(window);
 
-        if (OperatingSystem.IsLinux())
-            return CreateLinux(window, router);
+        // Linux keeps a concrete-type test where Windows no longer needs one.
+        // AT-SPI has no handle-shaped seam to key on — the bridge registers the
+        // application on the D-Bus session rather than attaching to a window — so
+        // there is nothing for a backend to implement, and "is this a real desktop
+        // window" is still the question being asked. Headless platform windows stay
+        // on the Null bridge, which also avoids probing a bus a display-less CI
+        // environment does not have. Revisit if a second Linux backend ever exists.
+        if (OperatingSystem.IsLinux() && window.PlatformWindow is SDL3Window)
+            return CreateLinux(window);
 
         return NullAccessibilityBridge.Instance;
     }
 
+    /// <summary>
+    /// The UIA bridge needs an HWND and nothing else — it subclasses that window's
+    /// procedure to answer <c>WM_GETOBJECT</c>. Keying on
+    /// <see cref="IWin32WindowHandle"/> rather than on the SDL backend is what lets a
+    /// HultUI surface hosted in someone else's window (a WinForms or WPF control) be
+    /// read by a screen reader; a backend with no handle — headless — falls through to
+    /// the Null bridge exactly as before.
+    /// </summary>
     [SupportedOSPlatform("windows")]
-    private static IAccessibilityBridge CreateWindows(Window window, AccessibilityActionRouter router)
+    private static IAccessibilityBridge CreateWindows(Window window)
     {
-        var hwnd = ((SDL3Window)window.PlatformWindow).GetWin32Hwnd();
+        if (window.PlatformWindow is not IWin32WindowHandle handleSource)
+            return NullAccessibilityBridge.Instance;
+
+        var hwnd = handleSource.Hwnd;
         if (hwnd == IntPtr.Zero) return NullAccessibilityBridge.Instance;
 
-        var host = new Sdl3UiaHostBridge(window, router);
+        // Marshals AT-triggered actions onto the UI thread's per-frame drain.
+        var router = new AccessibilityActionRouter(window);
+        var host = new UiaHostBridge(window, router);
         window.SetUiaHostBridge(host);
         window.SetActionRouter(router);
         return new WindowsAccessibilityBridge(hwnd, host);
     }
 
     [SupportedOSPlatform("linux")]
-    private static IAccessibilityBridge CreateLinux(Window window, AccessibilityActionRouter router)
+    private static IAccessibilityBridge CreateLinux(Window window)
     {
+        var router = new AccessibilityActionRouter(window);
         window.SetActionRouter(router);
         return new LinuxAccessibilityBridge(router);
     }

@@ -16,6 +16,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HultUI.Headless" />
+    <!-- So the accessibility bridge factory's backend-agnostic selection can be
+         tested against a platform window that is not the SDL one. -->
+    <InternalsVisibleTo Include="HultUI.Headless.Tests" />
   </ItemGroup>
 
   <ItemGroup>

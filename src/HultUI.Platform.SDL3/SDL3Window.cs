@@ -11,7 +11,7 @@ using static SDL.SDL3;
 
 namespace HultUI.Platform.SDL3;
 
-public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource
+public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle
 {
     private static bool _sdlInitialized;
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
@@ -879,6 +879,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     {
         return SDL_GetError() ?? "Unknown error";
     }
+
+    /// <inheritdoc/>
+    /// <remarks>Same handle as <see cref="GetWin32Hwnd"/>; the interface is how the
+    /// accessibility bridge finds it without knowing this type.</remarks>
+    public nint Hwnd => GetWin32Hwnd();
 
     /// <summary>
     /// Returns the native Win32 <c>HWND</c> for this window on Windows, or
