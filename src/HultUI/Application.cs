@@ -156,15 +156,56 @@ public sealed class Application : IDisposable
     /// platform. Used by HultUI.Headless to run apps without a display; apps
     /// normally use the default constructor.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Another application is already running in this process. See the remarks.
+    /// </exception>
+    /// <remarks>
+    /// One application per process is not a limitation to work around, it is what the
+    /// framework is: <see cref="Current"/>, <see cref="InvokeOnMainThread"/> and the
+    /// UI-thread binding are all static, and a second instance would take them over
+    /// while the first kept running. Several windows — and several hosted controls —
+    /// share one application, which is also what makes <c>InvokeOnMainThread</c> from a
+    /// background worker land correctly whichever window's tree it updates.
+    ///
+    /// <para>This used to be a silent rebind, whose symptom was
+    /// <c>InvokeOnMainThread</c> quietly posting to a queue nothing drained. Disposing
+    /// an application releases the claim, so creating one, disposing it, and creating
+    /// another is fine.</para>
+    /// </remarks>
     public Application(IWindowingPlatform platform, string title = "HultUI Application",
         int width = 800, int height = 600, WindowStyle style = WindowStyle.Default)
     {
+        if (_current is not null)
+            throw new InvalidOperationException(
+                "A HultUI Application is already running in this process. Application.Current, " +
+                "InvokeOnMainThread and the UI-thread binding are static, so a second one would " +
+                "take them from the first. Use the existing application's CreateWindow for another " +
+                "window (or, when hosting, HultUIApplicationHost, which owns the one application " +
+                "every HultUIControl shares), and dispose the current application before creating " +
+                "a replacement.");
+
         _platform = platform ?? throw new ArgumentNullException(nameof(platform));
         _current = this;
         // Claim this thread before any window (and therefore any element) exists, so
         // the tree can never be built on one thread and driven from another.
         UIThread.Bind();
-        CreateWindow(title, width, height, style);
+
+        try
+        {
+            CreateWindow(title, width, height, style);
+        }
+        catch
+        {
+            // The claim is only released by Dispose, and there is nothing to dispose:
+            // this instance never escaped the constructor. Without this, one failed
+            // window creation — no GL context, no display — would leave the process
+            // unable to create any application at all, and the second attempt would
+            // report the first one as "already running".
+            _current = null;
+            UIThread.Unbind();
+            throw;
+        }
+
         StartupTrace.Mark("application ready");
     }
 
