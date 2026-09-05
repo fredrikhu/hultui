@@ -60,13 +60,37 @@ public static class FileOps
     /// signal to offer "retry as administrator".</summary>
     public static bool IsDenied(string? error) => error != null && error.StartsWith(DeniedTag, StringComparison.Ordinal);
 
-    /// <summary>An error string with the internal denied tag stripped, for display.</summary>
-    public static string? Clean(string? error) => IsDenied(error) ? error![DeniedTag.Length..] : error;
+    // The same again for "another program has it open": the signal to go and ask which one
+    // (see FileHolders). Set from the HRESULT, like the denied tag, never from message text.
+    private const string InUseTag = "[inuse] ";
+
+    /// <summary>True when <paramref name="error"/> came from a sharing or lock violation —
+    /// something else has the file open, and naming it is more use than the message.</summary>
+    public static bool IsInUse(string? error) => error != null && error.StartsWith(InUseTag, StringComparison.Ordinal);
+
+    /// <summary>An error string with the internal tags stripped, for display.</summary>
+    public static string? Clean(string? error) =>
+        IsDenied(error) ? error![DeniedTag.Length..]
+        : IsInUse(error) ? error![InUseTag.Length..]
+        : error;
 
     /// <summary>Turn an exception into an error string, tagged when it is a permission
     /// failure (<c>UnauthorizedAccessException</c>, or an IO error carrying Win32
-    /// ERROR_ACCESS_DENIED / ERROR_PRIVILEGE_NOT_HELD, or EACCES/EPERM on Unix).</summary>
-    private static string Fail(Exception ex) => IsDeniedException(ex) ? DeniedTag + ex.Message : ex.Message;
+    /// ERROR_ACCESS_DENIED / ERROR_PRIVILEGE_NOT_HELD, or EACCES/EPERM on Unix) or an
+    /// in-use failure (ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION, or EBUSY/ETXTBSY).</summary>
+    private static string Fail(Exception ex) =>
+        IsDeniedException(ex) ? DeniedTag + ex.Message
+        : IsInUseException(ex) ? InUseTag + ex.Message
+        : ex.Message;
+
+    private static bool IsInUseException(Exception ex)
+    {
+        const int facilityWin32 = unchecked((int)0x80070000);
+        if ((ex.HResult & unchecked((int)0xFFFF0000)) == facilityWin32)
+            return (ex.HResult & 0xFFFF) is 32 or 33;   // SHARING_VIOLATION, LOCK_VIOLATION
+        // Unix: 16 = EBUSY (a mount point or a busy device), 26 = ETXTBSY (a running executable).
+        return ex is IOException && ex.HResult is 16 or 26;
+    }
 
     private static bool IsDeniedException(Exception ex)
     {
@@ -360,9 +384,11 @@ public static class FileOps
             {
                 int rc = ShellRecycle(path);
                 // SHFileOperation reports Win32 codes directly; 5 = ACCESS_DENIED, and
-                // 0x78 (DE_ACCESSDENIEDSRC) is its own "source access denied".
+                // 0x78 (DE_ACCESSDENIEDSRC) is its own "source access denied". 0x20 / 0x21
+                // are the sharing and lock violations: something has the file open.
                 if (rc != 0)
-                    return (rc is 5 or 0x78 ? DeniedTag : "") + $"delete failed (0x{rc:X})";
+                    return (rc is 5 or 0x78 ? DeniedTag : rc is 0x20 or 0x21 ? InUseTag : "")
+                         + $"delete failed (0x{rc:X})";
             }
             else
             {

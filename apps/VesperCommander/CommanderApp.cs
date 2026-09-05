@@ -127,8 +127,10 @@ public partial class CommanderApp : Component, IDisposable
     /// have nothing to do in that case and leave it null; one that was asked *about* something
     /// (an edit waiting to be written back) needs to record that it has now been answered, or
     /// it asks again the next time it looks.</summary>
+    /// <summary><paramref name="CancelLabel"/> null makes it an information dialog: one button,
+    /// which is also what Enter and Escape both mean — there is nothing to decide.</summary>
     private sealed record ConfirmSpec(string Title, string Message, string ConfirmLabel, bool Danger,
-        Action OnConfirm, Action? OnCancel = null);
+        Action OnConfirm, Action? OnCancel = null, string? CancelLabel = "Cancel");
     private ConfirmSpec? _confirm;
 
     // Name prompt (F7 new folder, Shift+F6 rename): a titled dialog over a focused
@@ -1913,12 +1915,16 @@ public partial class CommanderApp : Component, IDisposable
     private void DoDelete(char side, List<FileEntry> items)
     {
         var denied = new List<(string, string, bool)>();
+        var inUse = new List<string>();
+        string? other = null;
         foreach (var e in items)
         {
             var err = _settings.Recycle
                 ? FileOps.Recycle(e.FullPath, e.IsDir)
                 : FileOps.DeletePermanent(e.FullPath, e.IsDir);
             if (FileOps.IsDenied(err)) denied.Add((e.FullPath, e.FullPath, e.IsDir));
+            else if (FileOps.IsInUse(err)) inUse.Add(e.FullPath);
+            else if (err != null) other ??= $"Couldn't delete {e.Name}: {FileOps.Clean(err)}";
         }
         _confirm = null;
         _genL++; _genR++;
@@ -1926,7 +1932,11 @@ public partial class CommanderApp : Component, IDisposable
         ClearMeasuredIn(Dir(side));       // a deleted folder's cached total is now stale
         RefreshResultsBothSides();        // deleted hits leave a fed-in set
         MarkDirty();
+        // One answer at a time: rights first (that one has a fix to offer), then what is
+        // holding the file (that one has a name to give), then anything else.
         if (denied.Count > 0) OfferElevation(Job("delete", denied, recycle: _settings.Recycle), "Delete");
+        else if (inUse.Count > 0) ReportInUse(inUse, "delete");
+        else if (other != null) Notice(other);
     }
 
     // ── Bookmarks ────────────────────────────────────────────────────────
@@ -2068,6 +2078,7 @@ public partial class CommanderApp : Component, IDisposable
             new("Open in git client", null, OpenGitClientHere),
             new("Properties…", Key(Cmd.Properties), () => ShowProperties(side)),
             new("Context menu…", Key(Cmd.ContextMenu), () => ShowContextMenuAtCursor(side)),
+            new("Who has this file open?", Key(Cmd.Holders), () => ShowHolders(side)),
 
             // Selection and totals.
             new("Mark all", "Ctrl+A", () => MarkAll(side)),
@@ -2340,6 +2351,9 @@ public partial class CommanderApp : Component, IDisposable
             var target = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(e.FullPath) ?? "", newName);
             if (OfferElevation(Job("rename", [(e.FullPath, target, e.IsDir)]), "Rename")) return null;
         }
+        // "In use" names the program, inline, where the message would otherwise have said
+        // only that there was one.
+        if (FileOps.IsInUse(err)) return InUseMessage(e.FullPath);
         if (err != null) return err;
         // In a fed-in result set the renamed row has to be swapped in by hand: there is no
         // folder read to pick the new name up, and its old path no longer resolves.

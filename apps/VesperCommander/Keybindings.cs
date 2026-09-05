@@ -12,7 +12,7 @@ public enum Cmd
     Palette, Bookmarks, Options, NewTab, CloseTab, GoUpFolder, IntoFolder,
     Preview, Refresh, ToggleHidden, Swap, OpenInOther, Pack, Extract,
     ViewDetail, ViewBrief, ViewThumbnails, MultiRename, GotoPath, Properties, ContextMenu,
-    MarkPattern,
+    MarkPattern, Holders,
 }
 
 /// <summary>A key plus its modifiers — one per command.</summary>
@@ -58,6 +58,7 @@ public static class Keybindings
         [Cmd.Properties] = new(KeyCode.Enter, false, true, false),   // Alt+Enter (Explorer's)
         [Cmd.ContextMenu] = new(KeyCode.Menu, false, false, false),  // the context-menu key
         [Cmd.MarkPattern] = new(KeyCode.A, true, false, true),       // Ctrl+Shift+A
+        [Cmd.Holders] = new(KeyCode.L, true, false, true),           // Ctrl+Shift+L ("locks")
     };
 
     /// <summary>Commands in display order, with their Keyboard-page labels.</summary>
@@ -67,6 +68,7 @@ public static class Keybindings
         (Cmd.NewFolder, "New folder"), (Cmd.Edit, "Edit file"), (Cmd.View, "View file"),
         (Cmd.Diff, "Diff"), (Cmd.Sync, "Synchronize"),
         (Cmd.Properties, "Properties"), (Cmd.ContextMenu, "Context menu"),
+        (Cmd.Holders, "Who has this file open"),
         (Cmd.Find, "Find files"), (Cmd.MarkPattern, "Mark files by pattern"),
         (Cmd.MeasureAll, "Measure all folders"),
         (Cmd.Palette, "Command palette"), (Cmd.Bookmarks, "Bookmark manager"), (Cmd.Options, "Options"),
