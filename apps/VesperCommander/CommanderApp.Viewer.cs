@@ -105,6 +105,7 @@ public partial class CommanderApp
         _viewerMember = InArchive(side) ? entry : null;
         _viewerPassword = _viewerMember is null ? null : PasswordFor(entry.FullPath);
         LoadViewer();
+        RememberPaneScroll();   // the panes are about to be replaced by the view
         _viewerOpen = true;
         MarkDirty();
     }

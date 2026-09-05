@@ -40,6 +40,7 @@ public partial class CommanderApp
         _syncLeft = Dir('L');
         _syncRight = Dir('R');
         if (PathEquals(_syncLeft, _syncRight)) return;   // nothing to sync against itself
+        RememberPaneScroll();   // the panes are about to be replaced by the view
         _syncOpen = true;
         RunSyncCompare();
         MarkDirty();

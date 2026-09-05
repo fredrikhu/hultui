@@ -271,6 +271,56 @@ public partial class CommanderApp : Component, IDisposable
     private readonly Ref<VirtualListElement<FileEntry>> _vlistR = new();
     private bool _pendingScrollL, _pendingScrollR;
 
+    // ── Pane scroll across a full-shell view ─────────────────────────────
+    // The viewer, the diff and sync replace the panes with the view, and when it closes the
+    // panes are built again from nothing — so the lists opened at the top, wherever they had
+    // been. The offset of each pane's scrolling element (which one depends on the view mode)
+    // is noted on the way in and put back on the first build with the panes on screen again.
+    private readonly float[] _paneScroll = new float[2];
+    private int _pendingPaneScroll;   // builds left to try the restore; 0 = nothing pending
+
+    /// <summary>Call before opening a full-shell view, while the panes still exist.</summary>
+    private void RememberPaneScroll()
+    {
+        if (FullShellOpen) return;   // sync → diff: the panes are already gone, and noted
+        foreach (char side in "LR")
+            _paneScroll[Si(side)] = ViewOf(side) switch
+            {
+                ViewMode.Brief => BriefScroll(side).Current?.ScrollOffsetX ?? 0f,
+                ViewMode.Thumbnails => ThumbVList(side).Current?.ScrollOffsetY ?? 0f,
+                _ => VList(side).Current?.ScrollOffsetY ?? 0f,
+            };
+        // A few builds rather than one: the offset clamps against a content size the list
+        // may not know on the very first build after the panes come back.
+        _pendingPaneScroll = 4;
+    }
+
+    private void RestorePaneScroll()
+    {
+        bool settled = true;
+        foreach (char side in "LR")
+        {
+            float want = _paneScroll[Si(side)];
+            if (want <= 0f) continue;
+            float got;
+            switch (ViewOf(side))
+            {
+                case ViewMode.Brief:
+                    if (BriefScroll(side).Current is not { } bs) { settled = false; continue; }
+                    bs.ScrollOffsetX = want; got = bs.ScrollOffsetX; break;
+                case ViewMode.Thumbnails:
+                    if (ThumbVList(side).Current is not { } tv) { settled = false; continue; }
+                    tv.ScrollOffsetY = want; got = tv.ScrollOffsetY; break;
+                default:
+                    if (VList(side).Current is not { } vl) { settled = false; continue; }
+                    vl.ScrollOffsetY = want; got = vl.ScrollOffsetY; break;
+            }
+            if (got < want) settled = false;   // clamped short — the content isn't measured yet
+        }
+        _pendingPaneScroll = settled ? 0 : _pendingPaneScroll - 1;
+        if (_pendingPaneScroll > 0) MarkDirty();
+    }
+
     // Each pane is a Tab-focusable region; `_active` follows which one holds focus
     // (Tab traversal and click-to-focus both route through the same FocusManager, so
     // they stay in sync). Kept per side for programmatic focus on startup / overlay close.
@@ -677,6 +727,7 @@ public partial class CommanderApp : Component, IDisposable
             _pendingPaneFocus = null;
             PaneRef(paneSide).Current?.Focus();
         }
+        if (_pendingPaneScroll > 0 && !FullShellOpen) RestorePaneScroll();
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }

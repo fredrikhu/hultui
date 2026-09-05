@@ -240,6 +240,7 @@ public partial class CommanderApp
         }
 
         ComputeDiff();
+        RememberPaneScroll();   // the panes are about to be replaced by the view
         _diffOpen = true;
         MarkDirty();
     }
