@@ -13,10 +13,10 @@ using UiText = HultUI.Core.Builders.Text;
 namespace HultUI.Samples.WinFormsHost;
 
 /// <summary>
-/// The migration shape: an existing WinForms form where one region has been replaced
-/// with HultUI, and the rest is still WinForms. Two <see cref="HultUIControl"/>s share
-/// one application and one UI thread, beside a <c>DataGridView</c> and a menu strip
-/// that keep behaving exactly as they did.
+/// The migration shape: an existing WinForms form where some pages have moved to
+/// HultUI and the rest has not. Three <see cref="HultUIControl"/>s share one application
+/// and one UI thread, beside a <c>DataGridView</c>, a menu strip and an untouched
+/// WinForms page that keep behaving exactly as they did.
 /// </summary>
 internal static class Program
 {
@@ -65,10 +65,9 @@ internal sealed class MainForm : Form
         grid.Rows.Add("Focus, tab order, the message loop", "WinForms");
         grid.Rows.Add("Layout, painting, hit-testing inside a tab", "HultUI");
 
-        Counter = new HultUIControl { Name = "counter", Dock = DockStyle.Fill, RootFactory = BuildCounter };
-        Counter.Mounted += (_, _) => UpdateStatus();
-
-        Palette = new HultUIControl { Name = "palette", Dock = DockStyle.Fill, RootFactory = BuildPalette };
+        Counter = Mount("counter", BuildCounter);
+        Palette = Mount("palette", BuildPalette);
+        DragDrop = Mount("dragdrop", BuildDragDrop);
 
         // Tabs are the migration shape: a page at a time moves to HultUI while the rest
         // stays as it was. The palette page also proves the lazy case — a TabControl does
@@ -79,7 +78,6 @@ internal sealed class MainForm : Form
         migrated.Controls.Add(Counter);
         var paletteTab = new TabPage("Also migrated") { Name = "tab-palette" };
         paletteTab.Controls.Add(Palette);
-        DragDrop = new HultUIControl { Name = "dragdrop", Dock = DockStyle.Fill, RootFactory = BuildDragDrop };
         var dragTab = new TabPage("Drag and drop") { Name = "tab-dragdrop" };
         dragTab.Controls.Add(DragDrop);
 
@@ -120,17 +118,54 @@ internal sealed class MainForm : Form
         _split.SplitterDistance = (int)(_split.Width * 0.42f);
     }
 
+    /// <summary>
+    /// Creates one HultUI control, wired so it comes up correct whenever it is created.
+    /// </summary>
+    /// <remarks>
+    /// The Mounted handler is the point. A TabControl does not create a page's handle
+    /// until the page is first shown, and WinForms may recreate a handle later on its
+    /// own — so a control can mount long after the user changed the zoom, or mount a
+    /// second time. Applying the wanted zoom here rather than at the moment the user
+    /// asks for it is what makes those cases come out right.
+    /// </remarks>
+    private HultUIControl Mount(string name, Func<Element> rootFactory)
+    {
+        var control = new HultUIControl { Name = name, Dock = DockStyle.Fill, RootFactory = rootFactory };
+        control.Mounted += (_, _) =>
+        {
+            control.UserScale = _zoom;
+            UpdateStatus();
+        };
+        return control;
+    }
+
+    /// <summary>
+    /// The zoom the user asked for, which is not the same thing as any control's current
+    /// scale. A control that has not been shown yet has no window to scale, so the wish
+    /// is kept here and applied as each one mounts.
+    /// </summary>
+    private float _zoom = 1f;
+
     private void Zoom(float by)
     {
-        Counter.UserScale = Math.Clamp(Counter.UserScale + by, 0.5f, 3f);
-        // Only if its page has been shown: an unmounted control has no window to scale.
-        if (Palette.Window is not null) Palette.UserScale = Counter.UserScale;
+        _zoom = Math.Clamp(_zoom + by, 0.5f, 3f);
+        ApplyZoom();
         UpdateStatus();
     }
 
+    /// <summary>Pushes the wanted zoom onto every control that currently has a window.</summary>
+    private void ApplyZoom()
+    {
+        foreach (var control in HultUiControls)
+            if (control.Window is not null)
+                control.UserScale = _zoom;
+    }
+
+    private IEnumerable<HultUIControl> HultUiControls => [Counter, Palette, DragDrop];
+
     private void UpdateStatus()
         => _status.Text = $"HultUI application: {(HultUIApplicationHost.Application is null ? "not started" : "running")}"
-            + $"   ·   control DPI {Counter.DeviceDpi}   ·   zoom {Counter.UserScale:0.0}x"
+            + $"   ·   control DPI {Counter.DeviceDpi}   ·   zoom {_zoom:0.0}x"
             + "   ·   Tab moves in, through and out of the HultUI panels";
 
     /// <summary>
