@@ -145,20 +145,25 @@ public static class PrettyPrint
             using (var reader = XmlReader.Create(new StringReader(text.TrimStart(Bom)), settings))
                 doc = XDocument.Load(reader, LoadOptions.None);
 
+            ReindentText(doc);
+
             var ws = new XmlWriterSettings
             {
                 Indent = true,
-                IndentChars = "  ",
+                IndentChars = IndentUnit,
                 NewLineChars = "\n",
                 NewLineHandling = NewLineHandling.Replace,
                 Encoding = new UTF8Encoding(false),
-                // A file that had no declaration doesn't grow one.
-                OmitXmlDeclaration = doc.Declaration is null,
+                // The writer's own declaration is generated from its settings — it would say
+                // utf-8 whatever the file said, and add an encoding to one that had none. The
+                // file's is written back as parsed instead; a file without one doesn't grow one.
+                OmitXmlDeclaration = true,
             };
             using var ms = new MemoryStream();
             using (var w = XmlWriter.Create(ms, ws)) doc.Save(w);
             error = null;
-            return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+            var body = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+            return doc.Declaration is { } decl ? decl.ToString() + "\n" + body : body;
         }
         catch (XmlException ex)
         {
@@ -167,4 +172,79 @@ public static class PrettyPrint
         }
         catch (Exception ex) { error = "Not valid XML: " + ex.Message; return null; }
     }
+
+    private const string IndentUnit = "  ";
+
+    /// <summary>
+    /// Re-indent the text <em>inside</em> elements. The writer indents between elements and
+    /// leaves a text node byte for byte — whitespace in text is significant to XML — so a
+    /// multi-line text node keeps the indentation it had in the file, and the closing tag
+    /// lands wherever the text's trailing whitespace put it. A doc comment's
+    /// <c>&lt;summary&gt;</c> came out with its lines twelve spaces in and its closing tag
+    /// eight, whatever depth the element was written at.
+    ///
+    /// <para>So every text node that spans lines is rewritten: each line trimmed and set one
+    /// level deeper than its element, and — when the node is the element's last child — the
+    /// closing tag put on a line of its own at the element's depth. Inline elements in the
+    /// flow (<c>&lt;see cref/&gt;</c> between two runs of text) stay in the flow, since the
+    /// text on either side of them keeps its own leading and trailing space. Single-line
+    /// text (<c>&lt;item&gt;x&lt;/item&gt;</c>) is not touched, and nothing under
+    /// <c>xml:space="preserve"</c> is.</para>
+    /// </summary>
+    private static void ReindentText(XDocument doc)
+    {
+        var preserve = XNamespace.Xml + "space";
+        var touched = new HashSet<XElement>();
+        foreach (var node in doc.DescendantNodes().OfType<XText>().ToList())
+        {
+            if (node is XCData || node.Parent is not { } parent) continue;
+            if (!node.Value.Contains('\n')) continue;
+            if (parent.AncestorsAndSelf().Any(a => (string?)a.Attribute(preserve) == "preserve")) continue;
+            touched.Add(parent);
+
+            int depth = parent.Ancestors().Count();
+            string inner = Indent(depth + 1);
+            bool first = node.PreviousNode is null;
+            bool last = node.NextNode is null;
+
+            var lines = node.Value.Split('\n');
+            // Indentation is the file's, not the text's: strip it from every line after the
+            // first, and the trailing whitespace before every newline. The first line's leading
+            // space and the last line's trailing space are the gaps around an inline element
+            // ("when <see/> drains"), kept unless this node opens or closes the element.
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (i > 0) lines[i] = lines[i].TrimStart();
+                if (i < lines.Length - 1) lines[i] = lines[i].TrimEnd();
+            }
+            int start = 0, end = lines.Length;
+            if (first && lines[0].Length == 0) start++;                       // the newline after the open tag
+            if (last && end > start && lines[end - 1].Trim().Length == 0) end--; // the indent before the close tag
+
+            var sb = new StringBuilder();
+            if (first) sb.Append('\n').Append(inner);
+            for (int i = start; i < end; i++)
+            {
+                if (i > start)
+                {
+                    sb.Append('\n');
+                    // A blank line stays blank; the line that positions a following element
+                    // (the last one, empty) carries the indent that element will sit at.
+                    if (lines[i].Length > 0 || (i == end - 1 && !last)) sb.Append(inner);
+                }
+                sb.Append(lines[i]);
+            }
+            if (last) sb.Append('\n').Append(Indent(depth));
+            node.Value = sb.ToString();
+        }
+
+        // Once an element has mixed content the writer stops indenting inside it, including
+        // its own closing tag. Where the last child is an element, the text above put that
+        // element on a line of its own; the closing tag still needs one.
+        foreach (var parent in touched)
+            if (parent.LastNode is XElement)
+                parent.Add(new XText("\n" + Indent(parent.Ancestors().Count())));
+    }
+
+    private static string Indent(int depth) => string.Concat(Enumerable.Repeat(IndentUnit, depth));
 }

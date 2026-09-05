@@ -133,6 +133,75 @@ public class PrettyPrintTests
         Assert.Equal(["<stad namn=\"Göteborg\">Malmö</stad>"], lines);
     }
 
+    /// <summary>A text node is written byte for byte by the writer, so a doc comment's
+    /// summary kept the file's twelve-space indentation and put its closing tag wherever the
+    /// trailing whitespace landed. The text is re-set one level under its element, inline
+    /// elements stay in the flow, and the closing tag gets a line at the element's depth.</summary>
+    [Fact]
+    public void MultiLineTextIsReindentedUnderItsElement()
+    {
+        var lines = Format(PrettyKind.Xml, string.Join('\n',
+        [
+            "<doc>",
+            "    <members>",
+            "        <member name=\"T:X\">",
+            "            <summary>",
+            "            Platform-neutral router for accessibility actions.",
+            "            Each action is queued when <see cref=\"T:HultUI.Window\" /> drains it at the start",
+            "            of the next frame.",
+            "            </summary>",
+            "            <remarks>One line.</remarks>",
+            "        </member>",
+            "    </members>",
+            "</doc>",
+        ]), out var err);
+
+        Assert.Null(err);
+        Assert.Equal(
+        [
+            "<doc>",
+            "  <members>",
+            "    <member name=\"T:X\">",
+            "      <summary>",
+            "        Platform-neutral router for accessibility actions.",
+            "        Each action is queued when <see cref=\"T:HultUI.Window\" /> drains it at the start",
+            "        of the next frame.",
+            "      </summary>",
+            "      <remarks>One line.</remarks>",
+            "    </member>",
+            "  </members>",
+            "</doc>",
+        ], lines);
+    }
+
+    [Fact]
+    public void ABlankLineInTextStaysBlankAndAFollowingElementGetsItsOwnLine()
+    {
+        var lines = Format(PrettyKind.Xml, "<r>\n    first\n\n    second\n    <para>p</para>\n</r>", out _);
+        Assert.Equal(["<r>", "  first", "", "  second", "  <para>p</para>", "</r>"], lines);
+    }
+
+    [Fact]
+    public void PreservedWhitespaceIsLeftAlone()
+    {
+        var lines = Format(PrettyKind.Xml, "<r><pre xml:space=\"preserve\">\n   keep\n  this</pre></r>", out _);
+        Assert.Equal(["<r>", "  <pre xml:space=\"preserve\">", "   keep", "  this</pre>", "</r>"], lines);
+    }
+
+    /// <summary>The writer's own declaration is generated from its settings — utf-8 whatever
+    /// the file said, and added to a file that declared no encoding. The file's is written
+    /// back as it was.</summary>
+    [Theory]
+    [InlineData("<?xml version=\"1.0\"?>")]
+    [InlineData("<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>")]
+    [InlineData("<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>")]
+    public void TheDeclarationIsWrittenBackAsItWas(string declaration)
+    {
+        var lines = Format(PrettyKind.Xml, declaration + "<a><b/></a>", out var err);
+        Assert.Null(err);
+        Assert.Equal([declaration, "<a>", "  <b />", "</a>"], lines);
+    }
+
     // ── Detection ────────────────────────────────────────────────────────
     [Theory]
     [InlineData("settings.json", "{}", PrettyKind.Json)]
