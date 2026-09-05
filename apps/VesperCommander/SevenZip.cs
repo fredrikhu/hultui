@@ -172,16 +172,16 @@ public static class SevenZip
         return map;
     }
 
-    /// <summary>Move members within the archive (<c>7z rn</c>), which is how an add reaches a
-    /// folder inside it: 7-Zip's command line cannot remap an entry name while adding, so the
-    /// sources go in at the root and are renamed into place afterwards. A folder rename carries
-    /// everything beneath it, and no bytes are rewritten.</summary>
+    /// <summary>Move members within the archive (<c>7z rn</c>). Shift+F6 uses it as a rename;
+    /// an add uses it to reach a folder inside the archive — 7-Zip's command line cannot remap
+    /// an entry name while adding, so the sources go in at the root and are renamed into place
+    /// afterwards. A folder rename carries everything beneath it, and no bytes are rewritten.</summary>
     public static string? Rename(string archiveFile, IReadOnlyList<(string From, string To)> pairs, string? password)
     {
         if (pairs.Count == 0) return null;
         var (ok, _, wrongPassword) = Run(RenameArgs(archiveFile, pairs, password), readAll: false);
         if (wrongPassword) return "Wrong password";
-        return ok ? null : "7-Zip could not move the added items into place";
+        return ok ? null : "7-Zip could not rename inside the archive";
     }
 
     /// <summary>Remove members (<c>7z d</c>). <paramref name="targets"/> are '/'-separated

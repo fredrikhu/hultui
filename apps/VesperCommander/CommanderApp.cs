@@ -2250,7 +2250,10 @@ public partial class CommanderApp : Component, IDisposable
         if (cur < 0 || cur >= list.Count) return;
         var e = list[cur];
         if (e.IsParent) return;                    // never rename ".."
-        if (LockedBlock(side, "rename here") || InArchiveBlock(side)) return;
+        if (LockedBlock(side, "rename here")) return;
+        // Inside an archive the member is renamed in place — the one edit besides delete
+        // that needs no bytes from outside. Refused with a reason where the format can't.
+        if (InArchive(side)) { OpenArchiveRenamePrompt(side, e); return; }
         _active = side;
         _namePromptValue = e.Name;
         _namePromptError = null;

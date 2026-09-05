@@ -592,6 +592,117 @@ public static class ArchiveVfs
         return SevenZip.Rename(archiveFile, [.. roots.Select(r => (r!, prefix + "/" + r))], password);
     }
 
+    // ── Rename ───────────────────────────────────────────────────────────
+
+    /// <summary>A rename worked out but not yet done: the '/'-separated stored path the member
+    /// has now and the one it is to have. Kept apart from the write so the name can be checked
+    /// while the prompt is still open — a taken name is answered inline, in the dialog — and
+    /// the rewrite, which can take as long as the archive is large, runs off the UI thread.</summary>
+    public readonly record struct RenamePlan(string From, string To);
+
+    /// <summary>
+    /// Check a rename of the member at <paramref name="internalPath"/> to
+    /// <paramref name="newName"/>, and say where it would go. Returns an error message, or
+    /// null with <paramref name="plan"/> set. A plan whose From and To are equal is a no-op
+    /// the caller can skip.
+    ///
+    /// <para>A rename keeps the member in its folder, so the name is one segment: a separator
+    /// in it is refused rather than read as "move into that folder", which F6 is for. The one
+    /// collision allowed is with the member itself in another case — matching is
+    /// case-insensitive, as the listing's is, so <c>readme</c> → <c>README</c> would otherwise
+    /// be told the name is taken by the thing being renamed.</para>
+    /// </summary>
+    public static string? PlanRename(string archiveFile, string internalPath, string newName,
+        string? password, bool sevenZip, out RenamePlan plan)
+    {
+        plan = default;
+        if (!File.Exists(archiveFile)) return "That archive is no longer there";
+        string ext = Path.GetExtension(archiveFile).ToLowerInvariant();
+        if (!Caps(ext, sevenZip).Write)
+            return ext is ".rar"
+                ? "rar archives are read-only"
+                : "Renaming in this format needs 7-Zip — set it in Tools → Archiver";
+
+        string name = newName.Trim();
+        if (name.Length == 0) return "Enter a name";
+        if (name.Contains('/') || name.Contains('\\')) return "A name can't contain a separator — use F6 to move";
+        if (name is "." or "..") return "That name can't be stored in an archive";
+
+        string from = (ArchivePath.SafeMemberPath(internalPath) ?? internalPath.Replace('\\', '/')).TrimEnd('/');
+        if (from.Length == 0) return "Not inside an archive";
+        int slash = from.LastIndexOf('/');
+        string to = slash < 0 ? name : from[..(slash + 1)] + name;
+        plan = new RenamePlan(from, to);
+
+        if (from.Equals(to, StringComparison.Ordinal)) return null;               // unchanged
+        if (from.Equals(to, StringComparison.OrdinalIgnoreCase)) return null;     // a case change of itself
+
+        var existing = AllMembers(archiveFile, password, sevenZip);
+        if (existing != null && existing.Keys.Any(k =>
+                k.Equals(to, StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith(to + "/", StringComparison.OrdinalIgnoreCase)))
+            return $"\"{name}\" is already in the archive";
+        return null;
+    }
+
+    /// <summary>
+    /// Carry out a <see cref="PlanRename"/>. A folder takes everything beneath it. Returns an
+    /// error message or null.
+    ///
+    /// <para>A zip cannot rename an entry in place — the name is part of the entry — so through
+    /// the BCL each member under the old path is copied to a new entry under the new one and the
+    /// old entry dropped, in one Update pass. The stamp travels with it; the compression level
+    /// is the writer's default, which is what F5-into-archive already gives new members. 7-Zip
+    /// has <c>rn</c>, which moves a subtree without rewriting bytes.</para>
+    /// </summary>
+    public static string? RenameMember(string archiveFile, RenamePlan plan, string? password, bool sevenZip)
+    {
+        if (plan.From.Equals(plan.To, StringComparison.Ordinal)) return null;
+        if (!File.Exists(archiveFile)) return "That archive is no longer there";
+        try
+        {
+            return WritesThroughSevenZip(archiveFile, password)
+                ? SevenZip.Rename(archiveFile, [(plan.From, plan.To)], password)
+                : RenameInZip(archiveFile, plan);
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    private static string? RenameInZip(string archiveFile, RenamePlan plan)
+    {
+        using var zip = ZipFile.Open(archiveFile, ZipArchiveMode.Update);
+        int moved = 0;
+        // Matched the way the listing and the delete match — through SafeMemberPath, so a
+        // member stored as "./notes/a.txt" still answers to "notes/a.txt".
+        foreach (var entry in zip.Entries.ToList())
+        {
+            if (ArchivePath.SafeMemberPath(entry.FullName) is not { } full) continue;
+            bool marker = full.EndsWith('/');
+            var norm = full.TrimEnd('/');
+            string rest;
+            if (norm.Equals(plan.From, StringComparison.OrdinalIgnoreCase)) rest = "";
+            else if (norm.StartsWith(plan.From + "/", StringComparison.OrdinalIgnoreCase)) rest = norm[plan.From.Length..];
+            else continue;
+
+            string target = plan.To + rest + (marker ? "/" : "");
+            // Read fully before the new entry exists: Update mode holds a changed entry in
+            // memory either way, and one open stream at a time keeps the writer honest.
+            byte[] bytes;
+            using (var s = entry.Open())
+            using (var ms = new MemoryStream())
+            { s.CopyTo(ms); bytes = ms.ToArray(); }
+            var stamp = entry.LastWriteTime;
+            entry.Delete();
+
+            var fresh = zip.CreateEntry(target);
+            fresh.LastWriteTime = stamp;
+            if (bytes.Length > 0)
+                using (var w = fresh.Open()) w.Write(bytes, 0, bytes.Length);
+            moved++;
+        }
+        return moved > 0 ? null : "Nothing in the archive matched";
+    }
+
     /// <summary>
     /// Remove members from an archive. <paramref name="internalPaths"/> are the pane's
     /// backslash-separated internal paths; a directory path removes everything beneath it.

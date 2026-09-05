@@ -105,6 +105,69 @@ public partial class CommanderApp
         });
     }
 
+    // ── Rename (Shift+F6 inside an archive) ──────────────────────────────
+    /// <summary>Shift+F6 on a member: the same name prompt as on disk, writing to the archive.
+    /// Blocks nested archives and read-only formats the way delete does, and for the same
+    /// reasons. The name is checked while the prompt is open — a taken name stays in the
+    /// dialog — and the rewrite itself runs off-thread, reported through a notice.</summary>
+    private void OpenArchiveRenamePrompt(char side, FileEntry e)
+    {
+        if (InNestedArchive(side))
+        { _notice = "Can't rename inside a nested archive — extract it first"; MarkDirty(); return; }
+        if (ArchivePath.TryParse(Dir(side)) is not { } ap) return;
+        string ext = System.IO.Path.GetExtension(ap.ArchiveFile).ToLowerInvariant();
+        if (!ArchiveVfs.Caps(ext, _sevenZip).Write)
+        {
+            _notice = ext is ".rar"
+                ? "rar archives are read-only"
+                : "Renaming in this format needs 7-Zip — set it in Tools → Archiver";
+            MarkDirty(); return;
+        }
+
+        _active = side;
+        _namePromptValue = e.Name;
+        _namePromptError = null;
+        _namePrompt = new NamePromptSpec("Rename in archive", e.IsDir ? "folder" : "file", "Rename",
+            newName => RenameArchiveMember(side, e, newName));
+        _pendingNamePromptFocus = true;
+        MarkDirty();
+    }
+
+    /// <summary>Commit of the archive rename prompt. Returns an error string (kept inline in
+    /// the dialog) or null, at which point the rewrite is under way.</summary>
+    private string? RenameArchiveMember(char side, FileEntry e, string newName)
+    {
+        if (ArchivePath.TryParse(e.FullPath) is not { } ap) return "Not inside an archive";
+        string? password = PasswordFor(e.FullPath);
+        bool sevenZip = _sevenZip;
+
+        var err = ArchiveVfs.PlanRename(ap.ArchiveFile, ap.Internal, newName, password, sevenZip, out var plan);
+        if (err != null) return err;
+        if (plan.From == plan.To) return null;    // unchanged
+
+        string archive = ap.ArchiveFile;
+        string name = newName.Trim();
+        _notice = "Renaming in archive…";
+        MarkDirty();
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            var writeErr = ArchiveVfs.RenameMember(archive, plan, password, sevenZip);
+            Application.InvokeOnMainThread(() =>
+            {
+                if (writeErr == null)
+                {
+                    _notice = $"Renamed {e.Name} to {name} in {System.IO.Path.GetFileName(archive)}";
+                    _pendingFocusChild[side == 'L' ? 0 : 1] = name;   // land on the new name
+                }
+                else _notice = $"Rename failed: {FileOps.Clean(writeErr)}";
+                Marks(side).Clear();
+                _genL++; _genR++;   // both panes could be showing this archive
+                MarkDirty();
+            });
+        });
+        return null;
+    }
+
     // ── Extract (copy-out) ───────────────────────────────────────────────
     private void StartArchiveTransfer(List<FileEntry> items, string dest, char source)
     {
