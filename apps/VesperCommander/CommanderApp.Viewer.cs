@@ -67,6 +67,16 @@ public partial class CommanderApp
     private IReadOnlyList<TextSpan>[]? _viewerHl;
     private string? _viewerHlKey;
 
+    // Pretty print. The file as read stays in _viewerRaw; `f` swaps the re-indented form in
+    // and out of _viewerLines, so everything downstream — rows, search, selection — sees a
+    // plain list of lines either way. The formatted lines are kept once made: the second
+    // toggle is a swap, not another parse of a 4MB document.
+    private string[] _viewerRaw = [];
+    private string[]? _viewerPrettyLines;
+    private bool _viewerPretty;
+    private PrettyKind _viewerPrettyKind;    // what the footer offers; None hides the hint
+    private string? _viewerPrettyError;      // why the last attempt was refused, in the footer
+
     /// <summary>Whether long lines wrap rather than scrolling sideways. Deliberately the
     /// <i>same</i> preference the diff uses: both views show code in the same font at the
     /// same size, and keeping two settings for it meant answering the same question twice.</summary>
@@ -133,6 +143,11 @@ public partial class CommanderApp
         _viewerHlKey = null;
         _viewerPan.Reset();
         _viewerPan.ContentWidth = 0;
+        _viewerRaw = [];
+        _viewerPrettyLines = null;
+        _viewerPretty = false;
+        _viewerPrettyKind = PrettyKind.None;
+        _viewerPrettyError = null;
         _viewerState = ViewerState.Loading;
         // The matches index into the file being replaced. The query itself is kept, so
         // opening the next file searches it for the same thing.
@@ -189,16 +204,85 @@ public partial class CommanderApp
         _viewerState = state;
         if (state != ViewerState.Ok || lines is null) return;
 
+        _viewerRaw = lines;
+        _viewerPrettyKind = PrettyPrint.Detect(_viewerPath, lines);
+        ShowViewerLines(lines);
+    }
+
+    /// <summary>Put <paramref name="lines"/> on screen as the file's text — on load, and
+    /// again on each pretty-print toggle, which is why this is not part of ApplyViewer.</summary>
+    private void ShowViewerLines(string[] lines)
+    {
         _viewerLines = lines;
         _viewerItems = new int[lines.Length];
         for (int i = 0; i < lines.Length; i++) _viewerItems[i] = i;
-        // Selection is bound to this file: rebinding a different key drops a selection whose
-        // offsets mean nothing in the new one.
-        _viewerGroup.Bind((_viewerPath, _viewerGen), lines.Length,
+        // Row heights belong to the old lines; the next Build measures the new ones.
+        _viewerTops = [];
+        _viewerPan.Reset();
+        // Selection is bound to this text: rebinding a different key drops a selection whose
+        // offsets mean nothing in the new one — a different file, or the same file re-indented.
+        _viewerGroup.Bind((ViewerTextKey, _viewerGen), lines.Length,
             i => i >= 0 && i < _viewerLines.Length ? _viewerLines[i] : null);
         _viewerPan.ContentWidth = HorizontalPan.MeasureWidest(lines, ViewerFontSize, TextFont);
         StartViewerHighlight(lines);
         BindViewerSearch();
+    }
+
+    /// <summary>What the body is showing: the file, or the file re-indented. Keys the list,
+    /// the selection and the highlight, so a toggle reconciles as a new text rather than
+    /// patching rows whose lines have all moved.</summary>
+    private string ViewerTextKey => _viewerPretty ? _viewerPath + "|pretty" : _viewerPath;
+
+    /// <summary>`f` — swap between the file as stored and the file re-indented. The first
+    /// press parses and formats off the UI thread (a 4MB JSON document is a real amount of
+    /// work); after that the two forms are simply exchanged. A file that turns out not to be
+    /// JSON or XML says so in the footer and stays as it was.</summary>
+    private void ToggleViewerPretty()
+    {
+        if (_viewerState != ViewerState.Ok) return;
+        _viewerPrettyError = null;
+
+        if (_viewerPretty)
+        {
+            _viewerPretty = false;
+            ShowViewerLines(_viewerRaw);
+            MarkDirty();
+            return;
+        }
+        if (_viewerPrettyLines is { } cached)
+        {
+            _viewerPretty = true;
+            ShowViewerLines(cached);
+            MarkDirty();
+            return;
+        }
+
+        // The key works on any file, not only the ones the footer offered it for: the
+        // extension said nothing, so the first character decides.
+        var kind = _viewerPrettyKind != PrettyKind.None ? _viewerPrettyKind : PrettyPrint.Sniff(_viewerRaw);
+        if (kind == PrettyKind.None)
+        {
+            _viewerPrettyError = "Not JSON or XML";
+            MarkDirty();
+            return;
+        }
+
+        var raw = _viewerRaw;
+        int generation = _viewerGen;
+        Task.Run(() =>
+        {
+            var formatted = PrettyPrint.Format(kind, raw, out var error);
+            HultUI.Application.InvokeOnMainThread(() =>
+            {
+                if (_viewerGen != generation) return;   // another file by now
+                if (formatted is null) { _viewerPrettyError = error; MarkDirty(); return; }
+                _viewerPrettyLines = formatted;
+                _viewerPrettyKind = kind;               // it parsed, so the footer can say so
+                _viewerPretty = true;
+                ShowViewerLines(formatted);
+                MarkDirty();
+            });
+        });
     }
 
     /// <summary>Tokenize the whole file off the UI thread, exactly as the diff does — a
@@ -211,7 +295,9 @@ public partial class CommanderApp
         if (!SyntaxHighlighter.CanHighlight(_viewerPath)) return;   // no grammar for this extension
 
         string path = _viewerPath;
-        var key = _viewerHlKey = $"{path} {_viewerGen}";
+        // Keyed by which text is up, not only which file: a tokenize of the raw lines that
+        // lands after a pretty-print toggle would colour the wrong lines.
+        var key = _viewerHlKey = $"{ViewerTextKey} {_viewerGen}";
         Task.Run(() =>
         {
             var spans = Tokenize(path, lines);
@@ -363,6 +449,9 @@ public partial class CommanderApp
             case KeyCode.Left or KeyCode.Right:
                 _viewerPan.HandleKey(e); e.StopPropagation = true; break;
             case KeyCode.W: ToggleViewerWrap(); e.StopPropagation = true; break;
+            // Ctrl+F is find, handled above; bare f re-indents JSON or XML.
+            case KeyCode.F when !e.Modifiers.HasFlag(KeyModifiers.Ctrl):
+                ToggleViewerPretty(); e.StopPropagation = true; break;
         }
     }
 
@@ -451,7 +540,7 @@ public partial class CommanderApp
             .Background(Nocturne.Bg);
         // Keyed by file so opening another one starts at the top instead of inheriting the
         // previous one's offset, and so toggling wrap reconciles rather than rebuilding.
-        list.Key = $"view:{_viewerPath}|{_viewerGen}";
+        list.Key = $"view:{ViewerTextKey}|{_viewerGen}";
         list.WithRef(_viewerScrollRef);
         // Focusable so that closing the find bar has somewhere in the tree to put the
         // keyboard. Out of the Tab cycle: the view has one thing to focus, so traversal
@@ -528,6 +617,18 @@ public partial class CommanderApp
             footer.AddChild(Ui.Mono("scroll", 10f, Nocturne.On(0.45)));
             footer.AddChild(Ui.Kbd("w"));
             footer.AddChild(Ui.Mono(ViewerWrap ? "no wrap" : "wrap", 10f, Nocturne.On(0.45)));
+            // Offered when the file looks like JSON or XML; a refusal says why, in its place.
+            if (_viewerPrettyError is { } why)
+            {
+                footer.AddChild(Ui.Kbd("f"));
+                footer.AddChild(Ui.Mono(why, 10f, Nocturne.MarkRed));
+            }
+            else if (_viewerPrettyKind != PrettyKind.None)
+            {
+                footer.AddChild(Ui.Kbd("f"));
+                footer.AddChild(Ui.Mono(_viewerPretty ? "as stored" : $"format {(_viewerPrettyKind == PrettyKind.Json ? "JSON" : "XML")}",
+                    10f, Nocturne.On(0.45)));
+            }
             if (_viewerFind.Open)
             {
                 footer.AddChild(Ui.Kbd("n")); footer.AddChild(Ui.Kbd("p"));
