@@ -113,7 +113,10 @@ public partial class JunctionApp
     private BoxElement ChangeFolderRow(TreeNode<GitFileChange> node, bool expanded,
         Element? lead = null, Element? trail = null)
     {
-        var row = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
+        // Lead · twisty · folder glyph · name · count · trail, the glyph slots sized to
+        // their content since the two icons are not the same width.
+        var row = Grid.Of(lead != null ? ChangeFolderColumnsWithLead : ChangeFolderColumns, gap: 6)
+            .AlignItems(AlignItems.Center)
             .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(node.Path);
         // Tree semantics for assistive tech, as in the Files tab: a folder row announces
@@ -121,19 +124,27 @@ public partial class JunctionApp
         row.Role = AccessibilityRole.TreeItem;
         row.AccessibleExpanded = expanded;
 
-        if (lead != null) row.AddChild(lead);
-        row.AddChild(Ui.Icon(expanded ? Icons.CaretDown : Icons.CaretRight, 9f, Nocturne.On(0.5)).FlexShrink(0));
-        row.AddChild(Ui.Icon(expanded ? Icons.FolderOpen : Icons.Folders, 12f, Nocturne.Accent300).FlexShrink(0));
+        int col = 0;
+        if (lead != null) row.AddChild(lead.GridColumn(col++));
+        row.AddChild(Ui.Icon(expanded ? Icons.CaretDown : Icons.CaretRight, 9f, Nocturne.On(0.5)).GridColumn(col++));
+        row.AddChild(Ui.Icon(expanded ? Icons.FolderOpen : Icons.Folders, 12f, Nocturne.Accent300).GridColumn(col++));
         // The joined label can be long ("src/HultUI.Core/Elements"); it ellipsizes from
         // the end, and the tooltip carries the whole path.
         row.AddChild(Text.New(node.Segment).FontSize(11.5f).FontWeight(FontWeight.Medium)
-            .TextColor(Nocturne.On(0.78))
-            .FlexGrow(1).FlexShrink(1).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+            .TextColor(Nocturne.On(0.78)).GridColumn(col++)
+            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         row.AddChild(Text.New(node.LeafCount.ToString()).FontSize(10f)
-            .TextColor(Nocturne.On(0.35)).FlexShrink(0));
-        if (trail != null) row.AddChild(trail);
+            .TextColor(Nocturne.On(0.35)).GridColumn(col++));
+        if (trail != null) row.AddChild(trail.GridColumn(col));
         return row;
     }
+
+    // The templates behind the two row kinds. A file row is checkbox · letter · name ·
+    // counts, with the letter on a fixed track so names start on one column. A folder
+    // row's icon slots size to their glyphs; its name takes the rest either way.
+    private const string ChangeRowColumns = "auto 14px 1fr auto";
+    private const string ChangeFolderColumns = "auto auto 1fr auto auto";
+    private const string ChangeFolderColumnsWithLead = "auto auto auto 1fr auto auto";
 
     /// <summary>The +/− pair a row shows, or null when nothing changed on either side
     /// (a pure rename, a mode change). Shared so a folder's totals read exactly like the

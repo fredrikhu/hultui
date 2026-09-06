@@ -17,6 +17,9 @@ public partial class JunctionApp
     private const float ColTagCreated = 118f;
     private const float ColTagKind = 110f;
     private const float ColTagActions = 210f;
+    // Shared by the header and every leaf row; see BranchColumns.
+    private static readonly string TagColumns = FormattableString.Invariant(
+        $"34fr 40fr {ColTagCreated}px {ColTagKind}px {ColTagActions}px");
 
     private Element BuildTagsView()
     {
@@ -139,15 +142,15 @@ public partial class JunctionApp
 
     private Element BuildTagTableHeader()
     {
-        var row = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Center)
+        var row = Grid.Of(TagColumns).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 26, 6, 26))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        row.AddChild(HeaderCell("TAG", flexGrow: 34, align: JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("COMMIT", flexGrow: 40, align: JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("CREATED", width: ColTagCreated, align: JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("KIND", width: ColTagKind, align: JustifyContent.Center));
-        row.AddChild(HeaderCell("ACTIONS", width: ColTagActions, align: JustifyContent.FlexEnd));
+        row.AddChild(HeaderCell("TAG", 0, JustifyContent.FlexStart));
+        row.AddChild(HeaderCell("COMMIT", 1, JustifyContent.FlexStart));
+        row.AddChild(HeaderCell("CREATED", 2, JustifyContent.FlexStart));
+        row.AddChild(HeaderCell("KIND", 3, JustifyContent.Center));
+        row.AddChild(HeaderCell("ACTIONS", 4, JustifyContent.FlexEnd));
         return row;
     }
 
@@ -207,7 +210,7 @@ public partial class JunctionApp
     {
         var t = node.Item;
         var depth = node.Depth;
-        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
+        var row = Grid.Of(TagColumns, rows: "1fr").AlignItems(AlignItems.Center)   // see BranchLeafRow
             .Height(TagRowHeight).FlexShrink(0)
             .Padding(new Thickness(0, 26, 0, 26))
             .CornerRadius(Nocturne.RadiusRow)
@@ -220,8 +223,7 @@ public partial class JunctionApp
 
         // Tag cell: chip + name, with the annotation message underneath when there is one.
         // The tree's indent lives inside this cell so the columns beside it stay aligned.
-        var tagCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
-            .FlexGrow(34).FlexBasis(Dimension.Px(0));
+        var tagCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0);
         if (depth > 0)
             tagCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         tagCell.AddChild(Ui.Chip(Icons.Tag, "TAG",
@@ -242,17 +244,17 @@ public partial class JunctionApp
 
         // The commit it points at: short hash then subject.
         var commitCell = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .FlexGrow(40).FlexBasis(Dimension.Px(0)).Padding(new Thickness(0, 8, 0, 0));
+            .GridColumn(1).Padding(new Thickness(0, 8, 0, 0));
         commitCell.AddChild(Ui.Mono(ShortHash(t.Hash), 11.5f, Nocturne.On(0.45)).FlexShrink(0));
         commitCell.AddChild(Text.New(t.Subject.Length > 0 ? t.Subject : "—").FontSize(12.5f)
             .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
         row.AddChild(commitCell);
 
-        row.AddChild(Box.New().Width(ColTagCreated).FlexShrink(0)
+        row.AddChild(Box.New().GridColumn(2)
             .Children(Text.New(t.Date == default ? "" : t.Date.ToString("g"))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));
 
-        var kind = Flex.Row(gap: 0).Width(ColTagKind).FlexShrink(0)
+        var kind = Flex.Row(gap: 0).GridColumn(3)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
         kind.AddChild(Text.New(t.Annotated ? "annotated" : "lightweight")
             .FontSize(11.5f).TextColor(Nocturne.On(t.Annotated ? 0.62 : 0.40)));
@@ -268,7 +270,7 @@ public partial class JunctionApp
 
     private Element TagActions(GitTag t)
     {
-        var box = Flex.Row(gap: 5).Width(ColTagActions).FlexShrink(0)
+        var box = Flex.Row(gap: 5).GridColumn(4)
             .JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
         box.AddChild(Ui.SecondaryButton("Checkout", Icons.BendDownRight, () => CheckoutTag(t), 11.5f));
         box.AddChild(SmallIconButton(Icons.ArrowUp, () => PushTag(t), "Push tag (p)"));

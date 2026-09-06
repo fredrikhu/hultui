@@ -24,6 +24,10 @@ public partial class JunctionApp
     private const float ColAheadBehind = 120f;
     private const float ColInHistory = 96f;
     private const float ColActions = 250f;
+    // One template for the header and every leaf row, so the columns line up by
+    // construction rather than by each row repeating the same widths.
+    private static readonly string BranchColumns = FormattableString.Invariant(
+        $"38fr 30fr {ColUpdated}px {ColAheadBehind}px {ColInHistory}px {ColActions}px");
 
     private Element BuildBranchesView()
     {
@@ -173,25 +177,24 @@ public partial class JunctionApp
 
     private Element BuildBranchTableHeader()
     {
-        var row = Flex.Row(gap: 0).FlexShrink(0).AlignItems(AlignItems.Center)
+        var row = Grid.Of(BranchColumns).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(6, 26, 6, 26))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        row.AddChild(HeaderCell("BRANCH", flexGrow: 38, align: JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("LAST COMMIT", flexGrow: 30, align: JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("UPDATED", width: ColUpdated, align: JustifyContent.FlexStart));
-        row.AddChild(HeaderCell("AHEAD / BEHIND", width: ColAheadBehind, align: JustifyContent.Center));
-        row.AddChild(HeaderCell("IN HISTORY", width: ColInHistory, align: JustifyContent.Center));
-        row.AddChild(HeaderCell("ACTIONS", width: ColActions, align: JustifyContent.FlexEnd));
+        row.AddChild(HeaderCell("BRANCH", 0, JustifyContent.FlexStart));
+        row.AddChild(HeaderCell("LAST COMMIT", 1, JustifyContent.FlexStart));
+        row.AddChild(HeaderCell("UPDATED", 2, JustifyContent.FlexStart));
+        row.AddChild(HeaderCell("AHEAD / BEHIND", 3, JustifyContent.Center));
+        row.AddChild(HeaderCell("IN HISTORY", 4, JustifyContent.Center));
+        row.AddChild(HeaderCell("ACTIONS", 5, JustifyContent.FlexEnd));
         return row;
     }
 
-    private static Element HeaderCell(string label, float flexGrow = 0, float width = 0,
-        JustifyContent align = JustifyContent.FlexStart)
+    /// <summary>A table header label in its grid column. The cell is stretched to the
+    /// track, so the label's alignment within it is a flex justification.</summary>
+    private static Element HeaderCell(string label, int column, JustifyContent align)
     {
-        var box = Flex.Row(gap: 0).JustifyContent(align);
-        if (width > 0) box.Width(width).FlexShrink(0);
-        else box.FlexGrow(flexGrow).FlexBasis(Dimension.Px(0));
+        var box = Flex.Row(gap: 0).JustifyContent(align).GridColumn(column);
         box.AddChild(Text.New(label).FontSize(10.5f).LetterSpacing(0.6f).TextColor(Nocturne.On(0.55)));
         return box;
     }
@@ -272,7 +275,9 @@ public partial class JunctionApp
         // the height of the information in it, so a nested row is the leaf and nothing else.
         var inFolder = depth > 0;
 
-        var row = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
+        // A 1fr row track: the row has a fixed height, and the cells centre within the
+        // track, so the track has to be the whole row rather than hug the tallest cell.
+        var row = Grid.Of(BranchColumns, rows: "1fr").AlignItems(AlignItems.Center)
             .Height(BranchRowHeight).FlexShrink(0)
             .Padding(new Thickness(0, 26, 0, 26))
             .CornerRadius(Nocturne.RadiusRow)
@@ -289,8 +294,7 @@ public partial class JunctionApp
         // Branch cell: chip + leaf title + current/remote tag + version·team subtitle.
         // The tree's indent lives inside this cell so every column right of it stays
         // aligned however deep the ref sits.
-        var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center)
-            .FlexGrow(38).FlexBasis(Dimension.Px(0));
+        var branchCell = Flex.Row(gap: 9).AlignItems(AlignItems.Center).GridColumn(0);
         if (depth > 0)
             branchCell.AddChild(Box.New().Width(depth * RefIndent).FlexShrink(0));
         if (inFolder)
@@ -330,15 +334,15 @@ public partial class JunctionApp
         row.AddChild(branchCell);
 
         // Last commit + updated.
-        row.AddChild(Box.New().FlexGrow(30).FlexBasis(Dimension.Px(0)).Padding(new Thickness(0, 8, 0, 0))
+        row.AddChild(Box.New().GridColumn(1).Padding(new Thickness(0, 8, 0, 0))
             .Children(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
                 .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)));
-        row.AddChild(Box.New().Width(ColUpdated).FlexShrink(0)
+        row.AddChild(Box.New().GridColumn(2)
             .Children(Text.New(b.CommitDate == default ? "" : b.CommitDate.ToString("g"))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));
 
         // Ahead / behind (remote-tracking refs have no upstream of their own).
-        var ab = Flex.Row(gap: 4).Width(ColAheadBehind).FlexShrink(0)
+        var ab = Flex.Row(gap: 4).GridColumn(3)
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center);
         if (b.IsRemote)
             ab.AddChild(Text.New("—").FontSize(12f).TextColor(Nocturne.On(0.30)));
@@ -352,8 +356,7 @@ public partial class JunctionApp
 
         // In history (eye toggle) — keyed on the full ref name, so it works for
         // remote branches too (git log accepts origin/<branch> as a ref).
-        var inHist = Flex.Row(gap: 0).Width(ColInHistory).FlexShrink(0)
-            .JustifyContent(JustifyContent.Center);
+        var inHist = Flex.Row(gap: 0).GridColumn(4).JustifyContent(JustifyContent.Center);
         inHist.AddChild(IncludeToggle(b.Name));
         row.AddChild(inHist);
 
@@ -390,7 +393,7 @@ public partial class JunctionApp
 
     private Element BranchActions(GitBranch b, string checkoutTarget)
     {
-        var box = Flex.Row(gap: 5).Width(ColActions).FlexShrink(0)
+        var box = Flex.Row(gap: 5).GridColumn(5)
             .JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
 
         if (b.IsCurrent)

@@ -665,7 +665,9 @@ public partial class JunctionApp
         var n = ChangeActionCount(self, 1);
         var (letter, color) = StatusLetter(f.Kind);
 
-        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
+        // Checkbox · status letter · name · counts. The letter slot is a fixed track so
+        // the names start on one column whatever the letter's width.
+        var row = Grid.Of(ChangeRowColumns, gap: 8).AlignItems(AlignItems.Center)
             .Padding(ChangeRowPadding(node.Depth)).CornerRadius(Nocturne.RadiusRow)
             .Cursor(CursorType.Pointer).Tooltip(f.Path);
         // Selection and focus in the key so either change gives a fresh element (see
@@ -676,7 +678,7 @@ public partial class JunctionApp
 
         // Checkbox toggles staging without moving the selection — and acts on the whole
         // selection when this row is part of one, the same set the context menu takes.
-        var check = Box.New().FlexShrink(0).Cursor(CursorType.Pointer)
+        var check = Box.New().GridColumn(0).Cursor(CursorType.Pointer)
             .Tooltip(n > 1 ? (isStaged ? $"Unstage {n} files" : $"Stage {n} files")
                            : isStaged ? "Unstage" : "Stage")
             .Children(Ui.Icon(isStaged ? Icons.CheckSquare : Icons.Square, 14f,
@@ -691,15 +693,15 @@ public partial class JunctionApp
         });
         row.AddChild(check);
 
-        row.AddChild(Box.New().Width(14).FlexShrink(0)
+        row.AddChild(Box.New().GridColumn(1)
             .Children(Ui.Mono(letter, 11f, color).FontWeight(FontWeight.Bold)));
 
         // The name alone: the folder row above it carries the directory.
-        row.AddChild(Text.New(node.Segment).FontSize(12f).FlexGrow(1).FlexShrink(1)
+        row.AddChild(Text.New(node.Segment).FontSize(12f).GridColumn(2)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
 
         if (ChangeCounts(f.Additions, f.Deletions) is { } counts)
-            row.AddChild(counts);
+            row.AddChild(counts.GridColumn(3));
 
         row.OnClick(e => OnChangeRowClick(self, e.Modifiers));
         // Right-click outside the selection collapses to that row first, then the
