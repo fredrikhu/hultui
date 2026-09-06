@@ -30,7 +30,7 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Branches", "Open a repository first.");
 
-        _branches.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadBranches, onLoaded: ClampBranchSel);
+        // No load of its own: the list rides on the repo summary (see ActiveBranches).
         var rows = BranchRows();
         if (_branchSel >= rows.Count) _branchSel = Math.Max(0, rows.Count - 1);
 
@@ -43,11 +43,15 @@ public partial class JunctionApp
         return col;
     }
 
-    // Runs off the UI thread.
-    private BranchesData LoadBranches()
+    /// <summary>The active repository's branches in display order. The list comes from the
+    /// repo summary — the same <c>for-each-ref</c> the sidebar badge needs, asked for once —
+    /// so this tab is as warm as the sidebar, for every repository it shows.</summary>
+    private IReadOnlyList<GitBranch> ActiveBranches => BranchesFor(_activeRepoPath);
+
+    private IReadOnlyList<GitBranch> BranchesFor(string path)
     {
-        var repo = RepoFor(_activeRepoPath);
-        var all = repo.GetBranches();
+        var all = SummaryFor(path).Branches;
+        if (ReferenceEquals(all, _sortedBranches.Source)) return _sortedBranches.Sorted;
         // Local branches first (current pinned to top, then most-recent), then the
         // remote-tracking branches (most-recent). GetBranches already drops the
         // origin/HEAD symbolic ref.
@@ -56,19 +60,15 @@ public partial class JunctionApp
             .ThenByDescending(b => b.CommitDate);
         var remote = all.Where(b => b.IsRemote)
             .OrderByDescending(b => b.CommitDate);
-        return new BranchesData(local.Concat(remote).ToList());
+        var sorted = local.Concat(remote).ToList();
+        _sortedBranches = (all, sorted);
+        return sorted;
     }
 
     private static (string Remote, string Leaf) SplitRemote(string name)
     {
         var i = name.IndexOf('/');
         return i > 0 ? (name[..i], name[(i + 1)..]) : ("", name);
-    }
-
-    private void ClampBranchSel(BranchesData data)
-    {
-        var count = BranchRowsOf(data.Local).Count;
-        if (_branchSel >= count) _branchSel = Math.Max(0, count - 1);
     }
 
     /// <summary>The branches the query keeps. A plain query is a substring, matched against
@@ -100,7 +100,7 @@ public partial class JunctionApp
         RefRows(FilterBranches(all), RefKindBranch, b => b.Name, b => b.IsRemote,
             filtering: _branchQuery.Trim().Length > 0);
 
-    private List<TreeNode<GitBranch>> BranchRows() => BranchRowsOf(_branches.Value.Local);
+    private List<TreeNode<GitBranch>> BranchRows() => BranchRowsOf(ActiveBranches);
 
     // ── Header (title · search · new branch) ─────────────────────────────
 
@@ -573,7 +573,7 @@ public partial class JunctionApp
     /// "no differences" state.</summary>
     private void RecomputeBranchCompare()
     {
-        var sel = _branches.Value.Local
+        var sel = ActiveBranches
             .Where(b => _selectedBranches.Contains(b.FullName))
             .OrderBy(b => b.CommitDate).ToList();
         if (sel.Count < 2) { _branchCompare = null; return; }

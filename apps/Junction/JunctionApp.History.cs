@@ -33,16 +33,9 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("History", "Open a repository to see its history.");
 
-        var include = IncludeSet(_activeRepoPath);
-        var includeList = include.OrderBy(x => x, StringComparer.Ordinal).ToList();
-        // Snapshot the pickaxe query/mode so the off-thread load uses a stable value.
-        var content = _contentApplied;
-        var contentRegex = _contentRegex;
-        var key = $"{_activeRepoPath}|{string.Join(",", includeList)}|{DataGen(_activeRepoPath)}"
-                + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
-        _history.Load(key, () => LoadHistory(_activeRepoPath, includeList, content, contentRegex),
-            onLoaded: PickInitialCommit);
+        EnsureHistoryLoaded(_activeRepoPath, stats: true);
         var data = _history.Value;
+        var stats = _historyStats.Value;
         var filtered = FilteredCommits(data);
 
         // A reveal requested from another view settles here rather than at the click: the
@@ -63,12 +56,38 @@ public partial class JunctionApp
         else PrefetchCommitDetail(_selectedCommitHash);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
-        col.AddChild(BuildIncludeBar(includeList, filtered.Count));
+        col.AddChild(BuildIncludeBar(
+            IncludeSet(_activeRepoPath).OrderBy(x => x, StringComparer.Ordinal).ToList(), filtered.Count));
         if (_contentSearchOpen)
             col.AddChild(BuildContentSearchBar(filtered.Count));
-        col.AddChild(BuildCommitList(data, filtered));
+        col.AddChild(BuildCommitList(data, stats, filtered));
         col.AddChild(BuildHistoryFooter());
         return col;
+    }
+
+    /// <summary>
+    /// Starts (or reuses) the loads behind the History view for <paramref name="path"/>:
+    /// the log with its graph, and — with <paramref name="stats"/> — the +/- counts that
+    /// come from the far slower numstat pass. The view calls this as it builds; the
+    /// preload calls it while another tab is showing, and the key is the same either way,
+    /// so whichever comes second is a cache hit.
+    /// </summary>
+    private void EnsureHistoryLoaded(string path, bool stats)
+    {
+        var includeList = IncludeSet(path).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        // Snapshot the pickaxe query/mode so the off-thread load uses a stable value.
+        var content = _contentApplied;
+        var contentRegex = _contentRegex;
+        var key = $"{path}|{string.Join(",", includeList)}|{DataGen(path)}"
+                + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
+        // The initial selection is active-repo state; a preload of some other repo (none
+        // today, but the guard is cheap) must not pick a commit in this one.
+        _historyLoaders.For(path).Load(key, () => LoadHistory(path, includeList, content, contentRegex),
+            onLoaded: data => { if (PathEquals(path, _activeRepoPath)) PickInitialCommit(data); });
+        if (stats)
+            _historyStatLoaders.For(path).Load(key,
+                () => RepoFor(path).GetLogStats(refs: includeList.Count > 0 ? includeList : null,
+                    pickaxe: content, pickaxeRegex: contentRegex));
     }
 
     private List<GitCommit> FilteredCommits(HistoryData data)
@@ -103,9 +122,8 @@ public partial class JunctionApp
         }
 
         var graph = GitGraphLayout.Compute(graphInput);
-        var stats = repo.GetLogStats(refs: refs, pickaxe: content, pickaxeRegex: contentRegex);
         var remotes = new HashSet<string>(repo.GetRemotes(), StringComparer.Ordinal);
-        return new HistoryData(commits, graph, stats, remotes);
+        return new HistoryData(commits, graph, remotes);
     }
 
     private void PickInitialCommit(HistoryData data)
@@ -624,7 +642,8 @@ public partial class JunctionApp
 
     // ── Commit list ──────────────────────────────────────────────────────
 
-    private Element BuildCommitList(HistoryData data, List<GitCommit> commits)
+    private Element BuildCommitList(HistoryData data,
+        Dictionary<string, (int Added, int Deleted)> stats, List<GitCommit> commits)
     {
         if (commits.Count == 0)
         {
@@ -644,7 +663,7 @@ public partial class JunctionApp
             .Items(commits)
             .RenderWith(c => HistoryRow(c,
                 data.Graph.TryGetValue(c.Hash, out var g) ? g : default,
-                data.Stats.TryGetValue(c.Hash, out var s) ? s : (0, 0),
+                stats.TryGetValue(c.Hash, out var s) ? s : (0, 0),
                 data.Remotes,
                 SelectionContains(c.Hash)))
             .AccessibleItemLabel(c => $"{c.Subject}, {c.AuthorName}, {c.ShortHash}")

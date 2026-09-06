@@ -98,6 +98,9 @@ public partial class JunctionApp : Component, IDisposable
     // last-loaded value so returning to a repo is instant; see LoaderFor.
     private readonly KeyedAsyncLoader<string, HistoryData> _historyLoaders =
         new(HistoryData.Empty, capacity: 16, comparer: PathComparer);
+    // The +/- counts per commit, keyed exactly like _historyLoaders (see HistoryData).
+    private readonly KeyedAsyncLoader<string, Dictionary<string, (int Added, int Deleted)>> _historyStatLoaders =
+        new(NoStats, capacity: 16, comparer: PathComparer);
     // Multi-selection à la Windows lists: _selectedCommitHash is the focused/lead
     // commit (keyboard nav, context menus), _selectedCommitHashes the full selection
     // (always contains the focused one), _selectionAnchorHash the Shift-range anchor.
@@ -212,9 +215,9 @@ public partial class JunctionApp : Component, IDisposable
     /// since then alone.</summary>
     private string? _amendPrefill;
 
-    // Branches (management) state.
-    private readonly KeyedAsyncLoader<string, BranchesData> _branchesLoaders =
-        new(BranchesData.Empty, capacity: 16, comparer: PathComparer);
+    // Branches (management) state. The list itself lives in the repo summary (see
+    // RepoSummary); _sortedBranches memoizes its display order per loaded list.
+    private (IReadOnlyList<GitBranch> Source, IReadOnlyList<GitBranch> Sorted) _sortedBranches = ([], []);
     private string _branchQuery = "";
     private int _branchSel;
     private readonly Ref<TextInputElement> _branchSearchRef = new();
@@ -273,19 +276,30 @@ public partial class JunctionApp : Component, IDisposable
     private string? _toast;
     private CancellationTokenSource? _toastCts;
 
+    /// <summary>What the sidebar badge and the Overview card say about a repository — and,
+    /// since the ahead/behind counts come from listing every ref anyway, the whole branch
+    /// list. The Branches view reads it from here rather than asking git a second time,
+    /// which also means every repository the sidebar shows has its Branches tab warm.</summary>
     private readonly record struct RepoSummary(string Branch, int Ahead, int Behind, int Dirty, string Version = "")
     {
         public static readonly RepoSummary Pending = new("…", 0, 0, 0);
+        public IReadOnlyList<GitBranch> Branches { get; init; } = [];
     }
 
+    /// <summary>The commit list itself. The per-commit +/- counts are deliberately not
+    /// here: they come from a second <c>git log --numstat</c> pass that costs many times
+    /// what the log does (about a second against a hundred milliseconds on a repository of
+    /// a few hundred commits), so they load behind the list in <see cref="_historyStatLoaders"/>
+    /// and fill in once the rows are already on screen.</summary>
     private readonly record struct HistoryData(
         IReadOnlyList<GitCommit> Commits,
         Dictionary<string, GitGraphRow> Graph,
-        Dictionary<string, (int Added, int Deleted)> Stats,
         HashSet<string> Remotes)
     {
-        public static readonly HistoryData Empty = new([], new(), new(), new());
+        public static readonly HistoryData Empty = new([], new(), new());
     }
+
+    private static readonly Dictionary<string, (int Added, int Deleted)> NoStats = new();
 
     private readonly record struct CommitDetail(
         GitCommit? Commit,
@@ -340,11 +354,6 @@ public partial class JunctionApp : Component, IDisposable
     private readonly record struct ConflictSides(
         SequencerState State, GitCommit? Ours, GitCommit? Theirs);
 
-    private readonly record struct BranchesData(IReadOnlyList<GitBranch> Local)
-    {
-        public static readonly BranchesData Empty = new([]);
-    }
-
     private readonly record struct TagsData(IReadOnlyList<GitTag> All)
     {
         public static readonly TagsData Empty = new([]);
@@ -389,6 +398,8 @@ public partial class JunctionApp : Component, IDisposable
         _activeRepoPath = _settings.ActiveRepoPath ?? ActiveWorkspace?.RepoPaths.FirstOrDefault() ?? "";
 
         View = JunctionView.History;
+        // Startup opens on History; warm the other tabs behind it.
+        RequestPreload(_activeRepoPath, full: true);
 
         // The user's zoom goes on before the first layout, so the window opens at the size
         // they left it at rather than snapping a frame later.
@@ -509,9 +520,53 @@ public partial class JunctionApp : Component, IDisposable
     // The active repo's loaders. Each repo has its own, so its last-loaded value
     // survives while another repo is on screen — switching back is a cache hit.
     private AsyncLoader<HistoryData> _history => _historyLoaders.For(_activeRepoPath);
+    private AsyncLoader<Dictionary<string, (int Added, int Deleted)>> _historyStats =>
+        _historyStatLoaders.For(_activeRepoPath);
     private AsyncLoader<ChangesData> _changes => _changesLoaders.For(_activeRepoPath);
-    private AsyncLoader<BranchesData> _branches => _branchesLoaders.For(_activeRepoPath);
     private AsyncLoader<TagsData> _tags => _tagsLoaders.For(_activeRepoPath);
+
+    // ── Preloading ───────────────────────────────────────────────────────
+    //
+    // A view only ever asked for its data when it was the one building, so the tab
+    // you were NOT on was cold after every repository switch: land on Branches,
+    // switch repos, click History, wait a second. The loaders are per repository and
+    // keyed on the data generation already, so warming them early costs nothing on
+    // the next tab switch — it is the same Load call, made sooner.
+    //
+    // The request is queued rather than issued on the spot: it runs at the end of
+    // the next Build, after the visible view has scheduled its own load, so the one
+    // the user is looking at is first in the thread pool's queue.
+
+    /// <summary>The repository whose views the next Build should warm, and whether the
+    /// expensive ones (the numstat pass, the working-tree diffs) are included.</summary>
+    private (string Path, bool Full)? _preload;
+
+    private void RequestPreload(string path, bool full)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        // A full request outranks a cheap one already waiting for the same repo.
+        if (_preload is { } p && PathEquals(p.Path, path) && p.Full) return;
+        _preload = (path, full);
+    }
+
+    /// <summary>Warms the given repository's views. Branches comes free with the summary
+    /// the sidebar keeps warm; History's list, Tags and (when <paramref name="full"/>) the
+    /// stats and Changes are the loads that used to wait for their tab.</summary>
+    private void PreloadViews(string path, bool full)
+    {
+        if (string.IsNullOrEmpty(path) || !System.IO.Directory.Exists(path)) return;
+        _ = SummaryFor(path);
+        EnsureHistoryLoaded(path, stats: full);
+        EnsureTagsLoaded(path);
+        if (full) EnsureChangesLoaded(path);
+    }
+
+    private void RunPendingPreload()
+    {
+        if (_preload is not { } p) return;
+        _preload = null;
+        PreloadViews(p.Path, p.Full);
+    }
 
     /// <summary>Reconcile the watcher set with the repos in the active workspace
     /// (plus the active repo). Cheap to call every Build — it only diffs the sets.</summary>
@@ -538,6 +593,10 @@ public partial class JunctionApp : Component, IDisposable
     private void OnExternalChange(string path)
     {
         BumpDataGen(path);
+        // Re-warm the cheap views of the repo on screen. Not the full set: the working
+        // tree watcher fires on every editor save, and the numstat pass and the
+        // working-tree diffs are the expensive loads — those wait for their tab.
+        if (PathEquals(path, _activeRepoPath)) RequestPreload(path, full: false);
         // Rerender, not MarkDirty: bumping the generation changes every loader key
         // for this repo, so the next build activates NEW AsyncLoader instances. A
         // MarkDirty rebuild is untracked, so the Effect would never subscribe to
@@ -556,7 +615,8 @@ public partial class JunctionApp : Component, IDisposable
         var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == branch);
         var dirty = repo.GetStatus().Count;
         var version = repo.GetDescribeVersion();
-        return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, dirty, version);
+        return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, dirty, version)
+            { Branches = branches };
     }
 
     private HashSet<string> IncludeSet(string path)
@@ -656,6 +716,9 @@ public partial class JunctionApp : Component, IDisposable
         if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
         if (_modal != null) Overlay("modal", BuildModal(_modal));
+
+        // Last, so the visible view's own load was scheduled first (see _preload).
+        RunPendingPreload();
 
         return root;
     }
@@ -846,7 +909,7 @@ public partial class JunctionApp : Component, IDisposable
             // Opens every branch folder, so a capture can measure the worst case the
             // tree can reach: as many rows as the flat list, plus the folders.
             var set = RefExpandedSet(RefKindBranch);
-            foreach (var root in Tree.Build(_branches.Value.Local, b => b.Name))
+            foreach (var root in Tree.Build(ActiveBranches, b => b.Name))
                 foreach (var folder in Tree.Folders(root))
                     set[folder.Path] = step[7..] == "all";
             MarkDirty();
@@ -865,6 +928,10 @@ public partial class JunctionApp : Component, IDisposable
         _selectedCommitHashes.Clear();
         if (hash != null) _selectedCommitHashes.Add(hash);
         EndBranchCompare();   // any collapse (History click, repo switch) ends a branch compare
+        // Start on the commit's files and diff at the selection, not at the Commit tab.
+        // History's build asks too, but the selection can land while another tab is
+        // showing — a preloaded log picking its first commit — and this covers that.
+        PrefetchCommitDetail(hash);
     }
 
     /// <summary>Clears the Branches-tab compare selection. Called when a History
@@ -910,6 +977,7 @@ public partial class JunctionApp : Component, IDisposable
         SetCommitSelection(null);   // reset selection; History reloads and picks first
         _settings.ActiveRepoPath = path;
         Persist();
+        RequestPreload(path, full: true);
         Rerender();
     }
 
@@ -925,6 +993,7 @@ public partial class JunctionApp : Component, IDisposable
             _activeRepoPath = ws.RepoPaths.FirstOrDefault() ?? "";
             SetCommitSelection(null);
             _settings.ActiveRepoPath = _activeRepoPath;
+            RequestPreload(_activeRepoPath, full: true);
         }
         Persist();
         Rerender();

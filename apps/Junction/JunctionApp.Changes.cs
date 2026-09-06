@@ -18,10 +18,7 @@ public partial class JunctionApp
             return BuildStubView("Changes", "Open a repository first.");
 
         SyncChangeTrees(_activeRepoPath);
-        // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
-        bool ws = _settings.Git.IgnoreWhitespace;
-        _changes.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}|w{ws}",
-            () => LoadChanges(ws), onLoaded: OnChangesLoaded);
+        EnsureChangesLoaded(_activeRepoPath);
         var data = ChangesView;
 
         // Mid-operation the right pane is always shown — it hosts the per-file
@@ -62,9 +59,24 @@ public partial class JunctionApp
     }
 
     // Runs off the UI thread.
-    private ChangesData LoadChanges(bool ignoreWhitespace = false)
+    /// <summary>Starts (or reuses) the working-tree load for <paramref name="path"/>. The view
+    /// calls it as it builds and the preload calls it from another tab; same key both ways.
+    /// The selection bookkeeping in <see cref="OnChangesLoaded"/> is active-repo state, and
+    /// there is no self-heal in the build for it, so the callback rides along here too —
+    /// a preloaded Changes tab would otherwise open with nothing selected.</summary>
+    private void EnsureChangesLoaded(string path)
     {
-        var repo = RepoFor(_activeRepoPath);
+        // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
+        bool ws = _settings.Git.IgnoreWhitespace;
+        _changesLoaders.For(path).Load($"{path}|{DataGen(path)}|w{ws}",
+            () => LoadChanges(path, ws),
+            onLoaded: data => { if (PathEquals(path, _activeRepoPath)) OnChangesLoaded(data); });
+    }
+
+    // Runs off the UI thread.
+    private ChangesData LoadChanges(string path, bool ignoreWhitespace)
+    {
+        var repo = RepoFor(path);
         var staged = repo.GetStagedChanges();
         var unstaged = repo.GetUnstagedChanges();
 

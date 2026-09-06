@@ -23,7 +23,7 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Tags", "Open a repository first.");
 
-        _tags.Load($"{_activeRepoPath}|{DataGen(_activeRepoPath)}", LoadTags, onLoaded: ClampTagSel);
+        EnsureTagsLoaded(_activeRepoPath);
         var rows = TagRows();
         if (_tagSel >= rows.Count) _tagSel = Math.Max(0, rows.Count - 1);
 
@@ -34,8 +34,12 @@ public partial class JunctionApp
         return col;
     }
 
-    // Runs off the UI thread.
-    private TagsData LoadTags() => new(RepoFor(_activeRepoPath).GetTags());
+    /// <summary>Starts (or reuses) the tag load for <paramref name="path"/> — from the view
+    /// as it builds, or from the preload while another tab is showing.</summary>
+    private void EnsureTagsLoaded(string path) =>
+        _tagsLoaders.For(path).Load($"{path}|{DataGen(path)}",
+            () => new TagsData(RepoFor(path).GetTags()),
+            onLoaded: data => { if (PathEquals(path, _activeRepoPath)) ClampTagSel(data); });
 
     private void ClampTagSel(TagsData data)
     {

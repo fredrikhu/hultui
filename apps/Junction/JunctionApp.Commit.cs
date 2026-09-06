@@ -207,13 +207,14 @@ public partial class JunctionApp
     {
         if (string.IsNullOrEmpty(hash) || !HasActiveRepo) return;
         var h = hash;
-        _commitDetail.Load(CommitDetailKey(h), () => LoadDetail(h), onLoaded: PickInitialFile);
+        var path = _activeRepoPath;   // captured: the producer runs off-thread, after any switch
+        _commitDetail.Load(CommitDetailKey(h), () => LoadDetail(path, h), onLoaded: PickInitialFile);
     }
 
     // Runs off the UI thread.
-    private CommitDetail LoadDetail(string hash)
+    private CommitDetail LoadDetail(string path, string hash)
     {
-        var repo = RepoFor(_activeRepoPath);
+        var repo = RepoFor(path);
         var commit = repo.GetCommit(hash);
         var files = repo.GetCommitFiles(hash);
         var diffs = repo.GetCommitDiff(hash, _settings.Git.IgnoreWhitespace);

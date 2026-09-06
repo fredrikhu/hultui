@@ -300,6 +300,15 @@ public class ChangeTreeTests
         try
         {
             session.PumpUntil(() => Field(app, "_changeSelPath") != null, TimeSpan.FromSeconds(20));
+            // The working tree is preloaded at startup, so the selection can already be set
+            // when the key goes down and the wait above returns before the view has had a
+            // frame. The rows are what the tests click; wait for them to have bounds.
+            session.PumpUntil(() => app.View == JunctionView.Changes
+                && LayoutProbe.Descendants<BoxElement>(Root(session),
+                    e => e.Key is string k && e.Layout.AbsoluteBorderBox.Height > 0
+                         && (k.StartsWith("u:", StringComparison.Ordinal)
+                             || k.StartsWith("Unstaged:dir:", StringComparison.Ordinal))).Any(),
+                TimeSpan.FromSeconds(20));
         }
         catch (TimeoutException e)
         {
