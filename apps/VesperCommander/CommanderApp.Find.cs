@@ -427,7 +427,10 @@ public partial class CommanderApp
     {
         // Reserve the 1px border on every row (transparent when unselected) so selecting
         // one doesn't nudge its contents inward.
-        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(RowHeight)
+        // Icon · name · size, the size slot only on a file so a folder's name runs to the
+        // edge. A 1fr row track: the row is a fixed height and the cells centre in the track.
+        var row = Grid.Of(h.IsDir ? "auto 1fr" : "auto 1fr auto", rows: "1fr", gap: 8)
+            .AlignItems(AlignItems.Center).Height(RowHeight)
             .Padding(new Thickness(0, 10, 0, 10)).CornerRadius(Nocturne.RadiusSm)
             .BorderWidth(1f).BorderColor(selected ? Nocturne.Accent600 : Color.Transparent)
             .Cursor(CursorType.Pointer);
@@ -435,9 +438,9 @@ public partial class CommanderApp
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13));
 
         var fe = new FileEntry(h.Name, h.FullPath, h.IsDir, h.Size, h.Modified);
-        row.AddChild(Icons.Draw(Icons.KindFor(fe)));
+        row.AddChild(Icons.Draw(Icons.KindFor(fe)).GridColumn(0));
 
-        var name = Flex.Row(gap: 6).AlignItems(AlignItems.Center).FlexGrow(1).Overflow(Overflow.Hidden);
+        var name = Flex.Row(gap: 6).AlignItems(AlignItems.Center).GridColumn(1).Overflow(Overflow.Hidden);
         name.AddChild(Ui.Mono(h.Name, 12f, h.IsDir ? Nocturne.DirText : Nocturne.Text)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis).Spans(FindNameSpans(h.Name)));
         // Archive member: "· archive.zip › internal" with the archive name amber.
@@ -460,7 +463,7 @@ public partial class CommanderApp
         row.AddChild(name);
 
         if (!h.IsDir)
-            row.AddChild(Ui.Mono(FileSystem.ByteCount(h.Size), 10.5f, Nocturne.On(0.45)));
+            row.AddChild(Ui.Mono(FileSystem.ByteCount(h.Size), 10.5f, Nocturne.On(0.45)).GridColumn(2));
 
         int idx = _findResults.IndexOf(h);
         row.OnClick(_ => { _findSel = idx; JumpFindResult(_findSide); });

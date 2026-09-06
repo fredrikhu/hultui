@@ -159,6 +159,9 @@ public partial class CommanderApp
 
     private Element PaletteRow(Command cmd, int index, bool selected)
     {
+        // Flex, not a grid, on purpose: the list is a plain column in a card the backdrop
+        // clamps, and the rows only fit because flex lets them shrink below their 30px.
+        // Grid rows hold their height, and the palette's tail would clip off the card.
         var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(30)
             .Padding(new Thickness(0, 10, 0, 10)).CornerRadius(Nocturne.RadiusSm)
             .Cursor(CursorType.Pointer);
@@ -508,14 +511,14 @@ public partial class CommanderApp
     private Element BookmarkRow(int index, bool selected)
     {
         var b = _bookmarks[index];
-        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(30)
+        var row = Grid.Of("auto 1fr", rows: "1fr", gap: 8).AlignItems(AlignItems.Center).Height(30)
             .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(Nocturne.RadiusSm)
             .Cursor(CursorType.Pointer);
         if (selected)
             row.Background(Nocturne.Alpha(Nocturne.Accent500, 0.13))
                .BorderColor(Nocturne.Accent600).BorderWidth(1f);
-        row.AddChild(Ui.Icon(Glyphs.CaretRight, 11f, Nocturne.DirText));
-        row.AddChild(Ui.Mono(b.Name, 11.5f, selected ? Nocturne.Text : Nocturne.On(0.80))
+        row.AddChild(Ui.Icon(Glyphs.CaretRight, 11f, Nocturne.DirText).GridColumn(0));
+        row.AddChild(Ui.Mono(b.Name, 11.5f, selected ? Nocturne.Text : Nocturne.On(0.80)).GridColumn(1)
             .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         row.OnClick(_ => { _bookmarkSel = index; MarkDirty(); });
         row.On<DoubleClickEvent>(e => { e.StopPropagation = true; OpenBookmarkInPane(index, _active); });

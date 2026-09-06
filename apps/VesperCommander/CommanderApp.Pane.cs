@@ -387,14 +387,16 @@ public partial class CommanderApp
 
     private Element HistoryRow(char side, string path, bool active, float budget)
     {
-        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(28)
+        // Folder glyph · path · (the active row's dot).
+        var row = Grid.Of(active ? "auto 1fr auto" : "auto 1fr", rows: "1fr", gap: 8)
+            .AlignItems(AlignItems.Center).Height(28)
             .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(Nocturne.RadiusSm)
             .Cursor(active ? CursorType.Default : CursorType.Pointer);
-        row.AddChild(Icons.Draw(IconKind.Folder, null, 14f));
+        row.AddChild(Icons.Draw(IconKind.Folder, null, 14f).GridColumn(0));
         row.AddChild(Ui.Mono(CollapsePath(path, budget), 11.5f, active ? Nocturne.Accent200 : Nocturne.On(0.80))
-            .FlexGrow(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+            .GridColumn(1).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         if (active)
-            row.AddChild(Ui.Icon(Glyphs.Dot, 9f, Nocturne.Accent));
+            row.AddChild(Ui.Icon(Glyphs.Dot, 9f, Nocturne.Accent).GridColumn(2));
         else
         {
             row.OnClick(_ => { CloseHistoryPopover(); _active = side; NavigateTo(side, path); });
