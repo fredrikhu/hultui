@@ -151,13 +151,13 @@ bool open = app.IsInspectorOpen;
 
 ```csharp
 #if !DEBUG
-app.DevToolsHotkeysEnabled = false;
+app.DevToolsHotkeysEnabled = Environment.GetEnvironmentVariable("HULTUI_DEVTOOLS") == "1";
 #endif
 ```
 
 It suppresses only the chords. `OpenInspector`, `window.DevTools`, and the `HULTUI_TRACE` environment variable keep working, so an app can still offer any of it on its own terms — and benchmark automation, which drives tracing through the environment variable, is unaffected.
 
-Vesper Commander and Junction both do exactly the above, so their release installers ship with no inspector, no HUD, and no trace hotkey.
+Junction, Vesper Commander and Meridian all do exactly the above, so their release installers ship with no inspector, no HUD, and no trace hotkey — until you start one with `HULTUI_DEVTOOLS=1` in the environment, which is the way to look into a shipped build without rebuilding it. The variable is the app's convention, not the framework's: `DevToolsHotkeysEnabled` itself does not read it.
 
 ---
 

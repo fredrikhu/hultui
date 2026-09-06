@@ -9,8 +9,9 @@ using var app = new Application("Meridian", 1440, 900, WindowStyle.Borderless);
 app.Theme = Azimuth.ToHultTheme();
 
 #if !DEBUG
-// No developer surfaces in a shipped build (inspector, perf HUD, trace hotkeys).
-app.DevToolsHotkeysEnabled = false;
+// No developer surfaces in a shipped build (inspector, perf HUD, trace hotkeys), unless
+// HULTUI_DEVTOOLS=1 asks for them — for looking into a shipped installer.
+app.DevToolsHotkeysEnabled = Environment.GetEnvironmentVariable("HULTUI_DEVTOOLS") == "1";
 #endif
 
 var window = app.PrimaryWindow;

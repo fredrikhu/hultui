@@ -61,7 +61,9 @@ internal static class JunctionProgram
         // No developer surfaces in a shipped build: the element inspector (Ctrl+Shift+I),
         // the performance HUD (F12), and trace recording (F11) all stay dark. Debug builds
         // keep them, and HULTUI_TRACE still drives the trace capture below either way.
-        app.DevToolsHotkeysEnabled = false;
+        // HULTUI_DEVTOOLS=1 lights them in a release build, for looking into a shipped
+        // installer without rebuilding it.
+        app.DevToolsHotkeysEnabled = Environment.GetEnvironmentVariable("HULTUI_DEVTOOLS") == "1";
         #endif
 
         var window = app.PrimaryWindow;

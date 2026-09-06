@@ -51,8 +51,9 @@ internal static class VesperProgram
         // No developer surfaces in a shipped build: the element inspector (Ctrl+Shift+I),
         // the performance HUD (F12), and trace recording (F11) all stay dark. Vesper also
         // owns Ctrl+Shift+C for "copy as path", so leaving the framework's chords live has
-        // already cost one binding once. Debug builds keep the lot.
-        app.DevToolsHotkeysEnabled = false;
+        // already cost one binding once. Debug builds keep the lot, and HULTUI_DEVTOOLS=1
+        // lights them in a release build for looking into a shipped installer.
+        app.DevToolsHotkeysEnabled = Environment.GetEnvironmentVariable("HULTUI_DEVTOOLS") == "1";
         #endif
 
         var window = app.PrimaryWindow;
