@@ -489,17 +489,42 @@ public partial class JunctionApp
         if (IsImagePath(path))
             return new FileContent(null, null, MakeSide(bytes), false, bytes.Length);
 
-        // A NUL byte in the first 8 KB is git's own heuristic for "binary".
-        int probe = Math.Min(bytes.Length, 8000);
-        for (int i = 0; i < probe; i++)
-            if (bytes[i] == 0)
-                return new FileContent(null, null, null, true, bytes.Length);
+        if (DecodeBlobText(bytes) is not { } text)
+            return new FileContent(null, null, null, true, bytes.Length);
 
-        var text = System.Text.Encoding.UTF8.GetString(bytes);
         var lines = text.Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
         IReadOnlyList<TextSpan>[]? spans = null;
         try { spans = SyntaxHighlighter.TokenizeLines(path, text); } catch { /* highlight is best-effort */ }
         return new FileContent(lines, spans, null, false, bytes.Length);
+    }
+
+    /// <summary>
+    /// A blob's bytes as text, or null when they are binary.
+    ///
+    /// <para>A UTF-16 byte-order mark settles it and picks the encoding: UTF-16 puts a NUL
+    /// after every ASCII character, so it can never pass the scan below, and Windows writes
+    /// its own <c>desktop.ini</c> that way. A UTF-8 mark is dropped. Without a mark, a NUL in
+    /// the first 8 KB is git's own heuristic for binary, and stays the rule: guessing mark-less
+    /// UTF-16 from byte patterns would risk showing a real binary as text.</para>
+    ///
+    /// <para>This browser shows a blob, not a diff, so reading UTF-16 here contradicts nothing
+    /// git says. The diff pane is left to git's verdict — git calls the same file binary, and
+    /// <see cref="GitRepository.LooksBinary"/> copies that on purpose so an untracked file is
+    /// judged the way it will be once staged.</para>
+    /// </summary>
+    private static string? DecodeBlobText(byte[] bytes)
+    {
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        int start = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
+
+        int probe = Math.Min(bytes.Length, 8000);
+        for (int i = start; i < probe; i++)
+            if (bytes[i] == 0)
+                return null;
+        return System.Text.Encoding.UTF8.GetString(bytes, start, bytes.Length - start);
     }
 
     private Element BuildFileContentPane(string reference)
