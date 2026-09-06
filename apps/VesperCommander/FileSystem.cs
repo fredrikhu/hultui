@@ -320,6 +320,44 @@ public static class FileSystem
     private const long PreviewMaxBytes = 1024 * 1024;
     private const int PreviewMaxLines = 500;
 
+    /// <summary>
+    /// Whether the start of a file reads as text. The one binary test for everything that
+    /// shows or searches a file's contents: the preview pane, the viewer, the comparison and
+    /// find-in-files, so a file is text in all of them or in none.
+    ///
+    /// <para>A UTF-16 byte-order mark settles it, because UTF-16 cannot pass the test that
+    /// follows: every ASCII character in it is followed by a NUL byte. Windows writes its own
+    /// <c>desktop.ini</c> files as UTF-16 LE with a mark, and a 282-byte one used to come up
+    /// "binary" in all four places.</para>
+    ///
+    /// <para>Otherwise a NUL in the head means binary. UTF-16 without a mark is rare enough
+    /// on Windows that guessing it from byte patterns would risk showing a real binary as
+    /// text with every other character a NUL.</para>
+    /// </summary>
+    public static bool LooksLikeText(ReadOnlySpan<byte> head)
+    {
+        if (HasUtf16Mark(head)) return true;
+        for (int i = 0; i < head.Length; i++) if (head[i] == 0) return false;
+        return true;
+    }
+
+    private static bool HasUtf16Mark(ReadOnlySpan<byte> head) =>
+        head.Length >= 2 && ((head[0] == 0xFF && head[1] == 0xFE) || (head[0] == 0xFE && head[1] == 0xFF));
+
+    /// <summary>The bytes as a string, or null when <see cref="LooksLikeText"/> says they
+    /// are not text. A byte-order mark picks the encoding and is dropped; without one the
+    /// bytes are read as UTF-8.</summary>
+    public static string? DecodeText(byte[] bytes)
+    {
+        if (!LooksLikeText(bytes.AsSpan(0, Math.Min(bytes.Length, 8192)))) return null;
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        int start = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
+        return System.Text.Encoding.UTF8.GetString(bytes, start, bytes.Length - start);
+    }
+
     /// <summary>Leading lines of a text file for the (scrollable) preview pane, or ""
     /// when the file is too big, binary, or unreadable. Runs off the UI thread; the
     /// line cap bounds how much the preview will scroll through.</summary>
@@ -331,9 +369,10 @@ public static class FileSystem
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             Span<byte> probe = stackalloc byte[512];
             int read = stream.Read(probe);
-            for (int i = 0; i < read; i++) if (probe[i] == 0) return "";   // NUL ⇒ binary
+            if (!LooksLikeText(probe[..read])) return "";
             stream.Position = 0;
 
+            // The reader picks the encoding from the byte-order mark, if there is one.
             using var reader = new StreamReader(stream);
             var sb = new System.Text.StringBuilder();
             string? line;
@@ -353,8 +392,7 @@ public static class FileSystem
     /// same NUL-binary guard and line/length caps as <see cref="PreviewText"/>.</summary>
     public static string PreviewTextFromBytes(byte[] bytes)
     {
-        int scan = Math.Min(bytes.Length, 512);
-        for (int i = 0; i < scan; i++) if (bytes[i] == 0) return "";   // NUL ⇒ binary
+        if (!LooksLikeText(bytes.AsSpan(0, Math.Min(bytes.Length, 512)))) return "";
         try
         {
             using var reader = new StreamReader(new MemoryStream(bytes));

@@ -25,7 +25,7 @@ public partial class CommanderApp
     // and the traps that cost real bugs in the diff (measuring a wrapped row against the
     // wrong width, a label that doesn't fill its row) would cost them again here.
 
-    private enum ViewerState { Loading, Ok, Binary, Missing, Unreadable }
+    private enum ViewerState { Loading, Ok, Binary, TooLarge, Missing, Unreadable }
 
     private bool _viewerOpen;
     private char _viewerSide;
@@ -177,8 +177,13 @@ public partial class CommanderApp
     private static (ViewerState, string[]?) ReadViewerFile(string path)
     {
         if (!File.Exists(path)) return (ViewerState.Missing, null);
-        var (lines, binary) = LoadForDiff(path);
-        return binary || lines is null ? (ViewerState.Binary, null) : (ViewerState.Ok, lines);
+        var (lines, why) = LoadForDiff(path);
+        return why switch
+        {
+            TextLoad.TooLarge => (ViewerState.TooLarge, null),
+            TextLoad.Binary => (ViewerState.Binary, null),
+            _ => lines is null ? (ViewerState.Binary, null) : (ViewerState.Ok, lines),
+        };
     }
 
     /// <summary>
@@ -189,15 +194,15 @@ public partial class CommanderApp
     /// </summary>
     private (ViewerState, string[]?) ReadViewerMember(FileEntry member, string? password)
     {
-        if (member.Size > ViewMaxBytes) return (ViewerState.Binary, null);
+        if (member.Size > ViewMaxBytes) return (ViewerState.TooLarge, null);
         // A zero-length member reads as an empty file, not as one that could not be read —
         // ReadMemberBytes declines to open it, so there is nothing to ask it for.
         if (member.Size == 0) return (ViewerState.Ok, [""]);
 
         var bytes = ReadMemberBytes(member, ViewMaxBytes, password);
         if (bytes is null) return (ViewerState.Unreadable, null);
-        var (lines, binary) = LinesFromBytes(bytes);
-        return binary || lines is null ? (ViewerState.Binary, null) : (ViewerState.Ok, lines);
+        var (lines, why) = LinesFromBytes(bytes);
+        return why != TextLoad.Ok || lines is null ? (ViewerState.Binary, null) : (ViewerState.Ok, lines);
     }
 
     private void ApplyViewer(ViewerState state, string[]? lines)
@@ -476,7 +481,11 @@ public partial class CommanderApp
             ViewerState.Loading => DiffMessage(Glyphs.TextContent, "Loading…",
                 System.IO.Path.GetFileName(_viewerPath)),
             ViewerState.Binary => DiffMessage(Glyphs.BinaryFile, "Can't show this as text",
-                "The file is binary or larger than 4 MB."),
+                "The file is binary."),
+            // Distinct from binary on purpose: the file may be perfectly ordinary text, and
+            // one message for both sent people looking for a problem with a small ini file.
+            ViewerState.TooLarge => DiffMessage(Glyphs.BinaryFile, "Too large to show",
+                "Viewing needs the file under 4 MB."),
             // Distinct from binary on purpose: the member may be perfectly ordinary text, and
             // saying otherwise sends people looking for a problem with the file itself.
             ViewerState.Unreadable => DiffMessage(Glyphs.Key, "Couldn't read this archive member",

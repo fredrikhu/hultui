@@ -354,9 +354,11 @@ public partial class CommanderApp
         if (!File.Exists(leftPath) || !File.Exists(rightPath))
             return new DiffOutcome(DiffViewState.Missing, null, null, null);
 
-        var (la, lbin) = LoadForDiff(leftPath);
-        var (ra, rbin) = LoadForDiff(rightPath);
-        if (lbin || rbin || la is null || ra is null)
+        var (la, lwhy) = LoadForDiff(leftPath);
+        var (ra, rwhy) = LoadForDiff(rightPath);
+        if (lwhy == TextLoad.TooLarge || rwhy == TextLoad.TooLarge)
+            return new DiffOutcome(DiffViewState.TooLarge, null, null, null);
+        if (la is null || ra is null)
             return new DiffOutcome(DiffViewState.Binary, null, null, null);
         if (DiffEngine.TooLarge(la, ra))
             return new DiffOutcome(DiffViewState.TooLarge, null, null, null);
@@ -383,26 +385,31 @@ public partial class CommanderApp
     /// worth it.</summary>
     internal const long ViewMaxBytes = 4L * 1024 * 1024;
 
-    private static (string[]? lines, bool binary) LoadForDiff(string path)
+    /// <summary>Why a file could not be read as text. Kept apart because they send the reader
+    /// to different places: binary means look at the file, too large means look at the size,
+    /// and one message for both had people looking for a problem with a 282-byte ini file.</summary>
+    private enum TextLoad { Ok, Binary, TooLarge }
+
+    private static (string[]? lines, TextLoad why) LoadForDiff(string path)
     {
         try
         {
             var fi = new FileInfo(path);
-            if (fi.Length > ViewMaxBytes) return (null, true);
+            if (fi.Length > ViewMaxBytes) return (null, TextLoad.TooLarge);
             return LinesFromBytes(File.ReadAllBytes(path));
         }
-        catch { return (null, true); }
+        catch { return (null, TextLoad.Binary); }
     }
 
     /// <summary>Decodes a whole file's bytes into lines, or reports it binary. Shared with the
     /// viewer, which reads archive members through the VFS and so has bytes rather than a
     /// path — splitting them the same way here is what makes the two views agree about what a
     /// line is.</summary>
-    private static (string[]? lines, bool binary) LinesFromBytes(byte[] bytes)
+    private static (string[]? lines, TextLoad why) LinesFromBytes(byte[] bytes)
     {
-        int scan = Math.Min(bytes.Length, 8192);
-        for (int i = 0; i < scan; i++) if (bytes[i] == 0) return (null, true);
-        return (System.Text.Encoding.UTF8.GetString(bytes).Replace("\r\n", "\n").Split('\n'), false);
+        var text = FileSystem.DecodeText(bytes);
+        if (text is null) return (null, TextLoad.Binary);
+        return (text.Replace("\r\n", "\n").Split('\n'), TextLoad.Ok);
     }
 
     /// <summary>Flatten the diff into rendered rows, collapsing long unchanged runs to
@@ -610,11 +617,11 @@ public partial class CommanderApp
             DiffViewState.Identical => DiffMessage(Glyphs.Check, "Files are identical",
                 $"{(_diffResult?.Lines.Count ?? 0)} lines · same content"),
             DiffViewState.Binary => DiffMessage(Glyphs.BinaryFile, "Can't show a text diff",
-                "One side is binary or larger than 4 MB."),
+                "One side is binary."),
             // Distinct from binary on purpose: these files are perfectly readable text, and
             // saying otherwise sent people looking for a problem with the files themselves.
             DiffViewState.TooLarge => DiffMessage(Glyphs.BinaryFile, "Too large to compare",
-                $"Comparing needs both sides under {DiffEngine.MaxLines:N0} lines."),
+                $"Comparing needs both sides under 4 MB and {DiffEngine.MaxLines:N0} lines."),
             DiffViewState.Comparing => DiffMessage(Glyphs.Check, "Comparing…",
                 System.IO.Path.GetFileName(_diffLeftPath)),
             _ => DiffMissingBody(),

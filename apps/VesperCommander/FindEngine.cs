@@ -100,13 +100,12 @@ public static class FindEngine
     }
 
     /// <summary>Occurrences of the containing text in a byte buffer, or 0 when it's binary
-    /// (a NUL in the first 8 KB). Shared by the disk and archive-member paths.</summary>
+    /// by <see cref="FileSystem.DecodeText"/>'s test. Shared by the disk and archive-member
+    /// paths.</summary>
     private static int CountHits(byte[] bytes, Options o)
     {
         if (string.IsNullOrEmpty(o.ContainingText)) return 0;
-        int scan = Math.Min(bytes.Length, 8192);
-        for (int i = 0; i < scan; i++) if (bytes[i] == 0) return 0;   // binary
-        string text = Encoding.UTF8.GetString(bytes);
+        if (FileSystem.DecodeText(bytes) is not { } text) return 0;   // binary
         var cmp = o.MatchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         int count = 0, idx = 0;
         while ((idx = text.IndexOf(o.ContainingText, idx, cmp)) >= 0) { count++; idx += o.ContainingText.Length; }

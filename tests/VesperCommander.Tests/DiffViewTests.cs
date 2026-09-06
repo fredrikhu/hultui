@@ -937,6 +937,40 @@ public class DiffViewTests
         Assert.Equal("TooLarge", t.DiffState);
     }
 
+    /// <summary>The same decoder as the viewer: a UTF-16 file with a byte-order mark is text
+    /// on both sides of the comparison, not a binary that happens to have NULs in it.</summary>
+    [Fact]
+    public void AUtf16FileWithAByteOrderMarkComparesAsText()
+    {
+        using var t = new Fixture();
+        var enc = System.Text.Encoding.Unicode;
+        File.WriteAllBytes(Path.Combine(t.Left, "a.ini"),
+            enc.GetPreamble().Concat(enc.GetBytes("[a]\r\nk=1\r\n")).ToArray());
+        File.WriteAllBytes(Path.Combine(t.Right, "a.ini"),
+            enc.GetPreamble().Concat(enc.GetBytes("[a]\r\nk=2\r\n")).ToArray());
+        t.Open();
+
+        t.OpenDiffOn("a.ini");
+
+        Assert.Equal("Ok", t.DiffState);
+    }
+
+    [Fact]
+    public void AFileOverTheSizeLimitSaysTooLargeRatherThanBinary()
+    {
+        using var t = new Fixture();
+        using (var f = File.Create(Path.Combine(t.Left, "big.log")))
+        {
+            f.SetLength(CommanderApp.ViewMaxBytes + 1);
+        }
+        t.WriteRight("big.log", "small\n");
+        t.Open();
+
+        t.OpenDiffOn("big.log");
+
+        Assert.Equal("TooLarge", t.DiffState);
+    }
+
     [Fact]
     public void ABinaryFileIsStillReportedAsBinary()
     {

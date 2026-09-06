@@ -23,6 +23,37 @@ public class FileSystemTests : IDisposable
     private static string[] FileNames(DirListing l) =>
         l.Entries.Where(e => !e.IsParent && !e.IsDir).Select(e => e.Name).ToArray();
 
+    // ── Preview text ─────────────────────────────────────────────────────
+
+    /// <summary>UTF-16 with a byte-order mark is text, even though every other byte is a
+    /// NUL — the file says what it is. Windows writes desktop.ini this way, and the preview
+    /// pane used to show nothing for it.</summary>
+    [Theory]
+    [InlineData("utf-16LE")]
+    [InlineData("utf-16BE")]
+    [InlineData("utf-8")]
+    public void PreviewText_DecodesAByteOrderMarkedFile(string encodingName)
+    {
+        var enc = System.Text.Encoding.GetEncoding(encodingName);
+        var bytes = enc.GetPreamble().Concat(enc.GetBytes("[.ShellClassInfo]\r\nIconResource=x\r\n")).ToArray();
+        var path = Path.Combine(_dir, "desktop.ini");
+        File.WriteAllBytes(path, bytes);
+
+        Assert.Equal("[.ShellClassInfo]\nIconResource=x", FileSystem.PreviewText(path, bytes.Length));
+        Assert.Equal("[.ShellClassInfo]\nIconResource=x", FileSystem.PreviewTextFromBytes(bytes));
+    }
+
+    [Fact]
+    public void PreviewText_IsEmptyForBinary()
+    {
+        var bytes = new byte[] { (byte)'a', 0, (byte)'b' };
+        var path = Path.Combine(_dir, "b.bin");
+        File.WriteAllBytes(path, bytes);
+
+        Assert.Equal("", FileSystem.PreviewText(path, bytes.Length));
+        Assert.Equal("", FileSystem.PreviewTextFromBytes(bytes));
+    }
+
     [Fact]
     public void NameAscending_IsAlphabetical()
     {

@@ -70,6 +70,22 @@ public class FindEngineTests
         finally { File.Delete(tmp); }
     }
 
+    /// <summary>UTF-16 with a byte-order mark is text, even though every other byte is a
+    /// NUL — the file says what it is. Windows writes desktop.ini this way.</summary>
+    [Fact]
+    public void ContentHits_ReadsUtf16WithAByteOrderMark()
+    {
+        var tmp = Path.GetTempFileName();
+        try
+        {
+            var enc = System.Text.Encoding.Unicode;
+            File.WriteAllBytes(tmp, enc.GetPreamble().Concat(enc.GetBytes("panic here\r\npanic again\r\n")).ToArray());
+            var o = new FindEngine.Options("", "panic", false, false, false, false);
+            Assert.Equal(2, FindEngine.ContentHits(tmp, o));
+        }
+        finally { File.Delete(tmp); }
+    }
+
     [Fact]
     public void ContentHits_ZeroForBinary()
     {

@@ -78,6 +78,44 @@ public class ViewerTests
         Assert.False(t.ViewerOpen);
     }
 
+    /// <summary>Windows writes its own desktop.ini files as UTF-16 LE with a byte-order
+    /// mark, which puts a NUL after every ASCII character — exactly what the binary sniff
+    /// looks for. The mark says what the file is, and wins.</summary>
+    [Theory]
+    [InlineData("utf-16LE")]
+    [InlineData("utf-16BE")]
+    [InlineData("utf-8")]
+    public void AFileWithAByteOrderMarkIsDecodedAsItSays(string encodingName)
+    {
+        using var t = new Fixture();
+        var enc = System.Text.Encoding.GetEncoding(encodingName);
+        var bytes = enc.GetPreamble().Concat(enc.GetBytes("[.ShellClassInfo]\r\nIconResource=x\r\n")).ToArray();
+        File.WriteAllBytes(Path.Combine(t.Root, "desktop.ini"), bytes);
+        t.Open();
+
+        t.ViewFile("desktop.ini");
+
+        Assert.Equal(ViewerState.Ok, t.State);
+        Assert.Equal(new[] { "[.ShellClassInfo]", "IconResource=x", "" }, t.Lines);
+    }
+
+    /// <summary>The 4 MB ceiling is a size, not a verdict on the content — a file over it is
+    /// usually ordinary text, and calling it binary sent people looking at the file.</summary>
+    [Fact]
+    public void AFileOverTheSizeLimitSaysTooLargeRatherThanBinary()
+    {
+        using var t = new Fixture();
+        using (var f = File.Create(Path.Combine(t.Root, "big.log")))
+        {
+            f.SetLength(CommanderApp.ViewMaxBytes + 1);
+        }
+        t.Open();
+
+        t.ViewFile("big.log");
+
+        Assert.Equal(ViewerState.TooLarge, t.State);
+    }
+
     [Fact]
     public void ABinaryFileSaysSoRatherThanShowingGibberish()
     {
@@ -705,7 +743,7 @@ public class ViewerTests
 
     /// <summary>Mirrors the app's private <c>ViewerState</c>, which the tests compare by name
     /// rather than reaching for the private enum type.</summary>
-    internal enum ViewerState { Loading, Ok, Binary, Missing, Unreadable }
+    internal enum ViewerState { Loading, Ok, Binary, TooLarge, Missing, Unreadable }
 
     /// <summary>
     /// The viewer reads in the face and size the settings name. Both used to be constants,
