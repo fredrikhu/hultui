@@ -95,7 +95,16 @@ public partial class CommanderApp
     /// current match cannot be scrolled to before the rows have been measured.</summary>
     private void ServiceFindBar(FindBarState s, Ref<ScrollViewElement> body, Action reveal)
     {
-        if (s.PendingFocus) { s.PendingFocus = false; s.FieldRef.Current?.Focus(); }
+        // Ctrl+F on a bar that is already open lands here too. The query is still in the
+        // field, and the person pressed the key to search for something else, so it is
+        // selected whole: the next keystroke replaces it rather than appending to it. On a
+        // freshly opened bar the field is empty and the selection is nothing.
+        if (s.PendingFocus && s.FieldRef.Current is { } field)
+        {
+            s.PendingFocus = false;
+            field.Focus();
+            field.SelectAll();
+        }
         // Only once the bar is gone from the tree — focusing the body while the field is still
         // mounted would take the keyboard away from what the user just opened.
         if (s.PendingBodyFocus && !s.Open) { s.PendingBodyFocus = false; body.Current?.Focus(); }

@@ -82,6 +82,17 @@ public class TextInputElement : BoxElement
     public bool HasSelection => _selectionStart != _cursorPos;
     public string SelectedText => HasSelection ? _text[SelectionStart..SelectionEnd] : "";
 
+    /// <summary>Selects the whole value and puts the caret at its end — what Ctrl+A does, for
+    /// a caller that wants the same effect on a field it just focused: a find bar re-opened
+    /// with a query still in it, where the next keystroke should replace rather than append.
+    /// A no-op on an empty field.</summary>
+    public void SelectAll()
+    {
+        _selectionStart = 0;
+        _cursorPos = _text.Length;
+        MarkPaintDirty();
+    }
+
     public string Placeholder { get; set; } = "";
     public Color PlaceholderColor { get; set; } = new(150, 150, 150, 255);
     public Color SelectionColor { get; set; } = new(66, 135, 245, 80);
@@ -229,7 +240,7 @@ public class TextInputElement : BoxElement
                 Action = () => { if (Clipboard?.GetText() is { } t) { DeleteSelection(); _text = _text.Insert(_cursorPos, t); _cursorPos += t.Length; _selectionStart = _cursorPos; NotifyChanged(); MarkPaintDirty(); } } },
             ContextMenuItem.Separator(),
             new ContextMenuItem { Label = "Select All", ShortcutHint = "Ctrl+A", IsDisabled = _text.Length == 0,
-                Action = () => { _selectionStart = 0; _cursorPos = _text.Length; MarkPaintDirty(); } },
+                Action = SelectAll },
         ];
     }
 
@@ -320,8 +331,7 @@ public class TextInputElement : BoxElement
                 break;
 
             case KeyCode.A when ctrl:
-                _selectionStart = 0;
-                _cursorPos = _text.Length;
+                SelectAll();
                 break;
 
             case KeyCode.C when ctrl:

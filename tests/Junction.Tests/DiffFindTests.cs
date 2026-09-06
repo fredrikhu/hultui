@@ -30,6 +30,25 @@ public class DiffFindTests
         });
     }
 
+    /// <summary>Ctrl+F on a bar that is already open is "search for something else": the
+    /// query is selected whole, so typing replaces it instead of tacking onto its end.</summary>
+    [Fact]
+    public void CtrlFOnAnOpenBarSelectsTheQuery()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Find(session, app, "EDIT");
+
+            Press(session, KeyCode.F, KeyModifiers.Ctrl);
+
+            var field = Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+            Assert.Equal("EDIT", field.SelectedText);
+
+            Find(session, app, "one");
+            Assert.Equal("one", Search(app).Query);
+        }, content: "one\ntwo\nthree\n");
+    }
+
     [Fact]
     public void TypingFindsMatchesInTheDiff()
     {

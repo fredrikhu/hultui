@@ -124,7 +124,16 @@ public partial class JunctionApp
     /// </summary>
     private void ServiceFindBar(FindBarState s, Func<Element?> body, Action reveal)
     {
-        if (s.PendingFocus) { s.PendingFocus = false; s.FieldRef.Current?.Focus(); }
+        // Ctrl+F on a bar that is already open lands here too. The query is still in the
+        // field, and the person pressed the key to search for something else, so it is
+        // selected whole: the next keystroke replaces it rather than appending to it. On a
+        // freshly opened bar the field is empty and the selection is nothing.
+        if (s.PendingFocus && s.FieldRef.Current is { } field)
+        {
+            s.PendingFocus = false;
+            field.Focus();
+            field.SelectAll();
+        }
         if (s.PendingBodyFocus && !s.Open) { s.PendingBodyFocus = false; body()?.Focus(); }
         // Hold the request until there is a body to receive it. The reveal runs after the
         // frame — scrolling during Build would precede the layout pass and clamp to 0 — but

@@ -444,6 +444,26 @@ public class ViewerTests
         Assert.IsType<TextInputElement>(t.Focused);
     }
 
+    /// <summary>Ctrl+F on a bar that is already open is "search for something else": the
+    /// query is selected whole, so typing replaces it instead of tacking onto its end.</summary>
+    [Fact]
+    public void CtrlFOnAnOpenBarSelectsTheQuery()
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "alpha\nbeta\n");
+        t.Open();
+        t.ViewFile("a.txt");
+        t.Find("alpha");
+
+        t.Press(KeyCode.F, KeyModifiers.Ctrl);
+
+        var field = Assert.IsType<TextInputElement>(t.Focused);
+        Assert.Equal("alpha", field.SelectedText);
+
+        t.Find("beta");
+        Assert.Equal("beta", t.Search.Query);
+    }
+
     [Fact]
     public void TypingFindsEveryMatch_CaseInsensitiveByDefault()
     {

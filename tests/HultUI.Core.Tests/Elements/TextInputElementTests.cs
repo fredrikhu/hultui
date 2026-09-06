@@ -118,6 +118,20 @@ public class TextInputElementTests
     }
 
     [Fact]
+    public void SelectAll_SelectsTheWholeValueWithTheCaretAtTheEnd()
+    {
+        var input = CreateInput("Hello");
+        input.CursorPosition = 2;
+        input.SelectAll();
+        Assert.Equal("Hello", input.SelectedText);
+        Assert.Equal(5, input.CursorPosition);
+
+        // Typing then replaces the selection rather than inserting at the old caret.
+        EventDispatcher.Dispatch(new TextInputEvent { Text = "X" }, input);
+        Assert.Equal("X", input.Text);
+    }
+
+    [Fact]
     public void CtrlA_SelectsAll()
     {
         var input = CreateInput("Hello");

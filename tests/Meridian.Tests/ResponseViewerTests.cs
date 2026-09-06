@@ -217,6 +217,34 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>Ctrl+F on a bar that is already open is "search for something else": the
+    /// query is selected whole, so typing replaces it instead of tacking onto its end.</summary>
+    [Fact]
+    public void CtrlFOnAnOpenBarSelectsTheQuery()
+    {
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "two");   // {"alpha":"xray","beta":"yankee"}
+
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+            session.Window.TypeText("xray");
+            session.PumpFrames(3);
+            Assert.True(Contains(session, "1 of 1"), "the first query found nothing");
+
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(2);
+
+            var field = Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+            Assert.Equal("xray", field.SelectedText);
+
+            session.Window.TypeText("yankee");
+            session.PumpFrames(3);
+            Assert.Equal("yankee", field.Text);
+            Assert.True(Contains(session, "1 of 1"), "the replaced query found nothing");
+        });
+    }
+
     [Fact]
     public void FindTintsMatchesInTheRenderedOutput()
     {
