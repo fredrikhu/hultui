@@ -466,8 +466,11 @@ public partial class JunctionApp
         list.WithRef(_diffBodyRef);
         // A trackpad's sideways swipe arrives as DeltaX, a mouse's as Shift+DeltaY. The
         // list's own handler sees them first and clamps them to nothing, since its content
-        // is exactly as wide as its viewport.
+        // is exactly as wide as its viewport. The middle-click autoscroll never arrives as
+        // an event at all — the window drives the list directly — so the list is told who
+        // scrolls it sideways, or aiming right of the anchor would do nothing.
         list.On<ScrollEvent>(ev => _diffPan.HandleScroll(ev));
+        list.ScrollSidewaysWith(_diffPan);
 
         if (!_diffBarBuilt) return list;
 

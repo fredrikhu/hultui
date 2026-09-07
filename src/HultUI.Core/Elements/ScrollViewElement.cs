@@ -66,6 +66,18 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
     /// </summary>
     public bool MiddleClickAutoScroll { get; set; } = true;
 
+    /// <summary>
+    /// Who really scrolls this view's content sideways, when it is not the view itself.
+    ///
+    /// <para>A virtualized list pins its content width to the viewport, so its own
+    /// <see cref="ScrollOffsetX"/> never leaves zero and an app that pans a wide list keeps
+    /// the position elsewhere (<see cref="Builders.HorizontalPan"/>). Set this to that, and
+    /// the middle-click autoscroll's horizontal delta goes there — otherwise a reader aiming
+    /// right of the anchor, over a list with a horizontal scrollbar plainly under it, gets
+    /// nothing. Null means the view scrolls sideways with its own offset, as a plain one does.</para>
+    /// </summary>
+    public ISidewaysScroller? SidewaysScroller { get; set; }
+
     public ScrollViewElement()
     {
         // Default: vertical scroll. OverflowY=Scroll gives children unlimited
@@ -153,20 +165,33 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         get
         {
             var box = Layout.AbsoluteContentBox;
-            return _contentHeight > box.Height + 0.5f || _contentWidth > box.Width + 0.5f;
+            if (_contentHeight > box.Height + 0.5f) return true;
+            return SidewaysScroller is { } sideways
+                ? sideways.CanScrollSideways
+                : _contentWidth > box.Width + 0.5f;
         }
     }
 
     /// <summary>Moves the view by a scroll delta — positive is further down and further
-    /// right through the content, the same sense as <see cref="ScrollOffsetY"/>.</summary>
+    /// right through the content, the same sense as <see cref="ScrollOffsetY"/>. The
+    /// horizontal part goes to the <see cref="SidewaysScroller"/> when there is one.</summary>
     /// <returns>True when something actually moved, so a caller can tell a scroll that ran
     /// from one already pinned against its end.</returns>
     public bool ScrollBy(float dx, float dy)
     {
         float beforeX = _scrollOffsetX, beforeY = _scrollOffsetY;
-        ScrollOffsetX = beforeX + dx;
         ScrollOffsetY = beforeY + dy;
-        return _scrollOffsetX != beforeX || _scrollOffsetY != beforeY;
+        bool moved = _scrollOffsetY != beforeY;
+        // The delegate goes last: a pan is app state, and moving it rebuilds the owner from
+        // inside this call. Writing this view's own offset after that would be writing it on
+        // whatever the rebuild left behind, so all of that is done before the rebuild runs.
+        if (SidewaysScroller is { } sideways)
+        {
+            if (dx != 0 && sideways.ScrollSidewaysBy(dx)) moved = true;
+            return moved;
+        }
+        ScrollOffsetX = beforeX + dx;
+        return moved || _scrollOffsetX != beforeX;
     }
 
     // ──── Scroll into view ────
@@ -278,6 +303,7 @@ public partial class ScrollViewElement : BoxElement, IScrollbarDraggable, IAutoS
         {
             ScrollSpeed = sv.ScrollSpeed;
             MiddleClickAutoScroll = sv.MiddleClickAutoScroll;
+            SidewaysScroller = sv.SidewaysScroller;
             ShowScrollbarX = sv.ShowScrollbarX;
             ShowScrollbarY = sv.ShowScrollbarY;
             CopyScrollbarsFrom(sv);

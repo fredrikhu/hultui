@@ -745,8 +745,11 @@ public partial class CommanderApp
         list.WithRef(_diffScrollRef);
         // A trackpad's sideways swipe arrives as DeltaX; a mouse reports Shift+wheel as
         // DeltaY. The list's own handler sees both first, but its content is exactly as wide
-        // as its viewport, so it clamps them to nothing and leaves them to us.
+        // as its viewport, so it clamps them to nothing and leaves them to us. The
+        // middle-click autoscroll is not an event — the window drives the list directly —
+        // so the list is told who scrolls it sideways.
         list.On<ScrollEvent>(ev => _diffPan.HandleScroll(ev));
+        list.ScrollSidewaysWith(_diffPan);
         return list;
     }
 

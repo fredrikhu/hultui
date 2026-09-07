@@ -136,6 +136,10 @@ public static class ElementExtensions
 
     // ──── ScrollView properties ────
     public static T ScrollSpeed<T>(this T el, float speed) where T : ScrollViewElement { el.ScrollSpeed = speed; return el; }
+    /// <summary>Names who scrolls the view's content sideways when the view cannot itself — a
+    /// <see cref="HorizontalPan"/> under a virtualized list — so the middle-click autoscroll's
+    /// horizontal delta reaches it. See <see cref="ScrollViewElement.SidewaysScroller"/>.</summary>
+    public static T ScrollSidewaysWith<T>(this T el, ISidewaysScroller? scroller) where T : ScrollViewElement { el.SidewaysScroller = scroller; return el; }
 
     // ──── TextInput properties ────
     public static T PlaceholderText<T>(this T el, string text) where T : TextInputElement { el.Placeholder = text; return el; }

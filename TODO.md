@@ -1,6 +1,19 @@
 # HultUI — Implementation TODO
 
 ## Just Completed
+- **Middle-click autoscroll pans an unwrapped diff sideways** — reported from Junction: the
+  scrollbar under an unwrapped diff worked and the gesture that means the same thing did not.
+  The diff's sideways position lives in `HorizontalPan` (a margin inside a clipping cell)
+  because `VirtualListElement` pins its content width to the viewport, so the list's own
+  `ScrollOffsetX` can never leave zero — and that offset is what the autoscroll drove. The
+  wheel never had this problem because it arrives as an event the app can route; the autoscroll
+  is driven straight from the frame loop and never reaches app code. So a scroll view can now be
+  told who really scrolls it sideways (`ISidewaysScroller` / `SidewaysScroller` /
+  `ScrollSidewaysWith`), `HorizontalPan` implements it, and `ScrollBy` sends the horizontal half
+  there — `CanAutoScroll` asks it too, so a short, wide list still claims the press. Junction's
+  diff and both of Vesper's panned lists (diff and viewer) are wired. The retired Junction test
+  that pinned "sideways does nothing, and that is not an oversight" is the positive case now.
+  4 framework tests, 2 in Junction, 1 in Vesper — each verified by disabling the delegate path.
 - **Two things wrong with the accent swatches, one of them mine** — both reported by eye and both
   confirmed by measuring the rendered frame, which is the only place either showed.
   The selected swatch was not ringed, it was *shrunk*. Its ring was a 3px border in `p.Card`, and

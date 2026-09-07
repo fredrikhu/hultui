@@ -300,6 +300,123 @@ public class MiddleClickAutoScrollTests
         Assert.Equal(1, presses);
     }
 
+    // ── The sideways axis, when something else owns it ───────────────────
+
+    /// <summary>A stand-in for <c>HorizontalPan</c>: something that moves the view's content
+    /// sideways by means the view knows nothing about, and keeps the position itself.</summary>
+    private sealed class Pan(float max) : ISidewaysScroller
+    {
+        public float Offset;
+        public bool CanScrollSideways => max > 0;
+        public bool ScrollSidewaysBy(float dx)
+        {
+            float next = Math.Clamp(Offset + dx, 0, max);
+            if (next == Offset) return false;
+            Offset = next;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// A view that has handed its sideways axis to something else sends the gesture's
+    /// horizontal half there, and its own horizontal offset stays where it was.
+    /// <para>This is what a virtualized list under a <c>HorizontalPan</c> looks like: its own
+    /// <c>ScrollOffsetX</c> can never leave zero, so a gesture that drove it did nothing
+    /// sideways while the scrollbar right under the list worked. Junction's diff found it.</para>
+    /// </summary>
+    [Fact]
+    public void HoldingRightOfTheAnchorDrivesTheSidewaysScrollerInstead()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var (scroll, _) = BuildList(session);
+        var pan = new Pan(max: 1000);
+        scroll.ScrollSidewaysWith(pan);
+
+        session.Window.MouseDown(100, 50, MouseButton.Middle);
+        session.Window.MoveMouse(130, 50);   // 16 past the dead zone, straight right
+        Pump(session, 0.5);
+
+        Assert.Equal(ExpectedScroll(30, 0.5), pan.Offset, 0);
+        Assert.Equal(0f, scroll.ScrollOffsetX, 3);
+        Assert.Equal(0f, scroll.ScrollOffsetY, 3);   // straight right is not down at all
+
+        session.Window.MoveMouse(70, 50);    // and back the other way
+        Pump(session, 0.25);
+        Assert.Equal(ExpectedScroll(30, 0.5) + ExpectedScroll(-30, 0.25), pan.Offset, 0);
+
+        session.Window.MouseUp(70, 50, MouseButton.Middle);
+    }
+
+    /// <summary>Both axes at once go to their respective owners: the view scrolls down by
+    /// itself while the scroller carries the sideways part.</summary>
+    [Fact]
+    public void ADiagonalHoldSplitsBetweenTheViewAndTheSidewaysScroller()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var (scroll, _) = BuildList(session);
+        var pan = new Pan(max: 1000);
+        scroll.ScrollSidewaysWith(pan);
+
+        session.Window.MouseDown(100, 50, MouseButton.Middle);
+        session.Window.MoveMouse(130, 80);
+        Pump(session, 0.5);
+
+        Assert.Equal(ExpectedScroll(30, 0.5), pan.Offset, 0);
+        Assert.Equal(ExpectedScroll(30, 0.5), scroll.ScrollOffsetY, 0);
+
+        session.Window.MouseUp(130, 80, MouseButton.Middle);
+    }
+
+    /// <summary>
+    /// A view with nothing to scroll of its own still claims the press when its sideways
+    /// scroller has somewhere to go — a short, wide list is exactly the case a reader reaches
+    /// for the middle button to pan.
+    /// </summary>
+    [Fact]
+    public void AShortViewStillClaimsThePressWhenItsSidewaysScrollerCanMove()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var row = Box.New().Height(RowH).FlexShrink(0).Background(Color.Red);
+        var scroll = ScrollView.New().Height(ViewH).Children(Flex.Column().Children(row));
+        var pan = new Pan(max: 1000);
+        scroll.ScrollSidewaysWith(pan);
+        session.Window.SetRoot(scroll);
+        session.PumpFrame();
+        Assert.True(scroll.CanAutoScroll);
+
+        session.Window.MouseDown(100, 20, MouseButton.Middle);
+        session.Window.MoveMouse(130, 20);
+        Pump(session, 0.5);
+
+        Assert.Equal(ExpectedScroll(30, 0.5), pan.Offset, 0);
+        session.Window.MouseUp(130, 20, MouseButton.Middle);
+    }
+
+    /// <summary>And when the scroller has nowhere to go either, the press is just a press —
+    /// the same promise a plain view with nothing to scroll already keeps.</summary>
+    [Fact]
+    public void AShortViewWhoseSidewaysScrollerCannotMoveLeavesTheMiddleButtonAlone()
+    {
+        using var session = HeadlessSession.Create(width: 200, height: 300);
+        var row = Box.New().Height(RowH).FlexShrink(0).Background(Color.Red);
+        var scroll = ScrollView.New().Height(ViewH).Children(Flex.Column().Children(row));
+        scroll.ScrollSidewaysWith(new Pan(max: 0));
+        session.Window.SetRoot(scroll);
+        session.PumpFrame();
+
+        int presses = 0;
+        row.On<PointerDownEvent>(e => { if (e.Button == 1) presses++; });
+        session.PumpFrame();
+
+        Assert.False(scroll.CanAutoScroll);
+        session.Window.MouseDown(100, 20, MouseButton.Middle);
+        session.Window.MoveMouse(130, 20);
+        Pump(session, 0.2);
+        session.Window.MouseUp(130, 20, MouseButton.Middle);
+
+        Assert.Equal(1, presses);
+    }
+
     /// <summary>Runs the loop for <paramref name="seconds"/> of virtual time. PumpFrame
     /// advances the clock itself, one 60 Hz frame each — advancing it again here would run
     /// the scroll at double speed while the frame count stayed the same.</summary>

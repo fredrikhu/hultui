@@ -135,32 +135,82 @@ public class MiddleClickAutoScrollTests
     }
 
     /// <summary>
-    /// Sideways it does nothing, and that is not an oversight.
+    /// Holding the middle button right of the anchor pans an unwrapped diff sideways, and
+    /// holding it left of there brings it back.
     /// <para>An unwrapped diff scrolls sideways through <c>HorizontalPan</c> — a margin inside
     /// a clipping cell — because <c>VirtualListElement</c> pins its content width to the
     /// viewport and so can never hold a horizontal offset of its own. The framework's
-    /// autoscroll moves that offset, which here has nowhere to go. Pinned so that whoever
-    /// wonders why aiming right does nothing finds the answer written down rather than
-    /// reading it as a broken gesture.</para>
+    /// autoscroll used to move that offset, which had nowhere to go: the scrollbar under the
+    /// diff worked and the gesture that looks exactly like using it did not. The list now
+    /// names the pan as what scrolls it sideways, and the gesture goes there.</para>
     /// </summary>
     [Fact]
-    public void SidewaysItDoesNothingBecauseTheListHasNoHorizontalOffset()
+    public void HoldingTheMiddleButtonRightOfTheAnchorPansTheDiffSideways()
     {
         WithTallDiff((session, app) =>
         {
+            var pan = Field<HultUI.Core.Builders.HorizontalPan>(app, "_diffPan");
+            Assert.True(pan.CanPan, "the fixture's diff has nothing to pan");
+            Assert.Equal(0f, pan.Offset);
+            float codeAtRest = CodeLabelX(app);
+
             var box = Body(app).Layout.AbsoluteContentBox;
             float x = box.X + box.Width / 2f, y = box.Y + 40f;
-            float before = Field<HultUI.Core.Builders.HorizontalPan>(app, "_diffPan").Offset;
 
             session.Window.MouseDown(x, y, MouseButton.Middle);
             session.Window.MoveMouse(x + DeadZone + 60f, y);
             PumpFor(session, 0.5);
-
-            Assert.Equal(before, Field<HultUI.Core.Builders.HorizontalPan>(app, "_diffPan").Offset);
+            float panned = pan.Offset;
+            Assert.True(panned > 0, "holding the middle button right of the anchor did not pan the diff");
+            // The list's own offset stays where it always was: the pan is the whole story.
             Assert.Equal(0f, Body(app).ScrollOffsetX, 3);
+            // And the code really moved: a panned cell shifts its text left by the offset.
+            Assert.True(CodeLabelX(app) < codeAtRest - 1f,
+                "the pan offset changed but the code on screen did not move");
 
-            session.Window.MouseUp(x + DeadZone + 60f, y, MouseButton.Middle);
+            session.Window.MoveMouse(x - DeadZone - 60f, y);   // the other way
+            PumpFor(session, 0.2);
+            Assert.True(pan.Offset < panned, "holding it left of the anchor did not pan back");
+
+            session.Window.MouseUp(x - DeadZone - 60f, y, MouseButton.Middle);
         });
+    }
+
+    /// <summary>Wrapped, every line is visible in full and there is nothing sideways to reach:
+    /// the gesture's horizontal half does nothing, and the vertical half still works.</summary>
+    [Fact]
+    public void SidewaysDoesNothingInAWrappedDiff()
+    {
+        WithTallDiff((session, app) =>
+        {
+            var pan = Field<HultUI.Core.Builders.HorizontalPan>(app, "_diffPan");
+            Assert.False(pan.CanPan, "a wrapped diff should have nothing to pan");
+
+            var box = Body(app).Layout.AbsoluteContentBox;
+            float x = box.X + box.Width / 2f, y = box.Y + 40f;
+
+            session.Window.MouseDown(x, y, MouseButton.Middle);
+            session.Window.MoveMouse(x + DeadZone + 60f, y + DeadZone + 40f);
+            PumpFor(session, 0.4);
+
+            Assert.Equal(0f, pan.Offset);
+            Assert.True(Body(app).ScrollOffsetY > 0, "the vertical half stopped working");
+
+            session.Window.MouseUp(x + DeadZone + 60f, y + DeadZone + 40f, MouseButton.Middle);
+        }, wrap: true);
+    }
+
+    /// <summary>The left edge of the first on-screen code label. A panned cell moves its text
+    /// by a negative margin, so this is where the pan shows on screen.</summary>
+    private static float CodeLabelX(JunctionApp app)
+    {
+        foreach (var row in Body(app).Children)
+        {
+            var label = LayoutProbe.Descendants<TextElement>(row,
+                t => t is { Selectable: true, SelectionIndex: >= 0 }).FirstOrDefault();
+            if (label is not null) return label.Layout.AbsoluteBorderBox.X;
+        }
+        throw new Xunit.Sdk.XunitException("no code label is on screen");
     }
 
 

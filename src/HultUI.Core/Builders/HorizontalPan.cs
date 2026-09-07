@@ -30,8 +30,12 @@ namespace HultUI.Core.Builders;
 /// app state: every mutator reports whether it changed anything, and the
 /// <c>onChanged</c> callback given to the constructor is where the owner marks itself
 /// dirty.</para>
+///
+/// <para>Hand it to the list it pans with <c>ScrollSidewaysWith</c>, and the middle-click
+/// autoscroll moves it too: the gesture otherwise drives the list's own horizontal offset,
+/// which under a virtualized list has nowhere to go.</para>
 /// </summary>
-public sealed class HorizontalPan
+public sealed class HorizontalPan : ISidewaysScroller
 {
     private readonly Action _onChanged;
     private readonly Ref<BoxElement> _trackRef = new();
@@ -85,6 +89,10 @@ public sealed class HorizontalPan
 
     /// <summary>Back to the left margin — call when the content changes underneath.</summary>
     public void Reset() => _offset = 0;
+
+    // ISidewaysScroller: the autoscroll's sideways half, by way of the list this pans under.
+    bool ISidewaysScroller.CanScrollSideways => CanPan;
+    bool ISidewaysScroller.ScrollSidewaysBy(float dx) => PanBy(dx);
 
     /// <summary>
     /// Wraps <paramref name="content"/> in a cell that clips, shifted by the current offset.

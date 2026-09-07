@@ -515,6 +515,36 @@ public class DiffViewTests
         }
     }
 
+    /// <summary>
+    /// Holding the middle button right of the anchor pans the diff sideways.
+    /// <para>The list cannot do this itself — it pins its content width to the viewport — so
+    /// the position lives in the pan, and the framework's autoscroll used to drive the list's
+    /// own offset, which had nowhere to go. The scrollbar right under the diff worked; the
+    /// gesture that means the same thing did not.</para>
+    /// </summary>
+    [Fact]
+    public void HoldingTheMiddleButtonRightOfTheAnchorPansTheDiffSideways()
+    {
+        using var t = new Fixture();
+        t.WriteLeft("a.txt", new string('L', 400) + "\n");
+        t.WriteRight("a.txt", new string('R', 400) + "\n");
+        t.Open();
+        t.OpenDiffOn("a.txt");
+        Assert.True(t.Pan.CanPan, "the fixture's diff has nothing to pan");
+        float atRest = t.FirstLineCell().text.Layout.AbsoluteBorderBox.X;
+
+        var box = t.FirstLineCell().cell.Layout.AbsoluteBorderBox;
+        float x = box.X + 20f, y = box.Y + box.Height / 2f;
+        t.Session.Window.MouseDown(x, y, MouseButton.Middle);
+        t.Session.Window.MoveMouse(x + 14f + 60f, y);   // well past the dead zone, straight right
+        for (int i = 0; i < 30; i++) t.Session.PumpFrame();
+
+        Assert.True(t.Pan.Offset > 0, "holding the middle button right of the anchor did not pan the diff");
+        Assert.True(t.FirstLineCell().text.Layout.AbsoluteBorderBox.X < atRest - 1f,
+            "the pan offset changed but the code on screen did not move");
+        t.Session.Window.MouseUp(x + 14f + 60f, y, MouseButton.Middle);
+    }
+
     [Fact]
     public void WrappingLeavesNothingToScrollSidewaysTo()
     {
