@@ -21,6 +21,24 @@ public class GitRepositoryTests
         Assert.Empty(t.Repo.GetStatus());
     }
 
+    /// <summary>The queries behind the views throw when git refuses them, rather than
+    /// answering "nothing here": a view's loader keeps its previous value on a throw, and
+    /// reads an empty list as the truth — which is what moved the selection every time
+    /// <c>git diff</c> hit a file its writer still held open.</summary>
+    [Fact]
+    public void AQueryGitRefusesThrowsInsteadOfAnsweringEmpty()
+    {
+        using var t = TempRepo.CreateWithInitialCommit();
+
+        Assert.Throws<GitCommandException>(() => t.Repo.GetTreeFiles("no-such-ref"));
+        Assert.Throws<GitCommandException>(() => t.Repo.GetCommitFiles("no-such-ref"));
+        Assert.Throws<GitCommandException>(() => t.Repo.GetCommitDiff("no-such-ref"));
+        Assert.Throws<GitCommandException>(() => t.Repo.GetLog(includeRefs: ["no-such-ref"]));
+        // And a repository that is merely empty is not a refusal.
+        Assert.Empty(t.Repo.GetUnstagedChanges());
+        Assert.Empty(t.Repo.GetWorkingDiff(staged: false));
+    }
+
     [Fact]
     public void StatusDistinguishesUntrackedStagedAndWorkingTreeChanges()
     {

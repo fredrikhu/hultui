@@ -40,6 +40,7 @@ public partial class JunctionApp
     // selection, and what a row looks like. Created in the ctor (needs MarkDirty).
     private readonly TreeView<string> _filesTree;
     private string? _filesTreeKey;   // the commit the expansion/selection belongs to
+    private bool _filesRevealSelection;   // open the selected file's folders when the tree lands
 
     // Keyboard navigation of the tree. The cursor may sit on a folder (to expand /
     // collapse) or a file (which also drives the content pane); _filesSelPath stays
@@ -96,12 +97,20 @@ public partial class JunctionApp
             return BuildStubView("Files", "Open a repository first.");
 
         var reference = FilesRef;
-        var key = $"{_activeRepoPath}|{reference}|{DataGen(_activeRepoPath)}";
-        SyncFilesTree(key);
+        // The slot is the commit being browsed; the load key is that commit at the repo's
+        // current generation, so a change on disk reloads the tree in place with the old
+        // one up until the new one lands. With the generation in the slot key too, every
+        // watcher tick opened a fresh, empty slot: the tree blanked for a frame, the
+        // cursor fell back to the open file and the folders closed — for a commit whose
+        // tree cannot change.
+        var browsed = $"{_activeRepoPath}|{reference}";
+        SyncFilesTree(browsed);
 
-        var loader = _treeLoaders.For(key);
+        var loader = _treeLoaders.For(browsed);
         var repoPath = _activeRepoPath;
-        loader.Load(key, () => RepoFor(repoPath).GetTreeFiles(reference), onLoaded: PickInitialTreeFile);
+        loader.Load($"{browsed}|{DataGen(repoPath)}",
+            () => LoadOrRetry(repoPath, () => RepoFor(repoPath).GetTreeFiles(reference)),
+            onLoaded: PickInitialTreeFile);
         var paths = loader.Value;
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
@@ -122,14 +131,22 @@ public partial class JunctionApp
         _filesTreeKey = key;
         _filesTree.ClearOverrides();
         // Keep the selected path across commits when it still exists — checked in
-        // PickInitialTreeFile once the new tree lands.
+        // PickInitialTreeFile once the new tree lands, which also opens the way to it.
+        _filesRevealSelection = true;
     }
 
     private void PickInitialTreeFile(IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) { _filesSelPath = null; return; }
         if (_filesSelPath == null || !paths.Contains(_filesSelPath))
+        {
             _filesSelPath = paths[0];
+            _filesRevealSelection = true;
+        }
+        // Only when the browsed commit or the selection changed: a reload of the same tree
+        // (the watcher saw a write) must not reopen a folder the user closed.
+        if (!_filesRevealSelection) return;
+        _filesRevealSelection = false;
         _filesTree.ExpandAncestors(_filesSelPath!);
     }
 

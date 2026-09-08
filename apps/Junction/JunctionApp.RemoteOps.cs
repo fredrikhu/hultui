@@ -200,7 +200,9 @@ public partial class JunctionApp
             // touching app state here is safe.)
             if (string.Equals(before, after, StringComparison.Ordinal)) continue;
             BumpDataGen(path);
-            MarkDirty();
+            // Rerender, not MarkDirty: the bump re-keys every loader of this repo, and only
+            // a tracked rebuild subscribes to the new ones (see OnExternalChange).
+            Rerender();
         }
     }
 

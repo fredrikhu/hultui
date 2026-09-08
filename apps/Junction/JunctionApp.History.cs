@@ -82,7 +82,8 @@ public partial class JunctionApp
                 + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
         // The initial selection is active-repo state; a preload of some other repo (none
         // today, but the guard is cheap) must not pick a commit in this one.
-        _historyLoaders.For(path).Load(key, () => LoadHistory(path, includeList, content, contentRegex),
+        _historyLoaders.For(path).Load(key,
+            () => LoadOrRetry(path, () => LoadHistory(path, includeList, content, contentRegex)),
             onLoaded: data => { if (PathEquals(path, _activeRepoPath)) PickInitialCommit(data); });
         if (stats)
             _historyStatLoaders.For(path).Load(key,
@@ -126,11 +127,82 @@ public partial class JunctionApp
         return new HistoryData(commits, graph, remotes);
     }
 
+    /// <summary>The log as it was before the one on screen — what a selected hash that the
+    /// new log no longer has can be looked up in, to follow it to its rewritten copy.</summary>
+    private HistoryData _previousHistory = HistoryData.Empty;
+
     private void PickInitialCommit(HistoryData data)
     {
+        var previous = _previousHistory;
+        _previousHistory = data;
         if (data.Commits.Count == 0) { SetCommitSelection(null); return; }
-        if (_selectedCommitHash == null || data.Commits.All(c => c.Hash != _selectedCommitHash))
-            SetCommitSelection(data.Commits[0].Hash);
+        if (_selectedCommitHash != null && data.Commits.Any(c => c.Hash == _selectedCommitHash)) return;
+        if (_selectedCommitHash != null && FollowRewrite(previous, data)) return;
+        SetCommitSelection(data.Commits[0].Hash);
+    }
+
+    // ── Following a rewrite ──────────────────────────────────────────────
+    //
+    // A rebase, amend or cherry-pick gives a commit a new hash, and the selection is a
+    // hash. Rather than fall back to the top of the list, the selection follows the
+    // commit: a rewrite keeps the author and the author timestamp to the second, so a
+    // commit that just appeared with the same author, second and subject is the same
+    // commit; when two appeared in the same second, the one whose change has the same
+    // patch id is. Nothing matches a dropped or squashed-away commit, and the top of the
+    // list is still where the selection lands then.
+
+    /// <summary>Moves the selection — lead, members and Shift anchor — to the rewritten
+    /// copies of the commits it named. False when the lead commit has no copy.</summary>
+    private bool FollowRewrite(HistoryData previous, HistoryData data)
+    {
+        if (previous.Commits.Count == 0) return false;
+        var before = new Dictionary<string, GitCommit>(StringComparer.Ordinal);
+        foreach (var c in previous.Commits) before.TryAdd(c.Hash, c);
+        var present = new HashSet<string>(data.Commits.Select(c => c.Hash), StringComparer.Ordinal);
+        var appeared = data.Commits.Where(c => !before.ContainsKey(c.Hash)).ToList();
+        if (appeared.Count == 0) return false;
+
+        string? Follow(string? hash)
+        {
+            if (hash == null) return null;
+            if (present.Contains(hash)) return hash;
+            return before.TryGetValue(hash, out var was) ? RewrittenAs(was, appeared) : null;
+        }
+
+        var lead = Follow(_selectedCommitHash);
+        if (lead == null) return false;
+        var members = _selectedCommitHashes.Select(Follow).OfType<string>().ToList();
+        _selectedCommitHashes.Clear();
+        _selectedCommitHashes.UnionWith(members);
+        _selectedCommitHashes.Add(lead);
+        _selectionAnchorHash = Follow(_selectionAnchorHash) ?? lead;
+        _selectedCommitHash = lead;
+        PrefetchCommitDetail(lead);
+        return true;
+    }
+
+    /// <summary>The commit among <paramref name="appeared"/> that <paramref name="was"/>
+    /// became, or null when none — or more than one — can be it.</summary>
+    private string? RewrittenAs(GitCommit was, List<GitCommit> appeared)
+    {
+        var stamped = appeared.Where(c =>
+            c.AuthorEmail == was.AuthorEmail && c.AuthorDate == was.AuthorDate).ToList();
+        if (stamped.Count == 0) return null;
+        if (stamped.Count == 1) return stamped[0].Hash;
+
+        // Same second twice — scripted commits do that. The subject usually settles it
+        // (unless the rewrite was a reword, which is why it is not the first test).
+        var titled = stamped.Where(c => c.Subject == was.Subject).ToList();
+        if (titled.Count == 1) return titled[0].Hash;
+        if (titled.Count > 1) stamped = titled;
+
+        // Still tied: by content. The original still exists after a rebase (the reflog
+        // keeps it), so its patch id can be compared with each candidate's. A few short git
+        // calls on the UI thread, on a path this rare.
+        if (ActiveRepo is not { } repo) return null;
+        if (repo.GetPatchId(was.Hash) is not { } id) return null;
+        var same = stamped.Where(c => repo.GetPatchId(c.Hash) == id).ToList();
+        return same.Count == 1 ? same[0].Hash : null;
     }
 
     private void MoveCommitSelection(int delta, bool extend = false, bool focusOnly = false, bool additive = false)

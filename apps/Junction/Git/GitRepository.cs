@@ -17,6 +17,20 @@ public class GitRepository
         Path = path;
     }
 
+    /// <summary>
+    /// Runs a read query for one of the views and throws <see cref="GitCommandException"/>
+    /// when git refuses it. The rest of this class answers a refused command with an empty
+    /// result; the queries behind a view must not, because a view's loader keeps its
+    /// previous value when the producer throws and treats an empty list as the truth —
+    /// which moved the selection every time a writer still held a file open.
+    /// </summary>
+    private GitResult Query(params string[] args)
+    {
+        var result = GitProcess.Run(Path, args);
+        if (!result.Success) throw new GitCommandException(args, result);
+        return result;
+    }
+
     // ── .git directory ──
 
     private string? _gitDir;
@@ -217,9 +231,7 @@ public class GitRepository
             args.Add(path);
         }
 
-        var result = GitProcess.Run(Path, args.ToArray());
-
-        if (!result.Success) return [];
+        var result = Query(args.ToArray());
 
         var commits = new List<GitCommit>();
         var records = result.Stdout.Split(RecordSep, StringSplitOptions.RemoveEmptyEntries);
@@ -365,8 +377,26 @@ public class GitRepository
             { "diff-tree", "--no-commit-id", "-p", "-M", "-m", "--first-parent", "--root" };
         if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
         args.Add(commitHash);
-        var result = GitProcess.Run(Path, args.ToArray());
-        return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+        return ParseUnifiedDiff(Query(args.ToArray()).Stdout);
+    }
+
+    /// <summary>
+    /// The stable patch id of a commit's change against its first parent — the same for a
+    /// commit and its rebased or amended copy as long as the change itself did not change,
+    /// which is what tells two rewritten commits apart when author, second and subject all
+    /// agree. Null when git has no such commit (an original pruned since it was rewritten)
+    /// or the commit changes nothing.
+    /// </summary>
+    public string? GetPatchId(string commitHash)
+    {
+        var diff = GitProcess.Run(Path, "diff-tree", "-p", "-m", "--first-parent", "--root", commitHash);
+        if (!diff.Success) return null;
+        var result = GitProcess.RunWithStdin(Path, diff.Stdout, "patch-id", "--stable");
+        if (!result.Success) return null;
+        // "<patch id> <commit id>", one line.
+        var line = result.Stdout.Trim();
+        var space = line.IndexOf(' ');
+        return space > 0 ? line[..space] : null;
     }
 
     /// <summary>
@@ -393,8 +423,7 @@ public class GitRepository
         if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
         args.Add(baseHash);
         args.Add(headHash);
-        var result = GitProcess.Run(Path, args.ToArray());
-        return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+        return ParseUnifiedDiff(Query(args.ToArray()).Stdout);
     }
 
     public List<GitFileDiff> GetWorkingDiff(bool staged, string? baseRef = null, bool ignoreWhitespace = false)
@@ -404,8 +433,7 @@ public class GitRepository
         if (ignoreWhitespace) args.Add(IgnoreWhitespaceFlag);
         if (staged && baseRef != null) args.Add(baseRef);
 
-        var result = GitProcess.Run(Path, args.ToArray());
-        return result.Success ? ParseUnifiedDiff(result.Stdout) : [];
+        return ParseUnifiedDiff(Query(args.ToArray()).Stdout);
     }
 
     public List<GitFileDiff> GetUntrackedFileDiff(string filePath)
@@ -470,8 +498,7 @@ public class GitRepository
     /// </summary>
     public List<string> GetTreeFiles(string gitRef)
     {
-        var result = GitProcess.Run(Path, "ls-tree", "-r", "--name-only", "-z", gitRef);
-        if (!result.Success) return [];
+        var result = Query("ls-tree", "-r", "--name-only", "-z", gitRef);
         // -z: NUL-separated, so paths with spaces or quotes need no unescaping.
         return result.Stdout
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
@@ -604,7 +631,7 @@ public class GitRepository
 
         if (includeUntracked)
         {
-            foreach (var line in GitProcess.Run(Path, "status", "--porcelain=v1", "-uall").Lines)
+            foreach (var line in Query("status", "--porcelain=v1", "-uall").Lines)
                 if (line.Length >= 4 && line[0] == '?' && line[1] == '?')
                     list.Add(new GitFileChange(line[3..], null, FileChangeKind.Untracked, 0, 0));
         }
@@ -621,7 +648,7 @@ public class GitRepository
     private List<GitFileChange> QueryFileChanges(string[] statusArgs, string[] numstatArgs)
     {
         var counts = new Dictionary<string, (int Add, int Del)>(StringComparer.Ordinal);
-        foreach (var line in GitProcess.Run(Path, numstatArgs).Lines)
+        foreach (var line in Query(numstatArgs).Lines)
         {
             var parts = line.Split('\t');
             if (parts.Length < 3) continue;
@@ -631,7 +658,7 @@ public class GitRepository
         }
 
         var list = new List<GitFileChange>();
-        foreach (var line in GitProcess.Run(Path, statusArgs).Lines)
+        foreach (var line in Query(statusArgs).Lines)
         {
             var parts = line.Split('\t');
             if (parts.Length < 2) continue;

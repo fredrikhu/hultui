@@ -513,7 +513,60 @@ public partial class JunctionApp : Component, IDisposable
     private void BumpDataGen(string path)
     {
         if (string.IsNullOrEmpty(path)) return;
-        _dataGen[path] = DataGen(path) + 1;
+        Invalidate(path);
+        // A change of the user's or the watcher's making: the retry budget starts over.
+        _loadRetries.Remove(path);
+    }
+
+    private void Invalidate(string path) => _dataGen[path] = DataGen(path) + 1;
+
+    // ── Refused loads ────────────────────────────────────────────────────
+    //
+    // The queries behind the History, Changes, Commit and Files views throw
+    // GitCommandException when git refuses them, and a loader keeps its previous value
+    // when the producer throws — so a refused query leaves the view as it was. It used
+    // to land as an empty answer instead, and the selection callbacks read "no rows" as
+    // "nothing to select": the next load then opened on its first row, which is how a
+    // commit or a file stopped being selected while nobody was at the keyboard. Git does
+    // refuse these in ordinary use — `git diff` dies with "cannot hash" on a file whose
+    // writer still holds it open, which is exactly when the working-tree watcher asks.
+    //
+    // Keeping the old value is half of it. The watcher event that raced the writer may
+    // have been the last one, so a refused load asks again shortly, a bounded number of
+    // times per change; the writer finishing usually gets there first.
+
+    private readonly Dictionary<string, int> _loadRetries = new(PathComparer);
+    private readonly HashSet<string> _retryPending = new(PathComparer);
+    private const int MaxLoadRetries = 3;
+
+    /// <summary>Runs a view's load off the UI thread. A refused query schedules a retry
+    /// and still throws, so the loader keeps what it had.</summary>
+    private T LoadOrRetry<T>(string path, Func<T> load)
+    {
+        try { return load(); }
+        catch (GitCommandException)
+        {
+            HultUI.Application.InvokeOnMainThread(() => ScheduleLoadRetry(path));
+            throw;
+        }
+    }
+
+    private void ScheduleLoadRetry(string path)
+    {
+        // Several loaders share a generation; one retry covers them all.
+        var attempt = _loadRetries.GetValueOrDefault(path);
+        if (attempt >= MaxLoadRetries || !_retryPending.Add(path)) return;
+        _loadRetries[path] = attempt + 1;
+        _ = RetryLoadAfter(path, TimeSpan.FromMilliseconds(500 * Math.Pow(3, attempt)));   // 0.5 s, 1.5 s, 4.5 s
+    }
+
+    private async Task RetryLoadAfter(string path, TimeSpan delay)
+    {
+        await Task.Delay(delay);
+        if (!_retryPending.Remove(path)) return;   // disposed meanwhile
+        Invalidate(path);
+        // Rerender, not MarkDirty — the same reason as OnExternalChange.
+        Rerender();
     }
 
 
@@ -1479,5 +1532,6 @@ public partial class JunctionApp : Component, IDisposable
         _remoteOpTween.Cancel();
         foreach (var w in _watchers.Values) w.Dispose();
         _watchers.Clear();
+        _retryPending.Clear();   // a pending retry finds nothing to do
     }
 }

@@ -93,7 +93,9 @@ public partial class JunctionApp
     {
         if (!HasActiveRepo) return;
         var r = range;
-        _commitDetail.Load(RangeDetailKey(r), () => LoadRangeDetail(r), onLoaded: PickInitialFile);
+        var path = _activeRepoPath;
+        _commitDetail.Load(RangeDetailKey(r), () => LoadOrRetry(path, () => LoadRangeDetail(r)),
+            onLoaded: PickInitialFile);
     }
 
     // Runs off the UI thread.
@@ -208,7 +210,8 @@ public partial class JunctionApp
         if (string.IsNullOrEmpty(hash) || !HasActiveRepo) return;
         var h = hash;
         var path = _activeRepoPath;   // captured: the producer runs off-thread, after any switch
-        _commitDetail.Load(CommitDetailKey(h), () => LoadDetail(path, h), onLoaded: PickInitialFile);
+        _commitDetail.Load(CommitDetailKey(h), () => LoadOrRetry(path, () => LoadDetail(path, h)),
+            onLoaded: PickInitialFile);
     }
 
     // Runs off the UI thread.
@@ -228,10 +231,14 @@ public partial class JunctionApp
     {
         if (detail.Files.Count == 0) { _selectedFilePath = null; _commitCursorPath = null; return; }
         if (_selectedFilePath == null || detail.Files.All(f => f.Path != _selectedFilePath))
+        {
             _selectedFilePath = detail.Files[0].Path;
-        // The cursor starts on the open file; the build re-checks that its row is
-        // actually visible before drawing the highlight.
-        _commitCursorPath = _selectedFilePath;
+            // The cursor starts on the open file; the build re-checks that its row is
+            // actually visible before drawing the highlight. A reload that keeps the open
+            // file leaves the cursor where it was parked — the build moves it only if its
+            // row is gone.
+            _commitCursorPath = _selectedFilePath;
+        }
         PrefetchHighlight(detail);
     }
 

@@ -69,7 +69,7 @@ public partial class JunctionApp
         // The ignore-whitespace flag is part of the key so toggling it reloads the diffs.
         bool ws = _settings.Git.IgnoreWhitespace;
         _changesLoaders.For(path).Load($"{path}|{DataGen(path)}|w{ws}",
-            () => LoadChanges(path, ws),
+            () => LoadOrRetry(path, () => LoadChanges(path, ws)),
             onLoaded: data => { if (PathEquals(path, _activeRepoPath)) OnChangesLoaded(data); });
     }
 

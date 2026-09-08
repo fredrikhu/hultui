@@ -170,3 +170,25 @@ public record GitResult(int ExitCode, string Stdout, string Stderr)
     public bool Success => ExitCode == 0;
     public string[] Lines => Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 }
+
+/// <summary>
+/// A read query git refused. Thrown by the queries that feed the views (the log, the
+/// working-tree changes, a commit's files and diff, a tree listing) so that a refused
+/// query is a failed load, which keeps the previous answer on screen, rather than an
+/// empty one, which used to land as data — "no commits", "no changes" — and take the
+/// selection with it. Git refuses these in ordinary use: <c>git diff</c> dies with
+/// "cannot hash" on a file whose writer still holds it open, which is exactly when the
+/// working-tree watcher asks.
+/// </summary>
+public sealed class GitCommandException : Exception
+{
+    public GitCommandException(IReadOnlyList<string> args, GitResult result)
+        : base($"git {string.Join(' ', args)} failed ({result.ExitCode}): {result.Stderr.Trim()}")
+    {
+        Args = args;
+        Result = result;
+    }
+
+    public IReadOnlyList<string> Args { get; }
+    public GitResult Result { get; }
+}
