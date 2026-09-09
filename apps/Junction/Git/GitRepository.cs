@@ -187,10 +187,15 @@ public class GitRepository
 
     // ── Log ──
 
+    /// <param name="skip">How many commits to leave out from the top — the next page of a log
+    /// whose first <paramref name="skip"/> commits are already loaded. Git's order is
+    /// deterministic for an unchanged repository, so consecutive pages join without a gap or
+    /// an overlap; a repository that changed in between is reloaded from the top by the
+    /// caller, whose cache key includes its data generation.</param>
     public List<GitCommit> GetLog(int maxCount = 500, string? author = null,
         string? path = null, DateTimeOffset? after = null, DateTimeOffset? before = null,
         bool followPath = false, IReadOnlyList<string>? includeRefs = null,
-        string? pickaxe = null, bool pickaxeRegex = false)
+        string? pickaxe = null, bool pickaxeRegex = false, int skip = 0)
     {
         var format = string.Join(FieldSep, ["%H", "%h", "%an", "%ae", "%aI", "%s", "%P", "%D"]);
 
@@ -200,6 +205,7 @@ public class GitRepository
             $"--max-count={maxCount}",
             $"--format={format}{RecordSep}",
         };
+        if (skip > 0) args.Add($"--skip={skip}");
 
         // Content search (pickaxe). -G matches commits whose diff adds/removes a
         // line matching the regex; -S matches commits that change the number of
@@ -294,7 +300,29 @@ public class GitRepository
         else
             args.Add("--all");
 
-        var result = GitProcess.Run(Path, args.ToArray());
+        return ParseNumstat(GitProcess.Run(Path, args.ToArray()));
+    }
+
+    /// <summary>
+    /// The same +/- totals for exactly the commits named, in one <c>git log --numstat</c>
+    /// that reads its revisions from stdin rather than walking a range.
+    ///
+    /// <para>This is what lets the History view's counts be cached by hash: a commit's
+    /// numstat never changes, so after a fetch or a commit only the hashes the log did not
+    /// have before need computing — not the whole window again, which at a few milliseconds
+    /// a commit is the one History cost that grows with how far back has been loaded.
+    /// Stdin because a few thousand forty-character hashes do not fit a command line.</para>
+    /// </summary>
+    public Dictionary<string, (int Added, int Deleted)> GetStatsFor(IReadOnlyCollection<string> hashes)
+    {
+        if (hashes.Count == 0) return new();
+        var stdin = string.Join("\n", hashes) + "\n";
+        return ParseNumstat(GitProcess.RunWithStdin(Path, stdin,
+            "log", "--no-walk=unsorted", "--stdin", "--numstat", "--format=%x1e%H"));
+    }
+
+    private static Dictionary<string, (int Added, int Deleted)> ParseNumstat(GitResult result)
+    {
         var stats = new Dictionary<string, (int, int)>();
         if (!result.Success) return stats;
 

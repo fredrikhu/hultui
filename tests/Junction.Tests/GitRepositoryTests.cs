@@ -422,4 +422,57 @@ public class ConflictWorkflowTests
         Assert.False(t.Repo.IsMerging());
         Assert.Equal("top\nOUR CHANGE\nbottom\n", t.Read("shared.txt"));
     }
+
+    // ── Paging the log ───────────────────────────────────────────────────
+
+    /// <summary>Consecutive pages join without a gap or an overlap: the page after the first
+    /// N commits is exactly what a single log of everything has after its first N.</summary>
+    [Fact]
+    public void TheLogPagesJoinExactly()
+    {
+        using var t = TempRepo.CreateWithInitialCommit();
+        for (var i = 1; i <= 7; i++)
+        {
+            t.Write("a.txt", $"{i}\n");
+            t.Git("add", "-A");
+            t.Git("commit", "-m", $"commit {i}");
+        }
+
+        var all = t.Repo.GetLog();
+        var first = t.Repo.GetLog(maxCount: 3);
+        var second = t.Repo.GetLog(maxCount: 3, skip: 3);
+        var rest = t.Repo.GetLog(maxCount: 100, skip: 6);
+
+        Assert.Equal(8, all.Count);
+        Assert.Equal(all.Take(3).Select(c => c.Hash), first.Select(c => c.Hash));
+        Assert.Equal(all.Skip(3).Take(3).Select(c => c.Hash), second.Select(c => c.Hash));
+        // The last page is short — which is how the caller learns the log is exhausted.
+        Assert.Equal(all.Skip(6).Select(c => c.Hash), rest.Select(c => c.Hash));
+        Assert.Empty(t.Repo.GetLog(maxCount: 3, skip: 8));
+    }
+
+    /// <summary>The +/- counts for named commits, and only those — what lets the History view
+    /// keep a cache by hash and compute only what a reload did not have.</summary>
+    [Fact]
+    public void StatsForNamedCommitsCoverExactlyThose()
+    {
+        using var t = TempRepo.CreateWithInitialCommit();
+        t.Write("a.txt", "one\ntwo\n");
+        t.Git("add", "-A");
+        t.Git("commit", "-m", "two lines");
+        t.Write("a.txt", "one\n");
+        t.Git("add", "-A");
+        t.Git("commit", "-m", "drop one");
+
+        var log = t.Repo.GetLog();
+        var drop = log.First(c => c.Subject == "drop one");
+        var two = log.First(c => c.Subject == "two lines");
+
+        var stats = t.Repo.GetStatsFor([drop.Hash, two.Hash]);
+
+        Assert.Equal(2, stats.Count);
+        Assert.Equal((0, 1), stats[drop.Hash]);
+        Assert.Equal((2, 0), stats[two.Hash]);
+        Assert.Empty(t.Repo.GetStatsFor([]));
+    }
 }

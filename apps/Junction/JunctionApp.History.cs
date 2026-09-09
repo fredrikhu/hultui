@@ -55,13 +55,23 @@ public partial class JunctionApp
         if (SelectedRange() is { } range) PrefetchRangeDetail(range);
         else PrefetchCommitDetail(_selectedCommitHash);
 
+        // The rows whose realization asks for the next page: the last tenth of a page, which
+        // is a few screens — enough lead for the page to land before the scroll reaches the
+        // end. Not while a search is on, because a search narrows the list until its tail is
+        // on screen from the start, and that would load the whole history a page at a time
+        // without anyone asking for it; "Search all history" is the ask.
+        _historyTail.Clear();
+        if (!data.Exhausted && _historyQuery.Trim().Length == 0)
+            for (var i = Math.Max(0, filtered.Count - Math.Max(2, _historyPageCommits / 10)); i < filtered.Count; i++)
+                _historyTail.Add(filtered[i].Hash);
+
         var col = Flex.Column(gap: 0).FlexGrow(1);
         col.AddChild(BuildIncludeBar(
-            IncludeSet(_activeRepoPath).OrderBy(x => x, StringComparer.Ordinal).ToList(), filtered.Count));
+            IncludeSet(_activeRepoPath).OrderBy(x => x, StringComparer.Ordinal).ToList(), filtered.Count, data));
         if (_contentSearchOpen)
             col.AddChild(BuildContentSearchBar(filtered.Count));
         col.AddChild(BuildCommitList(data, stats, filtered));
-        col.AddChild(BuildHistoryFooter());
+        col.AddChild(BuildHistoryFooter(data));
         return col;
     }
 
@@ -78,17 +88,166 @@ public partial class JunctionApp
         // Snapshot the pickaxe query/mode so the off-thread load uses a stable value.
         var content = _contentApplied;
         var contentRegex = _contentRegex;
-        var key = $"{path}|{string.Join(",", includeList)}|{DataGen(path)}"
-                + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
+        var scope = $"{path}|{string.Join(",", includeList)}"
+                  + (content.Length > 0 ? $"|{(contentRegex ? "G" : "S")}:{content}" : "");
+        var key = $"{scope}|{DataGen(path)}";
+
+        // How far back is remembered per scope, not per data generation: a commit or a fetch
+        // reloads the log from the top, but at the depth that had been scrolled to, so the
+        // selection five thousand commits down is still in the list afterwards. A different
+        // include set or content search is a different log, and starts at one page again.
+        var window = WindowFor(path);
+        if (window.Scope != scope)
+        {
+            window.Scope = scope;
+            window.Want = _historyPageCommits;
+            window.LoadAll = false;
+        }
+        var depth = window.Want;
+
+        var loader = _historyLoaders.For(path);
+        // The next page is appended onto what is loaded — when that is the same log. Across a
+        // generation the hashes may have moved, so the pages are fetched from the top again.
+        var from = loader.Value.Key == key ? loader.Value : HistoryData.Empty;
         // The initial selection is active-repo state; a preload of some other repo (none
         // today, but the guard is cheap) must not pick a commit in this one.
-        _historyLoaders.For(path).Load(key,
-            () => LoadOrRetry(path, () => LoadHistory(path, includeList, content, contentRegex)),
-            onLoaded: data => { if (PathEquals(path, _activeRepoPath)) PickInitialCommit(data); });
-        if (stats)
-            _historyStatLoaders.For(path).Load(key,
-                () => RepoFor(path).GetLogStats(refs: includeList.Count > 0 ? includeList : null,
-                    pickaxe: content, pickaxeRegex: contentRegex));
+        loader.Load($"{key}|{depth}",
+            () => LoadOrRetry(path, () => LoadHistory(path, includeList, content, contentRegex, key, from, depth)),
+            onLoaded: data =>
+            {
+                if (PathEquals(path, _activeRepoPath)) PickInitialCommit(data);
+                OnHistoryPageLoaded(path, data);
+                // The counts need the hashes, so a preload — which asks while the log is
+                // still empty and is not asked again — starts them from the landing.
+                if (stats) EnsureHistoryStatsLoaded(path, data);
+            });
+        if (stats) EnsureHistoryStatsLoaded(path, loader.Value);
+    }
+
+    // ── Paging the log ───────────────────────────────────────────────────
+    //
+    // The log used to stop at 500 commits, and a repository's history does not. A page at a
+    // time is the shape that stays cheap: git itself is fast — walking fifty thousand commits
+    // takes a quarter of a second, and a page of a thousand a few milliseconds over the
+    // process start — but the +/- counts beside each row come from a numstat pass that costs
+    // a few milliseconds per commit and would take minutes over the whole of a large
+    // repository. So the list grows a page at a time as it is scrolled, and the counts follow
+    // each page in chunks, cached by hash so a reload after a commit computes only what is new.
+
+    /// <summary>How many commits a page of the log holds. A field rather than a constant so
+    /// a test can shrink it to a handful and page through a small repository — through the
+    /// constructor, since the first page loads there.</summary>
+    private readonly int _historyPageCommits;
+    private const int DefaultHistoryPageCommits = 1000;
+
+    /// <summary>How many commits' counts one numstat pass computes. Small enough that the
+    /// first rows of a page show their counts while the rest are still being computed.</summary>
+    private const int HistoryStatsChunk = 250;
+
+    /// <summary>How much further the log is asked to reach, per repository.</summary>
+    private sealed class HistoryWindow
+    {
+        public string Scope = "";
+        public int Want;
+        /// <summary>Keep asking for the next page as each lands, until the log runs out —
+        /// "Load all", or a reveal of a commit that is not in the pages loaded so far.</summary>
+        public bool LoadAll;
+    }
+
+    private readonly Dictionary<string, HistoryWindow> _historyWindows = new(PathComparer);
+
+    private HistoryWindow WindowFor(string path)
+    {
+        if (!_historyWindows.TryGetValue(path, out var w)) _historyWindows[path] = w = new HistoryWindow();
+        return w;
+    }
+
+    /// <summary>The hashes near the loaded end of the list on screen. A row for one of these
+    /// being realized is what asks for the next page — that is the list being scrolled to
+    /// within a few screens of its end, whatever did the scrolling.</summary>
+    private HashSet<string> _historyTail = [];
+    private bool _historyMoreQueued;
+
+    /// <summary>Asks for the next page of the active repository's log, or — with
+    /// <paramref name="all"/> — for every page after it, one landing after the other.</summary>
+    private void RequestMoreHistory(bool all)
+    {
+        if (!HasActiveRepo) return;
+        var data = _history.Value;
+        var window = WindowFor(_activeRepoPath);
+        if (all) window.LoadAll = true;
+        if (data.Exhausted || _history.IsLoading) return;
+        window.Want = NextHistoryDepth(data.Commits.Count);
+        MarkDirty();   // the loader key now differs → the next page loads
+    }
+
+    private void StopLoadingAllHistory()
+    {
+        if (!HasActiveRepo) return;
+        WindowFor(_activeRepoPath).LoadAll = false;
+        MarkDirty();
+    }
+
+    /// <summary>
+    /// The depth to ask for after <paramref name="loaded"/> commits. Scrolling adds a page;
+    /// "Load all" doubles what there is, up to twenty pages at a time, because git re-walks
+    /// the commits it skips and a hundred pages of a thousand would walk the first ones a
+    /// hundred times over. Doubling keeps the total walk within twice the log's length.
+    /// </summary>
+    private int NextHistoryDepth(int loaded)
+    {
+        var page = _historyPageCommits;
+        if (HasActiveRepo && WindowFor(_activeRepoPath).LoadAll)
+            page = Math.Clamp(loaded, page, 20 * page);
+        return loaded + page;
+    }
+
+    private void OnHistoryPageLoaded(string path, HistoryData data)
+    {
+        var window = WindowFor(path);
+        if (!window.LoadAll) return;
+        // A reveal is what set LoadAll when its commit was not in the pages loaded; found, the
+        // loading stops there rather than fetching the rest of the history behind it.
+        if (_pendingRevealHash is { } hash && data.Commits.Any(c => c.Hash == hash))
+            window.LoadAll = false;
+        if (data.Exhausted) { window.LoadAll = false; return; }
+        window.Want = NextHistoryDepth(data.Commits.Count);
+        MarkDirty();
+    }
+
+    /// <summary>
+    /// Starts the numstat pass for the commits on screen that have no counts yet — one chunk
+    /// per call, the next asked for by the rebuild the landing triggers. The counts are kept
+    /// by hash for as long as the repository's loader lives, so a reload after a fetch or a
+    /// commit finds nearly all of them already there.
+    /// </summary>
+    private void EnsureHistoryStatsLoaded(string path, HistoryData data)
+    {
+        if (data.Commits.Count == 0) return;
+        var stats = _historyStatLoaders.For(path);
+        var known = stats.Value;
+        var missing = new List<string>(HistoryStatsChunk);
+        int missingCount = 0;
+        foreach (var c in data.Commits)
+        {
+            if (known.ContainsKey(c.Hash)) continue;
+            missingCount++;
+            if (missing.Count < HistoryStatsChunk) missing.Add(c.Hash);
+        }
+        if (missingCount == 0) return;
+        // The key is what is still owed under this log: each chunk landing lowers it, which is
+        // what makes the next call a new load rather than a cache hit.
+        stats.Load($"{data.Key}|{data.Depth}|{missingCount}",
+            () =>
+            {
+                var fresh = RepoFor(path).GetStatsFor(missing);
+                var merged = new Dictionary<string, (int Added, int Deleted)>(known);
+                foreach (var (hash, stat) in fresh) merged[hash] = stat;
+                return merged;
+            },
+            // More chunks owed: a rebuild asks for the next. Only the tracked reads in a build
+            // would otherwise, and a preload's are not.
+            onLoaded: _ => { if (missingCount > missing.Count) MarkDirty(); });
     }
 
     private List<GitCommit> FilteredCommits(HistoryData data)
@@ -104,11 +263,31 @@ public partial class JunctionApp
 
     // Runs off the UI thread.
     private HistoryData LoadHistory(string path, List<string> includeList,
-        string? content = null, bool contentRegex = false)
+        string? content, bool contentRegex, string key, HistoryData from, int depth)
     {
         var repo = RepoFor(path);
         var refs = includeList.Count > 0 ? includeList : null;
-        var commits = repo.GetLog(includeRefs: refs, pickaxe: content, pickaxeRegex: contentRegex);
+
+        // Only the page after what is loaded, when there is something to append to; a log
+        // asked for from nothing, or shallower than what there is, is fetched from the top.
+        List<GitCommit> commits;
+        if (from.Commits.Count > 0 && from.Commits.Count < depth && !from.Exhausted)
+        {
+            var more = repo.GetLog(maxCount: depth - from.Commits.Count, skip: from.Commits.Count,
+                includeRefs: refs, pickaxe: content, pickaxeRegex: contentRegex);
+            commits = new List<GitCommit>(from.Commits.Count + more.Count);
+            commits.AddRange(from.Commits);
+            commits.AddRange(more);
+        }
+        else if (from.Commits.Count > 0 && from.Exhausted)
+        {
+            commits = from.Commits.ToList();
+        }
+        else
+        {
+            commits = repo.GetLog(maxCount: depth, includeRefs: refs, pickaxe: content, pickaxeRegex: contentRegex);
+        }
+        var exhausted = commits.Count < depth;
 
         // With an explicit include set, parents can reference commits outside the
         // reachable window — strip those so the graph doesn't open phantom lanes.
@@ -124,8 +303,9 @@ public partial class JunctionApp
 
         var graph = GitGraphLayout.Compute(graphInput);
         var remotes = new HashSet<string>(repo.GetRemotes(), StringComparer.Ordinal);
-        return new HistoryData(commits, graph, remotes);
+        return new HistoryData(commits, graph, remotes, key, depth, exhausted);
     }
+
 
     /// <summary>The log as it was before the one on screen — what a selected hash that the
     /// new log no longer has can be looked up in, to follow it to its rewritten copy.</summary>
@@ -341,10 +521,35 @@ public partial class JunctionApp
     private void ResolvePendingReveal(List<GitCommit> filtered)
     {
         if (_pendingRevealHash is not { } hash || _history.IsLoading) return;
+
+        // Not in the pages loaded, with older ones still to come: the commit may well be
+        // further back — blame reaches any commit in the file's past — so the log keeps
+        // loading until it holds the hash or runs out, and the reveal stays owed meanwhile.
+        var data = _history.Value;
+        if (IndexOfHash(filtered, hash) < 0 && !data.Exhausted && data.Commits.Count > 0
+            && !data.Commits.Any(c => c.Hash == hash))
+        {
+            // This runs inside Build, so the request — which marks the tree dirty — waits
+            // for the frame rather than asking for a rebuild from within one.
+            if (!_historyMoreQueued)
+            {
+                _historyMoreQueued = true;
+                _window.RequestPostFrameCallback(() =>
+                {
+                    _historyMoreQueued = false;
+                    if (_pendingRevealHash != null) RequestMoreHistory(all: true);
+                });
+            }
+            return;
+        }
         _pendingRevealHash = null;
 
         if (IndexOfHash(filtered, hash) >= 0)
         {
+            // The click selected the commit before the log held it, and each build meanwhile
+            // moved a selection it could not find back to the top; now that it is here, it is
+            // the selection again.
+            if (_selectedCommitHash != hash) SetCommitSelection(hash);
             // Not _pendingScrollToSelected: that is consumed in OnAfterBuild, which runs
             // *before* the layout pass. The other setters get away with it because they
             // scroll a list that earlier frames already laid out, but a reveal arrives with
@@ -385,7 +590,7 @@ public partial class JunctionApp
     /// a new element on every build. The search box is one of those siblings: rebuilt from
     /// scratch, it dropped the keyboard on each keystroke, which is what the report "the
     /// filter text box loses focus for each keystroke" was. Key all of them or none.</remarks>
-    private Element BuildIncludeBar(List<string> includeList, int commitCount)
+    private Element BuildIncludeBar(List<string> includeList, int commitCount, HistoryData data)
     {
         var bar = Flex.Row(gap: 10)
             .FlexShrink(0).AlignItems(AlignItems.Center)
@@ -435,10 +640,23 @@ public partial class JunctionApp
 
         bar.AddChild(ContentSearchToggle());
 
-        var count = Text.New($"{commitCount} commits").FontSize(11f).TextColor(Nocturne.On(0.40));
+        var count = Text.New(HistoryCountLabel(commitCount, data)).FontSize(11f).TextColor(Nocturne.On(0.40));
         count.Key = "include-count";
         bar.AddChild(count);
         return bar;
+    }
+
+    /// <summary>
+    /// "786 commits" once the whole log is in; "newest 1,000" while there is more behind it,
+    /// so a count never reads as the size of a history it has only the top of. With a search
+    /// on, how many of those match.
+    /// </summary>
+    private string HistoryCountLabel(int shown, HistoryData data)
+    {
+        var loaded = data.Commits.Count;
+        var all = data.Exhausted ? $"{loaded:N0} commits" : $"newest {loaded:N0}";
+        if (_historyQuery.Trim().Length == 0) return data.Exhausted ? all : $"{all} commits";
+        return $"{shown:N0} of {all}";
     }
 
     /// <summary>
@@ -719,11 +937,21 @@ public partial class JunctionApp
     {
         if (commits.Count == 0)
         {
+            var searching = _historyQuery.Trim().Length > 0;
             var empty = _contentApplied.Length > 0
                 ? $"No commits {(_contentRegex ? "whose diff matches" : "that changed")} \"{_contentApplied}\""
-                : _historyQuery.Trim().Length > 0 ? "No matching commits" : "No commits yet";
-            return Box.New().FlexGrow(1).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+                : searching ? "No matching commits" : "No commits yet";
+            var box = Box.New().FlexGrow(1).Gap(12).JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Children(Text.New(empty).FontSize(14f).TextColor(Nocturne.On(0.45)));
+            // A search that found nothing in the pages loaded has not searched the history —
+            // say so, and offer the rest, or the empty list reads as "not in this repository".
+            if (searching && data.Commits.Count > 0 && !data.Exhausted)
+            {
+                box.AddChild(Text.New($"in the newest {data.Commits.Count:N0} commits")
+                    .FontSize(12f).TextColor(Nocturne.On(0.35)));
+                box.AddChild(HistoryLoadAllButton());
+            }
+            return box;
         }
 
         var selectedIndex = _selectedCommitHash == null
@@ -761,6 +989,20 @@ public partial class JunctionApp
     private Element HistoryRow(GitCommit commit, GitGraphRow graph, (int Added, int Deleted) stat,
         HashSet<string> remotes, bool selected)
     {
+        // A row near the loaded end coming on screen is the list being scrolled towards it —
+        // by wheel, keyboard, scrollbar or autoscroll alike, since every one of them ends in
+        // the list realizing the rows it now shows. This runs inside the render pass, so the
+        // request is deferred to after the frame rather than marking the tree dirty mid-paint.
+        if (_historyTail.Contains(commit.Hash) && !_historyMoreQueued)
+        {
+            _historyMoreQueued = true;
+            _window.RequestPostFrameCallback(() =>
+            {
+                _historyMoreQueued = false;
+                if (View == JunctionView.History) RequestMoreHistory(all: false);
+            });
+        }
+
         // The focus caret (Ctrl+arrows) can sit outside the selection; give it a
         // hover-strength tint so keyboard navigation stays visible.
         var focused = commit.Hash == _selectedCommitHash;
@@ -940,13 +1182,14 @@ public partial class JunctionApp
 
     // ── Footer ───────────────────────────────────────────────────────────
 
-    private Element BuildHistoryFooter()
+    private Element BuildHistoryFooter(HistoryData data)
     {
         var bar = Flex.Row(gap: 16)
             .FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(8, 16, 8, 16))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
 
+        if (HistoryPagingControls(data) is { } paging) bar.AddChild(paging);
         var comparing = SelectedRange() != null;
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton(
@@ -954,6 +1197,47 @@ public partial class JunctionApp
             Icons.ArrowRight, () => SetView(JunctionView.Commit), 11.5f));
         return bar;
     }
+
+    /// <summary>
+    /// The left of the footer while there is history behind what is loaded: how far the list
+    /// reaches, and the two ways to reach further — a page, or all of it. Nothing once the log
+    /// is exhausted; the count in the include bar says the whole of it is there.
+    /// </summary>
+    private Element? HistoryPagingControls(HistoryData data)
+    {
+        if (data.Commits.Count == 0 || data.Exhausted) return null;
+        var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center).FlexShrink(0);
+        var loaded = data.Commits.Count;
+
+        if (WindowFor(_activeRepoPath).LoadAll)
+        {
+            row.AddChild(Text.New($"Loading every commit… {loaded:N0} so far")
+                .FontSize(11f).TextColor(Nocturne.On(0.55)));
+            row.AddChild(Ui.GhostButton("Stop", Icons.X, StopLoadingAllHistory, 11f));
+            row.Key = "paging#all";
+            return row;
+        }
+        if (_history.IsLoading)
+        {
+            row.AddChild(Text.New("Loading older commits…").FontSize(11f).TextColor(Nocturne.On(0.55)));
+            row.Key = "paging#more";
+            return row;
+        }
+        row.AddChild(Text.New($"The newest {loaded:N0} commits").FontSize(11f).TextColor(Nocturne.On(0.55)));
+        row.AddChild(Ui.GhostButton($"Load {_historyPageCommits:N0} more", Icons.ArrowDown,
+            () => RequestMoreHistory(all: false), 11f));
+        row.AddChild(HistoryLoadAllButton());
+        // Three states of different shape in one slot: a key per state, so a change swaps the
+        // row rather than patching one state's children over another's.
+        row.Key = "paging#idle";
+        return row;
+    }
+
+    /// <summary>"Load all", or with a search on "Search all history" — the same load, named
+    /// for what the person is doing.</summary>
+    private Element HistoryLoadAllButton() =>
+        Ui.GhostButton(_historyQuery.Trim().Length > 0 ? "Search all history" : "Load all",
+            Icons.TrayArrowDown, () => RequestMoreHistory(all: true), 11f);
 
     private static Element Hint(string keys, string label)
     {

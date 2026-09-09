@@ -98,7 +98,9 @@ public partial class JunctionApp : Component, IDisposable
     // last-loaded value so returning to a repo is instant; see LoaderFor.
     private readonly KeyedAsyncLoader<string, HistoryData> _historyLoaders =
         new(HistoryData.Empty, capacity: 16, comparer: PathComparer);
-    // The +/- counts per commit, keyed exactly like _historyLoaders (see HistoryData).
+    // The +/- counts per commit, by hash. The value only ever grows: a hash's numstat never
+    // changes, so each chunk landing merges into what was there, and a reload after a fetch
+    // or a commit computes only the commits it did not have (see EnsureHistoryStatsLoaded).
     private readonly KeyedAsyncLoader<string, Dictionary<string, (int Added, int Deleted)>> _historyStatLoaders =
         new(NoStats, capacity: 16, comparer: PathComparer);
     // Multi-selection à la Windows lists: _selectedCommitHash is the focused/lead
@@ -291,10 +293,19 @@ public partial class JunctionApp : Component, IDisposable
     /// what the log does (about a second against a hundred milliseconds on a repository of
     /// a few hundred commits), so they load behind the list in <see cref="_historyStatLoaders"/>
     /// and fill in once the rows are already on screen.</summary>
+    /// <param name="Key">The log this window of commits belongs to — repository, include set,
+    /// content search and data generation. The next page is appended only onto data with the
+    /// same key; anything else is reloaded from the top (see EnsureHistoryLoaded).</param>
+    /// <param name="Depth">How many commits were asked for.</param>
+    /// <param name="Exhausted">True when git had fewer commits than were asked for — there is
+    /// no older page to load.</param>
     private readonly record struct HistoryData(
         IReadOnlyList<GitCommit> Commits,
         Dictionary<string, GitGraphRow> Graph,
-        HashSet<string> Remotes)
+        HashSet<string> Remotes,
+        string Key = "",
+        int Depth = 0,
+        bool Exhausted = false)
     {
         public static readonly HistoryData Empty = new([], new(), new());
     }
@@ -359,12 +370,16 @@ public partial class JunctionApp : Component, IDisposable
         public static readonly TagsData Empty = new([]);
     }
 
+    /// <param name="historyPageCommits">How many commits a page of the History log holds.
+    /// A test shrinks it to page through a small repository; the first page loads in this
+    /// constructor, so it cannot be set afterwards.</param>
     public JunctionApp(Application app, Window window, JunctionSettingsData settings,
-        IFileDialogs? fileDialogs = null)
+        IFileDialogs? fileDialogs = null, int historyPageCommits = DefaultHistoryPageCommits)
     {
         _app = app;
         _window = window;
         _settings = settings;
+        _historyPageCommits = historyPageCommits;
         // The built-in widgets read the Application theme rather than the colours this app
         // paints with, and TextInputElement.ApplyTheme re-reads it on every style pass — so
         // an unthemed Application leaves the search boxes and commit fields flat white in an
