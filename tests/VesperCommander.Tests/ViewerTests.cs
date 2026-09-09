@@ -502,6 +502,35 @@ public class ViewerTests
         Assert.Equal("beta", t.Search.Query);
     }
 
+    /// <summary>
+    /// Ctrl+F with text selected in the file searches for it: the query is the selection's
+    /// first line — a drag across lines contributes the one it started on — and the current
+    /// match is the selection itself rather than the first occurrence in the file.
+    /// </summary>
+    [Fact]
+    public void CtrlFSeedsTheQueryFromTheSelectedText()
+    {
+        using var t = new Fixture();
+        t.Write("a.txt", "beta\nalpha\nbeta\ngamma\n");
+        t.Open();
+        t.ViewFile("a.txt");
+
+        var group = t.Field<TextSelectionGroup>("_viewerGroup");
+        group.Anchor(2, 0);
+        group.ExtendTo(3, 3);   // "beta\ngam"
+        Assert.Equal("beta\ngam", group.SelectedText);
+
+        t.Press(KeyCode.F, KeyModifiers.Ctrl);
+
+        Assert.True(t.FindOpen);
+        Assert.Equal("beta", t.Search.Query);
+        Assert.Equal(2, t.Hits.Count);
+        Assert.Equal(2, t.Search.Current!.Value.Line);   // the selected one, not line 0's
+        var field = Assert.IsType<TextInputElement>(t.Focused);
+        Assert.Equal("beta", field.Text);
+        Assert.Equal("beta", field.SelectedText);
+    }
+
     [Fact]
     public void TypingFindsEveryMatch_CaseInsensitiveByDefault()
     {

@@ -49,6 +49,66 @@ public class DiffFindTests
         }, content: "one\ntwo\nthree\n");
     }
 
+    /// <summary>
+    /// Ctrl+F with text selected in the diff searches for it: the query is the selection's
+    /// first line — a drag across rows contributes the row it started on — and the current
+    /// match is the selection itself rather than the first occurrence in the file.
+    /// </summary>
+    [Fact]
+    public void CtrlFSeedsTheQueryFromTheSelectedText()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            // Locate the "two" row through the search, then put the bar away again.
+            Find(session, app, "two");
+            var row = Search(app).Current!.Value.Line;
+            Press(session, KeyCode.Escape);
+            Assert.False(Open(app));
+
+            var group = (TextSelectionGroup)typeof(JunctionApp)
+                .GetField("_diffGroupUnified", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            group.Anchor(row, 0);
+            group.ExtendTo(row + 1, 2);   // "two\nth"
+            Assert.Equal("two\nth", group.SelectedText);
+
+            Press(session, KeyCode.F, KeyModifiers.Ctrl);
+
+            Assert.True(Open(app));
+            Assert.Equal("two", Search(app).Query);
+            Assert.Equal(row, Search(app).Current!.Value.Line);
+            // Selected whole in the field, the same as a query left from before: typing
+            // replaces it.
+            var field = Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+            Assert.Equal("two", field.Text);
+            Assert.Equal("two", field.SelectedText);
+        }, content: "one\ntwo\nthree\n");
+    }
+
+    /// <summary>The seed lands on the selection, not the first match: with "two" on two
+    /// rows, selecting the lower one opens the bar on that one.</summary>
+    [Fact]
+    public void TheSeededMatchIsTheSelectionNotTheFirstOccurrence()
+    {
+        DiffScrollTests.Hosted((session, app) =>
+        {
+            Find(session, app, "two");
+            Assert.Equal(2, Search(app).Hits.Count);
+            var lower = Search(app).Hits[1].Line;
+            Press(session, KeyCode.Escape);
+
+            var group = (TextSelectionGroup)typeof(JunctionApp)
+                .GetField("_diffGroupUnified", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(app)!;
+            group.Anchor(lower, 0);
+            group.ExtendTo(lower, 3);
+
+            Press(session, KeyCode.F, KeyModifiers.Ctrl);
+
+            Assert.Equal("two", Search(app).Query);
+            Assert.Equal(1, Search(app).Index);
+            Assert.Equal(lower, Search(app).Current!.Value.Line);
+        }, content: "two\ntwo\nthree\n");   // all three within the hunk's context lines
+    }
+
     [Fact]
     public void TypingFindsMatchesInTheDiff()
     {

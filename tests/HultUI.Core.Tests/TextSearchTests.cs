@@ -331,4 +331,85 @@ public class TextSearchTests
         s.ToggleRegex(); Assert.Equal(4, changes);
         s.Move(1); Assert.Equal(5, changes);
     }
+
+    // ── Seeding from a selection ─────────────────────────────────────────
+
+    /// <summary>The current match becomes the first at or after a position — the selection
+    /// the query came from — so opening the bar does not scroll away to the top.</summary>
+    [Fact]
+    public void SeekToLandsOnTheMatchAtOrAfterAPosition()
+    {
+        var s = Over("alpha alpha", "beta", "alpha", "alpha");
+        s.SetQuery("alpha");
+        Assert.Equal(0, s.Index);
+
+        s.SeekTo(0, 0, 6);
+        Assert.Equal(1, s.Index);   // the second match on line 0
+        s.SeekTo(1, 0, 0);
+        Assert.Equal(2, s.Index);   // nothing on line 1: the next line's
+        s.SeekTo(2, 0, 3);
+        Assert.Equal(3, s.Index);   // past line 2's match: line 3's
+    }
+
+    [Fact]
+    public void SeekToPastTheLastMatchWrapsToTheFirst()
+    {
+        var s = Over("alpha", "beta", "alpha");
+        s.SetQuery("alpha");
+        s.Move(1);
+        Assert.Equal(1, s.Index);
+
+        s.SeekTo(5, 0, 0);
+        Assert.Equal(0, s.Index);
+    }
+
+    /// <summary>Lanes order within a line: a position on the left column comes before every
+    /// match on the right column of the same row.</summary>
+    [Fact]
+    public void SeekToOrdersLanesWithinALine()
+    {
+        var s = new TextSearch(() => { });
+        string?[][] rows = [["x needle", "needle y"], ["needle", null]];
+        s.Bind(rows.Length, 2, (line, lane) => rows[line][lane]);
+        s.SetQuery("needle");
+        Assert.Equal(3, s.Hits.Count);
+
+        s.SeekTo(0, 1, 0);
+        Assert.Equal(1, s.Index);
+        Assert.Equal(1, s.Current!.Value.Lane);
+    }
+
+    [Fact]
+    public void SeekToWithoutHitsIsANoOp()
+    {
+        int changes = 0;
+        var s = new TextSearch(() => changes++);
+        s.Bind(1, 1, (_, _) => "alpha");
+        s.SetQuery("zzz");
+        changes = 0;
+
+        s.SeekTo(0, 0, 0);
+        Assert.Equal(-1, s.Index);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public void ASelectionSeedsItsFirstLine()
+    {
+        Assert.Equal("first line", TextSearch.QueryFromSelection("first line\nsecond"));
+        Assert.Equal("first line", TextSearch.QueryFromSelection("first line\r\nsecond"));
+        Assert.Equal("  indented  ", TextSearch.QueryFromSelection("  indented  "));   // whitespace kept
+        Assert.Equal("one word", TextSearch.QueryFromSelection("one word"));
+    }
+
+    /// <summary>Nothing usable — no selection, or whitespace only — seeds nothing, so the bar
+    /// keeps the query it had.</summary>
+    [Fact]
+    public void AnEmptyOrBlankSelectionSeedsNothing()
+    {
+        Assert.Null(TextSearch.QueryFromSelection(null));
+        Assert.Null(TextSearch.QueryFromSelection(""));
+        Assert.Null(TextSearch.QueryFromSelection("   "));
+        Assert.Null(TextSearch.QueryFromSelection("\n\nsecond line"));   // a blank first line
+    }
 }

@@ -71,6 +71,10 @@ public sealed class TextSelectionGroup
     /// <summary>The offset within <see cref="FocusIndex"/> the loose end sits at.</summary>
     public int FocusOffset => _focusOffset;
 
+    /// <summary>Where the selection begins in document order — the top end, whichever way it
+    /// was dragged — as a line and an offset into it; (-1, 0) when there is none.</summary>
+    public (int Index, int Offset) Start => HasSelection ? Low : (-1, 0);
+
     /// <summary>Length of line <paramref name="index"/>, or -1 where the model has no line there.</summary>
     public int LengthAt(int index) =>
         index < 0 || index >= Count ? -1 : _textAt?.Invoke(index)?.Length ?? -1;

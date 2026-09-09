@@ -31,6 +31,33 @@ public class FilesFindTests
         });
     }
 
+    /// <summary>
+    /// Ctrl+F with text selected in the file searches for it, and opens on that occurrence
+    /// rather than the first in the file. The body is one TextArea, so the selection arrives
+    /// as absolute offsets and has to be turned back into the line the search speaks in.
+    /// </summary>
+    [Fact]
+    public void CtrlFSeedsTheQueryFromTheSelectedText()
+    {
+        Hosted((session, app) =>
+        {
+            var area = Body(app);
+            area.Focus();
+            area.CursorPosition = area.Text.IndexOf("needle two", StringComparison.Ordinal);
+            session.Window.PressKey(KeyCode.End, KeyModifiers.Shift);   // to the line's end
+            session.PumpFrame();
+            Assert.Equal("needle two", area.SelectedText);
+
+            Press(session, KeyCode.F, KeyModifiers.Ctrl);
+
+            Assert.True(Open(app));
+            Assert.Equal("needle two", Search(app).Query);
+            Assert.Equal(4, Search(app).Current!.Value.Line);   // "    // needle two" is line 4
+            var field = Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+            Assert.Equal("needle two", field.Text);
+        });
+    }
+
     [Fact]
     public void TypingFindsEveryMatchInTheOpenFile()
     {

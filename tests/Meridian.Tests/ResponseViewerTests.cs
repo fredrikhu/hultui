@@ -245,6 +245,34 @@ public class ResponseViewerTests : IClassFixture<TestHttpServer>, IDisposable
         });
     }
 
+    /// <summary>Ctrl+F with text selected in the body searches for it, so a value seen in
+    /// the response is one keystroke from being counted across it.</summary>
+    [Fact]
+    public void CtrlFSeedsTheQueryFromTheSelectedText()
+    {
+        Hosted((session, app) =>
+        {
+            SendAndWait(session, app, "two");   // {"alpha":"xray","beta":"yankee"}
+
+            var el = session.Window.FindByAutomationId("response-body");
+            Assert.True(el != null, "response body area not found");
+            var area = (TextAreaElement)el!.Element;
+            area.Focus();
+            area.CursorPosition = area.Text.IndexOf("yankee", StringComparison.Ordinal);
+            for (var i = 0; i < 6; i++) session.Window.PressKey(KeyCode.Right, KeyModifiers.Shift);
+            session.PumpFrame();
+            Assert.Equal("yankee", area.SelectedText);
+
+            session.Window.PressKey(KeyCode.F, KeyModifiers.Ctrl);
+            session.PumpFrames(3);
+
+            var field = Assert.IsType<TextInputElement>(session.Window.Window.FocusedElement);
+            Assert.Equal("yankee", field.Text);
+            Assert.Equal("yankee", field.SelectedText);
+            Assert.True(Contains(session, "1 of 1"), "the seeded query found nothing");
+        });
+    }
+
     [Fact]
     public void FindTintsMatchesInTheRenderedOutput()
     {

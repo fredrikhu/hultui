@@ -143,6 +143,51 @@ public sealed class TextSearch
         _onChanged();
     }
 
+    /// <summary>
+    /// Makes the first match at or after a position the current one, wrapping to the first
+    /// match in the document when nothing lies beyond it.
+    ///
+    /// <para>For a query that came from a selection: the match the person is looking at is
+    /// the selection itself, and a search that then scrolled away to the first occurrence at
+    /// the top of the file would lose them the place they were reading. Positions compare in
+    /// hit order — line, then lane, then start.</para>
+    /// </summary>
+    public void SeekTo(int line, int lane, int start)
+    {
+        if (_hits.Count == 0) return;
+        int at = 0;
+        for (int i = 0; i < _hits.Count; i++)
+        {
+            var h = _hits[i];
+            if (h.Line > line || (h.Line == line && (h.Lane > lane || (h.Lane == lane && h.Start >= start))))
+            {
+                at = i;
+                break;
+            }
+        }
+        if (at == Index) return;
+        Index = at;
+        _onChanged();
+    }
+
+    /// <summary>
+    /// What a find bar opens with when text is selected: the selection's first line, or null
+    /// when there is nothing usable in it.
+    ///
+    /// <para>A query is one line — the field is single-line, and a match never spans a line
+    /// break — so a selection dragged across several lines contributes its first. Whitespace
+    /// within the line is kept, because it is part of what was selected and matches the same
+    /// text again; a selection that is nothing but whitespace seeds nothing, and the bar keeps
+    /// whatever query it had.</para>
+    /// </summary>
+    public static string? QueryFromSelection(string? selected)
+    {
+        if (string.IsNullOrEmpty(selected)) return null;
+        int cut = selected.IndexOfAny(['\n', '\r']);
+        var line = cut < 0 ? selected : selected[..cut];
+        return string.IsNullOrWhiteSpace(line) ? null : line;
+    }
+
     /// <summary>The matches on a line of a lane, in order, or null when there are none — the
     /// question a row template asks while it is being built.</summary>
     public IReadOnlyList<Hit>? HitsOn(int line, int lane = 0) =>

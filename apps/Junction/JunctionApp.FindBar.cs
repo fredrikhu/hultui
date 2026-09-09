@@ -51,12 +51,61 @@ public partial class JunctionApp
     {
         s.Open = true;
         s.PendingFocus = true;
+        SeedFindFromSelection(s);
         // Find works over the file's text, and blame replaces that text with a gutter view
         // whose rows are a virtual list — nothing for the search to bind to, and its reveal
         // would be scrolling a body no longer on screen. So Ctrl+F comes back to the source
         // rather than opening a bar that could not answer.
         if (ReferenceEquals(s, _filesFind)) _filesBlame = false;
         MarkDirty();
+    }
+
+    /// <summary>
+    /// Ctrl+F with text selected searches for that text. The query becomes the selection's
+    /// first line, and the current match becomes the selection itself rather than the first
+    /// occurrence in the file — the reader is looking at the one they selected, and the bar
+    /// opening should not scroll them away from it. With nothing selected the bar keeps the
+    /// query it had, which Ctrl+F on an open bar selects whole (see ServiceFindBar).
+    /// </summary>
+    private void SeedFindFromSelection(FindBarState s)
+    {
+        if (FindSelection(s) is not var (selected, line, lane, start)) return;
+        if (TextSearch.QueryFromSelection(selected) is not { } query) return;
+        s.Search.SetQuery(query);
+        s.Search.SeekTo(line, lane, start);
+        s.PendingReveal = true;
+    }
+
+    /// <summary>The selected text in the body the bar searches, and where it starts in the
+    /// search's own coordinates; null when nothing is selected there.</summary>
+    private (string Text, int Line, int Lane, int Start)? FindSelection(FindBarState s)
+    {
+        if (ReferenceEquals(s, _filesFind))
+        {
+            // One TextArea over the joined text: its offsets are absolute, and the line
+            // starts the tinting pass memoized turn them back into a line and a column.
+            if (_fileBodyRef.Current is not { HasSelection: true } area || !_window.IsInTree(area)) return null;
+            int offset = area.SelectionStart;
+            int lineAt = Array.BinarySearch(_fileLineStarts, offset);
+            if (lineAt < 0) lineAt = ~lineAt - 1;
+            if (lineAt < 0) return (area.SelectedText, 0, 0, offset);
+            return (area.SelectedText, lineAt, 0, offset - _fileLineStarts[lineAt]);
+        }
+        if (ReferenceEquals(s, _diffFind))
+        {
+            // Row numbers into the flattened diff are the search's line numbers too; the
+            // side a split selection is on is its lane.
+            if (_diffGroupUnified.HasSelection) return At(_diffGroupUnified, lane: 0);
+            if (_diffGroupLeft.HasSelection) return At(_diffGroupLeft, lane: 0);
+            if (_diffGroupRight.HasSelection) return At(_diffGroupRight, lane: 1);
+        }
+        return null;
+
+        static (string, int, int, int) At(TextSelectionGroup g, int lane)
+        {
+            var (index, offset) = g.Start;
+            return (g.SelectedText, index, lane, offset);
+        }
     }
 
     /// <summary>Closes the bar but not the view. Focus has to go somewhere still in the tree:

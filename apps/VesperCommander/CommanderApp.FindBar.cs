@@ -40,7 +40,35 @@ public partial class CommanderApp
     {
         s.Open = true;
         s.PendingFocus = true;
+        SeedFindFromSelection(s);
         MarkDirty();
+    }
+
+    /// <summary>
+    /// Ctrl+F with text selected searches for that text. The query becomes the selection's
+    /// first line, and the current match becomes the selection itself rather than the first
+    /// occurrence in the file — the reader is looking at the one they selected, and the bar
+    /// opening should not scroll them away from it. With nothing selected the bar keeps the
+    /// query it had, which Ctrl+F on an open bar selects whole (see ServiceFindBar).
+    /// </summary>
+    private void SeedFindFromSelection(FindBarState s)
+    {
+        // Line numbers into the viewer's text, or row numbers into the comparison, are the
+        // search's line numbers too; the side a comparison selection is on is its lane.
+        TextSelectionGroup? group = null;
+        int lane = 0;
+        if (ReferenceEquals(s, _viewerFind) && _viewerGroup.HasSelection) group = _viewerGroup;
+        else if (ReferenceEquals(s, _diffFind))
+        {
+            if (_diffGroupLeft.HasSelection) group = _diffGroupLeft;
+            else if (_diffGroupRight.HasSelection) { group = _diffGroupRight; lane = 1; }
+        }
+        if (group is null) return;
+        if (TextSearch.QueryFromSelection(group.SelectedText) is not { } query) return;
+        var (line, offset) = group.Start;
+        s.Search.SetQuery(query);
+        s.Search.SeekTo(line, lane, offset);
+        s.PendingReveal = true;
     }
 
     /// <summary>Closes the bar but not the view. Focus has to go somewhere still in the tree:

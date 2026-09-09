@@ -38,7 +38,14 @@ public partial class MeridianApp
         bool shift = e.Modifiers.HasFlag(KeyModifiers.Shift);
         bool alt = e.Modifiers.HasFlag(KeyModifiers.Alt);
 
-        if (ctrl && e.Key == KeyCode.F) { s.Open = true; s.PendingFocus = true; MarkDirty(); return true; }
+        if (ctrl && e.Key == KeyCode.F)
+        {
+            s.Open = true;
+            s.PendingFocus = true;
+            SeedFindFromSelection(s);
+            MarkDirty();
+            return true;
+        }
         if (!s.Open) return false;
 
         switch (e.Key)
@@ -60,6 +67,28 @@ public partial class MeridianApp
         s.Search.Move(dir);
         s.PendingReveal = true;
         MarkDirty();
+    }
+
+    /// <summary>
+    /// Ctrl+F with text selected in the body searches for that text. The query becomes the
+    /// selection's first line, and the current match becomes the selection itself rather than
+    /// the first occurrence in the response — the reader is looking at the one they selected,
+    /// and the bar opening should not scroll them away from it. With nothing selected the bar
+    /// keeps the query it had, which Ctrl+F on an open bar selects whole.
+    /// </summary>
+    private void SeedFindFromSelection(FindBarState s)
+    {
+        // One TextArea over the joined text: its offsets are absolute, and the line starts
+        // the tinting pass computed turn them back into a line and a column.
+        if (_responseBodyRef.Current is not { HasSelection: true } area || !_window.IsInTree(area)) return;
+        if (TextSearch.QueryFromSelection(area.SelectedText) is not { } query) return;
+        int offset = area.SelectionStart;
+        int line = Array.BinarySearch(_respLineStarts, offset);
+        if (line < 0) line = ~line - 1;
+        int column = line < 0 ? offset : offset - _respLineStarts[line];
+        s.Search.SetQuery(query);
+        s.Search.SeekTo(Math.Max(0, line), 0, column);
+        s.PendingReveal = true;
     }
 
     private void ServiceFindBar(FindBarState s)
