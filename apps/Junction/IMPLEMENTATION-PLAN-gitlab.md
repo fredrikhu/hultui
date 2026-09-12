@@ -111,6 +111,8 @@ Each phase leaves the app shippable. Tests live in `tests/Junction.Tests` (xunit
 
 ## 3. Test instance — when and how
 
+**As built (2026-09-13):** GitLab CE on a Proxmox VM at `http://gitlab.home` (192.168.0.54, plain HTTP, hosts entry on the Windows side), a docker-executor runner in the same VM with `clone_url = "http://gitlab.home"` and `extra_hosts = ["gitlab.home:192.168.0.54"]` so job containers resolve the name, seeded with `scripts/gitlab-lab-seed.sh`. Users `dana` (maintainer), `reviewer1`, `reviewer2`, `dev` (developer); group `acme`, subgroup `acme/platform`; projects `acme/core-api`, `acme/web-client`, `acme/platform/infra`. The tokens the script printed are kept by the owner, never in the repo. Two lessons: the root token needs `admin_mode` as well as `api` on a current GitLab, and a runner's `glrt-` token is not a personal access token.
+
 **When.** Phase 0 runs on recordings. Set the instance up **during Phase 1**, so it is there the day accounts land; from Phase 2 on every "done when" is checked against it. Real gitlab.com is also needed once for the OAuth application registration and for one end-to-end sign-in; the lab instance covers everything else, including OAuth if an application is registered on it.
 
 **Shape.** One Proxmox **VM** (not an LXC: GitLab Omnibus wants its own systemd, sysctl and a lot of RAM; it runs in a container but every upgrade fights it), plus the runner inside the same VM for a lab.
