@@ -42,6 +42,19 @@ jqr() { jq -r "$1"; }
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 urlenc() { jq -rn --arg s "$1" '$s|@uri'; }
 
+# ── preflight: the token must be an administrator's PAT, or every step below prints null ──
+ME=$(api GET /user) || { echo "Could not reach $API — is GITLAB_URL right and the instance up?" >&2; exit 1; }
+if ! jq -e '.is_admin == true' <<<"$ME" > /dev/null 2>&1; then
+  echo "GITLAB_TOKEN is not an administrator's personal access token." >&2
+  echo "  GitLab said: $(jq -r '.message // .username // .' <<<"$ME")" >&2
+  echo "  Use a root token (glpat-…) with the api and admin_mode scopes. A runner token (glrt-…) will not do." >&2
+  exit 1
+fi
+echo "Signed in to $GITLAB_URL as $(jq -r .username <<<"$ME") (administrator)"
+if ! api GET "/users?username=dana" | jq -e 'length == 0' > /dev/null; then
+  echo "  note: user dana already exists — this is a re-run; users, groups and projects are reused, issues and MRs will be added again" >&2
+fi
+
 # ── users ─────────────────────────────────────────────────────────────────────────────
 say "Users"
 ensure_user() {               # ensure_user USERNAME "Full Name" [admin]
