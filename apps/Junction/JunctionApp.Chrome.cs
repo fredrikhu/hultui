@@ -40,6 +40,8 @@ public partial class JunctionApp
         crumb.AddChild(Sep());
         crumb.AddChild(Ui.Icon(Icons.GitRepository, 13f, Nocturne.Accent300));
         crumb.AddChild(Text.New(repoName).FontSize(13f).TextColor(Nocturne.On(0.70)));
+        if (HasActiveRepo && GitLabMarkFor(_activeRepoPath) is { } gitlabMark)
+            crumb.AddChild(gitlabMark);
         // Narrow windows drop the branch + workspace segments so the breadcrumb
         // doesn't run into the search box; they're still visible in the sidebar.
         if (!_compactChrome)

@@ -30,6 +30,8 @@ public sealed class GlTokenInfo
     /// <summary>A date only (<c>2026-10-12</c>), or null for a token that never expires.</summary>
     public string? ExpiresAt { get; set; }
     public string? CreatedAt { get; set; }
+    /// <summary>Only in the answer to a rotate: the new token, shown once.</summary>
+    public string? Token { get; set; }
 
     public DateTime? Expires =>
         DateTime.TryParse(ExpiresAt, System.Globalization.CultureInfo.InvariantCulture,

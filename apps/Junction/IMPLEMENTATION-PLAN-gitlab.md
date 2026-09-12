@@ -1,7 +1,9 @@
 # Junction — GitLab integration implementation plan
 
 **Design source:** `design/gitlab-handoff/design_handoff_junction_gitlab/` (Claude Design, 2026-09-12; `README.md` is the spec, `Junction Git Client v2.dc.html` the interactive prototype, `GitLab State Boards.dc.html` the states the prototype does not reach). The brief it answers is `GITLAB-DESIGN-BRIEF.md`; the API notes are `design/gitlab-api-notes.md`.
-**Status:** Phase 0 built and green (2026-09-12, 74 new tests, 714 total). **Cursor:** ▶ Phase 1.
+**Status:** Phases 0–1 built and green (2026-09-13; 81 GitLab tests). **Cursor:** ▶ Phase 2.
+
+**Phase 1 as built, where it differs from the plan:** the Options rail lists only the two panes that exist (Appearance, GitLab accounts) rather than six entries with four dead ones; Phase 6 adds the rest. The first-run strip is on the History view only, as the prototype draws it, and its dismissal is persisted per host and cleared on sign-out. *Add gitlab.com account* steers to the token card with a toast until the OAuth application is registered (`GitLabOAuth.GitLabComClientId`). The waiting card's spinner is a static glyph for now. Sign-out is split so the revoke runs off the UI thread and the forgetting on it — the settings list is read by every build. The bundled Phosphor set gained the 26 GitLab-related glyphs (`scripts/phosphor-icons.txt`).
 
 **Phase 0 as built, where it differs from the plan below:** the code lives in `apps/Junction/GitLab/` (namespace `Junction.GitLab`), not `Git/Hosting/`. The credential store went into the framework as designed — interface and in-memory/null stores in `HultUI.Core.Platform`, the Windows P/Invoke store as `HultUI.CredentialStore.Default` in the umbrella package, because `HultUI.Core` forbids unsafe code and `LibraryImport` needs it. Meridian's own `Keyring.cs` was **left in place**: `Meridian.Core` has no framework dependency and taking one for sixty lines of P/Invoke is the wrong trade. `HttpEngine` was not lifted either — the client classifies the four network failures in a dozen lines off `HttpRequestError`, and the rest of the engine is Meridian's. The OAuth loopback is a raw `TcpListener` rather than `HttpListener` (http.sys refuses non-elevated URL bindings on Windows).
 
@@ -53,13 +55,13 @@ Each phase leaves the app shippable. Tests live in `tests/Junction.Tests` (xunit
 
 ### Phase 1 — Options shell + GitLab accounts pane (design §A, Options)
 
-- [ ] Options dialog: 860×640 card, 200px rail, pane with title + *Done*, setting-row primitive (label, description, right-aligned control: toggle / chips / segmented). `Ctrl+,` and palette verbs *Options…* / *GitLab accounts…*. Only **GitLab accounts** and **Appearance** panes are real in this phase (Appearance is a move of the existing card); the other four rails entries are hidden until Phase 6.
-- [ ] Accounts pane: account rows (avatar, name, `@user`, OAuth/PAT tag, host, expiry with the < 14 days warning register, scope tags, *Rotate token* / *Sign out* → confirm), OAuth waiting card with *Paste a token instead* / *Cancel*, self-managed card (URL, token, **Test** with idle/testing/verified/failed), detected-projects list.
-- [ ] Repo ↔ project marks: sidebar row mark at 55% / 26%, Overview card, title bar, Repository settings *Hosted on* line with *Use another remote…*.
-- [ ] First-run strip on History/Branches for a GitLab-backed repo with no account; dismissed once per host, persisted.
-- [ ] Sign-out degradation: every hosted surface gated on `glActive(repo)` = project detected **and** account for its host.
+- [x] Options dialog (`JunctionApp.Options.cs`): 860×640 card, 200px rail, pane with title + *Done*, setting-row primitives (row, toggle, chip). `Ctrl+,` and palette verbs *Options…* / *GitLab accounts…* / *Appearance: colour scheme…*. Appearance moved in from its own overlay (`JunctionApp.Appearance.cs` is the pane now).
+- [x] Accounts pane (`JunctionApp.GitLabAccounts.cs`): account rows (avatar, name, `@user`, OAuth/PAT tag, host, expiry with the < 14 days warning register, scope tags, *Rotate token* / *Sign out* → confirm), the expired/refused row variant (*Sign in again* / *Remove*), OAuth waiting card with *Paste a token instead* / *Cancel*, self-managed card (URL, masked token, **Test** with idle/testing/verified/failed and the design's three failure sentences, **Add account**), detected-projects list.
+- [x] Repo ↔ project marks (`JunctionApp.GitLabMarks.cs`): `GitLabRemoteFor` (origin, or the chosen remote, or the only one; host must read as GitLab), sidebar row mark at 55% / 26% with the two tooltips, Overview card, title bar, Repository settings *Hosted on* line with *Use another remote…* and the *add one in Options* link.
+- [x] First-run strip on History for a GitLab-backed repo with no account; dismissed once per host, persisted (`GitLabDismissedHosts`), cleared on sign-out.
+- [x] Sign-out degradation: `GitLabActive(path)` = project detected **and** account for its host; a repo without a GitLab remote renders no mark and no strip (tested).
 
-**Done when:** signing in on gitlab.com (real) and on the lab instance (PAT) shows the right rows, a repo with no GitLab remote is pixel-identical to today (headless screenshot diff in the test), and sign-out clears the keyring entry.
+**Done:** the token flow (Test → verified → Add account → row, mark lit, strip gone, secret in the store, identity in settings) and sign-out (confirm → forgotten, store empty, strip back) are covered end to end in `OptionsAccountsTests` against recordings. **Still to do by hand on the lab:** one sign-in with Dana's token at `http://gitlab.home`, and one on gitlab.com once the OAuth application exists.
 
 **First moment a real instance matters:** the end of this phase. Recordings prove the parsing; only a live server proves token scopes, expiry, self-signed TLS copy, and subgroup paths.
 

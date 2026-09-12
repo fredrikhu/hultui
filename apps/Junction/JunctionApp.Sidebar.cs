@@ -150,9 +150,14 @@ public partial class JunctionApp
 
         row.AddChild(Ui.InitialTile(name, tileBg, tileFg, 24f, 11f));
 
-        var text = Flex.Column(gap: 0).FlexGrow(1);
-        text.AddChild(Text.New(name).FontSize(13f).FontWeight(FontWeight.Medium)
+        var text = Flex.Column(gap: 0).FlexGrow(1).FlexShrink(1);
+        var nameRow = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        nameRow.AddChild(Text.New(name).FontSize(13f).FontWeight(FontWeight.Medium).FlexShrink(1)
             .OverflowMode(HultUI.Core.Layout.TextOverflow.Ellipsis).MaxLines(1));
+        // The GitLab mark rides after the name, not the description: the name line is the
+        // one that survives a narrow sidebar with its meaning intact.
+        if (GitLabMarkFor(path) is { } mark) nameRow.AddChild(mark);
+        text.AddChild(nameRow);
         text.AddChild(Text.New(RepoSubtitle(path)).FontSize(10.5f).TextColor(Nocturne.On(0.45))
             .OverflowMode(HultUI.Core.Layout.TextOverflow.Ellipsis).MaxLines(1));
         row.AddChild(text);

@@ -48,6 +48,11 @@ public partial class JunctionApp : Component, IDisposable
     // cache is invalidated.
     private readonly Dictionary<string, GitWatcher> _watchers = new(PathComparer);
 
+    // The GitLab identities the app is signed in with, and the clients they yield. Owns the
+    // token/identity split (see GitLab.GitLabAccounts); the pane that shows them is in
+    // JunctionApp.GitLabAccounts.cs.
+    private readonly GitLab.GitLabAccounts _gitlab;
+
     // Active pointers.
     private string _activeWorkspaceId;
     private string _activeRepoPath;
@@ -286,6 +291,9 @@ public partial class JunctionApp : Component, IDisposable
     {
         public static readonly RepoSummary Pending = new("…", 0, 0, 0);
         public IReadOnlyList<GitBranch> Branches { get; init; } = [];
+        /// <summary>The configured remotes — what says where the repository is hosted (see
+        /// GitLabRemoteFor). One <c>git remote -v</c>, read with the rest of the summary.</summary>
+        public IReadOnlyList<GitRemote> Remotes { get; init; } = [];
     }
 
     /// <summary>The commit list itself. The per-commit +/- counts are deliberately not
@@ -373,13 +381,22 @@ public partial class JunctionApp : Component, IDisposable
     /// <param name="historyPageCommits">How many commits a page of the History log holds.
     /// A test shrinks it to page through a small repository; the first page loads in this
     /// constructor, so it cannot be set afterwards.</param>
+    /// <param name="credentialStore">Where GitLab tokens are kept. Defaults to the OS store;
+    /// tests hand in an in-memory one so nothing lands in the developer's Credential Manager.</param>
+    /// <param name="gitLabHandler">Per host, the HTTP handler GitLab calls go through — null
+    /// for the network. Tests hand in a recorded one.</param>
     public JunctionApp(Application app, Window window, JunctionSettingsData settings,
-        IFileDialogs? fileDialogs = null, int historyPageCommits = DefaultHistoryPageCommits)
+        IFileDialogs? fileDialogs = null, int historyPageCommits = DefaultHistoryPageCommits,
+        ICredentialStore? credentialStore = null,
+        Func<string, System.Net.Http.HttpMessageHandler?>? gitLabHandler = null)
     {
         _app = app;
         _window = window;
         _settings = settings;
         _historyPageCommits = historyPageCommits;
+        _settings.Normalize();
+        _gitlab = new GitLab.GitLabAccounts(_settings.GitLabAccounts,
+            credentialStore ?? CredentialStore.Default, Persist, gitLabHandler);
         // The built-in widgets read the Application theme rather than the colours this app
         // paints with, and TextInputElement.ApplyTheme re-reads it on every style pass — so
         // an unthemed Application leaves the search boxes and commit fields flat white in an
@@ -403,7 +420,6 @@ public partial class JunctionApp : Component, IDisposable
         _filesFind = new FindBarState(MarkDirty);
         _filesTree = new TreeView<string>(MarkDirty);
         _commitFilesTree = NewChangeTree();
-        _settings.Normalize();
         _diffWrap = _settings.DiffWrap;
         _diffSplit = _settings.DiffSplit;
         _commitMsgExpanded = _settings.CommitMessageExpanded;
@@ -683,8 +699,9 @@ public partial class JunctionApp : Component, IDisposable
         var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == branch);
         var dirty = repo.GetStatus().Count;
         var version = repo.GetDescribeVersion();
+        var remotes = repo.GetRemotesDetailed();
         return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, dirty, version)
-            { Branches = branches };
+            { Branches = branches, Remotes = remotes };
     }
 
     private HashSet<string> IncludeSet(string path)
@@ -779,7 +796,7 @@ public partial class JunctionApp : Component, IDisposable
         if (_reflogOpen) Overlay("reflog", BuildReflogPanel());
         if (_submodulesOpen) Overlay("submodules", BuildSubmodulesPanel());
         if (_remotesOpen) Overlay("remotes", BuildRemotesPanel());
-        if (_appearanceOpen) Overlay("appearance", BuildAppearance());
+        if (_optionsOpen) Overlay("options", BuildOptions());
         if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
         if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
@@ -1209,14 +1226,6 @@ public partial class JunctionApp : Component, IDisposable
             return;
         }
 
-        // The scheme picker has no fields, so Esc (or Enter — there is nothing to confirm,
-        // the pick already applied) is all it needs.
-        if (_appearanceOpen)
-        {
-            if (e.Key is KeyCode.Escape or KeyCode.Enter) { CloseAppearance(); e.StopPropagation = true; }
-            return;
-        }
-
         // A modal dialog swallows every global shortcut; only Esc (cancel) acts,
         // and typing flows straight to the focused field.
         if (_dialog is { } dialog)
@@ -1226,6 +1235,15 @@ public partial class JunctionApp : Component, IDisposable
             // handler is what confirms the others), so it is accepted here.
             else if (e.Key == KeyCode.Enter && dialog.Placeholder == null)
             { ConfirmDialog(); e.StopPropagation = true; }
+            return;
+        }
+
+        // Options owns the keyboard while open — after the dialog, since a sign-out confirm
+        // asks on top of it. Esc backs out one step: the add-host card first, then the
+        // dialog. Typing flows to whichever field has focus.
+        if (_optionsOpen)
+        {
+            if (e.Key == KeyCode.Escape) { OptionsEscape(); e.StopPropagation = true; }
             return;
         }
 
@@ -1240,6 +1258,15 @@ public partial class JunctionApp : Component, IDisposable
         if (ctrl && e.Key is KeyCode.P or KeyCode.K)
         {
             TogglePalette();
+            e.StopPropagation = true;
+            return;
+        }
+
+        // Ctrl+, opens Options — the key every editor uses for its settings. There is no
+        // gear in the chrome by design; this and the palette are the two ways in.
+        if (ctrl && e.Key == KeyCode.Comma)
+        {
+            OpenOptions();
             e.StopPropagation = true;
             return;
         }

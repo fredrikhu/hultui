@@ -219,8 +219,14 @@ public partial class JunctionApp
             _settings.General.AutoFetchEnabled ? $"every {_settings.General.AutoFetchIntervalMinutes} min" : "",
             () => { ClosePalette(); ToggleAutoFetch(); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
+        // Options has no gear in the chrome by design: these verbs and Ctrl+, are the ways in.
+        items.Add(new("action", "Action", Icons.Gear, "Options…", "Ctrl ,",
+            () => { ClosePalette(); OpenOptions(); }));
+        items.Add(new("action", "Action", Icons.GitLabLogo, "GitLab accounts…",
+            _gitlab.All.Count == 0 ? "none" : string.Join(", ", _gitlab.All.Select(a => a.Host)),
+            () => { ClosePalette(); OpenOptions(OptionsSection.GitLabAccounts); }));
         items.Add(new("action", "Action", Icons.Palette, "Appearance: colour scheme…",
-            Nocturne.Theme.Name, () => { ClosePalette(); OpenAppearance(); }));
+            Nocturne.Theme.Name, () => { ClosePalette(); OpenOptions(OptionsSection.Appearance); }));
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));

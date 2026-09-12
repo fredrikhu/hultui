@@ -49,6 +49,11 @@ public sealed class GitLabAccountData
     public bool ExpiresSoon => DaysLeft is { } d && d < 14;
 }
 
+/// <summary>What a token check found out, before anything is kept. <see cref="Token"/> is the
+/// secret itself — this record lives only as long as the add-host card that holds it.</summary>
+public sealed record VerifiedToken(string Host, string WebBaseUrl, string Token, GlUser User,
+    List<string> Scopes, DateTimeOffset? ExpiresAt);
+
 /// <summary>
 /// The accounts the app is signed in with, and the clients they yield. Owns the split the
 /// design insists on: identity in settings, secret in the credential store. Sign-in
@@ -148,30 +153,31 @@ public sealed class GitLabAccounts
     // ── Sign in ──────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Sign in with a pasted personal access token. Three outcomes the design shows as the
-    /// failed row: the host is not GitLab (<see cref="GitLabFailureKind.Invalid"/> /
-    /// <see cref="GitLabFailureKind.Network"/>), the token is refused (401), the token is
-    /// read-only (<see cref="GitLabFailureKind.Forbidden"/>, since Junction creates and acts
-    /// on merge requests). The verified outcome names the user, expiry and scopes.
+    /// Checks a pasted personal access token without keeping it — the accounts pane's
+    /// <b>Test</b>. Three outcomes the design shows as the failed row: the host is not GitLab
+    /// (<see cref="GitLabFailureKind.Invalid"/> / <see cref="GitLabFailureKind.Network"/>),
+    /// the token is refused (401), the token is read-only (<see cref="GitLabFailureKind.Forbidden"/>,
+    /// since Junction creates and acts on merge requests). The verified outcome names the
+    /// user, expiry and scopes; <see cref="AddVerified"/> turns it into an account.
     /// </summary>
-    public async Task<GitLabResult<GitLabAccountData>> SignInWithTokenAsync(string webBaseUrl, string token, CancellationToken ct = default)
+    public async Task<GitLabResult<VerifiedToken>> VerifyTokenAsync(string webBaseUrl, string token, CancellationToken ct = default)
     {
         token = token.Trim();
         if (token.Length == 0)
-            return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Unauthorized, "Paste a token first");
+            return GitLabResult<VerifiedToken>.Fail(GitLabFailureKind.Unauthorized, "Paste a token first");
 
         string apiBase;
         try { apiBase = GitLabClient.NormalizeApiBase(webBaseUrl); }
         catch (UriFormatException)
         {
-            return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Invalid, $"\"{webBaseUrl}\" is not a host URL");
+            return GitLabResult<VerifiedToken>.Fail(GitLabFailureKind.Invalid, $"\"{webBaseUrl}\" is not a host URL");
         }
         var host = new Uri(apiBase).Host;
 
         using var probe = new GitLabClient(apiBase, token, GitLabTokenKind.Pat, _handlerFor(host));
         var user = await probe.GetCurrentUserAsync(ct).ConfigureAwait(false);
         if (!user.Ok)
-            return GitLabResult<GitLabAccountData>.Fail(DescribeSignInFailure(user.Failure!, host));
+            return GitLabResult<VerifiedToken>.Fail(DescribeSignInFailure(user.Failure!, host));
 
         var info = await probe.ProbeTokenAsync(ct).ConfigureAwait(false);
         List<string> scopes;
@@ -181,7 +187,7 @@ public sealed class GitLabAccounts
             scopes = info.Value.Scopes;
             if (info.Value.Expires is { } d) expires = new DateTimeOffset(d, TimeSpan.Zero);
             if (info.Value.Revoked || !info.Value.Active)
-                return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Unauthorized,
+                return GitLabResult<VerifiedToken>.Fail(GitLabFailureKind.Unauthorized,
                     $"That token has been revoked on {host} — create a new one at {probe.WebBaseUrl}/-/user_settings/personal_access_tokens");
         }
         else if (info.Failure!.Kind is GitLabFailureKind.NotFound or GitLabFailureKind.Forbidden)
@@ -192,28 +198,72 @@ public sealed class GitLabAccounts
         }
         else
         {
-            return GitLabResult<GitLabAccountData>.Fail(DescribeSignInFailure(info.Failure, host));
+            return GitLabResult<VerifiedToken>.Fail(DescribeSignInFailure(info.Failure, host));
         }
 
         if (!scopes.Contains("api"))
-            return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Forbidden,
-                $"This token is read-only ({string.Join(", ", scopes)}). Junction needs the api scope to create and act on merge requests");
+            return GitLabResult<VerifiedToken>.Fail(GitLabFailureKind.Forbidden,
+                $"The token has {string.Join(", ", scopes)} only. Reading works, but creating, approving and merging requests need the api scope.");
 
+        return GitLabResult<VerifiedToken>.Success(new VerifiedToken(host, probe.WebBaseUrl, token, user.Value, scopes, expires));
+    }
+
+    /// <summary>Keeps a token <see cref="VerifyTokenAsync"/> accepted: the identity into
+    /// settings, the secret into the store. Replaces any account on the same host.</summary>
+    public GitLabAccountData AddVerified(VerifiedToken verified)
+    {
         var account = new GitLabAccountData
         {
-            Host = host,
-            WebBaseUrl = probe.WebBaseUrl,
-            UserId = user.Value.Id,
-            Username = user.Value.Username,
-            Name = user.Value.Name,
-            AvatarUrl = user.Value.AvatarUrl,
+            Host = verified.Host,
+            WebBaseUrl = verified.WebBaseUrl,
+            UserId = verified.User.Id,
+            Username = verified.User.Username,
+            Name = verified.User.Name,
+            AvatarUrl = verified.User.AvatarUrl,
             Kind = GitLabTokenKind.Pat,
-            ExpiresAt = expires,
-            Scopes = scopes,
+            ExpiresAt = verified.ExpiresAt,
+            Scopes = verified.Scopes,
             SignedInAt = DateTimeOffset.UtcNow,
         };
-        Store(host, token, refresh: null);
+        Store(verified.Host, verified.Token, refresh: null);
         Upsert(account);
+        return account;
+    }
+
+    /// <summary>Verify and keep in one step.</summary>
+    public async Task<GitLabResult<GitLabAccountData>> SignInWithTokenAsync(string webBaseUrl, string token, CancellationToken ct = default)
+    {
+        var verified = await VerifyTokenAsync(webBaseUrl, token, ct).ConfigureAwait(false);
+        return verified.Ok
+            ? GitLabResult<GitLabAccountData>.Success(AddVerified(verified.Value))
+            : verified.As<GitLabAccountData>();
+    }
+
+    /// <summary>
+    /// Replaces a PAT with a fresh one from the instance (<c>/personal_access_tokens/self/rotate</c>);
+    /// GitLab revokes the old one in the same call, so the new value goes to the store before
+    /// anything else is asked. Only a PAT rotates; an OAuth account refreshes instead.
+    /// </summary>
+    public async Task<GitLabResult<GitLabAccountData>> RotateTokenAsync(string host, CancellationToken ct = default)
+    {
+        var account = For(host);
+        if (account is null)
+            return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Unauthorized, $"Not signed in to {host}");
+        if (account.Kind != GitLabTokenKind.Pat)
+            return GitLabResult<GitLabAccountData>.Success(account);
+        var client = ClientFor(host);
+        if (client is null)
+            return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Unauthorized, "Sign in again");
+
+        var rotated = await client.RotateTokenAsync(ct).ConfigureAwait(false);
+        if (!rotated.Ok) return rotated.As<GitLabAccountData>();
+        if (string.IsNullOrEmpty(rotated.Value.Token))
+            return GitLabResult<GitLabAccountData>.Fail(GitLabFailureKind.Invalid, $"{host} rotated the token but did not return the new one");
+
+        Store(host, rotated.Value.Token, refresh: null);
+        account.ExpiresAt = rotated.Value.Expires is { } d ? new DateTimeOffset(d, TimeSpan.Zero) : null;
+        if (rotated.Value.Scopes.Count > 0) account.Scopes = rotated.Value.Scopes;
+        _persist();
         return GitLabResult<GitLabAccountData>.Success(account);
     }
 
@@ -282,16 +332,25 @@ public sealed class GitLabAccounts
         return GitLabResult<GitLabAccountData>.Success(account);
     }
 
-    /// <summary>Forgets the account and its secrets. An OAuth token is revoked on the instance
-    /// first, best effort.</summary>
-    public async Task SignOutAsync(string host, CancellationToken ct = default)
+    /// <summary>Revokes the host's OAuth token on the instance, best effort — the network
+    /// half of a sign-out, kept apart from <see cref="Forget"/> so the app can run it off
+    /// the UI thread and do the forgetting on it. A PAT is not revoked: it may be in use
+    /// elsewhere, and GitLab has a page for that.</summary>
+    public async Task RevokeAsync(string host, CancellationToken ct = default)
     {
         host = host.ToLowerInvariant();
         var account = For(host);
         var token = TokenFor(host);
         if (account is { Kind: GitLabTokenKind.OAuth } && token is not null && account.ClientId.Length > 0)
             await GitLabOAuth.RevokeAsync(account.WebBaseUrl, account.ClientId, token, _handlerFor(host), ct).ConfigureAwait(false);
+    }
 
+    /// <summary>Drops the account, its secrets and its client. Synchronous, so the settings
+    /// list and the store change on whichever thread the caller owns.</summary>
+    public void Forget(string host)
+    {
+        host = host.ToLowerInvariant();
+        var account = For(host);
         _store.Delete(Service(host), TokenAccount);
         _store.Delete(Service(host), RefreshAccount);
         lock (_lock)
@@ -304,6 +363,13 @@ public sealed class GitLabAccounts
             _accounts.Remove(account);
             _persist();
         }
+    }
+
+    /// <summary>Revoke, then forget.</summary>
+    public async Task SignOutAsync(string host, CancellationToken ct = default)
+    {
+        await RevokeAsync(host, ct).ConfigureAwait(false);
+        Forget(host);
     }
 
     // ── Internals ────────────────────────────────────────────────────────────────────

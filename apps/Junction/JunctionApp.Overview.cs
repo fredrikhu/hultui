@@ -78,8 +78,11 @@ public partial class JunctionApp
         var nameCol = Flex.Column(gap: 1).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0));
         nameCol.AddChild(Text.New(name).FontSize(15f).FontWeight(FontWeight.Medium)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        nameCol.AddChild(Text.New(RepoSubtitle(path)).FontSize(11.5f).TextColor(Nocturne.On(0.52))
+        var pathLine = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        pathLine.AddChild(Text.New(RepoSubtitle(path)).FontSize(11.5f).TextColor(Nocturne.On(0.52)).FlexShrink(1)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        if (GitLabMarkFor(path) is { } mark) pathLine.AddChild(mark);
+        nameCol.AddChild(pathLine);
         head.AddChild(nameCol);
         if (sum.Dirty > 0)
             head.AddChild(Ui.Tag($"{sum.Dirty} changed", Nocturne.Accent900, Nocturne.Accent300, 10f));

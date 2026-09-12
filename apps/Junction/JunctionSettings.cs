@@ -68,6 +68,14 @@ public sealed class JunctionSettingsData
     /// the OS credential store; see <see cref="Junction.GitLab.GitLabAccounts"/>).</summary>
     public List<Junction.GitLab.GitLabAccountData> GitLabAccounts { get; set; } = [];
 
+    /// <summary>Hosts whose first-run "Connect to …" strip was dismissed. Cleared for a host
+    /// on sign-out, so the strip comes back if the account is removed later.</summary>
+    public List<string> GitLabDismissedHosts { get; set; } = [];
+
+    /// <summary>Per repository (normalised path), the remote whose URL says where it is
+    /// hosted, when it is not <c>origin</c>. Absent means origin, then the only remote.</summary>
+    public Dictionary<string, string> RepoHostingRemote { get; set; } = new();
+
     public void Normalize()
     {
         RepositoryPaths ??= [];
@@ -87,6 +95,8 @@ public sealed class JunctionSettingsData
             a.ClientId ??= "";
         }
         GitLabAccounts.RemoveAll(a => a.Host.Length == 0);
+        GitLabDismissedHosts ??= [];
+        RepoHostingRemote ??= new();
         General.AutoFetchIntervalMinutes = Math.Clamp(General.AutoFetchIntervalMinutes, 1, 120);
         // A hand-edited (or older) settings file must not be able to leave the window at a
         // scale nothing can be clicked at, or the diff at a size with no glyphs in it.

@@ -108,6 +108,15 @@ public sealed class GitLabClient : IDisposable
     public Task<GitLabResult<GlTokenInfo>> ProbeTokenAsync(CancellationToken ct = default) =>
         GetAsync("personal_access_tokens/self", GitLabJson.Default.GlTokenInfo, ct);
 
+    /// <summary>A new token in place of the one in use, which is revoked in the same call.
+    /// Needs the <c>api</c> or <c>self_rotate</c> scope; the answer's <see cref="GlTokenInfo.Token"/>
+    /// is the only time the new value is shown.</summary>
+    public async Task<GitLabResult<GlTokenInfo>> RotateTokenAsync(CancellationToken ct = default)
+    {
+        var res = await SendAsync(HttpMethod.Post, "personal_access_tokens/self/rotate", null, GitLabJson.Default.GlTokenInfo, ct).ConfigureAwait(false);
+        return res.Ok ? GitLabResult<GlTokenInfo>.Success(res.Value.Body) : res.As<GlTokenInfo>();
+    }
+
     // ── Projects ─────────────────────────────────────────────────────────────────────
 
     public Task<GitLabResult<GlProject>> GetProjectAsync(string projectPath, CancellationToken ct = default) =>

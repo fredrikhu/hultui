@@ -66,6 +66,10 @@ public partial class JunctionApp
                 _historyTail.Add(filtered[i].Hash);
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
+        // A GitLab-backed repository with no account gets one line offering to connect,
+        // above everything else and dismissable for good — see JunctionApp.GitLabMarks.
+        if (BuildFirstRunStrip() is { } firstRun)
+            col.AddChild(firstRun);
         col.AddChild(BuildIncludeBar(
             IncludeSet(_activeRepoPath).OrderBy(x => x, StringComparer.Ordinal).ToList(), filtered.Count, data));
         if (_contentSearchOpen)

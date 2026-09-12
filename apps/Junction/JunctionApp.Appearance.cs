@@ -10,33 +10,15 @@ using Junction.Theme;
 namespace Junction;
 
 /// <summary>
-/// The colour-scheme picker. Junction has no settings window, so this is a small overlay of
-/// its own rather than a tab in one — reached from the command palette.
+/// Options › Appearance: the colour-scheme cards, the interface scale and the code font.
+/// This was a small overlay of its own while Junction had no settings window; it is a pane
+/// of the Options dialog now (see JunctionApp.Options), with the same controls.
 /// </summary>
 public partial class JunctionApp
 {
-    private bool _appearanceOpen;
-
-    private void OpenAppearance()
-    {
-        _appearanceOpen = true;
-        _paletteOpen = false;
-        MarkDirty();
-    }
-
-    private void CloseAppearance()
-    {
-        _appearanceOpen = false;
-        // The font name is typed, and writing the settings file once per keystroke is a
-        // file write per character; every other choice on this card persists as it is made,
-        // so the one that cannot writes here instead.
-        Persist();
-        MarkDirty();
-    }
-
     /// <summary>
     /// Apply a scheme and remember it. Applied immediately rather than on an OK button:
-    /// the whole window is behind the picker, so the change is its own preview, and there is
+    /// the whole window is behind the dialog, so the change is its own preview, and there is
     /// nothing to confirm that the user cannot see.
     /// </summary>
     private void UseTheme(string id)
@@ -54,39 +36,13 @@ public partial class JunctionApp
         MarkDirty();
     }
 
-    private Element BuildAppearance()
+    private Element BuildAppearancePane()
     {
-        var backdrop = Box.New()
-            .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
-            .Background(new Color(0, 0, 0, 140))
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(24))
-            .ZIndex(46);
-        backdrop.Position.Type = PositionType.Absolute;
-        backdrop.Position.Top = Dimension.Px(0);
-        backdrop.Position.Left = Dimension.Px(0);
-        backdrop.On<ClickEvent>(e => { e.StopPropagation = true; CloseAppearance(); });
+        var col = Flex.Column(gap: 14).Padding(new Thickness(8, 0, 0, 0));
+        col.AddChild(Text.New("Each card is painted in its own colours. Picking one applies it straight away.")
+            .FontSize(12.5f).TextColor(Nocturne.On(0.62)));
 
-        var card = Flex.Column(gap: 14)
-            .Width(720)
-            .Padding(new Thickness(20))
-            .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
-        card.On<ClickEvent>(e => e.StopPropagation = true);
-
-        var header = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
-        header.AddChild(Text.New("Appearance").FontSize(19f).FontWeight(FontWeight.SemiBold).FlexGrow(1));
-        header.AddChild(Ui.GhostButton("Done", null, CloseAppearance));
-        card.AddChild(header);
-        card.AddChild(Text.New("Each card is painted in its own colours. Picking one applies it straight away.")
-            .FontSize(13f).TextColor(Nocturne.On(0.72)));
-
-        // The card carries three sections now, so the grid takes what the window can spare
-        // rather than a fixed 420: at the smallest window this app allows, a fixed height
-        // pushed the scale and font controls off the bottom of the card entirely.
-        var scroll = ScrollView.Vertical().MaxHeight(Math.Clamp(_window.LayoutHeight - 410f, 110f, 420f));
-        var col = Flex.Column(gap: 10).Padding(new Thickness(0, 10, 0, 0));
+        var grid = Flex.Column(gap: 10);
         var themes = ThemeCatalog.All;
         for (int i = 0; i < themes.Count; i += 3)
         {
@@ -96,17 +52,14 @@ public partial class JunctionApp
             // Pad the last row so two cards don't stretch to the width of three.
             for (int pad = themes.Count; pad < i + 3; pad++)
                 row.AddChild(Box.New().FlexGrow(1).FlexBasis(Dimension.Px(0)));
-            col.AddChild(row);
+            grid.AddChild(row);
         }
-        scroll.AddChild(col);
-        card.AddChild(scroll);
+        col.AddChild(grid);
 
-        card.AddChild(Box.New().Height(1).Background(Nocturne.Divider));
-        card.AddChild(BuildScaleSection());
-        card.AddChild(BuildCodeFontSection());
-
-        backdrop.AddChild(card);
-        return backdrop;
+        col.AddChild(Box.New().Height(1).Background(Nocturne.Divider));
+        col.AddChild(BuildScaleSection());
+        col.AddChild(BuildCodeFontSection());
+        return col;
     }
 
     /// <summary>The steps the zoom is offered in. Discrete rather than a slider: these are
@@ -201,7 +154,7 @@ public partial class JunctionApp
 
     /// <summary>
     /// Apply a zoom and remember it. Like the scheme cards above, it takes effect at once —
-    /// the whole window is behind this overlay, so the change is its own preview.
+    /// the whole window is behind the dialog, so the change is its own preview.
     /// </summary>
     private void UseUiScale(float scale)
     {
@@ -238,7 +191,7 @@ public partial class JunctionApp
         family = family.Trim();
         if (_settings.Appearance.CodeFont == family) return;
         _settings.Appearance.CodeFont = family;
-        InvalidateCodeMetrics();   // persisted when the card closes — see CloseAppearance
+        InvalidateCodeMetrics();   // persisted when Options closes — see CloseOptions
         MarkDirty();
     }
 

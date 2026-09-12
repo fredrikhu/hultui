@@ -97,6 +97,11 @@ public partial class JunctionApp
         col.AddChild(ModalField(f.IsWorkspace ? "Icon colour" : "Badge colour", BuildColorPicker(f)));
         col.AddChild(BuildPreview(f));
 
+        // Only for a repository whose remote reads as GitLab; every other repository's
+        // settings look exactly as they did.
+        if (f.Kind == ModalKind.EditRepo && f.EditId is { } repoPath && GitLabRemoteFor(repoPath) is { } hosted)
+            col.AddChild(BuildHostedOnField(repoPath, hosted));
+
         if (f.IsWorkspace)
             col.AddChild(ModalField("Repositories in this workspace", BuildRepoChecklist(f)));
         else

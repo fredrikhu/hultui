@@ -145,4 +145,33 @@ public static class Icons
     // Phosphor's set here carries no terminal or console glyph; a keyboard is the nearest
     // thing to "you type the rest of this yourself".
     public const string Terminal = "keyboard";
+
+    // GitLab integration: accounts, merge requests, pipelines, review, todos, options.
+    public const string GitLabLogo = "gitlab-logo";
+    public const string GitPullRequest = "git-pull-request";
+    public const string SealCheck = "seal-check";
+    public const string ChatCircle = "chat-circle";
+    public const string ChatCircleFill = "chat-circle-fill";
+    public const string Bell = "bell";
+    public const string Eyes = "eyes";
+    public const string NotePencil = "note-pencil";
+    public const string CircleNotch = "circle-notch";
+    public const string XCircle = "x-circle";
+    public const string Clock = "clock";
+    public const string Prohibit = "prohibit";
+    public const string SkipForwardCircle = "skip-forward-circle";
+    public const string PlayCircle = "play-circle";
+    public const string SignOut = "sign-out";
+    public const string ArrowSquareOut = "arrow-square-out";
+    public const string LinkSimple = "link-simple";
+    public const string UserCircle = "user-circle";
+    public const string Gear = "gear";
+    public const string At = "at";
+    public const string UserPlus = "user-plus";
+    public const string SlidersHorizontal = "sliders-horizontal";
+    public const string PlugsConnected = "plugs-connected";
+    public const string ShieldCheck = "shield-check";
+    public const string TerminalWindow = "terminal-window";
+    public const string Code = "code";
+    public const string HardDrives = "hard-drives";
 }
