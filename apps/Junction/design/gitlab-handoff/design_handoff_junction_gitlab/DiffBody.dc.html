@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="./styles.css"></helmet>
+<div style="font-family:ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;font-size:12px;line-height:1.65;background:var(--color-bg)">
+  <div style="padding:6px 14px;color:var(--color-accent-300);background:color-mix(in srgb,var(--color-accent) 6%, transparent);border-bottom:1px solid var(--color-divider);position:sticky;top:0">{{ hunk }}</div>
+
+  <sc-if value="{{ isUnified }}" hint-placeholder-val="{{ true }}">
+    <sc-for list="{{ uni }}" as="r" hint-placeholder-count="10">
+      <div style="{{ r.rowStyle }};display:flex">
+        <span style="width:46px;flex:none;text-align:right;padding-right:10px;color:color-mix(in srgb,var(--color-text) 30%, transparent);user-select:none">{{ r.oldNum }}</span>
+        <span style="width:46px;flex:none;text-align:right;padding-right:10px;color:color-mix(in srgb,var(--color-text) 30%, transparent);user-select:none">{{ r.newNum }}</span>
+        <span style="{{ r.signStyle }};width:16px;flex:none;text-align:center;user-select:none">{{ r.sign }}</span>
+        <span style="{{ r.codeStyle }};flex:1;white-space:pre;padding-right:14px">{{ r.text }}</span>
+      </div>
+    </sc-for>
+  </sc-if>
+
+  <sc-if value="{{ isSplit }}" hint-placeholder-val="{{ false }}">
+    <sc-for list="{{ split }}" as="r" hint-placeholder-count="10">
+      <div style="display:flex">
+        <div style="{{ r.lStyle }};flex:1;display:flex;min-width:0;border-right:1px solid var(--color-divider)">
+          <span style="width:44px;flex:none;text-align:right;padding-right:10px;color:color-mix(in srgb,var(--color-text) 30%, transparent);user-select:none">{{ r.lNum }}</span>
+          <span style="{{ r.lFg }};flex:1;white-space:pre;overflow:hidden;text-overflow:ellipsis;padding-right:10px">{{ r.lText }}</span>
+        </div>
+        <div style="{{ r.rStyle }};flex:1;display:flex;min-width:0">
+          <span style="width:44px;flex:none;text-align:right;padding-right:10px;color:color-mix(in srgb,var(--color-text) 30%, transparent);user-select:none">{{ r.rNum }}</span>
+          <span style="{{ r.rFg }};flex:1;white-space:pre;overflow:hidden;text-overflow:ellipsis;padding-right:10px">{{ r.rText }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:700,&quot;height&quot;:360},&quot;hunk&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;@@ -1,4 +1,6 @@&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;unified&quot;,&quot;options&quot;:[&quot;unified&quot;,&quot;split&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;uni&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;any[]&quot;},&quot;split&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;any[]&quot;}}">
+class Component extends DCLogic {
+  renderVals(){
+    const mode = this.props.mode || 'unified';
+    return {
+      hunk: this.props.hunk || '',
+      uni: this.props.uni || [],
+      split: this.props.split || [],
+      isUnified: mode === 'unified',
+      isSplit: mode === 'split',
+    };
+  }
+}
+</script>
+</body>
+</html>

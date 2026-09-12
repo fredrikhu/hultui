@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<style>
+  html,body{margin:0;background:#0f111b}
+  @keyframes jx-spin{to{transform:rotate(360deg)}}
+  a{color:var(--color-accent-300)} a:hover{color:var(--color-accent-200)}
+</style>
+</helmet>
+
+<div style="padding:40px;display:flex;flex-direction:column;gap:40px;color:var(--color-text);font-size:13px;line-height:1.5;min-width:1400px">
+
+  <div style="max-width:760px">
+    <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent-300);margin-bottom:8px">Junction · GitLab integration</div>
+    <h1 style="margin:0 0 10px;font-size:28px">State boards</h1>
+    <p style="color:color-mix(in srgb,var(--color-text) 65%, transparent);margin:0">Static companions to the interactive prototype (<a href="Junction Git Client v2.dc.html">Junction Git Client v2</a>). Tier 1 surfaces are live there; this page holds the states the prototype does not simulate, the Tier 2 surfaces, and the glyph vocabulary on Nocturne and on Solarized Light. Colours are named by role; the light board uses the Solarized Light scheme's own values.</p>
+  </div>
+
+  <!-- ═════ 1. GLYPH SHEET ═════ -->
+  <section>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:2px 7px;border-radius:999px;background:var(--color-accent-800);color:var(--color-accent-100)">E · K</span><h2 style="margin:0;font-size:18px">Glyph sheet — pipeline, merge status, review gutter</h2></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <sc-for list="{{ glyphBoards }}" as="b" hint-placeholder-count="2">
+        <div style="{{ b.style }}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><span style="font-weight:500;font-size:14px">{{ b.name }}</span><span style="font-size:11px;opacity:.6">shape + colour, never colour alone</span></div>
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;opacity:.55;margin-bottom:6px">Pipeline</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+            <sc-for list="{{ b.pipes }}" as="g" hint-placeholder-count="8"><div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;{{ b.cell }}"><i class="{{ g.icon }}" style="font-size:16px;color:{{ g.color }};{{ g.spin }}"></i><span style="font-size:12px">{{ g.label }}</span></div></sc-for>
+          </div>
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;opacity:.55;margin-bottom:6px">Merge request status word · from detailed_merge_status</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+            <sc-for list="{{ b.statuses }}" as="s" hint-placeholder-count="8"><span style="font-size:11.5px;padding:3px 9px;border-radius:999px;{{ b.cell }};color:{{ s.color }}">{{ s.label }}</span></sc-for>
+          </div>
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;opacity:.55;margin-bottom:6px">Review gutter · 22px column left of the line numbers</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;border-radius:6px;overflow:hidden;{{ b.cell }}">
+            <sc-for list="{{ b.gutter }}" as="r" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;{{ r.row }}">
+                <span style="width:22px;flex:none;display:grid;place-items:center;{{ r.gut }}"><i class="{{ r.icon }}" style="font-size:12px;color:{{ r.color }};{{ r.box }}"></i></span>
+                <span style="width:36px;text-align:right;padding-right:8px;opacity:.4">{{ r.old }}</span><span style="width:36px;text-align:right;padding-right:8px;opacity:.4">{{ r.new }}</span>
+                <span style="width:14px;text-align:center;color:{{ r.signColor }}">{{ r.sign }}</span>
+                <span style="flex:1;white-space:pre">{{ r.code }}</span>
+                <span style="font-family:var(--font-body);font-size:10.5px;opacity:.65;padding-right:10px">{{ r.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:14px;margin-top:10px;font-size:11px;opacity:.7;flex-wrap:wrap"><span><i class="ph ph-lock-simple"></i> protected branch</span><span><i class="ph ph-gitlab-logo"></i> GitLab-backed repo (muted when no account)</span><span><span style="font-family:ui-monospace,Menlo,monospace;padding:0 6px;border-radius:999px;border:1px solid {{ b.chipBorder }}">!412</span> open MR from this branch</span><span><i class="ph ph-seal-check"></i> 1/2 approvals</span></div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ═════ 2. ACCOUNTS STATES ═════ -->
+  <section>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:2px 7px;border-radius:999px;background:var(--color-accent-800);color:var(--color-accent-100)">A</span><h2 style="margin:0;font-size:18px">Accounts — token states the prototype does not reach</h2><span style="font-size:12px;opacity:.6">Live: add gitlab.com (OAuth wait), add self-managed (idle · testing · verified · failed), sign out — in Options › GitLab accounts.</span></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+      <!-- expired row -->
+      <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface)">
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin-bottom:10px">A.4 · Token expired — row in the Accounts pane</div>
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border:1px solid #a06868;border-radius:var(--radius-md);background:var(--color-bg)">
+          <span style="width:34px;height:34px;border-radius:50%;background:var(--color-neutral-800);color:var(--color-neutral-200);display:grid;place-items:center;font-size:12px">DO</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">Dana Osei</span><span style="opacity:.5">@dosei</span><span class="tag tag-outline" style="font-size:9px;padding:1px 6px">PAT</span></div>
+            <div style="display:flex;gap:8px;font-size:11px;margin-top:3px;color:#e39a9a"><span style="font-family:ui-monospace,Menlo,monospace">gitlab.acme.internal</span><span>·</span><span><i class="ph ph-warning"></i> token expired 2026-09-10 — sign in again</span></div>
+          </div>
+          <button class="btn btn-primary" style="font-size:12px">Sign in again</button>
+          <button class="btn btn-ghost" style="font-size:12px">Remove</button>
+        </div>
+        <div style="font-size:11px;opacity:.6;margin-top:8px">401 on any call flips the account to this state. Revoked tokens look the same; the copy says <i>revoked</i> when the probe returns <span style="font-family:ui-monospace,Menlo,monospace">active:false</span>.</div>
+      </div>
+      <!-- expiring soon -->
+      <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface)">
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin-bottom:10px">Expiry warning · under 14 days</div>
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-bg)">
+          <span style="width:34px;height:34px;border-radius:50%;background:var(--color-accent-800);color:var(--color-accent-100);display:grid;place-items:center;font-size:12px">DO</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:500">Dana Osei</span><span style="opacity:.5">@dosei</span><span class="tag tag-outline" style="font-size:9px;padding:1px 6px">PAT</span></div>
+            <div style="display:flex;gap:8px;font-size:11px;margin-top:3px;opacity:.75"><span style="font-family:ui-monospace,Menlo,monospace">gitlab.acme.internal</span><span>·</span><span style="color:#e0a76a"><i class="ph ph-warning"></i> expires in 9 days</span></div>
+            <div style="display:flex;gap:4px;margin-top:6px"><span class="tag tag-neutral" style="font-size:9px;font-family:ui-monospace,Menlo,monospace">api</span><span class="tag tag-neutral" style="font-size:9px;font-family:ui-monospace,Menlo,monospace">write_repository</span></div>
+          </div>
+          <button class="btn btn-secondary" style="font-size:12px"><i class="ph ph-arrows-clockwise"></i>Rotate token</button>
+        </div>
+        <div style="font-size:11px;opacity:.6;margin-top:8px">Rotate calls <span style="font-family:ui-monospace,Menlo,monospace">POST /personal_access_tokens/self/rotate</span>; needs <span style="font-family:ui-monospace,Menlo,monospace">api</span> or <span style="font-family:ui-monospace,Menlo,monospace">self_rotate</span>. OAuth accounts never show this row — they refresh silently.</div>
+      </div>
+      <!-- inline notice -->
+      <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface)">
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin-bottom:10px">A.4 · Where hosted data would have been</div>
+        <div style="padding:26px 16px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-bg);text-align:center">
+          <i class="ph ph-gitlab-logo" style="font-size:22px;opacity:.4"></i>
+          <div style="margin-top:8px">Your gitlab.com session expired.</div>
+          <div style="font-size:11.5px;opacity:.6;margin:4px 0 12px">Showing what was loaded 38 min ago.</div>
+          <button class="btn btn-primary" style="font-size:12px">Sign in again</button>
+        </div>
+        <div style="font-size:11px;opacity:.6;margin-top:8px">Same card at the top of the MR panel, in the Overview strip, and in place of the review gutter (which is simply absent — the diff stays an ordinary range compare). Cached rows stay visible below it with the stale mark.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 3. MR PANEL STATES ═════ -->
+  <section>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:2px 7px;border-radius:999px;background:var(--color-accent-800);color:var(--color-accent-100)">C.5</span><h2 style="margin:0;font-size:18px">Merge request panel — loading, empty, offline, rate-limited, action failures</h2></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+      <sc-for list="{{ mrStates }}" as="s" hint-placeholder-count="6">
+        <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface);display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55">{{ s.title }}</div>
+          <sc-if value="{{ s.skeleton }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:6px"><sc-for list="{{ s.bars }}" as="w" hint-placeholder-count="3"><div style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;background:var(--color-bg)"><span style="width:34px;height:10px;border-radius:5px;background:var(--color-neutral-800)"></span><span style="height:10px;border-radius:5px;background:var(--color-neutral-800);width:{{ w.w }}"></span><span style="flex:1"></span><span style="width:14px;height:14px;border-radius:50%;background:var(--color-neutral-800)"></span><span style="width:70px;height:10px;border-radius:5px;background:var(--color-neutral-800)"></span></div></sc-for></div>
+          </sc-if>
+          <sc-if value="{{ s.notice }}" hint-placeholder-val="{{ true }}">
+            <div style="{{ s.noticeStyle }}"><i class="{{ s.icon }}" style="font-size:15px;flex:none;color:{{ s.iconColor }}"></i><div style="flex:1"><div style="font-size:12.5px">{{ s.line1 }}</div><sc-if value="{{ s.line2 }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;opacity:.65;margin-top:2px">{{ s.line2 }}</div></sc-if></div><sc-if value="{{ s.action }}" hint-placeholder-val="{{ false }}"><button class="btn btn-ghost" style="font-size:11.5px;padding:2px 6px;color:var(--color-accent-200)">{{ s.action }}</button></sc-if></div>
+          </sc-if>
+          <sc-if value="{{ s.staleRow }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:8px;background:var(--color-bg);opacity:.75"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--color-accent-300)">!412</span><span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">PC-1042: split refund amounts across original tenders</span><i class="ph ph-circle-notch" style="color:var(--color-accent-300)"></i><span style="font-size:11px;color:var(--color-accent-300)">Pipeline running</span></div>
+          </sc-if>
+          <div style="font-size:11px;opacity:.6">{{ s.note }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ═════ 4. REVIEW STATES ═════ -->
+  <section>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:2px 7px;border-radius:999px;background:var(--color-accent-800);color:var(--color-accent-100)">K</span><h2 style="margin:0;font-size:18px">Review threads — split view, range band on a light scheme, failure and refresh states</h2><span style="font-size:12px;opacity:.6">Live in the prototype: gutter markers, cards, single-line and range composer (drag, ⇧-click, ⇧↑↓), Start review → pending strip → Submit ▾, outdated threads.</span></div>
+    <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px">
+      <!-- split view, Solarized Light, range band -->
+      <div style="padding:14px;border-radius:var(--radius-md);background:#fdf6e3;color:#586e75;border:1px solid #eee8d5">
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin-bottom:10px;display:flex;justify-content:space-between"><span>K.4–5 · Split view on Solarized Light — range 23–25 (new) selected, composer names the side</span><span>Accent900 band → the scheme's accent tint</span></div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;border:1px solid #eee8d5;border-radius:6px;overflow:hidden;background:#fdf6e3">
+          <sc-for list="{{ splitRows }}" as="r" hint-placeholder-count="6">
+            <div style="display:flex">
+              <div style="flex:1;display:flex;min-width:0;border-right:1px solid #eee8d5;{{ r.lbg }}"><span style="width:20px;flex:none;display:grid;place-items:center"><i class="{{ r.lIcon }}" style="font-size:11px;color:{{ r.lIconColor }}"></i></span><span style="width:34px;text-align:right;padding-right:8px;opacity:.45">{{ r.lNum }}</span><span style="flex:1;white-space:pre;overflow:hidden;text-overflow:ellipsis">{{ r.lText }}</span></div>
+              <div style="flex:1;display:flex;min-width:0;{{ r.rbg }}"><span style="width:20px;flex:none;display:grid;place-items:center;{{ r.rGut }}"><i class="{{ r.rIcon }}" style="font-size:11px;color:{{ r.rIconColor }}"></i></span><span style="width:34px;text-align:right;padding-right:8px;opacity:.45">{{ r.rNum }}</span><span style="flex:1;white-space:pre;overflow:hidden;text-overflow:ellipsis">{{ r.rText }}</span></div>
+            </div>
+          </sc-for>
+          <div style="margin:6px 12px 10px 50%;border:1px solid #268bd2;border-radius:8px;background:#fdf6e3;font-family:var(--font-body)">
+            <div style="padding:6px 10px;border-bottom:1px solid #eee8d5;font-size:10.5px;opacity:.75"><i class="ph ph-chat-circle-dots" style="color:#268bd2"></i> New comment on lines 23–25 (new)</div>
+            <div style="padding:8px 10px 4px"><div style="height:52px;border:1px solid #eee8d5;border-radius:6px;background:#fff9e6;padding:6px 8px;font-size:12px;opacity:.5">Parallel refunds: what happens if the second gateway call fails?</div></div>
+            <div style="display:flex;gap:8px;padding:6px 10px 9px;font-size:12px"><span style="padding:4px 10px;border:1px solid #268bd2;border-radius:6px;color:#268bd2">Add comment</span><span style="padding:4px 10px;opacity:.7">Start review</span><span style="flex:1"></span><span style="padding:4px 6px;opacity:.6">Cancel</span></div>
+          </div>
+        </div>
+        <div style="font-size:11px;opacity:.65;margin-top:8px">Each half carries its own <b>+</b>; a range cannot cross halves (old ↔ new) or a hunk boundary — the band stops and the composer header says so. On light schemes the band is the accent at 12% over the paper, with the 3px accent edge kept solid.</div>
+      </div>
+      <!-- failure + refresh -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface)">
+          <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin-bottom:10px">K.8 · Post failed — text preserved, error under the composer</div>
+          <div style="border:1px solid var(--color-accent);border-radius:var(--radius-md);background:var(--color-surface)">
+            <div style="padding:7px 11px;border-bottom:1px solid var(--color-divider);font-size:10.5px;opacity:.6"><i class="ph ph-chat-circle-dots" style="color:var(--color-accent-300)"></i> New comment on line 21 (new)</div>
+            <div style="padding:9px 11px 4px"><div class="input" style="min-height:52px;font-size:12.5px">Does `across` handle a tender with a zero remaining balance?</div></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 11px 0;font-size:11.5px;color:#e39a9a"><i class="ph ph-x-circle"></i>Could not post — 409, the merge request moved under you (new head <span style="font-family:ui-monospace,Menlo,monospace">d41e2c</span>). <span style="color:var(--color-accent-200);text-decoration:underline;text-underline-offset:2px;cursor:pointer">Refresh and try again</span></div>
+            <div style="display:flex;gap:8px;padding:8px 11px 9px"><button class="btn btn-primary" style="padding:5px 11px;font-size:12px">Add comment</button><button class="btn btn-ghost" style="font-size:12px">Start review</button></div>
+          </div>
+        </div>
+        <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface)">
+          <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin-bottom:10px">K.8 · Someone replied or resolved while the card was open — refresh in place, drafts kept</div>
+          <div style="border:1px solid var(--color-neutral-700);border-radius:var(--radius-md);background:var(--color-surface)">
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--color-divider);font-size:10.5px;opacity:.6"><i class="ph-fill ph-chat-circle" style="color:var(--color-accent-300)"></i>Thread on line 21 (new)<span style="flex:1"></span>Hide</div>
+            <div style="display:flex;gap:10px;padding:9px 11px;border-bottom:1px solid color-mix(in srgb,var(--color-text) 5%, transparent)"><span style="width:22px;height:22px;border-radius:50%;background:var(--color-accent-800);color:var(--color-accent-100);display:grid;place-items:center;font-size:9.5px">PN</span><div style="flex:1"><div style="font-size:11.5px"><b style="font-weight:500">Priya Nair</b> <span style="opacity:.5">38 min ago</span></div><div style="font-size:12.5px;margin-top:3px">Does `across` handle a tender with a zero remaining balance?</div></div></div>
+            <div style="display:flex;gap:10px;padding:9px 11px;border-bottom:1px solid color-mix(in srgb,var(--color-text) 5%, transparent);background:color-mix(in srgb,var(--color-accent) 6%, transparent)"><span style="width:22px;height:22px;border-radius:50%;background:var(--color-accent-800);color:var(--color-accent-100);display:grid;place-items:center;font-size:9.5px">MF</span><div style="flex:1"><div style="font-size:11.5px"><b style="font-weight:500">Marco Field</b> <span style="opacity:.5">just now</span> <span class="tag tag-accent" style="font-size:9px;padding:1px 6px;margin-left:4px">new</span></div><div style="font-size:12.5px;margin-top:3px">Zero-balance tenders are filtered upstream in `tenders.ts` — see !401.</div></div></div>
+            <div style="display:flex;gap:8px;padding:8px 11px;align-items:center"><div class="input" style="flex:1;height:30px;font-size:12px;display:flex;align-items:center;opacity:.9">Right, then we only need the weighting — your</div><button class="btn btn-primary" style="padding:4px 10px;font-size:11.5px">Reply</button><button class="btn btn-secondary" style="padding:4px 10px;font-size:11.5px"><i class="ph ph-check"></i>Resolve</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 5. TIER 2 ═════ -->
+  <section>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:2px 7px;border-radius:999px;background:var(--color-accent-800);color:var(--color-accent-100)">Tier 2</span><h2 style="margin:0;font-size:18px">Clone from GitLab · Branch from issue · Protected confirms · Push toast</h2><span style="font-size:12px;opacity:.6">Approve / Merge ▾ / Rebase / Draft (9), Todos bell (10) and the Overview strip (13) are live in the prototype.</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:start">
+
+      <!-- I. clone browser -->
+      <div style="border:1px solid var(--color-neutral-700);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-lg);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 18px 13px;border-bottom:1px solid var(--color-divider)">
+          <span style="width:34px;height:34px;border-radius:8px;display:grid;place-items:center;background:var(--color-accent-800);color:var(--color-accent-200)"><i class="ph ph-download-simple" style="font-size:17px"></i></span>
+          <div style="flex:1"><div style="font-family:var(--font-heading);font-weight:500;font-size:16px">Clone repository</div><div style="font-size:11.5px;opacity:.55">I · the Clone mode gains a URL / GitLab switch</div></div>
+        </div>
+        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:2px;padding:2px;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:6px;width:max-content"><span style="padding:4px 12px;border-radius:5px;font-size:11.5px;opacity:.6">URL</span><span style="padding:4px 12px;border-radius:5px;font-size:11.5px;background:var(--color-surface);color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)"><i class="ph ph-gitlab-logo"></i> GitLab</span></div>
+          <div style="display:flex;gap:8px"><div class="input" style="flex:1;height:32px;display:flex;align-items:center;gap:8px;font-size:12px;opacity:.7"><i class="ph ph-magnifying-glass"></i>Search my projects and groups…</div><div class="input" style="height:32px;display:flex;align-items:center;gap:6px;font-size:11.5px;padding:0 10px"><span style="width:16px;height:16px;border-radius:50%;background:var(--color-accent-800);color:var(--color-accent-100);display:grid;place-items:center;font-size:8px">DO</span>gitlab.com<i class="ph ph-caret-down" style="font-size:10px"></i></div></div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ cloneRows }}" as="p" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:8px;background:{{ p.bg }}">
+                <span style="width:26px;height:26px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:600;background:var(--color-neutral-800);color:var(--color-neutral-100)">{{ p.initial }}</span>
+                <span style="flex:1;min-width:0"><span style="display:block;font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ p.path }}</span><span style="display:block;font-size:10.5px;opacity:.5">{{ p.sub }}</span></span>
+                <span class="tag tag-outline" style="font-size:9px;padding:1px 6px">{{ p.vis }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div class="field"><label>Clone to</label><div style="display:flex;gap:8px"><div class="input" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px;height:32px;display:flex;align-items:center">C:\Users\fredr\source\repos\billing-service</div><button class="btn btn-secondary" style="flex:none"><i class="ph ph-folder-open"></i>Browse</button></div></div>
+          <div style="font-size:11px;opacity:.55">Loading: the list shows 6 skeleton rows once, then updates in place. Empty search: <i>No projects match "ledger" in your groups — try the full path.</i> Memberships come from <span style="font-family:ui-monospace,Menlo,monospace">/projects?membership=true&min_access_level=20</span>.</div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--color-divider)"><button class="btn btn-secondary">Cancel</button><button class="btn btn-primary"><i class="ph ph-download-simple"></i>Clone billing-service</button></div>
+      </div>
+
+      <!-- 12. branch from issue -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="border:1px solid var(--color-neutral-700);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-lg);overflow:hidden">
+          <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 18px 13px;border-bottom:1px solid var(--color-divider)">
+            <span style="width:34px;height:34px;border-radius:8px;display:grid;place-items:center;background:var(--color-accent-800);color:var(--color-accent-200)"><i class="ph ph-git-branch" style="font-size:17px"></i></span>
+            <div style="flex:1"><div style="font-family:var(--font-heading);font-weight:500;font-size:16px">New branch from an issue</div><div style="font-size:11.5px;opacity:.55">12 · palette <i>Branch from issue…</i>, Branches › New branch ▾</div></div>
+          </div>
+          <div style="padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+            <div class="input" style="height:32px;display:flex;align-items:center;gap:8px;font-size:12px"><i class="ph ph-magnifying-glass" style="opacity:.5"></i>1152<span style="opacity:.4">|</span></div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:var(--color-accent-900)"><span style="font-family:ui-monospace,Menlo,monospace;color:var(--color-accent-300);width:44px">#1152</span><span style="flex:1">Refund totals missing from hourly rollup</span><span class="tag tag-neutral" style="font-size:9px">bug</span></div>
+              <div style="display-flex;display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;opacity:.6"><span style="font-family:ui-monospace,Menlo,monospace;color:var(--color-accent-300);width:44px">#1150</span><span style="flex:1">Rollup job retries forever on 5xx</span></div>
+            </div>
+            <div class="field"><label>Branch name · project template <span style="font-family:ui-monospace,Menlo,monospace;text-transform:none;letter-spacing:0">%{id}-%{title}</span></label><div class="input" style="font-family:ui-monospace,Menlo,monospace;font-size:12px;height:32px;display:flex;align-items:center">1152-refund-totals-missing-from-hourly-rollup</div></div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="opacity:.6">From</span><span class="tag" style="background:var(--color-neutral-800);color:var(--color-neutral-200);font-size:9.5px">MAIN</span><span style="font-family:ui-monospace,Menlo,monospace">main</span><span style="opacity:.6">· project default</span></div>
+            <div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><i class="ph ph-check-square" style="font-size:16px;color:var(--color-accent)"></i>Checkout after creating</div>
+            <div style="font-size:11px;opacity:.55">The later merge request is pre-filled with <span style="font-family:ui-monospace,Menlo,monospace">Closes #1152</span>. No API for this — Junction creates the branch itself and remembers the link.</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--color-divider)"><button class="btn btn-secondary">Cancel</button><button class="btn btn-primary"><i class="ph ph-git-branch"></i>Create branch</button></div>
+        </div>
+        <!-- push toast variants -->
+        <div style="padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface);display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.55">D · Push toast, actionable variant (live) and MR-exists variant</div>
+          <div style="display:flex;align-items:center;gap:8px;width:max-content;padding:8px 12px 8px 16px;border-radius:var(--radius-md);background:var(--color-neutral-800);border:1px solid var(--color-neutral-700);font-size:12.5px"><i class="ph ph-check-circle" style="color:var(--color-accent-300)"></i>Published PC-1042-refund-splitting to origin<span style="opacity:.35">·</span><span style="color:var(--color-accent-200)">Create merge request <i class="ph ph-arrow-right"></i></span></div>
+          <div style="display:flex;align-items:center;gap:8px;width:max-content;padding:8px 12px 8px 16px;border-radius:var(--radius-md);background:var(--color-neutral-800);border:1px solid var(--color-neutral-700);font-size:12.5px"><i class="ph ph-check-circle" style="color:var(--color-accent-300)"></i>Pushed 2 commits to origin<span style="opacity:.35">·</span><span style="color:var(--color-accent-200)">Open !412 <i class="ph ph-arrow-right"></i></span></div>
+          <div style="font-size:11px;opacity:.55">Actionable toasts stay 4.5 s instead of 1.7 s; the action is also on the Commit composer footer after a publish.</div>
+        </div>
+      </div>
+
+      <!-- G. protected confirms -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <sc-for list="{{ confirms }}" as="c" hint-placeholder-count="3">
+          <div style="border:1px solid var(--color-neutral-700);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-lg);overflow:hidden">
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:16px 18px 4px"><span style="width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:{{ c.tileBg }};color:{{ c.tileFg }}"><i class="{{ c.icon }}" style="font-size:16px"></i></span><div style="flex:1"><div style="font-family:var(--font-heading);font-weight:500;font-size:15px">{{ c.title }}</div><div style="font-size:12.5px;opacity:.65;margin-top:4px">{{ c.body }}</div></div></div>
+            <div style="margin:10px 18px 0 62px;padding:8px 10px;border-radius:6px;background:var(--color-bg);border:1px solid var(--color-divider);display:flex;gap:8px;font-size:11.5px"><i class="ph ph-lock-simple" style="color:var(--color-accent-300);margin-top:2px"></i><span>{{ c.info }}</span></div>
+            <sc-if value="{{ c.check }}" hint-placeholder-val="{{ false }}"><div style="padding:10px 18px 0 62px;display:flex;align-items:center;gap:9px;font-size:12.5px;{{ c.checkStyle }}"><i class="ph ph-square" style="font-size:16px;color:var(--color-accent)"></i>{{ c.check }}<span style="opacity:.5">{{ c.reason }}</span></div></sc-if>
+            <div style="display:flex;align-items:center;gap:8px;padding:14px 18px 14px"><span style="font-size:10.5px;opacity:.4">↵ confirm · Esc cancel</span><span style="flex:1"></span><button class="btn btn-secondary">Cancel</button><button class="btn btn-primary" style="{{ c.primaryStyle }}">{{ c.primary }}</button></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 6. DECISIONS ═════ -->
+  <section style="max-width:1100px">
+    <h2 style="margin:0 0 12px;font-size:18px">Answers to the brief's open questions</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <sc-for list="{{ decisions }}" as="d" hint-placeholder-count="4">
+        <div style="padding:14px 16px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-surface)"><div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-300);margin-bottom:6px">{{ d.q }}</div><div style="font-weight:500;margin-bottom:4px">{{ d.a }}</div><div style="font-size:12px;opacity:.65">{{ d.why }}</div></div>
+      </sc-for>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals(){
+    const dark = { style:'padding:16px;border:1px solid var(--color-divider);border-radius:var(--radius-md);background:var(--color-bg);color:var(--color-text)', cell:'background:var(--color-surface);border:1px solid var(--color-divider)', name:'Nocturne', chipBorder:'var(--color-accent-700)',
+      pipe:{ success:'#93c98d', failed:'#cf9494', running:'var(--color-accent-300)', muted:'color-mix(in srgb,var(--color-text) 50%, transparent)', accent:'var(--color-accent-300)', text:'var(--color-text)', band:'var(--color-accent-900)', bandGut:'var(--color-accent-800)', bandEdge:'var(--color-accent)', add:'rgba(120,178,116,0.13)', del:'rgba(200,120,120,0.13)' } };
+    const light = { style:'padding:16px;border:1px solid #eee8d5;border-radius:var(--radius-md);background:#fdf6e3;color:#586e75', cell:'background:#eee8d5;border:1px solid #e4dcc3', name:'Solarized Light', chipBorder:'#268bd2',
+      pipe:{ success:'#859900', failed:'#dc322f', running:'#268bd2', muted:'#93a1a1', accent:'#268bd2', text:'#586e75', band:'rgba(38,139,210,0.12)', bandGut:'rgba(38,139,210,0.28)', bandEdge:'#268bd2', add:'rgba(133,153,0,0.14)', del:'rgba(220,50,47,0.12)' } };
+    const mk = (b) => { const c=b.pipe; return { ...b,
+      pipes:[ { icon:'ph ph-check-circle', color:c.success, label:'success' }, { icon:'ph ph-x-circle', color:c.failed, label:'failed' }, { icon:'ph ph-circle-notch', color:c.running, label:'running', spin:'animation:jx-spin 1s linear infinite' }, { icon:'ph ph-clock', color:c.muted, label:'pending' }, { icon:'ph ph-prohibit', color:c.muted, label:'canceled' }, { icon:'ph ph-skip-forward-circle', color:c.muted, label:'skipped' }, { icon:'ph ph-play-circle', color:c.text, label:'manual' }, { icon:'ph ph-minus', color:c.muted, label:'none · hidden' } ],
+      statuses:[ ['Mergeable',c.success],['Conflicts',c.failed],['Needs rebase',c.text],['Pipeline running',c.running],['Pipeline must pass',c.text],['Needs approval',c.text],['Unresolved threads',c.text],['Draft',c.muted] ].map(([label,color])=>({ label, color })),
+      gutter:[
+        { icon:'ph ph-plus', color:c.muted, box:'opacity:.5', old:'19', new:'19', sign:' ', signColor:'transparent', code:'', note:'idle: + at 28%, brightens on hover / caret', row:'' },
+        { icon:'ph ph-plus', color:c.accent, box:'border:1px solid '+c.accent+';border-radius:4px;padding:1px', old:'20', new:'', sign:'−', signColor:c.failed, code:'  const tender = order.tender;', note:'caret row: + lit, 3px edge', row:'background:'+c.del+';box-shadow:inset 3px 0 0 '+c.accent },
+        { icon:'ph-fill ph-chat-circle', color:c.accent, box:'', old:'', new:'21', sign:'+', signColor:c.success, code:'  const split = RefundSplit.across(tenders, amount);', note:'unresolved thread · filled', row:'background:'+c.add },
+        { icon:'ph ph-chat-circle', color:c.muted, box:'', old:'', new:'22', sign:'+', signColor:c.success, code:'', note:'resolved thread · outlined', row:'background:'+c.add },
+        { icon:'ph ph-plus', color:c.accent, box:'', old:'', new:'23', sign:'+', signColor:c.success, code:'  return Promise.all(', note:'range band start', row:'background:'+c.band+';box-shadow:inset 3px 0 0 '+c.bandEdge, gut:'background:'+c.bandGut },
+        { icon:'ph ph-plus', color:c.accent, box:'', old:'', new:'24', sign:'+', signColor:c.success, code:'    split.map((s) => gateway.refund(s.tender, s.amount)),', note:'range band · Accent900 / accent 12%', row:'background:'+c.band+';box-shadow:inset 3px 0 0 '+c.bandEdge, gut:'background:'+c.bandGut },
+        { icon:'ph ph-plus', color:c.muted, box:'opacity:.5', old:'22', new:'26', sign:' ', signColor:'transparent', code:'}', note:'side change (ctx counts as new) — band stops above', row:'' },
+      ] }; };
+    const mrStates = [
+      { title:'Loading · first open only', skeleton:true, bars:[{w:'46%'},{w:'58%'},{w:'38%'},{w:'52%'}], notice:false, note:'Skeleton rows only when nothing is cached. Every later open paints cached rows instantly and updates in place — never a spinner over old data.' },
+      { title:'Empty', notice:true, noticeStyle:'padding:30px 16px;text-align:center;border:1px dashed var(--color-divider);border-radius:var(--radius-md);display:flex;flex-direction:column;align-items:center;gap:6px', icon:'ph ph-git-pull-request', iconColor:'color-mix(in srgb,var(--color-text) 35%, transparent)', line1:'No open merge requests for hului-revamped.', line2:'Push a branch and the toast offers to create one.', action:'', note:'Filter-aware copy: “No merge requests assigned to you…”, “…waiting on your review…”. Same card for workspace scope with the workspace name.' },
+      { title:'No account · repo is GitLab-backed', notice:true, noticeStyle:'padding:30px 16px;text-align:center;border:1px dashed var(--color-divider);border-radius:var(--radius-md);display:flex;flex-direction:column;align-items:center;gap:6px', icon:'ph ph-gitlab-logo', iconColor:'color-mix(in srgb,var(--color-text) 35%, transparent)', line1:'acme/core-api is on gitlab.com, but no account is connected.', line2:'', action:'Add account', note:'Reached from the Repository tools menu or palette while signed out. The panel exists so the verb is never dead; it just explains.' },
+      { title:'Offline · stale mark', notice:true, staleRow:true, noticeStyle:'display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:6px;background:var(--color-bg);border:1px solid var(--color-divider)', icon:'ph ph-cloud-slash', iconColor:'#e0a76a', line1:'Showing what was loaded 14 min ago.', line2:'gitlab.com is not reachable. Nothing else changes.', action:'Retry', note:'The stale mark is one quiet line at the top plus rows at 75% opacity. Past 10 min the “as of” in the header goes amber everywhere (toolbar tooltip, Overview strip, MR header).' },
+      { title:'Rate-limited · 429', notice:true, noticeStyle:'display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:6px;background:var(--color-bg);border:1px solid var(--color-divider)', icon:'ph ph-hourglass-medium', iconColor:'#e0a76a', line1:'gitlab.com asked us to slow down — retrying in 42 s.', line2:'Cached rows stay. Retry-After is honoured; no button.', action:'', note:'2,000 req/min per user is generous; this appears mostly on self-managed hosts with tight limits or when several Junction windows poll.' },
+      { title:'Action failures · under the action row', notice:true, noticeStyle:'display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:6px;background:rgba(200,120,120,0.10);border:1px solid rgba(200,120,120,0.35)', icon:'ph ph-x-circle', iconColor:'#cf9494', line1:'Merge failed — 409, the merge request moved under you.', line2:'405 → “Not mergeable: pipeline must pass.”  403 → “Your token needs the api scope for this.”  404 → “Project not found on gitlab.com — was it moved?”', action:'Refresh and try again', note:'Busy state is on the button (spinner replaces the icon, label goes present-tense). Failure text lands inline; the button returns to idle. Never a modal.' },
+    ];
+    const splitRows = [
+      { lNum:'19', lText:'', rNum:'19', rText:'', lIcon:'ph ph-plus', lIconColor:'#93a1a1', rIcon:'ph ph-plus', rIconColor:'#93a1a1', lbg:'', rbg:'' },
+      { lNum:'20', lText:'  const tender = order.tender;', rNum:'20', rText:'  const tenders = order.tenders ?? [order.tender];', lIcon:'ph ph-chat-circle', lIconColor:'#93a1a1', rIcon:'ph ph-plus', rIconColor:'#93a1a1', lbg:'background:rgba(220,50,47,0.12)', rbg:'background:rgba(133,153,0,0.14)' },
+      { lNum:'21', lText:'  return gateway.refund(tender, amount);', rNum:'21', rText:'  const split = RefundSplit.across(tenders, amount);', lIcon:'ph ph-plus', lIconColor:'#93a1a1', rIcon:'ph-fill ph-chat-circle', rIconColor:'#268bd2', lbg:'background:rgba(220,50,47,0.12)', rbg:'background:rgba(133,153,0,0.14)' },
+      { lNum:'', lText:'', rNum:'22', rText:'', lIcon:'', lIconColor:'transparent', rIcon:'ph ph-plus', rIconColor:'#93a1a1', lbg:'background:rgba(147,161,161,0.10)', rbg:'background:rgba(133,153,0,0.14)' },
+      { lNum:'', lText:'', rNum:'23', rText:'  return Promise.all(', lIcon:'', lIconColor:'transparent', rIcon:'ph ph-plus', rIconColor:'#268bd2', lbg:'background:rgba(147,161,161,0.10)', rbg:'background:rgba(38,139,210,0.12);box-shadow:inset 3px 0 0 #268bd2', rGut:'background:rgba(38,139,210,0.28)' },
+      { lNum:'', lText:'', rNum:'24', rText:'    split.map((s) => gateway.refund(s.tender, s.amount)),', lIcon:'', lIconColor:'transparent', rIcon:'ph ph-plus', rIconColor:'#268bd2', lbg:'background:rgba(147,161,161,0.10)', rbg:'background:rgba(38,139,210,0.12);box-shadow:inset 3px 0 0 #268bd2', rGut:'background:rgba(38,139,210,0.28)' },
+      { lNum:'', lText:'', rNum:'25', rText:'  );', lIcon:'', lIconColor:'transparent', rIcon:'ph ph-plus', rIconColor:'#268bd2', lbg:'background:rgba(147,161,161,0.10)', rbg:'background:rgba(38,139,210,0.12);box-shadow:inset 3px 0 0 #268bd2', rGut:'background:rgba(38,139,210,0.28)' },
+      { lNum:'22', lText:'}', rNum:'26', rText:'}', lIcon:'ph ph-plus', lIconColor:'#93a1a1', rIcon:'ph ph-plus', rIconColor:'#93a1a1', lbg:'', rbg:'' },
+    ];
+    const cloneRows = [ { initial:'B', path:'acme/billing-service', sub:'active 2 h ago · Acme / Payments', vis:'private', bg:'var(--color-accent-900)' }, { initial:'C', path:'acme/core-api', sub:'active 12 min ago · already in Web feature work', vis:'private', bg:'transparent' }, { initial:'L', path:'acme/ledger', sub:'active 3 d ago', vis:'internal', bg:'transparent' }, { initial:'D', path:'acme/design-tokens', sub:'active 2 w ago', vis:'public', bg:'transparent' } ];
+    const confirms = [
+      { icon:'ph ph-lock-simple', tileBg:'var(--color-accent-800)', tileFg:'var(--color-accent-200)', title:'Push main to origin?', body:'Pushes 1 commit to origin/main.', info:'main is protected on gitlab.com — maintainers can push, force push is not allowed.', check:'Force push (--force-with-lease)', reason:'— not allowed on this branch', checkStyle:'opacity:.55', primary:'Push', primaryStyle:'' },
+      { icon:'ph ph-trash', tileBg:'#4a2a2a', tileFg:'#e39a9a', title:'Delete origin/release/2.3.1?', body:'The remote branch is deleted for everyone. The local branch is kept.', info:'release/* is protected on gitlab.com — developers and maintainers can merge; deleting needs a maintainer and is refused for anyone else.', check:'', reason:'', checkStyle:'', primary:'Delete on origin', primaryStyle:'border-color:#a06868;color:#e39a9a' },
+      { icon:'ph ph-lock-simple', tileBg:'var(--color-accent-800)', tileFg:'var(--color-accent-200)', title:'Push PC-1042-refund-splitting?', body:'origin will reject a direct push to a branch you rewrote. Force-with-lease is available here.', info:'feature/* is not protected on gitlab.com. main and release/* are.', check:'Force push (--force-with-lease)', reason:'', checkStyle:'', primary:'Push', primaryStyle:'' },
+    ];
+    const decisions = [
+      { q:'1 · MR panel: master-detail or two pages?', a:'Two pages, list → detail with ← back, each using the full 760.', why:'The detail needs the width for the three status cards, the description and the changes list; a 300px list beside it would truncate every title. Esc steps back a page; the list keeps its selection.' },
+      { q:'2 · Pipeline status in Branches: column or in-cell?', a:'Inside the LAST COMMIT cell, after the subject, with the !iid chip and the lock beside it.', why:'The cell is the commit; its pipeline belongs to it. A new column would push the grid past the compact breakpoint at 1140 and be empty on most repos, breaking local-first degradation.' },
+      { q:'3 · Where does GitLab accounts… live?', a:'Options › GitLab accounts, plus the palette verb and the first-run strip\'s Connect.', why:'Accounts are app-scoped; the Repository tools menu is repo-scoped and stays so — it gains only Merge requests… and Create merge request…, both of which need the repo.' },
+      { q:'4 · Review composer: between rows or docked?', a:'Between diff rows, directly under the anchored line or range, indented to the code column.', why:'Context is the point of reviewing in the diff. The virtualised list already measures thread cards; the composer is one more variable-height row of the same kind. Focus moves into it on open, Esc closes it, text survives a failed post.' },
+    ];
+    return { glyphBoards:[mk(dark), mk(light)], mrStates, splitRows, cloneRows, confirms, decisions };
+  }
+}
+</script>
+</body>
+</html>
