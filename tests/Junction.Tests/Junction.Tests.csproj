@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Recorded GitLab API responses the client tests replay; never the network. -->
+    <EmbeddedResource Include="GitLab\Recordings\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\apps\Junction\Junction.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Headless\HultUI.Headless.csproj" />
   </ItemGroup>

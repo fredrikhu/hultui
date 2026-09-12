@@ -64,6 +64,10 @@ public sealed class JunctionSettingsData
     public ExternalToolOptions ExternalTools { get; set; } = new();
     public AppearanceOptions Appearance { get; set; } = new();
 
+    /// <summary>Signed-in GitLab identities — who and where, never the token (that is in
+    /// the OS credential store; see <see cref="Junction.GitLab.GitLabAccounts"/>).</summary>
+    public List<Junction.GitLab.GitLabAccountData> GitLabAccounts { get; set; } = [];
+
     public void Normalize()
     {
         RepositoryPaths ??= [];
@@ -74,6 +78,15 @@ public sealed class JunctionSettingsData
         Git ??= new GitOptions();
         ExternalTools ??= new ExternalToolOptions();
         Appearance ??= new AppearanceOptions();
+        GitLabAccounts ??= [];
+        foreach (var a in GitLabAccounts)
+        {
+            a.Host = (a.Host ?? "").ToLowerInvariant();
+            a.Scopes ??= [];
+            a.WebBaseUrl ??= "";
+            a.ClientId ??= "";
+        }
+        GitLabAccounts.RemoveAll(a => a.Host.Length == 0);
         General.AutoFetchIntervalMinutes = Math.Clamp(General.AutoFetchIntervalMinutes, 1, 120);
         // A hand-edited (or older) settings file must not be able to leave the window at a
         // scale nothing can be clicked at, or the diff at a size with no glyphs in it.
