@@ -21,6 +21,9 @@ public partial class JunctionApp
     /// will say, before it is asked.</param>
     /// <param name="CheckboxDisabledReason">When set, the checkbox is drawn but cannot be
     /// ticked, and this suffix says why (<c>— not allowed on this branch</c>).</param>
+    /// <param name="SecondCheckboxLabel">A second, independent checkbox — the merge confirm's
+    /// squash and delete-source pair. Its state reaches <see cref="OnConfirm2"/>, which is
+    /// called instead of <see cref="OnConfirm"/> when set.</param>
     private sealed record DialogSpec(
         string Title,
         string? Body,
@@ -31,13 +34,19 @@ public partial class JunctionApp
         string? CheckboxLabel = null,
         bool CheckboxInitial = true,
         string? Info = null,
-        string? CheckboxDisabledReason = null);
+        string? CheckboxDisabledReason = null,
+        string? SecondCheckboxLabel = null,
+        bool SecondCheckboxInitial = false,
+        Action<string, bool, bool>? OnConfirm2 = null);
+
+    private bool _dialogChecked2;
 
     private void OpenDialog(DialogSpec spec, string initial = "")
     {
         _dialog = spec;
         _dialogValue = initial;
         _dialogChecked = spec.CheckboxDisabledReason is null && spec.CheckboxInitial;
+        _dialogChecked2 = spec.SecondCheckboxInitial;
         // Only ask for focus when there is a field to give it to: _dialogRef still
         // points at the last prompt's (unmounted) input, and focusing that corpse
         // takes the keyboard away from the root handler this dialog's Enter needs.
@@ -64,9 +73,12 @@ public partial class JunctionApp
         var value = _dialogValue.Trim();
         if (spec.Validate?.Invoke(value) is { } error) { Flash(error); return; }
         var onConfirm = spec.OnConfirm;
+        var onConfirm2 = spec.OnConfirm2;
         var checkbox = _dialogChecked;
+        var checkbox2 = _dialogChecked2;
         CloseDialog();
-        onConfirm(value, checkbox);
+        if (onConfirm2 != null) onConfirm2(value, checkbox, checkbox2);
+        else onConfirm(value, checkbox);
     }
 
     private void DialogKey(KeyDownEvent e)
@@ -169,6 +181,16 @@ public partial class JunctionApp
                 check.Key = "dialog-check";
                 card.AddChild(check);
             }
+        }
+        if (spec.SecondCheckboxLabel is { } secondLabel)
+        {
+            var check2 = Checkbox.New(_dialogChecked2, secondLabel)
+                .OnCheckedChanged(v => { _dialogChecked2 = v; MarkDirty(); });
+            check2.LabelGap = 9f;
+            check2.TextColor(Nocturne.On(0.82)).FontSize(13f);
+            check2.Key = "dialog-check-2";
+            check2.AutomationId = "dialog-check-2";
+            card.AddChild(check2);
         }
 
         // Actions.

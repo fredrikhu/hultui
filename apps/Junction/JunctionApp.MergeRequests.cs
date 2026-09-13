@@ -470,6 +470,8 @@ public partial class JunctionApp
     [
         Item(Icons.BendDownRight, "Checkout locally", () => CheckoutMergeRequest(r.Path, r.Mr)),
         Item(Icons.Eyes, "Review", () => StartReview(r.Path, r.Mr.Iid)),
+        Item(Icons.SealCheck, ApprovalsFor(r.Path, r.Mr.Iid).Value?.UserHasApproved == true ? "Revoke approval" : "Approve",
+            () => ToggleApproval(r.Path, r.Mr, ApprovalsFor(r.Path, r.Mr.Iid).Value)),
         ContextMenuItem.Separator(),
         Item(Icons.ArrowSquareOut, "Open in browser", () => OpenUrl(r.Mr.WebUrl)),
         Item(Icons.Copy, $"Copy !{r.Mr.Iid} link", () => CopyToClipboard(r.Mr.WebUrl ?? "")),
@@ -560,30 +562,22 @@ public partial class JunctionApp
         body.AddChild(col);
         card.AddChild(body);
 
-        // Actions. Checkout and the browser are the read side; approve, merge, rebase and
-        // the draft toggle come with the phase that owns them.
-        var actions = Flex.Row(gap: 8).AlignItems(AlignItems.Center).FlexShrink(0)
-            .Padding(new Thickness(12, 18, 12, 18))
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
+        // Actions: checkout and review, then the request's own verbs — see
+        // JunctionApp.MergeRequestActions. A refusal stays under the row.
         if (mr != null)
         {
-            var checkout = _mrBusy is { } busy
-                ? DisabledButton(busy, Icons.CircleNotch)
-                : Ui.PrimaryButton("Checkout locally", Icons.BendDownRight, () => CheckoutMergeRequest(path, mr), 12.5f);
-            checkout.Key = "mr-checkout-" + (_mrBusy is null ? "on" : "off");
-            checkout.AccessibleName = "Checkout locally";
-            actions.AddChild(checkout);
-            var review = Ui.SecondaryButton("Review", Icons.Eyes, () => StartReview(path, iid), 12.5f)
-                .Tooltip("Open the diff with its threads and the review gutter (r)");
-            review.AccessibleName = "Review";
-            actions.AddChild(review);
+            card.AddChild(MrActionRow(path, iid, mr, ApprovalsFor(path, iid).Value));
+            if (MrActionFailureLine() is { } failed) card.AddChild(failed);
         }
-        actions.AddChild(Box.New().FlexGrow(1));
-        card.AddChild(actions);
+        else
+        {
+            card.AddChild(Flex.Row(gap: 8).FlexShrink(0).Padding(new Thickness(12, 18, 12, 18))
+                .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0)));
+        }
 
         var legend = Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(7, 18, 7, 18));
-        foreach (var (key, what) in new[] { ("c", "checkout"), ("r", "review"), ("o", "open in browser"), ("Esc", "back") })
+        foreach (var (key, what) in new[] { ("c", "checkout"), ("r", "review"), ("a", "approve"), ("o", "open in browser"), ("Esc", "back") })
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));
@@ -593,6 +587,7 @@ public partial class JunctionApp
     private void BackToMrList()
     {
         _mrOpen = null;
+        _mrActionFailure = null;
         MarkDirty();
     }
 
@@ -800,12 +795,14 @@ public partial class JunctionApp
         var remoteName = HostingRemoteName(path);
         var fetched = $"refs/remotes/{remoteName}/merge-requests/{mr.Iid}";
         _mrBusy = $"Fetching refs/merge-requests/{mr.Iid}/head…";
+        _mrBusyAction = "checkout";
         MarkDirty();
 
         var fetch = await repo.FetchRefspecAsync(remoteName, $"+refs/merge-requests/{mr.Iid}/head:{fetched}", NoAskPass);
         if (!fetch.Success)
         {
             _mrBusy = null;
+            _mrBusyAction = null;
             Flash(FirstLine(fetch.Stderr, "Could not fetch the merge request"));
             MarkDirty();
             return;
@@ -827,6 +824,7 @@ public partial class JunctionApp
         });
 
         _mrBusy = null;
+        _mrBusyAction = null;
         if (!result.Success)
         {
             Flash(FirstLine(result.Stderr, "Checkout failed"));
@@ -881,6 +879,10 @@ public partial class JunctionApp
             case KeyCode.R:
                 if (open != null && openPath != null) StartReview(openPath, open.Iid);
                 else if (selected != null) StartReview(selected.Path, selected.Mr.Iid);
+                return true;
+            case KeyCode.A:
+                if (open != null && openPath != null) ToggleApproval(openPath, open, ApprovalsFor(openPath, open.Iid).Value);
+                else if (selected != null) ToggleApproval(selected.Path, selected.Mr, ApprovalsFor(selected.Path, selected.Mr.Iid).Value);
                 return true;
             case KeyCode.O:
                 OpenUrl((open ?? selected?.Mr)?.WebUrl);
@@ -996,6 +998,52 @@ public partial class JunctionApp
     }
 
     /// <summary>The Overview card's hosted footer: default-branch pipeline · N MRs · M need you.</summary>
+    /// <summary>The Overview's strip: how many open requests across the workspace name the
+    /// signed-in user as reviewer, and the way to them. Absent when no repository in the
+    /// workspace is on a GitLab with an account.</summary>
+    private Element? BuildOverviewReviewStrip(IReadOnlyList<string> repos)
+    {
+        var hosted = repos.Where(GitLabActive).ToList();
+        if (hosted.Count == 0) return null;
+        int count = 0, across = 0;
+        DateTimeOffset? asOf = null;
+        foreach (var path in hosted)
+        {
+            var mrs = MergeRequestsFor(path);
+            if (mrs.Loaded) asOf = asOf is null || mrs.AsOf < asOf ? mrs.AsOf : asOf;
+            var me = MyIdOn(path);
+            int mine = me is { } id ? mrs.Value.Count(m => m.IsOpen && m.Reviewers.Any(u => u.Id == id)) : 0;
+            if (mine > 0) { count += mine; across++; }
+        }
+
+        var strip = Flex.Row(gap: 10).AlignItems(AlignItems.Center).FlexShrink(0)
+            .Padding(new Thickness(12, 16, 12, 16)).CornerRadius(Nocturne.RadiusMd)
+            .Background(Nocturne.Surface).BorderColor(Nocturne.Neutral700).BorderWidth(1f);
+        strip.AutomationId = "overview-review-strip";
+        strip.AddChild(Ui.Icon(Icons.GitLabLogo, 15f, Nocturne.Accent300).FlexShrink(0));
+        var text = count == 0
+            ? "Nothing is waiting for your review."
+            : $"You have {count} merge request{(count == 1 ? "" : "s")} to review across {across} repositor{(across == 1 ? "y" : "ies")}.";
+        strip.AddChild(Text.New(text).FontSize(13f).FlexShrink(1).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
+        if (asOf is { } at)
+            strip.AddChild(Text.New(AsOfText(at)).FontSize(11f).TextColor(Nocturne.On(0.42)).FlexShrink(0));
+        strip.AddChild(Box.New().FlexGrow(1));
+        var open = Ui.GhostButton(count == 0 ? "Open merge requests" : "Review them", Icons.ArrowRight,
+            () => OpenWorkspaceReviews(hosted), 12.5f);
+        open.AccessibleName = count == 0 ? "Open merge requests" : "Review them";
+        strip.AddChild(open.FlexShrink(0));
+        return strip;
+    }
+
+    /// <summary>The panel in workspace scope on Reviewing. The panel keys off the active
+    /// repository, so a workspace whose active one is not on GitLab moves to one that is.</summary>
+    private void OpenWorkspaceReviews(IReadOnlyList<string> hosted)
+    {
+        if (!GitLabActive(_activeRepoPath) && hosted.Count > 0) SelectRepo(hosted[0]);
+        _mrScope = MrScope.Workspace;
+        OpenMergeRequests(MrFilter.Reviewing);
+    }
+
     private Element? BuildOverviewHostedLine(string path)
     {
         if (!GitLabActive(path)) return null;

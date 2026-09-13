@@ -797,6 +797,7 @@ public partial class JunctionApp : Component, IDisposable
         if (_submodulesOpen) Overlay("submodules", BuildSubmodulesPanel());
         if (_remotesOpen) Overlay("remotes", BuildRemotesPanel());
         if (_mrPanelOpen) Overlay("merge-requests", BuildMergeRequestsPanel());
+        if (_todosOpen) Overlay("todos", BuildTodosPanel());
         if (_optionsOpen) Overlay("options", BuildOptions());
         if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
         if (_createMr != null) Overlay("create-mr", BuildCreateMrDialog(_createMr));
@@ -1378,6 +1379,13 @@ public partial class JunctionApp : Component, IDisposable
         if (_remotesOpen)
         {
             if (e.Key == KeyCode.Escape) { CloseRemotes(); e.StopPropagation = true; }
+            return;
+        }
+
+        // The todos list: arrows, Enter opens, d marks done, Esc closes.
+        if (_todosOpen)
+        {
+            if (HandleTodosKey(e)) e.StopPropagation = true;
             return;
         }
 

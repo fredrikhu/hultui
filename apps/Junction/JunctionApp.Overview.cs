@@ -32,6 +32,13 @@ public partial class JunctionApp
         scroll.AddChild(header);
         scroll.AddChild(Box.New().Height(22).FlexShrink(0));
 
+        // What GitLab is waiting on from you, across the workspace — design §J.
+        if (BuildOverviewReviewStrip(repos) is { } strip)
+        {
+            scroll.AddChild(strip);
+            scroll.AddChild(Box.New().Height(14).FlexShrink(0));
+        }
+
         if (repos.Count == 0)
         {
             scroll.AddChild(Box.New().Padding(new Thickness(40)).JustifyContent(JustifyContent.Center)

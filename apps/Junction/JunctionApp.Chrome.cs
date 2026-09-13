@@ -66,6 +66,13 @@ public partial class JunctionApp
         // ancestor, so hits on it fall through as non-draggable).
         right.AddChild(Flex.Row(gap: 0).FlexGrow(1).AlignSelf(AlignSelf.Stretch).WindowDrag());
 
+        // GitLab's todos, when there are any: a bell with the count, left of the search.
+        if (TodosBell() is { } bell)
+        {
+            right.AddChild(bell);
+            right.AddChild(Box.New().Width(8));
+        }
+
         var search = Flex.Row(gap: 8)
             .Height(26).AlignItems(AlignItems.Center)
             .Padding(_compactChrome ? new Thickness(0, 7, 0, 7) : new Thickness(0, 8, 0, 10))

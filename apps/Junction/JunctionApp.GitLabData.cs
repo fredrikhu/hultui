@@ -61,6 +61,7 @@ public partial class JunctionApp
         if (string.IsNullOrEmpty(path)) return;
         _hostedGen[path] = HostedGen(path) + 1;
         _hostedLastRefresh[path] = DateTimeOffset.UtcNow;
+        RefreshTodos();   // the bell rides along: an action on a request usually changes them
         Rerender();
     }
 

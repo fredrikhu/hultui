@@ -225,6 +225,10 @@ public partial class JunctionApp
         items.Add(new("action", "Action", Icons.GitLabLogo, "GitLab accounts…",
             _gitlab.All.Count == 0 ? "none" : string.Join(", ", _gitlab.All.Select(a => a.Host)),
             () => { ClosePalette(); OpenOptions(OptionsSection.GitLabAccounts); }));
+        if (_gitlab.All.Count > 0)
+            items.Add(new("action", "Action", Icons.Bell, "To do on GitLab…",
+                TodoCount is var todos && todos > 0 ? $"{todos} pending" : "nothing pending",
+                () => { ClosePalette(); OpenTodos(); }));
         items.Add(new("action", "Action", Icons.Palette, "Appearance: colour scheme…",
             Nocturne.Theme.Name, () => { ClosePalette(); OpenOptions(OptionsSection.Appearance); }));
         if (GitLabRemoteFor(_activeRepoPath) is { } gitlabRemote)

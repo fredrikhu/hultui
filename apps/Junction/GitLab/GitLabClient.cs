@@ -289,6 +289,47 @@ public sealed class GitLabClient : IDisposable
         return PostFormAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/approve", fields, GitLabJson.Default.GlApprovals, ct);
     }
 
+    // ── Acting on a request: approvals, merge, rebase, draft ────────────────────────
+
+    /// <summary>Takes the signed-in user's approval back.</summary>
+    public Task<GitLabResult<bool>> UnapproveAsync(long projectId, long iid, CancellationToken ct = default) =>
+        SendStatusAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/unapprove", new FormUrlEncodedContent([]), ct);
+
+    /// <summary>Merges — now, or when the pipeline succeeds. <paramref name="sha"/> is the
+    /// head the reader saw; a head that moved since answers 409. 405 is "not mergeable in this
+    /// state", 406 "already merged".</summary>
+    public Task<GitLabResult<GlMergeRequest>> MergeAsync(long projectId, long iid, string? sha, bool squash, bool removeSourceBranch,
+        bool whenPipelineSucceeds, CancellationToken ct = default)
+    {
+        var fields = new List<KeyValuePair<string, string>>
+        {
+            new("squash", squash ? "true" : "false"),
+            new("should_remove_source_branch", removeSourceBranch ? "true" : "false"),
+            new("merge_when_pipeline_succeeds", whenPipelineSucceeds ? "true" : "false"),
+        };
+        if (sha is { Length: > 0 } s) fields.Add(new("sha", s));
+        return PostFormAsync(HttpMethod.Put, $"projects/{projectId}/merge_requests/{iid}/merge", fields, GitLabJson.Default.GlMergeRequest, ct);
+    }
+
+    /// <summary>Asks GitLab to rebase the source onto the target. Asynchronous on the server:
+    /// poll <see cref="GetMergeRequestAsync"/> until <c>rebase_in_progress</c> clears, then
+    /// read <c>merge_error</c>.</summary>
+    public Task<GitLabResult<bool>> RebaseAsync(long projectId, long iid, CancellationToken ct = default) =>
+        SendStatusAsync(HttpMethod.Put, $"projects/{projectId}/merge_requests/{iid}/rebase", new FormUrlEncodedContent([]), ct);
+
+    /// <summary>Retitles the request — how draft is toggled: the <c>Draft:</c> prefix is the
+    /// flag.</summary>
+    public Task<GitLabResult<GlMergeRequest>> UpdateTitleAsync(long projectId, long iid, string title, CancellationToken ct = default) =>
+        PostFormAsync(HttpMethod.Put, $"projects/{projectId}/merge_requests/{iid}", [new("title", title)], GitLabJson.Default.GlMergeRequest, ct);
+
+    // ── Todos ───────────────────────────────────────────────────────────────────────
+
+    public Task<GitLabResult<bool>> MarkTodoDoneAsync(long todoId, CancellationToken ct = default) =>
+        SendStatusAsync(HttpMethod.Post, $"todos/{todoId}/mark_as_done", new FormUrlEncodedContent([]), ct);
+
+    public Task<GitLabResult<bool>> MarkAllTodosDoneAsync(CancellationToken ct = default) =>
+        SendStatusAsync(HttpMethod.Post, "todos/mark_as_done", new FormUrlEncodedContent([]), ct);
+
     /// <summary>The <c>position[...]</c> form fields of a diff note: the three SHAs, both
     /// paths, one line for a single-line note, and <c>line_range</c> for a range — each end
     /// carrying its <c>line_code</c> (<c>sha1(path)_old_new</c>) and side.</summary>

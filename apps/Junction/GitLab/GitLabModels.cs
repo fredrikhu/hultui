@@ -214,6 +214,10 @@ public sealed class GlMergeRequest
     public int UserNotesCount { get; set; }
     public GlReferences? References { get; set; }
     public GlMergeRequestUser? User { get; set; }
+    /// <summary>Only on the single request, and only while a rebase runs.</summary>
+    public bool? RebaseInProgress { get; set; }
+    /// <summary>Why the last merge or rebase failed, when it did.</summary>
+    public string? MergeError { get; set; }
 
     public bool IsOpen => State == "opened";
 }
