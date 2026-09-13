@@ -85,13 +85,31 @@ internal static class TreeDiffer
         }
     }
 
+    /// <summary>
+    /// Patches <paramref name="existing"/> from <paramref name="incoming"/> when the two are
+    /// the same kind of element, and says so; otherwise touches neither. For an owner that
+    /// keeps live elements of its own outside the tree — a virtualised list holding a row
+    /// back across a rebuild — and wants the reconciler's semantics without its swap.
+    /// </summary>
+    public static bool TryPatch(Element existing, Element incoming)
+    {
+        if (!CanPatch(existing, incoming)) return false;
+        _depth++;
+        try { Patch(existing, incoming); }
+        finally { _depth--; }
+        return true;
+    }
+
     private static void Patch(Element existing, Element incoming)
     {
         existing.PatchFrom(incoming);
         // After the full patch the visual props hold the new base, so let the
         // element re-snapshot it and re-apply any active interaction states.
         existing.RefreshInteractionAfterPatch();
-        ReconcileChildren(existing, incoming);
+        // An element that realizes its own children keeps them: the incoming twin has none,
+        // and wiping the live ones here would unmount rows the element is about to put back.
+        if (!existing.ManagesOwnChildren)
+            ReconcileChildren(existing, incoming);
         // Child reconciliation may have altered a self-managing element's
         // internally-owned subtree (e.g. Tabs); let it re-assert its live state.
         existing.OnReconciled();

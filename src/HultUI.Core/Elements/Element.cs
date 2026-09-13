@@ -338,6 +338,15 @@ public abstract class Element
     /// </summary>
     internal virtual void OnReconciled() { }
 
+    /// <summary>
+    /// True for an element that creates its children itself rather than receiving them from
+    /// a build — a virtualised list, whose rows are realized from a template during layout.
+    /// The reconciler then leaves the live children alone when it patches the element: the
+    /// incoming twin carries none, and clearing the live ones would unmount rows the element
+    /// is about to put back, taking the keyboard focus inside one of them with it.
+    /// </summary>
+    internal virtual bool ManagesOwnChildren => false;
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 

@@ -129,6 +129,17 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     // Currently materialized elements (index → element)
     private readonly Dictionary<int, Element> _activeElements = [];
 
+    // Rows held back across an invalidation, by their Key. A row whose template gives it a
+    // key is reconciled with the next realization of that key instead of being replaced by
+    // it — so a text field inside a row keeps its focus, caret and selection through the
+    // rebuilds the rest of the tree goes through on every keystroke. Cleared once the next
+    // window of rows has been realized: a key that did not come back is gone.
+    private Dictionary<string, Element>? _retained;
+
+    /// <summary>The rows are realized here, from the template — never handed in by a
+    /// build — so the reconciler must not clear them when it patches the list.</summary>
+    internal override bool ManagesOwnChildren => true;
+
     // Captured during normal pipeline phases for inline child processing
     private Theme? _activeTheme;
     private LayoutEngine? _childLayoutEngine;
@@ -270,6 +281,9 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
         _offsets = null;
         _visibleStart = -1;
         _visibleEnd = -1;
+        foreach (var element in _activeElements.Values)
+            if (element.Key is { } key)
+                (_retained ??= new Dictionary<string, Element>(StringComparer.Ordinal))[key] = element;
         _activeElements.Clear();
         _recyclePool.Clear();
         MarkLayoutDirty();
@@ -497,17 +511,20 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             if (_activeElements.ContainsKey(i))
                 continue;
 
-            Element element;
+            // Recycle: take from pool, but recreate from template
+            // (recycled element structure may differ)
             if (_recyclePool.Count > 0)
-            {
-                // Recycle: take from pool, but recreate from template
-                // (recycled element structure may differ)
                 _recyclePool.RemoveAt(_recyclePool.Count - 1);
-                element = _itemTemplate(_items[i]);
-            }
-            else
+            var element = _itemTemplate(_items[i]);
+
+            // A keyed row that was on screen before the invalidation is patched from the
+            // fresh one and kept, the way the reconciler keeps a keyed child: same object,
+            // same focus, same caret. Its layout is stale, so it is laid out again below.
+            if (element.Key is { } key && _retained is { } retained
+                && retained.Remove(key, out var kept) && Components.TreeDiffer.TryPatch(kept, element))
             {
-                element = _itemTemplate(_items[i]);
+                element = kept;
+                element.MarkLayoutDirty();
             }
 
             // Force item to its row height, full width
@@ -516,6 +533,8 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
 
             _activeElements[i] = element;
         }
+        // Whatever was held back and not asked for again has left the viewport for good.
+        _retained = null;
 
         // Update spacer height to push items to correct virtual positions
         _spacer.Box.Height = OffsetOf(newStart);
