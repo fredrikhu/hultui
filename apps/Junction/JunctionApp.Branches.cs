@@ -337,13 +337,17 @@ public partial class JunctionApp
         // the host knows about the branch — lock · subject · pipeline glyph · !iid chip —
         // in the cell rather than a column of its own, per the design's answer.
         var lastCommit = Flex.Row(gap: 7).AlignItems(AlignItems.Center).GridColumn(1)
-            .Padding(new Thickness(0, 8, 0, 0));
+            .Padding(new Thickness(0, 12, 0, 0));
         bool hosted = GitLabActive(_activeRepoPath);
         if (hosted && !b.IsRemote && ProtectionFor(_activeRepoPath, b.Name) is { } rule)
             lastCommit.AddChild(Ui.Icon(Icons.Lock, 11f, Nocturne.On(0.5)).FlexShrink(0)
                 .Tooltip(ProtectionSummary(rule)));
+        // The subject takes the slack, so the glyph and the chip sit flush right in the cell
+        // — one column of marks down the list, as the design draws it — rather than trailing
+        // each subject at whatever width it happens to have.
         lastCommit.AddChild(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
-            .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1).FlexShrink(1));
+            .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)
+            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0)));
         if (hosted)
         {
             if (PipelineForSha(_activeRepoPath, b.Hash) is { } pipe && Ui.PipelineGlyph(pipe.Status, 13f) is { } glyph)
