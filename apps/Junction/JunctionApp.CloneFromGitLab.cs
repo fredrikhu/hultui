@@ -70,20 +70,28 @@ public partial class JunctionApp
         var search = ModalInput(f.CloneSearch, "Search projects you are a member of…", v => { f.CloneSearch = v; Rerender(); }, _modalNameRef, mono: false);
         col.AddChild(ModalField("Project", search));
 
-        var list = ScrollView.New().MaxHeight(260).FlexShrink(1)
+        // A fixed height, not a maximum: every keystroke re-keys the search, and a list that
+        // changed height with each answer moved the fields under it and grew the dialog a
+        // scrollbar it lost a moment later.
+        var list = ScrollView.New().Height(260).FlexShrink(0)
             .BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
         list.AutomationId = "clone-projects";
         var host2 = f.CloneHost;
         var term = f.CloneSearch.Trim();
         var projects = MembershipProjectsFor(host2, term);
-        if (MembershipFirstLoading(host2, term))
+        if (projects.Loaded) f.CloneLastProjects = projects.Value;
+        // Until this search answers, the last answer stays on screen, dimmed. Skeleton rows
+        // are for the very first load only, when there is nothing to keep showing.
+        bool waiting = !projects.Loaded;
+        var showing = projects.Loaded ? projects.Value : f.CloneLastProjects;
+        if (waiting && showing.Count == 0 && projects.Failure is null)
         {
             for (int i = 0; i < 6; i++)
                 list.AddChild(Flex.Row(gap: 10).AlignItems(AlignItems.Center).Padding(new Thickness(9, 12, 9, 12)).Children(
                     Box.New().Width(26).Height(26).CornerRadius(Nocturne.RadiusRow).Background(Nocturne.Neutral800),
                     Box.New().Width(180 + (i % 3) * 40).Height(12).CornerRadius(6f).Background(Nocturne.Neutral800)));
         }
-        else if (projects.Value.Count == 0)
+        else if (showing.Count == 0)
         {
             list.AddChild(Text.New(projects.Failure is { } failure
                     ? failure.UserMessage(host2, "Projects")
@@ -93,7 +101,12 @@ public partial class JunctionApp
         }
         else
         {
-            foreach (var p in projects.Value) list.AddChild(CloneProjectRow(f, p));
+            foreach (var p in showing)
+            {
+                var row = CloneProjectRow(f, p);
+                if (waiting) row.Opacity(0.55f);
+                list.AddChild(row);
+            }
         }
         col.AddChild(list);
 

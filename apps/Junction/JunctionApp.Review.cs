@@ -134,6 +134,9 @@ public partial class JunctionApp
     /// key, a changed-file row or a discussion row.</summary>
     internal void StartReview(string path, long iid, string? openFile = null, string? focusThread = null)
     {
+        // The Commit view compares in the active repository, so a request from another one
+        // (the workspace-scoped list, the Overview strip) makes that one active first.
+        if (!PathEquals(path, _activeRepoPath)) SelectRepo(path);
         if (_review is { } current && current.Path == path && current.Iid == iid)
         {
             if (openFile != null) { current.OpenFile = openFile; _selectedFilePath = openFile; }

@@ -800,6 +800,8 @@ public partial class JunctionApp
     private async void CheckoutMergeRequest(string path, GlMergeRequest mr)
     {
         if (_mrBusy != null || RemoteOpRunning) return;
+        // The branch is checked out in that repository, and History then shows it there.
+        if (!PathEquals(path, _activeRepoPath)) SelectRepo(path);
         var repo = RepoFor(path);
         var remoteName = HostingRemoteName(path);
         var fetched = $"refs/remotes/{remoteName}/merge-requests/{mr.Iid}";

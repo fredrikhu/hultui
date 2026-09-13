@@ -504,6 +504,8 @@ public partial class JunctionApp : Component, IDisposable
         ActiveWorkspace?.RepoPaths ?? [];
 
     private bool HasActiveRepo => !string.IsNullOrEmpty(_activeRepoPath);
+    /// <summary>The repository on screen, for tests that act across a workspace.</summary>
+    internal string ActiveRepositoryPath => _activeRepoPath;
 
     // RepoFor is called from background load threads (LoadHistory/LoadChanges/…)
     // as well as the UI thread, so the cache dictionary must be guarded — a plain

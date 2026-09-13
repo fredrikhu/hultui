@@ -135,6 +135,59 @@ public class OptionsPanesTests
         });
     }
 
+    /// <summary>Every keystroke is a new search. The list keeps a fixed height and shows the
+    /// last answer, dimmed, until the next one lands — skeleton rows are for the first load
+    /// only, so typing does not empty the list and bounce the dialog.</summary>
+    [Fact]
+    public void TypingASearchKeepsTheListSteady()
+    {
+        Hosted((_, session, app, _) =>
+        {
+            app.OpenCloneRepo();
+            session.PumpFrames(2);
+            session.Window.Click(Named(session, "GitLab"));
+            session.PumpUntil(() => TreeHas(session, "acme/core-api"), TimeSpan.FromSeconds(15));
+            var list = ById(session, "clone-projects")!;
+            float height = LayoutProbe.Painted(list).Height;
+            Assert.Equal(260f, height, 1f);
+
+            var field = LayoutProbe.Descendants<TextInputElement>(Root(session)!, t => t.Placeholder.StartsWith("Search projects")).First();
+            field.Focus();
+            session.PumpFrame();
+            session.Window.TypeText("web");
+            session.PumpFrames(2);
+            // In flight or answered, the rows are there and the box has not moved.
+            Assert.True(TreeHas(session, "acme/web-client"));
+            Assert.Equal(height, LayoutProbe.Painted(ById(session, "clone-projects")!).Height, 1f);
+            session.PumpUntil(() => !TreeHas(session, "acme/core-api"), TimeSpan.FromSeconds(15));
+            Assert.True(TreeHas(session, "acme/web-client"));
+        });
+    }
+
+    /// <summary>A request opened from another repository — the workspace-scoped list, the
+    /// Overview strip — makes that repository active first: the Commit view compares in the
+    /// active one, and a review left in the wrong one loaded forever.</summary>
+    [Fact]
+    public void ReviewingARequestFromAnotherRepositorySwitchesToIt()
+    {
+        using var other = TempRepo.CreateWithInitialCommit();
+        other.Git("remote", "add", "origin", "https://gitlab.com/acme/web-client.git");
+        Hosted((repo, session, app, _) =>
+        {
+            Assert.Equal(other.Path, app.ActiveRepositoryPath);
+            app.StartReview(repo.Path, 412);
+            session.PumpFrames(3);
+            Assert.Equal(repo.Path, app.ActiveRepositoryPath);
+            Assert.True(app.ReviewOpen);
+            session.PumpUntil(() => TreeHas(session, "!412"), TimeSpan.FromSeconds(15));
+        }, settings =>
+        {
+            settings.RepositoryPaths.Add(other.Path);
+            settings.Workspaces[0].RepoPaths.Add(other.Path);
+            settings.ActiveRepoPath = other.Path;
+        });
+    }
+
     [Fact]
     public void BranchFromIssueChecksOutTheNamedBranchFromTheDefaultBranch()
     {
@@ -169,6 +222,8 @@ public class OptionsPanesTests
             .MapJson($"GET {Api}/projects/7781/pipelines?order_by=updated_at&sort=desc&per_page=100&page=1", "[]")
             .Map($"GET {Api}/projects/7781/issues?state=opened&order_by=updated_at&sort=desc&per_page=100&page=1", "issues")
             .Map($"GET {Api}/todos?state=pending&per_page=100&page=1", "todos")
+            .MapJson(Membership.Replace("&simple=true", "&simple=true&search=web"),
+                "[{\"id\":7782,\"name\":\"web-client\",\"path\":\"web-client\",\"path_with_namespace\":\"acme/web-client\",\"http_url_to_repo\":\"https://gitlab.com/acme/web-client.git\",\"visibility\":\"internal\"}]")
             .MapJson(Membership,
                 "[{\"id\":7781,\"name\":\"core-api\",\"path\":\"core-api\",\"path_with_namespace\":\"acme/core-api\",\"http_url_to_repo\":\"https://gitlab.com/acme/core-api.git\",\"visibility\":\"private\",\"last_activity_at\":\"2026-09-12T09:00:00.000Z\",\"namespace\":{\"id\":1,\"name\":\"acme\",\"path\":\"acme\",\"full_path\":\"acme\",\"kind\":\"group\"}}," +
                 "{\"id\":7782,\"name\":\"web-client\",\"path\":\"web-client\",\"path_with_namespace\":\"acme/web-client\",\"http_url_to_repo\":\"https://gitlab.com/acme/web-client.git\",\"visibility\":\"internal\",\"namespace\":{\"id\":1,\"name\":\"acme\",\"path\":\"acme\",\"full_path\":\"acme\",\"kind\":\"group\"}}]");

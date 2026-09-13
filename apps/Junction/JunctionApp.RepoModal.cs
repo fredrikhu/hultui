@@ -62,6 +62,9 @@ public partial class JunctionApp
         public string CloneHost = "";
         public string CloneSearch = "";
         public Junction.GitLab.GlProject? CloneProject;
+        /// <summary>The last list that loaded, shown dimmed while the next search is on its
+        /// way — a keystroke must not empty the list into skeleton rows.</summary>
+        public IReadOnlyList<Junction.GitLab.GlProject> CloneLastProjects = [];
 
         // AddRepo folder validation: the expanded path we last checked and its result.
         public string CheckedPath = "";
