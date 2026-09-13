@@ -249,12 +249,16 @@ internal sealed class ContextMenuElement : Element
             float itemHeight = _theme.ItemPadding.Top + textSize.Height + _theme.ItemPadding.Bottom;
             _itemHeights[i] = itemHeight;
 
-            // Hover highlight (the open submenu's parent stays highlighted).
+            // Hover highlight (the open submenu's parent stays highlighted). Inset by the
+            // border at least: the menu's own 1px edge is drawn inside the box, and a theme
+            // with no horizontal padding would otherwise have the fill paint over it — a
+            // hovered row read as a notch cut out of the frame.
             if ((i == _hoveredIndex || i == PinnedIndex) && !item.IsDisabled)
             {
+                float insetL = MathF.Max(_theme.Padding.Left, 1f);
+                float insetR = MathF.Max(_theme.Padding.Right, 1f);
                 ctx.DrawRect(
-                    new Rect(box.X + _theme.Padding.Left, box.Y + y,
-                        contentWidth - _theme.Padding.Left - _theme.Padding.Right, itemHeight),
+                    new Rect(box.X + insetL, box.Y + y, contentWidth - insetL - insetR, itemHeight),
                     _theme.HoverBackground);
             }
 
