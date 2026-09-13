@@ -51,6 +51,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 |---|---|
 | `--app junction \| vesper \| meridian \| fluent` | Which app to mount. Default `junction`. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample. |
 | `--repo <path>` | Junction: the repository to open. Defaults to the git root of the working directory. |
+| `--gitlab` | Junction: borrow the signed-in GitLab accounts from the user's real settings (tokens stay in the OS credential store), so the merge-request panel, pipeline glyphs and marks render against the real instance. |
 | `--dir <path>` / `--dir2 <path>` | Vesper: the left and right panes' folders. Meridian: `--dir` opens a collection — without one it is an empty shell with nothing to drive. |
 | `--out <dir>` | Where PNGs land. Created if missing. Default `shots`. |
 | `--size 1400x900` | Window size in layout units. |

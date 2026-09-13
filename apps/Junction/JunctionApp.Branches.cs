@@ -333,10 +333,27 @@ public partial class JunctionApp
         branchCell.AddChild(titleCol);
         row.AddChild(branchCell);
 
-        // Last commit + updated.
-        row.AddChild(Box.New().GridColumn(1).Padding(new Thickness(0, 8, 0, 0))
-            .Children(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
-                .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1)));
+        // Last commit + updated. On a GitLab-backed repository the cell also carries what
+        // the host knows about the branch — lock · subject · pipeline glyph · !iid chip —
+        // in the cell rather than a column of its own, per the design's answer.
+        var lastCommit = Flex.Row(gap: 7).AlignItems(AlignItems.Center).GridColumn(1)
+            .Padding(new Thickness(0, 8, 0, 0));
+        bool hosted = GitLabActive(_activeRepoPath);
+        if (hosted && !b.IsRemote && ProtectionFor(_activeRepoPath, b.Name) is { } rule)
+            lastCommit.AddChild(Ui.Icon(Icons.Lock, 11f, Nocturne.On(0.5)).FlexShrink(0)
+                .Tooltip(ProtectionSummary(rule)));
+        lastCommit.AddChild(Text.New(b.Subject.Length > 0 ? b.Subject : "—").FontSize(12.5f)
+            .TextColor(Nocturne.On(0.68)).OverflowMode(TextOverflow.Ellipsis).MaxLines(1).FlexShrink(1));
+        if (hosted)
+        {
+            if (PipelineForSha(_activeRepoPath, b.Hash) is { } pipe && Ui.PipelineGlyph(pipe.Status, 13f) is { } glyph)
+                lastCommit.AddChild(glyph.FlexShrink(0).Tooltip(PipelineSummary(pipe)));
+            // By leaf for a remote-tracking row: after a clone the branch an MR comes from
+            // usually exists only as origin/<name>, and that row is where the chip is wanted.
+            if (MergeRequestForBranch(_activeRepoPath, b.IsRemote ? leaf : b.Name) is { } mr)
+                lastCommit.AddChild(MergeRequestChip(mr).FlexShrink(0));
+        }
+        row.AddChild(lastCommit);
         row.AddChild(Box.New().GridColumn(2)
             .Children(Text.New(b.CommitDate == default ? "" : b.CommitDate.ToString("g"))
                 .FontSize(12f).TextColor(Nocturne.On(0.55))));

@@ -109,6 +109,12 @@ public partial class JunctionApp
         footer.AddChild(OpenRepoButton(path));
         card.AddChild(footer);
 
+        // One more line for a repository on GitLab with an account: the default branch's
+        // pipeline, how many merge requests are open, and how many of them are waiting on
+        // the signed-in user. See JunctionApp.MergeRequests.
+        if (BuildOverviewHostedLine(path) is { } hosted)
+            card.AddChild(hosted);
+
         return card;
     }
 

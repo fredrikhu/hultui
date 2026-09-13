@@ -381,6 +381,22 @@ public sealed class GlDiscussion
     public GlPosition? Position => First?.Position;
 }
 
+/// <summary>One file of a merge request's diff (<c>GET …/merge_requests/:iid/diffs</c>).</summary>
+public sealed class GlDiff
+{
+    public string? OldPath { get; set; }
+    public string? NewPath { get; set; }
+    public bool NewFile { get; set; }
+    public bool RenamedFile { get; set; }
+    public bool DeletedFile { get; set; }
+    public bool? GeneratedFile { get; set; }
+    /// <summary>Present unless the diff was collapsed for size.</summary>
+    public string? Diff { get; set; }
+
+    public string Path => NewPath ?? OldPath ?? "";
+    public char StatusLetter => NewFile ? 'A' : DeletedFile ? 'D' : RenamedFile ? 'R' : 'M';
+}
+
 /// <summary>A note written but not yet published — the "Start review" flow.</summary>
 public sealed class GlDraftNote
 {
@@ -439,6 +455,8 @@ public sealed class GlErrorBody
 [JsonSerializable(typeof(GlDiscussion))]
 [JsonSerializable(typeof(List<GlDiscussion>))]
 [JsonSerializable(typeof(GlNote))]
+[JsonSerializable(typeof(GlDiff))]
+[JsonSerializable(typeof(List<GlDiff>))]
 [JsonSerializable(typeof(GlDraftNote))]
 [JsonSerializable(typeof(List<GlDraftNote>))]
 [JsonSerializable(typeof(GlPosition))]

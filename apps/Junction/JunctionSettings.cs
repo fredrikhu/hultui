@@ -333,6 +333,10 @@ public static class JunctionSettings
         return ReadFile(path) ?? ReadFile(path + BackupSuffix) ?? new JunctionSettingsData();
     }
 
+    /// <summary>Reads a settings file at an explicit path — a harness borrowing the user's
+    /// accounts from the real file while running against a scratch config, for one.</summary>
+    public static JunctionSettingsData? LoadFrom(string path) => ReadFile(path);
+
     private static JunctionSettingsData? ReadFile(string path)
     {
         try

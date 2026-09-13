@@ -207,6 +207,46 @@ public static class Ui
         return b;
     }
 
+    // ── Pipeline status ──────────────────────────────────────────────────
+
+    /// <summary>The one glyph vocabulary for a pipeline's status, shape-coded so it survives
+    /// a light scheme: success · failed · running · pending · canceled · skipped · manual.
+    /// Null for a status nothing is drawn for.</summary>
+    public static (string Glyph, Color Color)? PipelineMark(string? status) => status switch
+    {
+        "success" => (Icons.CheckCircle, Nocturne.DiffAddSign),
+        "failed" => (Icons.XCircle, Nocturne.DiffDelSign),
+        "running" => (Icons.CircleNotch, Nocturne.Accent300),
+        "pending" or "created" or "waiting_for_resource" or "preparing" or "scheduled" or "waiting_for_callback"
+            => (Icons.Clock, Nocturne.On(0.55)),
+        "canceled" or "canceling" => (Icons.Prohibit, Nocturne.On(0.45)),
+        "skipped" => (Icons.SkipForwardCircle, Nocturne.On(0.45)),
+        "manual" => (Icons.PlayCircle, Nocturne.On(0.62)),
+        _ => null,
+    };
+
+    /// <summary>The glyph for a status, or null when nothing should be drawn.</summary>
+    public static Element? PipelineGlyph(string? status, float size = 14f)
+    {
+        if (PipelineMark(status) is not { } mark) return null;
+        var el = Icon(mark.Glyph, size, mark.Color);
+        el.AutomationId = "pipeline:" + status;
+        return el;
+    }
+
+    /// <summary>The word beside a pipeline glyph: "passed", "failed", "running"…</summary>
+    public static string PipelineWord(string? status) => status switch
+    {
+        "success" => "passed",
+        "failed" => "failed",
+        "running" => "running",
+        "pending" or "created" or "waiting_for_resource" or "preparing" or "scheduled" => "pending",
+        "canceled" or "canceling" => "canceled",
+        "skipped" => "skipped",
+        "manual" => "waiting for manual step",
+        _ => status ?? "",
+    };
+
     /// <summary>A square repository "logo" tile (coloured initial).</summary>
     public static BoxElement InitialTile(string name, Color bg, Color fg, float size, float fontSize)
     {

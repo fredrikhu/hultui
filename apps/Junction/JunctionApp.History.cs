@@ -1059,6 +1059,15 @@ public partial class JunctionApp
             line2.AddChild(Text.New($"+{stat.Added}").FontSize(11f).TextColor(Nocturne.AddCount));
         if (stat.Deleted > 0)
             line2.AddChild(Text.New($"−{stat.Deleted}").FontSize(11f).TextColor(Nocturne.DelCount));
+        // What GitLab knows about this commit, after the stats: its latest pipeline, and
+        // the merge request it is the head of. Most rows have neither and show nothing.
+        if (GitLabActive(_activeRepoPath))
+        {
+            if (PipelineForSha(_activeRepoPath, commit.Hash) is { } pipe && Ui.PipelineGlyph(pipe.Status, 12f) is { } glyph)
+                line2.AddChild(glyph.FlexShrink(0).Tooltip(PipelineSummary(pipe)));
+            if (MergeRequestForSha(_activeRepoPath, commit.Hash) is { } mr)
+                line2.AddChild(MergeRequestChip(mr).FlexShrink(0));
+        }
         body.AddChild(line2);
 
         row.AddChild(body);

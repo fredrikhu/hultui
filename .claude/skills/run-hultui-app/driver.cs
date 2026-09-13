@@ -30,6 +30,7 @@ int width = 1400, height = 900;
 float scale = 1f;
 bool fluentDark = true;
 int fluentAccent = 0;
+bool gitlab = false;
 var steps = new List<string>();
 
 for (int i = 0; i < args.Length; i++)
@@ -50,6 +51,7 @@ for (int i = 0; i < args.Length; i++)
         // Windows runs most machines at 125% or 150%, and a frame captured at 1.0 cannot show
         // what a hairline does on the pixel grid there — which is where borders go soft.
         case "--scale": scale = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;
+        case "--gitlab": gitlab = true; break;
         default: steps.Add(args[i]); break;
     }
 }
@@ -108,6 +110,20 @@ Element MountJunction()
         Workspaces = [new Junction.WorkspaceData { Id = "w1", Name = "Driver", RepoPaths = [path] }],
         ActiveWorkspaceId = "w1",
     };
+    // --gitlab: borrow the signed-in GitLab accounts from the user's real settings file. Only
+    // the identities travel; the tokens stay in the OS credential store, which this process
+    // reads as the same Windows user. The scratch config is otherwise untouched.
+    if (gitlab)
+    {
+        var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HultGit", "settings.json");
+        if (File.Exists(real))
+        {
+            var realSettings = Junction.JunctionSettings.LoadFrom(real);
+            if (realSettings?.GitLabAccounts is { Count: > 0 } accounts) settings.GitLabAccounts = accounts;
+            else Console.Error.WriteLine("--gitlab: no GitLab accounts in the real settings file");
+        }
+        else Console.Error.WriteLine($"--gitlab: no settings file at {real}");
+    }
     var a = new Junction.JunctionApp(session.Application, session.Window.Window, settings);
     instance = a;
     return a.Mount();

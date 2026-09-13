@@ -159,6 +159,15 @@ public partial class JunctionApp
 
         bar.AddChild(Box.New().FlexGrow(1));
 
+        // The current branch's head on GitLab: its latest pipeline and the merge request it
+        // is the source of. Absent — not greyed — when the repository is not GitLab-backed,
+        // when there is no account, and when the host knows nothing about the head.
+        if (HeadPipelineButton(compact) is { } head)
+        {
+            head.Key = "head-pipeline";
+            bar.AddChild(head);
+        }
+
         // Git actions. Narrow windows drop the button labels (keeping the
         // ahead/behind counts) so Fetch/Pull/Push don't crowd the view tabs.
         // Keyed: the compact breakpoint swaps each button between its labelled and
@@ -296,6 +305,8 @@ public partial class JunctionApp
         finally { EndRemoteOp(); }
         Flash(result.Success ? "Fetched all remotes" : FirstLine(result.Stderr, "Fetch failed"));
         RefreshAll();
+        // A fetch is the moment someone expects the hosted side to be current too.
+        RefreshHosted(_activeRepoPath);
     }
 
     private async void DoPull()
@@ -435,8 +446,8 @@ public partial class JunctionApp
                 Unavailable(Icons.CounterClockwise, "Reflog (recover work)…"),
             ];
 
-        return
-        [
+        var items = new List<ContextMenuItem>
+        {
             Item(Icons.TreeStructure, "Worktrees…", OpenWorktrees),
             Item(Icons.Cube, "Submodules…", OpenSubmodules),
             Item(Icons.Cloud, "Remotes…", OpenRemotes),
@@ -444,7 +455,17 @@ public partial class JunctionApp
             // Set apart: the other three manage a repository, this one recovers from
             // an accident with it.
             Item(Icons.CounterClockwise, "Reflog (recover work)…", OpenReflog),
-        ];
+        };
+        // The hosted group, only for a repository whose remote reads as GitLab. Signed
+        // out, the entry leads to the accounts pane rather than to an empty panel.
+        if (GitLabRemoteFor(_activeRepoPath) is { } remote)
+        {
+            items.Add(ContextMenuItem.Separator());
+            items.Add(_gitlab.HasAccount(remote.Host)
+                ? Item(Icons.GitPullRequest, "Merge requests…", () => OpenMergeRequests())
+                : Item(Icons.GitPullRequest, "Merge requests…", () => OpenOptions(OptionsSection.GitLabAccounts)));
+        }
+        return items;
     }
 
     /// <summary>A square toolbar button that drops a menu under itself, right-aligned so

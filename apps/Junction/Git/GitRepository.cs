@@ -987,6 +987,21 @@ public class GitRepository
         Func<string, Task<string?>>? askPass = null)
         => GitProcess.RunAsync(Path, askPass, "fetch", remote, $"{remoteBranch}:{localBranch}");
 
+    /// <summary>One refspec from one remote — how a merge request's head
+    /// (<c>+refs/merge-requests/N/head:refs/remotes/origin/merge-requests/N</c>) is brought
+    /// down without touching any branch.</summary>
+    public Task<GitResult> FetchRefspecAsync(string remote, string refspec, Func<string, Task<string?>>? askPass = null)
+        => GitProcess.RunAsync(Path, askPass, "fetch", remote, refspec);
+
+    /// <summary>Whether a local branch of that name exists.</summary>
+    public bool LocalBranchExists(string name) =>
+        GitProcess.Run(Path, "show-ref", "--verify", "--quiet", "refs/heads/" + name).Success;
+
+    /// <summary>Fast-forwards the checked-out branch to <paramref name="commitish"/>;
+    /// refuses (non-zero) when that would not be a fast-forward.</summary>
+    public GitResult MergeFastForwardOnly(string commitish) =>
+        GitProcess.Run(Path, "merge", "--ff-only", commitish);
+
     private static List<string> BuildPullArgs(PullOptions? options)
     {
         options ??= new PullOptions();

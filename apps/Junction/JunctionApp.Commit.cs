@@ -313,6 +313,10 @@ public partial class JunctionApp
         row2.AddChild(Flex.Row(gap: 5).AlignItems(AlignItems.Center).Children(
             Ui.Icon(Icons.GitBranch, 12f, Nocturne.On(0.55)),
             Text.New(CommitBranchTitle(commit)).FontSize(11.5f).TextColor(Nocturne.On(0.55))));
+        // What GitLab ran on this commit, and the merge request it heads, when the
+        // repository is hosted there.
+        if (BuildCommitHostedLine(commit?.Hash ?? hash) is { } hostedLine)
+            row2.AddChild(hostedLine);
 
         // The toggle rides at the end of the metadata row, not beside the subject: row 1
         // already ends in two carets for stepping between commits, and a third would read

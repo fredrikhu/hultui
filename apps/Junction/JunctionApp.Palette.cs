@@ -227,6 +227,13 @@ public partial class JunctionApp
             () => { ClosePalette(); OpenOptions(OptionsSection.GitLabAccounts); }));
         items.Add(new("action", "Action", Icons.Palette, "Appearance: colour scheme…",
             Nocturne.Theme.Name, () => { ClosePalette(); OpenOptions(OptionsSection.Appearance); }));
+        if (GitLabRemoteFor(_activeRepoPath) is { } gitlabRemote)
+        {
+            bool signedIn = _gitlab.HasAccount(gitlabRemote.Host);
+            items.Add(new("action", "Action", Icons.GitPullRequest, "Merge requests…",
+                signedIn ? gitlabRemote.ProjectPath : $"sign in to {gitlabRemote.Host} first",
+                () => { ClosePalette(); if (signedIn) OpenMergeRequests(); else OpenOptions(OptionsSection.GitLabAccounts); }));
+        }
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));

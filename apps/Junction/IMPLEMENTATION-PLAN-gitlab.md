@@ -1,7 +1,9 @@
 # Junction — GitLab integration implementation plan
 
 **Design source:** `design/gitlab-handoff/design_handoff_junction_gitlab/` (Claude Design, 2026-09-12; `README.md` is the spec, `Junction Git Client v2.dc.html` the interactive prototype, `GitLab State Boards.dc.html` the states the prototype does not reach). The brief it answers is `GITLAB-DESIGN-BRIEF.md`; the API notes are `design/gitlab-api-notes.md`.
-**Status:** Phases 0–1 built and green (2026-09-13; 81 GitLab tests). **Cursor:** ▶ Phase 2.
+**Status:** Phases 0–2 built and green (2026-09-13; 87 GitLab tests). **Cursor:** ▶ Phase 3.
+
+**Phase 2 as built, where it differs from the plan:** the repository-panel shell was **not** extracted — the merge-request panel is a two-page card of its own (`JunctionApp.MergeRequests.cs`) and the four existing panels are untouched; factoring the five is a later cleanup, not a prerequisite. Hosted data lives in `JunctionApp.GitLabData.cs`: per-repository loaders for project + protected branches, open merge requests, the latest hundred pipelines keyed by SHA (one call covers every branch tip and recent History row — no per-commit status calls), and per-MR approvals, discussions and diffs; every value is a `Hosted<T>` with an as-of stamp, and a failed reload keeps the previous value and adds the failure. A refresh happens on Fetch, on panel open and on a repository switch, but only when nothing is in flight and the data is older than two minutes — a refresh that pre-empted a first load superseded its result with the failure. A merge request whose pipeline GitLab did not link (a branch pipeline) falls back to the SHA lookup. Remote-tracking branch rows carry the `!iid` chip by leaf name, since after a clone the MR's branch usually exists only as `origin/<name>`. The action row holds only *Checkout locally* and the browser; approve/merge/rebase/draft come with Phase 5, the review entry with Phase 4. The driver gained `--gitlab` (borrows the real accounts; tokens stay in the OS store) so the panel could be rendered against the lab.
 
 **Phase 1 as built, where it differs from the plan:** the Options rail lists only the two panes that exist (Appearance, GitLab accounts) rather than six entries with four dead ones; Phase 6 adds the rest. The first-run strip is on the History view only, as the prototype draws it, and its dismissal is persisted per host and cleared on sign-out. *Add gitlab.com account* steers to the token card with a toast until the OAuth application is registered (`GitLabOAuth.GitLabComClientId`). The waiting card's spinner is a static glyph for now. Sign-out is split so the revoke runs off the UI thread and the forgetting on it — the settings list is read by every build. The bundled Phosphor set gained the 26 GitLab-related glyphs (`scripts/phosphor-icons.txt`).
 
@@ -67,15 +69,15 @@ Each phase leaves the app shippable. Tests live in `tests/Junction.Tests` (xunit
 
 ### Phase 2 — Merge requests panel, read side (design §C list + detail, §E glyphs)
 
-- [ ] Extract the repository-panel shell; MR panel = shell at 760 with a two-page stack (list → detail, Esc back then close).
-- [ ] List page: filter chips with counts (Assigned to me · Reviewing · Mine · All open), This repo / Workspace segmented, `/` search, rows per the spec (iid · title · Draft · source chip → target · author · updated · pipeline glyph · approvals `1/2` · status word), legend, context menu, keys `c r o`.
-- [ ] Detail page: header, meta row, Status / Pipeline / Approvals cards, description (the 40-line renderer), Changes list, Discussions list; **Checkout locally** = fetch `refs/merge-requests/<iid>/head` into `origin/merge-requests/<iid>` and create/update a local branch, with the busy label.
-- [ ] Pipeline glyph vocabulary (one `PipelineGlyph(status)` in `Ui.cs`): toolbar head glyph + `!iid` pill, History rows, Branches LAST COMMIT cell (lock · subject · glyph · chip), Commit header line, Overview card footer. Commit statuses per SHA via one batched loader per repo; nothing drawn for `none`.
-- [ ] Repository tools menu: *Merge requests…* (opens the accounts pane when signed out), *Create merge request…*.
-- [ ] States: skeleton once, empty, no-account, offline stale mark with rows at 75%, 429 countdown.
-- [ ] Refresh: on repo switch, on Fetch, on panel open, and the optional timer; *as of* stamps everywhere the design shows them.
+- [x] MR panel: a 760-wide two-page card (list → detail, Esc back then close). The shell extraction was skipped — see the as-built note.
+- [x] List page: filter chips with counts (Assigned to me · Reviewing · Mine · All open), This repo / Workspace segmented, `/` search, rows per the spec (iid · title · Draft · source chip → target · author · updated · pipeline glyph · approvals `1/2` · status word from `detailed_merge_status`), legend, context menu (Checkout locally — Open in browser · Copy !iid link), keys `/ ↑↓ ↵ c o Esc`.
+- [x] Detail page: header, meta row, Status / Pipeline / Approvals cards with the design's reason lines, description (paragraphs, bullets, gaps, backticks stripped), Changes list with thread-count pills, Discussions list with file · line(s); **Checkout locally** fetches `refs/merge-requests/<iid>/head` into `refs/remotes/<remote>/merge-requests/<iid>` and creates the source branch on it, or checks it out and fast-forwards, refusing to rewrite a diverged one (`MergeRequestCheckoutGitTests` against a real local origin).
+- [x] Pipeline glyph vocabulary (`Ui.PipelineMark` / `PipelineGlyph` / `PipelineWord`): toolbar head glyph + `!iid` pill, History rows, Branches LAST COMMIT cell (lock · subject · glyph · chip), Commit header line, Overview card footer (`main passed · N MRs · M need you`). One pipelines call per repository keyed by SHA; nothing drawn for none.
+- [x] Repository tools menu: *Merge requests…* (opens the accounts pane when signed out) and the palette verb. *Create merge request…* comes with Phase 3.
+- [x] States: skeleton once, empty copy per filter, failure line (offline / 429 / 401) with the rows kept and dimmed, *as of* stamps on the header and detail.
+- [x] Refresh: on Fetch, on panel open and on a repository switch when nothing is in flight and the data is older than two minutes. The timer waits for the Options General pane (Phase 6).
 
-**Done when:** the lab instance's MRs list, filter, open, and check out; the pipeline glyphs match `gitlab-runner`'s real results on the lab instance; unplugging the network shows the stale mark, not a spinner.
+**Done:** the lab instance's five merge requests list, filter, open and read correctly with the glyphs from `gitlab-runner`'s real results (rendered through the driver with `--gitlab`); a failed reload keeps the rows and says how old they are (tested against recordings). **Not yet checked by hand:** *Checkout locally* against the lab — the git half is covered by tests on a local origin.
 
 ### Phase 3 — Create MR, protected branches, issues (design §D, §G, §F)
 

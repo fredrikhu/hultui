@@ -796,6 +796,7 @@ public partial class JunctionApp : Component, IDisposable
         if (_reflogOpen) Overlay("reflog", BuildReflogPanel());
         if (_submodulesOpen) Overlay("submodules", BuildSubmodulesPanel());
         if (_remotesOpen) Overlay("remotes", BuildRemotesPanel());
+        if (_mrPanelOpen) Overlay("merge-requests", BuildMergeRequestsPanel());
         if (_optionsOpen) Overlay("options", BuildOptions());
         if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
         if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
@@ -864,6 +865,12 @@ public partial class JunctionApp : Component, IDisposable
         {
             _pendingHistorySearchFocus = false;
             _historySearchRef.Current?.Focus();
+        }
+
+        if (_pendingMrSearchFocus)
+        {
+            _pendingMrSearchFocus = false;
+            _mrSearchRef.Current?.Focus();
         }
 
         if (_pendingContentSearchFocus)
@@ -1063,6 +1070,9 @@ public partial class JunctionApp : Component, IDisposable
         _settings.ActiveRepoPath = path;
         Persist();
         RequestPreload(path, full: true);
+        // Hosted data is per repository too, and reloads on a switch only when it has
+        // gone quiet for a while — flipping between two repos is not a poll.
+        RefreshHostedIfStale(path, RefreshOnSwitchAfter);
         Rerender();
     }
 
@@ -1336,6 +1346,14 @@ public partial class JunctionApp : Component, IDisposable
         if (_remotesOpen)
         {
             if (e.Key == KeyCode.Escape) { CloseRemotes(); e.StopPropagation = true; }
+            return;
+        }
+
+        // The merge-request panel has keys of its own (list navigation, checkout, open in
+        // browser); it decides what it took. Typing in its search box flows to the field.
+        if (_mrPanelOpen)
+        {
+            if (HandleMergeRequestsKey(e, typing)) e.StopPropagation = true;
             return;
         }
 

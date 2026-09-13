@@ -172,6 +172,12 @@ public sealed class GitLabClient : IDisposable
         int maxPages = DefaultMaxPages, CancellationToken ct = default) =>
         GetPagedAsync($"projects/{projectId}/merge_requests/{iid}/discussions", "", GitLabJson.Default.ListGlDiscussion, maxPages, ct);
 
+    /// <summary>The files a merge request touches. Without <paramref name="unidiff"/> the
+    /// per-file <c>diff</c> text still comes along; the list view only reads the paths.</summary>
+    public Task<GitLabResult<List<GlDiff>>> GetMergeRequestDiffsAsync(long projectId, long iid,
+        int maxPages = DefaultMaxPages, CancellationToken ct = default) =>
+        GetPagedAsync($"projects/{projectId}/merge_requests/{iid}/diffs", "", GitLabJson.Default.ListGlDiff, maxPages, ct);
+
     public Task<GitLabResult<List<GlDraftNote>>> ListDraftNotesAsync(long projectId, long iid, CancellationToken ct = default) =>
         GetPagedAsync($"projects/{projectId}/merge_requests/{iid}/draft_notes", "", GitLabJson.Default.ListGlDraftNote, DefaultMaxPages, ct);
 
