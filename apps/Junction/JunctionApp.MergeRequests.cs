@@ -469,6 +469,7 @@ public partial class JunctionApp
     private IReadOnlyList<ContextMenuItem> MrMenuItems(MrRow r) =>
     [
         Item(Icons.BendDownRight, "Checkout locally", () => CheckoutMergeRequest(r.Path, r.Mr)),
+        Item(Icons.Eyes, "Review", () => StartReview(r.Path, r.Mr.Iid)),
         ContextMenuItem.Separator(),
         Item(Icons.ArrowSquareOut, "Open in browser", () => OpenUrl(r.Mr.WebUrl)),
         Item(Icons.Copy, $"Copy !{r.Mr.Iid} link", () => CopyToClipboard(r.Mr.WebUrl ?? "")),
@@ -554,7 +555,7 @@ public partial class JunctionApp
             col.AddChild(MrCards(path, mr, approvals));
             col.AddChild(MrDescription(mr.Description));
             col.AddChild(MrChanges(path, iid, mr, discussions));
-            col.AddChild(MrDiscussions(discussions));
+            col.AddChild(MrDiscussions(path, iid, discussions));
         }
         body.AddChild(col);
         card.AddChild(body);
@@ -572,13 +573,17 @@ public partial class JunctionApp
             checkout.Key = "mr-checkout-" + (_mrBusy is null ? "on" : "off");
             checkout.AccessibleName = "Checkout locally";
             actions.AddChild(checkout);
+            var review = Ui.SecondaryButton("Review", Icons.Eyes, () => StartReview(path, iid), 12.5f)
+                .Tooltip("Open the diff with its threads and the review gutter (r)");
+            review.AccessibleName = "Review";
+            actions.AddChild(review);
         }
         actions.AddChild(Box.New().FlexGrow(1));
         card.AddChild(actions);
 
         var legend = Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(7, 18, 7, 18));
-        foreach (var (key, what) in new[] { ("c", "checkout"), ("o", "open in browser"), ("Esc", "back") })
+        foreach (var (key, what) in new[] { ("c", "checkout"), ("r", "review"), ("o", "open in browser"), ("Esc", "back") })
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));
@@ -699,6 +704,9 @@ public partial class JunctionApp
                         Ui.Icon(Icons.ChatCircle, 10f, Nocturne.Neutral100),
                         Text.New(threads.ToString()).FontSize(10f).TextColor(Nocturne.Neutral100)));
             row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+            row.Cursor(CursorType.Pointer).Tooltip("Review this file");
+            var file = d.Path;
+            row.OnClick(_ => StartReview(path, iid, openFile: file));
             rows.AddChild(row);
         }
         if (diffs.Value.Count == 0)
@@ -708,7 +716,7 @@ public partial class JunctionApp
         return col;
     }
 
-    private Element MrDiscussions(IReadOnlyList<GlDiscussion> discussions)
+    private Element MrDiscussions(string path, long iid, IReadOnlyList<GlDiscussion> discussions)
     {
         var threads = discussions.Where(t => t.First is { System: false }).ToList();
         var col = Flex.Column(gap: 6);
@@ -733,6 +741,15 @@ public partial class JunctionApp
             row.AddChild(mid);
             row.AddChild(Text.New($"{first.Author?.Name ?? ""} · {RelativeTime(first.CreatedAt)}").FontSize(11f)
                 .TextColor(Nocturne.On(0.45)).FlexShrink(0));
+            // A thread on the diff opens the review on it; one on the request itself has
+            // no line to go to.
+            if (first.Position is { } p && (p.NewPath ?? p.OldPath) is { } threadFile)
+            {
+                var id = t.Id;
+                row.Cursor(CursorType.Pointer).Tooltip("Open this thread in the diff");
+                row.HoverBg(Nocturne.Neutral900, Color.Transparent);
+                row.OnClick(_ => StartReview(path, iid, openFile: threadFile, focusThread: id));
+            }
             rows.AddChild(row);
         }
         if (threads.Count == 0)
@@ -860,6 +877,10 @@ public partial class JunctionApp
             case KeyCode.C:
                 if (open != null && openPath != null) CheckoutMergeRequest(openPath, open);
                 else if (selected != null) CheckoutMergeRequest(selected.Path, selected.Mr);
+                return true;
+            case KeyCode.R:
+                if (open != null && openPath != null) StartReview(openPath, open.Iid);
+                else if (selected != null) StartReview(selected.Path, selected.Mr.Iid);
                 return true;
             case KeyCode.O:
                 OpenUrl((open ?? selected?.Mr)?.WebUrl);

@@ -228,6 +228,126 @@ public sealed class GitLabClient : IDisposable
     public Task<GitLabResult<List<GlDraftNote>>> ListDraftNotesAsync(long projectId, long iid, CancellationToken ct = default) =>
         GetPagedAsync($"projects/{projectId}/merge_requests/{iid}/draft_notes", "", GitLabJson.Default.ListGlDraftNote, DefaultMaxPages, ct);
 
+    // ── Review: threads, replies, drafts ────────────────────────────────────────────
+
+    /// <summary>Starts a thread — on a line or a range of the diff when <paramref name="position"/>
+    /// is given (its three SHAs must be the request's <c>diff_refs</c>), on the request itself
+    /// otherwise. Published at once; see <see cref="CreateDraftNoteAsync"/> for a review.</summary>
+    public Task<GitLabResult<GlDiscussion>> CreateDiscussionAsync(long projectId, long iid, string body, GlPosition? position,
+        CancellationToken ct = default)
+    {
+        var fields = new List<KeyValuePair<string, string>> { new("body", body) };
+        AddPositionFields(fields, position);
+        return PostFormAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/discussions", fields, GitLabJson.Default.GlDiscussion, ct);
+    }
+
+    /// <summary>A reply in an existing thread.</summary>
+    public Task<GitLabResult<GlNote>> ReplyToDiscussionAsync(long projectId, long iid, string discussionId, string body,
+        CancellationToken ct = default) =>
+        PostFormAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/discussions/{discussionId}/notes",
+            [new("body", body)], GitLabJson.Default.GlNote, ct);
+
+    /// <summary>Resolves or reopens a thread.</summary>
+    public Task<GitLabResult<GlDiscussion>> ResolveDiscussionAsync(long projectId, long iid, string discussionId, bool resolved,
+        CancellationToken ct = default) =>
+        PostFormAsync(HttpMethod.Put, $"projects/{projectId}/merge_requests/{iid}/discussions/{discussionId}",
+            [new("resolved", resolved ? "true" : "false")], GitLabJson.Default.GlDiscussion, ct);
+
+    /// <summary>A note nobody else sees until the review is submitted — a new thread when
+    /// <paramref name="inReplyToDiscussionId"/> is null, a reply otherwise.</summary>
+    public Task<GitLabResult<GlDraftNote>> CreateDraftNoteAsync(long projectId, long iid, string note, GlPosition? position,
+        string? inReplyToDiscussionId = null, bool resolveDiscussion = false, CancellationToken ct = default)
+    {
+        var fields = new List<KeyValuePair<string, string>> { new("note", note) };
+        if (inReplyToDiscussionId is { Length: > 0 } d) fields.Add(new("in_reply_to_discussion_id", d));
+        if (resolveDiscussion) fields.Add(new("resolve_discussion", "true"));
+        AddPositionFields(fields, position);
+        return PostFormAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/draft_notes", fields, GitLabJson.Default.GlDraftNote, ct);
+    }
+
+    public Task<GitLabResult<bool>> DeleteDraftNoteAsync(long projectId, long iid, long draftNoteId, CancellationToken ct = default) =>
+        SendStatusAsync(HttpMethod.Delete, $"projects/{projectId}/merge_requests/{iid}/draft_notes/{draftNoteId}", null, ct);
+
+    /// <summary>Publishes every pending draft note of the signed-in user as one review.
+    /// <paramref name="reviewerState"/> is <c>requested_changes</c> or <c>reviewed</c>, or
+    /// null to leave the reviewer state alone.</summary>
+    public Task<GitLabResult<bool>> BulkPublishDraftNotesAsync(long projectId, long iid, string? reviewerState = null,
+        CancellationToken ct = default)
+    {
+        var fields = new List<KeyValuePair<string, string>>();
+        if (reviewerState is { Length: > 0 } s) fields.Add(new("reviewer_state", s));
+        return SendStatusAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/draft_notes/bulk_publish",
+            new FormUrlEncodedContent(fields), ct);
+    }
+
+    /// <summary>Approves the request; <paramref name="sha"/> guards against approving a head
+    /// that moved (409).</summary>
+    public Task<GitLabResult<GlApprovals>> ApproveAsync(long projectId, long iid, string? sha = null, CancellationToken ct = default)
+    {
+        var fields = new List<KeyValuePair<string, string>>();
+        if (sha is { Length: > 0 } s) fields.Add(new("sha", s));
+        return PostFormAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests/{iid}/approve", fields, GitLabJson.Default.GlApprovals, ct);
+    }
+
+    /// <summary>The <c>position[...]</c> form fields of a diff note: the three SHAs, both
+    /// paths, one line for a single-line note, and <c>line_range</c> for a range — each end
+    /// carrying its <c>line_code</c> (<c>sha1(path)_old_new</c>) and side.</summary>
+    internal static void AddPositionFields(List<KeyValuePair<string, string>> fields, GlPosition? position)
+    {
+        if (position is null) return;
+        fields.Add(new("position[position_type]", position.PositionType ?? "text"));
+        if (position.BaseSha is { } b) fields.Add(new("position[base_sha]", b));
+        if (position.HeadSha is { } h) fields.Add(new("position[head_sha]", h));
+        if (position.StartSha is { } s) fields.Add(new("position[start_sha]", s));
+        if (position.NewPath is { } np) fields.Add(new("position[new_path]", np));
+        if (position.OldPath is { } op) fields.Add(new("position[old_path]", op));
+        if (position.NewLine is { } nl) fields.Add(new("position[new_line]", nl.ToString(CultureInfo.InvariantCulture)));
+        if (position.OldLine is { } ol) fields.Add(new("position[old_line]", ol.ToString(CultureInfo.InvariantCulture)));
+        if (position.LineRange is { Start: { } start, End: { } end })
+        {
+            AddLineFields("start", start);
+            AddLineFields("end", end);
+        }
+
+        void AddLineFields(string which, GlLinePosition line)
+        {
+            if (line.LineCode is { } code) fields.Add(new($"position[line_range][{which}][line_code]", code));
+            if (line.Type is { } type) fields.Add(new($"position[line_range][{which}][type]", type));
+            if (line.OldLine is { } o) fields.Add(new($"position[line_range][{which}][old_line]", o.ToString(CultureInfo.InvariantCulture)));
+            if (line.NewLine is { } n) fields.Add(new($"position[line_range][{which}][new_line]", n.ToString(CultureInfo.InvariantCulture)));
+        }
+    }
+
+    private async Task<GitLabResult<T>> PostFormAsync<T>(HttpMethod method, string path, List<KeyValuePair<string, string>> fields,
+        JsonTypeInfo<T> type, CancellationToken ct)
+    {
+        using var content = new FormUrlEncodedContent(fields);
+        var res = await SendAsync(method, path, content, type, ct).ConfigureAwait(false);
+        return res.Ok ? GitLabResult<T>.Success(res.Value.Body) : res.As<T>();
+    }
+
+    /// <summary>A call whose answer is its status — a delete, a bulk publish — where a 2xx
+    /// with no body is the success case rather than "Empty response".</summary>
+    private async Task<GitLabResult<bool>> SendStatusAsync(HttpMethod method, string path, HttpContent? content, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, _apiBase + "/" + path) { Content = content };
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return GitLabResult<bool>.Fail(Classify(ex));
+        }
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+                return GitLabResult<bool>.Fail(await FailureFromAsync(response, ct).ConfigureAwait(false));
+            return GitLabResult<bool>.Success(true);
+        }
+    }
+
     // ── Pipelines ────────────────────────────────────────────────────────────────────
 
     public Task<GitLabResult<List<GlPipeline>>> ListPipelinesAsync(long projectId, string? @ref = null, string? sha = null,

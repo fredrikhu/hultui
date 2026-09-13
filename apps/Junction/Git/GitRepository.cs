@@ -902,6 +902,33 @@ public class GitRepository
             if (kind == "(push)") push[name] = url;
             else fetch[name] = url;
         }
+
+        // `remote -v` prints the URLs git will actually contact, with any url.<base>.insteadOf
+        // rewrite applied. The URL the user wrote is the one that says where the repository is
+        // hosted — a gitlab.com remote rewritten to an internal mirror for transport is still
+        // a gitlab.com project — so the configured URL wins where the two differ.
+        var configured = GitProcess.Run(Path, "config", "--get-regexp", @"^remote\..*\.(url|pushurl)$");
+        if (configured.Success)
+        {
+            var cfgUrl = new Dictionary<string, string>(StringComparer.Ordinal);
+            var cfgPush = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var line in configured.Lines)
+            {
+                var sp = line.IndexOf(' ');
+                if (sp < 0 || !line.StartsWith("remote.", StringComparison.Ordinal)) continue;
+                var key = line[..sp];
+                var url = line[(sp + 1)..];
+                bool isPush = key.EndsWith(".pushurl", StringComparison.Ordinal);
+                var name = key["remote.".Length..^(isPush ? ".pushurl".Length : ".url".Length)];
+                (isPush ? cfgPush : cfgUrl)[name] = url;
+            }
+            foreach (var name in order)
+                if (cfgUrl.TryGetValue(name, out var url))
+                {
+                    fetch[name] = url;
+                    push[name] = cfgPush.GetValueOrDefault(name, url);
+                }
+        }
         return order
             .Select(n => new GitRemote(n, fetch.GetValueOrDefault(n, ""), push.GetValueOrDefault(n, fetch.GetValueOrDefault(n, ""))))
             .ToList();

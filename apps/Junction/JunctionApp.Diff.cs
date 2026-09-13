@@ -101,6 +101,12 @@ public partial class JunctionApp
         }
 
         col.AddChild(BuildDiffBody(path, diff, interact));
+        // Reviewing: the pending strip while a review is being written, and the key legend.
+        if (ReviewRowsActive && _review is { } review && diff is { IsBinary: false })
+        {
+            if (review.ReviewMode) col.AddChild(BuildPendingStrip(review));
+            col.AddChild(BuildReviewLegend());
+        }
         return col;
     }
 
@@ -273,7 +279,7 @@ public partial class JunctionApp
     /// is keyed on the font, because until now it could not change.</summary>
     private void InvalidateCodeMetrics()
     {
-        _diffHeightShape = (false, false, -1f, -1);
+        _diffHeightShape = (false, false, -1f, -1, -1);
         _diffHeights = [];
         _diffLongestFor = "";
         _diffMonoAdvance = -1f;
@@ -313,21 +319,26 @@ public partial class JunctionApp
         if (_diffWrap) return label.FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0));
         return _diffPan.Cell(label.MaxLines(1).OverflowMode(TextOverflow.Clip).FlexGrow(1));
     }
-    private (bool Wrap, bool Split, float Width, int Rows) _diffHeightShape = (false, false, -1f, -1);
+    // Review is the review's height version, so a card opening or a composer appearing
+    // measures the rows again; -1 when no review is on.
+    private (bool Wrap, bool Split, float Width, int Rows, int Review) _diffHeightShape = (false, false, -1f, -1, -1);
 
     /// <summary>
     /// The height of every row at the current width, measured once per change of shape rather
     /// than per frame. Unwrapped every row is <see cref="DiffRowHeight"/> and the list is told
-    /// so directly; this only runs when wrapping.
+    /// so directly; this only runs when wrapping, or when the review's cards are among the rows.
     /// </summary>
     private void RebuildDiffHeights(List<DiffRow> rows, float codeWidth)
     {
         var heights = new float[rows.Count];
         var style = TextMeasure.StyleFor(DiffCodeSize, CodeFont);
+        float cardText = CardTextWidth;
         for (int i = 0; i < rows.Count; i++)
         {
             var r = rows[i];
             if (r.Type == DiffRowType.Hunk) { heights[i] = DiffRowHeight; continue; }
+            if (r.Type is DiffRowType.Thread or DiffRowType.Composer or DiffRowType.Section) { heights[i] = ReviewRowHeight(r, cardText); continue; }
+            if (!_diffWrap) { heights[i] = DiffRowHeight; continue; }
             float text = r.Type == DiffRowType.Split
                 ? Math.Max(WrappedHeight(r.Left?.Content, style, codeWidth),
                            WrappedHeight(r.Right?.Content, style, codeWidth))
@@ -376,13 +387,23 @@ public partial class JunctionApp
         _diffMonoAdvance = advance;
     }
 
-    private enum DiffRowType : byte { Hunk, Unified, Split }
+    // Thread, Composer and Section are the review's rows (JunctionApp.Review): a thread card
+    // under the line it anchors to, the composer under the end of its range, and the header
+    // of the outdated threads listed after the diff.
+    private enum DiffRowType : byte { Hunk, Unified, Split, Thread, Composer, Section }
 
     private sealed record DiffRow
     {
         public DiffRowType Type { get; init; }
         /// <summary>Position in the flattened list — what a cross-line selection is anchored to.</summary>
         public int Index { get; init; }
+        /// <summary>Position among the line rows alone, before the review's cards are woven
+        /// in — what the caret and the range are held as. A card carries the index of the
+        /// line it follows.</summary>
+        public int LineIndex { get; init; } = -1;
+        /// <summary>Where this line sits for GitLab: side, numbers, line code. Only while reviewing.</summary>
+        public ReviewLine? Review { get; init; }
+        public ThreadView? Thread { get; init; }
         public string Hunk { get; init; } = "";
         public GitDiffHunk? HunkRef { get; init; }   // set on Hunk rows, for hunk-level staging
         public GitDiffLine? Line { get; init; }   // unified
@@ -407,7 +428,11 @@ public partial class JunctionApp
         if (interact != null) SyncStageSelection(interact);
 
         var hl = HighlightForCurrent(diff.Path);
-        var rows = _diffSplit ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
+        // Reviewing is unified only: GitLab's positions are one column of lines, and the
+        // cards need a row to follow.
+        var review = ReviewRowsActive ? _review : null;
+        var rows = _diffSplit && review is null ? FlattenSplit(diff, hl) : FlattenUnified(diff, hl);
+        if (review is not null) rows = WithReviewRows(diff, rows, review);
         for (int i = 0; i < rows.Count; i++) rows[i] = rows[i] with { Index = i };
         BindDiffSelection(diff, rows);
         BindDiffSearch(diff, rows);
@@ -432,10 +457,11 @@ public partial class JunctionApp
         var settleKey = (_diffWrap, _diffSplit, rows.Count);
         if (_diffWidthSettleKey != settleKey) { _diffWidthSettleKey = settleKey; _diffSettledWidth = float.NaN; }
 
-        var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count);
+        bool perRow = _diffWrap || review is not null;
+        var shape = (_diffWrap, _diffSplit, codeWidth, rows.Count, review?.HeightKey ?? -1);
         if (_diffHeightShape != shape)
         {
-            if (_diffWrap) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
+            if (perRow) RebuildDiffHeights(rows, codeWidth); else _diffHeights = [];
             // Not on the first build: there is nothing realized yet to throw away, and doing
             // it mid-build disturbs the rows the very first frame lays out.
             if (_diffHeightShape.Rows >= 0 && _diffBodyRef.Current is VirtualListElement<DiffRow> mounted)
@@ -450,19 +476,24 @@ public partial class JunctionApp
             .FlexGrow(1)
             .Background(Nocturne.Bg);
         // Unwrapped every row is the same height and the list does its own arithmetic; only
-        // wrapping needs the measured index.
-        if (_diffWrap)
+        // wrapping, and the review's cards, need the measured index.
+        if (perRow)
             list.RowHeights((_, i) => i < _diffHeights.Length ? _diffHeights[i] : DiffRowHeight);
         // Key by file so each file gets its own scroll position instead of one shared
         // offset — switching files reconciles to a fresh list that starts at the top.
         list.Key = "diff:" + diff.Path;
         // Focusable so clicking the diff lets arrow / page / home / end scroll it.
         // KeyboardScroll handles those (and leaves chorded keys to the app, so
-        // Ctrl+↑/↓ commit stepping still works while the diff has focus).
+        // Ctrl+↑/↓ commit stepping still works while the diff has focus). Not while
+        // reviewing: there the arrows are the caret's, and revealing the caret scrolls.
         list.IsFocusable = true;
         list.TabIndex = 0;
-        list.KeyboardScroll();
+        if (review is null) list.KeyboardScroll();
         list.On<KeyDownEvent>(DiffPaneKey);
+        // A range drag released off the rows — over the scrollbar, the gutter's padding —
+        // still ends in the composer.
+        if (review is { } rv)
+            list.On<PointerUpEvent>(_ => { if (rv.Dragging) { rv.Dragging = false; OpenComposer(rv); } });
         list.WithRef(_diffBodyRef);
         // A trackpad's sideways swipe arrives as DeltaX, a mouse's as Shift+DeltaY. The
         // list's own handler sees them first and clamps them to nothing, since its content
@@ -546,7 +577,7 @@ public partial class JunctionApp
         {
             if (_diffBodyRef.Current is not { Layout.AbsoluteContentBox.Width: > 0 } body) return;
             if (_diffBarBuilt != _diffPan.CanPan) { MarkDirty(); return; }
-            if (!_diffWrap) return;
+            if (!_diffWrap && !ReviewRowsActive) return;
 
             // _diffHeightShape.Width is the width the heights on screen were measured at.
             float observed = CodeWidthFor(body.Layout.AbsoluteContentBox.Width);
@@ -569,8 +600,10 @@ public partial class JunctionApp
             ? b.Layout.AbsoluteContentBox.Width
             : _window.LayoutWidth;
         // Split: two 44px number columns. Unified: two 46px number columns, a 16px sign,
-        // and — while staging — a 20px checkbox.
-        _diffFixedCols = _diffSplit ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f);
+        // and — while staging — a 20px checkbox; while reviewing, the 22px gutter.
+        bool reviewing = ReviewRowsActive;
+        _diffFixedCols = _diffSplit && !reviewing ? 44f * 2 : 46f * 2 + 16f + (interactive ? 20f : 0f) + (reviewing ? 22f : 0f);
+        _diffBodyWidth = body;
         _diffCodeWidth = CodeWidthFor(body);
         // Wrapped, every line is visible in full, so there is nothing left to scroll to. An
         // unbounded viewport is what says so: it leaves no offset to pan by, so CanPan goes
@@ -726,7 +759,10 @@ public partial class JunctionApp
         DiffRowType.Split => SplitRow(r.Left, r.Right,
             FoundIn(r.LeftSpans, r.Index, 0, r.Left?.Content),
             FoundIn(r.RightSpans, r.Index, 1, r.Right?.Content), r.Index),
-        _ => UnifiedRow(r.Line!, FoundIn(r.Spans, r.Index, 0, r.Line?.Content), interact, r.Index),
+        DiffRowType.Thread => ThreadCardRow(_review!, r),
+        DiffRowType.Composer => ComposerRow(_review!, r),
+        DiffRowType.Section => OutdatedSectionRow(),
+        _ => UnifiedRow(r.Line!, FoundIn(r.Spans, r.Index, 0, r.Line?.Content), interact, r.Index, r),
     };
 
     /// <summary>A code cell's syntax spans with any search matches tinted over them. A match
@@ -778,7 +814,7 @@ public partial class JunctionApp
         if (_diffBodyRef.Current is not ScrollViewElement sv) return;
 
         float top = 0f, height = DiffRowHeight;
-        if (_diffWrap && _diffHeights.Length > 0)
+        if (_diffHeights.Length > 0)
         {
             for (int i = 0; i < line && i < _diffHeights.Length; i++) top += _diffHeights[i];
             if (line < _diffHeights.Length) height = _diffHeights[line];
@@ -825,7 +861,7 @@ public partial class JunctionApp
     }
 
     private Element UnifiedRow(GitDiffLine line, IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans,
-        DiffInteract? interact, int rowIndex)
+        DiffInteract? interact, int rowIndex, DiffRow? model = null)
     {
         var (bg, code, sign, signColor) = line.Kind switch
         {
@@ -838,12 +874,26 @@ public partial class JunctionApp
         bool selected = selectable && _stageSel.Contains(line);
         if (selected) bg = Nocturne.Alpha(Nocturne.Accent, 0.22);
 
+        // Reviewing: the range band takes the row, the caret lights its gutter.
+        var review = model?.Review is not null && ReviewRowsActive ? _review : null;
+        bool inRange = review?.Range is { } range && model!.LineIndex >= range.From && model.LineIndex <= range.To;
+        bool caret = review is not null && review.Caret == model!.LineIndex;
+        if (inRange) bg = Nocturne.Accent900;
+
         // Stretch, so the code label can fill the row's height. Centred, the label was only
         // as tall as its own text and the pixel or two above and below it belonged to the
         // row — a strip between the lines where a press began no selection at all.
         // Stretching alone is not enough: the label also has to grow inside its cell, or the
         // cell fills the row and the label still does not fill the cell.
         var row = Flex.Row(gap: 0).AlignItems(AlignItems.Stretch).Background(bg);
+
+        if (review is not null)
+        {
+            var anchored = AnchoredThreads(model!.LineIndex);
+            row.AddChild(ReviewGutterCell(review, model, inRange, caret, anchored));
+            WireReviewRow(review, row, model.LineIndex);
+            if (caret) row.AutomationId = "review-caret-row";
+        }
 
         // Interactive mode gets a leading checkbox column (transparent on context
         // rows) so the sign/number columns stay aligned across every row.

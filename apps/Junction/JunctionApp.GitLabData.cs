@@ -168,7 +168,9 @@ public partial class JunctionApp
             return Hosted<IReadOnlyList<GlDiscussion>>.Empty([]);
         var loader = _discussionLoaders.For((path, iid));
         var prev = loader.Value;
-        loader.Load($"{path}#{iid}#{HostedGen(path)}", () =>
+        // The note generation reloads this request's threads alone — after a post, a reply,
+        // a resolve — without asking for the rest of the hosted data again.
+        loader.Load($"{path}#{iid}#{HostedGen(path)}#{NoteGen(path, iid)}", () =>
         {
             var id = ResolveProjectId(client, remote);
             if (id is null) return prev;

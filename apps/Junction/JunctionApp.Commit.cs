@@ -16,8 +16,12 @@ public partial class JunctionApp
         if (!HasActiveRepo)
             return BuildStubView("Commit", "Open a repository first.");
 
+        // A review on its way in: its refs are being fetched, or did not come.
+        if (_review is { Ready: false } pendingReview)
+            return BuildReviewPendingView(pendingReview);
+
         // Two or more commits selected in History → Fork-style compare between
-        // the oldest and newest of the selection.
+        // the oldest and newest of the selection. A review is one too: base to head.
         if (SelectedRange() is { } range)
             return BuildRangeCompareView(range);
         _detailRange = null;
@@ -56,7 +60,7 @@ public partial class JunctionApp
         SyncCommitFileTree($"{range.BaseHash}..{range.HeadHash}");
 
         var col = Flex.Column(gap: 0).FlexGrow(1);
-        col.AddChild(BuildRangeHeader(range));
+        col.AddChild(_review is { Ready: true } review ? BuildReviewHeader(review) : BuildRangeHeader(range));
 
         // Two branches on the same commit: nothing to diff.
         if (range.BaseHash == range.HeadHash)
@@ -607,6 +611,8 @@ public partial class JunctionApp
         // which is the whole point of grouping them.
         row.AddChild(Text.New(node.Segment).FontSize(12f).FlexGrow(1).FlexShrink(1)
             .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
+        // Reviewing: how many threads the file has, and whether any is still open.
+        if (ReviewFilePill(f.Path) is { } pill) row.AddChild(pill);
 
         row.OnClick(_ => { _commitCursorPath = f.Path; _selectedFilePath = f.Path; Rerender(); });
         if (!selected && !cursor) row.HoverBg(Nocturne.Neutral900, Color.Transparent);

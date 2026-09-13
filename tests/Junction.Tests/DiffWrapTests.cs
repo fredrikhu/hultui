@@ -290,7 +290,7 @@ public class DiffWrapTests
             float laidOut = (float)typeof(JunctionApp)
                 .GetMethod("CodeWidthFor", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .Invoke(app, [body.Layout.AbsoluteContentBox.Width])!;
-            var shape = Field<(bool Wrap, bool Split, float Width, int Rows)>(app, "_diffHeightShape");
+            var shape = Field<(bool Wrap, bool Split, float Width, int Rows, int Review)>(app, "_diffHeightShape");
 
             Assert.Equal(laidOut, shape.Width, 1);
         });
@@ -332,7 +332,7 @@ public class DiffWrapTests
             var label = CodeLabels(session).FirstOrDefault(l => RowOf(l, Body(app)) is not null)
                 ?? throw new Xunit.Sdk.XunitException("no code label on screen");
             float actual = label.Layout.AbsoluteContentBox.Width;
-            var shape = Field<(bool Wrap, bool Split, float Width, int Rows)>(app, "_diffHeightShape");
+            var shape = Field<(bool Wrap, bool Split, float Width, int Rows, int Review)>(app, "_diffHeightShape");
 
             Assert.True(shape.Width <= actual + 0.5f,
                 $"rows were measured at {shape.Width:0.0}px but the text only gets {actual:0.0}px "

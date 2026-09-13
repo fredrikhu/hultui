@@ -161,6 +161,12 @@ it opens and rewrites the user's real settings.
   helper that turns an element into a point, do the same.
 - **Not everything has an accessible name.** The pane splitter is a bare box with a cursor and
   no label, so `@` cannot find it — take a `shot`, read the x off it, and drag by coordinates.
+- **`@` cannot reach inside a virtualised list's rows.** A `VirtualListElement` exposes its
+  *items* to the accessibility tree (one `ListItem` per item, named from the item), not the
+  elements it realized for them — so a button, a field or a card inside a diff row, a branch
+  row or a file row is invisible to `@` and to `dump`, however it is named. Junction's review
+  composer, thread replies and Resolve buttons live there. Take a `shot` and click by
+  coordinates; the header, the strips and the panel buttons outside the list are still `@`-able.
 - **Junction's view keys are Digit1–Digit6**: Overview, History, Commit, Changes, Branches,
   Tags.
 - **`/tmp` in the Bash tool is not `/tmp` in PowerShell.** Git Bash maps it to

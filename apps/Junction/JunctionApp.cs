@@ -855,6 +855,7 @@ public partial class JunctionApp : Component, IDisposable
     protected override void OnAfterBuild()
     {
         SettleDiffScrollbar();
+        ServiceReviewAfterBuild();
 
         if (_pendingPaletteFocus)
         {
@@ -1047,6 +1048,11 @@ public partial class JunctionApp : Component, IDisposable
     /// null when fewer than two selected commits exist in the loaded history.</summary>
     private (string BaseHash, string HeadHash)? SelectedRange()
     {
+        // A merge request under review is compared between its own base and head — the
+        // refs GitLab computed its diff from, so every position sent back matches.
+        if (_review is { Ready: true } review)
+            return (review.BaseSha, review.HeadSha);
+
         // A branch-tab compare resolves its two tips directly, so the diff works
         // even when a tip isn't in the loaded (filtered) history list.
         if (BranchCompareActive())
@@ -1067,6 +1073,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         if (PathEquals(path, _activeRepoPath)) return;
         _activeRepoPath = path;
+        _review = null;             // a review belongs to the repository it was opened in
         SetCommitSelection(null);   // reset selection; History reloads and picks first
         _settings.ActiveRepoPath = path;
         Persist();
@@ -1486,6 +1493,14 @@ public partial class JunctionApp : Component, IDisposable
             && View is JunctionView.Commit or JunctionView.Files)
         {
             MoveCommitSelection(e.Key == KeyCode.Up ? -1 : 1);
+            e.StopPropagation = true;
+            return;
+        }
+
+        // Reviewing a merge request: the arrows are the caret's, c n p e act on the threads,
+        // and Esc backs out one layer at a time — ahead of the file-tree keys below.
+        if (HandleReviewKey(e))
+        {
             e.StopPropagation = true;
             return;
         }
