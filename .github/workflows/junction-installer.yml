@@ -112,8 +112,11 @@ jobs:
           & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\Junction\Installer\junction.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # A convenience copy: the release below attaches the installer from the workspace, so
+      # a failed upload (the account's artifact quota, hit on 2026-09-13) must not stop it.
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
+        continue-on-error: true
         with:
           name: Junction-Setup-${{ steps.version.outputs.version }}
           path: apps/Junction/Installer/Output/*.exe
