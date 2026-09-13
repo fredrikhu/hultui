@@ -117,8 +117,11 @@ jobs:
           & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\Meridian\Meridian\Installer\meridian.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # A convenience copy: the release step attaches the installer from the workspace, so a
+      # failed upload (the account's artifact quota) must not stop it.
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
+        continue-on-error: true
         with:
           name: Meridian-Setup-${{ steps.version.outputs.version }}
           path: apps/Meridian/Meridian/Installer/Output/*.exe
