@@ -150,7 +150,7 @@ public partial class JunctionApp
             .Children(Ui.Icon(Icons.Bell, 14f, Nocturne.Accent100)));
         header.AddChild(Text.New($"To do · {todos.Count}").FontSize(14f).FontWeight(FontWeight.Medium).FlexGrow(1));
         if (_todoBusy is { } busy)
-            header.AddChild(DisabledButton(busy, Icons.CircleNotch));
+            header.AddChild(BusyButton(busy));
         else if (todos.Count > 0)
         {
             var all = Ui.GhostButton("Mark all done", Icons.Check, MarkAllTodosDone, 12f);
@@ -173,10 +173,8 @@ public partial class JunctionApp
         var footer = Flex.Row(gap: 16).AlignItems(AlignItems.Center)
             .Padding(new Thickness(8, 14, 8, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
-        footer.AddChild(Hint("↑ ↓", "navigate"));
-        footer.AddChild(Hint("↵", "open"));
-        footer.AddChild(Hint("d", "done"));
-        footer.AddChild(Hint("Esc", "close"));
+        foreach (var (keys, word) in Shortcuts.Legend("To do"))
+            footer.AddChild(Hint(keys, word));
         card.AddChild(footer);
 
         backdrop.AddChild(card);

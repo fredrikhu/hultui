@@ -201,7 +201,7 @@ public partial class JunctionApp
         var card = Flex.Row(gap: 12).AlignItems(AlignItems.Center)
             .Padding(new Thickness(13, 14, 13, 14)).CornerRadius(Nocturne.RadiusMd)
             .Background(Nocturne.Accent900).BorderColor(Nocturne.Accent700).BorderWidth(1f);
-        card.AddChild(Ui.Icon(Icons.CircleNotch, 20f, Nocturne.Accent300));
+        card.AddChild(Spinner(20f, Nocturne.Accent300));
         var text = Flex.Column(gap: 2).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0));
         text.AddChild(Text.New("Waiting for the browser…").FontSize(13f).FontWeight(FontWeight.Medium));
         text.AddChild(Text.New($"Finish signing in to gitlab.com in the window that just opened. Junction is listening on localhost:{GitLabOAuth.DefaultPort} for the redirect.")
@@ -292,8 +292,7 @@ public partial class JunctionApp
         bool canTest = card.Token.Trim().Length > 0 && card.State != HostCardState.Testing;
         var test = canTest
             ? Ui.SecondaryButton("Test", Icons.PlugsConnected, TestHostCard, 12f)
-            : DisabledButton(card.State == HostCardState.Testing ? "Testing…" : "Test",
-                card.State == HostCardState.Testing ? Icons.CircleNotch : Icons.PlugsConnected);
+            : card.State == HostCardState.Testing ? BusyButton("Testing…") : DisabledButton("Test", Icons.PlugsConnected);
         test.Key = "gitlab-host-test-" + (canTest ? "on" : "off");
         test.AccessibleName = "Test";
         tokenRow.AddChild(test.FlexShrink(0));

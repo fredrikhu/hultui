@@ -7,7 +7,9 @@ namespace Junction;
 /// </summary>
 public static class Shortcuts
 {
-    public sealed record Entry(string Group, string Keys, string What);
+    /// <param name="Short">The word a panel's legend row uses for the key, when it carries
+    /// one; null keeps the key out of the legends.</param>
+    public sealed record Entry(string Group, string Keys, string What, string? Short = null);
 
     public static readonly IReadOnlyList<Entry> All =
     [
@@ -33,28 +35,34 @@ public static class Shortcuts
         new("Branches", "p", "Push"),
         new("Branches", "m", "Create or open the merge request"),
 
-        new("Merge requests", "/", "Search"),
-        new("Merge requests", "↑ ↓ ↵", "Move · open"),
-        new("Merge requests", "c", "Checkout locally"),
-        new("Merge requests", "r", "Review in the diff"),
-        new("Merge requests", "a", "Approve or revoke"),
-        new("Merge requests", "o", "Open in the browser"),
-        new("Merge requests", "Esc", "Back · close"),
+        new("Merge requests", "/", "Search", "search"),
+        new("Merge requests", "↑ ↓ ↵", "Move · open", "open"),
+        new("Merge requests", "c", "Checkout locally", "checkout locally"),
+        new("Merge requests", "r", "Review in the diff", "review"),
+        new("Merge requests", "a", "Approve or revoke", "approve"),
+        new("Merge requests", "o", "Open in the browser", "open in browser"),
+        new("Merge requests", "Esc", "Back · close", "back"),
 
-        new("Review", "↑ ↓", "Move the caret"),
-        new("Review", "⇧ ↑ ↓", "Extend the range"),
-        new("Review", "c", "Comment on the line or range"),
-        new("Review", "n p", "Next / previous unresolved thread"),
-        new("Review", "e", "Expand or collapse every thread"),
+        new("Review", "↑ ↓", "Move the caret", "caret"),
+        new("Review", "⇧ ↑ ↓", "Extend the range", "extend range"),
+        new("Review", "c", "Comment on the line or range", "comment"),
+        new("Review", "n p", "Next / previous unresolved thread", "next/previous unresolved"),
+        new("Review", "e", "Expand or collapse every thread", "expand all"),
         new("Review", "Ctrl ↵", "Post the comment"),
         new("Review", "Esc", "Close the composer · clear the range · leave"),
 
-        new("To do", "↑ ↓ ↵", "Move · open"),
-        new("To do", "d", "Mark done"),
+        new("To do", "↑ ↓ ↵", "Move · open", "open"),
+        new("To do", "d", "Mark done", "done"),
+        new("To do", "Esc", "Close", "close"),
     ];
 
     /// <summary>The groups, in display order.</summary>
     public static IEnumerable<string> Groups => All.Select(e => e.Group).Distinct();
+
+    /// <summary>A panel's legend row: the group's keys that carry a short word, as key and
+    /// word pairs, in table order.</summary>
+    public static IEnumerable<(string Keys, string Word)> Legend(string group) =>
+        All.Where(e => e.Group == group && e.Short is not null).Select(e => (e.Keys, e.Short!));
 
     /// <summary>The keys bound to one description in one group — for a tooltip that names
     /// its key, so it cannot drift from the pane.</summary>

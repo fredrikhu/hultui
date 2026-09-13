@@ -296,6 +296,15 @@ public sealed class ExternalToolOptions
     /// Windows Terminal when it is there, the configured interpreter otherwise.</summary>
     public TerminalPreset Terminal { get; set; } = TerminalPreset.System;
 
+    /// <summary>The three-way tool the conflicts view can hand a file to. None hides the
+    /// button; Custom runs <see cref="ExternalMergeToolPath"/> with
+    /// <see cref="ExternalMergeToolArgs"/> (<c>{base} {local} {remote} {merged}</c>).</summary>
+    public MergeToolPreset MergeTool { get; set; } = MergeToolPreset.None;
+
+    /// <summary>A command of the reader's own, offered on file rows: <c>$file</c>, <c>$line</c>
+    /// and <c>$repo</c> are filled in. Empty hides the entry.</summary>
+    public string CustomCommand { get; set; } = "";
+
     public ExternalToolOptions Clone() => new()
     {
         DiffToolPreset = DiffToolPreset,
@@ -306,7 +315,19 @@ public sealed class ExternalToolOptions
         Editor = Editor,
         EditorCommand = EditorCommand,
         Terminal = Terminal,
+        MergeTool = MergeTool,
+        CustomCommand = CustomCommand,
     };
+}
+
+public enum MergeToolPreset
+{
+    None,
+    VSCode,
+    BeyondCompare,
+    Meld,
+    KDiff3,
+    Custom,
 }
 
 public enum EditorPreset
@@ -360,12 +381,17 @@ public sealed class AppearanceOptions
     /// so the lines do not crowd as it grows.</summary>
     public float CodeFontSize { get; set; } = 12f;
 
+    /// <summary>How many columns a tab advances to in the diff. The text is expanded for
+    /// drawing and measuring only; a copy still carries the tabs.</summary>
+    public int TabWidth { get; set; } = 4;
+
     public AppearanceOptions Clone() => new()
     {
         Theme = Theme,
         UiScale = UiScale,
         CodeFont = CodeFont,
         CodeFontSize = CodeFontSize,
+        TabWidth = TabWidth,
     };
 }
 

@@ -173,6 +173,20 @@ public partial class JunctionApp
             OptionToggle(_diffWrap, ToggleDiffWrap, "Wrap long lines")));
         col.AddChild(OptionRow("Ignore whitespace", "Hide whitespace-only changes (git --ignore-all-space). Line staging is off while this is on. The i key switches.",
             OptionToggle(_settings.Git.IgnoreWhitespace, ToggleIgnoreWhitespace, "Ignore whitespace")));
+
+        var tabs = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        foreach (var width in new[] { 2, 4, 8 })
+        {
+            int w = width;
+            tabs.AddChild(OptionChip(w.ToString(), _settings.Appearance.TabWidth == w, () =>
+            {
+                _settings.Appearance.TabWidth = w;
+                Persist();
+                InvalidateCodeMetrics();   // widths and wrapped heights were measured with the old tabs
+                MarkDirty();
+            }));
+        }
+        col.AddChild(OptionRow("Tab width", "How many columns a tab advances to in the diff. A copy keeps the tabs.", tabs));
         return col;
     }
 
@@ -232,7 +246,66 @@ public partial class JunctionApp
         }
         col.AddChild(OptionRow("Terminal", "What \"Open in terminal\" starts, in the repository's folder.", Box.New()));
         col.AddChild(IndentedRow(null, terminals));
+
+        var mergeTools = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
+        mergeTools.FlexWrap(FlexWrap.Wrap);
+        foreach (var (preset, label) in MergeTools)
+        {
+            var p = preset;
+            mergeTools.AddChild(OptionChip(label, t.MergeTool == p, () => { t.MergeTool = p; Persist(); MarkDirty(); }));
+        }
+        col.AddChild(OptionRow("Merge tool", "The three-way tool the conflicts view can hand a file to; the pane reloads the file when the tool closes.", Box.New()));
+        col.AddChild(IndentedRow(null, mergeTools));
+        if (t.MergeTool == MergeToolPreset.Custom)
+        {
+            col.AddChild(IndentedRow("Program", OptionTextField(t.ExternalMergeToolPath, "kdiff3", v => t.ExternalMergeToolPath = v, "merge-tool-path")));
+            col.AddChild(IndentedRow("Arguments", OptionTextField(t.ExternalMergeToolArgs, "{base} {local} {remote} -o {merged}", v => t.ExternalMergeToolArgs = v, "merge-tool-args")));
+        }
+
+        col.AddChild(OptionRow("Custom command", "Offered on file rows in Changes and Files. $file, $line and $repo are filled in; empty hides the entry.", Box.New()));
+        col.AddChild(IndentedRow("Command", OptionTextField(t.CustomCommand, "code --goto $file:$line", v => t.CustomCommand = v, "custom-command")));
         return col;
+    }
+
+    private static readonly (MergeToolPreset Preset, string Label)[] MergeTools =
+    [
+        (MergeToolPreset.None, "None"),
+        (MergeToolPreset.VSCode, "VS Code"),
+        (MergeToolPreset.BeyondCompare, "Beyond Compare"),
+        (MergeToolPreset.Meld, "Meld"),
+        (MergeToolPreset.KDiff3, "KDiff3"),
+        (MergeToolPreset.Custom, "Custom"),
+    ];
+
+    /// <summary>A mono text field for a command or a path; persisted when Options closes,
+    /// like the code font — a file write per keystroke is not a setting saving.</summary>
+    private static Element OptionTextField(string value, string placeholder, Action<string> onChange, string automationId)
+    {
+        var field = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
+            .Height(32).Padding(new Thickness(0, 10, 0, 10)).FlexGrow(1)
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
+            .CornerRadius(Nocturne.RadiusMd);
+        var input = TextInput.New(value)
+            .PlaceholderText(placeholder)
+            .OnTextChanged(onChange)
+            .Height(Dimension.Px(26)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .FontFamily(Fonts.Mono).FontSize(12f).TextColor(Nocturne.Text);
+        input.AutomationId = automationId;
+        field.AddChild(input);
+        return field;
+    }
+
+    /// <summary>Runs the custom command on a file — from the Files and Changes menus.</summary>
+    private async void RunCustomCommandOn(string? fullPath, int? line)
+    {
+        var command = _settings.ExternalTools.CustomCommand;
+        var repo = _activeRepoPath;
+        var (ok, error) = await Task.Run(() =>
+        {
+            var started = Platform.ShellLauncher.RunCustomCommand(command, repo, fullPath, line, out var err);
+            return (started, err);
+        });
+        if (!ok) Flash(string.IsNullOrEmpty(error) ? "Could not run the custom command" : error);
     }
 
     // ── Keyboard shortcuts ───────────────────────────────────────────────────────────

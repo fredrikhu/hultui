@@ -79,6 +79,43 @@ public class ReviewTests
         });
     }
 
+    /// <summary>A refresh that brings a thread the reader has not seen tags it <i>new</i>
+    /// until the card is opened; the threads the review started with never are.</summary>
+    [Fact]
+    public void AThreadARefreshBringsInIsNewUntilOpened()
+    {
+        int loads = 0;
+        var handler = Routes()
+            .Map(Discussions, _ =>
+            {
+                loads++;
+                var json = FakeGitLabHandler.Recording("discussions");
+                if (loads > 1)
+                    json = "[" + "{\"id\":\"late\",\"individual_note\":false,\"notes\":[{\"id\":7001,\"type\":\"DiffNote\",\"body\":\"Late to the party.\",\"author\":{\"id\":9,\"username\":\"tbrandt\",\"name\":\"Tomas Brandt\"},\"created_at\":\"2026-09-12T12:00:00.000Z\",\"system\":false,\"resolvable\":true,\"resolved\":false,\"position\":{\"position_type\":\"text\",\"old_path\":\"src/api/Orders.cs\",\"new_path\":\"src/api/Orders.cs\",\"new_line\":20}}]},"
+                        + json.TrimStart('[');
+                return FakeGitLabHandler.Json(json);
+            });
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            Assert.Null(Tag(session, "new"));
+
+            app.RefreshHosted(repo.Path);
+            session.PumpUntil(() => TreeHas(session, "Late to the party."), TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+            Assert.NotNull(Tag(session, "new"));
+
+            // Opening it is having seen it.
+            var card = LayoutProbe.Descendants<Element>(Root(session)!, e => e.AutomationId == "review-thread").First();
+            session.Window.Click(card);
+            session.PumpUntil(() => Tag(session, "new") is null, TimeSpan.FromSeconds(10));
+        }, handler);
+
+        static TextElement? Tag(HeadlessSession session, string word) =>
+            Root(session) is { } root ? LayoutProbe.Descendants<TextElement>(root, t => t.Content == word).FirstOrDefault() : null;
+    }
+
     [Fact]
     public void AThreadCardIsExactlyAsTallAsTheRowTheListGivesIt()
     {

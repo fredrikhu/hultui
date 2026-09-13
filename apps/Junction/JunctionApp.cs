@@ -760,6 +760,7 @@ public partial class JunctionApp : Component, IDisposable
     public override Element Build()
     {
         SyncWindowTitle();
+        _spinnerWanted = false;   // set again by any Spinner() built below
 
         // Track the revision signal so a Rerender() re-runs Build through the
         // Effect (re-subscribing to the active repo's loaders — see _revision).
@@ -861,6 +862,7 @@ public partial class JunctionApp : Component, IDisposable
         SettleDiffScrollbar();
         ServiceReviewAfterBuild();
         ServiceBranchFromIssue();
+        ServiceSpinner();
 
         if (_pendingPaletteFocus)
         {

@@ -50,23 +50,7 @@ public partial class JunctionApp
         var list = _remoteDetails.Value;
         var loading = _remoteDetails.IsLoading && list.Count == 0;
 
-        var backdrop = Box.New()
-            .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
-            .Background(new Color(0, 0, 0, 140))
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(24))
-            .ZIndex(42);
-        backdrop.Position.Type = PositionType.Absolute;
-        backdrop.Position.Top = Dimension.Px(0);
-        backdrop.Position.Left = Dimension.Px(0);
-        backdrop.On<ClickEvent>(e => { e.StopPropagation = true; CloseRemotes(); });
-
-        var card = Flex.Column(gap: 0)
-            .Width(680).MaxHeight(560)
-            .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusLg);
-        card.On<ClickEvent>(e => e.StopPropagation = true);
+        var card = PanelCard(680, 560);
 
         card.AddChild(BuildRemotesHeader());
         card.AddChild(BuildRemotesToolbar());
@@ -81,26 +65,10 @@ public partial class JunctionApp
                 scroll.AddChild(RemoteRow(r));
         card.AddChild(scroll);
 
-        backdrop.AddChild(card);
-        return backdrop;
+        return PanelBackdrop(card, CloseRemotes);
     }
 
-    private Element BuildRemotesHeader()
-    {
-        var repoName = System.IO.Path.GetFileName(_activeRepoPath.TrimEnd('/', '\\'));
-        var bar = Flex.Row(gap: 10).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(14, 18, 14, 18))
-            .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 0, 1, 0));
-
-        bar.AddChild(Ui.Icon(Icons.Cloud, 16f, Nocturne.Accent300).FlexShrink(0));
-        var titleCol = Flex.Column(gap: 1).FlexGrow(1);
-        titleCol.AddChild(Text.New("Remotes").FontSize(16f).FontWeight(FontWeight.SemiBold));
-        titleCol.AddChild(Text.New(repoName).FontSize(11.5f).TextColor(Nocturne.On(0.5))
-            .OverflowMode(TextOverflow.Ellipsis).MaxLines(1));
-        bar.AddChild(titleCol);
-        bar.AddChild(Ui.IconButton(Icons.WinClose, CloseRemotes, "Close (Esc)", 30f).FlexShrink(0));
-        return bar;
-    }
+    private Element BuildRemotesHeader() => PanelHeader(Icons.Cloud, "Remotes", ActiveRepoName, CloseRemotes);
 
     private Element BuildRemotesToolbar()
     {

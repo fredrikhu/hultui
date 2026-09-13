@@ -280,6 +280,18 @@ public partial class JunctionApp
     }
 
     // Sticky summary + whole-file escapes above the regions.
+    /// <summary>Hands the file to the chosen merge tool and reloads it once the tool closes,
+    /// so what the tool wrote is what the pane shows.</summary>
+    private async void OpenConflictInMergeTool(string path)
+    {
+        if (ActiveRepo is not { } repo) return;
+        var tools = _settings.ExternalTools;
+        Flash($"Opening {path} in {ExternalMergeLauncher.Name(tools)}…");
+        var (ok, err) = await Task.Run(() => (ExternalMergeLauncher.TryRun(tools, repo, path, out var e), e));
+        if (!ok) { Flash(string.IsNullOrEmpty(err) ? "Could not open the merge tool" : err); return; }
+        RefreshAll();
+    }
+
     private Element BuildConflictActionBar(string path, ConflictDocument doc)
     {
         int total = doc.Hunks.Count;
@@ -297,6 +309,10 @@ public partial class JunctionApp
         bar.AddChild(ConflictButton("All ours", null, () => ChooseAll(doc, ConflictChoice.Ours), Nocturne.Accent300));
         bar.AddChild(ConflictButton("All theirs", null, () => ChooseAll(doc, ConflictChoice.Theirs), Nocturne.Accent2_300));
         bar.AddChild(ConflictButton("Open in VS Code", Icons.FileCode, () => OpenConflictInVsCode(path), Nocturne.On(0.7)));
+        // The three-way tool from Options › External tools, when one is chosen.
+        if (ExternalMergeLauncher.Command(_settings.ExternalTools) is not null)
+            bar.AddChild(ConflictButton($"Open in {ExternalMergeLauncher.Name(_settings.ExternalTools)}", Icons.GitMerge,
+                () => OpenConflictInMergeTool(path), Nocturne.On(0.7)));
 
         var save = ConflictButton(all ? "Mark resolved" : $"Resolve {total - done} more",
             Icons.Check, all ? () => ApplyConflictResolution(path, doc) : null,

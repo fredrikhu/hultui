@@ -75,6 +75,11 @@ public partial class JunctionApp
         public Dictionary<string, (int Threads, int Unresolved)> ByFile = new(StringComparer.Ordinal);
 
         public int Pending;   // draft notes on the server, mine
+        /// <summary>The threads seen on the first load. A thread a later refresh brings in
+        /// carries a <i>new</i> tag until it is opened, so a live reload says what it
+        /// changed rather than moving the cards under the reader.</summary>
+        public readonly HashSet<string> KnownThreads = new(StringComparer.Ordinal);
+        public bool ThreadsSeeded;
         /// <summary>When the drafts were last submitted or discarded; a drafts value loaded
         /// before that is stale and is read as none.</summary>
         public DateTimeOffset DraftsSettledAt = DateTimeOffset.MinValue;
@@ -108,7 +113,8 @@ public partial class JunctionApp
         bool Outdated,
         string Where,
         long? FirstNoteId,
-        long? DraftId);
+        long? DraftId,
+        bool New = false);
 
     private ReviewSession? _review;
     private readonly Ref<TextAreaElement> _reviewComposerRef = new();
@@ -330,8 +336,32 @@ public partial class JunctionApp
             list.Add((new ThreadView("draft:" + draft.Id, null, [new ThreadNote(me, null, draft.Note, true)], false, null,
                 true, false, WhereOf(draft.Position), null, draft.Id), draft.Position));
         }
+
+        // The first loaded set is what the reader started from; anything a refresh adds
+        // after that is new until opened. Drafts are the reader's own and never new.
+        var discussionsHosted = DiscussionsFor(rv.Path, rv.Iid);
+        if (discussionsHosted.Loaded)
+        {
+            if (!rv.ThreadsSeeded)
+            {
+                foreach (var (view, _) in list) rv.KnownThreads.Add(view.Id);
+                rv.ThreadsSeeded = true;
+            }
+            else
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var (view, pos) = list[i];
+                    if (!view.Pending && !rv.KnownThreads.Contains(view.Id))
+                        list[i] = (view with { New = true }, pos);
+                }
+            }
+        }
         return list;
     }
+
+    /// <summary>Opening a thread is having seen it: the <i>new</i> tag comes off.</summary>
+    private static void MarkThreadSeen(ReviewSession rv, string id) => rv.KnownThreads.Add(id);
 
     private static string WhereOf(GlPosition pos)
     {
@@ -459,6 +489,7 @@ public partial class JunctionApp
                 signature.Add(t.Notes.Count);
                 signature.Add(t.Resolved);
                 signature.Add(t.Outdated);
+                signature.Add(t.New);
                 signature.Add(ThreadExpanded(rv, t));
                 foreach (var n in t.Notes) signature.Add(n.Body.Length);
             }
@@ -710,6 +741,7 @@ public partial class JunctionApp
             line.AddChild(Text.New(FirstTextLine(first.Body)).FontSize(12f).TextColor(Nocturne.On(0.7))
                 .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0)).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
             if (t.Resolved) line.AddChild(Text.New($"resolved by {t.ResolvedBy}").FontSize(11f).TextColor(Nocturne.On(0.45)).FlexShrink(0));
+            if (t.New) line.AddChild(Ui.Tag("new", Nocturne.Accent, Nocturne.Bg, 9.5f));
             if (t.Pending) line.AddChild(Ui.Tag("pending", Nocturne.Accent800, Nocturne.Accent100, 9.5f));
             if (t.Outdated) line.AddChild(Ui.Tag("outdated", Nocturne.Neutral800, Nocturne.Neutral100, 9.5f));
             line.AddChild(Ui.Mono($"{t.Notes.Count} note{(t.Notes.Count == 1 ? "" : "s")} · {(t.Outdated ? "was " : "")}{t.Where}", 10.5f, Nocturne.On(0.45)).FlexShrink(0));
@@ -722,6 +754,7 @@ public partial class JunctionApp
             var head = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(CardLineHeight);
             head.AddChild(Text.New($"Thread on {(t.Outdated ? "what was " : "")}{t.Where}").FontSize(12.5f).FontWeight(FontWeight.Medium)
                 .FlexShrink(1).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
+            if (t.New) head.AddChild(Ui.Tag("new", Nocturne.Accent, Nocturne.Bg, 9.5f));
             if (t.Pending) head.AddChild(Ui.Tag("pending", Nocturne.Accent800, Nocturne.Accent100, 9.5f));
             if (t.Resolved) head.AddChild(Ui.Tag($"resolved by {t.ResolvedBy}", Nocturne.Neutral800, Nocturne.Neutral100, 9.5f));
             if (t.Outdated) head.AddChild(Ui.Tag("outdated", Nocturne.Neutral800, Nocturne.Neutral100, 9.5f));
@@ -792,13 +825,19 @@ public partial class JunctionApp
             }
             card.AddChild(footer);
         }
-        card.On<ClickEvent>(_ => { if (rv.FocusThread != t.Id) { rv.FocusThread = t.Id; MarkDirty(); } });
+        card.On<ClickEvent>(_ =>
+        {
+            bool wasNew = t.New;
+            MarkThreadSeen(rv, t.Id);
+            if (rv.FocusThread != t.Id || wasNew) { rv.FocusThread = t.Id; MarkDirty(); }
+        });
         outer.AddChild(card);
         return outer;
     }
 
     private void ToggleThread(ReviewSession rv, string id, bool open)
     {
+        MarkThreadSeen(rv, id);
         if (open) rv.Expanded.Add(id);
         else { rv.Expanded.Remove(id); rv.ExpandAll = false; if (rv.FocusThread == id) rv.FocusThread = null; }
         rv.HeightVersion++;
@@ -834,7 +873,7 @@ public partial class JunctionApp
 
         var buttons = Flex.Row(gap: 8).AlignItems(AlignItems.Center).Height(ComposerButtonsHeight);
         if (rv.Busy is { } busy)
-            buttons.AddChild(DisabledButton(busy, Icons.CircleNotch));
+            buttons.AddChild(BusyButton(busy));
         else
         {
             var add = Ui.PrimaryButton(rv.ReviewMode ? "Add to review" : "Add comment", null, () => SubmitComposer(rv), 11.5f)
@@ -1066,7 +1105,7 @@ public partial class JunctionApp
                 : $"{rv.Pending} comment{(rv.Pending == 1 ? "" : "s")} pending · only you can see them until you submit")
             .FontSize(12f).TextColor(Nocturne.Accent100).FlexGrow(1).FlexShrink(1).MaxLines(1).OverflowMode(TextOverflow.Ellipsis));
         if (rv.Busy is { } busy)
-            strip.AddChild(DisabledButton(busy, Icons.CircleNotch));
+            strip.AddChild(BusyButton(busy));
         else
         {
             var submit = Ui.PrimaryButton("Submit review", Icons.CaretDown, () => { }, 12f);
@@ -1252,7 +1291,7 @@ public partial class JunctionApp
         }
         else
         {
-            body.AddChild(Ui.Icon(Icons.CircleNotch, 22f, Nocturne.On(0.35)));
+            body.AddChild(Spinner(22f, Nocturne.On(0.35)));
             body.AddChild(Text.New(rv.Status).FontSize(12f).TextColor(Nocturne.On(0.45)));
         }
         col.AddChild(body);
@@ -1265,11 +1304,7 @@ public partial class JunctionApp
             .Padding(new Thickness(6, 14, 6, 14))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
         legend.AutomationId = "review-legend";
-        foreach (var (key, what) in new[]
-                 {
-                     ("↑↓", "caret"), ("⇧↑↓", "extend range"), ("c", "comment"), ("n p", "next/previous unresolved"),
-                     ("e", "expand all"), ("drag + or ⇧-click", "for a range"),
-                 })
+        foreach (var (key, what) in Shortcuts.Legend("Review").Append(("drag + or ⇧-click", "for a range")))
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));

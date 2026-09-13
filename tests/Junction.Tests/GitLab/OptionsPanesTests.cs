@@ -50,6 +50,47 @@ public class OptionsPanesTests
     }
 
     [Fact]
+    public void MergeToolPresetsHaveTheirCommandsAndNoneHasNone()
+    {
+        Assert.Null(ExternalMergeLauncher.Command(new ExternalToolOptions()));
+        var code = ExternalMergeLauncher.Command(new ExternalToolOptions { MergeTool = MergeToolPreset.VSCode });
+        Assert.Equal("code", code!.Value.Program);
+        Assert.Contains("{merged}", code.Value.Args);
+        // Custom with no program is as good as none; with one, its arguments default to the four files.
+        Assert.Null(ExternalMergeLauncher.Command(new ExternalToolOptions { MergeTool = MergeToolPreset.Custom }));
+        var custom = ExternalMergeLauncher.Command(new ExternalToolOptions { MergeTool = MergeToolPreset.Custom, ExternalMergeToolPath = "mytool" });
+        Assert.Equal("{base} {local} {remote} {merged}", custom!.Value.Args);
+    }
+
+    /// <summary>Tabs are drawn at the width Options says and the model keeps them: the
+    /// label shows spaces, the search and a copy still see the line as git has it.</summary>
+    [Fact]
+    public void TabsAreDrawnAtTheChosenWidth()
+    {
+        Hosted((repo, session, app, settings) =>
+        {
+            session.Window.PressKey(KeyCode.Digit3);
+            session.PumpUntil(() => Code(session, "    x   y") is not null, TimeSpan.FromSeconds(20));
+
+            app.OpenOptions(OptionsSection.CodeAndDiff);
+            session.PumpFrames(2);
+            session.Window.Click(Named(session, "8"));
+            session.PumpFrames(2);
+            Assert.Equal(8, settings.Appearance.TabWidth);
+            session.Window.PressKey(KeyCode.Escape);
+            session.PumpUntil(() => Code(session, "        x       y") is not null, TimeSpan.FromSeconds(20));
+        }, prepare: repo =>
+        {
+            repo.Write("tabs.txt", "\tx\ty\n");
+            repo.Git("add", "tabs.txt");
+            repo.Git("commit", "-q", "-m", "tabs");
+        });
+
+        static TextElement? Code(HeadlessSession session, string content) =>
+            Root(session) is { } root ? LayoutProbe.Descendants<TextElement>(root, t => t.Content == content).FirstOrDefault() : null;
+    }
+
+    [Fact]
     public void GeneralWritesItsSettingsAsTheyAreTouched()
     {
         Hosted((_, session, app, settings) =>
@@ -228,10 +269,12 @@ public class OptionsPanesTests
                 "[{\"id\":7781,\"name\":\"core-api\",\"path\":\"core-api\",\"path_with_namespace\":\"acme/core-api\",\"http_url_to_repo\":\"https://gitlab.com/acme/core-api.git\",\"visibility\":\"private\",\"last_activity_at\":\"2026-09-12T09:00:00.000Z\",\"namespace\":{\"id\":1,\"name\":\"acme\",\"path\":\"acme\",\"full_path\":\"acme\",\"kind\":\"group\"}}," +
                 "{\"id\":7782,\"name\":\"web-client\",\"path\":\"web-client\",\"path_with_namespace\":\"acme/web-client\",\"http_url_to_repo\":\"https://gitlab.com/acme/web-client.git\",\"visibility\":\"internal\",\"namespace\":{\"id\":1,\"name\":\"acme\",\"path\":\"acme\",\"full_path\":\"acme\",\"kind\":\"group\"}}]");
 
-    private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp, JunctionSettingsData> body, Action<JunctionSettingsData>? tune = null)
+    private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp, JunctionSettingsData> body, Action<JunctionSettingsData>? tune = null,
+        Action<TempRepo>? prepare = null)
     {
         using var repo = TempRepo.CreateWithInitialCommit();
         repo.Git("remote", "add", "origin", "https://gitlab.com/acme/core-api.git");
+        prepare?.Invoke(repo);
         var handler = Routes();
 
         var store = new InMemoryCredentialStore();

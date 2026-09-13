@@ -105,6 +105,43 @@ public static class ShellLauncher
     public static bool OpenTerminal(string directory, out string error) =>
         OpenTerminal(directory, TerminalPreset.System, out error);
 
+    /// <summary>
+    /// Runs the reader's own command from Options › External tools with <c>$file</c>,
+    /// <c>$line</c> and <c>$repo</c> filled in — each quoted, so a path with a space stays
+    /// one argument. The first word is the program; the shell is not involved.
+    /// </summary>
+    public static bool RunCustomCommand(string command, string repo, string? file, int? line, out string error)
+    {
+        error = "";
+        var expanded = command
+            .Replace("$file", Quote(file ?? ""))
+            .Replace("$line", (line ?? 0).ToString())
+            .Replace("$repo", Quote(repo))
+            .Trim();
+        if (expanded.Length == 0) { error = "No custom command is set."; return false; }
+        int space = expanded.IndexOf(' ');
+        var program = space < 0 ? expanded : expanded[..space];
+        var args = space < 0 ? "" : expanded[(space + 1)..];
+        try
+        {
+            var psi = new ProcessStartInfo(program.Trim('"'))
+            {
+                Arguments = args,
+                WorkingDirectory = repo,
+                UseShellExecute = true,
+            };
+            Process.Start(psi)?.Dispose();
+            return true;
+        }
+        catch (Exception ex) when (IsLaunchFailure(ex))
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static string Quote(string s) => s.Contains(' ') ? "\"" + s + "\"" : s;
+
     /// <summary>As above, with Options › External tools' choice first: a named terminal is
     /// tried before the machine's own order, which stays the fallback.</summary>
     public static bool OpenTerminal(string directory, TerminalPreset preset, out string error)

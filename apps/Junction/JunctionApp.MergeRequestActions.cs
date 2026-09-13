@@ -34,7 +34,7 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
 
         var checkout = _mrBusy is { } busy && _mrBusyAction is "checkout"
-            ? DisabledButton(busy, Icons.CircleNotch)
+            ? BusyButton(busy)
             : Ui.PrimaryButton("Checkout locally", Icons.BendDownRight, () => CheckoutMergeRequest(path, mr), 12.5f);
         checkout.Key = "mr-checkout-" + (_mrBusyAction is "checkout" ? "off" : "on");
         checkout.AccessibleName = "Checkout locally";
@@ -105,7 +105,7 @@ public partial class JunctionApp
         BoxElement b;
         if (_mrBusyAction == action && _mrBusy is { } busy)
         {
-            b = (BoxElement)DisabledButton(busy, Icons.CircleNotch);
+            b = BusyButton(busy);
         }
         else
         {

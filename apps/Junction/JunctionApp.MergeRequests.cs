@@ -282,7 +282,7 @@ public partial class JunctionApp
         var legend = Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(8, 18, 8, 18))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(1, 0, 0, 0));
-        foreach (var (key, what) in new[] { ("/", "search"), ("↑ ↓ ↵", "open"), ("c", "checkout locally"), ("o", "open in browser") })
+        foreach (var (key, what) in Shortcuts.Legend("Merge requests").Where(l => l.Keys != "Esc" && l.Keys != "r" && l.Keys != "a"))
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));
@@ -586,7 +586,7 @@ public partial class JunctionApp
 
         var legend = Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0)
             .Padding(new Thickness(7, 18, 7, 18));
-        foreach (var (key, what) in new[] { ("c", "checkout"), ("r", "review"), ("a", "approve"), ("o", "open in browser"), ("Esc", "back") })
+        foreach (var (key, what) in Shortcuts.Legend("Merge requests").Where(l => l.Keys != "/" && l.Keys != "↑ ↓ ↵"))
             legend.AddChild(Flex.Row(gap: 4).AlignItems(AlignItems.Center).Children(
                 Text.New(key).FontSize(10.5f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.On(0.68)),
                 Text.New(what).FontSize(10.5f).TextColor(Nocturne.On(0.45))));

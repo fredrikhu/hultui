@@ -156,7 +156,7 @@ public static class ExternalDiffLauncher
     /// when <see cref="ProcessStartInfo.UseShellExecute"/> is false) cannot run a
     /// .cmd/.bat directly nor apply PATHEXT — so those are routed through cmd.exe.
     /// </summary>
-    private static void ConfigureExecutable(ProcessStartInfo psi, string executable, List<string> arguments)
+    internal static void ConfigureExecutable(ProcessStartInfo psi, string executable, List<string> arguments)
     {
         var resolved = ResolveOnPath(executable) ?? executable;
 
@@ -229,7 +229,7 @@ public static class ExternalDiffLauncher
             ? arg
             : "\"" + arg.Replace("\"", "\\\"") + "\"";
 
-    private static string Expand(string template, Dictionary<string, string> replacements)
+    internal static string Expand(string template, Dictionary<string, string> replacements)
     {
         var result = template;
         foreach (var replacement in replacements)
@@ -237,7 +237,7 @@ public static class ExternalDiffLauncher
         return result;
     }
 
-    private static IEnumerable<string> SplitArguments(string text)
+    internal static IEnumerable<string> SplitArguments(string text)
     {
         var args = new List<string>();
         var current = new System.Text.StringBuilder();

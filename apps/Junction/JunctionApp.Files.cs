@@ -766,6 +766,8 @@ public partial class JunctionApp
                 node.IsFolder ? "Open folder" : "Open",
                 () => LaunchFilesPath(node.Path)));
             items.Add(Item(Icons.FolderOpen, ShellLauncher.RevealLabel, () => RevealFilesPath(node.Path)));
+            if (!node.IsFolder && _settings.ExternalTools.CustomCommand.Trim().Length > 0)
+                items.Add(Item(Icons.TerminalWindow, "Run custom command", () => RunCustomCommandOn(onDisk, null)));
         }
         else
         {

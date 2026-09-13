@@ -352,7 +352,7 @@ public partial class JunctionApp
         string primaryLabel = f.Busy ? f.BusyLabel : needsPush ? "Push and create merge request" : "Create merge request";
         var primary = valid
             ? Ui.PrimaryButton(primaryLabel, Icons.GitPullRequest, SubmitCreateMr, 12.5f)
-            : DisabledButton(primaryLabel, f.Busy ? Icons.CircleNotch : Icons.GitPullRequest);
+            : f.Busy ? BusyButton(primaryLabel) : DisabledButton(primaryLabel, Icons.GitPullRequest);
         primary.Key = "create-mr-primary-" + (valid ? "on" : "off");
         primary.AccessibleName = "Create merge request";
         footer.AddChild(primary);

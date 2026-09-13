@@ -273,6 +273,51 @@ public partial class JunctionApp
     private TextElement CodeText(string text, Color color) =>
         Text.New(text).FontFamily(CodeFont).FontSize(DiffCodeSize).TextColor(color);
 
+    // ── Tabs ─────────────────────────────────────────────────────────────
+    // The diff draws and measures tabs expanded to the width Options › Code & diff says;
+    // the model keeps the tabs, so a copy and the search still see the line as git has it.
+    // A syntax or search span is an offset into the original line, so it is moved by the
+    // spaces the tabs before it became.
+
+    private int TabWidth => Math.Clamp(_settings.Appearance.TabWidth, 1, 16);
+
+    private string ExpandTabs(string text)
+    {
+        if (text.IndexOf('\t') < 0) return text;
+        int w = TabWidth;
+        var sb = new System.Text.StringBuilder(text.Length + 16);
+        int col = 0;
+        foreach (var c in text)
+        {
+            if (c == '\t') { int n = w - col % w; sb.Append(' ', n); col += n; }
+            else { sb.Append(c); col++; }
+        }
+        return sb.ToString();
+    }
+
+    private IReadOnlyList<HultUI.Core.Rendering.TextSpan>? RemapSpans(IReadOnlyList<HultUI.Core.Rendering.TextSpan>? spans, string original)
+    {
+        if (spans is null || spans.Count == 0 || original.IndexOf('\t') < 0) return spans;
+        // map[i] = where original index i lands in the expanded text; map[Length] = its end.
+        var map = new int[original.Length + 1];
+        int w = TabWidth, col = 0;
+        for (int i = 0; i < original.Length; i++)
+        {
+            map[i] = col;
+            col += original[i] == '\t' ? w - col % w : 1;
+        }
+        map[original.Length] = col;
+        var moved = new HultUI.Core.Rendering.TextSpan[spans.Count];
+        for (int i = 0; i < spans.Count; i++)
+        {
+            var s = spans[i];
+            int start = map[Math.Clamp(s.Start, 0, original.Length)];
+            int end = map[Math.Clamp(s.End, 0, original.Length)];
+            moved[i] = s with { Start = start, Length = Math.Max(0, end - start) };
+        }
+        return moved;
+    }
+
     /// <summary>Drops everything measured in the old code face: the per-row heights of a
     /// wrapped diff, the width of its longest line, and the monospace advance the wrap
     /// shortcut leans on. Called when the family or the size changes — none of those caches
@@ -340,9 +385,9 @@ public partial class JunctionApp
             if (r.Type is DiffRowType.Thread or DiffRowType.Composer or DiffRowType.Section) { heights[i] = ReviewRowHeight(r, cardText); continue; }
             if (!_diffWrap) { heights[i] = DiffRowHeight; continue; }
             float text = r.Type == DiffRowType.Split
-                ? Math.Max(WrappedHeight(r.Left?.Content, style, codeWidth),
-                           WrappedHeight(r.Right?.Content, style, codeWidth))
-                : WrappedHeight(r.Line?.Content, style, codeWidth);
+                ? Math.Max(WrappedHeight(ExpandTabs(r.Left?.Content ?? ""), style, codeWidth),
+                           WrappedHeight(ExpandTabs(r.Right?.Content ?? ""), style, codeWidth))
+                : WrappedHeight(ExpandTabs(r.Line?.Content ?? ""), style, codeWidth);
             // The label carries 2px of padding above and below it.
             heights[i] = Math.Max(DiffRowHeight, text + 4f);
         }
@@ -617,7 +662,8 @@ public partial class JunctionApp
         _diffLongestFor = key;
         _diffPan.Reset();
         _diffPan.ContentWidth = HorizontalPan.MeasureWidest(
-            rows.SelectMany(r => new[] { r.Line?.Content, r.Left?.Content, r.Right?.Content }),
+            rows.SelectMany(r => new[] { r.Line?.Content, r.Left?.Content, r.Right?.Content })
+                .Select(c => c is null ? null : ExpandTabs(c)),
             DiffCodeSize, CodeFont);
     }
 
@@ -913,9 +959,9 @@ public partial class JunctionApp
         // Clip rather than ellipsise: the line is scrollable now, so cutting it at the edge
         // says "there is more that way", where an ellipsis says "this is all there is".
         row.AddChild(DiffCodeCell(
-            CodeText(line.Content.Length == 0 ? " " : line.Content, code)
+            CodeText(line.Content.Length == 0 ? " " : ExpandTabs(line.Content), code)
                 .Selectable().SelectionGroup(_diffGroupUnified, rowIndex)
-                .Spans(spans)
+                .Spans(RemapSpans(spans, line.Content))
                 .Padding(new Thickness(2, UnifiedCodePadX, 2, 0))));
 
         if (selectable)
@@ -977,9 +1023,9 @@ public partial class JunctionApp
         half.AddChild(NumCell(num, 44f));
         // Both halves share one offset, so the two files stay aligned as they move.
         half.AddChild(DiffCodeCell(
-            CodeText(text, code).Selectable()
+            CodeText(ExpandTabs(text), code).Selectable()
                 .SelectionGroup(isLeft ? _diffGroupLeft : _diffGroupRight, rowIndex)
-                .Spans(spans)
+                .Spans(RemapSpans(spans, text))
                 .Padding(new Thickness(2, SplitCodePadX, 2, 0))));
         return half;
     }

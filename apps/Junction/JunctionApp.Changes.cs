@@ -784,6 +784,9 @@ public partial class JunctionApp
             OpenSelectedDiffExternally();
         }, "Ctrl D"));
         items.Add(Item(Icons.Copy, "Copy path", () => CopyToClipboard(f.Path)));
+        if (_settings.ExternalTools.CustomCommand.Trim().Length > 0)
+            items.Add(Item(Icons.TerminalWindow, "Run custom command",
+                () => RunCustomCommandOn(System.IO.Path.Combine(_activeRepoPath, f.Path.Replace('/', System.IO.Path.DirectorySeparatorChar)), null)));
 
         // Ignore / assume-unchanged apply to the worktree (unstaged) list.
         if (!isStaged)
