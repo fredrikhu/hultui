@@ -166,17 +166,23 @@ public partial class JunctionApp
     private async void DoMerge(string path, GlMergeRequest mr, bool squash, bool removeSource, bool whenPipelineSucceeds)
     {
         if (!BeginAction("merge", whenPipelineSucceeds ? "Setting auto-merge…" : "Merging…", path, out var client, out var remote)) return;
-        var failure = await Task.Run(() =>
+        var (failure, merged) = await Task.Run(() =>
         {
             var id = ResolveProjectId(client, remote);
-            if (id is null) return new GitLabFailure(GitLabFailureKind.NotFound, $"Project not found on {remote.Host}");
+            if (id is null) return (new GitLabFailure(GitLabFailureKind.NotFound, $"Project not found on {remote.Host}"), false);
             var r = Sync(client.MergeAsync(id.Value, mr.Iid, mr.Sha, squash, removeSource, whenPipelineSucceeds));
-            return r.Ok ? null : r.Failure;
+            // "When the pipeline succeeds" on a pipeline that already has merges at once:
+            // GitLab answers with the merged request, and the page has nothing left to show.
+            return r.Ok ? (null, r.Value.State == "merged") : (r.Failure, false);
         });
-        EndAction(path, failure, remote.Host, whenPipelineSucceeds
-            ? $"!{mr.Iid} merges when its pipeline succeeds"
-            : $"Merged !{mr.Iid} into {mr.TargetBranch}");
-        if (failure is null && !whenPipelineSucceeds) BumpDataGen(path);
+        EndAction(path, failure, remote.Host, merged || !whenPipelineSucceeds
+            ? $"Merged !{mr.Iid} into {mr.TargetBranch}"
+            : $"!{mr.Iid} merges when its pipeline succeeds");
+        if (failure is null && (merged || !whenPipelineSucceeds))
+        {
+            BumpDataGen(path);
+            if (_mrOpen is { } open && open.Iid == mr.Iid) BackToMrList();
+        }
     }
 
     private async void ToggleApproval(string path, GlMergeRequest mr, GlApprovals? approvals)

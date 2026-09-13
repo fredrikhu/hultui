@@ -94,6 +94,43 @@ public class MergeRequestActionTests
         }, handler);
     }
 
+    /// <summary>"Merge when pipeline succeeds" on a pipeline that already has: GitLab merges
+    /// at once and answers with the merged request. The page goes back to the list rather
+    /// than waiting for a request that will never be in it again — and a request that
+    /// disappears under an open page says so instead of "Loading…".</summary>
+    [Fact]
+    public void AMergeThatCompletesAtOnceLeavesTheDetailPage()
+    {
+        bool merged = false;
+        var handler = Routes()
+            .Map(MrList, _ => FakeGitLabHandler.Json(merged
+                ? FakeGitLabHandler.Recording("merge_requests_page1").Replace("\"iid\":412", "\"iid\":9412")
+                : FakeGitLabHandler.Recording("merge_requests_page1")))
+            .Map($"PUT {Api}/projects/7781/merge_requests/412/merge", _ =>
+            {
+                merged = true;
+                return FakeGitLabHandler.Json("{\"id\":90412,\"iid\":412,\"project_id\":7781,\"title\":\"PC-1042: refund splitting\",\"state\":\"merged\"}");
+            });
+        Hosted((repo, session, app) =>
+        {
+            OpenDetail(session, app);
+            session.PumpUntil(() => ById(session, "mr-merge") is not null, TimeSpan.FromSeconds(15));
+            app.ChooseMerge(whenPipelineSucceeds: true);
+            session.PumpUntil(() => TreeHas(session, "Merge !412 into main"), TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            session.Window.Click(Labelled(session, "Merge when pipeline succeeds"));
+            session.PumpUntil(() => TreeHas(session, "Merged !412 into main"), TimeSpan.FromSeconds(10));
+            // Back on the list, which no longer carries !412.
+            session.PumpUntil(() => TreeHas(session, "All open") && !TreeHas(session, "!412"), TimeSpan.FromSeconds(15));
+            Assert.True(app.MergeRequestsOpen);
+
+            // Opening a request that has gone since the list was loaded says so.
+            app.OpenMergeRequest(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "mr-gone") is not null, TimeSpan.FromSeconds(15));
+            Assert.True(TreeHas(session, "!412 is no longer open"));
+        }, handler);
+    }
+
     [Fact]
     public void ARefusedMergeIsSaidUnderTheRow()
     {

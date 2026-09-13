@@ -67,7 +67,7 @@ public partial class JunctionApp
     }
 
     /// <summary>Straight to one merge request's detail — from a chip, the toolbar, a todo.</summary>
-    private void OpenMergeRequest(string path, long iid)
+    internal void OpenMergeRequest(string path, long iid)
     {
         if (!PathEquals(path, _activeRepoPath)) SelectRepo(path);
         if (GitLabRemoteFor(_activeRepoPath) is not { } remote || !_gitlab.HasAccount(remote.Host)) return;
@@ -356,7 +356,9 @@ public partial class JunctionApp
         var input = TextInput.New(_mrQuery)
             .PlaceholderText("Press / to search…")
             .OnTextChanged(v => { _mrQuery = v; _mrSel = 0; MarkDirty(); })
-            .Height(Dimension.Px(24)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            // The field fills the box's 28px of content: at 24 the theme's own padding left
+            // the glyphs' descenders under the bottom edge.
+            .Height(Dimension.Px(28)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
             .FontSize(12f).TextColor(Nocturne.Text)
             .WithRef(_mrSearchRef);
         input.AutomationId = "mr-search";
@@ -522,7 +524,14 @@ public partial class JunctionApp
         }
         else
         {
-            row1.AddChild(Text.New("Loading…").FontSize(14.5f).TextColor(Nocturne.On(0.5)).FlexGrow(1));
+            // The list is loaded and the request is not in it: it was merged or closed since —
+            // by this window's own merge, or by someone else. Say so rather than wait forever.
+            var hostedList = MergeRequestsFor(path);
+            bool gone = hostedList.Loaded && !_mrLoaders.For(path).IsLoading;
+            var word = Text.New(gone ? $"!{iid} is no longer open — it was merged or closed." : "Loading…")
+                .FontSize(14.5f).TextColor(Nocturne.On(0.5)).FlexGrow(1);
+            if (gone) word.AutomationId = "mr-gone";
+            row1.AddChild(word);
         }
         row1.AddChild(MrCloseButton());
         header.AddChild(row1);

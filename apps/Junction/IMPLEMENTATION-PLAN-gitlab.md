@@ -117,7 +117,7 @@ Each phase leaves the app shippable. Tests live in `tests/Junction.Tests` (xunit
 
 - [ ] Clone mode URL / GitLab switch: account picker, search, membership rows (`GET /projects?membership=true&min_access_level=30`), 6 skeleton rows once, empty copy.
 - [ ] Branch from issue: pick an issue → `<iid>-<slug>` from the default branch, and an MR later pre-filled with `Closes #<iid>`.
-- [ ] Options panes General (auto-fetch + interval chips, pull strategy, prune, GitLab refresh timer, confirm destructive), Code & diff (font, size, default view, wrap, whitespace, tab width), External tools (editor, terminal, merge tool, custom command), Keyboard shortcuts (generated from the same table the tooltips read, so it cannot drift). Retire the palette-only toggles these replace, keep the verbs.
+- [ ] Options panes General (auto-fetch + interval chips, pull strategy, prune, GitLab refresh timer, confirm destructive, **todo filters** — which kinds ring the bell and whether only repositories in the open workspace count; asked for after Phase 5, where a busy instance's 26 seeded todos made the point), Code & diff (font, size, default view, wrap, whitespace, tab width), External tools (editor, terminal, merge tool, custom command), Keyboard shortcuts (generated from the same table the tooltips read, so it cannot drift). Retire the palette-only toggles these replace, keep the verbs.
 
 ## 3. Test instance — when and how
 
