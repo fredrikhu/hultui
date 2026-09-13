@@ -799,6 +799,7 @@ public partial class JunctionApp : Component, IDisposable
         if (_mrPanelOpen) Overlay("merge-requests", BuildMergeRequestsPanel());
         if (_optionsOpen) Overlay("options", BuildOptions());
         if (_dialog != null) Overlay("dialog", BuildDialog(_dialog));
+        if (_createMr != null) Overlay("create-mr", BuildCreateMrDialog(_createMr));
         if (_rebase != null) Overlay("rebase", BuildRebaseDialog(_rebase));
         if (_popover != null) Overlay("popover", BuildPopover(_popover));
         if (_modal != null) Overlay("modal", BuildModal(_modal));
@@ -1180,20 +1181,35 @@ public partial class JunctionApp : Component, IDisposable
 
     // ── Toast ────────────────────────────────────────────────────────────
 
-    private async void Flash(string message)
+    /// <summary>The one verb an actionable toast offers, e.g. "Create merge request".</summary>
+    private (string Label, Action Run)? _toastAction;
+
+    /// <summary>A transient confirmation bottom-centre. With an <paramref name="action"/> it
+    /// stays 4.5 s instead of 1.7 — it is asking for a decision rather than reporting one.</summary>
+    private async void Flash(string message, (string Label, Action Run)? action = null)
     {
         _toastCts?.Cancel();
         _toast = message;
+        _toastAction = action;
         _toastCts = new CancellationTokenSource();
         var token = _toastCts.Token;
         MarkDirty();
         try
         {
-            await Task.Delay(1700, token);
+            await Task.Delay(action is null ? 1700 : 4500, token);
             _toast = null;
+            _toastAction = null;
             MarkDirty();
         }
         catch (OperationCanceledException) { }
+    }
+
+    private void DismissToast()
+    {
+        _toastCts?.Cancel();
+        _toast = null;
+        _toastAction = null;
+        MarkDirty();
     }
 
     private void CopyToClipboard(string text)
@@ -1233,6 +1249,15 @@ public partial class JunctionApp : Component, IDisposable
                 return;
             }
             if (HandleRebaseKey(e)) e.StopPropagation = true;
+            return;
+        }
+
+        // The create-merge-request card: Esc cancels, Ctrl+Enter submits, typing flows to
+        // its fields. Checked before the popover's own Esc so a picker closes first.
+        if (_createMr != null && _popover == null)
+        {
+            if (e.Key == KeyCode.Escape) { CloseCreateMr(); e.StopPropagation = true; }
+            else if (ctrl && e.Key == KeyCode.Enter) { SubmitCreateMr(); e.StopPropagation = true; }
             return;
         }
 

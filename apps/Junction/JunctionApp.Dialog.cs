@@ -16,6 +16,11 @@ public partial class JunctionApp
     /// and the checkbox state (false when the prompt has no checkbox).
     /// A null <see cref="Placeholder"/> drops the field entirely — that is the
     /// confirm-only shape, see <see cref="OpenConfirm"/>.</summary>
+    /// <param name="Info">An informational line under the body — the protected-branch rule
+    /// GitLab enforces, drawn in a quiet box with a lock — so the card says what the server
+    /// will say, before it is asked.</param>
+    /// <param name="CheckboxDisabledReason">When set, the checkbox is drawn but cannot be
+    /// ticked, and this suffix says why (<c>— not allowed on this branch</c>).</param>
     private sealed record DialogSpec(
         string Title,
         string? Body,
@@ -24,13 +29,15 @@ public partial class JunctionApp
         Action<string, bool> OnConfirm,
         Func<string, string?>? Validate = null,
         string? CheckboxLabel = null,
-        bool CheckboxInitial = true);
+        bool CheckboxInitial = true,
+        string? Info = null,
+        string? CheckboxDisabledReason = null);
 
     private void OpenDialog(DialogSpec spec, string initial = "")
     {
         _dialog = spec;
         _dialogValue = initial;
-        _dialogChecked = spec.CheckboxInitial;
+        _dialogChecked = spec.CheckboxDisabledReason is null && spec.CheckboxInitial;
         // Only ask for focus when there is a field to give it to: _dialogRef still
         // points at the last prompt's (unmounted) input, and focusing that corpse
         // takes the keyboard away from the root handler this dialog's Enter needs.
@@ -127,15 +134,41 @@ public partial class JunctionApp
             card.AddChild(inputBox);
         }
 
-        // Optional checkbox.
+        // The rule the host enforces, when there is one: a quiet box, a lock, one sentence.
+        if (spec.Info is { } info)
+        {
+            var box = Flex.Row(gap: 8).AlignItems(AlignItems.FlexStart)
+                .Padding(new Thickness(8, 10, 8, 10)).CornerRadius(Nocturne.RadiusSm)
+                .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f);
+            box.AddChild(Ui.Icon(Icons.Lock, 13f, Nocturne.Accent300).FlexShrink(0));
+            box.AddChild(Text.New(info).FontSize(12f).TextColor(Nocturne.On(0.78)).FlexShrink(1));
+            box.Key = "dialog-info";
+            box.AutomationId = "dialog-info";
+            card.AddChild(box);
+        }
+
+        // Optional checkbox. Disabled, it is still drawn — a choice that has gone missing
+        // reads as a bug, a choice that says why it is off reads as a rule.
         if (spec.CheckboxLabel is { } checkLabel)
         {
-            var check = Checkbox.New(_dialogChecked, checkLabel)
-                .OnCheckedChanged(v => { _dialogChecked = v; MarkDirty(); });
-            check.LabelGap = 9f;
-            check.TextColor(Nocturne.On(0.82)).FontSize(13f);
-            check.Key = "dialog-check";
-            card.AddChild(check);
+            if (spec.CheckboxDisabledReason is { } why)
+            {
+                var off = Flex.Row(gap: 9).AlignItems(AlignItems.FlexStart);
+                off.AddChild(Ui.Icon(Icons.Square, 14f, Nocturne.On(0.3)).FlexShrink(0));
+                off.AddChild(Text.New($"{checkLabel} {why}").FontSize(13f).TextColor(Nocturne.On(0.38)).FlexShrink(1));
+                off.Key = "dialog-check-off";
+                off.AutomationId = "dialog-check-off";
+                card.AddChild(off);
+            }
+            else
+            {
+                var check = Checkbox.New(_dialogChecked, checkLabel)
+                    .OnCheckedChanged(v => { _dialogChecked = v; MarkDirty(); });
+                check.LabelGap = 9f;
+                check.TextColor(Nocturne.On(0.82)).FontSize(13f);
+                check.Key = "dialog-check";
+                card.AddChild(check);
+            }
         }
 
         // Actions.

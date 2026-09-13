@@ -13,20 +13,38 @@ namespace Junction;
 /// </summary>
 public partial class JunctionApp
 {
-    private (string Repo, DateTime Stamp, IReadOnlyList<IssueTrackerRule> Rules) _issueRules = ("", default, []);
+    private (string Repo, DateTime Stamp, string Host, IReadOnlyList<IssueTrackerRule> Rules) _issueRules = ("", default, "", []);
 
     /// <summary>
     /// The active repository's rules, re-read when the file changes. Cached because it is
     /// asked once per rendered line — every visible History row, every line of a message —
     /// and the answer costs a subprocess.
+    /// <para>A repository on GitLab gets two rules of its own after the file's: <c>#123</c>
+    /// is an issue and <c>!123</c> a merge request on that project. The file's rules come
+    /// first so a project that maps <c>#</c> elsewhere keeps its say.</para>
     /// </summary>
     private IReadOnlyList<IssueTrackerRule> IssueRules()
     {
         if (!HasActiveRepo) return [];
         var file = System.IO.Path.Combine(_activeRepoPath, IssueTrackerFile.FileName);
         var stamp = System.IO.File.Exists(file) ? System.IO.File.GetLastWriteTimeUtc(file) : default;
-        if (_issueRules.Repo != _activeRepoPath || _issueRules.Stamp != stamp)
-            _issueRules = (_activeRepoPath, stamp, IssueTrackerFile.Load(_activeRepoPath));
+        var remote = GitLabRemoteFor(_activeRepoPath);
+        var hostKey = remote is null ? "" : remote.WebBaseUrl + "/" + remote.ProjectPath;
+        if (_issueRules.Repo != _activeRepoPath || _issueRules.Stamp != stamp || _issueRules.Host != hostKey)
+        {
+            var rules = new List<IssueTrackerRule>(IssueTrackerFile.Load(_activeRepoPath));
+            if (remote is not null)
+            {
+                var project = $"{remote.WebBaseUrl}/{remote.ProjectPath}";
+                rules.Add(new IssueTrackerRule("GitLab issue",
+                    new System.Text.RegularExpressions.Regex(@"(?<![\w!])#(\d+)\b", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(100)),
+                    project + "/-/issues/$1"));
+                rules.Add(new IssueTrackerRule("GitLab merge request",
+                    new System.Text.RegularExpressions.Regex(@"(?<!\w)!(\d+)\b", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(100)),
+                    project + "/-/merge_requests/$1"));
+            }
+            _issueRules = (_activeRepoPath, stamp, hostKey, rules);
+        }
         return _issueRules.Rules;
     }
 

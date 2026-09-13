@@ -915,6 +915,9 @@ public partial class JunctionApp
     private BoxElement? HeadPipelineButton(bool compact)
     {
         if (!HasActiveRepo || !GitLabActive(_activeRepoPath)) return null;
+        // The toolbar is built on every view, so this is where the project — and with it the
+        // protected-branch rules a push confirm quotes — starts loading, before anything asks.
+        _ = ProjectFor(_activeRepoPath);
         var sum = SummaryFor(_activeRepoPath);
         var current = sum.Branches.FirstOrDefault(b => b.IsCurrent);
         var pipe = PipelineForSha(_activeRepoPath, current?.Hash);

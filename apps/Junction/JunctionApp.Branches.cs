@@ -423,6 +423,12 @@ public partial class JunctionApp
         // is checked out (creating a local tracking branch) but not managed here.
         if (!b.IsRemote)
         {
+            // A merge request for a branch that has none yet, on a GitLab-backed
+            // repository; the default branch is the target, never the source.
+            if (GitLabActive(_activeRepoPath)
+                && b.Name != (ProjectFor(_activeRepoPath).Value?.Project.DefaultBranch ?? "main")
+                && MergeRequestForBranch(_activeRepoPath, b.Name) is null)
+                box.AddChild(SmallIconButton(Icons.GitPullRequest, () => OpenCreateMergeRequest(b.Name), "Create merge request (m)"));
             box.AddChild(SmallIconButton(Icons.ArrowUp, () => PushBranch(b), "Push (p)"));
             box.AddChild(SmallIconButton(Icons.ArrowDown, () => PullBranch(b), "Pull (l)"));
             box.AddChild(SmallIconButton(Icons.Trash, () => DeleteBranchAction(b), "Delete"));
@@ -456,6 +462,7 @@ public partial class JunctionApp
         switch (e.Key)
         {
             case KeyCode.C: CheckoutSelected(); return true;
+            case KeyCode.M: CreateMergeRequestForSelected(); return true;
             case KeyCode.P: PushSelected(); return true;
             case KeyCode.L: PullSelected(); return true;
             case KeyCode.I: ToggleIncludeSelected(); return true;
@@ -645,6 +652,13 @@ public partial class JunctionApp
 
     // Push / Pull only apply to local branches (remote rows silently ignore them).
     private void PushSelected() { if (SelectedBranch() is { IsRemote: false } b) PushBranch(b); }
+    /// <summary><c>m</c>: the selected branch's merge request — opened when it has one,
+    /// created when it has not. A remote-tracking row answers for its leaf.</summary>
+    private void CreateMergeRequestForSelected()
+    {
+        if (SelectedBranch() is not { } b || !GitLabActive(_activeRepoPath)) return;
+        OpenCreateMergeRequest(b.IsRemote ? SplitRemote(b.Name).Leaf : b.Name);
+    }
     private void PullSelected() { if (SelectedBranch() is { IsRemote: false } b) PullBranch(b); }
     private void ToggleIncludeSelected() { if (SelectedBranch() is { } b) ToggleInclude(b.Name); }
 
@@ -675,14 +689,17 @@ public partial class JunctionApp
             : b.AheadCount == 0 && b.BehindCount == 0
                 ? $"Pushes {b.Name} to {remote}. Nothing to send — the branch and its upstream are level."
                 : $"Pushes {b.Name} to {remote}. {b.AheadCount} ahead, {b.BehindCount} behind.";
+        var guard = PushGuard(b.Name);
         OpenDialog(new DialogSpec(
             Title: publish ? $"Publish {b.Name}" : $"Push {b.Name}",
-            Body: body,
+            Body: guard.NobodyCanPush ? $"{remote} will reject a direct push to {b.Name}. Open a merge request instead." : body,
             Placeholder: null,
-            ConfirmLabel: publish ? "Publish" : "Push",
+            ConfirmLabel: guard.NobodyCanPush ? "Try anyway" : publish ? "Publish" : "Push",
             OnConfirm: (_, force) => RunPushBranch(b, remote, publish, force),
             CheckboxLabel: ForceWithLeaseLabel,
-            CheckboxInitial: false));
+            CheckboxInitial: false,
+            Info: guard.Info,
+            CheckboxDisabledReason: guard.ForceDisabledReason));
     }
 
     private async void RunPushBranch(GitBranch b, string remote, bool publish, bool forceWithLease)
@@ -699,11 +716,15 @@ public partial class JunctionApp
                 : await repo.PushToAsync(remote, b.Name, NoAskPass, forceWithLease);
         }
         finally { EndRemoteOp(); }
-        Flash(res.Success
-            ? publish ? $"Published {b.Name} to {remote}"
-            : forceWithLease ? $"Force-pushed {b.Name}" : $"Pushed {b.Name}"
-            : FirstLine(res.Stderr, "Push failed"));
+        if (!res.Success)
+        {
+            Flash(FirstLine(res.Stderr, "Push failed"));
+            RefreshAll();
+            return;
+        }
         RefreshAll();
+        AfterPushToast(b.Name, publish ? $"Published {b.Name} to {remote}"
+            : forceWithLease ? $"Force-pushed {b.Name}" : $"Pushed {b.Name} to {remote}");
     }
 
     private async void PullBranch(GitBranch b)
@@ -735,12 +756,43 @@ public partial class JunctionApp
         RefreshAll();
     }
 
+    /// <summary>
+    /// Asks before deleting. The card says what is lost — commits not on the default branch
+    /// — and offers <c>-D</c> only when there are any, so an unmerged branch cannot be dropped
+    /// by reflex; and on a GitLab-backed repository it carries the branch's protection rule.
+    /// </summary>
     private void DeleteBranchAction(GitBranch b)
     {
         if (ActiveRepo is not { } repo) return;
         if (b.IsCurrent) { Flash("Can't delete the checked-out branch"); return; }
+        var leaf = BranchName.Parse(b.Name).Title;
+        var defaultBranch = GitLabActive(_activeRepoPath)
+            ? ProjectFor(_activeRepoPath).Value?.Project.DefaultBranch ?? "main"
+            : "main";
+        int unmerged = repo.GetSubjectsBetween(defaultBranch, b.Name).Count;
+        var remoteName = HostingRemoteName(_activeRepoPath);
+        var body = unmerged > 0
+            ? $"{leaf} has {unmerged} commit{(unmerged == 1 ? "" : "s")} not on {defaultBranch}. The local branch is removed; {remoteName}/{b.Name} is kept."
+            : $"The local branch is removed. {remoteName}/{b.Name} is kept.";
+        string? info = GitLabActive(_activeRepoPath) && GitLabRemoteFor(_activeRepoPath) is { } r
+            && ProtectionFor(_activeRepoPath, b.Name) is { } rule
+            ? PushRuleSummary(b.Name, rule, r.Host) : null;
+        OpenDialog(new DialogSpec(
+            Title: $"Delete {leaf}?",
+            Body: body,
+            Placeholder: null,
+            ConfirmLabel: "Delete branch",
+            OnConfirm: (_, discard) => DoDeleteBranch(b, discard && unmerged > 0),
+            CheckboxLabel: unmerged > 0 ? "Discard unmerged work (git branch -D)" : null,
+            CheckboxInitial: false,
+            Info: info));
+    }
+
+    private void DoDeleteBranch(GitBranch b, bool force)
+    {
+        if (ActiveRepo is not { } repo) return;
         // Non-force delete: git refuses to drop an unmerged branch, which keeps this safe.
-        var res = repo.DeleteBranch(b.Name);
+        var res = repo.DeleteBranch(b.Name, force);
         if (res.Success)
         {
             IncludeSet(_activeRepoPath).Remove(b.Name);

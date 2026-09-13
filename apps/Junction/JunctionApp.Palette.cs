@@ -233,6 +233,12 @@ public partial class JunctionApp
             items.Add(new("action", "Action", Icons.GitPullRequest, "Merge requests…",
                 signedIn ? gitlabRemote.ProjectPath : $"sign in to {gitlabRemote.Host} first",
                 () => { ClosePalette(); if (signedIn) OpenMergeRequests(); else OpenOptions(OptionsSection.GitLabAccounts); }));
+            if (signedIn && HasActiveRepo)
+            {
+                var leaf = BranchName.Parse(SummaryFor(_activeRepoPath).Branch).Title;
+                items.Add(new("action", "Action", Icons.GitPullRequest, "Create merge request…", $"from {leaf}",
+                    () => { ClosePalette(); OpenCreateMergeRequest(); }));
+            }
         }
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));

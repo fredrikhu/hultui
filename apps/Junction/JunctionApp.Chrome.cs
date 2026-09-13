@@ -351,14 +351,48 @@ public partial class JunctionApp
         if (ActiveRepo is not { } repo || RemoteOpRunning) return;
         var plan = await Task.Run(() => repo.PlanPush());
         if (plan.Problem is { } problem) { Flash(problem); return; }
+        // What the host will say, said first: a protected branch's rule sits under the body,
+        // the lease is greyed where force is not allowed, and a branch nobody can push to
+        // says so and offers to try anyway rather than pretending.
+        var guard = PushGuard(plan.Branch);
         OpenDialog(new DialogSpec(
             Title: plan.SetUpstream ? $"Publish {plan.Branch}" : $"Push {plan.Branch}",
-            Body: PushDialogBody(plan),
+            Body: guard.NobodyCanPush
+                ? $"{plan.Remote} will reject a direct push to {plan.Branch}. Open a merge request instead."
+                : PushDialogBody(plan),
             Placeholder: null,
-            ConfirmLabel: plan.SetUpstream ? "Publish" : "Push",
+            ConfirmLabel: guard.NobodyCanPush ? "Try anyway" : plan.SetUpstream ? "Publish" : "Push",
             OnConfirm: (_, force) => RunPush(plan, force),
             CheckboxLabel: ForceWithLeaseLabel,
-            CheckboxInitial: false));
+            CheckboxInitial: false,
+            Info: guard.Info,
+            CheckboxDisabledReason: guard.ForceDisabledReason));
+    }
+
+    /// <summary>What GitLab's protected-branch rule says about pushing <paramref name="branch"/>,
+    /// for the confirm card. Everything null/false on a branch it does not protect, or a
+    /// repository that is not on GitLab.</summary>
+    private (string? Info, string? ForceDisabledReason, bool NobodyCanPush) PushGuard(string branch)
+    {
+        if (!HasActiveRepo || !GitLabActive(_activeRepoPath) || GitLabRemoteFor(_activeRepoPath) is not { } remote)
+            return (null, null, false);
+        if (ProtectionFor(_activeRepoPath, branch) is not { } rule) return (null, null, false);
+        return (PushRuleSummary(branch, rule, remote.Host),
+            rule.AllowForcePush ? null : "— not allowed on this branch",
+            rule.PushLevel == 0);
+    }
+
+    /// <summary>The toast after a push: on a GitLab-backed repository it offers to create the
+    /// merge request the branch does not have yet, or to open the one it has.</summary>
+    private void AfterPushToast(string branch, string message)
+    {
+        if (!HasActiveRepo || !GitLabActive(_activeRepoPath)) { Flash(message); return; }
+        var defaultBranch = ProjectFor(_activeRepoPath).Value?.Project.DefaultBranch ?? "main";
+        if (branch == defaultBranch) { Flash(message); return; }
+        if (MergeRequestForBranch(_activeRepoPath, branch) is { } mr)
+            Flash(message, ($"Open !{mr.Iid}", () => OpenMergeRequest(_activeRepoPath, mr.Iid)));
+        else
+            Flash(message, ("Create merge request", () => OpenCreateMergeRequest(branch)));
     }
 
     /// <summary>The wording of the force option, shared by every push that offers it. It
@@ -392,11 +426,16 @@ public partial class JunctionApp
         GitResult result;
         try { result = await repo.RunPushAsync(plan, NoAskPass, forceWithLease); }
         finally { EndRemoteOp(); }
-        Flash(result.Success
-            ? plan.SetUpstream ? $"Published {plan.Branch} to {plan.Remote}"
-            : forceWithLease ? $"Force-pushed {plan.Branch}" : "Pushed successfully"
-            : FirstLine(result.Stderr, "Push failed"));
+        if (!result.Success)
+        {
+            Flash(FirstLine(result.Stderr, "Push failed"));
+            RefreshAll();
+            return;
+        }
+        var message = plan.SetUpstream ? $"Published {plan.Branch} to {plan.Remote}"
+            : forceWithLease ? $"Force-pushed {plan.Branch}" : $"Pushed {plan.Branch} to {plan.Remote}";
         RefreshAll();
+        AfterPushToast(plan.Branch, message);
     }
 
     // Stash affordance: a toolbar button that opens a small popover offering
@@ -464,6 +503,8 @@ public partial class JunctionApp
             items.Add(_gitlab.HasAccount(remote.Host)
                 ? Item(Icons.GitPullRequest, "Merge requests…", () => OpenMergeRequests())
                 : Item(Icons.GitPullRequest, "Merge requests…", () => OpenOptions(OptionsSection.GitLabAccounts)));
+            if (_gitlab.HasAccount(remote.Host))
+                items.Add(Item(Icons.GitPullRequest, "Create merge request…", () => OpenCreateMergeRequest()));
         }
         return items;
     }

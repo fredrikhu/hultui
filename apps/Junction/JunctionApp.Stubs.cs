@@ -1,5 +1,6 @@
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
+using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
@@ -41,6 +42,20 @@ public partial class JunctionApp
             .Children(
                 Ui.Icon(Icons.CheckCircle, 15f, Nocturne.Accent300),
                 Text.New(message).FontSize(12.5f).TextColor(Nocturne.Text));
+
+        // An actionable toast carries one verb after a separator — "Create merge request →" —
+        // and stays longer, since it is asking for a decision rather than reporting one.
+        if (_toastAction is { } action)
+        {
+            pill.AddChild(Text.New("·").FontSize(12.5f).TextColor(Nocturne.On(0.4)));
+            var link = Flex.Row(gap: 4).AlignItems(AlignItems.Center).Cursor(CursorType.Pointer);
+            link.AddChild(Text.New(action.Label).FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Accent300));
+            link.AddChild(Ui.Icon(Icons.ArrowRight, 12f, Nocturne.Accent300));
+            link.On<ClickEvent>(e => { e.StopPropagation = true; var run = action.Run; DismissToast(); run(); });
+            link.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
+            link.AccessibleName = action.Label;
+            pill.AddChild(link);
+        }
 
         strip.AddChild(pill);
         return strip;

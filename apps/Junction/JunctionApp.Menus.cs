@@ -130,6 +130,11 @@ public partial class JunctionApp
         {
             items.Add(Item(Icons.BendDownRight, "Checkout", () => CheckoutBranch(leaf)));
             items.Add(Item(Icons.GitBranch, $"Create branch from {title}…", () => PromptCreateBranchAt(b.Name, title)));
+            if (GitLabActive(_activeRepoPath) && MergeRequestForBranch(_activeRepoPath, leaf) is { } remoteMr)
+            {
+                items.Add(ContextMenuItem.Separator());
+                items.Add(Item(Icons.GitPullRequest, $"Open merge request !{remoteMr.Iid}", () => OpenMergeRequest(_activeRepoPath, remoteMr.Iid)));
+            }
             items.Add(ContextMenuItem.Separator());
             items.Add(IncludeItem(b.Name));
             items.Add(Item(Icons.Copy, "Copy branch name", () => CopyToClipboard(b.Name)));
@@ -156,6 +161,16 @@ public partial class JunctionApp
         items.Add(Item(Icons.ArrowUp, "Push", () => PushBranch(b)));
         items.Add(Item(Icons.ArrowDown, "Pull", () => PullBranch(b)));
         items.Add(Item(Icons.Cloud, "Set upstream…", () => PromptSetUpstream(b.Name)));
+
+        // The hosted group: open the merge request this branch has, or create one.
+        if (GitLabActive(_activeRepoPath))
+        {
+            items.Add(ContextMenuItem.Separator());
+            if (MergeRequestForBranch(_activeRepoPath, b.Name) is { } mr)
+                items.Add(Item(Icons.GitPullRequest, $"Open merge request !{mr.Iid}", () => OpenMergeRequest(_activeRepoPath, mr.Iid)));
+            else
+                items.Add(Item(Icons.GitPullRequest, "Create merge request…", () => OpenCreateMergeRequest(b.Name)));
+        }
 
         items.Add(ContextMenuItem.Separator());
         items.Add(IncludeItem(b.Name));

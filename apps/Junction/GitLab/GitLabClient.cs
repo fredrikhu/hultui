@@ -29,6 +29,21 @@ public sealed record MergeRequestQuery(
     string OrderBy = "updated_at",
     string Sort = "desc");
 
+/// <summary>What <see cref="GitLabClient.CreateMergeRequestAsync"/> sends. Null means "leave
+/// it to the project's defaults" for the flags GitLab defaults itself.</summary>
+public sealed record NewMergeRequest(
+    string SourceBranch,
+    string TargetBranch,
+    string Title,
+    string? Description = null,
+    bool Draft = false,
+    IReadOnlyList<long>? ReviewerIds = null,
+    IReadOnlyList<long>? AssigneeIds = null,
+    IReadOnlyList<string>? Labels = null,
+    long? MilestoneId = null,
+    bool? RemoveSourceBranch = null,
+    bool? Squash = null);
+
 /// <summary>Filters for <see cref="GitLabClient.ListIssuesAsync"/>.</summary>
 public sealed record IssueQuery(
     string State = "opened",
@@ -161,6 +176,38 @@ public sealed class GitLabClient : IDisposable
             .Add("with_merge_status_recheck", "true");
         return GetPagedAsync($"projects/{projectId}/merge_requests", q.ToString(), GitLabJson.Default.ListGlMergeRequest, maxPages, ct);
     }
+
+    /// <summary><c>POST /projects/:id/merge_requests</c>. A title starting with <c>Draft:</c>
+    /// is what GitLab reads as a draft; the <c>draft</c> flag is sent as well for newer
+    /// instances. Reviewers, assignees and labels are sent only when given.</summary>
+    public async Task<GitLabResult<GlMergeRequest>> CreateMergeRequestAsync(long projectId, NewMergeRequest mr, CancellationToken ct = default)
+    {
+        var fields = new List<KeyValuePair<string, string>>
+        {
+            new("source_branch", mr.SourceBranch),
+            new("target_branch", mr.TargetBranch),
+            new("title", mr.Draft && !mr.Title.StartsWith("Draft:", StringComparison.OrdinalIgnoreCase) ? "Draft: " + mr.Title : mr.Title),
+        };
+        if (mr.Description is { Length: > 0 } d) fields.Add(new("description", d));
+        if (mr.Draft) fields.Add(new("draft", "true"));
+        if (mr.ReviewerIds is { Count: > 0 } reviewers) foreach (var id in reviewers) fields.Add(new("reviewer_ids[]", id.ToString(CultureInfo.InvariantCulture)));
+        if (mr.AssigneeIds is { Count: > 0 } assignees) foreach (var id in assignees) fields.Add(new("assignee_ids[]", id.ToString(CultureInfo.InvariantCulture)));
+        if (mr.Labels is { Count: > 0 } labels) fields.Add(new("labels", string.Join(",", labels)));
+        if (mr.MilestoneId is { } m) fields.Add(new("milestone_id", m.ToString(CultureInfo.InvariantCulture)));
+        if (mr.RemoveSourceBranch is { } rsb) fields.Add(new("remove_source_branch", rsb ? "true" : "false"));
+        if (mr.Squash is { } sq) fields.Add(new("squash", sq ? "true" : "false"));
+        using var content = new FormUrlEncodedContent(fields);
+        var res = await SendAsync(HttpMethod.Post, $"projects/{projectId}/merge_requests", content, GitLabJson.Default.GlMergeRequest, ct).ConfigureAwait(false);
+        return res.Ok ? GitLabResult<GlMergeRequest>.Success(res.Value.Body) : res.As<GlMergeRequest>();
+    }
+
+    /// <summary>Everyone with access, inherited included — the reviewer picker's pool.</summary>
+    public Task<GitLabResult<List<GlMember>>> ListMembersAsync(long projectId, string? search = null,
+        int maxPages = DefaultMaxPages, CancellationToken ct = default) =>
+        GetPagedAsync($"projects/{projectId}/members/all", new Query().Add("search", search).ToString(), GitLabJson.Default.ListGlMember, maxPages, ct);
+
+    public Task<GitLabResult<List<GlLabel>>> ListLabelsAsync(long projectId, int maxPages = DefaultMaxPages, CancellationToken ct = default) =>
+        GetPagedAsync($"projects/{projectId}/labels", new Query().Add("with_counts", "false").ToString(), GitLabJson.Default.ListGlLabel, maxPages, ct);
 
     public Task<GitLabResult<GlMergeRequest>> GetMergeRequestAsync(long projectId, long iid, CancellationToken ct = default) =>
         GetAsync($"projects/{projectId}/merge_requests/{iid}", GitLabJson.Default.GlMergeRequest, ct);

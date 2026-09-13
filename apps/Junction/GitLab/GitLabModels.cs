@@ -381,6 +381,28 @@ public sealed class GlDiscussion
     public GlPosition? Position => First?.Position;
 }
 
+/// <summary>A project member (<c>GET /projects/:id/members/all</c>) — the reviewer picker's pool.</summary>
+public sealed class GlMember
+{
+    public long Id { get; set; }
+    public string Username { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string? AvatarUrl { get; set; }
+    public string? State { get; set; }
+    /// <summary>10 guest · 20 reporter · 30 developer · 40 maintainer · 50 owner.</summary>
+    public int AccessLevel { get; set; }
+}
+
+/// <summary>A project label (<c>GET /projects/:id/labels</c>).</summary>
+public sealed class GlLabel
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = "";
+    public string? Color { get; set; }
+    public string? TextColor { get; set; }
+    public string? Description { get; set; }
+}
+
 /// <summary>One file of a merge request's diff (<c>GET …/merge_requests/:iid/diffs</c>).</summary>
 public sealed class GlDiff
 {
@@ -457,6 +479,10 @@ public sealed class GlErrorBody
 [JsonSerializable(typeof(GlNote))]
 [JsonSerializable(typeof(GlDiff))]
 [JsonSerializable(typeof(List<GlDiff>))]
+[JsonSerializable(typeof(GlMember))]
+[JsonSerializable(typeof(List<GlMember>))]
+[JsonSerializable(typeof(GlLabel))]
+[JsonSerializable(typeof(List<GlLabel>))]
 [JsonSerializable(typeof(GlDraftNote))]
 [JsonSerializable(typeof(List<GlDraftNote>))]
 [JsonSerializable(typeof(GlPosition))]

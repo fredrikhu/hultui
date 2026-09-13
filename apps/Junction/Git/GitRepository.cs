@@ -993,6 +993,16 @@ public class GitRepository
     public Task<GitResult> FetchRefspecAsync(string remote, string refspec, Func<string, Task<string?>>? askPass = null)
         => GitProcess.RunAsync(Path, askPass, "fetch", remote, refspec);
 
+    /// <summary>The subjects of the commits <paramref name="head"/> has that
+    /// <paramref name="baseRef"/> does not, newest first — what a merge request's
+    /// description is pre-filled from. Empty when either ref is unknown.</summary>
+    public List<string> GetSubjectsBetween(string baseRef, string head, int max = 50)
+    {
+        var res = GitProcess.Run(Path, "log", "--format=%s", $"--max-count={max}", $"{baseRef}..{head}");
+        if (!res.Success) return [];
+        return res.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(s => s.TrimEnd('\r')).ToList();
+    }
+
     /// <summary>Whether a local branch of that name exists.</summary>
     public bool LocalBranchExists(string name) =>
         GitProcess.Run(Path, "show-ref", "--verify", "--quiet", "refs/heads/" + name).Success;

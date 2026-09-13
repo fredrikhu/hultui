@@ -939,8 +939,20 @@ public partial class JunctionApp
             {
                 e.StopPropagation = true;
                 DoCommit();
+                return;
             }
+            // While the issue list is open its keys come first — Enter picks rather than
+            // inserting a newline, Esc closes the list before it does anything else.
+            if (HandleIssueSuggestionKey(e)) e.StopPropagation = true;
         });
+
+        // The open issues a typed "#" offers, above the field it is typed in — see
+        // JunctionApp.IssueAutocomplete. Absent on a repository that is not on GitLab.
+        if (BuildIssueSuggestions() is { } suggestions)
+        {
+            suggestions.Key = "composer-issues";
+            box.AddChild(suggestions);
+        }
 
         // Summary
         var sumBox = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
@@ -948,7 +960,7 @@ public partial class JunctionApp
             .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
         var summary = TextInput.New(_commitSummary);
         summary.PlaceholderText("Summary (required)")
-            .OnTextChanged(q => { _commitSummary = q; MarkDirty(); })
+            .OnTextChanged(q => { _commitSummary = q; NoteComposerTyping(summary: true, _summaryRef.Current?.CursorPosition ?? q.Length); MarkDirty(); })
             .Height(Dimension.Px(30)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
             .TextColor(Nocturne.Text).WithRef(_summaryRef);
         sumBox.AddChild(summary);
@@ -965,12 +977,20 @@ public partial class JunctionApp
             .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
         var desc = TextArea.New(_commitDescription);
         desc.PlaceholderText("Description")
-            .OnTextChanged(q => { _commitDescription = q; MarkDirty(); })
+            .OnTextChanged(q => { _commitDescription = q; NoteComposerTyping(summary: false, _descRef.Current?.CursorPosition ?? q.Length); MarkDirty(); })
             .Height(Dimension.Px(56))
             .TextColor(Nocturne.Text).WithRef(_descRef);
         descBox.AddChild(desc);
         descBox.Key = "composer-description";
         box.AddChild(descBox);
+
+        // "Closes #1042 will close the issue when this reaches main." — one line, only when
+        // the message says so and the repository is on GitLab.
+        if (BuildClosingHint() is { } hint)
+        {
+            hint.Key = "composer-closing-hint";
+            box.AddChild(hint);
+        }
 
         // Amend, then sign. Amend is offered only where there is a commit to rewrite — a
         // repository with no commits yet has nothing behind HEAD, and `git commit --amend`
