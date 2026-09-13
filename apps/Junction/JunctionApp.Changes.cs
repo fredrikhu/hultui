@@ -867,6 +867,8 @@ public partial class JunctionApp
             body += untracked == 1
                 ? " One of them is untracked and is deleted from disk."
                 : $" {untracked} of them are untracked and are deleted from disk.";
+        // Options › General can turn the question off; the discard itself is the same.
+        if (!_settings.General.ConfirmDestructive) { DiscardChanges(files); return; }
         OpenConfirm("Discard changes", body + " This cannot be undone.",
             files.Count == 1 ? "Discard" : $"Discard {files.Count} files",
             () => DiscardChanges(files));

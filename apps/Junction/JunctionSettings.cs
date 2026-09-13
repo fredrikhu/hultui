@@ -213,11 +213,33 @@ public sealed class GeneralOptions
     /// current. Fetching one of them would leave the rest quietly lying.</summary>
     public AutoFetchMode AutoFetchMode { get; set; } = AutoFetchMode.AllOpenRepositories;
 
+    /// <summary>Minutes between reloads of the hosted (GitLab) data for the active
+    /// repository; 0 reloads only on Fetch, on opening the panel and on a repository switch.
+    /// Every hosted surface shows its as-of time and marks itself stale after ten minutes
+    /// either way.</summary>
+    public int GitLabRefreshMinutes { get; set; }
+
+    /// <summary>Ask before discarding working-tree changes or deleting a branch that is
+    /// fully merged. A branch with unmerged work always asks: that card is a choice, not
+    /// a confirmation.</summary>
+    public bool ConfirmDestructive { get; set; } = true;
+
+    /// <summary>GitLab todo kinds (<c>action_name</c> values) that do not ring the bell.</summary>
+    public List<string> TodoHiddenKinds { get; set; } = [];
+
+    /// <summary>Only todos on projects that a repository in the open workspace is a clone
+    /// of ring the bell; the rest stay on GitLab.</summary>
+    public bool TodoOnlyWorkspaceRepos { get; set; }
+
     public GeneralOptions Clone() => new()
     {
         AutoFetchEnabled = AutoFetchEnabled,
         AutoFetchIntervalMinutes = AutoFetchIntervalMinutes,
         AutoFetchMode = AutoFetchMode,
+        GitLabRefreshMinutes = GitLabRefreshMinutes,
+        ConfirmDestructive = ConfirmDestructive,
+        TodoHiddenKinds = [.. TodoHiddenKinds],
+        TodoOnlyWorkspaceRepos = TodoOnlyWorkspaceRepos,
     };
 }
 
@@ -265,6 +287,15 @@ public sealed class ExternalToolOptions
     public string ExternalMergeToolPath { get; set; } = "";
     public string ExternalMergeToolArgs { get; set; } = "";
 
+    /// <summary>The editor Ctrl+D opens a diff in. <see cref="EditorPreset.Custom"/> runs
+    /// <see cref="EditorCommand"/>, with <c>{left}</c> and <c>{right}</c> for the two files.</summary>
+    public EditorPreset Editor { get; set; } = EditorPreset.VSCode;
+    public string EditorCommand { get; set; } = "";
+
+    /// <summary>What "Open in terminal" starts. System is what the machine opens on its own:
+    /// Windows Terminal when it is there, the configured interpreter otherwise.</summary>
+    public TerminalPreset Terminal { get; set; } = TerminalPreset.System;
+
     public ExternalToolOptions Clone() => new()
     {
         DiffToolPreset = DiffToolPreset,
@@ -272,7 +303,26 @@ public sealed class ExternalToolOptions
         ExternalDiffToolArgs = ExternalDiffToolArgs,
         ExternalMergeToolPath = ExternalMergeToolPath,
         ExternalMergeToolArgs = ExternalMergeToolArgs,
+        Editor = Editor,
+        EditorCommand = EditorCommand,
+        Terminal = Terminal,
     };
+}
+
+public enum EditorPreset
+{
+    VSCode,
+    VisualStudio,
+    Rider,
+    Custom,
+}
+
+public enum TerminalPreset
+{
+    System,
+    WindowsTerminal,
+    PowerShell,
+    CommandPrompt,
 }
 
 public enum ExternalToolPreset

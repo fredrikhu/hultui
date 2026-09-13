@@ -21,7 +21,7 @@ internal enum OptionsSection { General, Appearance, CodeAndDiff, ExternalTools, 
 public partial class JunctionApp
 {
     private bool _optionsOpen;
-    private OptionsSection _optionsSection = OptionsSection.Appearance;
+    private OptionsSection _optionsSection = OptionsSection.General;
 
     private static readonly (OptionsSection Section, string Icon, string Title)[] OptionsRail =
     [
@@ -33,9 +33,8 @@ public partial class JunctionApp
         (OptionsSection.KeyboardShortcuts, Icons.Terminal, "Keyboard shortcuts"),
     ];
 
-    /// <summary>Which sections have a pane today. The rest come with the Options phase.</summary>
-    private static bool OptionsSectionBuilt(OptionsSection s) =>
-        s is OptionsSection.Appearance or OptionsSection.GitLabAccounts;
+    /// <summary>Every section has its pane since Phase 6; kept as the one place to say so.</summary>
+    private static bool OptionsSectionBuilt(OptionsSection s) => true;
 
     internal bool OptionsOpen => _optionsOpen;
     internal OptionsSection OptionsSectionShown => _optionsSection;
@@ -171,7 +170,11 @@ public partial class JunctionApp
         var col = Flex.Column(gap: 0).Padding(new Thickness(6, 22, 22, 22));
         col.AddChild(_optionsSection switch
         {
+            OptionsSection.General => BuildGeneralPane(),
+            OptionsSection.CodeAndDiff => BuildCodeAndDiffPane(),
+            OptionsSection.ExternalTools => BuildExternalToolsPane(),
             OptionsSection.GitLabAccounts => BuildGitLabAccountsPane(),
+            OptionsSection.KeyboardShortcuts => BuildShortcutsPane(),
             _ => BuildAppearancePane(),
         });
         body.AddChild(col);

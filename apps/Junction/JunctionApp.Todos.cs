@@ -44,13 +44,28 @@ public partial class JunctionApp
         return loader.Value;
     }
 
-    /// <summary>Every account's pending todos, newest first.</summary>
+    /// <summary>Every account's pending todos, newest first — less the kinds Options ›
+    /// General silences, and, when it says so, less the projects no repository in the open
+    /// workspace is a clone of.</summary>
     private List<(string Host, GlTodo Todo)> AllTodos()
     {
+        var g = _settings.General;
+        HashSet<string>? workspaceProjects = null;
+        if (g.TodoOnlyWorkspaceRepos)
+        {
+            workspaceProjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in ActiveWorkspaceRepos)
+                if (GitLabRemoteFor(path) is { } r) workspaceProjects.Add(r.Host + "|" + r.ProjectPath);
+        }
         var all = new List<(string, GlTodo)>();
         foreach (var account in _gitlab.All)
             foreach (var t in TodosFor(account.Host).Value)
+            {
+                var kind = t.ActionName == "directly_addressed" ? "mentioned" : t.ActionName;
+                if (g.TodoHiddenKinds.Contains(kind)) continue;
+                if (workspaceProjects != null && !workspaceProjects.Contains(account.Host + "|" + (t.Project?.PathWithNamespace ?? ""))) continue;
                 all.Add((account.Host, t));
+            }
         all.Sort((a, b) => Nullable.Compare(b.Item2.CreatedAt, a.Item2.CreatedAt));
         return all;
     }

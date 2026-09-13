@@ -777,6 +777,9 @@ public partial class JunctionApp
         string? info = GitLabActive(_activeRepoPath) && GitLabRemoteFor(_activeRepoPath) is { } r
             && ProtectionFor(_activeRepoPath, b.Name) is { } rule
             ? PushRuleSummary(b.Name, rule, r.Host) : null;
+        // A merged branch needs no question when Options › General says so; one with
+        // unmerged work always asks — that card is a choice (-D or not), not a confirmation.
+        if (unmerged == 0 && !_settings.General.ConfirmDestructive) { DoDeleteBranch(b, false); return; }
         OpenDialog(new DialogSpec(
             Title: $"Delete {leaf}?",
             Body: body,

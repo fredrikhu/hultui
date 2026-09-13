@@ -58,7 +58,7 @@ public partial class JunctionApp
 
         col.AddChild(Box.New().Height(1).Background(Nocturne.Divider));
         col.AddChild(BuildScaleSection());
-        col.AddChild(BuildCodeFontSection());
+        // The code font moved to Code & diff with the rest of the diff's settings.
         return col;
     }
 
@@ -100,7 +100,7 @@ public partial class JunctionApp
         return chip;
     }
 
-    private Element BuildCodeFontSection()
+    private BoxElement BuildCodeFontSection()
     {
         var col = Flex.Column(gap: 7);
         col.AddChild(SectionTitle("Code font"));

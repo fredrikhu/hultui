@@ -511,7 +511,10 @@ public partial class JunctionApp
                 ? Item(Icons.GitPullRequest, "Merge requests…", () => OpenMergeRequests())
                 : Item(Icons.GitPullRequest, "Merge requests…", () => OpenOptions(OptionsSection.GitLabAccounts)));
             if (_gitlab.HasAccount(remote.Host))
+            {
                 items.Add(Item(Icons.GitPullRequest, "Create merge request…", () => OpenCreateMergeRequest()));
+                items.Add(Item(Icons.GitBranch, "Create branch from issue…", OpenBranchFromIssue));
+            }
         }
         return items;
     }

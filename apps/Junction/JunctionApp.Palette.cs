@@ -214,10 +214,11 @@ public partial class JunctionApp
         // Find-in-text, which until now was only ever reachable by knowing Ctrl+F.
         items.Add(new("action", "Action", Icons.MagnifyingGlass, "Find in this diff or file", "f · Ctrl+F",
             () => { ClosePalette(); ShowDiffView(); if (ActiveFindBar() is { } bar) OpenFindBar(bar); }));
+        // Background fetch is a switch in Options › General now, not a palette toggle.
         items.Add(new("action", "Action", Icons.ArrowsClockwise,
             "Background fetch: " + (_settings.General.AutoFetchEnabled ? "on" : "off"),
-            _settings.General.AutoFetchEnabled ? $"every {_settings.General.AutoFetchIntervalMinutes} min" : "",
-            () => { ClosePalette(); ToggleAutoFetch(); }));
+            "Options › General",
+            () => { ClosePalette(); OpenOptions(OptionsSection.General); }));
         items.Add(new("action", "Action", Icons.CounterClockwise, "Reflog (recover lost commits)…", "", () => { ClosePalette(); OpenReflog(); }));
         // Options has no gear in the chrome by design: these verbs and Ctrl+, are the ways in.
         items.Add(new("action", "Action", Icons.Gear, "Options…", "Ctrl ,",
@@ -246,6 +247,9 @@ public partial class JunctionApp
         }
         items.Add(new("action", "Action", Icons.Cube, "Submodules…", "", () => { ClosePalette(); OpenSubmodules(); }));
         items.Add(new("action", "Action", Icons.Cloud, "Remotes…", "", () => { ClosePalette(); OpenRemotes(); }));
+        if (GitLabActive(_activeRepoPath))
+            items.Add(new("action", "Action", Icons.GitBranch, "Create branch from issue…", "<iid>-<slug> from the default branch",
+                () => { ClosePalette(); OpenBranchFromIssue(); }));
         items.Add(new("action", "Action", Icons.GitCommit, "Commit staged changes", "", () => { ClosePalette(); SetView(JunctionView.Changes); }));
         items.Add(new("action", "Action", Icons.TrayArrowDown, "Stash changes", "", () => { ClosePalette(); DoStash(includeUntracked: false); }));
         items.Add(new("action", "Action", Icons.Stack, "Stash including untracked", "", () => { ClosePalette(); DoStash(includeUntracked: true); }));

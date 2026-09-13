@@ -63,7 +63,7 @@ public partial class JunctionApp
         var external = diff is { IsBinary: true }
             ? Ui.DisabledIconButton(Icons.FileCode,
                 "Binary file — there are no two texts for VS Code to compare")
-            : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, "Open in VS Code (Ctrl D)");
+            : Ui.IconButton(Icons.FileCode, OpenSelectedDiffExternally, $"Open in {EditorName(_settings.ExternalTools)} ({Shortcuts.Keys("Diff", "Open in the editor")})");
         external.Key = diff is { IsBinary: true } ? "diff-external#off" : "diff-external";
         header.AddChild(external.FlexShrink(0));
         header.AddChild(Ui.IconButton(Icons.ArrowsOut, ToggleDiffFullscreen, "Fullscreen diff (F11)").FlexShrink(0));
@@ -1095,21 +1095,49 @@ public partial class JunctionApp
             return;
         }
 
-        Flash("Opening diff in VS Code…");
-        var (ok, err) = await Task.Run(() => LaunchVsCodeDiff(repo, path, mode, commitHash, baseHash));
-        if (!ok) Flash(string.IsNullOrEmpty(err) ? "Could not open VS Code" : err);
+        var editor = EditorName(_settings.ExternalTools);
+        var opts = EditorLaunchOptions(_settings.ExternalTools);
+        Flash($"Opening diff in {editor}…");
+        var (ok, err) = await Task.Run(() => LaunchEditorDiff(repo, path, mode, commitHash, baseHash, opts));
+        if (!ok) Flash(string.IsNullOrEmpty(err) ? $"Could not open {editor}" : err);
     }
 
+    /// <summary>What Options › External tools chose, as the launcher's executable and
+    /// arguments. A custom command is split at its first space: the program, then the
+    /// arguments with <c>{left}</c> and <c>{right}</c> for the two files.</summary>
+    internal static ExternalToolOptions EditorLaunchOptions(ExternalToolOptions tools)
+    {
+        switch (tools.Editor)
+        {
+            case EditorPreset.VisualStudio:
+                return new ExternalToolOptions { ExternalDiffToolPath = "devenv", ExternalDiffToolArgs = "/diff {left} {right}" };
+            case EditorPreset.Rider:
+                return new ExternalToolOptions { ExternalDiffToolPath = "rider", ExternalDiffToolArgs = "diff {left} {right}" };
+            case EditorPreset.Custom:
+                var command = tools.EditorCommand.Trim();
+                if (command.Length == 0) break;
+                int space = command.IndexOf(' ');
+                var program = space < 0 ? command : command[..space];
+                var args = space < 0 ? "{left} {right}" : command[(space + 1)..];
+                if (!args.Contains("{left}")) args += " {left} {right}";
+                return new ExternalToolOptions { ExternalDiffToolPath = program, ExternalDiffToolArgs = args };
+        }
+        return new ExternalToolOptions { ExternalDiffToolPath = "code", ExternalDiffToolArgs = "--wait --diff {left} {right}" };
+    }
+
+    internal static string EditorName(ExternalToolOptions tools) => tools.Editor switch
+    {
+        EditorPreset.VisualStudio => "Visual Studio",
+        EditorPreset.Rider => "Rider",
+        EditorPreset.Custom when tools.EditorCommand.Trim().Length > 0 => "the editor",
+        _ => "VS Code",
+    };
+
     // Runs off the UI thread (git show + temp-file writes + process start).
-    private static (bool ok, string err) LaunchVsCodeDiff(
-        GitRepository repo, string path, ExternalDiffMode mode, string? commitHash, string? baseHash = null)
+    private static (bool ok, string err) LaunchEditorDiff(
+        GitRepository repo, string path, ExternalDiffMode mode, string? commitHash, string? baseHash, ExternalToolOptions opts)
     {
         var request = BuildExternalDiffRequest(repo, path, mode, commitHash, baseHash);
-        var opts = new ExternalToolOptions
-        {
-            ExternalDiffToolPath = "code",
-            ExternalDiffToolArgs = "--wait --diff {left} {right}",
-        };
         bool ok = ExternalDiffLauncher.TryLaunch(opts, request, out var err);
         return (ok, err);
     }

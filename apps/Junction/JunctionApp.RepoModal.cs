@@ -57,6 +57,12 @@ public partial class JunctionApp
         public HashSet<string> WorkspaceIds = new(); // repo modes: joined workspaces
         public string? EditId;   // workspace id (workspace modes) or repo path (editRepo)
 
+        // CloneRepo: the GitLab side of the URL / GitLab switch.
+        public bool FromGitLab;
+        public string CloneHost = "";
+        public string CloneSearch = "";
+        public Junction.GitLab.GlProject? CloneProject;
+
         // AddRepo folder validation: the expanded path we last checked and its result.
         public string CheckedPath = "";
         public RepoPathStatus PathStatus = RepoPathStatus.Empty;
@@ -87,7 +93,7 @@ public partial class JunctionApp
         WorkspaceIds = ActiveWorkspace is { } w ? new() { w.Id } : new(),
     });
 
-    private void OpenCloneRepo() => OpenModal(new ModalForm
+    internal void OpenCloneRepo() => OpenModal(new ModalForm
     {
         Kind = ModalKind.CloneRepo,
         Color = "blurple",
@@ -459,7 +465,7 @@ public partial class JunctionApp
     {
         var (ok, error) = await Task.Run(() =>
         {
-            var started = ShellLauncher.OpenTerminal(path, out var err);
+            var started = ShellLauncher.OpenTerminal(path, _settings.ExternalTools.Terminal, out var err);
             return (started, err);
         });
         if (!ok)

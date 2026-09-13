@@ -102,10 +102,15 @@ public static class ShellLauncher
     /// execution alias on PATH — and the machine's configured interpreter is the fallback
     /// for a machine without it. The two Unix desktops each have one conventional opener.</para>
     /// </summary>
-    public static bool OpenTerminal(string directory, out string error)
+    public static bool OpenTerminal(string directory, out string error) =>
+        OpenTerminal(directory, TerminalPreset.System, out error);
+
+    /// <summary>As above, with Options › External tools' choice first: a named terminal is
+    /// tried before the machine's own order, which stays the fallback.</summary>
+    public static bool OpenTerminal(string directory, TerminalPreset preset, out string error)
     {
         error = "";
-        foreach (var (program, args) in TerminalCandidates(directory))
+        foreach (var (program, args) in PreferredTerminal(directory, preset).Concat(TerminalCandidates(directory)))
         {
             try
             {
@@ -128,6 +133,25 @@ public static class ShellLauncher
         }
         if (error.Length == 0) error = "No terminal found.";
         return false;
+    }
+
+    private static IEnumerable<(string Program, string[] Args)> PreferredTerminal(string directory, TerminalPreset preset)
+    {
+        if (!OperatingSystem.IsWindows()) yield break;
+        switch (preset)
+        {
+            case TerminalPreset.WindowsTerminal:
+                yield return ("wt.exe", ["-d", directory]);
+                break;
+            case TerminalPreset.PowerShell:
+                yield return ("pwsh.exe", ["-NoExit"]);
+                yield return ("powershell.exe", ["-NoExit"]);
+                break;
+            case TerminalPreset.CommandPrompt:
+                var comspec = Environment.GetEnvironmentVariable("ComSpec");
+                if (!string.IsNullOrEmpty(comspec)) yield return (comspec, []);
+                break;
+        }
     }
 
     private static IEnumerable<(string Program, string[] Args)> TerminalCandidates(string directory)

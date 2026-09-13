@@ -82,8 +82,14 @@ public partial class JunctionApp
         }
         if (f.Kind == ModalKind.CloneRepo)
         {
-            col.AddChild(ModalField("Remote URL",
-                ModalInput(f.Url, "https://github.com/acme/service.git", v => f.Url = v, _modalNameRef, mono: true)));
+            // With an account signed in the source is a switch: a URL, or a project picked
+            // from GitLab (JunctionApp.CloneFromGitLab), which fills the URL underneath.
+            if (_gitlab.All.Count > 0) col.AddChild(CloneSourceSwitch(f));
+            if (f.FromGitLab && _gitlab.All.Count > 0)
+                col.AddChild(BuildCloneFromGitLab(f));
+            else
+                col.AddChild(ModalField("Remote URL",
+                    ModalInput(f.Url, "https://github.com/acme/service.git", v => f.Url = v, _modalNameRef, mono: true)));
             col.AddChild(ModalField("Clone to",
                 ModalInputWithBrowse(f, f.Dest, "~/code", v => f.Dest = v, null, mono: true)));
         }

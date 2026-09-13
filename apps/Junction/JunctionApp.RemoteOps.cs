@@ -206,9 +206,43 @@ public partial class JunctionApp
         }
     }
 
-    /// <summary>Turns the background fetch on or off. Lives in the command palette
-    /// because Junction has no settings window; the toast confirms which way it went,
-    /// since the effect is by design invisible.</summary>
+    // ── GitLab refresh timer ─────────────────────────────────────────────────────────
+
+    private CancellationTokenSource? _gitlabRefreshCts;
+
+    /// <summary>(Re)starts the hosted-data timer from the settings — Options › General.
+    /// Off (0 minutes) leaves the reloads to Fetch, the panel and repository switches.</summary>
+    private void RestartGitLabRefresh()
+    {
+        _gitlabRefreshCts?.Cancel();
+        _gitlabRefreshCts?.Dispose();
+        _gitlabRefreshCts = null;
+        if (_settings.General.GitLabRefreshMinutes <= 0) return;
+        var cts = new CancellationTokenSource();
+        _gitlabRefreshCts = cts;
+        _ = GitLabRefreshLoop(cts.Token);
+    }
+
+    private async Task GitLabRefreshLoop(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromMinutes(Math.Clamp(_settings.General.GitLabRefreshMinutes, 1, 120)), ct);
+                // Only the repository on screen: the others reload when they are switched to.
+                if (HasActiveRepo && GitLabActive(_activeRepoPath) && !_mrLoaders.For(_activeRepoPath).IsLoading)
+                    RefreshHosted(_activeRepoPath);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Settings changed, or the window is closing.
+        }
+    }
+
+    /// <summary>Turns the background fetch on or off — Options › General. The toast
+    /// confirms which way it went, since the effect is by design invisible.</summary>
     private void ToggleAutoFetch()
     {
         _settings.General.AutoFetchEnabled = !_settings.General.AutoFetchEnabled;

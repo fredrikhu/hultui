@@ -445,6 +445,7 @@ public partial class JunctionApp : Component, IDisposable
         Mount().On<KeyDownEvent>(HandleKeyDown);
 
         RestartAutoFetch();
+        RestartGitLabRefresh();
     }
 
     // Toggle compact chrome as the window crosses the breakpoint. Only rerender on
@@ -857,6 +858,7 @@ public partial class JunctionApp : Component, IDisposable
     {
         SettleDiffScrollbar();
         ServiceReviewAfterBuild();
+        ServiceBranchFromIssue();
 
         if (_pendingPaletteFocus)
         {
