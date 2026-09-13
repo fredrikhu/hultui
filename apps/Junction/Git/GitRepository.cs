@@ -104,6 +104,10 @@ public class GitRepository
 
             // Skip symbolic refs like refs/remotes/origin/HEAD
             if (fullName.EndsWith("/HEAD")) continue;
+            // The refs "Checkout locally" and a review fetch a merge request's head into
+            // (refs/remotes/<remote>/merge-requests/N) are addressed by name where they are
+            // used; listed among the remote branches they only read as clutter.
+            if (isMergeRequestRef(fullName)) continue;
 
             var isCurrent = parts[2] == "*";
             var isRemote = fullName.StartsWith("refs/remotes/");
@@ -122,6 +126,20 @@ public class GitRepository
         }
 
         return branches;
+    }
+
+    /// <summary><c>refs/remotes/&lt;remote&gt;/merge-requests/&lt;n&gt;</c> — the merge-request
+    /// heads Junction fetches for a checkout or a review.</summary>
+    private static bool isMergeRequestRef(string fullName)
+    {
+        const string prefix = "refs/remotes/";
+        if (!fullName.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        int slash = fullName.IndexOf('/', prefix.Length);
+        if (slash < 0) return false;
+        var rest = fullName.AsSpan(slash + 1);
+        const string mr = "merge-requests/";
+        return rest.StartsWith(mr, StringComparison.Ordinal) && rest.Length > mr.Length
+            && rest[mr.Length..].ToString().All(char.IsAsciiDigit);
     }
 
     public string GetCurrentBranch()

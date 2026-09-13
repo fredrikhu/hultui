@@ -63,14 +63,15 @@ public partial class JunctionApp
     private Element GitLabMark(GitLabRemote remote, float size = 12f)
     {
         bool connected = _gitlab.HasAccount(remote.Host);
-        var box = Box.New().FlexShrink(0)
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
+        // The glyph itself, not a box around it: wrapped, the box took the row's height and
+        // sat the glyph at its bottom, so the mark hung under the name it follows.
+        var mark = Ui.Icon(Icons.GitLabLogo, size, Nocturne.On(connected ? 0.55 : 0.26))
+            .FlexShrink(0)
             .Tooltip(connected
                 ? $"{remote.ProjectPath} on {remote.Host}"
                 : $"Connect an account for {remote.Host} to use GitLab features");
-        box.AddChild(Ui.Icon(Icons.GitLabLogo, size, Nocturne.On(connected ? 0.55 : 0.26)));
-        box.AutomationId = "gitlab-mark";
-        return box;
+        mark.AutomationId = "gitlab-mark";
+        return mark;
     }
 
     /// <summary>The mark for <paramref name="path"/>, or null when it is not GitLab-backed.</summary>

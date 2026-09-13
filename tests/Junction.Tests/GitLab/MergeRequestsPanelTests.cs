@@ -199,6 +199,21 @@ public class MergeRequestsPanelTests
 /// </summary>
 public class MergeRequestCheckoutGitTests
 {
+    /// <summary>The ref a checkout or a review fetches the head into is addressed by name
+    /// where it is used; among the remote branches it only read as clutter.</summary>
+    [Fact]
+    public void TheFetchedMergeRequestRefIsNotListedAmongTheBranches()
+    {
+        using var local = TempRepo.CreateWithInitialCommit();
+        local.Git("update-ref", "refs/remotes/origin/merge-requests/412", local.Head);
+        local.Git("update-ref", "refs/remotes/origin/main", local.Head);
+        var names = local.Repo.GetBranches().Select(b => b.Name).ToList();
+        Assert.Contains("origin/main", names);
+        Assert.DoesNotContain("origin/merge-requests/412", names);
+        // The ref itself is still there for the code that names it.
+        Assert.Equal(local.Head, local.Git("rev-parse", "refs/remotes/origin/merge-requests/412").Stdout.Trim());
+    }
+
     [Fact]
     public async Task TheMergeRequestHeadIsFetchedAndABranchCreatedOnIt()
     {
