@@ -163,9 +163,26 @@ public partial class JunctionApp
         row.AddChild(text);
 
         var status = Flex.Row(gap: 6).AlignItems(AlignItems.Center).FlexShrink(0);
-        if (sum.Dirty > 0)
-            status.AddChild(Box.New().Width(7).Height(7).CornerRadius(3.5f).Background(Nocturne.Accent)
-                .Tooltip("Uncommitted changes"));
+        // A half-finished merge or rebase takes the dot's place rather than sitting beside
+        // it. The dot means "there is work here"; an unfinished operation means "git is
+        // waiting on you", and a repository in that state read as ordinary dirt — which is
+        // the whole reason a conflicted pull could sit unnoticed in another workspace.
+        // Keyed: a repository entering or leaving an operation swaps a 7px dot for a chip
+        // at the same position, which is the shape of change the reconciler must make by
+        // identity rather than patch in place.
+        if (sum.InSequencer)
+        {
+            var badge = SequencerBadge(sum);
+            badge.Key = "seq";
+            status.AddChild(badge);
+        }
+        else if (sum.Dirty > 0)
+        {
+            var dot = Box.New().Width(7).Height(7).CornerRadius(3.5f).Background(Nocturne.Accent)
+                .Tooltip("Uncommitted changes");
+            dot.Key = "dirty";
+            status.AddChild(dot);
+        }
         status.AddChild(AheadBehind(sum.Ahead, sum.Behind));
         row.AddChild(status);
 
@@ -246,18 +263,25 @@ public partial class JunctionApp
             var active = PathEquals(path, _activeRepoPath) || activeChild != null;
             var name = System.IO.Path.GetFileName(path.TrimEnd('/', '\\'));
             var (bg, fg) = RepoTile(path);
+            // The rail has room for a 34px square and nothing else, so an unfinished merge
+            // shows as the tile's border rather than as a chip — the one property that can
+            // change without moving the letter it frames.
+            var sum = SummaryFor(path);
+            var tooltip = activeChild != null ? $"{name} · {activeChild.RefLabel}" : name;
+            if (sum.InSequencer) tooltip = $"{name} · {SequencerSummary(sum)}";
             var tile = Box.New()
                 .Width(34).Height(34).FlexShrink(0).CornerRadius(Nocturne.RadiusMd)
                 .Background(active ? Nocturne.Accent800 : Nocturne.Neutral900)
-                .BorderColor(active ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
+                .BorderColor(sum.InSequencer ? Nocturne.DangerIcon
+                    : active ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
                 .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
                 .Cursor(CursorType.Pointer)
-                .Tooltip(activeChild != null ? $"{name} · {activeChild.RefLabel}" : name)
+                .Tooltip(tooltip)
                 .Children(Text.New(string.IsNullOrEmpty(name) ? "?" : char.ToUpperInvariant(name[0]).ToString())
                     .FontSize(12f).FontWeight(FontWeight.SemiBold).TextColor(fg));
             // Both colours and the tooltip change with the active flag, so the two states
             // are different rows to the reconciler rather than one patched in place.
-            tile.Key = "rail:" + path + (active ? "#a" : "");
+            tile.Key = "rail:" + path + (active ? "#a" : "") + (sum.InSequencer ? "#c" : "");
             // Clicking the tile goes to the repository itself; the checkouts need the
             // expanded sidebar, where they have rows of their own.
             tile.OnClick(_ => SelectRepo(path));

@@ -719,4 +719,44 @@ public partial class JunctionApp
         SequencerOp.Revert => "Revert",
         _ => "Operation",
     };
+
+    // ── Repository-level markers ─────────────────────────────────────────
+    //
+    // The banner above only exists inside the Changes view, which is no use at all to
+    // someone whose pull stopped on conflicts in the third repository of a workspace:
+    // every other surface showed the same accent dot it shows for an unsaved edit. These
+    // two are what the sidebar row, the collapsed rail and the Overview card wear instead.
+
+    /// <summary>The chip a repository row wears while git is half way through an
+    /// operation: the operation's own glyph and how many conflicts are still unresolved.
+    /// Danger-coloured, because unlike a dirty working tree this is a state the repository
+    /// cannot be left in.</summary>
+    private static Element SequencerBadge(RepoSummary sum)
+    {
+        var chip = Flex.Row(gap: 3).AlignItems(AlignItems.Center).FlexShrink(0)
+            .Padding(new Thickness(2, 6, 2, 6)).CornerRadius(Nocturne.RadiusMd * 0.75f)
+            .Background(Nocturne.Alpha(Nocturne.DangerText, 0.16))
+            .Tooltip(SequencerSummary(sum));
+        chip.AddChild(Ui.Icon(SequencerGlyph(sum.Op), 10f, Nocturne.DangerText));
+        if (sum.Conflicts > 0)
+            chip.AddChild(Text.New(sum.Conflicts.ToString()).FontSize(9.5f)
+                .FontWeight(FontWeight.Medium).TextColor(Nocturne.DangerText));
+        return chip;
+    }
+
+    /// <summary>One line naming the state and what it is waiting for. A sequencer with
+    /// nothing left to resolve is a real state — the work is done and git wants the
+    /// continue — and says so rather than reading as "nothing to see here".</summary>
+    private static string SequencerSummary(RepoSummary sum) => sum.Conflicts > 0
+        ? $"{OpName(sum.Op)} stopped on {sum.Conflicts} conflict{(sum.Conflicts == 1 ? "" : "s")} — resolve them in Changes"
+        : $"{OpName(sum.Op)} in progress — every conflict resolved, waiting to continue";
+
+    /// <summary>The same state as a tag, for the Overview card, where it takes the place of
+    /// the "N changed" count: the count is true but it is not the thing to act on.</summary>
+    private static Element SequencerTag(RepoSummary sum) =>
+        Ui.Tag(sum.Conflicts > 0
+                    ? $"{OpName(sum.Op)} · {sum.Conflicts} conflict{(sum.Conflicts == 1 ? "" : "s")}"
+                    : $"{OpName(sum.Op)} · ready to continue",
+                Nocturne.Alpha(Nocturne.DangerText, 0.16), Nocturne.DangerText, 10f)
+            .Tooltip(SequencerSummary(sum));
 }

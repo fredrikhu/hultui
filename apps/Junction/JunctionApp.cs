@@ -294,6 +294,16 @@ public partial class JunctionApp : Component, IDisposable
         /// <summary>The configured remotes — what says where the repository is hosted (see
         /// GitLabRemoteFor). One <c>git remote -v</c>, read with the rest of the summary.</summary>
         public IReadOnlyList<GitRemote> Remotes { get; init; } = [];
+
+        /// <summary>The half-finished merge / rebase / cherry-pick / revert the repository is
+        /// sitting in, if any. Carried here rather than left to the Changes view: a pull that
+        /// stops on conflicts is the one repository state a user must not be able to walk past,
+        /// and the sidebar row and the Overview card are what they are looking at when it
+        /// happens. Four <c>File.Exists</c> calls on top of a load that already runs git.</summary>
+        public SequencerOp Op { get; init; } = SequencerOp.None;
+        /// <summary>Unmerged files, counted from the same status the dirty count comes from.</summary>
+        public int Conflicts { get; init; }
+        public bool InSequencer => Op != SequencerOp.None;
     }
 
     /// <summary>The commit list itself. The per-commit +/- counts are deliberately not
@@ -700,11 +710,18 @@ public partial class JunctionApp : Component, IDisposable
         var branch = repo.GetCurrentBranch();
         var branches = repo.GetBranches();
         var info = branches.FirstOrDefault(b => b.IsCurrent || b.Name == branch);
-        var dirty = repo.GetStatus().Count;
+        // One status, read twice: the dirty count and — when git is half way through a
+        // sequencer operation — how many of those entries are unmerged. Counting conflicts
+        // only inside an operation matches what the Changes view lists (LoadChanges).
+        var status = repo.GetStatus();
+        var op = repo.GetSequencerOp();
+        var conflicts = op == SequencerOp.None
+            ? 0
+            : status.Count(f => f.Kind == FileChangeKind.Conflicted);
         var version = repo.GetDescribeVersion();
         var remotes = repo.GetRemotesDetailed();
-        return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, dirty, version)
-            { Branches = branches, Remotes = remotes };
+        return new RepoSummary(branch, info?.AheadCount ?? 0, info?.BehindCount ?? 0, status.Count, version)
+            { Branches = branches, Remotes = remotes, Op = op, Conflicts = conflicts };
     }
 
     private HashSet<string> IncludeSet(string path)

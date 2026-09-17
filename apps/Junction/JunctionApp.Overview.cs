@@ -21,14 +21,34 @@ public partial class JunctionApp
 
         // Header: WORKSPACE kicker + name · right-aligned repo/dirty summary.
         var dirtyCount = repos.Count(p => SummaryFor(p).Dirty > 0);
+        var stuck = repos.Where(p => SummaryFor(p).InSequencer).ToList();
         var header = Flex.Row(gap: 16).AlignItems(AlignItems.FlexEnd)
             .JustifyContent(JustifyContent.SpaceBetween);
         var left = Flex.Column(gap: 6);
         left.AddChild(Text.New("WORKSPACE").FontSize(11f).LetterSpacing(1.1f).TextColor(Nocturne.Accent300));
         left.AddChild(Text.New(ws?.Name ?? "Workspace").FontSize(22f).FontWeight(FontWeight.SemiBold));
         header.AddChild(left);
-        header.AddChild(Text.New($"{repos.Count} repositor{(repos.Count == 1 ? "y" : "ies")} · {dirtyCount} with uncommitted work")
+        // The counts read right-to-left in urgency: a repository git is waiting on gets its
+        // own line above the tally rather than being folded into "uncommitted work", which
+        // is exactly the sentence that hid a conflicted pull.
+        var counts = Flex.Column(gap: 3).AlignItems(AlignItems.FlexEnd);
+        if (stuck.Count > 0)
+        {
+            // Named by what is left to do rather than by which command left it there: the
+            // four sequencer operations can be in flight in different repositories at once,
+            // and "conflicts to resolve" is true of all of them.
+            var conflicts = stuck.Sum(p => SummaryFor(p).Conflicts);
+            var where = stuck.Count == 1
+                ? System.IO.Path.GetFileName(stuck[0].TrimEnd('/', '\\'))
+                : $"{stuck.Count} repositories";
+            counts.AddChild(Text.New(conflicts > 0
+                    ? $"{conflicts} conflict{(conflicts == 1 ? "" : "s")} to resolve in {where}"
+                    : $"Unfinished work in {where} — waiting to continue")
+                .FontSize(12f).FontWeight(FontWeight.Medium).TextColor(Nocturne.DangerText));
+        }
+        counts.AddChild(Text.New($"{repos.Count} repositor{(repos.Count == 1 ? "y" : "ies")} · {dirtyCount} with uncommitted work")
             .FontSize(12f).TextColor(Nocturne.On(0.55)));
+        header.AddChild(counts);
         scroll.AddChild(header);
         scroll.AddChild(Box.New().Height(22).FlexShrink(0));
 
@@ -76,7 +96,10 @@ public partial class JunctionApp
         var card = Flex.Column(gap: 12).FlexGrow(1).FlexBasis(Dimension.Px(0))
             .Padding(new Thickness(15))
             .Background(Nocturne.Surface)
-            .BorderColor(Nocturne.Divider).BorderWidth(1f)
+            // The tag alone is easy to miss in a grid of three identical cards; the border
+            // is what makes the one repository git is waiting on findable at a glance.
+            .BorderColor(sum.InSequencer ? Nocturne.Alpha(Nocturne.DangerText, 0.45) : Nocturne.Divider)
+            .BorderWidth(1f)
             .CornerRadius(Nocturne.RadiusLg);
 
         // Header: initial tile + name/subtitle + "N changed" tag.
@@ -91,8 +114,19 @@ public partial class JunctionApp
         if (GitLabMarkFor(path) is { } mark) pathLine.AddChild(mark);
         nameCol.AddChild(pathLine);
         head.AddChild(nameCol);
-        if (sum.Dirty > 0)
-            head.AddChild(Ui.Tag($"{sum.Dirty} changed", Nocturne.Accent900, Nocturne.Accent300, 10f));
+        // Keyed for the same reason as the sidebar's badge: the two tags swap at one index.
+        if (sum.InSequencer)
+        {
+            var tag = SequencerTag(sum);
+            tag.Key = "seq";
+            head.AddChild(tag);
+        }
+        else if (sum.Dirty > 0)
+        {
+            var tag = Ui.Tag($"{sum.Dirty} changed", Nocturne.Accent900, Nocturne.Accent300, 10f);
+            tag.Key = "dirty";
+            head.AddChild(tag);
+        }
         card.AddChild(head);
 
         // Branch inset.

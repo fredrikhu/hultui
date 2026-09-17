@@ -158,7 +158,12 @@ public partial class JunctionApp
         seg.AddChild(ViewTab(JunctionView.Overview, "Overview", Icons.SquaresFour, "1", 0));
         seg.AddChild(ViewTab(JunctionView.History, "History", Icons.GitCommit, "2", 0));
         seg.AddChild(ViewTab(JunctionView.Commit, "Commit", Icons.GitDiff, "3", 0));
-        seg.AddChild(ViewTab(JunctionView.Changes, "Changes", Icons.Pencil, "4", sum.Dirty));
+        // The Changes tab is where an unfinished operation is resolved, so its badge counts
+        // the conflicts — in the danger colour — rather than the working-tree total while
+        // one is in flight. Same tab, same place, but it now reads as something to go to.
+        seg.AddChild(sum.InSequencer && sum.Conflicts > 0
+            ? ViewTab(JunctionView.Changes, "Changes", Icons.Pencil, "4", sum.Conflicts, alarm: true)
+            : ViewTab(JunctionView.Changes, "Changes", Icons.Pencil, "4", sum.Dirty));
         seg.AddChild(ViewTab(JunctionView.Branches, "Branches", Icons.GitBranch, "5", 0));
         seg.AddChild(ViewTab(JunctionView.Tags, "Tags", Icons.Tag, "6", 0));
         seg.AddChild(ViewTab(JunctionView.Files, "Files", Icons.Folders, "7", 0));
@@ -247,7 +252,8 @@ public partial class JunctionApp
         return b.HoverBg(Nocturne.Alpha(fg, primary ? 0.12 : 0.07), Color.Transparent);
     }
 
-    private Element ViewTab(JunctionView view, string label, string glyph, string num, int badge)
+    private Element ViewTab(JunctionView view, string label, string glyph, string num, int badge,
+        bool alarm = false)
     {
         var active = View == view;
         var fg = active ? Nocturne.Accent : Nocturne.On(0.60);
@@ -282,9 +288,10 @@ public partial class JunctionApp
         if (badge > 0)
             tab.AddChild(
                 Box.New().MinWidth(15).Height(15).Padding(new Thickness(0, 4, 0, 4)).CornerRadius(8f)
-                    .Background(Nocturne.Accent700)
+                    .Background(alarm ? Nocturne.Alpha(Nocturne.DangerText, 0.28) : Nocturne.Accent700)
                     .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-                    .Children(Text.New(badge.ToString()).FontSize(9f).TextColor(Nocturne.Accent100)));
+                    .Children(Text.New(badge.ToString()).FontSize(9f)
+                        .TextColor(alarm ? Nocturne.DangerText : Nocturne.Accent100)));
 
         tab.OnClick(_ => SetView(view));
         // Declarative hover: the interaction config follows the latest build, so the
