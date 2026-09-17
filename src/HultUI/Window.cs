@@ -1256,7 +1256,7 @@ public sealed class Window : IOverlayHost, IDisposable
                             Tracer.Annotate("Graphics", gfx);
                     }
                     else
-                        Tracer.StopRecording("/tmp/hultui-trace.json");
+                        Tracer.StopRecording(FrameTracer.DefaultPath);
                 }
 
                 // Context menu keyboard navigation. An open flyout captures

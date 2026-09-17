@@ -18,6 +18,20 @@ public sealed class FrameTracer
 
     public bool IsRecording { get; private set; }
 
+    /// <summary>
+    /// Where the F11 hotkey saves a trace, for callers that have no path of their own.
+    ///
+    /// <para>Asked of <see cref="Path.GetTempPath"/> rather than spelled <c>/tmp</c>: that
+    /// literal is drive-relative on Windows, so it resolved to <c>tmp\</c> at the root of
+    /// whichever drive the app happened to be running from — a directory that exists on
+    /// nobody's machine by default. Pressing F11 twice then threw out of the input handler
+    /// instead of writing a trace. GetTempPath reads TMP then TEMP on Windows and TMPDIR on
+    /// Unix, where it still falls back to <c>/tmp</c> — so the path this replaces is exactly
+    /// what it keeps returning there.</para>
+    /// </summary>
+    public static string DefaultPath { get; } =
+        Path.Combine(Path.GetTempPath(), "hultui-trace.json");
+
     public void StartRecording()
     {
         _events.Clear();
@@ -95,6 +109,10 @@ public sealed class FrameTracer
             AppendEvent(sb, _events[i]);
         }
         sb.Append(']');
+        // HULTUI_TRACE can name a path several directories deep that nothing has created
+        // yet; a trace lost at the last step because of that wastes the whole run.
+        if (Path.GetDirectoryName(Path.GetFullPath(path)) is { Length: > 0 } dir)
+            Directory.CreateDirectory(dir);
         File.WriteAllText(path, sb.ToString());
     }
 
