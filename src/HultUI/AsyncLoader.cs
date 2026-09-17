@@ -16,6 +16,16 @@ namespace HultUI;
 /// rebuild. Requests for the same key are ignored (cache hit), and a newer key
 /// supersedes an in-flight older one (its stale result is dropped).</para>
 ///
+/// <para><b>Failure.</b> A producer that throws leaves the previous value in place
+/// and retries, up to <see cref="MaxAttempts"/> times with a widening delay. The key
+/// counts as loaded only once a value has actually been <i>delivered</i>: a load that
+/// threw used to record its key anyway, so every later <c>Load</c> for it was a cache
+/// hit and the loader sat on its seed value for the life of the process. In Junction
+/// that showed as a repository stuck on "…" with no branch, no counts and no changes,
+/// hours after a <c>git pull</c> whose half-written index had refused one status call —
+/// and because nothing re-keys a repository whose working tree and remote have both gone
+/// quiet, there was no way back short of restarting the app.</para>
+///
 /// <para>The result is applied inside a <see cref="ReactiveRuntime.Batch"/>, so
 /// the value, the loading flag, and any <c>onLoaded</c> side effects coalesce
 /// into a single rebuild.</para>
@@ -52,9 +62,22 @@ namespace HultUI;
 /// </remarks>
 public sealed class AsyncLoader<T>
 {
+    /// <summary>How many times a failed load is retried before the loader gives up and
+    /// waits for a new key. Bounded, because a producer that fails the same way four
+    /// times running is not losing a race — it is broken, and a client that keeps
+    /// relaunching subprocesses for it is worse than a stale value. The delays widen
+    /// 0.5 s · 1.5 s · 4.5 s, long enough for the writer that refused it to finish.</summary>
+    private const int MaxAttempts = 3;
+
     private readonly Signal<T> _value;
     private readonly Signal<bool> _loading = new(false);
+    /// <summary>The key whose value <see cref="_value"/> actually holds. Advanced on
+    /// delivery, never on the attempt — see the Failure note on the class.</summary>
     private object? _loadedKey;
+    /// <summary>The key currently in flight, waiting to be retried, or given up on.
+    /// Keeps a rebuild from restarting a load that is already under way, and — once the
+    /// attempts are spent — from spinning on one that cannot succeed.</summary>
+    private object? _attemptedKey;
     private int _generation;
 
     /// <summary>Creates a loader seeded with an initial value shown until the first load lands.</summary>
@@ -67,9 +90,9 @@ public sealed class AsyncLoader<T>
     public bool IsLoading => _loading.Value;
 
     /// <summary>
-    /// Ensures the value for <paramref name="key"/> is loaded. No-op if that key
-    /// is already loaded or currently loading. Must be called on the UI thread
-    /// (typically from <c>Build()</c>).
+    /// Ensures the value for <paramref name="key"/> is loaded. No-op if that key is
+    /// already loaded, currently loading, or waiting out a retry. Must be called on the
+    /// UI thread (typically from <c>Build()</c>).
     /// </summary>
     /// <param name="key">Identifies the desired value. Equal keys are a cache hit.</param>
     /// <param name="produce">Runs on a thread-pool thread; must not touch UI or reactive state.</param>
@@ -78,10 +101,18 @@ public sealed class AsyncLoader<T>
     /// adjusting a selection.</param>
     public void Load(object key, Func<T> produce, Action<T>? onLoaded = null)
     {
-        if (Equals(key, _loadedKey))
+        // Two different "already handled" answers: the value is here, or an attempt at it
+        // is. The second is what keeps the rebuild that a failure itself triggers (the
+        // loading flag falling is a reactive write) from starting the load again.
+        if (Equals(key, _loadedKey) || Equals(key, _attemptedKey))
             return;
 
-        _loadedKey = key;
+        _attemptedKey = key;
+        Start(key, produce, onLoaded, attempt: 0);
+    }
+
+    private void Start(object key, Func<T> produce, Action<T>? onLoaded, int attempt)
+    {
         int gen = ++_generation;
         _loading.Value = true;
 
@@ -94,12 +125,16 @@ public sealed class AsyncLoader<T>
             }
             catch
             {
-                // Clear the spinner even on failure so the UI doesn't hang in a
-                // loading state; the previous value is kept.
                 Application.InvokeOnMainThread(() =>
                 {
-                    if (gen == _generation)
-                        _loading.Value = false;
+                    if (gen != _generation)
+                        return; // superseded by a newer Load — it owns the retries now
+
+                    // Clear the spinner even on failure so the UI doesn't hang in a
+                    // loading state; the previous value is kept.
+                    _loading.Value = false;
+                    if (attempt < MaxAttempts)
+                        RetryAfter(key, produce, onLoaded, attempt, gen);
                 });
                 return;
             }
@@ -112,10 +147,25 @@ public sealed class AsyncLoader<T>
                 ReactiveRuntime.Batch(() =>
                 {
                     _value.Value = result;
+                    _loadedKey = key;
                     _loading.Value = false;
                     onLoaded?.Invoke(result);
                 });
             });
         });
+    }
+
+    /// <summary>Waits out the backoff and tries the same key again, unless a newer
+    /// <see cref="Load"/> has taken over meanwhile. The delay is wall-clock rather than
+    /// frame-driven, so a headless session must settle over real time to see a retry —
+    /// the first attempt still lands deterministically, which is what tests key on.</summary>
+    private void RetryAfter(object key, Func<T> produce, Action<T>? onLoaded, int attempt, int gen)
+    {
+        var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(3, attempt));
+        _ = Task.Delay(delay).ContinueWith(_ => Application.InvokeOnMainThread(() =>
+        {
+            if (gen != _generation) return;
+            Start(key, produce, onLoaded, attempt + 1);
+        }));
     }
 }

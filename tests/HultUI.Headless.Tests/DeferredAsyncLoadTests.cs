@@ -86,6 +86,68 @@ public class DeferredAsyncLoadTests
     }
 
     [Fact]
+    public void AFailedLoad_IsRetriedUntilItDelivers()
+    {
+        // The one case the loader used to give up on silently. A producer that throws had
+        // its key recorded as loaded anyway, so every later Load for it was a cache hit and
+        // the seed value stayed on screen for the life of the process — a Junction
+        // repository frozen at "…" after one status call lost a race with git's own index
+        // write. The key now advances on delivery, and a failure is retried.
+        using var session = HeadlessSession.Create();
+        var loader = new AsyncLoader<string>("empty");
+        int attempts = 0;
+
+        loader.Load("key", () =>
+        {
+            if (++attempts == 1) throw new InvalidOperationException("the writer still had it open");
+            return "loaded";
+        });
+
+        session.PumpFrame();
+        Assert.Equal(1, attempts);
+        Assert.Equal("empty", loader.Value);
+
+        // The one wall-clock wait in this file: the backoff is a real delay (the point is
+        // to let whoever refused the read finish), so the pump has to run across it. The
+        // deadline is generous and the poll is tight — it exits on the value, not the clock.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (loader.Value == "empty" && DateTime.UtcNow < deadline)
+        {
+            session.PumpFrame();
+            Thread.Sleep(20);
+        }
+
+        Assert.Equal(2, attempts);
+        Assert.Equal("loaded", loader.Value);
+        Assert.False(loader.IsLoading);
+    }
+
+    [Fact]
+    public void AFailedLoad_DoesNotRestartOnEveryRebuild()
+    {
+        // The failure clears the loading flag, which is a reactive write, which rebuilds,
+        // and the rebuild asks for the same key again. That has to be refused until the
+        // backoff is up: a producer retried once per rebuild is a subprocess storm.
+        using var session = HeadlessSession.Create();
+        var loader = new AsyncLoader<string>("empty");
+        int attempts = 0;
+
+        Func<string> broken = () => { attempts++; throw new InvalidOperationException("broken"); };
+
+        loader.Load("key", broken);
+        session.PumpFrame();
+        Assert.Equal(1, attempts);
+
+        for (int i = 0; i < 5; i++)
+        {
+            loader.Load("key", broken);
+            session.PumpFrame();
+        }
+
+        Assert.Equal(1, attempts);
+    }
+
+    [Fact]
     public void ALoadRequestedByOnLoaded_WaitsForItsOwnFrame()
     {
         // A completion that requests another load (a reveal chasing a two-step fetch)
