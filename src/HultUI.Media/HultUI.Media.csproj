@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HultUI\HultUI.csproj" />
+    <!-- The transport bar's play and full-screen glyphs. -->
+    <ProjectReference Include="..\HultUI.Icons\HultUI.Icons.csproj" />
   </ItemGroup>
 
 </Project>

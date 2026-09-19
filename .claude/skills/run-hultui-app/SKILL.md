@@ -49,7 +49,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 
 | Option | Meaning |
 |---|---|
-| `--app junction \| vesper \| meridian \| fluent` | Which app to mount. Default `junction`. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample. |
+| `--app junction \| vesper \| meridian \| fluent \| media` | Which app to mount. Default `junction`. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample; `media` is `samples/HultUI.Samples.Media`, the video player over a synthetic backend (its frames arrive from a worker thread in real time, so `settle` between shots). |
 | `--repo <path>` | Junction: the repository to open. Defaults to the git root of the working directory. |
 | `--gitlab` | Junction: borrow the signed-in GitLab accounts from the user's real settings (tokens stay in the OS credential store), so the merge-request panel, pipeline glyphs and marks render against the real instance. |
 | `--theme <id>` | Junction: open in a colour scheme from `ThemeCatalog` (`dracula`, `gruvbox-dark`, `solarized-light`, ...). Default `nocturne`. |

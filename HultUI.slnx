@@ -32,6 +32,7 @@
     <Project Path="samples/HultUI.Samples.DateTime/HultUI.Samples.DateTime.csproj" />
     <Project Path="samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj" />
     <Project Path="samples/HultUI.Samples.WinFormsHost/HultUI.Samples.WinFormsHost.csproj" />
+    <Project Path="samples/HultUI.Samples.Media/HultUI.Samples.Media.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />

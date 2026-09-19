@@ -202,10 +202,21 @@ table gains three rows.
 ### `HultUI.Media`
 
 **Shipped 2026-09-19** (everything below except `GpuFrameSink`, which waits for
-S2, and the `VideoPlayer` transport component, which is the next step). Two things
-changed on the way: `PixelFrameSink` is Core's (S1), and `VideoElement` overrides
-`MeasureContent`/`PatchFrom`, which are internal, so `HultUI.Core` grants the
-package `InternalsVisibleTo` the way it does the framework and the headless host.
+S2). Two things changed on the way: `PixelFrameSink` is Core's (S1), and
+`VideoElement` overrides `MeasureContent`/`PatchFrom`, which are internal, so
+`HultUI.Core` grants the package `InternalsVisibleTo` the way it does the framework
+and the headless host.
+
+`VideoPlayer` shipped the same day with `VideoPlayerTheme` (a theme extension; only
+the accent follows the palette, video chrome stays dark) and
+`samples/HultUI.Samples.Media`, whose `SyntheticMediaBackend` renders a test pattern
+on a worker thread at 30 fps — the app driver mounts it as `--app media`. Things
+learned building it: `Children(...)` replaces rather than appends; a box with a
+click handler is announced as a button unless given a role; canvas coordinates are
+relative to the canvas; the driver pumps frames faster than wall time, so the bar
+auto-hides before any playing shot unless `HULTUI_MEDIA_NOHIDE=1`; a delayed tween
+is the framework's timer; and the theme reaches a component through a root element's
+`ApplyTheme`, deferred a frame so no rebuild runs inside the style walk.
 
 References `HultUI` (it needs `Application.InvokeOnMainThread` and the Skia
 surface types). Contents:

@@ -3,6 +3,7 @@
 #:project ../../../apps/VesperCommander/VesperCommander.csproj
 #:project ../../../apps/Meridian/Meridian/Meridian.csproj
 #:project ../../../samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj
+#:project ../../../samples/HultUI.Samples.Media/HultUI.Samples.Media.csproj
 
 // Drives a HultUI app off-screen and writes PNGs of what it drew.
 //
@@ -80,7 +81,8 @@ try
         "vesper" or "vespercommander" => MountVesper(),
         "meridian" => MountMeridian(),
         "fluent" => MountFluent(),
-        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | fluent)"),
+        "media" => MountMedia(),
+        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | fluent | media)"),
     };
     session.Application.SetRoot(root);
     session.PumpFrames(3);
@@ -170,6 +172,16 @@ Element MountFluent()
     var a = new HultUI.Samples.Fluent.FluentApp(session.Application, session.Window.Window);
     if (!fluentDark) a.SetDark(false);
     if (fluentAccent > 0) a.SetAccent(fluentAccent);
+    return a.Mount();
+}
+
+Element MountMedia()
+{
+    // The synthetic backend renders on a worker thread in real time; a settle step
+    // between shots is what lets frames arrive.
+    session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
+    var a = new HultUI.Samples.Media.MediaSampleApp(session.Application, session.Window.Window);
+    instance = a;
     return a.Mount();
 }
 
