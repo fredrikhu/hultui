@@ -63,6 +63,12 @@ To use the result: `HULTUI_MPV_PATH=out/win-x64/libmpv-2.dll dotnet test
 tests/HultUI.Media.Backends.Tests`, or pack it — `src/HultUI.Media.Mpv.Natives` picks up
 whatever `out/` holds and puts it under `runtimes/<rid>/native/`.
 
+In CI, `.github/workflows/mpv-natives.yml` runs this on both self-hosted runners,
+proves each library with the backend tests (`HULTUI_MPV_EXPECT_LGPL=1`), and packs.
+Binaries move between jobs as assets of a GitHub release through
+`release-transport.sh` — a dispatch run fills the rolling `mpv-natives-ci`
+prerelease, a `mpv-natives-v*` tag fills its own release, `.nupkg` included.
+
 ## Complete corresponding source
 
 The LGPL asks that a recipient of the binary can get its source. It is: the upstream

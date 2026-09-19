@@ -364,8 +364,14 @@ CI without natives stays green and a machine with them proves the real thing.
    self-hosted runners, packaged per RID. **win-x64 built and verified 2026-09-19**
    (`native/mpv/`, 38 MB self-contained DLL against the GPL community build's
    120 MB; all backend tests and the real-window GL test pass on it, with the
-   licence assertion on). linux-x64 is scripted and wired into the `mpv natives`
-   workflow but has not run yet; osx-arm64 has no runner and is not started.
+   licence assertion on). **linux-x64 built and verified 2026-09-19 on the Ubuntu
+   runner** by the `mpv natives` workflow (30 MB `libmpv.so.2`, same tests). The
+   workflow's first successful run packed both into `HultUI.Media.Mpv.Natives`,
+   published on the rolling `mpv-natives-ci` prerelease; a `mpv-natives-v*` tag
+   does the same onto its own release. Outputs move between jobs as release
+   assets (`native/mpv/release-transport.sh`, Python only): artifact storage hit
+   its quota and `actions/cache` cross-OS archives fail on the Windows runner.
+   osx-arm64 has no runner and is not started.
 7. `LibVlc` only if an application asks for something mpv lacks (Chromecast, DVD
    menus, VLC's adaptive streaming).
 
