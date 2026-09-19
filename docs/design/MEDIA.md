@@ -201,6 +201,12 @@ table gains three rows.
 
 ### `HultUI.Media`
 
+**Shipped 2026-09-19** (everything below except `GpuFrameSink`, which waits for
+S2, and the `VideoPlayer` transport component, which is the next step). Two things
+changed on the way: `PixelFrameSink` is Core's (S1), and `VideoElement` overrides
+`MeasureContent`/`PatchFrom`, which are internal, so `HultUI.Core` grants the
+package `InternalsVisibleTo` the way it does the framework and the headless host.
+
 References `HultUI` (it needs `Application.InvokeOnMainThread` and the Skia
 surface types). Contents:
 

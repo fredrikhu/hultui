@@ -13,6 +13,7 @@
             "src/HultUI.Platform.Accessibility.Windows/HultUI.Platform.Accessibility.Windows.csproj",
             "src/HultUI.Platform.Accessibility.Linux/HultUI.Platform.Accessibility.Linux.csproj",
             "src/HultUI.Headless/HultUI.Headless.csproj",
+            "src/HultUI.Media/HultUI.Media.csproj",
             "src/HultUI.Icons/HultUI.Icons.csproj",
             "src/HultUI.Syntax/HultUI.Syntax.csproj"
           ]

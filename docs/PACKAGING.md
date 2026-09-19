@@ -10,7 +10,7 @@ references become exact-version package dependencies automatically.
 dotnet pack HultUI.slnx -c Release -o artifacts/packages
 ```
 
-produces thirteen packages plus symbol packages (snupkg):
+produces fourteen packages plus symbol packages (snupkg):
 
 | Package | What it is |
 |---|---|
@@ -22,6 +22,7 @@ produces thirteen packages plus symbol packages (snupkg):
 | `HultUI.Platform.Accessibility.Windows` / `.Linux` | UIA and AT-SPI bridges. |
 | `HultUI.WinForms` | The WinForms host: mount a HultUI tree as a `System.Windows.Forms.Control`. The only `net10.0-windows` package, and the only one not in the cross-platform solution filter. |
 | `HultUI.Headless` | Headless testing host — consumers test their apps with it. |
+| `HultUI.Media` | Video playback without a decoder: the backend contract, the reactive `MediaPlayer`, `VideoElement`, and a fake backend for tests. A decoder is a separate package. |
 | `HultUI.Icons`, `HultUI.Syntax`, `HultUI.Themes` | Satellite libraries. |
 | `HultUI.SourceGenerators` | The generator/analyzers standalone, for Core-only projects. Development dependency; no lib output, no symbols package. |
 
@@ -86,7 +87,7 @@ binding follows the key's position rather than its printed letter.
 ## The documentation site
 
 `docfx.json` builds the guides in this folder plus an API reference harvested
-from the XML doc comments — ten of the thirteen packable projects, listed
+from the XML doc comments — eleven of the fourteen packable projects, listed
 explicitly — into `artifacts/docs`. The generated API pages land in `docs/api/`, which is ignored;
 nothing generated is committed.
 

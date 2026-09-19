@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Video playback for HultUI, without a decoder. This package holds what every
+    backend shares: the IMediaBackend contract, the reactive MediaPlayer that owns one
+    backend and marshals its events to the UI thread, the VideoElement that paints the
+    frames, and a scripted FakeMediaBackend so an application's headless tests need no
+    native library. A decoder is a separate package (HultUI.Media.Mpv) that an
+    application adds when it wants one — see docs/design/MEDIA.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Media</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI video playback: the backend contract, the reactive MediaPlayer, the VideoElement, and a fake backend for tests. No decoder — add a backend package for one.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Media.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI\HultUI.csproj" />
+  </ItemGroup>
+
+</Project>
