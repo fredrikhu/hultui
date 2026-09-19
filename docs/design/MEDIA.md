@@ -335,6 +335,16 @@ into the ring from a worker thread woken by mpv's update callback, in GPU mode
 `Render` runs inside `RunExternalGL` on the UI thread. `PixelFrameWriter.Address`
 exists for exactly this: a native decoder writing through a pointer.
 
+`RequestRepaint` does not post to the UI thread on the caller's thread; it flips a
+flag and a thread-pool item posts. Found the hard way with a 1080p file and the
+full-screen button: mpv calls the update callback on the thread that feeds
+`mpv_render_context_render`, a post is an `SDL_PushEvent`, and that push waits for
+SDL's event-watcher lock, which the UI thread holds while it renders a live-resize
+frame inside the watcher (`SDL_RestoreWindow` resizes synchronously, so the watcher
+fires under the caller). That frame was in `Render`, waiting for mpv's thread, which
+was waiting for the lock: a deadlock on every fourth or so toggle. The hop breaks
+the cycle for any renderer; see THREADING.md.
+
 - No package dependency. Hand-written `LibraryImport` bindings for the ~40 entry
   points the backend uses (`mpv_create`, `mpv_initialize`, `mpv_command`,
   `mpv_set/get_property`, `mpv_observe_property`, `mpv_wait_event`,

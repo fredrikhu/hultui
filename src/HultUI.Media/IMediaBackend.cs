@@ -58,6 +58,9 @@ public interface IVideoSink
     /// <summary>
     /// Any thread: a GPU renderer has a new frame ready and wants to be asked for it.
     /// (A pixel producer needs nothing here; publishing to <see cref="Pixels"/> asks.)
+    /// Never blocks the caller and never touches the platform on the caller's thread,
+    /// so it is safe from a callback the renderer's own <see cref="IGpuFrameRenderer.Render"/>
+    /// waits on, such as mpv's update callback.
     /// </summary>
     void RequestRepaint();
 }

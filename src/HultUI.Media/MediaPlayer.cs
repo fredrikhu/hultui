@@ -51,6 +51,7 @@ public sealed class MediaPlayer : IDisposable
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _videoSink = new VideoSink(_sink) { Owner = this };
+        _repaintHop = new RepaintHop(this);
         _backend.Event += OnBackendEvent;
         _sink.FramePublished += OnFramePublished;
         _backend.Attach(_videoSink);
@@ -217,7 +218,37 @@ public sealed class MediaPlayer : IDisposable
 
     private void OnFramePublished(PixelFrameSink _) => Dispatch(() => FrameArrived?.Invoke());
 
-    private void OnRepaintRequested() => Dispatch(() => FrameArrived?.Invoke());
+    // A GPU renderer asks for a repaint from a thread of the decoder's, and often from
+    // inside a callback its own Render waits on: mpv runs the update callback on the
+    // thread that hands frames to mpv_render_context_render. Posting to the UI thread
+    // from there deadlocks under live resize. A post wakes the loop with an SDL event
+    // push, which waits for SDL's event-watcher lock; the UI thread holds that lock
+    // while it renders a live-resize frame inside the watcher, and that frame is
+    // waiting in Render for the very thread that is trying to post. So the request
+    // only flips a flag, and a thread-pool item does the posting: the renderer's
+    // thread never touches the platform, and requests that pile up while a post is
+    // pending fold into it (the render pulls the newest frame anyway).
+    private void OnRepaintRequested()
+    {
+        if (_disposed) return;
+        if (UIThread.IsCurrent) { FrameArrived?.Invoke(); return; }
+        if (Interlocked.Exchange(ref _repaintPending, 1) == 0)
+            ThreadPool.UnsafeQueueUserWorkItem(_repaintHop, preferLocal: false);
+    }
+
+    private int _repaintPending;
+    private readonly RepaintHop _repaintHop;
+
+    private sealed class RepaintHop(MediaPlayer owner) : IThreadPoolWorkItem
+    {
+        private readonly Action _onUIThread = () =>
+        {
+            Volatile.Write(ref owner._repaintPending, 0);
+            if (!owner._disposed) owner.FrameArrived?.Invoke();
+        };
+
+        public void Execute() => Application.InvokeOnMainThread(_onUIThread);
+    }
 
     /// <summary>
     /// Runs on the UI thread: now when this is it (a backend that reports synchronously,

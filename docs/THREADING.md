@@ -51,6 +51,17 @@ anything — the loop is running that code, not parked.
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());
 ```
 
+One thread must not post: a thread the UI thread waits for during a frame. On
+Windows a frame can render inside SDL's event watcher (that is how the window
+repaints during a live resize, and `Maximize`/`Restore` resize synchronously,
+so the watcher fires under whoever called them). SDL holds its watcher lock for
+the duration, and `Wake` is an `SDL_PushEvent`, which waits for that lock. If the
+frame then waits for a thread that is inside `InvokeOnMainThread`, both wait
+forever. A native decoder whose render call waits for its own callback thread is
+the known case (`HultUI.Media` hops such requests through the thread pool); a
+plain producer that only publishes and posts is fine, because nothing in a frame
+waits for it.
+
 ## What happens when you get it wrong
 
 Nothing visible, at first — which is the problem. A background write to a

@@ -94,6 +94,45 @@ public class MediaPlayerTests
     }
 
     [Fact]
+    public void ARepaintRequest_FromTheRenderersThread_PostsFromElsewhere_AndCoalesces()
+    {
+        // The renderer's thread must return at once and never touch the platform: a
+        // decoder calls this from a callback its own Render waits on, and a post from
+        // there can deadlock under live resize (see MediaPlayer.OnRepaintRequested).
+        using var session = HeadlessSession.Create(200, 100);
+        var backend = new FakeMediaBackend { GpuRenderer = new NullRenderer() };
+        using var player = new MediaPlayer(backend);
+        int uiThread = Environment.CurrentManagedThreadId;
+        var arrivedOn = new List<int>();
+        player.FrameArrived += () => arrivedOn.Add(Environment.CurrentManagedThreadId);
+
+        var requester = new Thread(() =>
+        {
+            for (int i = 0; i < 50; i++) backend.Sink!.RequestRepaint();
+        });
+        requester.Start();
+        requester.Join();
+        Assert.Empty(arrivedOn);   // nothing ran on the requesting thread
+
+        session.PumpUntil(() => arrivedOn.Count > 0, TimeSpan.FromSeconds(5));
+        session.PumpFrames(3);
+        Assert.Equal([uiThread], arrivedOn);   // fifty requests, one frame
+
+        backend.Sink!.RequestRepaint();        // from the UI thread: immediate, as before
+        Assert.Equal([uiThread, uiThread], arrivedOn);
+    }
+
+    private sealed class NullRenderer : IGpuFrameRenderer
+    {
+        public void OnModeDecided(VideoSinkMode mode) { }
+        public void PrepareGL(Func<string, nint> getProcAddress) { }
+        public bool TryGetFrameSize(out int width, out int height) { width = height = 0; return false; }
+        public bool RendersBottomUp => false;
+        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height) => false;
+        public void ReleaseGL() { }
+    }
+
+    [Fact]
     public void Open_WithAutoPlay_StartsOnceLoaded_NotBefore()
     {
         var (player, backend) = NewPlayer();
