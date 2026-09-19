@@ -55,6 +55,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The runner account is unprivileged (docs/SELF-HOSTED-RUNNERS.md). With
+      # passwordless sudo the packages install themselves; without it, the job says
+      # what to install and stops before spending half an hour to find out.
+      - name: Build dependencies
+        run: |
+          pkgs="build-essential git meson ninja-build nasm pkg-config python3 python3-jinja2 autoconf automake libtool \
+                libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev libdav1d-dev zlib1g-dev \
+                libasound2-dev libpulse-dev libgl-dev"
+          if sudo -n true 2>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq $pkgs
+          else
+            missing=""
+            for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"; done
+            if [ -n "$missing" ]; then
+              echo "::error::Missing packages on this runner and no passwordless sudo. Install as root: apt install -y$missing"
+              exit 1
+            fi
+          fi
+
       - name: Build libmpv
         run: cd native/mpv && ./build-libmpv.sh
 

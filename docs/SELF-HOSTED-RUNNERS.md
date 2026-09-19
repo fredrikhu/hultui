@@ -46,6 +46,7 @@ The hosted `windows-latest` image bundles a lot that a developer machine may not
 | Native AOT publish | VS Build Tools with the **Desktop development with C++** workload | Visual Studio Installer |
 | `Compile installer` | Inno Setup 6 | The workflow falls back to `choco install innosetup`, so Chocolatey is enough |
 | `Create GitHub release` | `gh --version` | `choco install gh -y` |
+| `mpv natives` workflow | `C:\msys64\usr\bin\bash.exe -lc 'gcc --version'` (or the path in the `MSYS2_ROOT` repository variable) | An MSYS2 with the MINGW64 packages `native/mpv/README.md` lists. The base tar.xz from msys2-installer's releases extracted to `C:\msys64` is enough; grant the runner account modify rights on it (`icacls C:\msys64 /grant "ghrunner:(OI)(CI)M" /T`), since pacman and the first login write there. |
 
 Every check has to be made **for the service account**, not in your own shell. A tool you can
 run is not necessarily a tool the runner can run, and the two ways that goes wrong are below.
