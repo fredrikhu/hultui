@@ -22,11 +22,17 @@ public sealed class MediaSampleApp : IDisposable
     private readonly MediaPlayer _player;
     private readonly VideoPlayer _videoPlayer;
 
+    private readonly MediaSource _source;
+
     public MediaSampleApp(Application app, Window window)
+        : this(app, window, new SyntheticMediaBackend(), MediaSource.FromFile("test-pattern.synthetic")) { }
+
+    public MediaSampleApp(Application app, Window window, IMediaBackend backend, MediaSource source)
     {
         _app = app;
         _window = window;
-        _player = new MediaPlayer(new SyntheticMediaBackend());
+        _source = source;
+        _player = new MediaPlayer(backend);
         _videoPlayer = new VideoPlayer(_player);
         _videoPlayer.FullscreenRequested += ToggleFullscreen;
         // The headless driver pumps frames far faster than wall time, so the bar would
@@ -41,7 +47,7 @@ public sealed class MediaSampleApp : IDisposable
     {
         var muted = new Color(148, 163, 184);
 
-        _player.Open(MediaSource.FromFile("test-pattern.synthetic"));
+        _player.Open(_source);
 
         return Flex.Column(gap: 12).Padding(16f).Children(
             Text.New("Video").FontSize(22f).FontWeight(FontWeight.Bold).FlexShrink(0),

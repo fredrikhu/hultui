@@ -49,6 +49,7 @@
     <Project Path="src/HultUI/HultUI.csproj" />
     <Project Path="src/HultUI.Headless/HultUI.Headless.csproj" />
     <Project Path="src/HultUI.Media/HultUI.Media.csproj" />
+    <Project Path="src/HultUI.Media.Mpv/HultUI.Media.Mpv.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj" />
@@ -63,6 +64,7 @@
     <Project Path="tests/HultUI.UiTests/HultUI.UiTests.csproj" />
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
     <Project Path="tests/HultUI.Media.Tests/HultUI.Media.Tests.csproj" />
+    <Project Path="tests/HultUI.Media.Backends.Tests/HultUI.Media.Backends.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
     <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />

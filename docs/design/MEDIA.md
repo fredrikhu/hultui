@@ -140,8 +140,7 @@ public interface IGpuImageSource : IImageSource
 - The headless render log marks such a source `gpu`.
 
 `GpuFrameSink` — the Media-side source that hands a backend an FBO to render into
-and falls back to the pixel ring elsewhere — is built with the mpv backend, whose
-render API decides its shape.
+and falls back to the pixel ring elsewhere — shipped with the mpv backend (below).
 
 ### S3 — Wake the parked loop (`HultUI.Core`, `HultUI`, `HultUI.Platform.SDL3`)
 
@@ -279,6 +278,23 @@ lists, equalisers, DVD menus and playlists stay off it until a control needs the
 
 ### `HultUI.Media.Mpv`
 
+**Built 2026-09-19, not yet run against a real libmpv** — none was on the build
+machine. Everything compiles, the six backend tests skip visibly without the
+library, and the GL half of the path (`GpuFrameSink` owning the texture and
+framebuffer, the renderer clearing into it, Skia compositing it) is proven with a
+fake renderer in `GpuFrameSinkGLTests`. What a real libmpv will settle:
+whether mpv fills an FBO top row first without `FLIP_Y` (`RendersBottomUp` is
+false on that reading), whether `hwdec=auto-copy` is the right default with a
+desktop GL context, and the `av://lavfi:testsrc` source the tests open.
+
+Sink contract as built: `IVideoSink.UseGpuRenderer(IGpuFrameRenderer)` from
+`Attach`, and `RequestRepaint()` from any thread. The first draw decides the mode
+(`VideoSinkMode.Gpu` on a GL surface, `Pixels` elsewhere) and tells the renderer
+once through `OnModeDecided`; in pixel mode the backend renders mpv's `sw` output
+into the ring from a worker thread woken by mpv's update callback, in GPU mode
+`Render` runs inside `RunExternalGL` on the UI thread. `PixelFrameWriter.Address`
+exists for exactly this: a native decoder writing through a pointer.
+
 - No package dependency. Hand-written `LibraryImport` bindings for the ~40 entry
   points the backend uses (`mpv_create`, `mpv_initialize`, `mpv_command`,
   `mpv_set/get_property`, `mpv_observe_property`, `mpv_wait_event`,
@@ -311,7 +327,7 @@ CI without natives stays green and a machine with them proves the real thing.
 3. `VideoPlayer` transport UI, sample app.
 4. S2 (external GL) + `GpuFrameSink`.
 5. The `Mpv` backend: bindings, the `sw` path first (testable headlessly with real
-   media), then the GL path. Backend test fixture.
+   media), then the GL path. Backend test fixture. **Built; awaiting a libmpv.**
 6. The trimmed LGPL native build for win-x64, linux-x64, osx-arm64 on the
    self-hosted runners, packaged per RID.
 7. `LibVlc` only if an application asks for something mpv lacks (Chromecast, DVD

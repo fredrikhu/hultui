@@ -28,6 +28,7 @@ public sealed class MediaPlayer : IDisposable
     private readonly IMediaBackend _backend;
     private readonly PixelFrameSink _sink = new();
     private readonly VideoSink _videoSink;
+    private GpuFrameSink? _gpuSink;
     private bool _disposed;
 
     private readonly Signal<MediaSource?> _source = new(null);
@@ -48,7 +49,7 @@ public sealed class MediaPlayer : IDisposable
     public MediaPlayer(IMediaBackend backend)
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
-        _videoSink = new VideoSink(_sink);
+        _videoSink = new VideoSink(_sink) { Owner = this };
         _backend.Event += OnBackendEvent;
         _sink.FramePublished += OnFramePublished;
         _backend.Attach(_videoSink);
@@ -57,8 +58,15 @@ public sealed class MediaPlayer : IDisposable
     public IMediaBackend Backend => _backend;
     public BackendCapabilities Capabilities => _backend.Capabilities;
 
-    /// <summary>The frames, for an image element to draw. Never null; empty until the first frame.</summary>
-    public IPixelImageSource Frames => _sink;
+    /// <summary>
+    /// The frames, for an image element to draw. Never null; empty until the first frame.
+    /// A backend that registered a GPU renderer is drawn through a <see cref="GpuFrameSink"/>,
+    /// which is also this pixel ring on a surface without GL.
+    /// </summary>
+    public IPixelImageSource Frames => _gpuSink ?? (IPixelImageSource)_sink;
+
+    /// <summary>How frames reach the screen; <see cref="VideoSinkMode.Pixels"/> for a backend with no GPU renderer.</summary>
+    public VideoSinkMode SinkMode => _gpuSink?.Mode ?? VideoSinkMode.Pixels;
 
     /// <summary>A frame was published. UI thread. <see cref="VideoElement"/> subscribes.</summary>
     public event Action? FrameArrived;
@@ -203,6 +211,8 @@ public sealed class MediaPlayer : IDisposable
 
     private void OnFramePublished(PixelFrameSink _) => Dispatch(() => FrameArrived?.Invoke());
 
+    private void OnRepaintRequested() => Dispatch(() => FrameArrived?.Invoke());
+
     /// <summary>
     /// Runs on the UI thread: now when this is it (a backend that reports synchronously,
     /// or a unit test with no application), otherwise on the next frame — which the post
@@ -261,12 +271,27 @@ public sealed class MediaPlayer : IDisposable
         _disposed = true;
         _backend.Event -= OnBackendEvent;
         _sink.FramePublished -= OnFramePublished;
+        // The backend first: a GPU renderer frees its GL objects before the sink
+        // deletes the framebuffer they drew into.
         _backend.Dispose();
+        _gpuSink?.Dispose();
         _sink.Dispose();
     }
 
     private sealed class VideoSink(PixelFrameSink pixels) : IVideoSink
     {
+        internal MediaPlayer? Owner { get; set; }
         public PixelFrameSink Pixels => pixels;
+
+        public void UseGpuRenderer(IGpuFrameRenderer renderer)
+        {
+            ArgumentNullException.ThrowIfNull(renderer);
+            var owner = Owner ?? throw new InvalidOperationException("The sink has no player.");
+            if (owner._gpuSink is not null)
+                throw new InvalidOperationException("A GPU renderer is already registered.");
+            owner._gpuSink = new GpuFrameSink(pixels, renderer);
+        }
+
+        public void RequestRepaint() => Owner?.OnRepaintRequested();
     }
 }

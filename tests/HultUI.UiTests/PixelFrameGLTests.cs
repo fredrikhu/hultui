@@ -31,7 +31,10 @@ public sealed class PixelFrameGLTests
                 writer.Publish();
             }
             image.MarkLayoutDirty();
-            Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16)));
+            // Forced: a second SDL application in one test process can report its first
+            // unforced frame as not rendered, and that event-loop quirk is not what this
+            // test is about.
+            Assert.True(app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true));
         }
 
         // Both borrows came back, so the ring has a free slot for a third frame.

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The libmpv backend for HultUI.Media: hand-written bindings to the parts of the
+    mpv client and render APIs the backend uses, and MpvBackend, which drives one
+    mpv instance and delivers frames through the render API — on the GPU into the
+    sink's framebuffer when the surface is GL, as pixels into the sink's ring
+    otherwise. No native library ships in this package; see README.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Media.Mpv</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>HultUI video playback through libmpv: decoding, audio, subtitles, streaming and GPU rendering, behind HultUI.Media's backend contract. Bring your own libmpv — see the README.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- This package's own README replaces the repository one src/Directory.Build.props packs. -->
+    <None Remove="$(MSBuildThisFileDirectory)..\..\README.md" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.Media.Backends.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.Media\HultUI.Media.csproj" />
+  </ItemGroup>
+
+</Project>

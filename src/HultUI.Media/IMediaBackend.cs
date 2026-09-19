@@ -9,6 +9,8 @@ public enum BackendCapabilities
     None = 0,
     /// <summary>Delivers frames as pixels through the sink's <see cref="IVideoSink.Pixels"/>.</summary>
     PixelFrames = 1 << 0,
+    /// <summary>Renders on the GPU through an <see cref="IGpuFrameRenderer"/> when the surface is GL.</summary>
+    GpuFrames = 1 << 6,
     /// <summary>Opens <see cref="MediaSourceKind.Uri"/> sources.</summary>
     Uris = 1 << 1,
     /// <summary>Opens <see cref="MediaSourceKind.Stream"/> sources.</summary>
@@ -21,16 +23,73 @@ public enum BackendCapabilities
     PreciseSeek = 1 << 5,
 }
 
+/// <summary>How a backend's frames reach the screen, decided at the first draw.</summary>
+public enum VideoSinkMode
+{
+    /// <summary>Nothing has been drawn yet, so the surface kind is not known.</summary>
+    Undecided,
+    /// <summary>The backend renders on the GPU into a framebuffer the sink owns (a GL surface).</summary>
+    Gpu,
+    /// <summary>The backend writes pixels into <see cref="IVideoSink.Pixels"/> (a raster or headless surface).</summary>
+    Pixels,
+}
+
 /// <summary>
 /// Where a backend puts its frames. Created by the player, handed to the backend once
-/// in <see cref="IMediaBackend.Attach"/>. Today one mode: pixels into a
-/// <see cref="PixelFrameSink"/> from any thread. A GPU mode arrives with the external
-/// GL seam and will sit beside it here.
+/// in <see cref="IMediaBackend.Attach"/>. Two modes: pixels into
+/// <see cref="Pixels"/> from any thread, which every backend can do; and, for a
+/// backend that registers an <see cref="IGpuFrameRenderer"/>, rendering into a GPU
+/// framebuffer when the surface is GL. Which one applies is only known once the
+/// element is first drawn — the renderer hears about it through
+/// <see cref="IGpuFrameRenderer.OnModeDecided"/>.
 /// </summary>
 public interface IVideoSink
 {
     /// <summary>The frame ring the backend writes decoded frames into.</summary>
     PixelFrameSink Pixels { get; }
+
+    /// <summary>
+    /// Registers a GPU renderer. Call from <see cref="IMediaBackend.Attach"/>; the
+    /// player then draws through a <see cref="GpuFrameSink"/> that calls the renderer on
+    /// a GL surface and reads <see cref="Pixels"/> elsewhere.
+    /// </summary>
+    void UseGpuRenderer(IGpuFrameRenderer renderer);
+
+    /// <summary>
+    /// Any thread: a GPU renderer has a new frame ready and wants to be asked for it.
+    /// (A pixel producer needs nothing here; publishing to <see cref="Pixels"/> asks.)
+    /// </summary>
+    void RequestRepaint();
+}
+
+/// <summary>
+/// A backend that can draw its current frame into a GL framebuffer. Every method runs
+/// on the render thread, inside the frame, with the GL context current.
+/// </summary>
+public interface IGpuFrameRenderer
+{
+    /// <summary>
+    /// The first draw decided the mode. In <see cref="VideoSinkMode.Gpu"/> the
+    /// renderer will be asked to <see cref="Render"/>; in <see cref="VideoSinkMode.Pixels"/>
+    /// it must produce frames into the sink's pixel ring on its own.
+    /// </summary>
+    void OnModeDecided(VideoSinkMode mode);
+
+    /// <summary>The size to render at, usually the video's coded size; false before it is known.</summary>
+    bool TryGetFrameSize(out int width, out int height);
+
+    /// <summary>True when the renderer fills the framebuffer bottom row first, GL style.</summary>
+    bool RendersBottomUp { get; }
+
+    /// <summary>
+    /// Draws the current frame into <paramref name="framebuffer"/> (already sized
+    /// <paramref name="width"/>×<paramref name="height"/>, not bound). Returns false when
+    /// there is nothing to draw, in which case the last frame stays on screen.
+    /// </summary>
+    bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height);
+
+    /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.</summary>
+    void ReleaseGL();
 }
 
 /// <summary>

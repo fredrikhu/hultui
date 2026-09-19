@@ -35,6 +35,12 @@ public sealed class FakeMediaBackend : IMediaBackend
     public List<MediaTrack> SubtitleTracks { get; } = [];
     /// <summary>Makes the next <see cref="Open"/> fail with this message, then clears itself.</summary>
     public string? FailNextOpenWith { get; set; }
+    /// <summary>
+    /// Registered with the sink on <see cref="Attach"/> when set, so a test can drive the
+    /// GPU path — the fake still publishes pixel frames, which is what a surface without
+    /// GL draws.
+    /// </summary>
+    public IGpuFrameRenderer? GpuRenderer { get; set; }
 
     // ──── Observed ────
 
@@ -61,6 +67,7 @@ public sealed class FakeMediaBackend : IMediaBackend
     {
         Calls.Add("Attach");
         Sink = sink;
+        if (GpuRenderer is { } renderer) sink.UseGpuRenderer(renderer);
     }
 
     public void Open(MediaSource source)

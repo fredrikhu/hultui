@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media.Mpv\HultUI.Media.Mpv.csproj" />
   </ItemGroup>
 
 </Project>

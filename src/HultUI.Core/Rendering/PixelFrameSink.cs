@@ -116,7 +116,8 @@ public sealed class PixelFrameSink : IPixelImageSource, IDisposable
         slot.Stride = stride;
         slot.Format = format;
 
-        return new PixelFrameWriter(this, index, new Span<byte>(slot.Buffer, 0, length), width, height, stride, format);
+        return new PixelFrameWriter(this, index, new Span<byte>(slot.Buffer, 0, length),
+            Marshal.UnsafeAddrOfPinnedArrayElement(slot.Buffer, 0), width, height, stride, format);
     }
 
     /// <summary>
@@ -221,12 +222,13 @@ public ref struct PixelFrameWriter
     private readonly int _slot;
     private bool _done;
 
-    internal PixelFrameWriter(PixelFrameSink sink, int slot, Span<byte> pixels,
+    internal PixelFrameWriter(PixelFrameSink sink, int slot, Span<byte> pixels, nint address,
         int width, int height, int stride, PixelFormat format)
     {
         _sink = sink;
         _slot = slot;
         Pixels = pixels;
+        Address = address;
         Width = width;
         Height = height;
         Stride = stride;
@@ -235,6 +237,13 @@ public ref struct PixelFrameWriter
 
     /// <summary>The frame's bytes: <see cref="Height"/> rows of <see cref="Stride"/> bytes.</summary>
     public Span<byte> Pixels { get; }
+
+    /// <summary>
+    /// The same bytes as an address, for a native decoder that writes through a
+    /// pointer. Pinned for the writer's lifetime; managed producers use
+    /// <see cref="Pixels"/> and never need this.
+    /// </summary>
+    public nint Address { get; }
     public int Width { get; }
     public int Height { get; }
     /// <summary>Bytes from one row to the next; <c>Width * 4</c> for this sink.</summary>

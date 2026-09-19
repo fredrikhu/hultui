@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI.WinForms\HultUI.WinForms.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
   </ItemGroup>
 
   <ItemGroup>
