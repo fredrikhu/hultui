@@ -2,33 +2,45 @@ using System.Diagnostics;
 using HultUI.Core.Rendering;
 using HultUI.Media;
 
-namespace HultUI.Samples.Media;
+namespace HultUI.Samples.ProceduralVideo;
 
 /// <summary>
-/// A backend with no decoder: a worker thread renders a moving test pattern at 30 fps
-/// into the sink and reports the playhead four times a second, honouring seeks, the
-/// rate, and the two-minute duration. It exercises exactly the paths a real decoder
-/// would — frames and events from another thread — which is the point of it.
+/// An <see cref="IMediaBackend"/> whose frames come from an <see cref="IFrameAlgorithm"/>
+/// instead of a decoder. A worker thread asks the algorithm for the frame at the
+/// current time thirty times a second and writes it into the sink; because a frame is a
+/// pure function of time, seeking is a change of clock and playback speed a change of
+/// its rate. The "clip" is five minutes long and reports itself like any file would.
 /// </summary>
-public sealed class SyntheticMediaBackend : IMediaBackend
+public sealed class ProceduralBackend : IMediaBackend
 {
-    private const int Width = 640;
-    private const int Height = 360;
+    private const int Width = 480, Height = 270;
     private const double Fps = 30;
-    private static readonly TimeSpan Length = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan Length = TimeSpan.FromMinutes(5);
 
     private readonly object _gate = new();
     private IVideoSink? _sink;
     private Thread? _thread;
     private volatile bool _running;
     private PlaybackState _state = PlaybackState.NoMedia;
-    private double _position;          // seconds
+    private double _position;
     private double _rate = 1;
-    private long _frame;
+    private IFrameAlgorithm _algorithm;
+
+    public ProceduralBackend(IFrameAlgorithm algorithm) => _algorithm = algorithm;
+
+    /// <summary>The algorithm drawing the frames. Swappable while playing; the next frame uses it.</summary>
+    public IFrameAlgorithm Algorithm
+    {
+        get => _algorithm;
+        set
+        {
+            lock (_gate) _algorithm = value;
+            RenderNow();
+        }
+    }
 
     public BackendCapabilities Capabilities =>
-        BackendCapabilities.PixelFrames | BackendCapabilities.Rate | BackendCapabilities.Subtitles
-        | BackendCapabilities.PreciseSeek;
+        BackendCapabilities.PixelFrames | BackendCapabilities.Rate | BackendCapabilities.PreciseSeek;
 
     public event Action<BackendEvent>? Event;
 
@@ -36,26 +48,17 @@ public sealed class SyntheticMediaBackend : IMediaBackend
 
     public void Open(MediaSource source)
     {
-        lock (_gate)
-        {
-            _position = 0;
-            _frame = 0;
-            _state = PlaybackState.Opening;
-        }
+        lock (_gate) { _position = 0; _state = PlaybackState.Opening; }
         Raise(new BackendEvent.StateChanged(PlaybackState.Opening));
         Raise(new BackendEvent.DurationChanged(Length));
         Raise(new BackendEvent.VideoGeometry(Width, Height));
-        Raise(new BackendEvent.TracksChanged(
-            [new MediaTrack(1, "English", "en"), new MediaTrack(2, "Commentary", "en")],
-            [new MediaTrack(1, "English", "en"), new MediaTrack(2, "Svenska", "sv")],
-            SelectedAudio: 1, SelectedSubtitle: null));
+        Raise(new BackendEvent.TracksChanged([], [], null, null));
         SetState(PlaybackState.Paused);
-        RenderFrame(0);
-
+        RenderNow();
         if (_thread is null)
         {
             _running = true;
-            _thread = new Thread(Loop) { IsBackground = true, Name = "synthetic-video" };
+            _thread = new Thread(Loop) { IsBackground = true, Name = "procedural-video" };
             _thread.Start();
         }
     }
@@ -81,21 +84,17 @@ public sealed class SyntheticMediaBackend : IMediaBackend
         lock (_gate) _position = 0;
         Raise(new BackendEvent.PositionChanged(TimeSpan.Zero));
         SetState(PlaybackState.Paused);
-        RenderFrame(0);
+        RenderNow();
     }
 
     public void Seek(TimeSpan position, bool precise)
     {
         double seconds = Math.Clamp(position.TotalSeconds, 0, Length.TotalSeconds);
         bool wasEnded;
-        lock (_gate)
-        {
-            _position = seconds;
-            wasEnded = _state == PlaybackState.Ended;
-        }
+        lock (_gate) { _position = seconds; wasEnded = _state == PlaybackState.Ended; }
         Raise(new BackendEvent.PositionChanged(TimeSpan.FromSeconds(seconds)));
         if (wasEnded && seconds < Length.TotalSeconds) SetState(PlaybackState.Paused);
-        RenderFrame(seconds);
+        RenderNow();
     }
 
     public void SetRate(double rate) { lock (_gate) _rate = rate; }
@@ -122,10 +121,8 @@ public sealed class SyntheticMediaBackend : IMediaBackend
     private void Loop()
     {
         var clock = Stopwatch.StartNew();
-        double last = 0;
-        double lastReport = 0;
+        double last = 0, lastReport = 0;
         var frameTime = TimeSpan.FromSeconds(1 / Fps);
-
         while (_running)
         {
             Thread.Sleep(frameTime);
@@ -148,8 +145,7 @@ public sealed class SyntheticMediaBackend : IMediaBackend
                 position = _position;
             }
 
-            RenderFrame(position);
-
+            RenderAt(position);
             if (now - lastReport >= 0.25 || ended)
             {
                 lastReport = now;
@@ -159,35 +155,28 @@ public sealed class SyntheticMediaBackend : IMediaBackend
         }
     }
 
-    /// <summary>A gradient, a sweeping bar and a bouncing dot, all functions of the position.</summary>
-    private void RenderFrame(double seconds)
+    /// <summary>Draws the frame for the current position, whatever the state — a seek while paused shows where it landed.</summary>
+    private void RenderNow()
+    {
+        double position;
+        PlaybackState state;
+        lock (_gate) { position = _position; state = _state; }
+        if (state is PlaybackState.NoMedia or PlaybackState.Failed) return;
+        RenderAt(position);
+    }
+
+    private void RenderAt(double seconds)
     {
         if (_sink is null) return;
-        using var writer = _sink.Pixels.BeginWrite(Width, Height, PixelFormat.Rgbx8888);
-        var pixels = writer.Pixels;
-        int stride = writer.Stride;
-
-        float sweep = (float)(seconds % 4 / 4) * Width;
-        float dotX = Width * 0.5f + MathF.Cos((float)seconds * 1.3f) * Width * 0.35f;
-        float dotY = Height * 0.5f + MathF.Sin((float)seconds * 2.1f) * Height * 0.35f;
-        const float dotR = 22f;
-
-        for (int y = 0; y < Height; y++)
+        IFrameAlgorithm algorithm;
+        lock (_gate) algorithm = _algorithm;
+        // The ring allows one writer at a time; the worker and a UI-thread seek can
+        // both want to draw, so they take turns here.
+        lock (_sink)
         {
-            var row = pixels.Slice(y * stride, Width * 4);
-            byte rowG = (byte)(30 + 60 * y / Height);
-            byte rowB = (byte)(70 + 80 * (Height - y) / Height);
-            for (int x = 0; x < Width; x++)
-            {
-                byte r = (byte)(20 + 90 * x / Width), g = rowG, b = rowB;
-                float dx = x - dotX, dy = y - dotY;
-                if (dx * dx + dy * dy < dotR * dotR) { r = 250; g = 204; b = 21; }
-                else if (Math.Abs(x - sweep) < 3) { r = 255; g = 255; b = 255; }
-                int i = x * 4;
-                row[i] = r; row[i + 1] = g; row[i + 2] = b; row[i + 3] = 255;
-            }
+            using var writer = _sink.Pixels.BeginWrite(Width, Height, PixelFormat.Rgbx8888);
+            algorithm.Render(writer.Pixels, Width, Height, writer.Stride, seconds);
+            writer.Publish();
         }
-        writer.Publish();
-        Interlocked.Increment(ref _frame);
     }
 }

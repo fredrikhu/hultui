@@ -94,6 +94,25 @@ public class MediaPlayerTests
     }
 
     [Fact]
+    public void Open_WithAutoPlay_StartsOnceLoaded_NotBefore()
+    {
+        var (player, backend) = NewPlayer();
+        using (player)
+        {
+            // The fake loads synchronously, so "once loaded" and "at once" coincide here;
+            // what the test pins is that the play comes from the load, not from Open.
+            player.Open(Clip, autoPlay: true);
+            Assert.True(player.IsPlaying);
+            Assert.Equal([@"Open(file:C:\clips\intro.mp4)", "Play"], backend.Calls.Where(c => c.StartsWith("Open") || c == "Play"));
+
+            backend.FailNextOpenWith = "nope";
+            player.Open(Clip, autoPlay: true);
+            Assert.Equal(PlaybackState.Failed, player.State);
+            Assert.Equal(1, backend.Calls.Count(c => c == "Play"));   // a failed load never plays
+        }
+    }
+
+    [Fact]
     public void PlayPause_AreTheBackendsWord()
     {
         var (player, backend) = NewPlayer();

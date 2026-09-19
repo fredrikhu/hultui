@@ -228,7 +228,8 @@ these two carry a whole product's worth of them.
 - [`HultUI.Samples.Clipboard`](samples/HultUI.Samples.Clipboard/) -- one selection copied in several formats
 - [`HultUI.Samples.Dropdown`](samples/HultUI.Samples.Dropdown/) -- single-select dropdowns, mouse and keyboard
 - [`HultUI.Samples.Fluent`](samples/HultUI.Samples.Fluent/) -- the Windows 11 / WinUI look, built from HultUI primitives
-- [`HultUI.Samples.Media`](samples/HultUI.Samples.Media/) -- the video player over a synthetic backend: transport bar, keys, menus, no decoder needed
+- [`HultUI.Samples.VideoPlayer`](samples/HultUI.Samples.VideoPlayer/) -- open a video file (dialog, drop, or argument) and play it through libmpv, with the overlay that appears on pointer movement and fades
+- [`HultUI.Samples.ProceduralVideo`](samples/HultUI.Samples.ProceduralVideo/) -- video from an algorithm: plasma, a Julia set, Life, computed per frame from the playhead's time, no decoder
 
 ## Requirements
 

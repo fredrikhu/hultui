@@ -11,6 +11,8 @@
       "tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj",
       "tests/HultUI.Media.Tests/HultUI.Media.Tests.csproj",
       "tests/HultUI.Media.Backends.Tests/HultUI.Media.Backends.Tests.csproj",
+      "tests/HultUI.Samples.VideoPlayer.Tests/HultUI.Samples.VideoPlayer.Tests.csproj",
+      "tests/HultUI.Samples.ProceduralVideo.Tests/HultUI.Samples.ProceduralVideo.Tests.csproj",
       "tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj"
     ]
   }

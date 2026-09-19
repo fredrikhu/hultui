@@ -3,7 +3,8 @@
 #:project ../../../apps/VesperCommander/VesperCommander.csproj
 #:project ../../../apps/Meridian/Meridian/Meridian.csproj
 #:project ../../../samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj
-#:project ../../../samples/HultUI.Samples.Media/HultUI.Samples.Media.csproj
+#:project ../../../samples/HultUI.Samples.VideoPlayer/HultUI.Samples.VideoPlayer.csproj
+#:project ../../../samples/HultUI.Samples.ProceduralVideo/HultUI.Samples.ProceduralVideo.csproj
 
 // Drives a HultUI app off-screen and writes PNGs of what it drew.
 //
@@ -83,8 +84,9 @@ try
         "vesper" or "vespercommander" => MountVesper(),
         "meridian" => MountMeridian(),
         "fluent" => MountFluent(),
-        "media" => MountMedia(),
-        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | fluent | media)"),
+        "player" => MountPlayer(),
+        "procedural" => MountProcedural(),
+        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | fluent | player | procedural)"),
     };
     session.Application.SetRoot(root);
     session.PumpFrames(3);
@@ -177,17 +179,24 @@ Element MountFluent()
     return a.Mount();
 }
 
-Element MountMedia()
+Element MountPlayer()
 {
-    // The synthetic backend renders on a worker thread in real time; a settle step
-    // between shots is what lets frames arrive.
+    // --media <file> opens it through libmpv (HULTUI_MPV_PATH must point at one); with
+    // no libmpv the window shows its notice. Frames arrive from a worker thread in
+    // real time, so settle before a shot.
     session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
-    // --media <file> plays it through libmpv (HULTUI_MPV_PATH must point at one);
-    // otherwise the synthetic test pattern.
-    var a = mediaPath is null
-        ? new HultUI.Samples.Media.MediaSampleApp(session.Application, session.Window.Window)
-        : new HultUI.Samples.Media.MediaSampleApp(session.Application, session.Window.Window,
-            new HultUI.Media.Mpv.MpvBackend(), HultUI.Media.MediaSource.FromFile(Path.GetFullPath(mediaPath)));
+    Func<HultUI.Media.IMediaBackend>? backends = HultUI.Media.Mpv.MpvBackend.IsAvailable
+        ? () => new HultUI.Media.Mpv.MpvBackend() : null;
+    var a = new HultUI.Samples.VideoPlayer.VideoPlayerApp(session.Application, session.Window.Window, backends,
+        mediaPath is null ? null : Path.GetFullPath(mediaPath));
+    instance = a;
+    return a.Mount();
+}
+
+Element MountProcedural()
+{
+    session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
+    var a = new HultUI.Samples.ProceduralVideo.ProceduralVideoApp(session.Application, session.Window.Window);
     instance = a;
     return a.Mount();
 }

@@ -32,7 +32,8 @@
     <Project Path="samples/HultUI.Samples.DateTime/HultUI.Samples.DateTime.csproj" />
     <Project Path="samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj" />
     <Project Path="samples/HultUI.Samples.WinFormsHost/HultUI.Samples.WinFormsHost.csproj" />
-    <Project Path="samples/HultUI.Samples.Media/HultUI.Samples.Media.csproj" />
+    <Project Path="samples/HultUI.Samples.VideoPlayer/HultUI.Samples.VideoPlayer.csproj" />
+    <Project Path="samples/HultUI.Samples.ProceduralVideo/HultUI.Samples.ProceduralVideo.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HultUI.Core/HultUI.Core.csproj" />
@@ -65,6 +66,8 @@
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
     <Project Path="tests/HultUI.Media.Tests/HultUI.Media.Tests.csproj" />
     <Project Path="tests/HultUI.Media.Backends.Tests/HultUI.Media.Backends.Tests.csproj" />
+    <Project Path="tests/HultUI.Samples.VideoPlayer.Tests/HultUI.Samples.VideoPlayer.Tests.csproj" />
+    <Project Path="tests/HultUI.Samples.ProceduralVideo.Tests/HultUI.Samples.ProceduralVideo.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />
     <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />

@@ -24,7 +24,7 @@ using Text = HultUI.Core.Builders.Text;
 /// </summary>
 /// <remarks>
 /// <para>Keys, when the player has focus (clicking the picture gives it focus): Space
-/// and K play/pause; Left/Right seek by <see cref="SeekStep"/>, J/L by twice that;
+/// and K play/pause; Left/Right seek by <see cref="SeekStep"/>, J/L by <see cref="JumpStep"/>;
 /// Up/Down change the volume; M mutes; F asks for full screen; Home/End go to the
 /// start/end; 0–9 jump to that tenth of the media.</para>
 ///
@@ -39,9 +39,13 @@ public sealed class VideoPlayer : Component
     private static readonly double[] Rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
     private readonly Signal<bool> _controlsVisible = new(true);
+    private readonly Signal<TimeSpan> _jumpStep = new(TimeSpan.FromSeconds(10));   // the buttons carry it in their names
+    // The bar's opacity while it fades; driven by a tween, read by Build.
+    private readonly Signal<float> _barOpacity = new(1f);
     private readonly Signal<bool> _fullscreen = new(false);
     private readonly Signal<VideoPlayerTheme> _theme = new(VideoPlayerTheme.CreateDefault(Theme.Light));
     private TweenHandle _hideTimer;
+    private TweenHandle _fade;
     private Effect? _playingWatch;
 
     public VideoPlayer(MediaPlayer player)
@@ -54,8 +58,12 @@ public sealed class VideoPlayer : Component
     /// <summary>Hide the bar while playing after <see cref="AutoHideDelay"/> without pointer movement.</summary>
     public bool AutoHideControls { get; set; } = true;
     public TimeSpan AutoHideDelay { get; set; } = TimeSpan.FromSeconds(2.5);
-    /// <summary>How far Left/Right seek; J/L seek twice this.</summary>
+    /// <summary>How far Left/Right seek.</summary>
     public TimeSpan SeekStep { get; set; } = TimeSpan.FromSeconds(5);
+    /// <summary>How far the jump buttons, and J/L, seek.</summary>
+    public TimeSpan JumpStep { get => _jumpStep.Value; set => _jumpStep.Value = value; }
+    /// <summary>How long the bar takes to fade out once the pointer has been still.</summary>
+    public TimeSpan FadeDuration { get; set; } = TimeSpan.FromMilliseconds(300);
 
     /// <summary>The user asked for full screen (the F key or the button). The app decides what that means.</summary>
     public event Action? FullscreenRequested;
@@ -79,13 +87,14 @@ public sealed class VideoPlayer : Component
         _playingWatch = new Effect(() =>
         {
             if (Player.IsPlaying) ScheduleHide();
-            else { _hideTimer.Cancel(); _controlsVisible.Value = true; }
+            else Show();
         });
     }
 
     protected internal override void OnUnmount()
     {
         _hideTimer.Cancel();
+        _fade.Cancel();
         _playingWatch?.Dispose();
         _playingWatch = null;
         base.OnUnmount();
@@ -100,8 +109,22 @@ public sealed class VideoPlayer : Component
 
     private void Reveal()
     {
-        _controlsVisible.Value = true;
+        Show();
         ScheduleHide();
+    }
+
+    /// <summary>The bar, at once: cancels any fade and a pending hide.</summary>
+    private void Show()
+    {
+        _hideTimer.Cancel();
+        _fade.Cancel();
+        _controlsVisible.Value = true;
+        float from = _barOpacity.Peek();
+        if (from >= 1f) return;
+        // Coming back is quick — half the fade-out — so the pointer never waits on it.
+        _fade = Animate.Value(from, 1f, v => _barOpacity.Value = v)
+            .Duration((float)FadeDuration.TotalSeconds * 0.5f)
+            .Start();
     }
 
     private void ScheduleHide()
@@ -113,7 +136,17 @@ public sealed class VideoPlayer : Component
         _hideTimer = Animate.Value(0f, 1f, _ => { })
             .Delay((float)AutoHideDelay.TotalSeconds)
             .Duration(0.01f)
-            .OnComplete(() => { if (Player.IsPlaying) _controlsVisible.Value = false; })
+            .OnComplete(FadeOut)
+            .Start();
+    }
+
+    private void FadeOut()
+    {
+        if (!Player.IsPlaying) return;
+        _fade.Cancel();
+        _fade = Animate.Value(_barOpacity.Peek(), 0f, v => _barOpacity.Value = v)
+            .Duration((float)FadeDuration.TotalSeconds)
+            .OnComplete(() => _controlsVisible.Value = false)
             .Start();
     }
 
@@ -125,6 +158,7 @@ public sealed class VideoPlayer : Component
         var player = Player;
         bool playing = player.IsPlaying;
         bool controls = _controlsVisible.Value || !playing;
+        float opacity = controls ? (playing ? _barOpacity.Value : 1f) : 0f;
 
         var root = new VideoPlayerRootElement(this)
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
@@ -148,7 +182,7 @@ public sealed class VideoPlayer : Component
         root.Children(
             Video.New(player).Width(Dimension.Percent(100)).Height(Dimension.Percent(100)),
             Notice(theme, player),
-            Bar(theme, player, playing, controls));
+            Bar(theme, player, playing, opacity));
         return root;
     }
 
@@ -175,7 +209,7 @@ public sealed class VideoPlayer : Component
         return overlay;
     }
 
-    private Element Bar(VideoPlayerTheme theme, MediaPlayer player, bool playing, bool visible)
+    private Element Bar(VideoPlayerTheme theme, MediaPlayer player, bool playing, float opacity)
     {
         var duration = player.Duration;
         var position = player.Position;
@@ -184,7 +218,7 @@ public sealed class VideoPlayer : Component
             .Height(theme.BarHeight).Padding(6f)
             .Background(theme.Scrim)
             .AlignItems(AlignItems.Center)
-            .Opacity(visible ? 1f : 0f)
+            .Opacity(opacity)
             .AutomationId("video-controls")
             .FontSize(theme.FontSize).TextColor(theme.Foreground)
             // Clicks on the bar are the bar's; the picture behind it must not toggle play.
@@ -201,6 +235,12 @@ public sealed class VideoPlayer : Component
         items.Add(IconButton(theme, playing ? "Pause" : "Play", "video-play",
             playing ? PauseGlyph(theme.Foreground) : Phosphor.Draw("play", 16f, theme.Foreground),
             () => player.TogglePlay()));
+
+        string jump = $"{JumpStep.TotalSeconds:0} s";
+        items.Add(IconButton(theme, $"Back {jump}", "video-jump-back", ChevronsGlyph(theme.Foreground, back: true),
+            () => player.SeekBy(-JumpStep)));
+        items.Add(IconButton(theme, $"Forward {jump}", "video-jump-forward", ChevronsGlyph(theme.Foreground, back: false),
+            () => player.SeekBy(JumpStep)));
 
         items.Add(Text.New(FormatTime(position, duration)).AutomationId("video-elapsed"));
 
@@ -294,8 +334,8 @@ public sealed class VideoPlayer : Component
             case KeyCode.Space or KeyCode.K: player.TogglePlay(); break;
             case KeyCode.Left: player.SeekBy(-SeekStep); break;
             case KeyCode.Right: player.SeekBy(SeekStep); break;
-            case KeyCode.J: player.SeekBy(-SeekStep * 2); break;
-            case KeyCode.L: player.SeekBy(SeekStep * 2); break;
+            case KeyCode.J: player.SeekBy(-JumpStep); break;
+            case KeyCode.L: player.SeekBy(JumpStep); break;
             case KeyCode.Up: player.Volume += 0.05f; break;
             case KeyCode.Down: player.Volume -= 0.05f; break;
             case KeyCode.M: player.Muted = !player.Muted; break;
@@ -379,6 +419,21 @@ public sealed class VideoPlayer : Component
         ctx.DrawRoundedRect(new Rect(w * 0.12f, 0, bar, h), radius, color);
         ctx.DrawRoundedRect(new Rect(w * 0.58f, 0, bar, h), radius, color);
     }).Width(16f).Height(16f);
+
+    /// <summary>Two chevrons, pointing back or forward.</summary>
+    private static Element ChevronsGlyph(Color color, bool back) => Canvas.New(ctx =>
+    {
+        float w = ctx.Bounds.Width, h = ctx.Bounds.Height;
+        float span = w * 0.42f;
+        for (int i = 0; i < 2; i++)
+        {
+            float x0 = i * (w - span);
+            float tip = back ? x0 : x0 + span;
+            float tail = back ? x0 + span : x0;
+            ctx.DrawLine(new Point(tail, 0), new Point(tip, h / 2), color, 2f);
+            ctx.DrawLine(new Point(tip, h / 2), new Point(tail, h), color, 2f);
+        }
+    }).Width(18f).Height(14f);
 
     private static Element SpeakerGlyph(Color color, bool muted) => Canvas.New(ctx =>
     {

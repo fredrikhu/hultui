@@ -1,23 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The video player over a synthetic backend: a test pattern rendered on a worker
-    thread at 30 fps, with a duration, tracks and a rate, so the whole transport bar is
-    exercised without a decoder or a media file. Swap SyntheticMediaBackend for a real
-    backend package and nothing else changes.
+    A video player: open a file (button, drag-and-drop, or a command-line argument)
+    and play it through libmpv, with the transport bar that appears when the pointer
+    moves over the picture and fades out when it has been still. Needs a libmpv —
+    see src/HultUI.Media.Mpv/README.md; without one the window says so.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>HultUI.Samples.Media</RootNamespace>
+    <RootNamespace>HultUI.Samples.VideoPlayer</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
     <ProjectReference Include="..\..\src\HultUI.Media.Mpv\HultUI.Media.Mpv.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
   </ItemGroup>
 
 </Project>

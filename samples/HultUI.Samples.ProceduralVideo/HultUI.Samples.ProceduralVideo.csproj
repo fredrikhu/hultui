@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Video with no file and no decoder: a backend whose every frame is computed by an
+    algorithm — plasma, a Julia set, Conway's Life — as a pure function of time, so
+    it plays, pauses, seeks and changes speed like any other source. Swap the
+    algorithm while it runs. What it shows: IMediaBackend is small enough that a
+    frame generator implements it in a page, and the pixel ring carries whatever a
+    producer writes.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Samples.ProceduralVideo</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -124,6 +124,43 @@ public class VideoPlayerTests
     }
 
     [Fact]
+    public void TheJumpButtons_SeekByTheJumpStep()
+    {
+        using var f = new Fixture();
+        f.VideoPlayer.JumpStep = TimeSpan.FromSeconds(3);
+        f.Session.PumpFrame();
+
+        f.Button("Forward 3 s").Click();
+        Assert.Equal(TimeSpan.FromSeconds(3), f.Player.Position);
+        f.Button("Forward 3 s").Click();
+        Assert.Equal(TimeSpan.FromSeconds(6), f.Player.Position);
+        f.Button("Back 3 s").Click();
+        Assert.Equal(TimeSpan.FromSeconds(3), f.Player.Position);
+    }
+
+    [Fact]
+    public void TheBar_FadesOut_RatherThanVanishing()
+    {
+        using var f = new Fixture();
+        f.VideoPlayer.AutoHideDelay = TimeSpan.FromSeconds(1);
+        f.VideoPlayer.FadeDuration = TimeSpan.FromSeconds(1);
+        f.Player.Play();
+        f.Elapse(1.4);   // hide fired at 1 s; the fade is ~40% through
+
+        var bar = f.Session.Window.FindByAutomationId("video-controls")!.Element;
+        Assert.True(f.VideoPlayer.ControlsVisible);
+        Assert.InRange(bar.Opacity, 0.2f, 0.85f);
+
+        f.Elapse(0.8);   // the fade has ended
+        Assert.False(f.VideoPlayer.ControlsVisible);
+
+        f.Session.Window.MoveMouse(300, 150);   // comes back, quickly
+        f.Elapse(0.6);
+        Assert.True(f.VideoPlayer.ControlsVisible);
+        Assert.Equal(1f, f.Session.Window.FindByAutomationId("video-controls")!.Element.Opacity);
+    }
+
+    [Fact]
     public void TheTime_ReadsElapsedOverTotal()
     {
         using var f = new Fixture();

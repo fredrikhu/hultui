@@ -30,6 +30,7 @@ public sealed class MediaPlayer : IDisposable
     private readonly VideoSink _videoSink;
     private GpuFrameSink? _gpuSink;
     private bool _disposed;
+    private bool _playWhenLoaded;
 
     private readonly Signal<MediaSource?> _source = new(null);
     private readonly Signal<PlaybackState> _state = new(PlaybackState.NoMedia);
@@ -130,10 +131,15 @@ public sealed class MediaPlayer : IDisposable
 
     // ──── Commands ────
 
-    public void Open(MediaSource source)
+    /// <param name="source">What to open.</param>
+    /// <param name="autoPlay">Start playing once the backend has loaded it. A backend
+    /// loads asynchronously, so a <see cref="Play"/> straight after <c>Open</c> would
+    /// land before there is anything to play; this waits for the load.</param>
+    public void Open(MediaSource source, bool autoPlay = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         UIThread.VerifyAccess("MediaPlayer.Open");
+        _playWhenLoaded = autoPlay;
         ReactiveRuntime.Batch(() =>
         {
             _source.Value = source;
@@ -233,6 +239,15 @@ public sealed class MediaPlayer : IDisposable
             {
                 case BackendEvent.StateChanged s:
                     _state.Value = s.State;
+                    if (s.State == PlaybackState.Paused && _playWhenLoaded)
+                    {
+                        _playWhenLoaded = false;
+                        _backend.Play();
+                    }
+                    else if (s.State is PlaybackState.Failed or PlaybackState.NoMedia)
+                    {
+                        _playWhenLoaded = false;
+                    }
                     break;
                 case BackendEvent.PositionChanged p:
                     _position.Value = p.Position;

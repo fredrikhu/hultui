@@ -198,7 +198,8 @@ tests/
   HultUI.Media.Tests/            headless, fake backend, no natives
   HultUI.Media.Backends.Tests/   real backends, skipped unless natives resolve
 samples/
-  HultUI.Samples.Media/          a player app, driven by /run-hultui-app
+  HultUI.Samples.VideoPlayer/    open and play files, driven by /run-hultui-app --app player
+  HultUI.Samples.ProceduralVideo/ frames from an algorithm, --app procedural
 ```
 
 All three packages are `net10.0`, `IsAotCompatible`, in `HultUI.CrossPlatform.slnf`,
@@ -214,9 +215,16 @@ S2). Two things changed on the way: `PixelFrameSink` is Core's (S1), and
 and the headless host.
 
 `VideoPlayer` shipped the same day with `VideoPlayerTheme` (a theme extension; only
-the accent follows the palette, video chrome stays dark) and
-`samples/HultUI.Samples.Media`, whose `SyntheticMediaBackend` renders a test pattern
-on a worker thread at 30 fps — the app driver mounts it as `--app media`. Things
+the accent follows the palette, video chrome stays dark). Its bar has play/pause,
+jump back/forward by `JumpStep`, the scrubber with times, mute and volume, speed,
+track menus and full screen; it appears on pointer movement and fades out
+(`FadeDuration`) after `AutoHideDelay` while playing. Two samples host it, and the
+app driver mounts them as `--app player` and `--app procedural`:
+`samples/HultUI.Samples.VideoPlayer` opens files (dialog, drop, argument) through
+libmpv, and `samples/HultUI.Samples.ProceduralVideo` is a backend whose frames an
+algorithm computes from the playhead's time — plasma, a Julia set, Life — so it
+seeks and changes speed like a file. (The earlier `HultUI.Samples.Media` with its
+synthetic test pattern was replaced by these two.) Things
 learned building it: `Children(...)` replaces rather than appends; a box with a
 click handler is announced as a button unless given a role; canvas coordinates are
 relative to the canvas; the driver pumps frames faster than wall time, so the bar
