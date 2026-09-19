@@ -5,6 +5,12 @@
 # needs an MSYS2 with the MINGW64 packages the README lists; MSYS2_ROOT says where
 # (default C:\msys64). The Ubuntu runner needs the apt packages the README lists.
 #
+# Outputs travel between jobs as assets of a GitHub release, through
+# native/mpv/release-transport.sh: a tag run uses the release for its tag, a
+# dispatch run a rolling "mpv-natives-ci" prerelease whose assets are replaced each
+# time. Neither artifact storage (a small quota) nor actions/cache (its cross-OS
+# archive fails on the Windows runner) survived contact with these machines.
+#
 # Tags only, plus workflow_dispatch: a native build is half an hour of runner time
 # and the result changes only when versions.env does.
 
@@ -22,11 +28,17 @@ concurrency:
   group: mpv-natives-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # A tag run publishes to its own release; anything else to the rolling prerelease.
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/mpv-natives-v') && github.ref_name || 'mpv-natives-ci' }}
+  RELEASE_KIND: ${{ startsWith(github.ref, 'refs/tags/mpv-natives-v') && '' || '--prerelease' }}
+
 jobs:
   windows:
     runs-on: [self-hosted, windows, x64]
     env:
       MSYS2_ROOT: ${{ vars.MSYS2_ROOT || 'C:\msys64' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -45,26 +57,18 @@ jobs:
           $env:HULTUI_MPV_EXPECT_LGPL = '1'
           dotnet test tests/HultUI.Media.Backends.Tests -c Release
 
-      # The package job gets the binary through the cache, not an artifact: artifact
-      # storage is a small per-repository quota that a few weeks of docs uploads fill,
-      # and a full quota fails the upload outright. The cache is 10 GB and separate.
-      # A cache saved on Windows is invisible to a Linux restore unless both sides
-      # say enableCrossOsArchive — the first package run missed for exactly that.
-      - uses: actions/cache/save@v4
-        with:
-          path: native/mpv/out/win-x64
-          key: libmpv-win-x64-${{ github.run_id }}
-          enableCrossOsArchive: true
-
-      - uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: libmpv-win-x64
-          path: native/mpv/out/win-x64/
-          retention-days: 7
+      - name: Publish the binary to the release
+        shell: pwsh
+        run: |
+          $env:MSYSTEM = 'MINGW64'
+          $env:CHERE_INVOKING = '1'
+          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && bash ./release-transport.sh ensure '$env:RELEASE_TAG' $env:RELEASE_KIND && bash ./release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/libmpv-2.dll libmpv-2.dll && bash ./release-transport.sh upload '$env:RELEASE_TAG' out/win-x64/LICENCE-REPORT.txt LICENCE-REPORT-win-x64.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   linux:
     runs-on: [self-hosted, linux, x64]
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -93,38 +97,28 @@ jobs:
       - name: Prove it with the backend tests
         run: HULTUI_MPV_PATH="$PWD/native/mpv/out/linux-x64/libmpv.so.2" HULTUI_MPV_EXPECT_LGPL=1 dotnet test tests/HultUI.Media.Backends.Tests -c Release
 
-      - uses: actions/cache/save@v4
-        with:
-          path: native/mpv/out/linux-x64
-          key: libmpv-linux-x64-${{ github.run_id }}
-          enableCrossOsArchive: true
-
-      - uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: libmpv-linux-x64
-          path: native/mpv/out/linux-x64/
-          retention-days: 7
+      - name: Publish the binary to the release
+        run: |
+          cd native/mpv
+          bash ./release-transport.sh ensure "$RELEASE_TAG" $RELEASE_KIND
+          bash ./release-transport.sh upload "$RELEASE_TAG" out/linux-x64/libmpv.so.2 libmpv.so.2
+          bash ./release-transport.sh upload "$RELEASE_TAG" out/linux-x64/LICENCE-REPORT.txt LICENCE-REPORT-linux-x64.txt
 
   package:
     needs: [windows, linux]
     runs-on: [self-hosted, linux, x64]
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/cache/restore@v4
-        with:
-          path: native/mpv/out/win-x64
-          key: libmpv-win-x64-${{ github.run_id }}
-          enableCrossOsArchive: true
-          fail-on-cache-miss: true
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: native/mpv/out/linux-x64
-          key: libmpv-linux-x64-${{ github.run_id }}
-          enableCrossOsArchive: true
-          fail-on-cache-miss: true
+      - name: Fetch both binaries from the release
+        run: |
+          cd native/mpv
+          bash ./release-transport.sh download "$RELEASE_TAG" libmpv-2.dll out/win-x64/libmpv-2.dll
+          bash ./release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-win-x64.txt out/win-x64/LICENCE-REPORT.txt
+          bash ./release-transport.sh download "$RELEASE_TAG" libmpv.so.2 out/linux-x64/libmpv.so.2
+          bash ./release-transport.sh download "$RELEASE_TAG" LICENCE-REPORT-linux-x64.txt out/linux-x64/LICENCE-REPORT.txt
 
       # Tag mpv-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp.
       - name: Version
@@ -139,20 +133,15 @@ jobs:
       - name: Pack
         run: dotnet pack src/HultUI.Media.Mpv.Natives/HultUI.Media.Mpv.Natives.csproj -c Release -o artifacts/packages -p:Version=${{ steps.version.outputs.version }}
 
+      - name: Publish the package to the release
+        run: |
+          for f in artifacts/packages/*.nupkg; do
+            bash native/mpv/release-transport.sh upload "$RELEASE_TAG" "$f" "$(basename "$f")"
+          done
+
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: HultUI.Media.Mpv.Natives
           path: artifacts/packages/*.nupkg
           retention-days: 30
-
-      - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/mpv-natives-v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${GITHUB_REF#refs/tags/}" artifacts/packages/*.nupkg \
-            native/mpv/out/win-x64/libmpv-2.dll native/mpv/out/win-x64/LICENCE-REPORT.txt \
-            native/mpv/out/linux-x64/libmpv.so.2 native/mpv/out/linux-x64/LICENCE-REPORT.txt \
-            --title "libmpv natives ${{ steps.version.outputs.version }}" \
-            --notes "Trimmed LGPL-2.1 libmpv for HultUI.Media.Mpv. See native/mpv/README.md and each LICENCE-REPORT.txt."
