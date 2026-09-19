@@ -74,8 +74,12 @@ jobs:
       - name: Build documentation
         run: dotnet docfx docfx.json --warningsAsErrors
 
+      # The job exists for the warnings-as-errors build above; the site itself is a
+      # convenience. Artifact storage is a small account-wide quota that fills, and a
+      # full quota must not turn a clean docs build red.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: docs-site
           path: artifacts/docs
-          retention-days: 7
+          retention-days: 3
