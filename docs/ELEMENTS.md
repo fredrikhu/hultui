@@ -518,3 +518,31 @@ var banner = Image.New(bannerSource)
     .Height(200f)
     .ImageFit(ImageFit.Cover);
 ```
+
+**Changing pixels.** A source whose pixels change over time — a video frame, a
+camera, a software-rendered view — implements `IPixelImageSource`, and the renderer
+draws its current bytes without copying. `PixelFrameSink` is the ready-made one: a
+ring of three pinned buffers the producer writes through a `Span<byte>`, from any
+thread.
+
+```csharp
+var sink = new PixelFrameSink();
+var view = Image.New(sink).Width(640f).Height(360f);
+
+// Producer thread. FramePublished fires here; marshal before touching the tree.
+sink.FramePublished += _ => Application.InvokeOnMainThread(() => view.MarkPaintDirty());
+
+using (var frame = sink.BeginWrite(640, 360, PixelFormat.Bgrx8888))
+{
+    frame.Pixels.Fill(0x40);   // rows are frame.Stride bytes apart
+    frame.Publish();
+}
+```
+
+Mark the element layout-dirty too when the frame size changes, since it is the
+intrinsic size. The renderer holds a frame from the draw until the frame is
+flushed and only then hands it back, so a producer never overwrites what is being
+uploaded; with three slots it never has to wait for it either. The `x` formats
+(`Rgbx8888`, `Bgrx8888`) are opaque with the fourth byte ignored, which is what a
+decoder emitting `rgb0`/`bgr0` needs. Under the headless host the render log
+records `version=N` for every frame drawn.

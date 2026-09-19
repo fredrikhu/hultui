@@ -32,6 +32,15 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private SkiaCanvasDrawingContext? _canvasContext;
     private bool _disposed;
 
+    // Frames borrowed from IPixelImageSources during the frame being drawn. The
+    // wrapper image references the source's bytes without copying, and Skia reads
+    // them lazily — on the GPU backend the upload happens at flush, not at the draw
+    // call — so the borrow is held until EndFrame has flushed and only then handed
+    // back. A producer can therefore never overwrite, or free, bytes Skia has yet
+    // to read.
+    private readonly List<HeldFrame> _heldFrames = new();
+    private readonly record struct HeldFrame(IPixelImageSource Source, PixelFrame Frame, SKImage Image);
+
     internal SKPaint PooledPaint => _pooledPaint;
     internal SKPath PooledPath => _pooledPath;
     internal SKFont PooledCanvasFont => _pooledCanvasFont;
@@ -55,6 +64,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null)
     {
         _scale = scaleFactor > 0f ? scaleFactor : 1f;
+        // Nothing should be held here; a frame that threw between a draw and its
+        // EndFrame would have leaked its borrows into this one.
+        ReleaseHeldFrames();
         Canvas.ResetMatrix();
         Canvas.Scale(scaleFactor);
         Canvas.Clear(clearColor is { } c ? ToSkColor(c) : SKColors.Transparent);
@@ -63,6 +75,18 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     public void EndFrame()
     {
         Canvas.Flush();
+        ReleaseHeldFrames();
+    }
+
+    private void ReleaseHeldFrames()
+    {
+        if (_heldFrames.Count == 0) return;
+        foreach (var held in _heldFrames)
+        {
+            held.Image.Dispose();
+            held.Source.Release(held.Frame);
+        }
+        _heldFrames.Clear();
     }
 
     public void DrawRect(Rect rect, Color fill)
@@ -641,6 +665,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
     {
+        if (source is IPixelImageSource pixelSource)
+        {
+            DrawPixelFrame(pixelSource, destRect, fit);
+            return;
+        }
+
         if (source is not SkiaImageSource skiaSource || skiaSource.Bitmap is not { } bitmap
             || skiaSource.Image is not { } image)
             return;
@@ -660,6 +690,48 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // aliased, and geometry thinner than a destination pixel (Phosphor's `minus`
         // bar is 6% of its box) could land between samples and vanish outright.
         Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
+    }
+
+    /// <summary>
+    /// Bilinear only, no mipmaps: a raster image's mip chain is rebuilt every time
+    /// the image is new, and a frame source's image is new every frame — several
+    /// milliseconds per 1080p frame for nothing. Downscaling beyond 2× will alias;
+    /// a video that small on screen is not where quality is being judged.
+    /// </summary>
+    private static readonly SKSamplingOptions FrameSampling =
+        new(SKFilterMode.Linear, SKMipmapMode.None);
+
+    private void DrawPixelFrame(IPixelImageSource source, Rect destRect, ImageFit fit)
+    {
+        if (!source.TryAcquire(out var frame))
+            return;
+
+        var (colorType, alphaType) = frame.Format switch
+        {
+            PixelFormat.Rgba8888 => (SKColorType.Rgba8888, SKAlphaType.Premul),
+            PixelFormat.Bgra8888 => (SKColorType.Bgra8888, SKAlphaType.Premul),
+            PixelFormat.Rgbx8888 => (SKColorType.Rgba8888, SKAlphaType.Opaque),
+            PixelFormat.Bgrx8888 => (SKColorType.Bgra8888, SKAlphaType.Opaque),
+            _ => throw new ArgumentOutOfRangeException(nameof(frame.Format), frame.Format, null),
+        };
+
+        var info = new SKImageInfo(frame.Width, frame.Height, colorType, alphaType);
+        // No copy: the image is a view over the source's bytes, so the borrow
+        // outlives this call — see _heldFrames.
+        var image = SKImage.FromPixels(info, frame.Pixels, frame.Stride);
+        if (image is null)
+        {
+            source.Release(frame);
+            return;
+        }
+        _heldFrames.Add(new HeldFrame(source, frame, image));
+
+        var (drawRect, srcRect) = ComputeImageFit(fit, frame.Width, frame.Height,
+            destRect.Width, destRect.Height, destRect);
+
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
     }
 
     private static (Rect drawRect, SKRect srcRect) ComputeImageFit(
@@ -966,6 +1038,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ReleaseHeldFrames();
         ClearRunBlobCache();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();

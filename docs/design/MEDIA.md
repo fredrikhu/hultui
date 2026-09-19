@@ -39,16 +39,16 @@ first.
 ```csharp
 namespace HultUI.Core.Rendering;
 
-/// An image whose pixels change over time. The renderer re-reads it on every draw
-/// and uses <see cref="Version"/> to know whether its cached upload is stale.
+/// An image whose pixels change over time. The renderer re-reads it on every draw;
+/// Version is for the headless render log, so a test can name the frame painted.
 public interface IPixelImageSource : IImageSource
 {
     /// Incremented by the producer on every new frame. Monotonic; never reset.
     long Version { get; }
 
-    /// Borrows the current frame for the duration of the draw. Returns false when
-    /// there is no frame yet. The buffer must stay valid until the matching
-    /// <see cref="Release"/>; producers hand out a slot of a triple buffer.
+    /// Borrows the current frame. Returns false when there is no frame yet. The
+    /// buffer must stay untouched until the matching <see cref="Release"/>, which
+    /// comes at the end of the frame, after the flush — not at the end of the draw.
     bool TryAcquire(out PixelFrame frame);
     void Release(in PixelFrame frame);
 }
@@ -56,20 +56,39 @@ public interface IPixelImageSource : IImageSource
 public readonly record struct PixelFrame(
     nint Pixels, int Width, int Height, int Stride, PixelFormat Format, int Slot);
 
-public enum PixelFormat { Rgba8888, Bgra8888 }
+// The "x" formats are opaque with an ignored fourth byte: a decoder's rgb0/bgr0,
+// whose alpha byte is undefined and must not be read as premultiplied alpha.
+public enum PixelFormat { Rgba8888, Bgra8888, Rgbx8888, Bgrx8888 }
 ```
+
+**Shipped 2026-09-19** as written here, plus the sink and the borrow rule below.
 
 - Backend-neutral, so it lives in Core beside `IImageSource` and the raster and
   headless surfaces render it unchanged.
 - `SkiaRenderContext.DrawImage` grows a second branch: when the source is an
   `IPixelImageSource`, wrap the acquired slot with `SKImage.FromPixels` (no copy)
   and draw; Skia uploads to the GPU on the GL backend and blits on the raster one.
-  Keep the wrapping `SKImage` per source and rebuild it only when `Version` moved.
 - `RecordingRenderContext` records `Version` so a headless test can assert that
   frame *n* was painted.
 - `ImageElement` already re-measures when `Source` changes and `Fit` handles
   letterboxing, so the video element is `ImageElement` plus aspect-ratio measure
   and a role.
+- **`PixelFrameSink`, also in Core.** The general case is an application with pixels
+  in managed memory — a `byte[]`, a `Span<byte>` — which needs a pinned or native
+  buffer behind the `nint` and should never touch one. So the ready-made sink lives
+  beside the interface rather than in the Media package: it owns a ring of three
+  pinned slots, `BeginWrite(w, h, format)` returns a `ref struct` writer over a
+  `Span<byte>` with `Publish()`, and `Write(...)` copies a whole buffer in. A
+  borrowed slot is never written over; a second borrow in the same render pass
+  returns the same frame; `FramePublished` fires on the producer's thread and the
+  subscriber marshals to mark the element dirty. The Media package's sink is this
+  class, not a second one.
+- **Borrow lifetime.** The Skia context holds every acquired frame until its
+  `EndFrame` has flushed — on the GPU backend the upload happens at flush, not at
+  the draw call — and only then releases it, so a producer can neither tear nor free
+  bytes Skia has yet to read. There is no cross-frame caching of the wrapper: every
+  draw re-reads and re-uploads, which is what a changing frame needs anyway; a
+  paused frame repainting behind a tooltip pays about a millisecond at 1080p.
 
 ### S2 — External GL rendering on the Skia surface (`HultUI.Rendering.Skia`)
 

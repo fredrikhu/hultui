@@ -112,9 +112,11 @@ public sealed class RecordingRenderContext : IRenderContext
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
     {
         // Image identity isn't exposed through IImageSource, so record the
-        // observable facts: intrinsic size, load state, and fit.
+        // observable facts: intrinsic size, load state, and fit. A frame source
+        // adds its version, which is how a test asserts that frame n was painted.
         Record("DrawImage",
             $"{Fmt(destRect)} {fit} intrinsic={F(source.IntrinsicSize.Width)}x{F(source.IntrinsicSize.Height)}"
+            + (source is IPixelImageSource frames ? $" version={frames.Version}" : "")
             + (source.IsLoaded ? "" : " (not loaded)"));
         _inner.DrawImage(source, destRect, fit);
     }
