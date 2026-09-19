@@ -90,57 +90,58 @@ public enum PixelFormat { Rgba8888, Bgra8888, Rgbx8888, Bgrx8888 }
   draw re-reads and re-uploads, which is what a changing frame needs anyway; a
   paused frame repainting behind a tooltip pays about a millisecond at 1080p.
 
-### S2 — External GL rendering on the Skia surface (`HultUI.Rendering.Skia`)
+### S2 — External GL rendering on the Skia surface (`HultUI.Core`, `HultUI.Rendering.Skia`)
 
 A backend that renders on the GPU (libmpv's render API, libvlc 4's output
-callbacks) draws into a texture the framework owns, inside the frame, on the GL
-thread, and Skia then composites that texture. Skia must be flushed before the
-foreign code touches GL and told its state cache is stale afterwards.
+callbacks) draws into a texture of its own, inside the frame, on the GL thread,
+and Skia then composites that texture. Skia must be flushed before the foreign
+code touches GL and told its state cache is stale afterwards.
+
+**Shipped 2026-09-19.** The shape changed from the first sketch: nothing on the
+surface class is public beyond two interface members, and Core sees no Skia type.
 
 ```csharp
-public sealed class SkiaGLRenderSurface
+namespace HultUI.Core.Rendering;
+
+/// The GL-backed Skia surface implements this; a raster surface does not.
+public interface IExternalGLSurface : IRenderSurface
 {
-    /// GL entry-point resolver the surface was built with; a GPU decoder resolves
-    /// its own GL through the same one so it lands in the same context.
-    public Func<string, nint> GetProcAddress { get; }
-
-    /// Runs foreign GL code inside the current frame: flushes Skia's pending work,
-    /// invokes <paramref name="draw"/>, then resets Skia's GL state cache
-    /// (GRGlBackendState.All). Only valid on the GL thread between Resize and
-    /// Present, i.e. from a Render pass.
-    public void RunExternalGL(Action draw);
-
-    /// Wraps a GL texture the caller owns as an SKImage, without copying. Rebuild
-    /// after the texture is resized; content changes need no rebuild.
-    public SKImage WrapTexture(uint textureId, int width, int height,
-        bool bottomLeftOrigin, uint internalFormat = GL_RGBA8);
+    Func<string, nint> GetProcAddress { get; }
+    /// Flushes Skia, runs draw, then invalidates Skia's GL state cache.
+    void RunExternalGL(Action draw);
 }
-```
 
-and, in Core, the texture counterpart of S1 so Core's draw path can dispatch it
-without knowing GL:
+/// The texture a source rendered: GL name, size, origin, internal format.
+public readonly record struct GpuFrame(
+    uint TextureId, int Width, int Height, bool BottomLeftOrigin, uint InternalFormat = GpuFrame.Rgba8);
 
-```csharp
-/// An image the producer renders on the GPU during the frame. Discovered by type
-/// test like IWin32WindowHandle; a raster or headless surface ignores it and the
-/// producer must then fall back to IPixelImageSource.
 public interface IGpuImageSource : IImageSource
 {
-    /// Called by the GL renderer inside the draw. The source renders its current
-    /// frame into its own texture (via RunExternalGL) and returns a handle the
-    /// renderer already wrapped, or null when nothing is ready.
-    object? RenderFrame(IRenderSurface surface);
+    /// Called on every draw, only on an IExternalGLSurface. The source does its
+    /// GL work inside RunExternalGL and returns its texture; false draws nothing.
+    bool TryRenderFrame(IExternalGLSurface surface, out GpuFrame frame);
 }
 ```
 
-The Skia branch: `source is IGpuImageSource g && surface is SkiaGLRenderSurface`
-→ `g.RenderFrame(surface)` returns the wrapped `SKImage` → draw it. The only new
-public surface on the framework is on the class that was already public for the
-WinForms host.
+- The Skia context dispatches: on a GL surface a `IGpuImageSource` is always drawn
+  as one (no frame yet means nothing this frame, never its pixel path); on any
+  other surface it is never asked, and is drawn as an `IPixelImageSource` if it is
+  one. A source that must work headlessly implements both — mpv's `sw` render API
+  is the pixel half.
+- The wrapper (`SKImage.FromTexture`) is kept per source and rebuilt only when the
+  texture, size or orientation changes; it is a view, so content follows the
+  texture. `ForgetGpuSource` drops it for a source about to delete its texture.
+- `RunExternalGL` flushes the canvas and context first and calls
+  `ResetContext(GRGlBackendState.All)` afterwards, so the callee may leave its
+  framebuffer and textures bound. Proven in `GpuImageSourceGLTests` against a real
+  context: a texture cleared in two colours through an FBO composites the right
+  way up, and a box Skia draws after it still lands, read back from the front
+  buffer.
+- The headless render log marks such a source `gpu`.
 
-Skia caveat to respect: `RunExternalGL` must be called from inside
-`RenderDirtyWindows` (context current, surface bound). Rendering from a decoder
-thread is never allowed; the decoder signals, the frame renders.
+`GpuFrameSink` — the Media-side source that hands a backend an FBO to render into
+and falls back to the pixel ring elsewhere — is built with the mpv backend, whose
+render API decides its shape.
 
 ### S3 — Wake the parked loop (`HultUI.Core`, `HultUI`, `HultUI.Platform.SDL3`)
 

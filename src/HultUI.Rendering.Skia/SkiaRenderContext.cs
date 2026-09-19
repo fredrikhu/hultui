@@ -41,6 +41,13 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private readonly List<HeldFrame> _heldFrames = new();
     private readonly record struct HeldFrame(IPixelImageSource Source, PixelFrame Frame, SKImage Image);
 
+    // The GL surface this context draws for, when it is one; the raster surface leaves
+    // it null and IGpuImageSources then fall back to their pixel path. Wrapped
+    // textures are kept per source and rebuilt only when the frame's texture, size or
+    // orientation changes — a wrapper is a view, so its content follows the texture.
+    private SkiaGLRenderSurface? _glSurface;
+    private readonly Dictionary<IGpuImageSource, (GpuFrame Frame, SKImage Image)> _wrappedTextures = new();
+
     internal SKPaint PooledPaint => _pooledPaint;
     internal SKPath PooledPath => _pooledPath;
     internal SKFont PooledCanvasFont => _pooledCanvasFont;
@@ -58,6 +65,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private float _scale = 1f;
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
+    internal void SetGLSurface(SkiaGLRenderSurface surface) => _glSurface = surface;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     internal SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
@@ -665,6 +673,14 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
     public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
     {
+        // On a GL surface a GPU source is always drawn as one — no frame yet means
+        // nothing this frame, not its pixel path. Elsewhere it is whatever else it is.
+        if (source is IGpuImageSource gpuSource && _glSurface is { } gl)
+        {
+            DrawGpuFrame(gpuSource, gl, destRect, fit);
+            return;
+        }
+
         if (source is IPixelImageSource pixelSource)
         {
             DrawPixelFrame(pixelSource, destRect, fit);
@@ -700,6 +716,43 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     /// </summary>
     private static readonly SKSamplingOptions FrameSampling =
         new(SKFilterMode.Linear, SKMipmapMode.None);
+
+    private void DrawGpuFrame(IGpuImageSource source, SkiaGLRenderSurface gl, Rect destRect, ImageFit fit)
+    {
+        if (!source.TryRenderFrame(gl, out var frame))
+            return;
+
+        if (!_wrappedTextures.TryGetValue(source, out var wrapped) || wrapped.Frame != frame)
+        {
+            wrapped.Image?.Dispose();
+            var image = gl.WrapTexture(frame);
+            if (image is null)
+            {
+                _wrappedTextures.Remove(source);
+                return;
+            }
+            wrapped = (frame, image);
+            _wrappedTextures[source] = wrapped;
+        }
+
+        var (drawRect, srcRect) = ComputeImageFit(fit, frame.Width, frame.Height,
+            destRect.Width, destRect.Height, destRect);
+
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        Canvas.DrawImage(wrapped.Image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
+    }
+
+    /// <summary>
+    /// Drops the wrapper kept for a source, freeing its reference to the texture. A
+    /// source that is about to delete its texture calls this first; one that simply
+    /// stops being drawn may leave it, since a wrapper is a few bytes and a reference.
+    /// </summary>
+    public void ForgetGpuSource(IGpuImageSource source)
+    {
+        if (_wrappedTextures.Remove(source, out var wrapped))
+            wrapped.Image.Dispose();
+    }
 
     private void DrawPixelFrame(IPixelImageSource source, Rect destRect, ImageFit fit)
     {
@@ -1039,6 +1092,8 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (_disposed) return;
         _disposed = true;
         ReleaseHeldFrames();
+        foreach (var wrapped in _wrappedTextures.Values) wrapped.Image.Dispose();
+        _wrappedTextures.Clear();
         ClearRunBlobCache();
         _pooledPaint.Dispose();
         _pooledFont.Dispose();

@@ -117,6 +117,7 @@ public sealed class RecordingRenderContext : IRenderContext
         Record("DrawImage",
             $"{Fmt(destRect)} {fit} intrinsic={F(source.IntrinsicSize.Width)}x{F(source.IntrinsicSize.Height)}"
             + (source is IPixelImageSource frames ? $" version={frames.Version}" : "")
+            + (source is IGpuImageSource ? " gpu" : "")
             + (source.IsLoaded ? "" : " (not loaded)"));
         _inner.DrawImage(source, destRect, fit);
     }
