@@ -149,7 +149,7 @@ collect() {
     log "runtime dependencies"
     readelf -d "$dest/libmpv.so.2" | grep NEEDED
   fi
-  "$HERE/licence-report.sh" "$WORK" > "$dest/LICENCE-REPORT.txt"
+  bash "$HERE/licence-report.sh" "$WORK" > "$dest/LICENCE-REPORT.txt"
   cat "$dest/LICENCE-REPORT.txt"
 }
 

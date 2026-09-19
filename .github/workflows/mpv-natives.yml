@@ -35,7 +35,7 @@ jobs:
         run: |
           $env:MSYSTEM = 'MINGW64'
           $env:CHERE_INVOKING = '1'
-          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && ./build-libmpv.sh"
+          & "$env:MSYS2_ROOT\usr\bin\bash.exe" -lc "cd '$PWD/native/mpv' && bash ./build-libmpv.sh"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Prove it with the backend tests
@@ -75,7 +75,7 @@ jobs:
           fi
 
       - name: Build libmpv
-        run: cd native/mpv && ./build-libmpv.sh
+        run: cd native/mpv && bash ./build-libmpv.sh
 
       - name: Prove it with the backend tests
         run: HULTUI_MPV_PATH="$PWD/native/mpv/out/linux-x64/libmpv.so.2" HULTUI_MPV_EXPECT_LGPL=1 dotnet test tests/HultUI.Media.Backends.Tests -c Release
