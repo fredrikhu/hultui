@@ -21,6 +21,10 @@ Windows, `libmpv.so.2` on Linux and `libmpv.2.dylib` on macOS, looking:
    usual library directories).
 
 `MpvBackend.IsAvailable` says whether it was found, without throwing.
+`HULTUI_MPV_LOG=warn` (or `info`, `v`, `debug`) forwards mpv's own log to stderr,
+the fastest way to learn why a source would not open.
+
+Verified with shinchiro's `mpv-dev-x86_64` build of 2026-09-03 (client API 2.5).
 
 The build to use is the project's own trimmed LGPL build (`-Dgpl=false`, no Lua,
 JavaScript, yt-dlp or disc support, against an LGPL FFmpeg), published per RID

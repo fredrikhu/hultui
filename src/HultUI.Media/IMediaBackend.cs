@@ -75,6 +75,14 @@ public interface IGpuFrameRenderer
     /// </summary>
     void OnModeDecided(VideoSinkMode mode);
 
+    /// <summary>
+    /// Called once, right after <see cref="OnModeDecided"/> reported
+    /// <see cref="VideoSinkMode.Gpu"/>, inside the GL frame with the context current:
+    /// the place to create whatever the renderer needs before any frame exists — a
+    /// decoder's GL render context has to be there before it can load a file.
+    /// </summary>
+    void PrepareGL(Func<string, nint> getProcAddress);
+
     /// <summary>The size to render at, usually the video's coded size; false before it is known.</summary>
     bool TryGetFrameSize(out int width, out int height);
 

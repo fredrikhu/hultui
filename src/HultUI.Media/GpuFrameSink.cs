@@ -50,7 +50,17 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     {
         frame = default;
         if (_disposed) return false;
-        Decide(VideoSinkMode.Gpu);
+        if (_mode == VideoSinkMode.Undecided)
+        {
+            Decide(VideoSinkMode.Gpu);
+            // The renderer sets up inside the frame, before there is anything to draw:
+            // that is what lets a decoder create its GL context ahead of loading.
+            surface.RunExternalGL(() =>
+            {
+                _gl ??= new GLFunctions(surface.GetProcAddress);
+                _renderer.PrepareGL(surface.GetProcAddress);
+            });
+        }
         if (!_renderer.TryGetFrameSize(out int width, out int height) || width <= 0 || height <= 0)
             return false;
 

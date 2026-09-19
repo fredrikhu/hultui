@@ -27,7 +27,9 @@ public class VideoElementTests
         using var player = new MediaPlayer(backend);
         session.Application.SetRoot(Box.New().Children(Video.New(player)));
         session.PumpFrame();
-        Assert.DoesNotContain("DrawImage", session.Window.RenderLog.ToString());
+        // Visited before any frame exists — that visit is how the source learns its
+        // surface — but with nothing to show.
+        Assert.Contains("(not loaded)", session.Window.RenderLog.ToString());
 
         player.Open(Clip);                     // publishes frame 1
         session.Window.RenderLog.Clear();

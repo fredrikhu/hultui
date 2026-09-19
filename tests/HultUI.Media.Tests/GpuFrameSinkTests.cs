@@ -76,6 +76,7 @@ public class GpuFrameSinkTests
         public int GLRenders { get; private set; }
 
         public void OnModeDecided(VideoSinkMode mode) => DecidedMode = mode;
+        public void PrepareGL(Func<string, nint> getProcAddress) { }
         public bool TryGetFrameSize(out int width, out int height) { width = 320; height = 180; return true; }
         public bool RendersBottomUp => false;
         public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height) { GLRenders++; return true; }

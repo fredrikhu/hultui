@@ -86,12 +86,21 @@ internal static unsafe partial class Mpv
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct mpv_event_log_message
+    {
+        public byte* prefix;
+        public byte* level;
+        public byte* text;
+        public int log_level;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct mpv_event_end_file
     {
         public int reason;
         public int error;
         public long playlist_entry_id;
-        public int playlist_insert_id;
+        public long playlist_insert_id;
         public int playlist_insert_num_entries;
     }
 
@@ -107,15 +116,19 @@ internal static unsafe partial class Mpv
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_get_property(nint handle, string name, int format, void* data);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial byte* mpv_get_property_string(nint handle, string name);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_observe_property(nint handle, ulong replyUserdata, string name, int format);
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_request_log_messages(nint handle, string minLevel);
     [LibraryImport(Library)] public static partial int mpv_command(nint handle, byte** args);
     [LibraryImport(Library)] public static partial mpv_event* mpv_wait_event(nint handle, double timeout);
 
     // ──── Render API ────
 
+    // Values from render.h of client API 2.5; a wrong number here is a silent no-op
+    // or a crash inside mpv, never a compile error, so they are checked against the
+    // header, not remembered.
     public const int MPV_RENDER_PARAM_INVALID = 0, MPV_RENDER_PARAM_API_TYPE = 1, MPV_RENDER_PARAM_OPENGL_INIT_PARAMS = 2,
-        MPV_RENDER_PARAM_OPENGL_FBO = 3, MPV_RENDER_PARAM_FLIP_Y = 4, MPV_RENDER_PARAM_ADVANCED_CONTROL = 11,
-        MPV_RENDER_PARAM_SW_SIZE = 18, MPV_RENDER_PARAM_SW_FORMAT = 19, MPV_RENDER_PARAM_SW_STRIDE = 20,
-        MPV_RENDER_PARAM_SW_POINTER = 21;
+        MPV_RENDER_PARAM_OPENGL_FBO = 3, MPV_RENDER_PARAM_FLIP_Y = 4, MPV_RENDER_PARAM_ADVANCED_CONTROL = 10,
+        MPV_RENDER_PARAM_SW_SIZE = 17, MPV_RENDER_PARAM_SW_FORMAT = 18, MPV_RENDER_PARAM_SW_STRIDE = 19,
+        MPV_RENDER_PARAM_SW_POINTER = 20;
 
     public const ulong MPV_RENDER_UPDATE_FRAME = 1;
 

@@ -31,6 +31,7 @@ int width = 1400, height = 900;
 float scale = 1f;
 bool fluentDark = true;
 int fluentAccent = 0;
+string? mediaPath = null;
 bool gitlab = false;
 string theme = "";
 var steps = new List<string>();
@@ -46,6 +47,7 @@ for (int i = 0; i < args.Length; i++)
         case "--dir2": dir2 = Path.GetFullPath(args[++i]); break;
         case "--dark": fluentDark = bool.Parse(args[++i]); break;
         case "--accent": fluentAccent = int.Parse(args[++i]); break;
+        case "--media": mediaPath = args[++i]; break;
         case "--size":
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
@@ -180,7 +182,12 @@ Element MountMedia()
     // The synthetic backend renders on a worker thread in real time; a settle step
     // between shots is what lets frames arrive.
     session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
-    var a = new HultUI.Samples.Media.MediaSampleApp(session.Application, session.Window.Window);
+    // --media <file> plays it through libmpv (HULTUI_MPV_PATH must point at one);
+    // otherwise the synthetic test pattern.
+    var a = mediaPath is null
+        ? new HultUI.Samples.Media.MediaSampleApp(session.Application, session.Window.Window)
+        : new HultUI.Samples.Media.MediaSampleApp(session.Application, session.Window.Window,
+            new HultUI.Media.Mpv.MpvBackend(), HultUI.Media.MediaSource.FromFile(Path.GetFullPath(mediaPath)));
     instance = a;
     return a.Mount();
 }

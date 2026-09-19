@@ -46,6 +46,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private Thread? _swThread;
     private readonly AutoResetEvent _swWake = new(false);
     private volatile bool _swStopping;
+    // With vo=libmpv a file cannot start until a render context exists, and the
+    // context's kind is only known once the element has been drawn. A source opened
+    // before that waits here and loads the moment the context is up.
+    private string? _pendingTarget;
+    private readonly object _loadGate = new();
 
     public MpvBackend()
     {
@@ -72,6 +77,10 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // Decode on the GPU where there is a decoder, copy back for mpv's GL pipeline:
         // the mode that works with a desktop GL context on every platform.
         mpv_set_option_string(_mpv, "hwdec", "auto-copy");
+        // HULTUI_MPV_LOG=warn|info|v|debug forwards mpv's own log to stderr: the
+        // fastest way to learn why a source would not open.
+        if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 } logLevel)
+            mpv_request_log_messages(_mpv, logLevel);
         Check(mpv_initialize(_mpv));
 
         Check(mpv_observe_property(_mpv, ObservePause, "pause", MPV_FORMAT_FLAG));
@@ -113,7 +122,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         string? target = source.Kind switch
         {
             MediaSourceKind.File => source.Path,
-            MediaSourceKind.Uri => source.Uri!.ToString(),
+            MediaSourceKind.Uri => source.Url,
             _ => null,
         };
         if (target is null)
@@ -122,9 +131,34 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             return;
         }
 
+        lock (_loadGate)
+        {
+            if (_render == 0)
+            {
+                _pendingTarget = target;
+                return;
+            }
+        }
+        Load(target);
+    }
+
+    private void Load(string target)
+    {
         SetFlag(_mpv, "pause", true);
         int error = Command(_mpv, "loadfile", target, "replace");
         if (error < 0) Raise(new BackendEvent.Failed(ErrorString(error)));
+    }
+
+    /// <summary>Loads the source that was waiting for a render context, if any.</summary>
+    private void LoadPending()
+    {
+        string? target;
+        lock (_loadGate)
+        {
+            target = _pendingTarget;
+            _pendingTarget = null;
+        }
+        if (target is not null) Load(target);
     }
 
     public void Play()
@@ -182,6 +216,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     {
         switch (e->event_id)
         {
+            case MPV_EVENT_LOG_MESSAGE:
+                var log = (mpv_event_log_message*)e->data;
+                Console.Error.Write($"[mpv {Marshal.PtrToStringUTF8((nint)log->prefix)}] {Marshal.PtrToStringUTF8((nint)log->text)}");
+                break;
+
             case MPV_EVENT_FILE_LOADED:
                 ReadGeometry();
                 Raise(new BackendEvent.DurationChanged(ReadDuration()));
@@ -324,13 +363,20 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     public void OnModeDecided(VideoSinkMode mode)
     {
         _mode = mode;
-        if (mode != VideoSinkMode.Pixels) return;
+        if (mode != VideoSinkMode.Pixels) return;   // GL waits for PrepareGL, inside the frame
         // Software rendering: mpv's sw renderer writes into the ring from a thread of
         // its own, woken by mpv's update callback, so the UI thread never waits on it.
         CreateSoftwareContext();
         _swThread = new Thread(SoftwareLoop) { IsBackground = true, Name = "mpv-sw-render" };
         _swThread.Start();
         _swWake.Set();
+        LoadPending();
+    }
+
+    public void PrepareGL(Func<string, nint> getProcAddress)
+    {
+        if (_render == 0) CreateGLContext(getProcAddress);
+        LoadPending();
     }
 
     public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height)
@@ -405,24 +451,26 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private void SoftwareLoop()
     {
         var format = "rgb0\0"u8.ToArray();
-        while (!_swStopping)
+        var size = stackalloc int[2];
+        var parameters = stackalloc mpv_render_param[5];
+        nuint stride = 0;
+        fixed (byte* fmt = format)
         {
-            _swWake.WaitOne(500);
-            if (_swStopping || _render == 0 || _sink is null) continue;
-            if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0) continue;
-            if (!TryGetFrameSize(out int width, out int height)) continue;
-
-            using var writer = _sink.Pixels.BeginWrite(width, height, PixelFormat.Rgbx8888);
-            var size = stackalloc int[2] { width, height };
-            nuint stride = (nuint)writer.Stride;
-            void* pointer = (void*)writer.Address;
-            fixed (byte* fmt = format)
+            while (!_swStopping)
             {
-                var parameters = stackalloc mpv_render_param[5];
+                _swWake.WaitOne(500);
+                if (_swStopping || _render == 0 || _sink is null) continue;
+                if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0) continue;
+                if (!TryGetFrameSize(out int width, out int height)) continue;
+
+                using var writer = _sink.Pixels.BeginWrite(width, height, PixelFormat.Rgbx8888);
+                size[0] = width;
+                size[1] = height;
+                stride = (nuint)writer.Stride;
                 parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_SW_SIZE, data = size };
                 parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_SW_FORMAT, data = fmt };
                 parameters[2] = new mpv_render_param { type = MPV_RENDER_PARAM_SW_STRIDE, data = &stride };
-                parameters[3] = new mpv_render_param { type = MPV_RENDER_PARAM_SW_POINTER, data = pointer };
+                parameters[3] = new mpv_render_param { type = MPV_RENDER_PARAM_SW_POINTER, data = (void*)writer.Address };
                 parameters[4] = default;
                 if (mpv_render_context_render(_render, parameters) >= 0)
                     writer.Publish();

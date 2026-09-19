@@ -33,6 +33,7 @@ public sealed class GpuFrameSinkGLTests
 
         Assert.Equal(VideoSinkMode.Gpu, player.SinkMode);
         Assert.Equal(VideoSinkMode.Gpu, backend.DecidedMode);
+        Assert.Equal(1, backend.Prepared);
         Assert.True(backend.Renders >= 2, $"rendered {backend.Renders} times");
         Assert.Equal((320, 180), backend.LastSize);
 
@@ -58,6 +59,8 @@ public sealed class GpuFrameSinkGLTests
         public GL? GL { get; private set; }
 
         public void OnModeDecided(VideoSinkMode mode) => DecidedMode = mode;
+        public void PrepareGL(Func<string, nint> getProcAddress) => Prepared++;
+        public int Prepared { get; private set; }
         public bool TryGetFrameSize(out int width, out int height) { width = 320; height = 180; return true; }
         public bool RendersBottomUp => true;
 

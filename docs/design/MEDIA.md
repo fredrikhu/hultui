@@ -61,6 +61,12 @@ public readonly record struct PixelFrame(
 public enum PixelFormat { Rgba8888, Bgra8888, Rgbx8888, Bgrx8888 }
 ```
 
+The "x" formats needed more than an opaque alpha type: Skia's opaque-image fast
+path copies the raw fourth byte into the destination's alpha, so an rgb0 frame
+came out fully transparent in a headless capture (white in the driver's PNG,
+found with the first real mpv frames). They are drawn with a colour filter that
+forces alpha to one, and the raster test checks the destination alpha.
+
 **Shipped 2026-09-19** as written here, plus the sink and the borrow rule below.
 
 - Backend-neutral, so it lives in Core beside `IImageSource` and the raster and
@@ -278,14 +284,23 @@ lists, equalisers, DVD menus and playlists stay off it until a control needs the
 
 ### `HultUI.Media.Mpv`
 
-**Built 2026-09-19, not yet run against a real libmpv** — none was on the build
-machine. Everything compiles, the six backend tests skip visibly without the
-library, and the GL half of the path (`GpuFrameSink` owning the texture and
-framebuffer, the renderer clearing into it, Skia compositing it) is proven with a
-fake renderer in `GpuFrameSinkGLTests`. What a real libmpv will settle:
-whether mpv fills an FBO top row first without `FLIP_Y` (`RendersBottomUp` is
-false on that reading), whether `hwdec=auto-copy` is the right default with a
-desktop GL context, and the `av://lavfi:testsrc` source the tests open.
+**Shipped 2026-09-19 and verified against shinchiro's libmpv 20260903 (client
+API 2.5).** Seven backend tests pass headlessly on the software path, and
+`MpvGLTests` in the real-window suite proves the GL path: mpv creates its render
+context inside the frame, loads, renders into the sink's framebuffer, and the
+picture composites the right way up — mpv fills an FBO top row first without
+`FLIP_Y`, so `RendersBottomUp` is false. Both suites skip visibly when no libmpv
+is found. Test media is a YUV4MPEG2 clip written by `TestClip` in
+`HultUI.Media.Testing`; nothing else is needed.
+
+Two things the real library taught: with `vo=libmpv` a file cannot load until a
+render context exists, and the render context's kind is only known once the
+element has been drawn — so `VideoElement` is drawn even before its first frame
+(that visit decides the mode), a GPU renderer gets `PrepareGL` inside the first GL
+frame, and the backend holds a source opened earlier until its context is up.
+And the enum values in `render.h` are not what memory says (`SW_SIZE` is 17):
+they are copied from the header, never recalled. `HULTUI_MPV_LOG=warn` forwards
+mpv's own log to stderr, which is how both were found.
 
 Sink contract as built: `IVideoSink.UseGpuRenderer(IGpuFrameRenderer)` from
 `Attach`, and `RequestRepaint()` from any thread. The first draw decides the mode
@@ -327,7 +342,7 @@ CI without natives stays green and a machine with them proves the real thing.
 3. `VideoPlayer` transport UI, sample app.
 4. S2 (external GL) + `GpuFrameSink`.
 5. The `Mpv` backend: bindings, the `sw` path first (testable headlessly with real
-   media), then the GL path. Backend test fixture. **Built; awaiting a libmpv.**
+   media), then the GL path. Backend test fixture. **Done, both paths verified.**
 6. The trimmed LGPL native build for win-x64, linux-x64, osx-arm64 on the
    self-hosted runners, packaged per RID.
 7. `LibVlc` only if an application asks for something mpv lacks (Chromecast, DVD

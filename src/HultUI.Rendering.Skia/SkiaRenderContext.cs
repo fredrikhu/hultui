@@ -717,6 +717,21 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private static readonly SKSamplingOptions FrameSampling =
         new(SKFilterMode.Linear, SKMipmapMode.None);
 
+    /// <summary>
+    /// Forces alpha to one. An image declared opaque is still blitted with whatever
+    /// its fourth byte holds — Skia's opaque fast path copies rather than blends —
+    /// and a decoder's rgb0 leaves that byte as zero or garbage, which then reads as
+    /// transparent wherever the destination alpha matters (a headless capture, a
+    /// layer). Identity on colour, 1 on alpha.
+    /// </summary>
+    private static readonly SKColorFilter ForceOpaque = SKColorFilter.CreateColorMatrix(
+    [
+        1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, 0, 1,
+    ]);
+
     private void DrawGpuFrame(IGpuImageSource source, SkiaGLRenderSurface gl, Rect destRect, ImageFit fit)
     {
         if (!source.TryRenderFrame(gl, out var frame))
@@ -784,7 +799,9 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
+        if (alphaType == SKAlphaType.Opaque) _pooledPaint.ColorFilter = ForceOpaque;
         Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
+        _pooledPaint.ColorFilter = null;
     }
 
     private static (Rect drawRect, SKRect srcRect) ComputeImageFit(

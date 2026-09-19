@@ -108,6 +108,17 @@ public class VideoElement : ImageElement
         return new Size(size.Width * scale, size.Height * scale);
     }
 
+    /// <summary>
+    /// Unlike an image, a video is drawn even before its first frame: the renderer's
+    /// visit is what tells the frame source which kind of surface it is on, and a
+    /// decoder needs to know that before it can load anything.
+    /// </summary>
+    public override void Render(IRenderContext ctx)
+    {
+        if (Source is null) return;
+        ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
+    }
+
     internal override void PatchFrom(Element source)
     {
         base.PatchFrom(source);

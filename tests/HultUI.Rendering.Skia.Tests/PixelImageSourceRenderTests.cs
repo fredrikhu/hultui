@@ -80,6 +80,10 @@ public class PixelImageSourceRenderTests
 
         var pixels = surface.ReadPixels(out _, out _, out int rowBytes);
         AssertPixel(pixels, rowBytes, 30, 30, 0, 0, 255);
+        // And the destination is opaque: Skia's opaque-image blit would otherwise copy
+        // the zero byte straight into the surface's alpha, which a capture shows as
+        // nothing at all.
+        Assert.Equal(255, pixels[30 * rowBytes + 30 * 4 + 3]);
     }
 
     [Fact]

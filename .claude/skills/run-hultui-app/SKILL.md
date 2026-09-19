@@ -58,6 +58,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `--size 1400x900` | Window size in layout units. |
 | `--dark true\|false` | Fluent sample only: which mode to open in. Default dark. |
 | `--accent 0-5` | Fluent sample only: which Windows accent preset. 0 blue, 1 purple, 2 teal, 3 green, 4 orange, 5 red. |
+| `--media <file>` | Media sample only: play this file through libmpv instead of the synthetic pattern. `HULTUI_MPV_PATH` must point at a `libmpv-2.dll`; frames arrive on the software path from a worker thread, so `settle` before a shot. |
 
 ### Steps
 

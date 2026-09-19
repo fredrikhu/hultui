@@ -2,37 +2,37 @@ using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Headless;
 using HultUI.Media.Mpv;
+using HultUI.Media.Testing;
 using Xunit;
 
 namespace HultUI.Media.Backends.Tests;
 
 /// <summary>
-/// The mpv backend against real media, with no file on disk: mpv's own <c>lavfi</c>
-/// source generates a test pattern of a known size and length. Under the headless
-/// host the sink is a raster one, so frames come through mpv's software renderer
-/// into the pixel ring — the path a decoder shares with every other headless test.
+/// The mpv backend against real media: a two-second uncompressed clip written by
+/// <see cref="TestClip"/>, so nothing but libmpv is needed. Under the headless host the
+/// surface is a raster one, so frames come through mpv's software renderer into the
+/// pixel ring — the path a decoder shares with every other headless test.
 /// </summary>
-public class MpvBackendTests
+public class MpvBackendTests : IDisposable
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+    private readonly string _clip = TestClip.WriteTempY4m(64, 36, fps: 10, frames: 20);
 
-    /// <summary>Two seconds of a 64×36 test pattern at 10 fps, and a 440 Hz tone.</summary>
-    private static MediaSource Pattern() =>
-        MediaSource.FromUri("av://lavfi:testsrc=duration=2:size=64x36:rate=10");
+    public void Dispose() => File.Delete(_clip);
+
+    private MediaSource Clip => MediaSource.FromFile(_clip);
 
     private sealed class Fixture : IDisposable
     {
         public HeadlessSession Session { get; } = HeadlessSession.Create(300, 200);
         public MpvBackend Backend { get; } = new();
         public MediaPlayer Player { get; }
-        public VideoElement Video { get; }
 
         public Fixture()
         {
             Player = new MediaPlayer(Backend);
-            Video = HultUI.Media.Video.New(Player);
-            Session.Application.SetRoot(Box.New().Children(Video));
-            Session.PumpFrame();
+            Session.Application.SetRoot(Box.New().Children(Video.New(Player)));
+            Session.PumpFrame();   // the first draw decides the pixel mode, and mpv gets its render context
         }
 
         public void Until(Func<bool> condition) => Session.PumpUntil(condition, Wait);
@@ -49,25 +49,41 @@ public class MpvBackendTests
     {
         using var f = new Fixture();
 
-        f.Player.Open(Pattern());
+        f.Player.Open(Clip);
         f.Until(() => f.Player.State == PlaybackState.Paused);
 
         Assert.InRange(f.Player.Duration!.Value.TotalSeconds, 1.9, 2.1);
         Assert.Equal(new Size(64, 36), f.Player.VideoSize);
+        Assert.Equal(VideoSinkMode.Pixels, f.Player.SinkMode);
+    }
+
+    [MpvFact]
+    public void OpeningBeforeTheFirstDraw_StillLoads()
+    {
+        // The sample does this: opens in Mount, before anything has rendered. With
+        // vo=libmpv a file cannot start without a render context, so the backend has
+        // to hold the source until the first draw provides one.
+        using var session = HeadlessSession.Create(300, 200);
+        using var player = new MediaPlayer(new MpvBackend());
+        player.Open(Clip);
+        session.Application.SetRoot(Box.New().Children(Video.New(player)));
+
+        session.PumpUntil(() => player.State == PlaybackState.Paused, Wait);
+        Assert.Equal(new Size(64, 36), player.VideoSize);
     }
 
     [MpvFact]
     public void Playing_PublishesFramesThroughTheSoftwareRenderer_AndMovesThePlayhead()
     {
         using var f = new Fixture();
-        f.Player.Open(Pattern());
+        f.Player.Open(Clip);
         f.Until(() => f.Player.State == PlaybackState.Paused);
+        long before = f.Player.Frames.Version;
 
         f.Player.Play();
         f.Until(() => f.Player.IsPlaying);
-        f.Until(() => f.Player.Frames.Version >= 3 && f.Player.Position > TimeSpan.FromMilliseconds(300));
+        f.Until(() => f.Player.Frames.Version > before + 2 && f.Player.Position > TimeSpan.FromMilliseconds(300));
 
-        Assert.Equal(VideoSinkMode.Pixels, f.Player.SinkMode);
         Assert.Equal(new Size(64, 36), f.Player.Frames.IntrinsicSize);
     }
 
@@ -75,7 +91,7 @@ public class MpvBackendTests
     public void Seek_MovesThePlayhead_WhilePaused()
     {
         using var f = new Fixture();
-        f.Player.Open(Pattern());
+        f.Player.Open(Clip);
         f.Until(() => f.Player.State == PlaybackState.Paused);
 
         f.Player.Seek(TimeSpan.FromSeconds(1.5));
@@ -87,9 +103,9 @@ public class MpvBackendTests
     public void ReachingTheEnd_EndsPlayback_AndPlayStartsOver()
     {
         using var f = new Fixture();
-        f.Player.Open(Pattern());
+        f.Player.Open(Clip);
         f.Until(() => f.Player.State == PlaybackState.Paused);
-        f.Player.Seek(TimeSpan.FromSeconds(1.8));
+        f.Player.Seek(TimeSpan.FromSeconds(1.7));
         f.Player.Play();
 
         f.Until(() => f.Player.State == PlaybackState.Ended);
@@ -113,7 +129,7 @@ public class MpvBackendTests
     public void RateVolumeAndMute_ReachMpv()
     {
         using var f = new Fixture();
-        f.Player.Open(Pattern());
+        f.Player.Open(Clip);
         f.Until(() => f.Player.State == PlaybackState.Paused);
 
         f.Player.Rate = 2;
