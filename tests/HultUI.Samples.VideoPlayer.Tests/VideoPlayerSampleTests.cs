@@ -21,12 +21,15 @@ public class VideoPlayerSampleTests
     {
         using var session = HeadlessSession.Create(1100, 700);
         var backend = new FakeMediaBackend();
-        using var app = new VideoPlayerApp(session.Application, session.Window.Window, () => backend, @"C:\clips\talk.mkv");
+        // Built with the host's separator: on Linux a backslash is an ordinary character,
+        // so Path.GetFileName would leave a whole "C:\clips\talk.mkv" as the name.
+        var talk = Path.Combine(Path.GetTempPath(), "clips", "talk.mkv");
+        using var app = new VideoPlayerApp(session.Application, session.Window.Window, () => backend, talk);
         session.Application.SetRoot(app.Mount());
         session.PumpFrames(2);
 
-        Assert.Equal(@"C:\clips\talk.mkv", app.CurrentFile);
-        Assert.Contains("Open(file:C:\\clips\\talk.mkv)", backend.Calls);
+        Assert.Equal(talk, app.CurrentFile);
+        Assert.Contains($"Open(file:{talk})", backend.Calls);
         Assert.True(app.Player!.IsPlaying);
         Assert.NotNull(session.Window.FindByText("talk.mkv"));
         Assert.Contains("talk.mkv", session.Window.Window.Title);
@@ -44,11 +47,13 @@ public class VideoPlayerSampleTests
         session.PumpFrames(2);
         Assert.Null(app.CurrentFile);
 
-        session.Window.DropFiles(new Point(500, 350), [@"D:\video\clip.mp4"]);
+        var clip = Path.Combine(Path.GetTempPath(), "video", "clip.mp4");
+        session.Window.DropFiles(new Point(500, 350), [clip]);
         session.PumpFrame();
 
-        Assert.Equal(@"D:\video\clip.mp4", app.CurrentFile);
-        Assert.Contains("Open(file:D:\\video\\clip.mp4)", backend.Calls);
+        Assert.Equal(clip, app.CurrentFile);
+        Assert.Contains($"Open(file:{clip})", backend.Calls);
+        Assert.NotNull(session.Window.FindByText("clip.mp4"));
     }
 
     [Fact]
