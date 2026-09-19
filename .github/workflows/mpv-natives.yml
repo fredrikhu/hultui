@@ -48,10 +48,13 @@ jobs:
       # The package job gets the binary through the cache, not an artifact: artifact
       # storage is a small per-repository quota that a few weeks of docs uploads fill,
       # and a full quota fails the upload outright. The cache is 10 GB and separate.
+      # A cache saved on Windows is invisible to a Linux restore unless both sides
+      # say enableCrossOsArchive — the first package run missed for exactly that.
       - uses: actions/cache/save@v4
         with:
           path: native/mpv/out/win-x64
           key: libmpv-win-x64-${{ github.run_id }}
+          enableCrossOsArchive: true
 
       - uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -94,6 +97,7 @@ jobs:
         with:
           path: native/mpv/out/linux-x64
           key: libmpv-linux-x64-${{ github.run_id }}
+          enableCrossOsArchive: true
 
       - uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -112,12 +116,14 @@ jobs:
         with:
           path: native/mpv/out/win-x64
           key: libmpv-win-x64-${{ github.run_id }}
+          enableCrossOsArchive: true
           fail-on-cache-miss: true
 
       - uses: actions/cache/restore@v4
         with:
           path: native/mpv/out/linux-x64
           key: libmpv-linux-x64-${{ github.run_id }}
+          enableCrossOsArchive: true
           fail-on-cache-miss: true
 
       # Tag mpv-natives-v1.2.0 -> 1.2.0; a dispatch build gets a prerelease stamp.
