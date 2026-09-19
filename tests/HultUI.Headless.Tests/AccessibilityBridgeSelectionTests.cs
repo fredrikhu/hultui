@@ -135,6 +135,7 @@ internal sealed class HandlePlatform(IntPtr hwnd) : IWindowingPlatform
 
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose) => true;
     public void WaitForEvents(int timeoutMs) { }
+    public void Wake() { }
     public void Dispose() { }
 }
 

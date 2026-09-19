@@ -71,6 +71,7 @@ internal sealed class StubPlatform : IWindowingPlatform
         => throw new InvalidOperationException("should not be reached");
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose) => true;
     public void WaitForEvents(int timeoutMs) { }
+    public void Wake() { }
     public void Dispose() { }
 }
 
@@ -82,5 +83,6 @@ internal sealed class FailingPlatform : IWindowingPlatform
         => throw new InvalidOperationException("no window for you");
     public bool PumpEvents(Action<IPlatformWindow>? onWindowClose) => true;
     public void WaitForEvents(int timeoutMs) { }
+    public void Wake() { }
     public void Dispose() { }
 }

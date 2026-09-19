@@ -20,10 +20,22 @@ public interface IWindowingPlatform : IDisposable
     bool PumpEvents(Action<IPlatformWindow>? onWindowClose);
 
     /// <summary>
-    /// Parks the loop until a native event arrives or the timeout elapses.
-    /// Called only when no window needed a frame this iteration.
+    /// Parks the loop until a native event arrives, <see cref="Wake"/> is called,
+    /// or the timeout elapses. Called only when no window needed a frame this
+    /// iteration.
     /// </summary>
     void WaitForEvents(int timeoutMs);
+
+    /// <summary>
+    /// Unblocks a <see cref="WaitForEvents"/> in progress so the next frame starts
+    /// now rather than when the timeout elapses. Thread-safe, and the only member of
+    /// this interface that is: it exists for work arriving from other threads — a
+    /// posted continuation, a decoded video frame, a native callback — which would
+    /// otherwise wait out the idle interval before anything looked at it. A no-op
+    /// when nothing is waiting; a platform with no idle wait of its own (headless, a
+    /// host that drives <c>RunFrame</c> from its own loop) implements it as one.
+    /// </summary>
+    void Wake();
 
     /// <summary>
     /// Clock used for input timing (double-click detection). Real platforms

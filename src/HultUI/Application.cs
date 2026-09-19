@@ -44,12 +44,27 @@ public sealed class Application : IDisposable
 
     /// <summary>
     /// Schedules an action to run on the main (UI) thread during the next
-    /// frame. Use this to safely update component state from background
+    /// frame, and wakes the loop if it is parked between frames so that frame
+    /// starts now. Use this to safely update component state from background
     /// threads (e.g. filesystem watchers, async completions).
     /// </summary>
     public static void InvokeOnMainThread(Action action)
     {
-        _current?._mainThreadQueue.Enqueue(action);
+        var app = _current;
+        if (app is null) return;
+        app._mainThreadQueue.Enqueue(action);
+        app.WakeIfParked();
+    }
+
+    /// <summary>
+    /// Unparks the frame loop after queued work, unless this is the UI thread — which
+    /// cannot be parked while it runs this, and whose wake would only queue a spurious
+    /// event that makes the next idle wait return at once.
+    /// </summary>
+    private void WakeIfParked()
+    {
+        if (Environment.CurrentManagedThreadId == UIThread.BoundThreadId) return;
+        _platform.Wake();
     }
 
     public Theme Theme
@@ -350,7 +365,7 @@ public sealed class Application : IDisposable
     {
         var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(
-            new UIThreadSynchronizationContext(_mainThreadQueue));
+            new UIThreadSynchronizationContext(_mainThreadQueue, WakeIfParked));
         return previous;
     }
 
@@ -491,14 +506,22 @@ public sealed class Application : IDisposable
 internal sealed class UIThreadSynchronizationContext : SynchronizationContext
 {
     private readonly ConcurrentQueue<Action> _queue;
+    private readonly Action _wake;
 
-    public UIThreadSynchronizationContext(ConcurrentQueue<Action> queue)
+    public UIThreadSynchronizationContext(ConcurrentQueue<Action> queue, Action wake)
     {
         _queue = queue;
+        _wake = wake;
     }
 
+    // A continuation whose antecedent completed on another thread (file I/O, a
+    // Task.Run) posts from that thread; without the wake it would sit in the queue
+    // for the rest of the idle wait.
     public override void Post(SendOrPostCallback d, object? state)
-        => _queue.Enqueue(() => d(state));
+    {
+        _queue.Enqueue(() => d(state));
+        _wake();
+    }
 
     public override void Send(SendOrPostCallback d, object? state)
         => throw new NotSupportedException(

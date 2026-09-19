@@ -38,5 +38,8 @@ internal sealed class HeadlessWindowingPlatform : IWindowingPlatform
         Thread.Sleep(1);
     }
 
+    /// <summary>No-op: the session pumps frames explicitly, so there is never a wait to cut short.</summary>
+    public void Wake() { }
+
     public void Dispose() { }
 }

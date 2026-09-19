@@ -64,5 +64,9 @@ internal sealed class WinFormsWindowingPlatform : IWindowingPlatform
     /// wait here would stall the form.</summary>
     public void WaitForEvents(int timeoutMs) { }
 
+    /// <summary>No-op: there is no wait here to cut short. The host's timer or idle
+    /// handler decides when the next <c>RunFrame</c> runs.</summary>
+    public void Wake() { }
+
     public void Dispose() { }
 }

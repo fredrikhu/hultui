@@ -41,6 +41,12 @@ frame, for callbacks that never had a UI-thread context to return to: a
 filesystem watcher, a native callback, a `Task.Run` continuation, a timer from
 another library.
 
+Both wake the loop. Between frames the application parks in the platform's idle
+wait (16 ms at a time); posting from another thread cuts that wait short through
+`IWindowingPlatform.Wake`, so the work runs within a frame of being posted rather
+than after the wait times out. Posting from the UI thread itself does not wake
+anything — the loop is running that code, not parked.
+
 ```csharp
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());
 ```

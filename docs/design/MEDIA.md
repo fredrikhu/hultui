@@ -134,17 +134,21 @@ public interface IWindowingPlatform
 }
 ```
 
-- `Application.InvokeOnMainThread` calls `Wake()` after enqueueing. This is a
-  latent bug fix on its own: every posted continuation today waits up to 16 ms.
-- SDL: `Wake` is `SDL_PushEvent` of a type from `SDL_RegisterEvents`;
-  `WaitForEvents` becomes `SDL_WaitEventTimeout(null, timeoutMs)`, which SDL3
-  interrupts on a push from any thread. **Verify** on Windows that this keeps the
-  live-resize behaviour the `MsgWaitForMultipleObjectsEx` path was chosen for
-  (that choice predates `IWindowingPlatform`; `git log -S MsgWaitForMultipleObjectsEx`
-  will say why). If it does not, keep the Win32 wait and add `PostThreadMessage`
-  of `WM_NULL` to the UI thread as the Windows `Wake`.
-- Headless: no-op; the session pumps frames itself.
-- Hosts driving `RunFrame` (WinForms) never park, so they need nothing.
+**Shipped 2026-09-19.**
+
+- `Application.InvokeOnMainThread` and the UI `SynchronizationContext`'s `Post`
+  call `Wake()` after enqueueing, unless the caller is the UI thread. This was a
+  latent bug fix on its own: every posted continuation used to wait up to 16 ms.
+- SDL: `Wake` is `SDL_PushEvent` of a type from `SDL_RegisterEvents`, coalesced
+  while one is already queued; `WaitForEvents` is `SDL_WaitEventTimeout(null, …)`,
+  which peeks without popping and which SDL3 interrupts on a push from any thread.
+  The hand-written `MsgWaitForMultipleObjectsEx` it replaced existed so that UI
+  Automation queries arriving as Win32 sent messages would wake the wait (fad106c);
+  SDL's own Windows wait is the same call with the same mask, and the real-window
+  accessibility suite passes unchanged over the new path.
+- Headless and the WinForms host: no-op; neither has a wait to cut short.
+- Tests: `WakeTests` (headless, the wiring) and `SdlWakeTests` (real window, the
+  wait itself parks and a cross-thread wake returns it at once).
 
 With S3, frame pacing needs no continuous-render flag: the decoder thread stores a
 frame, posts `MarkPaintDirty` for the element, wakes the loop, and one frame
