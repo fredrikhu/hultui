@@ -34,7 +34,7 @@
         ],
         "src": "docs",
         "exclude": [
-          "design/**",
+          "design/meridian/**",
           "plans/**",
           "**/*HANDOVER*.md"
         ]

@@ -111,12 +111,20 @@ build_mpv() {
   if [ "$HOST" = windows ]; then
     # One DLL with everything inside it: the static runtime, the static deps.
     # No window outputs: the framework's GL context is the only display.
-    host_opts=(-Dc_link_args=-static -Dcpp_link_args=-static
+    host_opts=(-Dc_link_args=-static -Dcpp_link_args=-static -Dprefer_static=true
                -Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled -Dgl-dxinterop=disabled -Degl-angle=disabled)
   else
     # GL only, through the framework's context: no windowing, no display interop.
+    # Our own prefix holds only static archives, so FFmpeg, libplacebo and libass
+    # link in by construction; the distribution's libraries must stay shared (its
+    # archives are not PIC — prefer_static here failed the link on libfontconfig.a).
+    # What static archives do need is their private dependencies, which pkg-config
+    # only lists with --static; the wrapper asks for that on every query.
     host_opts=(-Dx11=disabled -Dwayland=disabled -Degl=disabled -Ddrm=disabled
                -Dvaapi=disabled -Dvdpau=disabled -Dpipewire=disabled -Djack=disabled -Dopenal=disabled)
+    printf '#!/bin/sh\nexec pkg-config --static "$@"\n' > "$WORK/pkg-config-static"
+    chmod +x "$WORK/pkg-config-static"
+    export PKG_CONFIG="$WORK/pkg-config-static"
   fi
   meson setup build --prefix="$PREFIX" --libdir=lib --buildtype=release \
     -Dgpl=false -Dlibmpv=true -Dcplayer=false \
@@ -126,7 +134,6 @@ build_mpv() {
     -Dvulkan=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
     -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled \
     -Dmanpage-build=disabled -Dhtml-build=disabled -Dtests=false \
-    -Dprefer_static=true \
     "${host_opts[@]}"
   log "mpv: build"
   meson compile -C build -j "$JOBS"

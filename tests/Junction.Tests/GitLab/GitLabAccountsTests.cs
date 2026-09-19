@@ -45,7 +45,7 @@ public class GitLabAccountsTests
         Assert.Equal("Dana Osei", account.Name);
         Assert.Equal(GitLabTokenKind.Pat, account.Kind);
         Assert.Equal(["api", "write_repository"], account.Scopes);
-        Assert.Equal(new DateTimeOffset(2026, 9, 21, 0, 0, 0, TimeSpan.Zero), account.ExpiresAt);
+        Assert.Equal(new DateTimeOffset(2036, 9, 21, 0, 0, 0, TimeSpan.Zero), account.ExpiresAt);
         Assert.True(account.CanWrite);
 
         Assert.Same(account, Assert.Single(settings.GitLabAccounts));

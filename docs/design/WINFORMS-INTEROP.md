@@ -225,7 +225,7 @@ loop cannot call `Run()`, so all five spikes reached those methods by reflection
 And one thing degrades the embedded case:
 
 **`AccessibilityBridgeFactory` type-tests the concrete `SDL3Window`**
-([AccessibilityBridgeFactory.cs:35](../../src/HultUI/AccessibilityBridgeFactory.cs)),
+([AccessibilityBridgeFactory.cs:35](https://github.com/fredrikhu/hului-revamped/blob/main/src/HultUI/AccessibilityBridgeFactory.cs)),
 so a WGL-backed platform window falls back to `NullAccessibilityBridge` — no UIA,
 and a screen reader sees an empty region where the HultUI content is. This is a
 type test, not a real dependency: experiment F wired the bridge up by hand against
