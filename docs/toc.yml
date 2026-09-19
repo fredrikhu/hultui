@@ -46,5 +46,7 @@
       href: SELF-HOSTED-RUNNERS.md
     - name: WinForms interop
       href: design/WINFORMS-INTEROP.md
+    - name: Media (video player)
+      href: design/MEDIA.md
 - name: API
   href: api/toc.yml
