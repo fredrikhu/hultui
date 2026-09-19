@@ -69,11 +69,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // Reaching the end keeps the last frame instead of unloading the file.
         Check(mpv_set_option_string(_mpv, "keep-open", "yes"));
         Check(mpv_set_option_string(_mpv, "idle", "yes"));
-        Check(mpv_set_option_string(_mpv, "input-default-bindings", "no"));
-        Check(mpv_set_option_string(_mpv, "input-vo-keyboard", "no"));
-        Check(mpv_set_option_string(_mpv, "osc", "no"));
-        Check(mpv_set_option_string(_mpv, "terminal", "no"));
-        Check(mpv_set_option_string(_mpv, "ytdl", "no"));
+        // Best effort: these options only exist in builds with the feature they
+        // belong to (the OSC and ytdl hook are Lua scripts, "terminal" is the
+        // command-line player's), and the trimmed LGPL build has none of them.
+        mpv_set_option_string(_mpv, "input-default-bindings", "no");
+        mpv_set_option_string(_mpv, "input-vo-keyboard", "no");
+        mpv_set_option_string(_mpv, "osc", "no");
+        mpv_set_option_string(_mpv, "terminal", "no");
+        mpv_set_option_string(_mpv, "ytdl", "no");
         // Decode on the GPU where there is a decoder, copy back for mpv's GL pipeline:
         // the mode that works with a desktop GL context on every platform.
         mpv_set_option_string(_mpv, "hwdec", "auto-copy");

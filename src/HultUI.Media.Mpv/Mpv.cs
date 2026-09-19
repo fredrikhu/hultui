@@ -43,6 +43,8 @@ internal static unsafe partial class Mpv
             directories.Add(hint);
         }
         directories.Add(AppContext.BaseDirectory);
+        // Where a NuGet natives package lands in a framework-dependent build.
+        directories.Add(Path.Combine(AppContext.BaseDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "native"));
         directories.Add(null);   // the loader's own search
 
         foreach (var directory in directories)
@@ -54,6 +56,10 @@ internal static unsafe partial class Mpv
                 if (NativeLibrary.TryLoad(file, out handle)) return true;
             }
         }
+        // Last, the host's own probing for this assembly, which reads deps.json and
+        // knows about runtimes/<rid>/native for a published application.
+        foreach (var candidate in CandidateNames())
+            if (NativeLibrary.TryLoad(candidate, typeof(Mpv).Assembly, null, out handle)) return true;
         return false;
     }
 

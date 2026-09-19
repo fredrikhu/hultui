@@ -26,11 +26,13 @@ the fastest way to learn why a source would not open.
 
 Verified with shinchiro's `mpv-dev-x86_64` build of 2026-09-03 (client API 2.5).
 
-The build to use is the project's own trimmed LGPL build (`-Dgpl=false`, no Lua,
-JavaScript, yt-dlp or disc support, against an LGPL FFmpeg), published per RID
-alongside the packages. Any other libmpv works the same way — a distribution's
+The build to use is `HultUI.Media.Mpv.Natives`: the project's own trimmed LGPL
+build (`-Dgpl=false`, no Lua, JavaScript, yt-dlp or disc support, against an LGPL
+FFmpeg), one package with each RID under `runtimes/`. Add it beside this one and
+nothing else is needed. Any other libmpv works the same way — a distribution's
 package, a community build — but those are GPL, which is your application's
-licence question to answer, not this package's.
+licence question to answer, not this package's. How the build is made is in
+`native/mpv/README.md` of the repository.
 
 ## What the backend does
 

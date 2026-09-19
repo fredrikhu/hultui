@@ -24,6 +24,7 @@ produces fifteen packages plus symbol packages (snupkg):
 | `HultUI.Headless` | Headless testing host — consumers test their apps with it. |
 | `HultUI.Media` | Video playback without a decoder: the backend contract, the reactive `MediaPlayer`, `VideoElement`, `VideoPlayer`, and a fake backend for tests. A decoder is a separate package. |
 | `HultUI.Media.Mpv` | The libmpv backend. Bindings and `MpvBackend` only; the native library is the consumer's, per its README. |
+| `HultUI.Media.Mpv.Natives` | The trimmed LGPL libmpv itself, under `runtimes/<rid>/native/`. **Not in the solution**: it packs only after `native/mpv/build-libmpv.sh` has produced the binaries, from the `mpv natives` workflow, and errors otherwise. |
 | `HultUI.Icons`, `HultUI.Syntax`, `HultUI.Themes` | Satellite libraries. |
 | `HultUI.SourceGenerators` | The generator/analyzers standalone, for Core-only projects. Development dependency; no lib output, no symbols package. |
 

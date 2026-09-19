@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The native libmpv for HultUI.Media.Mpv: whatever native/mpv/build-libmpv.sh left in
+    native/mpv/out/<rid>/, packed under runtimes/<rid>/native/ where the .NET host finds
+    it. No managed code; a RID that was not built is simply absent from the package,
+    and the pack step says which ones went in.
+
+    Licence: the libraries inside are LGPL-2.1-or-later (mpv, FFmpeg, libplacebo) with
+    permissive dependencies; THIRD-PARTY-NOTICES.md and each RID's LICENCE-REPORT.txt
+    travel with them.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <Description>The native libmpv HultUI.Media.Mpv plays through: a trimmed LGPL-2.1 build (no GPL code, no encoders, no scripting, no Vulkan) with FFmpeg, libplacebo and libass linked in. Add this package beside HultUI.Media.Mpv.</Description>
+    <PackageLicenseExpression>LGPL-2.1-or-later</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <NativesDir>$(MSBuildThisFileDirectory)..\..\native\mpv\out\</NativesDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="$(MSBuildThisFileDirectory)..\..\README.md" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(NativesDir)win-x64\libmpv-2.dll" Condition="Exists('$(NativesDir)win-x64\libmpv-2.dll')"
+          Pack="true" PackagePath="runtimes\win-x64\native\" />
+    <None Include="$(NativesDir)win-x64\LICENCE-REPORT.txt" Condition="Exists('$(NativesDir)win-x64\LICENCE-REPORT.txt')"
+          Pack="true" PackagePath="runtimes\win-x64\native\" />
+    <None Include="$(NativesDir)linux-x64\libmpv.so.2" Condition="Exists('$(NativesDir)linux-x64\libmpv.so.2')"
+          Pack="true" PackagePath="runtimes\linux-x64\native\" />
+    <None Include="$(NativesDir)linux-x64\LICENCE-REPORT.txt" Condition="Exists('$(NativesDir)linux-x64\LICENCE-REPORT.txt')"
+          Pack="true" PackagePath="runtimes\linux-x64\native\" />
+  </ItemGroup>
+
+  <Target Name="ReportNatives" BeforeTargets="GenerateNuspec">
+    <Message Importance="high" Text="HultUI.Media.Mpv.Natives: win-x64 $([System.IO.File]::Exists('$(NativesDir)win-x64\libmpv-2.dll'))  linux-x64 $([System.IO.File]::Exists('$(NativesDir)linux-x64\libmpv.so.2'))" />
+    <Error Condition="!Exists('$(NativesDir)win-x64\libmpv-2.dll') And !Exists('$(NativesDir)linux-x64\libmpv.so.2')"
+           Text="No native libmpv found under native/mpv/out/. Run native/mpv/build-libmpv.sh first." />
+  </Target>
+
+</Project>

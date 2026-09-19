@@ -282,6 +282,23 @@ lists, equalisers, DVD menus and playlists stay off it until a control needs the
 - When LibVLCSharp 4 ships, `SetOutputCallbacks` gives a `GpuFrames` path behind the
   same sink interface, with no change to `HultUI.Media`.
 
+### `HultUI.Media.Mpv.Natives`
+
+The native library, built by `native/mpv/build-libmpv.sh` from pinned upstream
+tags: mpv 0.41.0 with `-Dgpl=false`, FFmpeg 8.1.2 without gpl/nonfree/version3
+and without encoders, muxers, devices or avdevice, libplacebo 7.360.1 GL-only,
+libass and dav1d from the host packages. On Windows everything is linked into one
+`libmpv-2.dll` (38 MB stripped) that depends only on system DLLs. `licence-report.sh`
+reads the configured trees and fails the build on any GPL switch; the backend test
+`TheLoadedBuild_IsTheTrimmedLgplOne_WhenExpected` asserts the same from inside the
+loaded library when `HULTUI_MPV_EXPECT_LGPL=1`. The package puts each RID under
+`runtimes/<rid>/native/` with the report and third-party notices, and is packed by
+the `mpv natives` workflow rather than the solution, since it errors with nothing
+built. Things the trimmed build taught: options that belong to trimmed features
+(`osc`, `ytdl`, `terminal`) do not exist, so the backend sets them best-effort;
+mpv 0.41 has no `sdl2` option (it is `sdl2-video`); meson's cmake fallback breaks
+under MSYS2 with no `USERPROFILE`, so cmake stays uninstalled there.
+
 ### `HultUI.Media.Mpv`
 
 **Shipped 2026-09-19 and verified against shinchiro's libmpv 20260903 (client
@@ -344,7 +361,11 @@ CI without natives stays green and a machine with them proves the real thing.
 5. The `Mpv` backend: bindings, the `sw` path first (testable headlessly with real
    media), then the GL path. Backend test fixture. **Done, both paths verified.**
 6. The trimmed LGPL native build for win-x64, linux-x64, osx-arm64 on the
-   self-hosted runners, packaged per RID.
+   self-hosted runners, packaged per RID. **win-x64 built and verified 2026-09-19**
+   (`native/mpv/`, 38 MB self-contained DLL against the GPL community build's
+   120 MB; all backend tests and the real-window GL test pass on it, with the
+   licence assertion on). linux-x64 is scripted and wired into the `mpv natives`
+   workflow but has not run yet; osx-arm64 has no runner and is not started.
 7. `LibVlc` only if an application asks for something mpv lacks (Chromecast, DVD
    menus, VLC's adaptive streaming).
 

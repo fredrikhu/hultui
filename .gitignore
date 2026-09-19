@@ -12,3 +12,7 @@ apps/VesperCommander/Installer/Output/
 
 artifacts/
 docs/api/
+
+# libmpv native build trees and outputs (native/mpv/README.md)
+native/mpv/work/
+native/mpv/out/

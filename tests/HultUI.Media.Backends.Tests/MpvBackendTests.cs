@@ -125,6 +125,25 @@ public class MpvBackendTests : IDisposable
         Assert.False(string.IsNullOrEmpty(f.Player.Error));
     }
 
+    /// <summary>
+    /// The trimmed LGPL build reports itself as such. Only asserted when the caller
+    /// says it expects that build (HULTUI_MPV_EXPECT_LGPL=1, as the natives workflow
+    /// does); against any other libmpv the test only prints what it found.
+    /// </summary>
+    [MpvFact]
+    public void TheLoadedBuild_IsTheTrimmedLgplOne_WhenExpected()
+    {
+        using var f = new Fixture();
+        string configuration = f.Backend.PeekString("mpv-configuration") ?? "";
+        string version = f.Backend.PeekString("mpv-version") ?? "";
+        Console.WriteLine($"{version}: {configuration}");
+
+        if (Environment.GetEnvironmentVariable("HULTUI_MPV_EXPECT_LGPL") != "1") return;
+        Assert.Contains("-Dgpl=false", configuration);
+        Assert.Contains("-Dlua=disabled", configuration);
+        Assert.Contains("-Dvulkan=disabled", configuration);
+    }
+
     [MpvFact]
     public void RateVolumeAndMute_ReachMpv()
     {
