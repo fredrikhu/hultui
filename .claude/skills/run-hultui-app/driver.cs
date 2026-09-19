@@ -31,6 +31,7 @@ float scale = 1f;
 bool fluentDark = true;
 int fluentAccent = 0;
 bool gitlab = false;
+string theme = "";
 var steps = new List<string>();
 
 for (int i = 0; i < args.Length; i++)
@@ -52,6 +53,7 @@ for (int i = 0; i < args.Length; i++)
         // what a hairline does on the pixel grid there — which is where borders go soft.
         case "--scale": scale = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;
         case "--gitlab": gitlab = true; break;
+        case "--theme": theme = args[++i]; break;
         default: steps.Add(args[i]); break;
     }
 }
@@ -110,6 +112,7 @@ Element MountJunction()
         Workspaces = [new Junction.WorkspaceData { Id = "w1", Name = "Driver", RepoPaths = [path] }],
         ActiveWorkspaceId = "w1",
     };
+    if (theme.Length > 0) settings.Appearance.Theme = theme;   // --theme: any ThemeCatalog id, e.g. dracula
     // --gitlab: borrow the signed-in GitLab accounts from the user's real settings file. Only
     // the identities travel; the tokens stay in the OS credential store, which this process
     // reads as the same Windows user. The scratch config is otherwise untouched.

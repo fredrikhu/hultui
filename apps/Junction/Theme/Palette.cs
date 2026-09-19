@@ -112,20 +112,48 @@ public sealed record Palette
         // the tint the row is washed with, the text on it, the +/− sign in the gutter, and
         // the count in a file's header. A light theme wants them below the paper rather
         // than above the ground, so every step flips.
-        AddBase = t.Green,
-        AddText = Tone(t, 0.80, 0.30),
+        //
+        // The added text on a light ground sits lower than the deleted: green hues carry
+        // more luminance than reds at the same HSL lightness, and at 0.30 Solarized's
+        // yellow-green came out at 2.3:1 on its own word highlight.
+        AddBase = Wash(t, t.Green, 0.45, 0.40),
+        AddText = Tone(t, 0.80, 0.24),
         AddSign = Tone(t, 0.61, 0.40),
         AddCount = Tone(t, 0.67, 0.36),
 
-        DelBase = t.Red,
+        DelBase = Wash(t, t.Red, 0.50, 0.40),
         DelText = Tone(t, 0.80, 0.30, red: true),
         DelSign = Tone(t, 0.69, 0.40, red: true),
         DelCount = Tone(t, 0.70, 0.38, red: true),
 
         DangerText = Tone(t, 0.74, 0.34, red: true),
         DangerIcon = Tone(t, 0.69, 0.40, red: true),
-        MarkAmber = t.Amber,
+        MarkAmber = Wash(t, t.Amber, 0.45, 0.70),
     };
+
+    /// <summary>The colour a diff row is washed with and its changed words are lit with, or
+    /// a search hit is marked in — the one that goes under text rather than being it.
+    ///
+    /// <para>Nocturne's own are muted mid-tones, picked so the syntax colours drawn over them
+    /// stay legible. A scheme's published green, red and amber are terminal colours — Dracula's
+    /// green is <c>#50fa7b</c>, its amber a pale yellow — and at the same opacities they
+    /// compose to a highlight bright enough to swallow that scheme's own comments, numbers and
+    /// strings: Dracula's comment sat at 1.4:1 on its word highlight, and a search hit on one of
+    /// its strings disappeared entirely, the string and the mark being the same yellow. So on a
+    /// dark ground the hue is kept and the lightness and saturation are capped, a little under
+    /// Nocturne's because these grounds mostly sit above Nocturne's. Capped, never lifted: a
+    /// green already darker than the cap (Solarized's) keeps its lightness and only loses
+    /// saturation, and one under both caps comes through as published. A light theme mixes its
+    /// wash under dark text, where a deep, saturated base is exactly what reads, so it passes
+    /// through.</para>
+    /// </summary>
+    private static Color Wash(NamedTheme t, Color published, double maxLightness, double maxSaturation)
+    {
+        if (!t.IsDark) return published;
+        var (h, s, l) = ColorMath.ToHsl(published);
+        if (l <= maxLightness && s <= maxSaturation) return published;
+        return ColorMath.FromHsl(h, Math.Min(s, maxSaturation), Math.Min(l, maxLightness));
+    }
 
     /// <summary>One step of the theme's green (or red), lit for a dark or a light ground.
     /// Saturation eases off with the extremes for the same reason the ramps do.</summary>

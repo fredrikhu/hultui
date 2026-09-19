@@ -144,4 +144,83 @@ public class ThemeTests : IDisposable
             Assert.NotEqual(default, p.MarkAmber);
         }
     }
+
+    /// <summary>
+    /// What a scheme's diff and search marks compose to on screen, and whether the text on
+    /// them survives. Nocturne's washes were picked by hand for exactly this; the generated
+    /// schemes take their published green, red and amber, and Dracula's — terminal colours,
+    /// turned all the way up — composed to a word highlight its own comments read at 1.4:1 on,
+    /// and a search mark its strings vanished into.
+    ///
+    /// <para>The floors are WCAG's where the design can meet them: 4.5:1 for the added or
+    /// deleted text on its own word highlight on a dark ground, 3:1 for the body text on it. A
+    /// light theme's word highlight is a saturated green at the same opacities over paper,
+    /// which leaves its added text at 3.4:1, so the light floor is 3:1. The current search hit
+    /// is held to 2.5:1: Solarized Dark's body text starts at 7:1 on its own ground, and no
+    /// mark bright enough to be found stays above 3:1 under it.</para>
+    /// </summary>
+    [Fact]
+    public void TextStaysLegibleOnEverySchemesHighlights()
+    {
+        foreach (var t in ThemeCatalog.All)
+        {
+            Nocturne.Use(t.Id);
+            var ground = Nocturne.Bg;
+            var addHl = Over(Nocturne.DiffAddHl, Over(Nocturne.DiffAddBg, ground));
+            var delHl = Over(Nocturne.DiffDelHl, Over(Nocturne.DiffDelBg, ground));
+            var current = Over(Nocturne.FindCurrentBg, ground);
+            double changed = t.IsDark ? 4.5 : 3.0;
+
+            AssertContrast(t, "added text on the word highlight", Nocturne.DiffAddText, addHl, changed);
+            AssertContrast(t, "deleted text on the word highlight", Nocturne.DiffDelText, delHl, changed);
+            AssertContrast(t, "body text on the added word highlight", Nocturne.Text, addHl, 3.0);
+            AssertContrast(t, "body text on the deleted word highlight", Nocturne.Text, delHl, 3.0);
+            AssertContrast(t, "body text on the current search hit", Nocturne.Text, current, 2.5);
+        }
+    }
+
+    [Fact]
+    public void TheWashIsCappedAndNeverLifted()
+    {
+        // The cap on a dark scheme's wash only ever pulls a colour down, and keeps its hue: a
+        // scheme still tints in its own green, just not at a terminal's full blast. Solarized's
+        // green is already dark and comes through at its printed lightness; a light theme's
+        // is untouched.
+        foreach (var t in ThemeCatalog.All)
+        {
+            if (t.Id == ThemeCatalog.Nocturne.Id) continue;   // drawn by hand, not derived
+            var p = Palette.For(t);
+            foreach (var (published, washed, what) in new[]
+            {
+                (t.Green, p.AddBase, "green"), (t.Red, p.DelBase, "red"), (t.Amber, p.MarkAmber, "amber"),
+            })
+            {
+                if (!t.IsDark) { Assert.Equal(published, washed); continue; }
+                var (h0, s0, l0) = ColorMath.ToHsl(published);
+                var (h1, s1, l1) = ColorMath.ToHsl(washed);
+                Assert.True(Math.Abs(h1 - h0) < 0.02, $"{t.Name}: the {what} wash changed hue");
+                Assert.True(s1 <= s0 + 0.01 && l1 <= l0 + 0.01, $"{t.Name}: the {what} wash was lifted");
+            }
+        }
+        Assert.Equal(ColorMath.ToHsl(Color.FromHex("#859900")).L,
+            ColorMath.ToHsl(Palette.For(ThemeCatalog.SolarizedDark).AddBase).L, 2);
+    }
+
+    /// <summary>Source-over: <paramref name="top"/> at its alpha on an opaque
+    /// <paramref name="under"/> — what the renderer puts on screen.</summary>
+    private static Color Over(Color top, Color under)
+    {
+        double a = top.A / 255.0;
+        return new(
+            (byte)Math.Round(under.R + (top.R - under.R) * a),
+            (byte)Math.Round(under.G + (top.G - under.G) * a),
+            (byte)Math.Round(under.B + (top.B - under.B) * a));
+    }
+
+    private static void AssertContrast(NamedTheme t, string what, Color fg, Color bg, double floor)
+    {
+        double lf = ColorMath.Luminance(fg), lb = ColorMath.Luminance(bg);
+        double ratio = (Math.Max(lf, lb) + 0.05) / (Math.Min(lf, lb) + 0.05);
+        Assert.True(ratio >= floor, $"{t.Name}: {what} is {ratio:0.0}:1, under {floor}:1");
+    }
 }
