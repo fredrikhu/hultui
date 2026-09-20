@@ -207,6 +207,7 @@ public static class AccessibilityTreeBuilder
         SliderElement => AccessibilityRole.Slider,
         CheckboxElement => AccessibilityRole.Checkbox,
         ToggleSwitchElement => AccessibilityRole.Switch,
+        ProgressBarElement => AccessibilityRole.ProgressBar,
         RadioButtonElement => AccessibilityRole.RadioButton,
         TextElement => AccessibilityRole.Label,
         ImageElement => AccessibilityRole.Image,

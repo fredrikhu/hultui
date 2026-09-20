@@ -165,6 +165,13 @@ public static class ElementExtensions
     // ──── ToggleSwitch properties ────
     public static T OnToggled<T>(this T el, Action<bool> handler) where T : ToggleSwitchElement { el.OnChanged = handler; return el; }
 
+    // ──── ProgressBar properties ────
+    public static ProgressBarElement Value(this ProgressBarElement el, double value) { el.Value = value; return el; }
+    public static ProgressBarElement Range(this ProgressBarElement el, double min, double max) { el.Minimum = min; el.Maximum = max; return el; }
+    /// <summary>Show activity without a known fraction: a segment sweeps the track until
+    /// <see cref="ProgressBarElement.IsIndeterminate"/> is cleared.</summary>
+    public static ProgressBarElement Indeterminate(this ProgressBarElement el, bool indeterminate = true) { el.IsIndeterminate = indeterminate; return el; }
+
     // ──── Slider properties ────
     public static SliderElement Value(this SliderElement el, double value) { el.Value = value; return el; }
     public static SliderElement Range(this SliderElement el, double min, double max) { el.Minimum = min; el.Maximum = max; return el; }

@@ -212,6 +212,24 @@ public abstract class Element
     public bool IsDetached => _detached;
 
     /// <summary>
+    /// Whether this element hangs off a root a window is showing. <see cref="OnMounted"/>
+    /// means "got a parent", which the freshly built twin of a rebuild also does, so an
+    /// element that drives its own animation asks this instead: a twin's root has no host,
+    /// a discarded root has had its host cleared, and only what is actually on screen says
+    /// yes. A walk to the root, cheap enough for a per-frame check.
+    /// </summary>
+    public bool IsHosted
+    {
+        get
+        {
+            if (_detached) return false;
+            var e = this;
+            while (e.Parent is not null) e = e.Parent;
+            return e.OverlayHost is not null;
+        }
+    }
+
+    /// <summary>
     /// Whether a detached-element access throws. Compiled in for strict-lifetime builds only
     /// (Debug by default — see Directory.Build.targets), and switchable at runtime for a test
     /// that means to inspect a discarded element.

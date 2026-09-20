@@ -531,9 +531,13 @@ public sealed class Window : IOverlayHost, IDisposable
 
     public void SetRoot(Element root)
     {
+        // The old tree is gone; anything held from it is a reference to a discarded element.
+        // Releasing its host is what lets an element still animating in it (a looping
+        // progress sweep) notice on its next tick — see Element.IsHosted.
+        if (_root is not null && !ReferenceEquals(_root, root))
+            _root.OverlayHost = null;
         _root = root;
         _maxButtonCache = null;
-        // The old tree is gone; anything held from it is a reference to a discarded element.
         SetScrollbarHover(null, default);
         root.OverlayHost = this;
         root.FocusManager = _focusManager;

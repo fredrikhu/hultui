@@ -69,6 +69,8 @@ public class ToggleSwitchElementTests
         s.ApplyTheme(themed);
         Assert.Equal(60f, s.TrackWidth);
         Assert.Equal(0f, s.TransitionSeconds);
+        // A partial override keeps the palette's colours.
+        Assert.Equal(Theme.Light.Primary, s.OnTrackColor);
     }
 
     [Fact]

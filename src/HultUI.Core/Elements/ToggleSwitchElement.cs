@@ -26,7 +26,6 @@ public class ToggleSwitchElement : Element
 {
     private bool _isOn;
     private bool _focused;
-    private bool _mounted;
     /// <summary>Where the knob is drawn, 0 = off side, 1 = on side.</summary>
     private float _knob;
     private TweenHandle _knobTween;
@@ -74,12 +73,12 @@ public class ToggleSwitchElement : Element
         TrackWidth = t.TrackWidth;
         TrackHeight = t.TrackHeight;
         KnobSize = t.KnobSize;
-        OnTrackColor = t.OnTrack;
-        OffTrackColor = t.OffTrack;
-        OffBorderColor = t.OffBorder;
+        OnTrackColor = t.OnTrack ?? theme.Primary;
+        OffTrackColor = t.OffTrack ?? theme.SurfaceVariant;
+        OffBorderColor = t.OffBorder ?? theme.Secondary;
         OffBorderWidth = t.OffBorderWidth;
-        OnKnobColor = t.OnKnob;
-        OffKnobColor = t.OffKnob;
+        OnKnobColor = t.OnKnob ?? theme.PrimaryText;
+        OffKnobColor = t.OffKnob ?? theme.Secondary;
         TransitionSeconds = t.TransitionSeconds;
         _focusRingColor = theme.FocusRing;
     }
@@ -117,9 +116,9 @@ public class ToggleSwitchElement : Element
     private void MoveKnob(float to)
     {
         _knobTween.Cancel();
-        // Only a mounted element is on screen to animate; the incoming twin of a rebuild
+        // Only an element on screen has a knob to slide; the incoming twin of a rebuild
         // and an element built but not yet shown just take the position.
-        if (!_mounted || TransitionSeconds <= 0f)
+        if (!IsHosted || TransitionSeconds <= 0f)
         {
             _knob = to;
             return;
@@ -130,16 +129,9 @@ public class ToggleSwitchElement : Element
             .Start();
     }
 
-    protected override void OnMounted()
-    {
-        base.OnMounted();
-        _mounted = true;
-    }
-
     protected override void OnUnmounted()
     {
         base.OnUnmounted();
-        _mounted = false;
         _knobTween.Cancel();
         _knob = _isOn ? 1f : 0f;
     }

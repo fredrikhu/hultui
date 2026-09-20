@@ -158,6 +158,7 @@ internal static partial class UiaInterop
     public const int UIA_ListItemControlTypeId = 50007;
     public const int UIA_PaneControlTypeId = 50033;
     public const int UIA_SliderControlTypeId = 50015;
+    public const int UIA_ProgressBarControlTypeId = 50012;
     public const int UIA_RadioButtonControlTypeId = 50013;
     public const int UIA_ScrollBarControlTypeId = 50014;
     public const int UIA_SeparatorControlTypeId = 50038;

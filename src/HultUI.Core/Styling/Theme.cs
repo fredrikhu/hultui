@@ -28,6 +28,8 @@ public sealed class Theme
     public CheckboxTheme Checkbox { get => Get<CheckboxTheme>(); init => Set(value); }
     public SliderTheme Slider { get => Get<SliderTheme>(); init => Set(value); }
     public ToggleSwitchTheme ToggleSwitch { get => Get<ToggleSwitchTheme>(); init => Set(value); }
+    public ProgressBarTheme ProgressBar { get => Get<ProgressBarTheme>(); init => Set(value); }
+    public SpinnerTheme Spinner { get => Get<SpinnerTheme>(); init => Set(value); }
     public FocusVisualTheme FocusVisual { get => Get<FocusVisualTheme>(); init => Set(value); }
     public RadioButtonTheme RadioButton { get => Get<RadioButtonTheme>(); init => Set(value); }
     public TooltipTheme Tooltip { get => Get<TooltipTheme>(); init => Set(value); }

@@ -599,3 +599,96 @@ element slides the knob from wherever it currently is.
 ToggleSwitch.New(settings.DarkMode, "Dark mode")
     .OnToggled(on => settings.DarkMode = on);
 ```
+
+---
+
+## 10. ProgressBarElement
+
+A horizontal progress bar: a track with a fill that grows from the left to the
+fraction `Value` is of `Minimum`..`Maximum`. It stretches to the width it is
+offered, so it sits in a column the way a divider does; give it a `Width` to fix
+it. Labels, percentages and captions are the app's to compose around it.
+
+**Builder:**
+
+```csharp
+ProgressBar.New(0.68)                 // 68 % of the default 0..1 range
+ProgressBar.New(340, max: 500)        // 340 of 500
+ProgressBar.New().Indeterminate()     // activity with no known fraction
+```
+
+**Properties (in addition to common):**
+
+| Property | Fluent | Type | Default |
+|---|---|---|---|
+| `Value` | `.Value(v)` | `double` (clamped) | `0` |
+| `Minimum` / `Maximum` | `.Range(min, max)` | `double` | `0` / `1` |
+| `IsIndeterminate` | `.Indeterminate(bool = true)` | `bool` | `false` |
+| `Fraction` | -- | `double` (read-only) | `0..1` |
+| `Height` | -- | `float` | `4` |
+| `CornerRadius` | -- | `float?` | `null` (a pill) |
+| `SweepPosition` | -- | `float` (read-only) | where the indeterminate segment is |
+
+`TrackColor`, `FillColor`, the sizes and the sweep timing come from
+`Theme.ProgressBar` (`ProgressBarTheme`): the fill is `Primary` on a
+`Border`-coloured track.
+
+The indeterminate sweep is a looping tween that runs only while the element is
+mounted and stops the moment it leaves the tree or `IsIndeterminate` clears, so an
+idle window with a finished bar renders nothing.
+
+**Accessibility:** reads as a **progress bar** with a read-only range value; set
+`AccessibleName` to say what is progressing.
+
+**Example:**
+
+```csharp
+Flex.Column(gap: 6).Children(
+    Text.New($"Downloading update — {pct}%").FontSize(12f),
+    ProgressBar.New(pct, max: 100));
+```
+
+---
+
+## 11. SpinnerElement
+
+A busy indicator: a ring of dots with the leading one at full colour and a fading
+tail, turning for as long as the element is on screen. Drop it in a row beside the
+label of whatever is waiting.
+
+**Builder:**
+
+```csharp
+Spinner.New()          // the theme's size (16)
+Spinner.New(24f)       // a fixed size
+```
+
+**Properties (in addition to common):**
+
+| Property | Type | Default |
+|---|---|---|
+| `Size` | `float` | theme `16` |
+| `Color` | `Color` | theme `Primary` |
+| `DotCount` | `int` | `8` |
+| `PeriodSeconds` | `float` | `0.9` |
+| `TailAlpha` | `float` | `0.15` |
+| `Phase` | `float` (read-only) | where the leading dot is, 0..1 of a turn |
+
+All of these come from `Theme.Spinner` (`SpinnerTheme`); a size passed to the
+builder wins over the theme's.
+
+The turn is a looping tween that starts from the element's first paint and stops
+itself as soon as the element is no longer hanging off a hosted root, so a rebuild
+that stops asking for the spinner stops the tween and nothing has to be serviced
+after a build. `Element.IsHosted` is the check it uses.
+
+**Accessibility:** reads as an indeterminate **progress bar**; set `AccessibleName`
+to say what is being waited for.
+
+**Example:**
+
+```csharp
+Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
+    Spinner.New(14f),
+    Text.New("Fetching…").FontSize(12.5f));
+```

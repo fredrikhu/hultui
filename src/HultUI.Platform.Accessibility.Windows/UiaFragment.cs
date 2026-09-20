@@ -97,7 +97,8 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaSelectionItemProvider(_bridge, ElementId),
             AccessibilityRole.TextInput when patternId == UiaInterop.UIA_ValuePatternId
                 => new UiaValueProvider(_bridge, ElementId),
-            AccessibilityRole.Slider when patternId == UiaInterop.UIA_RangeValuePatternId
+            // A progress bar exposes the same pattern read-only; the bridge refuses SetValue.
+            (AccessibilityRole.Slider or AccessibilityRole.ProgressBar) when patternId == UiaInterop.UIA_RangeValuePatternId
                 => new UiaRangeValueProvider(_bridge, ElementId),
             // Scroll views and (scrollable) lists expose the Scroll pattern.
             (AccessibilityRole.ScrollView or AccessibilityRole.List) when patternId == UiaInterop.UIA_ScrollPatternId
@@ -255,6 +256,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
         AccessibilityRole.Application => UiaInterop.UIA_WindowControlTypeId,
         AccessibilityRole.Link => UiaInterop.UIA_HyperlinkControlTypeId,
         AccessibilityRole.Slider => UiaInterop.UIA_SliderControlTypeId,
+        AccessibilityRole.ProgressBar => UiaInterop.UIA_ProgressBarControlTypeId,
         AccessibilityRole.ComboBox => UiaInterop.UIA_ComboBoxControlTypeId,
         // Toggle switches read as check boxes (with toggle state) to UIA.
         AccessibilityRole.Switch => UiaInterop.UIA_CheckBoxControlTypeId,
