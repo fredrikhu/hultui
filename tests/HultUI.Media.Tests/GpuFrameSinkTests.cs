@@ -64,7 +64,9 @@ public class GpuFrameSinkTests
         var thread = new Thread(() => backend.Sink!.RequestRepaint());
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
-        session.PumpFrame();
+        // The request posts through the thread pool (see MediaPlayer.OnRepaintRequested),
+        // so the post may land a moment after the requesting thread has returned.
+        session.PumpUntil(() => arrived == 1, TimeSpan.FromSeconds(10));
 
         Assert.Equal(1, arrived);
     }

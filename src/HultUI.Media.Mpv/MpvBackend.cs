@@ -80,6 +80,10 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // Decode on the GPU where there is a decoder, copy back for mpv's GL pipeline:
         // the mode that works with a desktop GL context on every platform.
         mpv_set_option_string(_mpv, "hwdec", "auto-copy");
+        // No headroom: mpv signals a frame when it is due, not early with a sleep in
+        // the render call to make up the difference (see Render, which also turns
+        // that sleep off). The loop then wakes and draws it.
+        mpv_set_option_string(_mpv, "video-timing-offset", "0");
         // HULTUI_MPV_LOG=warn|info|v|debug forwards mpv's own log to stderr: the
         // fastest way to learn why a source would not open.
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 } logLevel)
@@ -393,10 +397,17 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
 
         var fbo = new mpv_opengl_fbo { fbo = (int)framebuffer, w = width, h = height, internal_format = 0 };
         int flip = 0;
-        var parameters = stackalloc mpv_render_param[3];
+        // By default mpv hands a frame over early and then sleeps inside this call
+        // until the frame's display time — on the UI thread, inside the frame, so the
+        // whole window ran at the video's rate (a resize at 24 fps). With blocking off
+        // and video-timing-offset at 0 (set at start-up), mpv only signals when a frame
+        // is due, and the loop draws it on the frame it wakes for.
+        int block = 0;
+        var parameters = stackalloc mpv_render_param[4];
         parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_OPENGL_FBO, data = &fbo };
         parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_FLIP_Y, data = &flip };
-        parameters[2] = default;
+        parameters[2] = new mpv_render_param { type = MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data = &block };
+        parameters[3] = default;
         _lastGLFrameDrawn = mpv_render_context_render(_render, parameters) >= 0;
         return _lastGLFrameDrawn;
     }
