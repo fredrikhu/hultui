@@ -293,7 +293,12 @@ public sealed class Application : IDisposable
     /// </summary>
     /// <param name="delta">Time since the previous frame, for animation.</param>
     /// <param name="forceRender">Render every open window even when nothing is dirty.</param>
-    public bool RunFrame(TimeSpan delta, bool forceRender = false)
+    public bool RunFrame(TimeSpan delta, bool forceRender = false) => RunFrameCore(delta, forceRender, allowRender: true);
+
+    /// <param name="allowRender">False lets the frame pump, drain and tick but not render,
+    /// which is how <see cref="Run"/> holds a dirty window back until the display's next
+    /// interval; the dirt stays, so the next allowed frame draws it.</param>
+    private bool RunFrameCore(TimeSpan delta, bool forceRender, bool allowRender)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -318,7 +323,7 @@ public sealed class Application : IDisposable
         // catches up after the inspected window goes idle mid-interval.
         _inspectorHost?.Tick();
 
-        bool anyRendered = RenderDirtyWindows(forceRender);
+        bool anyRendered = allowRender && RenderDirtyWindows(forceRender);
 
         // Clean up closed windows
         CleanupClosedWindows();
@@ -338,43 +343,60 @@ public sealed class Application : IDisposable
         InstallSynchronizationContext();
 
         var frameStopwatch = Stopwatch.StartNew();
+        long nextRenderAt = 0;   // Stopwatch ticks; the earliest the next frame may render
 
         while (IsRunning)
         {
             var delta = frameStopwatch.Elapsed;
             frameStopwatch.Restart();
 
-            // Animations that changed something visible marked it dirty during the
-            // frame and rendered in it. One that didn't (a pure delay, e.g. the
-            // tooltip show timer) only needs ~60Hz ticks, so wait instead of
-            // busy-spinning until it fires.
-            if (!RunFrame(delta))
+            // Rendering is paced to the display. The swap interval is 0 (a vsync'd swap
+            // blocks the modal resize loop), so nothing else would stop a 300 ms fade
+            // from rendering two thousand frames, or a 1000 Hz mouse from making every
+            // report a frame. Events are pumped and handled every iteration regardless;
+            // only the render waits for the interval since the last one to pass, with a
+            // millisecond of slack so the wait below never has to be shorter than one.
+            long now = Stopwatch.GetTimestamp();
+            bool due = now >= nextRenderAt - Stopwatch.Frequency / 1000;
+            if (RunFrameCore(delta, forceRender: false, allowRender: due))
             {
-                _platform.WaitForEvents(16);
+                nextRenderAt = now + (long)(Stopwatch.Frequency / DisplayHz());
+                continue;
+            }
+
+            if (AnyWindowNeedsRender())
+            {
+                // Dirty, but too soon: wait out what is left of the interval. An event
+                // ends the wait early and is handled on the next iteration; the render
+                // still waits its turn.
+                long remainingMs = (nextRenderAt - Stopwatch.GetTimestamp()) * 1000 / Stopwatch.Frequency;
+                _platform.WaitForEvents((int)Math.Max(1, remainingMs));
             }
             else
             {
-                // A frame that did render is paced to the display. The swap interval is
-                // 0 (a vsync'd swap blocks the modal resize loop), so nothing else stops
-                // a 300 ms fade from rendering two thousand frames. An event, a posted
-                // action or a decoded frame still cuts the wait short.
-                int spent = (int)frameStopwatch.ElapsedMilliseconds;
-                int budget = FrameBudgetMs();
-                if (spent < budget)
-                    _platform.WaitForEvents(budget - spent);
+                // Nothing to draw. An animation that changed nothing visible (a pure
+                // delay, e.g. the tooltip show timer) only needs ~60Hz ticks, so wait
+                // instead of busy-spinning until it fires; a post or an event wakes this.
+                _platform.WaitForEvents(16);
             }
         }
     }
 
-    /// <summary>One display interval in whole milliseconds, from the fastest display any
-    /// window is on; 60 Hz when no platform window knows its rate.</summary>
-    private int FrameBudgetMs()
+    /// <summary>The refresh rate of the fastest display any open window is on, in Hz;
+    /// 60 when no platform window knows its rate.</summary>
+    private float DisplayHz()
     {
         float hz = 0f;
         foreach (var w in _windows)
             if (w.IsOpen) hz = Math.Max(hz, w.PlatformWindow.RefreshRate);
-        if (hz <= 0f) hz = 60f;
-        return Math.Max(1, (int)(1000f / hz));
+        return hz > 0f ? hz : 60f;
+    }
+
+    private bool AnyWindowNeedsRender()
+    {
+        foreach (var w in _windows)
+            if (w.IsOpen && w.NeedsRender) return true;
+        return false;
     }
 
     /// <summary>
@@ -444,6 +466,7 @@ public sealed class Application : IDisposable
         {
             if (!window.IsOpen || (!force && !window.NeedsRender)) continue;
             window.PlatformWindow.MakeCurrent();
+            window.Performance.DisplayHz = window.PlatformWindow.RefreshRate;
             window.Performance.BeginFrame();
             window.RenderFrame();
             window.Performance.EndFrame();

@@ -598,7 +598,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             $"video={driver} renderer=\"{renderer}\" vendor=\"{vendor}\" gl=\"{version}\""
             + $" swapInterval={(haveInterval ? swapInterval.ToString() : "?")} samples={samples}"
             + $" drawable={PixelWidth}x{PixelHeight}px window={ww}x{wh}"
-            + $" density={PixelDensity} scale={DisplayScale}");
+            + $" density={PixelDensity} scale={DisplayScale} refresh={RefreshRate}Hz");
     }
 
     private static string Utf8OrFallback(byte* s)

@@ -196,6 +196,10 @@ public sealed class Window : IOverlayHost, IDisposable
 
     // ──── Window management (custom chrome) ────
     public bool IsMaximized => PlatformWindow.IsMaximized;
+
+    /// <summary>The refresh rate of the display this window is on, in Hz; 0 when the platform
+    /// does not know. The frame loop renders at most this often.</summary>
+    public float RefreshRate => PlatformWindow.RefreshRate;
     public void Minimize() => PlatformWindow.Minimize();
     public void Maximize() => PlatformWindow.Maximize();
     public void Restore() => PlatformWindow.Restore();

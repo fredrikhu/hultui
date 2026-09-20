@@ -68,6 +68,10 @@ public sealed class PerformanceCounters
     /// </summary>
     public float Fps { get; private set; }
 
+    /// <summary>The display's refresh rate, the ceiling the frame loop paces
+    /// <see cref="Fps"/> to; 0 when unknown. Set by the application each frame.</summary>
+    public float DisplayHz { get; set; }
+
     private readonly Queue<long> _frameStarts = new();
     public int ElementCount { get; set; }
 
