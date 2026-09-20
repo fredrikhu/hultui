@@ -365,6 +365,14 @@ public abstract class Element
     /// </summary>
     internal virtual bool ManagesOwnChildren => false;
 
+    /// <summary>
+    /// Whether the platform's text input (the IME, and on SDL the text-input events at
+    /// all) should be armed while this element has focus. Text boxes say yes; so does any
+    /// other element that types, such as a number field. Without it a real window sends
+    /// key downs only, and typed characters never arrive.
+    /// </summary>
+    internal virtual bool WantsTextInput => false;
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 

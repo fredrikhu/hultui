@@ -79,6 +79,7 @@ internal static class AtSpiConstants
     public const uint RoleSeparator = 50;
     public const uint RoleSlider = 51;
     public const uint RoleProgressBar = 46;
+    public const uint RoleSpinButton = 52;
     public const uint RoleText = 61;
     public const uint RoleToggleButton = 62;
     public const uint RoleTree = 65;
@@ -97,6 +98,7 @@ internal static class AtSpiConstants
         AccessibilityRole.ScrollView => RoleScrollPane,
         AccessibilityRole.Slider => RoleSlider,
         AccessibilityRole.ProgressBar => RoleProgressBar,
+        AccessibilityRole.SpinButton => RoleSpinButton,
         AccessibilityRole.Checkbox => RoleCheckBox,
         AccessibilityRole.ComboBox => RoleComboBox,
         AccessibilityRole.RadioButton => RoleRadioButton,
@@ -137,6 +139,7 @@ internal static class AtSpiConstants
         RoleSeparator => "separator",
         RoleSlider => "slider",
         RoleProgressBar => "progress bar",
+        RoleSpinButton => "spin button",
         RoleText => "text",
         RoleToggleButton => "toggle button",
         RoleTree => "tree",

@@ -28,5 +28,7 @@ public enum AccessibilityRole : byte
     ComboBox,
     /// <summary>A determinate or indeterminate progress indicator: a bar or a spinner.
     /// Read-only range value when determinate.</summary>
-    ProgressBar
+    ProgressBar,
+    /// <summary>A numeric field with step buttons; a writable range value.</summary>
+    SpinButton
 }

@@ -320,6 +320,7 @@ public static class AccessibilityTreeBuilder
     {
         TextInputElement ti => ti.Text,
         TextAreaElement ta => ta.Text,
+        NumericUpDownElement n => n.DisplayText,
         // The pickers carry a value a reader needs and a name that describes the control,
         // so they cannot fold the two together the way a button does.
         DatePickerElement dp => dp.Value is { } d ? dp.DisplayText : "",

@@ -692,3 +692,51 @@ Flex.Row(gap: 8).AlignItems(AlignItems.Center).Children(
     Spinner.New(14f),
     Text.New("Fetching…").FontSize(12.5f));
 ```
+
+---
+
+## 12. NumericUpDownElement
+
+A number field with step buttons: the value on the left, an up/down strip on the
+right. The range is enforced by the element, so callers stop clamping at every
+site. Up/Down and the wheel step by `Step`, PageUp/PageDown by `LargeStep`,
+Home/End go to the bounds, a held button repeats after a short delay, and typing
+replaces the value on Enter (or blur) after parsing; Escape reverts an edit.
+
+**Builder:**
+
+```csharp
+NumericUpDown.New(12, min: 6, max: 72)                 // integers, step 1
+NumericUpDown.New(1.5, 0, 10, step: 0.5)               // shows one decimal
+NumericUpDown.New(12).Format(v => $"{v:0.#} pt")       // custom display; typing parses a plain number
+```
+
+**Properties (in addition to common):**
+
+| Property | Fluent | Type | Default |
+|---|---|---|---|
+| `Value` | `.Value(v)` | `double` (clamped, snapped) | `0` |
+| `Minimum` / `Maximum` | `.Range(min, max)` | `double` | `0` / `100` |
+| `Step` | `.Step(s)` | `double` | `1` |
+| `LargeStep` | `.LargeStep(s)` | `double?` | ten steps |
+| `Formatter` | `.Format(fn)` | `Func<double, string>?` | as many decimals as the step |
+| `OnChanged` | `.OnValueChanged(h)` / `.Changed(h)` | `Action<double>?` | `null` |
+| `DisplayText` / `IsEditing` | -- | read-only | what the field shows; whether a typed edit is pending |
+
+The box reuses `Theme.Dropdown` (like the date and time pickers) so a form row
+shares one shape; the strip comes from `Theme.NumericUpDown`
+(`NumericUpDownTheme`: `ButtonWidth`, chevron colour and stroke, pressed fill,
+`RepeatDelaySeconds`, `RepeatIntervalSeconds`).
+
+`OnChanged` runs for user gestures only — buttons, keys, wheel, typing and
+assistive technology — never for assigning `Value`.
+
+**Accessibility:** reads as a **spin button** with a writable range value.
+
+**Example:**
+
+```csharp
+NumericUpDown.New(settings.FontSize, 6, 72)
+    .Format(v => $"{v:0.#} pt")
+    .OnValueChanged(v => settings.FontSize = v);
+```

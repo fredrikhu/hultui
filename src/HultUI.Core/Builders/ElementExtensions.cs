@@ -172,6 +172,16 @@ public static class ElementExtensions
     /// <see cref="ProgressBarElement.IsIndeterminate"/> is cleared.</summary>
     public static ProgressBarElement Indeterminate(this ProgressBarElement el, bool indeterminate = true) { el.IsIndeterminate = indeterminate; return el; }
 
+    // ──── NumericUpDown properties ────
+    public static NumericUpDownElement Value(this NumericUpDownElement el, double value) { el.Value = value; return el; }
+    public static NumericUpDownElement Range(this NumericUpDownElement el, double min, double max) { el.Minimum = min; el.Maximum = max; return el; }
+    public static NumericUpDownElement Step(this NumericUpDownElement el, double step) { el.Step = step; return el; }
+    public static NumericUpDownElement LargeStep(this NumericUpDownElement el, double step) { el.LargeStep = step; return el; }
+    /// <summary>How the value is written: <c>.Format(v => $"{v:0.#} pt")</c>. Typing still
+    /// parses a plain number.</summary>
+    public static NumericUpDownElement Format(this NumericUpDownElement el, Func<double, string> format) { el.Formatter = format; return el; }
+    public static NumericUpDownElement OnValueChanged(this NumericUpDownElement el, Action<double> handler) { el.OnChanged = handler; return el; }
+
     // ──── Slider properties ────
     public static SliderElement Value(this SliderElement el, double value) { el.Value = value; return el; }
     public static SliderElement Range(this SliderElement el, double min, double max) { el.Minimum = min; el.Maximum = max; return el; }

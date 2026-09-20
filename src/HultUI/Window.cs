@@ -497,6 +497,10 @@ public sealed class Window : IOverlayHost, IDisposable
             textArea.TextInputHost = TextInputHost;
             TextInputHost.StartTextInput();
         }
+        else if (element is { WantsTextInput: true })
+        {
+            TextInputHost.StartTextInput();
+        }
         else
         {
             TextInputHost.StopTextInput();
