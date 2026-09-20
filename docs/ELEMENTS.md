@@ -740,3 +740,49 @@ NumericUpDown.New(settings.FontSize, 6, 72)
     .Format(v => $"{v:0.#} pt")
     .OnValueChanged(v => settings.FontSize = v);
 ```
+
+---
+
+## 13. PaneSplitter and SplitterHandleElement
+
+The draggable border between a fixed-size pane and whatever fills the rest of a row
+or column. It is a **model plus a handle**, not a container: `PaneSplitter` holds
+the pane's size as app state and reports every move (the way `HorizontalPan` holds
+its offset), and the owner rebuilds the pane at that size. A size written onto an
+element would be overwritten by the next build.
+
+```csharp
+// Once, in the component:
+_split = new PaneSplitter(MarkDirty, Persist, min: 180, max: 600, initial: 260);
+_split.AttachDrag(root);   // on an ancestor: a drag ends with the pointer off the handle
+
+// In Build():
+Flex.Row().AlignItems(AlignItems.Stretch).Children(
+    fileList.Width(_split.Size).FlexShrink(0),
+    _split.Handle(),
+    diff.FlexGrow(1));
+```
+
+| Member | Meaning |
+|---|---|
+| `Size` | the pane's width (side by side) or height (stacked), always within `min..max` |
+| `Handle()` / `Handle(hover, grabbed)` | the grip, themed or with explicit tints |
+| `AttachDrag(root)` | hears the move and release on an ancestor; passive, so an idle window does not repaint per pointer move |
+| `Restore(size)` | set from remembered settings; no callback |
+| `IsDragging` | true while grabbed |
+| `SplitterAxis.Vertical` (constructor) | stacked panes: the handle is a horizontal strip dragged up and down |
+
+`onChanged` runs on every move; `onCommitted` once per drag (and per key step), so a
+settings file is written once rather than sixty times a second. The grab is
+remembered as pointer-at-press plus size-at-press, so a splitter dragged past its
+minimum does not jump when the pointer comes back.
+
+**`SplitterHandleElement`** is the grip on screen: the resize cursor, a tint under
+the pointer and a stronger one while grabbed, a focus ring, and the keyboard —
+arrow keys along the axis move by `SplitterTheme.KeyStep` (Shift: five steps),
+Home/End go to the bounds. It draws no line of its own; the pane beside it already
+borders that edge. Theme: `Theme.Splitter` (`SplitterTheme`: `Thickness` 6,
+`Hover`/`Grabbed` tints defaulting to the primary colour at 18 % and 40 %, `KeyStep`).
+
+**Accessibility:** the handle reads as a **separator** named "Resize"; set
+`AccessibleName` to say what it resizes.

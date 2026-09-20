@@ -194,7 +194,7 @@ public partial class JunctionApp
     {
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         // The same width the loaded pane will use, so the layout does not jump when it lands.
-        row.AddChild(ScrollView.New().Width(_commitSplit.Width).FlexShrink(0)
+        row.AddChild(ScrollView.New().Width(_commitSplit.Size).FlexShrink(0)
             .Padding(new Thickness(8, 6, 8, 6))
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0)));
         row.AddChild(Flex.Column(gap: 0).FlexGrow(1)
@@ -466,7 +466,7 @@ public partial class JunctionApp
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0))
             .WithRef(_fileScrollRef);
         if (fill) scroll.FlexGrow(1);
-        else scroll.Width(_commitSplit.Width).FlexShrink(0);
+        else scroll.Width(_commitSplit.Size).FlexShrink(0);
 
         scroll.AddChild(Text.New($"{files.Count} FILES CHANGED").FontSize(10f)
             .TextColor(Nocturne.On(0.40)).Padding(new Thickness(6, 8, 6, 8)));

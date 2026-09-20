@@ -1205,8 +1205,8 @@ public partial class JunctionApp : Component, IDisposable
         _settings.DiffSplit = _diffSplit;
         _settings.RefTreeView = _refTreeView;
         _settings.CommitMessageExpanded = _commitMsgExpanded;
-        _settings.CommitFileListWidth = _commitSplit.Width;
-        _settings.ChangesFileListWidth = _changesSplit.Width;
+        _settings.CommitFileListWidth = _commitSplit.Size;
+        _settings.ChangesFileListWidth = _changesSplit.Size;
         JunctionSettings.Save(_settings);
     }
 

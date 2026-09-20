@@ -1,4 +1,5 @@
 using System.Reflection;
+using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Styling;
 using HultUI.Headless;
@@ -20,7 +21,7 @@ public class PaneSplitterTests
         DiffScrollTests.Hosted((session, app) =>
         {
             var handle = Handle(session);
-            float before = Splitter(app).Width;
+            float before = Splitter(app).Size;
             var mid = Center(handle);
 
             session.Window.MouseDown(mid.X, mid.Y);
@@ -28,9 +29,9 @@ public class PaneSplitterTests
             session.Window.MouseUp(mid.X + 90f, mid.Y);
             session.PumpFrames(2);
 
-            Assert.Equal(before + 90f, Splitter(app).Width, 1);
+            Assert.Equal(before + 90f, Splitter(app).Size, 1);
             // And the column laid out at the new width, not just the state behind it.
-            Assert.Equal(Splitter(app).Width, PaneLeftOf(session, Handle(session)).Layout.AbsoluteBorderBox.Width, 1);
+            Assert.Equal(Splitter(app).Size, PaneLeftOf(session, Handle(session)).Layout.AbsoluteBorderBox.Width, 1);
         });
     }
 
@@ -47,12 +48,12 @@ public class PaneSplitterTests
             session.Window.MouseDown(mid.X, mid.Y);
             session.Window.MoveMouse(4f, mid.Y);
             session.PumpFrames(2);
-            float narrow = Splitter(app).Width;
+            float narrow = Splitter(app).Size;
 
             session.Window.MoveMouse(1396f, mid.Y);
             session.Window.MouseUp(1396f, mid.Y);
             session.PumpFrames(2);
-            float wide = Splitter(app).Width;
+            float wide = Splitter(app).Size;
 
             Assert.Equal(Const(app, "MinFileListWidth"), narrow, 1);
             Assert.Equal(Const(app, "MaxFileListWidth"), wide, 1);
@@ -64,14 +65,14 @@ public class PaneSplitterTests
     {
         DiffScrollTests.Hosted((session, app) =>
         {
-            float before = Splitter(app).Width;
+            float before = Splitter(app).Size;
             var mid = Center(Handle(session));
 
             session.Window.MoveMouse(mid.X, mid.Y);
             session.Window.MoveMouse(mid.X + 120f, mid.Y);
             session.PumpFrames(2);
 
-            Assert.Equal(before, Splitter(app).Width, 1);
+            Assert.Equal(before, Splitter(app).Size, 1);
         });
     }
 
@@ -107,7 +108,7 @@ public class PaneSplitterTests
         void Walk(Element? e)
         {
             if (found != null || e is null) return;
-            if (e is BoxElement && e.Inherited.Cursor == CursorType.ResizeEW
+            if (e is SplitterHandleElement
                 && e.Layout.AbsoluteBorderBox.Height > 0)
             { found = e; return; }
             foreach (var c in e.Children) Walk(c);

@@ -507,7 +507,7 @@ public partial class JunctionApp
         var col = Flex.Column(gap: 0)
             .BorderColor(Nocturne.Divider).BorderWidth(new Thickness(0, 1, 0, 0));
         if (fill) col.FlexGrow(1);
-        else col.Width(_changesSplit.Width).FlexShrink(0);
+        else col.Width(_changesSplit.Size).FlexShrink(0);
 
         // A half-finished operation gets a pinned banner (status + Abort / Skip /
         // Continue) above the list.
