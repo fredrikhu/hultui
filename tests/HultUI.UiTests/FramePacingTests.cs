@@ -47,6 +47,42 @@ public sealed class FramePacingTests(ITestOutputHelper output)
             $"{run.Frames} frames in {run.Seconds} s unpaced is no faster than the display's {run.Hz} Hz");
     }
 
+    [UiFact]
+    public void LeavingUnlimitedPacing_RendersAgainAtOnce()
+    {
+        // Continuous redraw is unpaced; when it is switched off the next paced frame
+        // must come within an interval, not once a schedule advanced by thousands of
+        // unpaced frames has caught up (the window froze for tens of seconds).
+        var platform = new SdlWindowingPlatform();
+        using var app = new Application(platform, "pacing", 200, 100);
+        int frames = 0;
+        var box = Box.New().Width(200f).Height(100f);
+        var counter = Canvas.New(_ => frames++).Width(1f).Height(1f);
+        app.SetRoot(Box.New().Children(box, counter));
+        app.RunFrame(TimeSpan.Zero, forceRender: true);
+        float hz = app.PrimaryWindow.RefreshRate;
+        if (hz <= 0f) hz = 60f;
+
+        int pacedFrames = 0;
+        app.FramePacing = FramePacing.Unlimited;
+        Animate.Value(0f, 1f, v => { box.Background(new Color((byte)(v * 255), 0, 0)); box.MarkPaintDirty(); })
+            .Duration(0.5f)
+            .OnComplete(() =>
+            {
+                app.FramePacing = FramePacing.Display;
+                frames = 0;
+                Animate.Value(0f, 1f, v => { box.Background(new Color(0, (byte)(v * 255), 0)); box.MarkPaintDirty(); })
+                    .Duration(0.5f)
+                    .OnComplete(() => { pacedFrames = frames; app.PrimaryWindow.Close(); })
+                    .Start();
+            })
+            .Start();
+        app.Run();
+
+        output.WriteLine($"after unlimited: {pacedFrames} paced frames in 0.5 s on a {hz} Hz display");
+        Assert.InRange(pacedFrames, 0.5f * hz * 0.5f, 0.5f * hz * 1.1f);
+    }
+
     private void AssertPaced((int Frames, float Hz, float Seconds, long ElapsedMs, int EventsRaised) run)
     {
         // The frame count over the display's rate: at least half (the loop also pumps,

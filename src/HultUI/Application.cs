@@ -375,8 +375,13 @@ public sealed class Application : IDisposable
                 // took its slack and drew a millisecond early shifts the phase, not the
                 // rate (anchored to now it read 136 fps on a 120 Hz display). A frame
                 // more than an interval late restarts the schedule instead of catching up.
+                // An unpaced frame keeps no schedule: advancing it per frame at thousands
+                // of frames a second once pushed the deadline tens of seconds out, and the
+                // window stayed frozen after continuous redraw was switched off.
                 long interval = (long)(Stopwatch.Frequency / DisplayHz());
-                nextRenderAt = now > nextRenderAt + interval ? now + interval : nextRenderAt + interval;
+                nextRenderAt = unpaced ? now
+                    : now > nextRenderAt + interval ? now + interval
+                    : nextRenderAt + interval;
                 continue;
             }
 
