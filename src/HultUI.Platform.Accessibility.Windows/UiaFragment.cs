@@ -91,7 +91,7 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaInvokeProvider(_bridge, ElementId),
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),
-            AccessibilityRole.Checkbox when patternId == UiaInterop.UIA_TogglePatternId
+            (AccessibilityRole.Checkbox or AccessibilityRole.Switch) when patternId == UiaInterop.UIA_TogglePatternId
                 => new UiaToggleProvider(_bridge, ElementId),
             AccessibilityRole.RadioButton when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),

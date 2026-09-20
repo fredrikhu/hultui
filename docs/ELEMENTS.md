@@ -554,3 +554,48 @@ uploaded; with three slots it never has to wait for it either. The `x` formats
 (`Rgbx8888`, `Bgrx8888`) are opaque with the fourth byte ignored, which is what a
 decoder emitting `rgb0`/`bgr0` needs. Under the headless host the render log
 records `version=N` for every frame drawn.
+
+---
+
+## 9. ToggleSwitchElement
+
+An on/off switch: a pill-shaped track with a knob that slides to the on side. Same
+contract as a checkbox (click or Space toggles, `OnChanged` reports the new state),
+but the knob animates across the track and the element reads as a **switch** to
+assistive technology, so a reader says "switch, on" rather than "check box, checked".
+
+**Builder:**
+
+```csharp
+ToggleSwitch.New()                    // Off
+ToggleSwitch.New(true, "Wi-Fi")       // On, with a label to the right
+```
+
+**Properties (in addition to common):**
+
+| Property | Fluent | Type | Default |
+|---|---|---|---|
+| `IsOn` | -- | `bool` | `false` |
+| `OnChanged` | `.OnToggled(handler)` | `Action<bool>?` | `null` |
+| `Label` | -- | `string?` | `null` |
+| `TrackWidth` / `TrackHeight` / `KnobSize` | -- | `float` | `40` / `20` / `14` |
+| `TransitionSeconds` | -- | `float` | `0.15` (zero snaps) |
+| `KnobPosition` | -- | `float` (read-only) | where the knob is drawn, 0..1 |
+
+Colours (`OnTrackColor`, `OffTrackColor`, `OffBorderColor`, `OnKnobColor`,
+`OffKnobColor`) and sizes come from `Theme.ToggleSwitch` (`ToggleSwitchTheme`),
+which derives from the palette: the on track is `Primary`, the off state is an
+outlined `SurfaceVariant`. Override per app with
+`Theme.Dark.With(new ToggleSwitchTheme { TrackWidth = 48f })`.
+
+The knob position is a single number the element owns. Setting `IsOn` on a mounted
+element tweens it; on an unmounted one (the incoming twin of a rebuild, or an
+element not yet shown) it snaps, so a rebuild that patches `IsOn` onto the live
+element slides the knob from wherever it currently is.
+
+**Example:**
+
+```csharp
+ToggleSwitch.New(settings.DarkMode, "Dark mode")
+    .OnToggled(on => settings.DarkMode = on);
+```

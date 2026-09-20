@@ -206,6 +206,7 @@ public static class AccessibilityTreeBuilder
         TextAreaElement => AccessibilityRole.TextInput,
         SliderElement => AccessibilityRole.Slider,
         CheckboxElement => AccessibilityRole.Checkbox,
+        ToggleSwitchElement => AccessibilityRole.Switch,
         RadioButtonElement => AccessibilityRole.RadioButton,
         TextElement => AccessibilityRole.Label,
         ImageElement => AccessibilityRole.Image,
@@ -236,6 +237,8 @@ public static class AccessibilityTreeBuilder
             return checkbox.Label;
         if (element is RadioButtonElement radio && !string.IsNullOrEmpty(radio.Label))
             return radio.Label;
+        if (element is ToggleSwitchElement toggle && !string.IsNullOrEmpty(toggle.Label))
+            return toggle.Label;
 
         // Name from content: a button with no explicit name takes the
         // concatenated text of its descendants (e.g. a Box wrapping Text "Save").
@@ -308,6 +311,7 @@ public static class AccessibilityTreeBuilder
     internal static bool? ResolveIsToggled(Element element) => element switch
     {
         CheckboxElement cb => cb.IsChecked,
+        ToggleSwitchElement ts => ts.IsOn,
         _ => null
     };
 
