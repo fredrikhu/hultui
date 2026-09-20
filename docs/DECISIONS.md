@@ -136,6 +136,7 @@ firing on those would be noise, and warning noise is the failure these rules exi
 | Capture → Target → Bubble | Matches DOM event model. Well-understood, flexible |
 | Hit testing: depth-first, reverse child order | Front-to-back testing. Respects visual stacking order |
 | Focus management built in | Tab/shift-tab traversal, focus/blur events, FocusManager |
+| **Handler storage stays `Dictionary<Type, List>`** (2026-09-20) | The bitmask/inline-array rewrite was measured at ≤5 ns per event — see "Allocation items P4/P5" under Rendering |
 
 ---
 
@@ -210,6 +211,28 @@ Three reasons partial repaints don't pay here:
 
 Revisit only if a workload appears where frames are frequent, small-change, and
 expensive — the probe stays in the tree to make that check cheap.
+
+### Allocation items P4/P5: measured and declined
+
+The external review (2026-08-12) listed four remaining allocation/locality
+items after the SKPaint pooling, copy-on-write dispatch and `Signal` 0/1/many
+work landed. Measured 2026-09-20 (Release, i7-14700K, headless session, mins of
+five rounds; a temporary `GC.GetAllocatedBytesForCurrentThread` probe inside
+`TreeDiffer` for the reconcile numbers):
+
+| Item | What it would replace | Measured cost today | Verdict |
+|------|-----------------------|---------------------|---------|
+| P4 handler bitmask | one `Dictionary<Type, List>` probe per path element that has handlers | 2.6 ns miss / 3.5 ns hit; a full depth-8 `Dispatch` is 105 ns (170 ns with all 8 listening) | ≤5 ns per event. Declined |
+| P4 inline handler array | the dictionary + list behind the first handler | first handler +424 B on a 576 B `BoxElement` (dictionary ~216, list ~120, closure+delegate ~88); second event type +208 B | ~250–300 B per handled element is the only real number here. Not needed by any app; revisit if element memory becomes a target |
+| P5 `TreeDiffer` pooling | the two `ToArray` snapshots and the keyed `Dictionary<string, Element>` | 1,000-row keyed rebuild: 3.6 ms, 4.2 MB, of which snapshots 112 KB + keyed 118 KB = 5.4 % (2.8 % unkeyed; same ratio at 50 rows) | ~5 % of gen0 churn on rebuild frames, no measurable time. Declined |
+| P5 text `LruCache` ring | the `LinkedList` relink on a cache hit | hit 57 ns vs 50 ns for the bare dictionary lookup; ~7 ns of the 70 ns warm `Layout` call | Declined |
+| P5 `Element` bool packing | six `bool`s and one `bool?` | ≤8 B of 576 B; the size is inline structs (`LayoutResult`, 4-slot `MeasureCache`, `ResolvedInheritedStyle`, constraint cache) | Declined |
+
+Rebuild bytes are dominated by constructing the new tree (~1 KB per element),
+and a pointer move is dominated by hit-testing, not dispatch: the same move
+costs 107 ns over a 10-row table and ~5 µs over a 1,000-row column (~5 ns per
+child), with enter/leave allocating 528 B vs 1,016 B. That linear hit test is
+the lever if pointer cost ever matters; none of the review's items touch it.
 
 ### Right-to-left *text* is done; right-to-left *UI* is a separate project
 
