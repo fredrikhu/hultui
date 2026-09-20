@@ -56,8 +56,19 @@ public sealed class PerformanceCounters
     /// spans sum a hair over the frame timer).
     /// </summary>
     public float OtherTimeMs { get; private set; }
+    /// <summary>Average time spent inside a frame over the last 60 frames: the work, not
+    /// the interval. The inverse is how fast the app <i>could</i> run, not how fast it is.</summary>
     public float AverageFrameTimeMs { get; private set; }
-    public float Fps => AverageFrameTimeMs > 0 ? 1000f / AverageFrameTimeMs : 0;
+
+    /// <summary>
+    /// Frames actually begun per second, over the trailing second of wall time. An idle
+    /// app that renders one frame a second reads 1 here however cheap that frame was;
+    /// the old figure, 1000 / <see cref="AverageFrameTimeMs"/>, read 900 for a video
+    /// player showing 30 frames a second of 1 ms each.
+    /// </summary>
+    public float Fps { get; private set; }
+
+    private readonly Queue<long> _frameStarts = new();
     public int ElementCount { get; set; }
 
     // ──── Slowest pass over the trailing PeakWindow ────
@@ -70,7 +81,20 @@ public sealed class PerformanceCounters
     public float OverlayTimePeakMs => _overlayPeak.Max;
     public float OtherTimePeakMs => _otherPeak.Max;
 
-    public void BeginFrame() => _frameTimer.Restart();
+    public void BeginFrame()
+    {
+        _frameTimer.Restart();
+
+        long now = Stopwatch.GetTimestamp();
+        _frameStarts.Enqueue(now);
+        long oldestKept = now - Stopwatch.Frequency;   // one second
+        while (_frameStarts.Count > 1 && _frameStarts.Peek() < oldestKept)
+            _frameStarts.Dequeue();
+        // Over the span the retained frames cover (up to a second), so the figure is
+        // right from the second frame on rather than ramping up over the first second.
+        double span = (now - _frameStarts.Peek()) / (double)Stopwatch.Frequency;
+        Fps = span > 0 ? (float)((_frameStarts.Count - 1) / span) : 0f;
+    }
 
     public void EndFrame()
     {

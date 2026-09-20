@@ -47,6 +47,12 @@ wait (16 ms at a time); posting from another thread cuts that wait short through
 than after the wait times out. Posting from the UI thread itself does not wake
 anything — the loop is running that code, not parked.
 
+A frame that rendered is followed by the same kind of wait, for whatever is left
+of one display interval (`IPlatformWindow.RefreshRate`, 60 Hz when unknown). The
+swap interval is 0, because a vsync'd swap blocks the modal resize loop, so this
+wait is what keeps a tween at the display's rate instead of the GPU's. Events and
+posts still end it early, so a decoded video frame is drawn as soon as it is posted.
+
 ```csharp
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());
 ```

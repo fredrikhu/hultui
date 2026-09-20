@@ -94,6 +94,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     public float DisplayScale { get; private set; } = 1f;
 
+    /// <inheritdoc />
+    public float RefreshRate { get; private set; }
+
     /// <summary>What the OS asks for on its own, before the user's zoom.</summary>
     private float _osDisplayScale = 1f;
     private float _userScale = 1f;
@@ -709,6 +712,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         float displayScale = SDL_GetWindowDisplayScale(_window);
         if (density <= 0f) density = 1f;
         if (displayScale <= 0f) displayScale = 1f;
+
+        // Re-read here because this runs on every display change as well as every resize.
+        var mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(_window));
+        RefreshRate = mode is not null && mode->refresh_rate > 0f ? mode->refresh_rate : 0f;
 
         if (pw == PixelWidth && ph == PixelHeight
             && density == PixelDensity && displayScale == _osDisplayScale)

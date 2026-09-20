@@ -349,8 +349,32 @@ public sealed class Application : IDisposable
             // tooltip show timer) only needs ~60Hz ticks, so wait instead of
             // busy-spinning until it fires.
             if (!RunFrame(delta))
+            {
                 _platform.WaitForEvents(16);
+            }
+            else
+            {
+                // A frame that did render is paced to the display. The swap interval is
+                // 0 (a vsync'd swap blocks the modal resize loop), so nothing else stops
+                // a 300 ms fade from rendering two thousand frames. An event, a posted
+                // action or a decoded frame still cuts the wait short.
+                int spent = (int)frameStopwatch.ElapsedMilliseconds;
+                int budget = FrameBudgetMs();
+                if (spent < budget)
+                    _platform.WaitForEvents(budget - spent);
+            }
         }
+    }
+
+    /// <summary>One display interval in whole milliseconds, from the fastest display any
+    /// window is on; 60 Hz when no platform window knows its rate.</summary>
+    private int FrameBudgetMs()
+    {
+        float hz = 0f;
+        foreach (var w in _windows)
+            if (w.IsOpen) hz = Math.Max(hz, w.PlatformWindow.RefreshRate);
+        if (hz <= 0f) hz = 60f;
+        return Math.Max(1, (int)(1000f / hz));
     }
 
     /// <summary>

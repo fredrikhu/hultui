@@ -327,6 +327,15 @@ And the enum values in `render.h` are not what memory says (`SW_SIZE` is 17):
 they are copied from the header, never recalled. `HULTUI_MPV_LOG=warn` forwards
 mpv's own log to stderr, which is how both were found.
 
+Timing: by default `mpv_render_context_render` hands a frame over a little early
+and then sleeps inside the call until the frame's display time. On the UI thread
+that sleep is inside the frame, so the whole window ran at the video's rate (a
+resize of a 24 fps file redrew at 24 fps). The backend passes
+`MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME = 0` and sets `video-timing-offset=0`,
+mpv's documented pairing: mpv signals through the update callback when a frame is
+due, the loop wakes and draws it, and the render call returns at once. Measured
+with a 1080p file maximized: ~29 fps before, loop-bound after.
+
 Sink contract as built: `IVideoSink.UseGpuRenderer(IGpuFrameRenderer)` from
 `Attach`, and `RequestRepaint()` from any thread. The first draw decides the mode
 (`VideoSinkMode.Gpu` on a GL surface, `Pixels` elsewhere) and tells the renderer

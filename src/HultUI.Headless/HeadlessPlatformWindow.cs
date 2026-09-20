@@ -74,6 +74,7 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public float LayoutWidth => _layoutWidth / _userScale;
     public float LayoutHeight => _layoutHeight / _userScale;
     public float DisplayScale => _scale * _userScale;
+    public float RefreshRate => 0f;   // no display; the session drives frames itself
 
     private float _userScale = 1f;
 

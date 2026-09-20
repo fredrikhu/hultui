@@ -160,6 +160,7 @@ internal sealed class HandlePlatformWindow : IPlatformWindow, IWin32WindowHandle
     public float LayoutWidth { get; }
     public float LayoutHeight { get; }
     public float DisplayScale => 1f;
+    public float RefreshRate => 0f;
     public float UserScale { get; set; } = 1f;
     public WindowStyle Style { get; }
     public bool IsOpen { get; private set; }

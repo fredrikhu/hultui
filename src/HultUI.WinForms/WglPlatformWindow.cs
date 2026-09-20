@@ -130,6 +130,7 @@ internal sealed class WglPlatformWindow : IPlatformWindow, IWin32WindowHandle, I
     /// to work around.
     /// </summary>
     public float DisplayScale => _control.DeviceDpi / 96f * _userScale;
+    public float RefreshRate => 0f;   // WinForms owns the loop; nothing here paces frames
 
     /// <inheritdoc/>
     public float UserScale

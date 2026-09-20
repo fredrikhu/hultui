@@ -193,7 +193,7 @@ public sealed class DevToolsOverlay
             y += lineH;
         }
 
-        Line($"FPS: {_perf.Fps:F0}  ({_perf.AverageFrameTimeMs:F1} ms avg, {_perf.FrameTimePeakMs:F1} max)");
+        Line($"FPS: {_perf.Fps:F0}  (frame work {_perf.AverageFrameTimeMs:F1} ms avg, {_perf.FrameTimePeakMs:F1} max)");
         Line($"(peak = slowest pass in last {peakSeconds}s)");
         Line($"Style:   {_perf.StyleTimeMs,6:F2} ms  (peak {_perf.StyleTimePeakMs:F2})");
         Line($"Layout:  {_perf.LayoutTimeMs,6:F2} ms  (peak {_perf.LayoutTimePeakMs:F2})");

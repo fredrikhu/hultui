@@ -39,6 +39,14 @@ public interface IPlatformWindow : IDisposable
     /// </summary>
     float UserScale { get; set; }
 
+    /// <summary>
+    /// The refresh rate of the display the window is on, in Hz, or 0 when the platform
+    /// does not know. The frame loop paces rendered frames to it, since the swap
+    /// interval is 0 and nothing else would stop an animation from rendering as fast
+    /// as the GPU returns.
+    /// </summary>
+    float RefreshRate { get; }
+
     WindowStyle Style { get; }
     bool IsOpen { get; }
     bool IsMaximized { get; }
