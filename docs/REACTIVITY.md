@@ -154,6 +154,35 @@ input.On<KeyDownEvent>(_ =>
 });
 ```
 
+### `MarkDirty()` is synchronous; signal writes are batched
+
+The two ways of asking for a rebuild behave differently inside a handler, and it pays
+to know which one you are holding:
+
+| Call | Inside an event handler | Elsewhere on the UI thread |
+|---|---|---|
+| a `Signal<T>` write (or a `[Reactive]` setter) | queued; the rebuild runs once when the dispatch ends | runs the dependent effects immediately |
+| `Component.MarkDirty()` | rebuilds **and reconciles on the calling stack**, right now | the same |
+| `Application.InvokeOnMainThread(...)` | always queued for the next frame, even from the UI thread | the same |
+
+The synchronous one has consequences. A `MarkDirty()` inside a handler replaces
+elements *while the event is still bubbling*; the dispatcher pins the handler list of
+every element on the path before it starts, so the event finishes with the handlers
+that were live when it was raised, and a handler attached mid-dispatch does not run for
+the event that attached it. When a click "fires twice" or undoes itself, suspect a
+rebuild inside the dispatch, not the input pipeline.
+
+A `MarkDirty()` requested *while reconciliation is already running* — a `BlurEvent`
+handler, say, since blur fires synchronously when the focused element is removed by a
+patch — is deferred to the end of the outer pass rather than nesting. Nothing to do on
+your side; just know that the rebuild lands a moment later than the call.
+
+Drag handlers are the case to defer by hand: a `DragEnter` or `DragOver` that marks
+dirty replaces the element the hover landed on. The framework re-resolves the drop
+target by hit-testing again, so the drop still arrives, but
+`Application.InvokeOnMainThread(MarkDirty)` keeps the gesture off the rebuild path
+altogether.
+
 ---
 
 ## Component Model
@@ -199,6 +228,20 @@ Components expose lifecycle hooks that you can override:
 | `OnUnmount()` | When the component is removed from the tree |
 | `OnBeforeBuild()` | Immediately before each `Build()` call |
 | `OnAfterBuild()` | Immediately after each `Build()` call |
+
+**`OnAfterBuild` runs before the style and layout passes.** The new tree has been
+reconciled but not laid out, so any geometry read there — a viewport height, a column
+width — is the *previous* frame's, and a fresh element has none at all. Anything that
+needs the laid-out result goes through `Window.RequestPostFrameCallback(...)`, which
+runs once after the next frame is presented. A scroll reveal wired straight into
+`OnAfterBuild` used to do nothing for exactly this reason; `ScrollViewElement` now holds
+such a request until it has a viewport, but a hand-rolled version will not.
+
+**What triggers a rebuild.** `Build()` re-runs when a `Signal<T>`, `Computed<T>` or
+`[Reactive]` property *that it read* changes, or when the component calls
+`MarkDirty()`. Nothing else. A plain `{ get; set; }` property on a component is invisible
+to the runtime: set it, and the screen does not change until something else rebuilds.
+If `Build()` reads it, make it a signal.
 
 ---
 

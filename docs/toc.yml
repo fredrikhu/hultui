@@ -14,8 +14,12 @@
       href: REACTIVITY.md
     - name: Animations
       href: ANIMATIONS.md
+    - name: Focus and keyboard
+      href: FOCUS.md
     - name: Drag and drop
       href: DRAG-AND-DROP.md
+    - name: Video playback
+      href: MEDIA.md
     - name: Multi-window
       href: MULTI-WINDOW.md
     - name: Custom window chrome
@@ -36,6 +40,8 @@
   items:
     - name: Threading model
       href: THREADING.md
+    - name: Environment variables
+      href: ENVIRONMENT.md
     - name: Design decisions
       href: DECISIONS.md
     - name: Packaging

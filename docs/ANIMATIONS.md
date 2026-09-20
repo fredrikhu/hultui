@@ -134,6 +134,89 @@ box.On<PointerLeaveEvent>(_ =>
 
 ---
 
+## Repeating and Looping
+
+```csharp
+Animate.Value(0f, 1f, v => { _phase = v; MarkPaintDirty(); })
+    .Duration(1.2f)
+    .Ease(Easing.Linear)
+    .Loop()          // forever; shorthand for Repeat(0)
+    .Start();
+
+Animate.Opacity(dot, 0.3f, 1f).Duration(0.5f).Repeat(3).Yoyo().Start();
+```
+
+| Builder | Meaning |
+|---|---|
+| `.Repeat(int times)` | run the tween `times` times over; zero or less means forever |
+| `.Loop()` | `Repeat(0)` |
+| `.Yoyo(bool = true)` | every second cycle runs backwards, so a repeat eases to and fro instead of snapping back to the start; only meaningful with a repeat |
+
+The delay applies once, before the first cycle. The cycle index and the phase within it
+are **derived from elapsed time, never accumulated per cycle**: a frame almost never
+lands on a cycle boundary, and a restart that dropped the overshoot would make every
+cycle a frame longer than the last — a spinner built that way visibly slows down and
+drifts out of step. A finished repeat holds its end value; a running loop never renders
+the terminal frame at all.
+
+### A looping tween outlives anything that forgets it
+
+`AnimationManager` is **process-global**: one static list, ticked once per frame by the
+application, with no notion of which element or window a tween belongs to. A loop keeps
+ticking after the element that started it has been replaced by a rebuild, removed from
+the tree, or dropped with its whole root by `SetRoot`, and its callback keeps writing
+into a corpse. Two rules for an element that drives its own animation:
+
+1. **Start it from `Render`, not from the constructor or `OnMounted`.** `OnMounted`
+   means "got a parent", which the freshly built twin of a rebuild also gets — and the
+   twin is thrown away by reconciliation a moment later. Only what is painted is on
+   screen.
+2. **Check `IsHosted` on every tick and cancel when it goes false.** `Element.IsHosted`
+   walks to the root and asks whether a window is showing it; a twin's root has no host,
+   and a swapped-out root has had its host cleared.
+
+This is what the framework's own `SpinnerElement` and indeterminate `ProgressBarElement`
+do:
+
+```csharp
+private TweenHandle _tween;   // default(TweenHandle) is safe to Cancel()
+
+public override void Render(IRenderContext ctx)
+{
+    Start();
+    // ...
+}
+
+private void Start()
+{
+    if (_spinning) return;
+    _spinning = true;
+    _tween = Animate.Value(0f, 1f, v =>
+        {
+            if (!IsHosted) { Stop(); return; }
+            _phase = v;
+            MarkPaintDirty();
+        })
+        .Duration(PeriodSeconds).Ease(Easing.Linear).Loop().Start();
+}
+
+private void Stop() { _tween.Cancel(); _spinning = false; }
+
+protected override void OnUnmounted() => Stop();
+```
+
+**In tests, cancel every loop you start.** The manager is shared and `Reset` is internal;
+a headless session resets it on dispose, but a plain unit test that starts a `Loop()` and
+returns leaves it ticking through every test that follows. Hold the handle and cancel
+it. A tween that stands in for a timer should count steps off the tween's own elapsed
+value rather than detecting wrap-around, because a coarse headless pump can skip a
+whole cycle between ticks.
+
+`Animate.CancelAll(element)` exists but is a placeholder that does nothing; do not rely
+on it.
+
+---
+
 ## Chaining Animations
 
 Use `OnComplete` to sequence animations:

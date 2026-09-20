@@ -59,6 +59,18 @@ The layout engine computes the final size as:
 Use `Flex.Row()` and `Flex.Column()` to create flex containers. The default
 direction for a plain `BoxElement` is `Column`.
 
+> **A bare `Box.New()` is a column, so its axes are the reverse of the rows
+> around it.** Inside a `Box`, `JustifyContent` is *vertical* (the main axis)
+> and `AlignItems` is *horizontal* (the cross axis, default `Stretch`). Most
+> cells in an app are `Flex.Row`, where the two are the other way round, so
+> `AlignItems.Center` reads from habit as "centre this vertically" — in a `Box`
+> it centres the text horizontally instead, and every line of a text column
+> comes out centred in its cell. To centre a child vertically in a `Box`, use
+> `JustifyContent.Center` and leave `AlignItems` at `Stretch`, so a text child
+> fills the cell and clips at the cell's edge rather than at the width of its
+> own text. A cheap test that catches it without pixels: assert the text's
+> border box starts at the cell's content box `X`.
+
 ```csharp
 // Horizontal row with 8px gap between children
 var toolbar = Flex.Row(gap: 8).Children(
@@ -204,6 +216,25 @@ var icon = Box.New()
     .Size(24, 24)
     .FlexShrink(0);  // never compress the icon
 ```
+
+**`FlexShrink(0)` does not stop a label from wrapping.** A child in a tight row is
+*measured* under the leftover width before shrink is resolved, and a text element that
+may wrap does so during that measurement. A `FlexShrink(0)` parent then faithfully keeps
+the wrapped size — narrow and tall — because as far as shrink is concerned nothing was
+compressed. A chip, badge or tag that must stay on one line needs both:
+
+```csharp
+Flex.Row().FlexShrink(0).Children(
+    Text.New(label).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
+```
+
+The diagnosis, when a label wraps that should not: dump the ancestor chain with widths
+and `FlexShrink` per level — a wrapped label's box is about as wide as the wrapped text,
+not the intrinsic single line.
+
+The related trap in the other direction is in `TODO.md`'s durable notes: **`FlexGrow(1)`
+alone does not mean "take the leftover space"**, because the default `auto` basis sizes
+the item to its own content first. `FlexBasis(0)` is what says "start from nothing".
 
 ---
 
@@ -384,6 +415,77 @@ scroll.ScrollbarColor = new Color(128, 128, 128, 80);
 scroll.ScrollbarThumbColor = new Color(128, 128, 128, 200);
 scroll.ShowScrollbarX = true;  // enable horizontal scrollbar
 ```
+
+### Nesting scroll views
+
+Two constraints decide how any two-axis scrolling surface has to be built:
+
+- **A scroll view's wheel handler stops propagation whether or not it scrolled.** A
+  horizontal `ScrollView` nested inside a vertical one therefore eats the vertical
+  wheel: the inner `ScrollOffsetY` clamps to 0 and the outer never sees the event.
+  Nesting scroll views for the two axes costs you the wheel.
+- **A `VirtualListElement` cannot scroll sideways at all.** Its content width is pinned
+  to the viewport, so `ScrollOffsetX` is permanently 0. A plain `ScrollView` measures its
+  children and can.
+
+The pattern that works, used by every wide list in the apps (a side-by-side diff, a
+file viewer): keep **one vertical scroll view**, hold the horizontal offset as app state
+in a `HorizontalPan`, and apply it as a **negative left margin on the content inside a
+cell with `OverflowX(Overflow.Hidden)`** — which is what `HorizontalPan.Cell(content)`
+builds. The margin both shifts the content left and widens it by the same amount
+(cross-axis stretch computes the forced width as `crossSize - margin.Horizontal`), so
+text genuinely arrives from the right rather than leaving a hole. Fixed columns beside
+the cell (line-number gutters) stay frozen, and several cells sharing one pan stay
+aligned.
+
+```csharp
+_pan = new HorizontalPan(MarkDirty);                      // once
+_pan.ContentWidth = HorizontalPan.MeasureWidest(lines, fontSize, fontFamily);
+
+// per row, inside the vertical list:
+_pan.Cell(Text.New(line).MaxLines(1).TextOverflow(TextOverflow.Clip))
+
+// on the list:
+list.On<ScrollEvent>(e => _pan.HandleScroll(e));           // Shift+wheel / horizontal wheel
+list.On<KeyDownEvent>(e => _pan.HandleKey(e));
+list.ScrollSidewaysWith(_pan);                             // so middle-click autoscroll follows
+```
+
+The last line matters: the wheel and keys are events the app routes, but middle-click
+autoscroll runs from the frame loop and calls `ScrollBy` on the list itself. Without
+`ScrollSidewaysWith`, aiming right of the anchor does nothing while everything else
+works. `_pan.Scrollbar(track, thumb, border)` builds a draggable bar under the list.
+
+---
+
+## 12. Outline, not a conditional border
+
+A common bug: selecting a tab or a swatch makes its neighbours shift, because the
+selected state adds a border and the border takes space. Reaching for `box-sizing:
+border-box` does not help, and HultUI is already border-box: a declared `Width()` *is*
+the border box and padding and border eat inward. That only helps an element with a
+declared size. With no declared width, both box models give `content + padding +
+border`, so a border added in one state still grows the box and shoves every sibling
+along.
+
+Use **`Outline(width, color, offset)`** instead: a ring drawn outside the border box that
+layout never reads. `offset: -width` puts it exactly where the border would have been;
+use that where elements touch, since a ring at offset 0 is painted over by the next
+sibling.
+
+```csharp
+Box.New()
+    .Outline(selected ? 2f : 0f, accent, offset: -2f)   // width 0 draws nothing
+```
+
+When a size *is* declared, border-box fixes the outer size but the content box still
+shrinks by the border width, so the text inside still moves. The complete fix for that
+half is a transparent border in the unselected state: layout reads `BorderWidth`
+regardless of colour, and a fully transparent border is not drawn.
+
+When testing that a state change is layout-neutral, the fixture must be
+**content-sized**: with declared widths, border-box hides exactly the problem the test
+exists to catch.
 
 ---
 

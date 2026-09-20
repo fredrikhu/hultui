@@ -179,15 +179,36 @@ the cell; `FlexEnd` = bottom.
 > the value is applied to *both* the flex and grid styles. Whichever
 > container algorithm runs reads its own copy. This keeps call sites clean.
 
+**A fixed-height row needs `rows: "1fr"` to centre.** `Grid.Of(cols).Height(28)
+.AlignItems(AlignItems.Center)` top-aligns its cells, because the default row
+template is one `auto` track: it hugs the tallest cell, and centring happens
+inside *that* track, not inside the 28px row. Pass `rows: "1fr"` so the track is
+the whole row; it then matches the `Flex.Row` it replaced pixel for pixel. Rows
+with no fixed height are fine with `auto`.
+
+```csharp
+Grid.Of("16px 1fr 60px 116px", rows: "1fr").Height(28).AlignItems(AlignItems.Center)
+```
+
 ---
 
 ## 7. Performance Notes
 
-Grid layout is roughly **1.3–1.5× the cost** of a flex layout with the same
-number of children, dominated by the cell measurement passes:
+The cost depends on the track kinds, and the two cases go in opposite
+directions:
 
-- **Fixed + Percent + Fr only**: nearly identical cost to flex — closed-form
-  resolution per axis.
+- **Fixed + Percent + Fr only**: *cheaper* than the equivalent `Flex.Row` — a
+  lot cheaper on a cold first layout. Flex measures each child once
+  unconstrained and again with its forced size, so fixed-width cells miss the
+  measure cache and shape their text twice; the grid resolves such columns in
+  closed form and measures each cell once at its final width. Measured
+  headlessly (1,000 rows × 5 text cells, template `16px 1fr 60px 40px 116px`,
+  Release): first frame 110–130 ms for flex rows against 29–34 ms for grid
+  rows; resize relayout and same-tree rebuild within noise of each other.
+  Virtualized, everything is under 6 ms either way — the bigger lever is still
+  `VirtualListElement`.
+- **Auto tracks**: roughly **1.3–1.5× the cost** of flex, dominated by the
+  cell measurement passes below.
 - **Auto tracks**: each cell in an auto track gets one extra `MeasureSize`
   call to determine its intrinsic width. The measurement cache absorbs
   repeated calls within a frame, so the cost scales with `(cells × 1)`,

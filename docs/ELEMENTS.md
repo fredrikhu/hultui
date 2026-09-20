@@ -103,6 +103,13 @@ Handlers are replaced by each rebuild's versions during reconciliation, so closu
 
 `AccessibleName` is what a screen reader announces. `Name` is only its last-resort fallback — reach for `AccessibleName` on anything user-facing, and leave `Name` for debugging.
 
+**A `BoxElement` with a click handler is announced as a button.** When no role is set, the
+tree builder infers one from the element type, and the last rule is "a box with an
+`OnClick` is a `Button`", named from the text inside it. That is right for a clickable
+card and wrong for a row whose click merely selects it, or a backdrop whose click closes a
+dialog: give those an explicit `.AccessibleRole(...)`. An explicit role always wins over
+inference.
+
 ### Tree
 
 | Method | Description |
@@ -113,6 +120,11 @@ Handlers are replaced by each rebuild's versions during reconciliation, so closu
 | `.ReplaceChildren(elements)` | Replace all children |
 | `.Parent` | The parent element (read-only) |
 | `.Children` | List of child elements (read-only) |
+
+`.Children(...)` **replaces** the whole child list — a second call throws the first one
+away. Assemble the full list and call it once, or use `AddChild` for the odd extra.
+`ReplaceChildren` unmounts only the elements that actually leave, so a child present in
+both the old and the new list is moved, not remounted.
 
 ---
 
@@ -135,6 +147,18 @@ Flex.Column(gap: 4)   // BoxElement with FlexDirection.Column and gap
 | `BackgroundColor` | `.Background(color)` | `Color` | `Color.Transparent` |
 | `BorderColor` | `.BorderColor(color)` | `Color` | `Color.Transparent` |
 | `CornerRadius` | `.CornerRadius(8f)` or `.CornerRadius(new CornerRadius(...))` | `CornerRadius` | `0` |
+| `Outline` | `.Outline(width, color, offset = 0)` | `Outline` | `Outline.None` |
+
+**Outline is the ring for a selected or active state.** It is CSS's `outline`: drawn
+outside the border box and never read by layout, so it cannot resize an auto-sized
+element or push its siblings. A border added only in the selected state does both —
+HultUI is border-box, but that only decides how a *declared* size is read, and an
+element with no declared width is `content + padding + border` either way. Positive
+`offset` pushes the ring outward, negative pulls it in; `offset: -width` lands exactly
+where a border of that width would sit, which is what you want where elements touch
+(list rows), since a ring at offset 0 is painted over by the next sibling. A width of 0
+or a transparent colour draws nothing, so the unselected branch needs no `if`. See
+[LAYOUT.md — Outline, not a conditional border](LAYOUT.md#12-outline-not-a-conditional-border).
 
 **Example:**
 
@@ -279,6 +303,22 @@ third — so `feature/my-branch` and `src/core/Foo.cs` are several stops, not on
 lives in `WordBoundary` and is shared by `TextInputElement`, `TextAreaElement` and
 `TextElement`.
 
+**The theme owns the box.** `ApplyTheme` runs on *every* style pass, not once, and it
+re-imposes `Theme.TextInput`'s `Padding`, `BorderWidth`, `CornerRadius`, `BackgroundColor`
+and `BorderColor` each time. A `.Padding(...)` or `.Background(...)` set on the input
+itself survives exactly until the next pass and then silently reverts. Two ways out:
+
+- **`DrawsChrome = false`** hands the box back to you: the theme then leaves padding,
+  border, radius and fill alone, and the element draws only its text, caret and selection.
+  Use it for an input embedded in a search box or a toolbar that draws its own frame.
+- **Wrap the input in a `Box`** that carries the border, padding and fill, and keep the
+  input flush inside it. This is how the apps in this repository build a bordered field.
+
+`FontSize` is the exception: the theme value is only a default (`??=`), so a builder
+`.FontSize(...)` on the input wins. `TextColor` and `FontFamily` are not touched by the
+theme at all. `TextAreaElement` behaves the same way and has **no** `DrawsChrome`, so
+for a text area the wrapper box is the only route.
+
 **Example:**
 
 ```csharp
@@ -412,6 +452,28 @@ Scroll offset is automatically clamped to the valid range based on content size.
 - Mouse wheel scrolling
 - Scrollbar thumb drag
 - Track click
+- Middle-click autoscroll (`ScrollBy(dx, dy)` from the frame loop; `CanAutoScroll` says whether there is anywhere to go)
+
+**Nesting.** A scroll view's wheel handler sets `StopPropagation` whether or not the
+offset moved, so a horizontal scroll view inside a vertical one eats the vertical wheel:
+the inner offset clamps to 0 and the outer never sees the event. Two-axis surfaces are
+built with one vertical scroll view and a sideways *pan* held as app state — see
+[LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views).
+
+**Reveal before layout.** `ScrollRangeIntoView(top, height)` scrolls the minimum
+distance to show a band of content, and needs the viewport height to do it. Called
+before the view has been laid out (from `OnAfterBuild`, say — that runs before the
+layout pass), it holds the request and applies it when the extent is next computed,
+so a reveal asked for on the same frame the content appeared is not lost.
+`ScrollIntoView(child)` and `ScrollRangeIntoViewHorizontal(left, width)` are the
+element and sideways forms.
+
+**`ScrollSidewaysWith(ISidewaysScroller)`.** Set when the horizontal offset is owned by
+something other than the view's own `ScrollOffsetX` (a `HorizontalPan`). `ScrollBy`
+then forwards `dx` there instead, and autoscroll asks it whether sideways travel is
+possible. A panned list without this is half-broken: the wheel works because the app
+routes it, but the autoscroll gesture, which the framework drives, aims sideways and
+nothing moves.
 
 **Example:**
 
@@ -481,6 +543,32 @@ var chart = Canvas.New(ctx =>
 .Size(400f, 200f)
 .Background(new Color(250, 250, 250, 255));
 ```
+
+**Pixel snapping.** Coordinates are in DIPs and the renderer decides what lands on a
+device pixel. The rule is CSS's: snap the *edges* of a shape onto the device grid, then
+derive its size from the snapped edges — never round position and size independently,
+or two shapes sharing a coordinate can round apart and open a one-pixel seam. Knowing
+which operations snap tells you what a custom drawing can rely on:
+
+| Operation | Snapped? |
+|---|---|
+| Borders (`DrawBorder`, the stroke of a rounded rect) | yes, edges and thickness; drawn **inside** the border box, not straddling its edge |
+| Solid fills (`DrawRect`, backgrounds, gradients) | yes; a rect asked for at all becomes at least one device pixel, so a 0.3-DIP caret cannot vanish, while a zero-size rect stays empty |
+| `DrawLine` | **only when axis-aligned**; diagonals keep raw coordinates, because nearly every diagonal in the framework is a hand-drawn glyph (a checkbox tick, a chevron) that snapping would kink |
+| Arcs and rounded corners | no — snapping a curve steps it |
+| Text, shadows, images | no — text keeps subpixel positioning, shadows are blurred, images would change resampling |
+
+Two consequences worth knowing. A snapped fill's size is *position-dependent*: a 1-DIP
+rule at 1.5× is one device pixel at one `y` and two at another, which is correct — a
+position-independent size is what opens seams. A line is the exception and keeps a
+constant weight, since it has a width rather than two edges. And a fill drawn out to
+the same edge as a border is pulled back by half the stroke width, because two
+antialiased curves on one boundary blend rather than cover, and the fill showed through
+at rounded corners. A custom control that draws its own frame and fill should do the
+same.
+
+Everything above is invisible at scale 1.0. A pixel test for renderer geometry that only
+runs at 100% is a false green; the headless driver takes `--scale` for this reason.
 
 ---
 
@@ -833,3 +921,166 @@ announce unprompted. With an action the whole pill is a **button** named by
 the verb, with the message as its description: a bigger target for the second or
 two it is up, and one invokable node rather than a link buried in an alert. Clicking it dismisses the toast and runs
 the action.
+
+---
+
+## 15. VirtualListElement\<T\>
+
+A scroll view that realizes only the rows in and around the viewport. Extends
+`ScrollViewElement`. For a list in the thousands it is the difference between a frame
+and a freeze; for a few dozen rows a plain `ScrollView` over a `Flex.Column` is simpler.
+
+**Builder:** there is no `VirtualList` builder class — use the element's own factory.
+
+```csharp
+var list = VirtualListElement<FileEntry>.New()
+    .Items(entries)                 // IReadOnlyList<T>
+    .ItemHeight(24f)                // uniform rows (default 40)
+    .RenderWith(e => Row(e))        // Func<T, Element>
+    .AccessibleItemLabel(e => e.Name)
+    .OnActivateItem(Open)           // a reader's Invoke/Select action on a row
+    .OnSelectionChanged(ix => _selected = ix)
+    .FlexGrow(1);
+```
+
+| Fluent | Property | Meaning |
+|---|---|---|
+| `.Items(list)` | `Items` | the data; any `IReadOnlyList<T>` |
+| `.ItemHeight(h)` | `ItemHeight` | one height for every row |
+| `.RowHeights(Func<T,int,float>)` | `ItemHeightFor` | per-row heights (the extension is not called `ItemHeightFor`: that name would bind to invoking the delegate) |
+| `.RenderWith(Func<T,Element>)` | `ItemTemplate` | builds a row; called for every realized row on every pass |
+| `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, keyboard included |
+| `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
+| `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
+| — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see |
+
+**How rows live.** The visible window plus a row or two of overscan is rebuilt on every
+patch — the template is re-invoked, so a rebuild of the owning component always shows
+current data with no reference tricks. A row with a `Key` is retained across passes and
+patched instead of replaced, which is what keeps focus, a caret or a scroll offset alive
+inside it; key rows that hold state. Rows are force-sized to their height and
+`FlexShrink(0)`, so a template that wants a different height must say so through
+`RowHeights`.
+
+**No sideways scroll.** The content width is pinned to the viewport, so `ScrollOffsetX`
+is always 0 and a wide row simply clips. A virtual list that has to pan sideways uses a
+`HorizontalPan` and a negative-margin cell — see
+[LAYOUT.md — Nesting scroll views](LAYOUT.md#nesting-scroll-views) — and wires the pan
+with `.ScrollSidewaysWith(pan)` so middle-click autoscroll follows it.
+
+**Revealing a row.** `ScrollRangeIntoView(top, height)` works from `OnAfterBuild`, before
+layout, because the virtual list clamps against the rows it holds *now* rather than the
+extent the last layout left behind; a request made in the same frame the list grew is
+honoured, not clamped back to 0.
+
+**Accessibility.** The list is announced as a `List`; `AccessibleItemLabel` names each
+row without realizing it, so a reader can walk 20,000 items that were never built.
+
+---
+
+## 16. TextAreaElement
+
+A multi-line, word-wrapping text editor. Not a `BoxElement`: it draws its own box from
+`Theme.TextInput`, exactly as `TextInputElement` does (see "The theme owns the box"
+above — there is no `DrawsChrome` here, so a bordered area is a text area inside a
+bordered `Box`).
+
+**Builder:**
+
+```csharp
+TextArea.New()                     // empty
+TextArea.New("initial text")       // pre-filled; caret at the end
+    .PlaceholderText("Notes…")
+    .OnTextChanged(t => _notes = t)
+    .ReadOnly()                    // selectable and scrollable, not editable
+    .Spans(highlightSpans);        // IReadOnlyList<TextSpan>, colour and decoration per range
+```
+
+Those four are the only fluent members; everything else is a property.
+
+| Property | Type | Notes |
+|---|---|---|
+| `Text` | `string` | setting it collapses the selection to a caret |
+| `CursorPosition` | `int` | UTF-16 offset |
+| `SelectionStart`, `SelectionEnd`, `HasSelection`, `SelectedText` | read-only | document-order |
+| `ReadOnly` | `bool` | |
+| `Spans` | `IReadOnlyList<TextSpan>?` | syntax colouring; backgrounds only for search hits so grammar colour survives |
+| `ScrollOffsetY`, `ScrollSpeed`, `Scrollbar*` | | vertical only |
+| `TextChanged` | `Action<string>?` | |
+
+**Wrapping is unconditional.** Every hard line wraps at the content-box width; there is
+no wrap switch, and the wrapped rows are cached against the width they wrapped at, so a
+resize re-wraps with nothing for you to do. The corollary is that there is never
+anything to the right to scroll to: `ScrollBy` ignores `dx`, and autoscroll is vertical.
+
+**Revealing a position.** Two calls:
+
+```csharp
+area.ScrollLineIntoView(line);      // a logical line index
+area.ScrollOffsetIntoView(offset);  // a character offset — prefer this
+```
+
+Both scroll only if the target is off screen, and both resolve through the wrap cache to
+the true visual row. Prefer the offset form for anything that already holds an offset
+(a search hit, a selection): when the whole body is one logical line — minified JSON, a
+long log line — every hit is on line 0 and the line form has nothing to say.
+
+**Reconciliation** keeps the caret and selection when the incoming text is the same
+string, so a rebuild mid-edit is safe; a rebuild that *replaces* the element (a changed
+`Key`, a changed type, a swapped parent) loses them, which is the usual reason a field
+"keeps only its first character".
+
+---
+
+## 17. Date and time pickers
+
+Three elements in `HultUI.Core.Elements`, builders in `HultUI.Core.Builders`:
+
+```csharp
+MonthCalendar.New(selected: today)             // CalendarElement — the month grid
+    .Selected(d => _date = d);
+
+DatePicker.New(value: _date)                   // DatePickerElement — a field that opens the grid
+    .Changed(d => _date = d);                  // Action<DateOnly?>; null when cleared
+
+TimePicker.New(value: _time)                   // TimePickerElement — a segmented spinner
+    .Changed(t => _time = t);                  // Action<TimeOnly?>
+```
+
+**The builder is `MonthCalendar`, not `Calendar`.** `System.Globalization.Calendar`
+owns that name, and every file that formats a date imports that namespace, so a builder
+called `Calendar` would be ambiguous in exactly the files that want one.
+
+`Selected` / `Changed` are the only fluent members; the rest are properties on the
+element. **Setting `Value` (or `SelectedDate`) from code never raises the callback** —
+callbacks are for the user's own gestures.
+
+| Element | Properties |
+|---|---|
+| `CalendarElement` | `SelectedDate`, `DisplayMonth`, `FocusedDate`, `Today`, `MinDate`, `MaxDate`, `FirstDayOfWeek`, `Culture`, `MonthFormat` (`"MMMM yyyy"`); `ShiftMonths(n)`, `SelectDate(d)`, `DateAt(row, col)` |
+| `DatePickerElement` | `Value`, `Format` (`"d"`), `Placeholder`, `Culture`, `MinDate`, `MaxDate`, `Today`, `FirstDayOfWeek`, `AllowClear`; `IsOpen`, `Calendar`, `DisplayText`, `OpenPopup()`, `ClosePopup()` |
+| `TimePickerElement` | `Value`, `ShowSeconds`, `Use12Hour`, `MinuteStep`, `Culture`, `AllowClear`; `ActiveSegment`, `Step(±1)`, `MoveSegment(±1)`, `FocusSegment(s)`, `TypeDigit(n)`, `Clear()` |
+
+Design calls that are settled:
+
+- **The calendar draws itself** rather than composing 42 child boxes: a hover highlight
+  would otherwise cost 42 allocations, and flex is the wrong tool for equal cells.
+- **Six rows, always.** Sizing to the month makes the popup change height as you page,
+  so the day under the pointer becomes a different day.
+- **The time picker is a segmented spinner, not a dropdown of times.** A list is either
+  1,440 rows or cannot express 14:37.
+- **`Today` and `Culture` are properties**, not reads of the ambient clock and locale.
+  That is what makes a rendered picker comparable against a baseline that does not
+  expire and does not depend on the developer's country.
+
+**Themes.** `Theme.Calendar` (`CalendarTheme`) themes the month grid only. Both fields
+borrow **`Theme.Dropdown`** for their box, so a form does not grow three differently
+shaped controls; `Theme.TimeField` (`TimeFieldTheme`) adds only what a segmented field
+needs (active segment, separators, horizontal padding).
+
+**A field whose width follows its value must `MarkLayoutDirty`.** `DatePickerElement`
+measures a *sample* date so a numeric format never resizes, but a long format
+("Monday, 15 September") has no widest case, so the live value is measured too and a
+repaint alone would clip it. Its `Value` setter marks layout for that reason; the time
+picker's digits are fixed-width, so its `Value` only repaints. Copy the distinction in
+any custom field whose text changes its width.

@@ -16,6 +16,10 @@ applications built on it, and nothing about its API is stable yet.
 - **[Layout](LAYOUT.md)** and **[Grid](GRID.md)** — how boxes get their sizes.
 - **[Reactivity](REACTIVITY.md)** — signals, computeds, effects, and what
   re-runs when.
+- **[Focus and keyboard](FOCUS.md)** — Tab order, where keys go, and the ways
+  focus silently goes wrong.
+- **[Video playback](MEDIA.md)** — `MediaPlayer`, `VideoElement` and the
+  libmpv backend.
 
 ## While building
 
@@ -24,6 +28,8 @@ applications built on it, and nothing about its API is stable yet.
 - **[DevTools](DEVTOOLS.md)** — the in-app inspector and frame HUD.
 - **[Threading model](THREADING.md)** — what the UI thread owns and how to get
   back onto it.
+- **[Environment variables](ENVIRONMENT.md)** — every `HULTUI_*` switch and
+  build define, with exact values.
 
 ## Reference
 
