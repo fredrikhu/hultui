@@ -559,7 +559,7 @@ public partial class CommanderApp
         var field = Box.New().FlexGrow(1)
             .Padding(new Thickness(4, 8, 4, 8)).CornerRadius(3f)
             .Background(Nocturne.Bg)
-            .BorderColor(Nocturne.Neutral800).BorderWidth(1f)
+            .BorderColor(Nocturne.Divider).BorderWidth(1f)
             .Children(Ui.Mono(value, 11.5f, Nocturne.Text).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         row.AddChild(field);
         return row;

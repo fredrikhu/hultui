@@ -225,7 +225,7 @@ public partial class CommanderApp
         var cur = ViewOf(side);
         var box = Flex.Row(gap: 2).FlexShrink(0).AlignItems(AlignItems.Center)
             .Padding(new Thickness(2)).CornerRadius(Nocturne.RadiusSm)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral800).BorderWidth(1f);
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f);
         box.AddChild(ViewToggleBtn(side, ViewMode.Detail, IconKind.ViewDetail, cur));
         box.AddChild(ViewToggleBtn(side, ViewMode.Brief, IconKind.ViewBrief, cur));
         box.AddChild(ViewToggleBtn(side, ViewMode.Thumbnails, IconKind.ViewThumb, cur));

@@ -387,7 +387,7 @@ public partial class CommanderApp
     {
         var box = Box.New().FlexGrow(1)
             .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(3f)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral800).BorderWidth(1f);
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f);
         box.Key = "opt-text-font";
         var input = TextInput.New(_draft.TextFont)
             .Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
@@ -598,7 +598,7 @@ public partial class CommanderApp
     {
         var box = Box.New().FlexGrow(1)
             .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(3f)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral800).BorderWidth(1f);
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f);
         box.Key = "opt-find-exclude";
         var input = TextInput.New(_draft.FindExcludeFolders)
             .Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
@@ -613,7 +613,7 @@ public partial class CommanderApp
     {
         return Box.New().FlexGrow(1)
             .Padding(new Thickness(4, 8, 4, 8)).CornerRadius(3f)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral800).BorderWidth(1f)
+            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
             .Children(Ui.Mono(value, 11.5f, Nocturne.Text).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
     }
 
