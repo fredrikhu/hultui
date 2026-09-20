@@ -14,8 +14,9 @@ namespace HultUI.Samples.ProceduralVideo;
 public sealed class ProceduralBackend : IMediaBackend
 {
     private const int Width = 480, Height = 270;
-    private const double Fps = 30;
+    public const double MinFrameRate = 1, MaxFrameRate = 250;
     private static readonly TimeSpan Length = TimeSpan.FromMinutes(5);
+    private double _frameRate = 30;
 
     private readonly object _gate = new();
     private IVideoSink? _sink;
@@ -37,6 +38,18 @@ public sealed class ProceduralBackend : IMediaBackend
             lock (_gate) _algorithm = value;
             RenderNow();
         }
+    }
+
+    /// <summary>
+    /// How many frames a second the worker publishes while playing, 1 to 250. Only the
+    /// delivery pace: a frame is still computed from the playhead's time, so the picture
+    /// moves at the same speed at 5 fps as at 200, in coarser or finer steps. Read by the
+    /// worker each frame, so a change applies at once.
+    /// </summary>
+    public double FrameRate
+    {
+        get => Volatile.Read(ref _frameRate);
+        set => Volatile.Write(ref _frameRate, Math.Clamp(value, MinFrameRate, MaxFrameRate));
     }
 
     public BackendCapabilities Capabilities =>
@@ -122,10 +135,13 @@ public sealed class ProceduralBackend : IMediaBackend
     {
         var clock = Stopwatch.StartNew();
         double last = 0, lastReport = 0;
-        var frameTime = TimeSpan.FromSeconds(1 / Fps);
         while (_running)
         {
-            Thread.Sleep(frameTime);
+            // Sleep out what is left of this frame's interval, measured from the last
+            // frame's start, so the rate holds however long a frame took to compute.
+            double interval = 1 / FrameRate;
+            double remaining = interval - (clock.Elapsed.TotalSeconds - last);
+            if (remaining > 0) Thread.Sleep(TimeSpan.FromSeconds(remaining));
             double now = clock.Elapsed.TotalSeconds;
             double dt = now - last;
             last = now;

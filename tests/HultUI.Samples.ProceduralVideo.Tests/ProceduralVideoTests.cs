@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
+using HultUI.Core.Elements;
 using HultUI.Headless;
 using HultUI.Media;
 using HultUI.Samples.ProceduralVideo;
@@ -102,6 +103,40 @@ public class ProceduralVideoTests
     }
 
     [Fact]
+    public void TheFrameRate_SetsHowOftenFramesArePublished()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var backend = new ProceduralBackend(new Plasma());
+        using var player = new MediaPlayer(backend);
+        session.Application.SetRoot(Box.New().Children(Video.New(player)));
+        player.Open(MediaSource.FromFile("x"));
+        session.PumpFrame();
+
+        Assert.Equal(30, backend.FrameRate);
+        backend.FrameRate = 1000;
+        Assert.Equal(ProceduralBackend.MaxFrameRate, backend.FrameRate);   // clamped
+        backend.FrameRate = 0;
+        Assert.Equal(ProceduralBackend.MinFrameRate, backend.FrameRate);
+
+        // Generous bounds: this is a worker thread sleeping on a real clock.
+        Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 100), 25, 80);
+        Assert.InRange(FramesInHalfASecond(session, player, backend, fps: 4), 0, 6);
+    }
+
+    private static long FramesInHalfASecond(HeadlessSession session, MediaPlayer player, ProceduralBackend backend, double fps)
+    {
+        backend.FrameRate = fps;
+        player.Play();
+        session.PumpFrame();
+        long before = player.Frames.Version;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        session.PumpUntil(() => clock.ElapsedMilliseconds >= 500, TimeSpan.FromSeconds(5));
+        player.Pause();
+        session.PumpFrame();
+        return player.Frames.Version - before;
+    }
+
+    [Fact]
     public void TheApp_HostsAPlayerWithTheAlgorithmPicker()
     {
         using var session = HeadlessSession.Create(1000, 680);
@@ -112,6 +147,15 @@ public class ProceduralVideoTests
         Assert.NotNull(session.Window.FindByRole(AccessibilityRole.Button, "Play"));
         Assert.NotNull(session.Window.FindByText("Plasma"));
         Assert.Equal(PlaybackState.Paused, app.Player.State);
+
+        // The frame-rate slider drives the backend and its label.
+        var slider = (SliderElement)session.Window.FindByAutomationId("frame-rate")!.Element;
+        Assert.Equal(30, slider.Value);
+        Assert.NotNull(session.Window.FindByText("30 fps"));
+        ((IRangeValueElement)slider).SetAccessibleValue(120);
+        session.PumpFrame();
+        Assert.Equal(120, app.Backend.FrameRate);
+        Assert.NotNull(session.Window.FindByText("120 fps"));
     }
 
     private static byte[] Snapshot(MediaPlayer player)

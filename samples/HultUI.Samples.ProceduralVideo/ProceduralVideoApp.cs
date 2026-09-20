@@ -42,12 +42,27 @@ public sealed class ProceduralVideoApp : IDisposable
         var muted = new Color(148, 163, 184);
         _player.Open(MediaSource.FromFile("procedural.synthetic"));
 
+        // The delivery pace, 1 to 250 frames a second. The label follows the thumb; the
+        // picture moves at the same speed whatever the pace, in coarser or finer steps.
+        var fpsLabel = Text.New($"{_backend.FrameRate:0} fps").FontSize(13f).Width(48f);
+        var fps = Slider.New(_backend.FrameRate, ProceduralBackend.MinFrameRate, ProceduralBackend.MaxFrameRate)
+            .Width(180f).AccessibleName("Frame rate").AutomationId("frame-rate");
+        fps.Step = 1;
+        fps.OnChanged = v =>
+        {
+            _backend.FrameRate = v;
+            fpsLabel.Content = $"{v:0} fps";
+        };
+
         return Flex.Column(gap: 10).Padding(14f).Children(
             Flex.Row(gap: 14).AlignItems(AlignItems.Center).FlexShrink(0).Children(
                 Text.New("Procedural Video").FontSize(22f).FontWeight(FontWeight.Bold),
                 Text.New("Algorithm").FontSize(13f).TextColor(muted),
                 Dropdown.New(_algorithms.Select(a => a.Name).ToArray(), 0)
-                    .Changed(i => _backend.Algorithm = _algorithms[i])),
+                    .Changed(i => _backend.Algorithm = _algorithms[i]),
+                Text.New("Frame rate").FontSize(13f).TextColor(muted),
+                fps,
+                fpsLabel),
             _videoPlayer.Mount().FlexGrow(1),
             Text.New("Every frame is computed from the playhead's time, so seeking, speed and pause all just work · Space play/pause · ←/→ 5 s · J/L 10 s")
                 .FontSize(12f).TextColor(muted).FlexShrink(0));
