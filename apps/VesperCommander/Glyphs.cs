@@ -41,7 +41,6 @@ public static class Glyphs
     // Status
     public const string Warning = "warning";
     public const string Prohibit = "prohibit";
-    public const string Spinner = "circle-notch";
     public const string Dot = "circle-fill";
 
     // Archives

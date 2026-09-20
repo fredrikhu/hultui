@@ -64,11 +64,23 @@ public class ProgressBarElement : Element, IRangeValueElement
     /// <summary>The fraction filled, 0..1, whatever the range is.</summary>
     public double Fraction => _max > _min ? (_value - _min) / (_max - _min) : 0;
 
-    public float Height { get; set; } = 4f;
+    // Each visual knob has a theme value and an optional explicit one; the explicit one
+    // wins, so a bar given its own fill (two bars in one panel, coloured apart) keeps it
+    // through the style pass instead of being repainted the theme's colour.
+    private float _themeHeight = 4f;
+    private float? _height;
+    private float? _themeCornerRadius;
+    private float? _cornerRadius;
+    private Color _themeTrack = new(226, 232, 240);
+    private Color? _track;
+    private Color _themeFill = new(79, 70, 229);
+    private Color? _fill;
+
+    public float Height { get => _height ?? _themeHeight; set { _height = value; MarkLayoutDirty(); } }
     /// <summary>Corner radius of track and fill; null rounds fully.</summary>
-    public float? CornerRadius { get; set; }
-    public Color TrackColor { get; set; } = new(226, 232, 240);
-    public Color FillColor { get; set; } = new(79, 70, 229);
+    public float? CornerRadius { get => _cornerRadius ?? _themeCornerRadius; set { _cornerRadius = value; MarkPaintDirty(); } }
+    public Color TrackColor { get => _track ?? _themeTrack; set { _track = value; MarkPaintDirty(); } }
+    public Color FillColor { get => _fill ?? _themeFill; set { _fill = value; MarkPaintDirty(); } }
     public float IndeterminateSeconds { get; set; } = 1.4f;
     public float IndeterminateFraction { get; set; } = 0.35f;
 
@@ -79,10 +91,11 @@ public class ProgressBarElement : Element, IRangeValueElement
     protected internal override void ApplyTheme(Theme theme)
     {
         var t = theme.ProgressBar;
-        Height = t.Height;
-        CornerRadius = t.CornerRadius;
-        TrackColor = t.Track ?? theme.Border;
-        FillColor = t.Fill ?? theme.Primary;
+        _themeHeight = t.Height;
+        _themeCornerRadius = t.CornerRadius;
+        _themeTrack = t.Track ?? theme.Border;
+        _themeFill = t.Fill ?? theme.Primary;
+        MarkLayoutDirty();
         IndeterminateSeconds = t.IndeterminateSeconds;
         IndeterminateFraction = t.IndeterminateFraction;
     }
@@ -176,10 +189,10 @@ public class ProgressBarElement : Element, IRangeValueElement
         base.PatchFrom(source);
         if (source is ProgressBarElement p)
         {
-            Height = p.Height;
-            CornerRadius = p.CornerRadius;
-            TrackColor = p.TrackColor;
-            FillColor = p.FillColor;
+            _height = p._height;
+            _cornerRadius = p._cornerRadius;
+            _track = p._track;
+            _fill = p._fill;
             IndeterminateSeconds = p.IndeterminateSeconds;
             IndeterminateFraction = p.IndeterminateFraction;
             _min = p._min;

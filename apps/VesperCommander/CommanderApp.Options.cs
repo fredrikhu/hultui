@@ -1,4 +1,5 @@
 using HultUI.Core.Builders;
+using HultUI.Core.Events;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -397,12 +398,15 @@ public partial class CommanderApp
         return box;
     }
 
-    private Element TextFontSizeStepper() => Stepper($"{_draft.TextFontSize:0.#} pt",
-        () => SetDraft(() => _draft.TextFontSize =
-            Math.Max(Settings.MinTextFontSize, _draft.TextFontSize - 0.5f)),
-        () => SetDraft(() => _draft.TextFontSize =
-            Math.Min(Settings.MaxTextFontSize, _draft.TextFontSize + 0.5f)),
-        width: 68f, id: "opt-text-size");
+    private Element TextFontSizeStepper()
+    {
+        var n = NumericUpDown.New(_draft.TextFontSize, Settings.MinTextFontSize, Settings.MaxTextFontSize, step: 0.5)
+            .Format(v => $"{v:0.#} pt")
+            .OnValueChanged(v => SetDraft(() => _draft.TextFontSize = (float)v));
+        n.AutomationId = "opt-text-size";
+        n.AccessibleName = "Text size";
+        return n;
+    }
 
     /// <summary>A line of the real thing, in the face and size being chosen — the only
     /// honest way to say whether this machine actually has the font that was typed.</summary>
@@ -534,32 +538,22 @@ public partial class CommanderApp
     private void Flip(ref bool field) { field = !field; MarkDirty(); }
     private void SetDraft(Action mutate) { mutate(); MarkDirty(); }
 
-    private Element Toggle(bool value, Action onToggle)
-    {
-        var sw = Flex.Row(gap: 0).Width(30).Height(17).FlexShrink(0)
-            .Padding(new Thickness(2)).CornerRadius(9f).AlignItems(AlignItems.Center)
-            .JustifyContent(value ? JustifyContent.FlexEnd : JustifyContent.FlexStart)
-            .Background(value ? Nocturne.Accent700 : Nocturne.Neutral800).Cursor(CursorType.Pointer);
-        sw.AddChild(Box.New().Width(13).Height(13).CornerRadius(7f)
-            .Background(value ? Nocturne.Accent200 : Nocturne.Neutral500));
-        // No OnClick here: the switch always lives inside a ToggleRow whose row-level
-        // OnClick already covers it. Adding one here made a click on the switch fire the
-        // toggle twice (switch + bubbled row), netting no change — so the switch looked dead.
-        return sw;
-    }
-
+    /// <summary>The framework's switch (sized by <see cref="Nocturne.ToHultTheme"/>) with the
+    /// label and optional key hint beside it. The row's click covers the label; the switch
+    /// handles its own and stops it there, or a click on the switch toggled twice.</summary>
     private Element ToggleRow(bool value, string label, Action onToggle, string? kbd = null)
     {
         var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center).Height(28).Cursor(CursorType.Pointer);
-        row.AddChild(Toggle(value, onToggle));
+        var sw = ToggleSwitch.New(value).FlexShrink(0).OnToggled(_ => onToggle());
+        sw.On<ClickEvent>(e => e.StopPropagation = true);
+        sw.AutomationId = "opt-toggle:" + label;
+        sw.AccessibleName = label;
+        row.AddChild(sw);
         var lbl = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         lbl.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.Text));
         if (kbd != null) lbl.AddChild(Ui.Kbd(kbd));
         row.AddChild(lbl);
         row.OnClick(_ => onToggle());
-        row.AutomationId = "opt-toggle:" + label;
-        row.Role = HultUI.Core.Accessibility.AccessibilityRole.Switch;
-        row.AccessibleName = label;
         return row;
     }
 
@@ -588,31 +582,11 @@ public partial class CommanderApp
         return s;
     }
 
-    private static Element Stepper(int value, string unit, Action dec, Action inc) =>
-        Stepper($"{value} {unit}", dec, inc);
-
-    /// <summary>A −/value/+ stepper whose middle cell shows an arbitrary label, so a value
-    /// where 0 has its own meaning can read "Unlimited" instead of "0 levels". The buttons are
-    /// icon-only, so <paramref name="id"/> is what lets a test (or a screen reader) name
-    /// them — "&lt;id&gt;:dec" / "&lt;id&gt;:inc".</summary>
-    private static Element Stepper(string display, Action dec, Action inc,
-        float width = 56f, string? id = null)
-    {
-        var row = Flex.Row(gap: 8).AlignItems(AlignItems.Center);
-        row.AddChild(StepBtn(Glyphs.Minus, dec, id == null ? null : id + ":dec"));
-        row.AddChild(Ui.Mono(display, 11.5f, Nocturne.Text).Width(width).TextAlign(TextAlign.Center)
-            .MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
-        row.AddChild(StepBtn(Glyphs.Plus, inc, id == null ? null : id + ":inc"));
-        return row;
-    }
-
     // ── Find-files defaults (shared by the General page and settings search) ──
     /// <summary>Default depth bound for Alt+F7 — folder levels below the searched folder,
     /// 0 = unlimited. See <see cref="DepthLabel"/> for the wording.</summary>
-    private Element FindDepthStepper() => Stepper(DepthLabel(_draft.FindMaxDepth),
-        () => SetDraft(() => _draft.FindMaxDepth = Math.Max(0, _draft.FindMaxDepth - 1)),
-        () => SetDraft(() => _draft.FindMaxDepth = Math.Min(MaxFindDepth, _draft.FindMaxDepth + 1)),
-        width: 68f);
+    private Element FindDepthStepper() =>
+        DepthField(_draft.FindMaxDepth, v => SetDraft(() => _draft.FindMaxDepth = v), "opt-find-depth");
 
     /// <summary>Default folder-exclude list for Alt+F7. Unlike the read-only tool fields this
     /// one is editable, so it needs the bordered wrapper and an explicit height (a bare flex
@@ -632,20 +606,6 @@ public partial class CommanderApp
         return box;
     }
 
-    private static Element StepBtn(string icon, Action onClick, string? id = null)
-    {
-        var b = Box.New().Padding(new Thickness(3, 9, 3, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)
-            .BorderColor(Nocturne.Neutral800).BorderWidth(1f)
-            .Children(Ui.Icon(icon, 12f, Nocturne.Neutral400));
-        b.OnClick(_ => onClick());
-        if (id != null)
-        {
-            b.AutomationId = id;
-            b.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
-            b.AccessibleName = icon == Glyphs.Minus ? "Decrease" : "Increase";
-        }
-        return b.HoverBg(Nocturne.Neutral900, Color.Transparent);
-    }
 
     private static Element ReadonlyField(string value)
     {

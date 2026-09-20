@@ -121,9 +121,11 @@ public partial class CommanderApp
         bool active = RenameEngine.UsesCounter(RenOptions());
         var row = Flex.Row(gap: 14).AlignItems(AlignItems.Center);
         row.AddChild(Text.New("Counter").FontSize(12f).TextColor(Nocturne.On(0.55)).Width(96).FlexShrink(0));
-        row.AddChild(LabeledStepper("start", _renCounterStart, v => _renCounterStart = Math.Max(0, v)));
-        row.AddChild(LabeledStepper("step", _renCounterStep, v => { if (v != 0) _renCounterStep = v; }));
-        row.AddChild(LabeledStepper("digits", _renCounterDigits, v => _renCounterDigits = Math.Clamp(v, 1, 8)));
+        row.AddChild(LabeledStepper("start", _renCounterStart, 0, 99999, v => _renCounterStart = v));
+        // A step of zero would number every file alike; the field skips it in either direction.
+        row.AddChild(LabeledStepper("step", _renCounterStep, -999, 999,
+            v => _renCounterStep = v != 0 ? v : (v > _renCounterStep ? 1 : -1)));
+        row.AddChild(LabeledStepper("digits", _renCounterDigits, 1, 8, v => _renCounterDigits = v));
         if (active)
         {
             string Fmt(int n) => n.ToString().PadLeft(Math.Max(1, _renCounterDigits), '0');
@@ -136,11 +138,13 @@ public partial class CommanderApp
         return row;
     }
 
-    private Element LabeledStepper(string label, int value, Action<int> set)
+    private Element LabeledStepper(string label, int value, int min, int max, Action<int> set)
     {
         var r = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         r.AddChild(Ui.Mono(label, 10.5f, Nocturne.Neutral500));
-        r.AddChild(Stepper(value, "", () => { set(value - 1); MarkDirty(); }, () => { set(value + 1); MarkDirty(); }));
+        var n = NumericUpDown.New(value, min, max).OnValueChanged(v => { set((int)v); MarkDirty(); });
+        n.AccessibleName = "Counter " + label;
+        r.AddChild(n);
         return r;
     }
 

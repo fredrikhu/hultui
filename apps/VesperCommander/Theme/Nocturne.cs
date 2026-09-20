@@ -155,5 +155,22 @@ public static class Nocturne
             CheckedBackground = Accent,
             CheckMarkColor = Accent100,
         },
+        // The switch Options always had: a 30×17 pill, no outline, accent when on.
+        ToggleSwitch = new ToggleSwitchTheme
+        {
+            TrackWidth = 30f,
+            TrackHeight = 17f,
+            KnobSize = 13f,
+            OnTrack = Accent700,
+            OffTrack = Neutral800,
+            OffBorderWidth = 0f,
+            OnKnob = Accent200,
+            OffKnob = Neutral500,
+        },
+        ProgressBar = new ProgressBarTheme
+        {
+            Height = 5f,
+            Track = Neutral900,
+        },
     };
 }

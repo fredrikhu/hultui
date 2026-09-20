@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using HultUI.Core.Events;
 using HultUI.Headless;
 using Xunit;
 
@@ -22,17 +23,17 @@ public class FindDialogTests
             Assert.Equal(0, Field<int>(app, "_findMaxDepth"));
             Assert.Contains("Unlimited", session.Window.DumpAccessibilityTree());
 
-            Click(session, "find-depth:inc");
+            Step(session, +1);
             Assert.Equal(1, Field<int>(app, "_findMaxDepth"));
             Assert.Contains("1 level", session.Window.DumpAccessibilityTree());
 
-            Click(session, "find-depth:inc");
-            Click(session, "find-depth:inc");
+            Step(session, +1);
+            Step(session, +1);
             Assert.Equal(3, Field<int>(app, "_findMaxDepth"));
             Assert.Contains("3 levels", session.Window.DumpAccessibilityTree());
 
             // Below 0 there is nothing to step down to — 0 *is* unbounded.
-            for (int i = 0; i < 5; i++) Click(session, "find-depth:dec");
+            for (int i = 0; i < 5; i++) Step(session, -1);
             Assert.Equal(0, Field<int>(app, "_findMaxDepth"));
             Assert.Contains("Unlimited", session.Window.DumpAccessibilityTree());
         }
@@ -49,13 +50,12 @@ public class FindDialogTests
             Mark(app); session.PumpFrame();
 
             var field = session.Window.FindByAutomationId("find-exclude");
-            var inc = session.Window.FindByAutomationId("find-depth:inc");
-            var dec = session.Window.FindByAutomationId("find-depth:dec");
-            Assert.NotNull(field); Assert.NotNull(inc); Assert.NotNull(dec);
+            var depth = session.Window.FindByAutomationId("find-depth");
+            Assert.NotNull(field); Assert.NotNull(depth);
 
             var f = field!.Element.Layout.AbsoluteBorderBox;
-            var i = inc!.Element.Layout.AbsoluteBorderBox;
-            var d = dec!.Element.Layout.AbsoluteBorderBox;
+            var i = depth!.Element.Layout.AbsoluteBorderBox;
+            var d = i;
 
             // The field still has room to type in. (The height check is a floor against an
             // outright collapse, not a fidelity check — a TextInput without the explicit
@@ -64,8 +64,7 @@ public class FindDialogTests
             Assert.True(f.Height >= 24, $"exclude field collapsed to {f.Height}px tall");
 
             // One line: the stepper sits to the right of the field, centred on it.
-            Assert.True(d.X > f.X + f.Width, "the stepper wrapped under the exclude field");
-            Assert.True(i.X > d.X, "the stepper's + and − swapped places");
+            Assert.True(d.X > f.X + f.Width, "the depth field wrapped under the exclude field");
             Assert.True(System.Math.Abs((f.Y + f.Height / 2) - (i.Y + i.Height / 2)) < 4,
                 "the stepper is not vertically centred on the exclude field");
 
@@ -82,7 +81,7 @@ public class FindDialogTests
         try
         {
             SetField(app, "_findExclude", ".git;.vs");
-            Click(session, "find-depth:inc");
+            Step(session, +1);
             Invoke(app, "CloseFind");
             session.PumpFrame();
 
@@ -120,6 +119,16 @@ public class FindDialogTests
         Invoke(app, "OpenFind", 'L');
         session.PumpFrame();
         return session;
+    }
+
+    /// <summary>One press of Up or Down on the depth field: click it to focus, then the key.</summary>
+    private static void Step(HeadlessSession session, int direction)
+    {
+        var n = session.Window.FindByAutomationId("find-depth");
+        Assert.NotNull(n);
+        n!.Click();
+        session.Window.PressKey(direction > 0 ? KeyCode.Up : KeyCode.Down);
+        session.PumpFrame();
     }
 
     private static void Click(HeadlessSession session, string automationId)

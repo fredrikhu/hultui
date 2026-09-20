@@ -382,8 +382,8 @@ public partial class CommanderApp
         double fileFrac = op.FileBytes > 0 ? (double)op.FileBytesDone / op.FileBytes : 0;
         double totalFrac = op.TotalBytes > 0 ? (double)op.TotalBytesDone / op.TotalBytes : 0;
         if (!op.PackWholeRunOnly)
-            body.AddChild(ProgressBar(op.Paused ? "Paused" : "File", curName, fileFrac, Nocturne.Accent500));
-        body.AddChild(ProgressBar(op.PackWholeRunOnly && op.Paused ? "Paused" : "Total",
+            body.AddChild(TransferBar(op.Paused ? "Paused" : "File", curName, fileFrac, Nocturne.Accent500));
+        body.AddChild(TransferBar(op.PackWholeRunOnly && op.Paused ? "Paused" : "Total",
             $"{FileSystem.ByteLabel(op.TotalBytesDone)} of {FileSystem.ByteLabel(op.TotalBytes)}{TransferRate(op)}",
             totalFrac, Nocturne.Accent700));
 
@@ -429,7 +429,7 @@ public partial class CommanderApp
         return $" · {FileSystem.ByteLabel((long)bps)}/s · {eta} left";
     }
 
-    private static Element ProgressBar(string label, string sub, double frac, Color fill)
+    private static Element TransferBar(string label, string sub, double frac, Color fill)
     {
         frac = Math.Clamp(frac, 0, 1);
         var col = Flex.Column(gap: 5);
@@ -441,11 +441,11 @@ public partial class CommanderApp
         top.AddChild(Ui.Mono($"{(int)(frac * 100)}%", 10.5f, Nocturne.On(0.60)).FlexShrink(0));
         col.AddChild(top);
 
-        var track = Box.New().Height(5).CornerRadius(3f).Background(Nocturne.Neutral900)
-            .Overflow(Overflow.Hidden);
-        track.AddChild(Box.New().Height(5).Width(Dimension.Percent((float)(frac * 100)))
-            .CornerRadius(3f).Background(fill));
-        col.AddChild(track);
+        // Two bars in one panel, coloured apart: the fill is set on the bar itself, which
+        // wins over the theme's.
+        var bar = ProgressBar.New(frac);
+        bar.FillColor = fill;
+        col.AddChild(bar);
         return col;
     }
 

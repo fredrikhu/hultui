@@ -271,7 +271,7 @@ public partial class CommanderApp
     private Element BuildSyncComparing()
     {
         var box = Flex.Column(gap: 10).FlexGrow(1).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
-        box.AddChild(Ui.Icon(Glyphs.Spinner, 20f, Nocturne.Accent));
+        box.AddChild(Spinner.New(20f));
         box.AddChild(Ui.Mono($"Comparing… {_syncScanned} files", 11.5f, Nocturne.On(0.55)));
         if (_syncCurrent.Length > 0)
             box.AddChild(Ui.Mono(_syncCurrent, 10f, Nocturne.On(0.35)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));

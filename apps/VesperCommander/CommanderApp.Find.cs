@@ -54,6 +54,18 @@ public partial class CommanderApp
     /// root, so "1 level" means this folder and its immediate subfolders and no further.</summary>
     private static string DepthLabel(int d) => d <= 0 ? "Unlimited" : d == 1 ? "1 level" : $"{d} levels";
 
+    /// <summary>The depth bound as a number field, 0..<see cref="MaxFindDepth"/>, reading
+    /// <see cref="DepthLabel"/> so 0 says "Unlimited". Shared by the dialog and Options.</summary>
+    private static NumericUpDownElement DepthField(int value, Action<int> set, string id)
+    {
+        var n = NumericUpDown.New(value, 0, MaxFindDepth)
+            .Format(v => DepthLabel((int)v))
+            .OnValueChanged(v => set((int)v));
+        n.AutomationId = id;
+        n.AccessibleName = "Max search depth";
+        return n;
+    }
+
     /// <summary>Adopt the persisted find defaults. Called at start-up and after Options is
     /// saved; between those the dialog keeps whatever the user sets in it.</summary>
     private void SeedFindDefaults()
@@ -322,10 +334,7 @@ public partial class CommanderApp
         row.AddChild(Text.New("Depth").FontSize(11.5f).TextColor(Nocturne.Neutral300)
             .MaxLines(1).FlexShrink(0)
             .Tooltip("How many folder levels below this one to search. Unlimited is the default."));
-        row.AddChild(Stepper(DepthLabel(_findMaxDepth),
-            () => { _findMaxDepth = Math.Max(0, _findMaxDepth - 1); RunFind(); },
-            () => { _findMaxDepth = Math.Min(MaxFindDepth, _findMaxDepth + 1); RunFind(); },
-            width: 68f, id: "find-depth").FlexShrink(0));
+        row.AddChild(DepthField(_findMaxDepth, v => { _findMaxDepth = v; RunFind(); }, "find-depth").FlexShrink(0));
         return row;
     }
 
@@ -493,7 +502,7 @@ public partial class CommanderApp
 
         if (_findSearching)
         {
-            footer.AddChild(Ui.Icon(Glyphs.Spinner, 12f, Nocturne.Accent));   // spinner stand-in
+            footer.AddChild(Spinner.New(12f));
             footer.AddChild(Ui.Mono($"Searching… {_findScanned} of ~{_findApproxTotal} folders · {_findResults.Count} found",
                 10.5f, Nocturne.On(0.55)));
             footer.AddChild(Box.New().FlexGrow(1));

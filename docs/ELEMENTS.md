@@ -629,9 +629,10 @@ ProgressBar.New().Indeterminate()     // activity with no known fraction
 | `CornerRadius` | -- | `float?` | `null` (a pill) |
 | `SweepPosition` | -- | `float` (read-only) | where the indeterminate segment is |
 
-`TrackColor`, `FillColor`, the sizes and the sweep timing come from
+`TrackColor`, `FillColor`, `Height` and `CornerRadius` come from
 `Theme.ProgressBar` (`ProgressBarTheme`): the fill is `Primary` on a
-`Border`-coloured track.
+`Border`-coloured track. A value set on the element itself wins over the theme, so
+two bars in one panel can be coloured apart.
 
 The indeterminate sweep is a looping tween that runs only while the element is
 mounted and stops the moment it leaves the tree or `IsIndeterminate` clears, so an
