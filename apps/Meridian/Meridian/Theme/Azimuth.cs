@@ -102,6 +102,12 @@ public static class Azimuth
         Surface = Surface,
         Primary = Accent,
         Secondary = TextMuted,
+        // What the framework outlines and fills its own controls with; the toast
+        // keeps the raised surface and strong border it always had.
+        Border = BorderStrong,
+        SurfaceVariant = Raised,
+        Danger = StatusFail,
+        Toast = new ToastTheme { Background = Raised },
         // Inputs are az-surface on az-border per the sheet, but StyleResolver
         // re-applies the theme every pass (per-element border overrides don't
         // stick), so fields stay flush here and views wrap them in a bordered

@@ -209,6 +209,10 @@ void Run(string step)
         case "shot": Shot(arg); break;
         case "dump": Console.WriteLine(session.Window.DumpAccessibilityTree()); break;
         case "settle": Settle(arg.Length > 0 ? int.Parse(arg) : 1200); break;
+        // Exactly n frames of virtual time (16.7 ms each). settle races the clock — it pumps
+        // as fast as the CPU allows for a wall-clock span, so a 1.7 s toast is gone inside a
+        // 250 ms settle; anything timed needs frames.
+        case "frames": session.PumpFrames(arg.Length > 0 ? int.Parse(arg) : 1); break;
         case "key": Key(arg); break;
         case "type": Type(arg); break;
         case "click": Click(arg); break;

@@ -75,6 +75,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `hover:<x>,<y>[,<ms>]` or `hover:@<text>[,<ms>]` | Parks the pointer and runs frames (default 400ms), for anything that only exists under it — a hover fill, a tooltip, the scrollbar's expansion. `click` moves the pointer too, but it also presses. |
 | `waitfor:<text>[,<seconds>]` | Pumps until an element with that name appears. Default 30s. |
 | `settle[:<ms>]` | Pumps frames for that long. Default 1200ms. |
+| `frames:<n>` | Pumps exactly `n` frames of virtual time (16.7 ms each). `settle` races the clock — it pumps as fast as the CPU allows for a wall-clock span, so a 1.7 s toast is gone inside `settle:250`; anything timed (a toast, a tween mid-flight) wants `frames`. |
 | `size:<w>x<h>` | Resizes the client area mid-run, then settles. |
 
 Two more that were run while writing this:
