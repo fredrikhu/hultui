@@ -166,10 +166,12 @@ public static class Nocturne
             TrackHeight = 17f,
             KnobSize = 13f,
             OnTrack = Accent700,
-            OffTrack = Neutral800,
+            // Text-relative rather than a ramp step: Neutral800 sits on the ground in
+            // schemes whose neutral ramp is short (Dracula), and an off switch vanished.
+            OffTrack = On(0.14),
             OffBorderWidth = 0f,
             OnKnob = Accent200,
-            OffKnob = Neutral500,
+            OffKnob = On(0.55),
         },
         ProgressBar = new ProgressBarTheme
         {

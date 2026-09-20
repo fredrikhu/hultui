@@ -559,9 +559,11 @@ public partial class CommanderApp
 
     private Element Seg(params (string label, bool on, Action onClick)[] opts)
     {
+        // Divider (text at 16 %) rather than Neutral800: the ramp step sits on the ground
+        // in schemes with a short neutral ramp, and the control lost its outline.
         var seg = Flex.Row(gap: 2).FlexShrink(0)
             .Padding(new Thickness(2)).CornerRadius(6f)
-            .BorderColor(Nocturne.Neutral800).BorderWidth(1f);
+            .BorderColor(Nocturne.Divider).BorderWidth(1f);
         foreach (var (label, on, onClick) in opts)
         {
             var o = Box.New().Padding(new Thickness(3, 9, 3, 9)).CornerRadius(5f).Cursor(CursorType.Pointer)

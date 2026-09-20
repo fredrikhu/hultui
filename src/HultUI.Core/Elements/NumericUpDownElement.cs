@@ -297,10 +297,14 @@ public class NumericUpDownElement : Element, IRangeValueElement
         var content = Layout.AbsoluteContentBox;
         float buttonsX = content.Right - _theme.ButtonWidth;
 
-        // Value (or the edit in progress), left-aligned in what the buttons leave.
-        var textRect = new Rect(content.X + _boxTheme.Padding.Left, content.Y,
-            Math.Max(0f, buttonsX - _boxTheme.ChevronGap - content.X - _boxTheme.Padding.Left), content.Height);
+        // Value (or the edit in progress), left-aligned in what the buttons leave and
+        // centred on the box's height — the measure reserved the theme's padding, but a
+        // row that stretches the field gives it more, and the text should sit in the
+        // middle of whatever it got rather than at the top.
         var style = ResolvedInherited with { FontSize = _boxTheme.FontSize, TextColor = _boxTheme.TextColor };
+        float lineHeight = ctx.MeasureText(DisplayText, style).Height;
+        var textRect = new Rect(content.X + _boxTheme.Padding.Left, content.Y + (content.Height - lineHeight) / 2,
+            Math.Max(0f, buttonsX - _boxTheme.ChevronGap - content.X - _boxTheme.Padding.Left), lineHeight);
         ctx.DrawText(DisplayText, textRect, style, TextOverflow.Clip, 1);
 
         // The strip: a hairline off the text, an up half and a down half.
