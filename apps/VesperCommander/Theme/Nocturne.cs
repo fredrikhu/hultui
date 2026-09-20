@@ -122,6 +122,10 @@ public static class Nocturne
         Surface = Surface,
         Primary = Accent,
         Secondary = On(0.60),
+        // What the framework outlines its own fields with — a number field, a dropdown —
+        // matching the hairline the app draws round its text fields.
+        Border = Neutral700,
+        SurfaceVariant = Neutral800,
         // Fields are flush and borderless by default — StyleResolver re-applies
         // this every pass, so per-element border overrides don't stick. Views that
         // want a bordered field wrap the input in a bordered box instead.
