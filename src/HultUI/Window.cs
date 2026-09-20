@@ -568,6 +568,9 @@ public sealed class Window : IOverlayHost, IDisposable
     public void RequestPostFrameCallback(Action callback)
         => _postFrameCallbacks.Add(callback ?? throw new ArgumentNullException(nameof(callback)));
 
+    /// <summary>DevTools' continuous-redraw mode (F12 twice): render every iteration, unpaced.</summary>
+    internal bool ContinuousRedraw => _devTools.ContinuousRedraw;
+
     internal bool NeedsRender => (_root is not null && _root.DirtyFlags != DirtyFlags.None)
         // DevTools continuous-redraw mode (F12 second press): render every
         // iteration so the HUD shows raw render throughput.

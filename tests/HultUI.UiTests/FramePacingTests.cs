@@ -4,6 +4,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Platform.SDL3;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace HultUI.UiTests;
 
@@ -14,7 +15,7 @@ namespace HultUI.UiTests;
 /// frame per interval, measured against the display's own rate.
 /// </summary>
 [Collection("ui")]
-public sealed class FramePacingTests
+public sealed class FramePacingTests(ITestOutputHelper output)
 {
     [UiFact]
     public void ATween_RendersAboutOneFramePerDisplayInterval()
@@ -27,27 +28,42 @@ public sealed class FramePacingTests
     public void AnEventEveryMillisecond_DoesNotMakeEveryEventAFrame()
     {
         // Each event ends the loop's wait early, as a mouse report does; the render must
-        // still wait its turn. Wake is the cheapest event another thread can raise.
+        // still wait its turn, and at the display's rate, not a millisecond early each
+        // time (which read 136 on a 120 Hz display before the deadline followed the
+        // schedule). Wake is the cheapest event another thread can raise.
         var run = RunTween(eventStorm: true);
         AssertPaced(run);
         Assert.True(run.EventsRaised > run.Frames * 3,
             $"the storm raised {run.EventsRaised} events, not enough to test {run.Frames} frames against");
     }
 
-    private static void AssertPaced((int Frames, float Hz, float Seconds, long ElapsedMs, int EventsRaised) run)
+    [UiFact]
+    public void UnlimitedPacing_RendersAsFastAsTheGpuReturns()
+    {
+        // The measuring mode: what continuous redraw does on its own, opted into by an app.
+        var run = RunTween(eventStorm: false, pacing: FramePacing.Unlimited);
+        output.WriteLine($"unpaced: {run.Frames} frames in {run.ElapsedMs} ms on a {run.Hz} Hz display");
+        Assert.True(run.Frames > run.Seconds * run.Hz * 3,
+            $"{run.Frames} frames in {run.Seconds} s unpaced is no faster than the display's {run.Hz} Hz");
+    }
+
+    private void AssertPaced((int Frames, float Hz, float Seconds, long ElapsedMs, int EventsRaised) run)
     {
         // The frame count over the display's rate: at least half (the loop also pumps,
-        // drains and ticks), at most ~1.3x (a millisecond of slack per interval and
-        // integer-millisecond waits both land slightly early).
+        // drains and ticks, and may miss a deadline), at most a tenth over (the schedule
+        // is anchored, so slack shifts the phase and only timer granularity is left).
         float expected = run.Seconds * run.Hz;
-        Assert.InRange(run.Frames, expected * 0.5f, expected * 1.3f);
+        output.WriteLine($"paced: {run.Frames} frames in {run.ElapsedMs} ms on a {run.Hz} Hz display ({run.EventsRaised} events)");
+        Assert.InRange(run.Frames, expected * 0.5f, expected * 1.1f);
         Assert.InRange(run.ElapsedMs, run.Seconds * 800, run.Seconds * 2000);
     }
 
-    private static (int Frames, float Hz, float Seconds, long ElapsedMs, int EventsRaised) RunTween(bool eventStorm)
+    private static (int Frames, float Hz, float Seconds, long ElapsedMs, int EventsRaised) RunTween(
+        bool eventStorm, FramePacing pacing = FramePacing.Display)
     {
         var platform = new SdlWindowingPlatform();
         using var app = new Application(platform, "pacing", 200, 100);
+        app.FramePacing = pacing;
         int frames = 0;
         float shade = 0f;
         var box = Box.New().Width(200f).Height(100f);

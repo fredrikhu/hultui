@@ -55,7 +55,12 @@ regardless, so a 1000 Hz mouse updates hover a thousand times a second and is
 drawn at the display's rate; a posted video frame is drawn on the next interval.
 The DevTools HUD shows the measured rate next to the display's, and
 `FramePacingTests` (real window) holds a tween to it, with and without an event
-every millisecond.
+every millisecond. An application can opt out with
+`app.FramePacing = FramePacing.Unlimited`, which renders whenever anything is
+dirty, as fast as the GPU returns; the DevTools continuous-redraw mode (F12
+twice) does the same on its own, so the throughput figure it exists to show is
+not capped. Neither touches the swap interval: this is the loop's pacing, not
+the driver's vsync.
 
 ```csharp
 watcher.Changed += (_, e) => Application.InvokeOnMainThread(() => Files = Reload());

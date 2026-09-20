@@ -193,7 +193,7 @@ public sealed class DevToolsOverlay
             y += lineH;
         }
 
-        string display = _perf.DisplayHz > 0 ? $"of {_perf.DisplayHz:F0} Hz" : "display rate unknown";
+        string display = _perf.Unpaced ? "unpaced" : _perf.DisplayHz > 0 ? $"of {_perf.DisplayHz:F0} Hz" : "display rate unknown";
         Line($"FPS: {_perf.Fps:F0} {display}  (frame work {_perf.AverageFrameTimeMs:F1} ms avg, {_perf.FrameTimePeakMs:F1} max)");
         Line($"(peak = slowest pass in last {peakSeconds}s)");
         Line($"Style:   {_perf.StyleTimeMs,6:F2} ms  (peak {_perf.StyleTimePeakMs:F2})");

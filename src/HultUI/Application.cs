@@ -12,6 +12,15 @@ using HultUI.Platform.SDL3;
 
 namespace HultUI;
 
+/// <summary>How often the frame loop may render; see <see cref="Application.FramePacing"/>.</summary>
+public enum FramePacing
+{
+    /// <summary>At most once per display interval. Events are still handled as they arrive.</summary>
+    Display,
+    /// <summary>Whenever anything is dirty, as fast as the GPU returns. For measuring.</summary>
+    Unlimited,
+}
+
 public sealed class Application : IDisposable
 {
     private static Application? _current;
@@ -354,13 +363,20 @@ public sealed class Application : IDisposable
             // blocks the modal resize loop), so nothing else would stop a 300 ms fade
             // from rendering two thousand frames, or a 1000 Hz mouse from making every
             // report a frame. Events are pumped and handled every iteration regardless;
-            // only the render waits for the interval since the last one to pass, with a
-            // millisecond of slack so the wait below never has to be shorter than one.
+            // only the render waits for its deadline, with a millisecond of slack so the
+            // wait below never has to be shorter than one. Unpaced (FramePacing.Unlimited,
+            // or the DevTools continuous-redraw mode) renders whenever anything is dirty.
+            bool unpaced = FramePacing == FramePacing.Unlimited || AnyWindowContinuousRedraw();
             long now = Stopwatch.GetTimestamp();
-            bool due = now >= nextRenderAt - Stopwatch.Frequency / 1000;
+            bool due = unpaced || now >= nextRenderAt - Stopwatch.Frequency / 1000;
             if (RunFrameCore(delta, forceRender: false, allowRender: due))
             {
-                nextRenderAt = now + (long)(Stopwatch.Frequency / DisplayHz());
+                // The next deadline follows the schedule, not this render: a frame that
+                // took its slack and drew a millisecond early shifts the phase, not the
+                // rate (anchored to now it read 136 fps on a 120 Hz display). A frame
+                // more than an interval late restarts the schedule instead of catching up.
+                long interval = (long)(Stopwatch.Frequency / DisplayHz());
+                nextRenderAt = now > nextRenderAt + interval ? now + interval : nextRenderAt + interval;
                 continue;
             }
 
@@ -398,6 +414,22 @@ public sealed class Application : IDisposable
             if (w.IsOpen && w.NeedsRender) return true;
         return false;
     }
+
+    private bool AnyWindowContinuousRedraw()
+    {
+        foreach (var w in _windows)
+            if (w.IsOpen && w.ContinuousRedraw) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// How often <see cref="Run"/> may render: once per display interval (the default,
+    /// see <see cref="Window.RefreshRate"/>), or whenever anything is dirty. This is the
+    /// loop's own pacing, not the driver's vsync: the swap interval stays 0 either way,
+    /// because a vsync'd swap blocks the modal resize loop. Unlimited is for measuring,
+    /// which is also what the DevTools continuous-redraw mode does on its own.
+    /// </summary>
+    public FramePacing FramePacing { get; set; } = FramePacing.Display;
 
     /// <summary>
     /// Binds async/await continuations on this thread to the UI thread.
@@ -467,6 +499,7 @@ public sealed class Application : IDisposable
             if (!window.IsOpen || (!force && !window.NeedsRender)) continue;
             window.PlatformWindow.MakeCurrent();
             window.Performance.DisplayHz = window.PlatformWindow.RefreshRate;
+            window.Performance.Unpaced = FramePacing == FramePacing.Unlimited || window.ContinuousRedraw;
             window.Performance.BeginFrame();
             window.RenderFrame();
             window.Performance.EndFrame();

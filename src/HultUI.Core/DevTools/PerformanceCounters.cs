@@ -72,6 +72,10 @@ public sealed class PerformanceCounters
     /// <see cref="Fps"/> to; 0 when unknown. Set by the application each frame.</summary>
     public float DisplayHz { get; set; }
 
+    /// <summary>True while the loop renders unpaced (continuous redraw, or the application
+    /// chose unlimited pacing), so the HUD can say the figure is throughput, not a rate.</summary>
+    public bool Unpaced { get; set; }
+
     private readonly Queue<long> _frameStarts = new();
     public int ElementCount { get; set; }
 
