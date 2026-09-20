@@ -53,10 +53,18 @@ public class SliderElement : Element, IRangeValueElement
     {
         IsFocusable = true;
         Inherited.Cursor = CursorType.Pointer;
-        OnOwn<PointerDownEvent>(e => { _dragging = true; Focus(); ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
+        // The press captures the pointer, so a drag that wanders above or below the
+        // track keeps moving the thumb, as sliders do everywhere; only the release ends it.
+        OnOwn<PointerDownEvent>(e =>
+        {
+            if (e.Button != PointerEvent.LeftButton) return;
+            e.CapturePointer();
+            _dragging = true;
+            Focus();
+            ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
+        });
         OnOwn<PointerMoveEvent>(e => { if (_dragging) ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
         OnOwn<PointerUpEvent>(_ => _dragging = false);
-        OnOwn<PointerLeaveEvent>(_ => _dragging = false);
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
         OnOwn<KeyDownEvent>(e =>

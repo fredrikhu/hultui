@@ -23,6 +23,10 @@ public sealed class Window : IOverlayHost, IDisposable
     private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Element? _lastHoveredElement;
+    // The element that captured the pointer on its press (PointerDownEvent.CapturePointer),
+    // and the overlay offset its coordinates carry; moves and the release go to it directly.
+    private Element? _pointerCaptureTarget;
+    private Point _pointerCaptureOffset;
     private IScrollbarDraggable? _scrollbarDragTarget;
     private IScrollbarDraggable? _scrollbarHoverTarget;
 
@@ -892,6 +896,27 @@ public sealed class Window : IOverlayHost, IDisposable
             {
                 var pos = new Point(move.X, move.Y);
 
+                // An element that captured the pointer on its press gets every move,
+                // wherever the pointer is, and nothing else hears about the pointer
+                // (no hover changes, no drag start) until the release.
+                if (_pointerCaptureTarget is { } captured)
+                {
+                    if (captured.Parent is null && !ReferenceEquals(captured, _root))
+                    {
+                        _pointerCaptureTarget = null;   // rebuilt away mid-drag: the capture ends with it
+                    }
+                    else
+                    {
+                        EventDispatcher.Dispatch(new PointerMoveEvent
+                        {
+                            Position = new Point(pos.X - _pointerCaptureOffset.X, pos.Y - _pointerCaptureOffset.Y),
+                            Delta = new Point(move.DeltaX, move.DeltaY),
+                            Modifiers = move.Modifiers,
+                        }, captured);
+                        break;
+                    }
+                }
+
                 // If dragging a scrollbar, route directly to the drag target
                 if (_scrollbarDragTarget is not null)
                 {
@@ -1005,6 +1030,32 @@ public sealed class Window : IOverlayHost, IDisposable
                 // Hide tooltip on any mouse button press
                 if (button.IsDown)
                     HideTooltip();
+
+                // The release ends a pointer capture: it goes to the captured element
+                // (with the click, if that element was also pressed), then hover catches
+                // up with wherever the pointer is now.
+                if (!button.IsDown && _pointerCaptureTarget is { } captured)
+                {
+                    _pointerCaptureTarget = null;
+                    var capturedPos = new Point(pos.X - _pointerCaptureOffset.X, pos.Y - _pointerCaptureOffset.Y);
+                    var (overlayHover, overlayHoverOffset) = HitTestOverlays(pos);
+                    var nowUnder = overlayHover ?? HitTester.HitTest(_root, pos);
+                    var (capUp, capClick, capDbl) = _pointerState.HandlePointerUp(captured, capturedPos, button.Button, button.Modifiers);
+                    EventDispatcher.Dispatch(capUp, captured);
+                    // A click needs the release over the element (or inside it), as it
+                    // would without capture; letting go elsewhere is how a press is abandoned.
+                    bool releasedOver = false;
+                    for (var el = nowUnder; el is not null; el = el.Parent)
+                        if (ReferenceEquals(el, captured)) { releasedOver = true; break; }
+                    if (releasedOver && capClick is not null) EventDispatcher.Dispatch(capClick, captured);
+                    if (releasedOver && capDbl is not null) EventDispatcher.Dispatch(capDbl, captured);
+
+                    var hoverPos = overlayHover is not null
+                        ? new Point(pos.X - overlayHoverOffset.X, pos.Y - overlayHoverOffset.Y) : pos;
+                    _pointerState.UpdateHover(nowUnder, hoverPos, button.Modifiers);
+                    _lastHoveredElement = nowUnder;
+                    break;
+                }
 
                 // End internal drag on button up
                 if (!button.IsDown && _isDragging && !_isExternalDrag)
@@ -1126,6 +1177,15 @@ public sealed class Window : IOverlayHost, IDisposable
 
                     var downEvt = _pointerState.HandlePointerDown(target, effectiveBtnPos, button.Button, button.Modifiers);
                     EventDispatcher.Dispatch(downEvt, target);
+
+                    // A handler that captured the pointer owns the gesture from here: no
+                    // text drag, no drag source, no context menu comes of this press.
+                    if (downEvt.CaptureTarget is { } capture)
+                    {
+                        _pointerCaptureTarget = capture;
+                        _pointerCaptureOffset = isOverlayHit ? overlayOffset : default;
+                        break;
+                    }
 
                     // A press outside the labels of a group that holds a live selection
                     // clears it (so a stale multi-line highlight doesn't linger).

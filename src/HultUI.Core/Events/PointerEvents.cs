@@ -1,4 +1,5 @@
 using HultUI.Core.Primitives;
+using HultUI.Core.Elements;
 
 namespace HultUI.Core.Events;
 
@@ -49,6 +50,18 @@ public sealed class PointerDownEvent : PointerEvent
     /// button comes back up. Non-primary buttons are always 1.
     /// </summary>
     public int ClickCount { get; init; } = 1;
+
+    /// <summary>
+    /// Sends every move and the release of this press to the element handling it,
+    /// wherever the pointer goes, until the button comes up: a slider thumb dragged
+    /// above or below its track keeps following. Hover enter/leave stand still
+    /// meanwhile and catch up on the release. Call it from a handler for this event;
+    /// the window reads the request once the dispatch completes.
+    /// </summary>
+    public void CapturePointer() => CaptureTarget = CurrentTarget;
+
+    /// <summary>The element that asked to capture the pointer, or null.</summary>
+    public Element? CaptureTarget { get; private set; }
 }
 public sealed class PointerUpEvent : PointerEvent;
 
