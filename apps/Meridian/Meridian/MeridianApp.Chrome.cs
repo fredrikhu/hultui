@@ -137,32 +137,4 @@ public partial class MeridianApp
             b.HoverBg(Azimuth.Raised, Color.Transparent);
         return b;
     }
-
-    // ── Toast ────────────────────────────────────────────────────────────
-
-    private Element BuildToast(string message)
-    {
-        // PassThroughBox, not a plain box: the strip spans the window's width at
-        // the bottom, and a hit-testable one steals clicks from whatever control
-        // sits near the bottom edge for as long as the toast is up.
-        var strip = new Ui.PassThroughBox();
-        strip.Flex.Direction = FlexDirection.Row;
-        strip.Width(Dimension.Percent(100))
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.FlexEnd)
-            .Padding(new Thickness(0, 0, 22, 0))
-            .ZIndex(50);
-        strip.Position.Type = PositionType.Absolute;
-        strip.Position.Left = Dimension.Px(0);
-        strip.Position.Bottom = Dimension.Px(0);
-
-        var pill = Flex.Row(gap: Azimuth.S2).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(9, 16, 9, 16))
-            .CornerRadius(Azimuth.Radius2)
-            .Background(Azimuth.Raised)
-            .BorderColor(Azimuth.BorderStrong).BorderWidth(1f)
-            .Children(Text.New(message).FontSize(12.5f).TextColor(Azimuth.Text));
-
-        strip.AddChild(pill);
-        return strip;
-    }
 }

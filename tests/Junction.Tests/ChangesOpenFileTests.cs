@@ -1,3 +1,4 @@
+using HultUI.Core.Builders;
 using System.Reflection;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -59,7 +60,7 @@ public class ChangesOpenFileTests
             session.Window.PressKey(KeyCode.O, KeyModifiers.Ctrl);
             session.PumpFrames(2);
 
-            Assert.Equal("Select a file to open first", Get<string?>(app, "_toast"));
+            Assert.Equal("Select a file to open first", Get<ToastHost>(app, "_toasts").Message);
         });
     }
 
@@ -77,9 +78,9 @@ public class ChangesOpenFileTests
                 .SetValue(app, "deleted-since.txt");
 
             session.Window.PressKey(KeyCode.O, KeyModifiers.Ctrl);
-            session.PumpUntil(() => Get<string?>(app, "_toast") != null, TimeSpan.FromSeconds(20));
+            session.PumpUntil(() => Get<ToastHost>(app, "_toasts").Message != null, TimeSpan.FromSeconds(20));
 
-            Assert.Equal("deleted-since.txt isn't in the working tree", Get<string?>(app, "_toast"));
+            Assert.Equal("deleted-since.txt isn't in the working tree", Get<ToastHost>(app, "_toasts").Message);
         });
     }
 

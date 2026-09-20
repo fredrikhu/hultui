@@ -22,42 +22,4 @@ public partial class JunctionApp
                 Text.New(title).FontSize(18f).FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.70)),
                 Text.New(message).FontSize(13f).TextColor(Nocturne.On(0.45)));
     }
-
-    private Element BuildToast(string message)
-    {
-        var strip = Flex.Row(gap: 0)
-            .Width(Dimension.Percent(100))
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.FlexEnd)
-            .Padding(new Thickness(0, 0, 22, 0))
-            .ZIndex(50);
-        strip.Position.Type = PositionType.Absolute;
-        strip.Position.Left = Dimension.Px(0);
-        strip.Position.Bottom = Dimension.Px(0);
-
-        var pill = Flex.Row(gap: 8).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(9, 16, 9, 16))
-            .CornerRadius(Nocturne.RadiusMd)
-            .Background(Nocturne.Neutral800)
-            .BorderColor(Nocturne.Neutral700).BorderWidth(1f)
-            .Children(
-                Ui.Icon(Icons.CheckCircle, 15f, Nocturne.Accent300),
-                Text.New(message).FontSize(12.5f).TextColor(Nocturne.Text));
-
-        // An actionable toast carries one verb after a separator — "Create merge request →" —
-        // and stays longer, since it is asking for a decision rather than reporting one.
-        if (_toastAction is { } action)
-        {
-            pill.AddChild(Text.New("·").FontSize(12.5f).TextColor(Nocturne.On(0.4)));
-            var link = Flex.Row(gap: 4).AlignItems(AlignItems.Center).Cursor(CursorType.Pointer);
-            link.AddChild(Text.New(action.Label).FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(Nocturne.Accent300));
-            link.AddChild(Ui.Icon(Icons.ArrowRight, 12f, Nocturne.Accent300));
-            link.On<ClickEvent>(e => { e.StopPropagation = true; var run = action.Run; DismissToast(); run(); });
-            link.Role = HultUI.Core.Accessibility.AccessibilityRole.Button;
-            link.AccessibleName = action.Label;
-            pill.AddChild(link);
-        }
-
-        strip.AddChild(pill);
-        return strip;
-    }
 }

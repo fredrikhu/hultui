@@ -1048,6 +1048,14 @@ public abstract class Element
     public virtual bool HitTest(Point point) =>
         Layout.AbsoluteBorderBox.Contains(point);
 
+    /// <summary>
+    /// Whether this element can itself be the target of a pointer. Its children still
+    /// can: a full-width strip that centres a toast over the window's bottom edge must
+    /// not steal the clicks meant for whatever sits under it, while the toast inside it
+    /// stays clickable. CSS calls the same thing <c>pointer-events: none</c>.
+    /// </summary>
+    public bool IsHitTestVisible { get; set; } = true;
+
     // ──── Measurement (overridden by leaf elements) ────
     internal virtual Size MeasureContent(float availableWidth, float availableHeight, IMeasureContext ctx) =>
         Size.Zero;

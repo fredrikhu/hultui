@@ -1,3 +1,4 @@
+using HultUI.Core.Builders;
 using System.Reflection;
 using HultUI.Core.Elements;
 using HultUI.Headless;
@@ -118,9 +119,9 @@ public class BlameRevealTests
             // hidden by the Included-branches filter, which is the real case. Silence here
             // would be indistinguishable from a dead menu item.
             Invoke(app, "RevealCommitInHistory", new string('a', 40));
-            session.PumpUntil(() => Field<string?>(app, "_toast") is not null, TimeSpan.FromSeconds(20));
+            session.PumpUntil(() => Field<ToastHost>(app, "_toasts").Message is not null, TimeSpan.FromSeconds(20));
 
-            var toast = Field<string?>(app, "_toast");
+            var toast = Field<ToastHost>(app, "_toasts").Message;
             Assert.NotNull(toast);
             Assert.Contains("isn't in the history shown here", toast!, StringComparison.Ordinal);
             Assert.Contains("aaaaaaa", toast!, StringComparison.Ordinal);   // the short hash
@@ -134,9 +135,9 @@ public class BlameRevealTests
         {
             // git writes an all-zero hash for a line that is not committed yet.
             Invoke(app, "RevealCommitInHistory", new string('0', 40));
-            session.PumpUntil(() => Field<string?>(app, "_toast") is not null, TimeSpan.FromSeconds(20));
+            session.PumpUntil(() => Field<ToastHost>(app, "_toasts").Message is not null, TimeSpan.FromSeconds(20));
 
-            Assert.Contains("isn't committed yet", Field<string?>(app, "_toast")!, StringComparison.Ordinal);
+            Assert.Contains("isn't committed yet", Field<ToastHost>(app, "_toasts").Message!, StringComparison.Ordinal);
             Assert.Equal(JunctionView.Files, app.View);   // no navigation happened
         });
     }

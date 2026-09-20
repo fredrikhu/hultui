@@ -72,8 +72,9 @@ public static class HitTester
                 return hit;
         }
 
-        // No child was hit, this element is the target
-        return element;
+        // No child was hit, this element is the target — unless it has asked to be
+        // looked through, in which case whatever is behind it gets the pointer.
+        return element.IsHitTestVisible ? element : null;
     }
 
     private static Point InverseTransformPoint(Element element, Transform2D t, Point p)

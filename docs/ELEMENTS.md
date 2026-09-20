@@ -786,3 +786,49 @@ borders that edge. Theme: `Theme.Splitter` (`SplitterTheme`: `Thickness` 6,
 
 **Accessibility:** the handle reads as a **separator** named "Resize"; set
 `AccessibleName` to say what it resizes.
+
+---
+
+## 14. ToastHost and ToastElement
+
+One transient notice at a time, bottom-centre. `ToastHost` is app state, like
+`PaneSplitter`: the owner adds `Build()` to its root on every build and the host calls
+back to rebuild when the toast appears, changes, fades or goes. `ToastElement` is the
+pill it draws.
+
+```csharp
+// Once, in the component:
+_toasts = new ToastHost(MarkDirty);
+
+// In Build():
+if (_toasts.Build() is { } strip) root.AddChild(strip);
+
+// Anywhere:
+_toasts.Flash("Copied");
+_toasts.Flash("Pushed main", ToastSeverity.Success, action: ("Create merge request", OpenMergeRequest));
+_toasts.Flash("Push failed", ToastSeverity.Error, seconds: 4);
+```
+
+| Member | Meaning |
+|---|---|
+| `Flash(message, severity, action, seconds)` | show, replacing what is up; an action keeps it `ActionSeconds` instead of `Seconds` |
+| `Dismiss()` | take it down now, no fade |
+| `Message` / `Severity` / `Action` / `IsShowing` / `Opacity` | what is up |
+| `Seconds` 1.7, `ActionSeconds` 4.5, `FadeInSeconds`, `FadeOutSeconds`, `BottomMargin` 22, `ZIndex` 50 | the timings and placement |
+
+The clock is a tween, not a task, so it runs on the frame loop's virtual time and a
+headless test pumps exactly the seconds it means to. A second `Flash` while one is up
+replaces the text and restarts the clock without blinking. The strip spans the
+window's bottom edge and is looked through by the pointer (`Element.IsHitTestVisible
+= false`), so a toast over the bottom edge never steals the clicks meant for whatever
+sits there; the pill inside it is still clickable.
+
+**`ToastElement`** draws the pill from `Theme.Toast` (`ToastTheme`: surface fill,
+border, text, the action verb in `Primary`, and fixed success/warning accents plus
+`Danger` for errors). A severity draws a bar at the leading edge.
+
+**Accessibility:** a plain toast is an **alert** named by its message, which readers
+announce unprompted. With an action the whole pill is a **button** named by
+the verb, with the message as its description: a bigger target for the second or
+two it is up, and one invokable node rather than a link buried in an alert. Clicking it dismisses the toast and runs
+the action.

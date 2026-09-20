@@ -280,8 +280,7 @@ public partial class JunctionApp : Component, IDisposable
     private bool _pendingRewordFocus;
 
     // Toast.
-    private string? _toast;
-    private CancellationTokenSource? _toastCts;
+    private readonly ToastHost _toasts;
 
     /// <summary>What the sidebar badge and the Overview card say about a repository — and,
     /// since the ahead/behind counts come from listing every ref anyway, the whole branch
@@ -422,6 +421,7 @@ public partial class JunctionApp : Component, IDisposable
         _diffPan = new HorizontalPan(MarkDirty);
         // Same for the two file-list widths: the panes are rebuilt at the current width, so
         // a drag marks dirty rather than writing to an element that the next build replaces.
+        _toasts = new ToastHost(MarkDirty);
         _commitSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
             settings.CommitFileListWidth);
         _changesSplit = new PaneSplitter(MarkDirty, Persist, MinFileListWidth, MaxFileListWidth,
@@ -811,7 +811,7 @@ public partial class JunctionApp : Component, IDisposable
         void Overlay(string key, Element el) { el.Key = key; root.AddChild(el); }
 
         if (_diffFull) Overlay("fullscreen-diff", BuildFullscreenDiff());
-        if (_toast != null) Overlay("toast", BuildToast(_toast));
+        if (_toasts.Build() is { } toast) Overlay("toast", toast);
         if (_paletteOpen) Overlay("palette", BuildPalette());
         if (_worktreesOpen) Overlay("worktrees", BuildWorktreesPanel());
         if (_reflogOpen) Overlay("reflog", BuildReflogPanel());
@@ -1212,36 +1212,12 @@ public partial class JunctionApp : Component, IDisposable
 
     // ── Toast ────────────────────────────────────────────────────────────
 
-    /// <summary>The one verb an actionable toast offers, e.g. "Create merge request".</summary>
-    private (string Label, Action Run)? _toastAction;
-
     /// <summary>A transient confirmation bottom-centre. With an <paramref name="action"/> it
     /// stays 4.5 s instead of 1.7 — it is asking for a decision rather than reporting one.</summary>
-    private async void Flash(string message, (string Label, Action Run)? action = null)
-    {
-        _toastCts?.Cancel();
-        _toast = message;
-        _toastAction = action;
-        _toastCts = new CancellationTokenSource();
-        var token = _toastCts.Token;
-        MarkDirty();
-        try
-        {
-            await Task.Delay(action is null ? 1700 : 4500, token);
-            _toast = null;
-            _toastAction = null;
-            MarkDirty();
-        }
-        catch (OperationCanceledException) { }
-    }
+    private void Flash(string message, (string Label, Action Run)? action = null) =>
+        _toasts.Flash(message, action: action);
 
-    private void DismissToast()
-    {
-        _toastCts?.Cancel();
-        _toast = null;
-        _toastAction = null;
-        MarkDirty();
-    }
+    private void DismissToast() => _toasts.Dismiss();
 
     private void CopyToClipboard(string text)
     {
@@ -1653,8 +1629,6 @@ public partial class JunctionApp : Component, IDisposable
     public void Dispose()
     {
         _window.Resized -= OnWindowResize;
-        _toastCts?.Cancel();
-        _toastCts?.Dispose();
         _autoFetchCts?.Cancel();
         _autoFetchCts?.Dispose();
         // AnimationManager's tween list is process-global, and a looping tween holds a

@@ -32,6 +32,7 @@ public sealed class Theme
     public SpinnerTheme Spinner { get => Get<SpinnerTheme>(); init => Set(value); }
     public NumericUpDownTheme NumericUpDown { get => Get<NumericUpDownTheme>(); init => Set(value); }
     public SplitterTheme Splitter { get => Get<SplitterTheme>(); init => Set(value); }
+    public ToastTheme Toast { get => Get<ToastTheme>(); init => Set(value); }
     public FocusVisualTheme FocusVisual { get => Get<FocusVisualTheme>(); init => Set(value); }
     public RadioButtonTheme RadioButton { get => Get<RadioButtonTheme>(); init => Set(value); }
     public TooltipTheme Tooltip { get => Get<TooltipTheme>(); init => Set(value); }

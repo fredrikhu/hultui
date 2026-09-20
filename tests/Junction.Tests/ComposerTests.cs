@@ -1,3 +1,4 @@
+using HultUI.Core.Builders;
 using System.Reflection;
 using HultUI.Core.Events;
 using HultUI.Headless;
@@ -80,7 +81,7 @@ public class ComposerTests
             session.PumpFrames(3);
 
             Assert.Equal(before, CommitCount(repo));
-            Assert.Equal("Nothing staged to commit", Get<string?>(app, "_toast"));
+            Assert.Equal("Nothing staged to commit", Get<ToastHost>(app, "_toasts").Message);
         });
     }
 
@@ -111,7 +112,7 @@ public class ComposerTests
             session.PumpFrames(3);
 
             Assert.Equal(before, CommitCount(repo));
-            Assert.Equal("Resolve the conflicts first", Get<string?>(app, "_toast"));
+            Assert.Equal("Resolve the conflicts first", Get<ToastHost>(app, "_toasts").Message);
         });
     }
 

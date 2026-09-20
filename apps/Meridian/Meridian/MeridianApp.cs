@@ -105,8 +105,7 @@ public partial class MeridianApp : Component, IDisposable
     private void Rerender() => _revision.Value++;
 
     // Toast.
-    private string? _toast;
-    private CancellationTokenSource? _toastCts;
+    private readonly ToastHost _toasts;
 
     private bool _pickingFolder;
 
@@ -124,6 +123,7 @@ public partial class MeridianApp : Component, IDisposable
         // screenshot driver) gets the same window the user sees, rather than a frame that
         // reads as a theming bug the app does not have. Mirrors JunctionApp and CommanderApp.
         _app.Theme = Azimuth.ToHultTheme();
+        _toasts = new ToastHost(MarkDirty) { Seconds = 2.6f };
         // The window's dialogs are the real ones on a desktop and the scriptable
         // headless pair under test, so nothing needs substituting for either.
         _fileDialogs = fileDialogs ?? window.FileDialogs;
@@ -209,12 +209,7 @@ public partial class MeridianApp : Component, IDisposable
             popover.Key = "popover";
             root.AddChild(popover);
         }
-        if (_toast != null)
-        {
-            var toast = BuildToast(_toast);
-            toast.Key = "toast";
-            root.AddChild(toast);
-        }
+        if (_toasts.Build() is { } toast) root.AddChild(toast);
 
         return root;
     }
@@ -455,17 +450,7 @@ public partial class MeridianApp : Component, IDisposable
         }
     }
 
-    private async void Flash(string message)
-    {
-        _toastCts?.Cancel();
-        var cts = _toastCts = new CancellationTokenSource();
-        _toast = message;
-        MarkDirty();
-        try { await Task.Delay(2600, cts.Token); }
-        catch (TaskCanceledException) { return; }
-        _toast = null;
-        MarkDirty();
-    }
+    private void Flash(string message) => _toasts.Flash(message);
 
     // ── Send / cancel ────────────────────────────────────────────────────
 
@@ -685,7 +670,6 @@ public partial class MeridianApp : Component, IDisposable
     public void Dispose()
     {
         _window.Resized -= OnWindowResize;
-        _toastCts?.Cancel();
         foreach (var tab in _tabs) tab.Sending?.Cancel();
         _watcher?.Dispose();
         Engine.Dispose();
