@@ -86,6 +86,14 @@ public static class Ui
     private static readonly Dictionary<(Color?, float, float, float), TextInputStyle> _bordered = new();
     private static (object?, Color, Color) _borderedScheme;
 
+    /// <summary>A number field for a tight row — the Rename counter's start, step and
+    /// digits under 10.5pt labels — where the form's stepper is too big. Geometry only,
+    /// so a static is safe: the colours stay the scheme's.</summary>
+    public static readonly DropdownStyle CompactStepper = new()
+    {
+        Padding = new Thickness(3, 6), FontSize = 11.5f, MinWidth = 56f,
+    };
+
     /// <summary>A keycap chip (10px mono, hairline border) as in the design's <c>.kbd</c>.</summary>
     public static BoxElement Kbd(string text) =>
         Box.New()

@@ -255,11 +255,27 @@ public class DatePickerElement : Element
 
     // ── Theme / measure / render ─────────────────────────────────────────
 
+    /// <summary>
+    /// This field's own look for the box it borrows from the dropdown, laid over the theme's —
+    /// see <see cref="DropdownStyle"/>. Compared by reference, so hand the same instance each build.
+    /// </summary>
+    public DropdownStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+    private DropdownStyle? _style;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         // The same knobs as the dropdown's closed face, deliberately: a form with a
         // dropdown beside a date field should not have two differently-shaped boxes in it.
-        _theme = theme.Dropdown;
+        _theme = theme.Dropdown.Resolve(_style);
         _focusRingColor = theme.FocusRing;
     }
 
@@ -319,6 +335,7 @@ public class DatePickerElement : Element
         if (source is not DatePickerElement p) return;
         Format = p.Format;
         Placeholder = p.Placeholder;
+        Style = p.Style;
         Culture = p.Culture;
         MinDate = p.MinDate;
         MaxDate = p.MaxDate;

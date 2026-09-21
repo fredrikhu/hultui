@@ -142,7 +142,9 @@ public partial class CommanderApp
     {
         var r = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
         r.AddChild(Ui.Mono(label, 10.5f, Nocturne.Neutral500));
-        var n = NumericUpDown.New(value, min, max).OnValueChanged(v => { set((int)v); MarkDirty(); });
+        // Three of these sit in one row under a 10.5pt label; the form's stepper is too big for it.
+        var n = NumericUpDown.New(value, min, max).Style(Ui.CompactStepper)
+            .OnValueChanged(v => { set((int)v); MarkDirty(); });
         n.AccessibleName = "Counter " + label;
         r.AddChild(n);
         return r;

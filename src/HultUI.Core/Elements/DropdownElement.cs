@@ -138,9 +138,25 @@ public class DropdownElement : Element
         return this;
     }
 
+    /// <summary>
+    /// This dropdown's own look, laid over the theme's — see <see cref="DropdownStyle"/>.
+    /// Compared by reference, so hand the same instance each build.
+    /// </summary>
+    public DropdownStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+    private DropdownStyle? _style;
+
     protected internal override void ApplyTheme(Theme theme)
     {
-        var dt = theme.Dropdown;
+        var dt = theme.Dropdown.Resolve(_style);
         _background = dt.Background;
         _borderColor = dt.BorderColor;
         _borderWidth = dt.BorderWidth;
@@ -354,6 +370,7 @@ public class DropdownElement : Element
         if (source is DropdownElement dd)
         {
             Placeholder = dd.Placeholder;
+            Style = dd.Style;
             OnSelectionChanged = dd.OnSelectionChanged;
             Items = dd._items;          // closes an open, now-stale popup itself
             SelectedIndex = dd._selectedIndex;

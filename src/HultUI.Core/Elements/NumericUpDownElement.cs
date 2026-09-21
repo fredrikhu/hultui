@@ -258,9 +258,25 @@ public class NumericUpDownElement : Element, IRangeValueElement
 
     // ── Theme / measure / render ─────────────────────────────────────────
 
+    /// <summary>
+    /// This field's own look for the box it borrows from the dropdown, laid over the theme's —
+    /// see <see cref="DropdownStyle"/>. Compared by reference, so hand the same instance each build.
+    /// </summary>
+    public DropdownStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+    private DropdownStyle? _style;
+
     protected internal override void ApplyTheme(Theme theme)
     {
-        _boxTheme = theme.Dropdown;
+        _boxTheme = theme.Dropdown.Resolve(_style);
         _theme = theme.NumericUpDown;
         _chevronColor = _theme.ChevronColor ?? theme.Secondary;
         _pressedBackground = _theme.PressedBackground ?? theme.SurfaceVariant;
@@ -355,6 +371,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
         _step = n._step;
         LargeStep = n.LargeStep;
         Formatter = n.Formatter;
+        Style = n.Style;
         OnChanged = n.OnChanged;
         // A rebuild while the user is typing keeps the edit; the value under it moves.
         var typed = _typed;

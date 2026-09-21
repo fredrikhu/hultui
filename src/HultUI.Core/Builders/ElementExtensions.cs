@@ -186,6 +186,16 @@ public static class ElementExtensions
     public static NumericUpDownElement Format(this NumericUpDownElement el, Func<double, string> format) { el.Formatter = format; return el; }
     public static NumericUpDownElement OnValueChanged(this NumericUpDownElement el, Action<double> handler) { el.OnChanged = handler; return el; }
 
+    // ──── The dropdown-shaped fields' style ────
+    /// <summary>A reusable look for this field, laid over the theme's; see <see cref="DropdownStyle"/>.</summary>
+    public static DropdownElement Style(this DropdownElement el, DropdownStyle? style) { el.Style = style; return el; }
+    /// <inheritdoc cref="Style(DropdownElement, DropdownStyle?)"/>
+    public static NumericUpDownElement Style(this NumericUpDownElement el, DropdownStyle? style) { el.Style = style; return el; }
+    /// <inheritdoc cref="Style(DropdownElement, DropdownStyle?)"/>
+    public static DatePickerElement Style(this DatePickerElement el, DropdownStyle? style) { el.Style = style; return el; }
+    /// <inheritdoc cref="Style(DropdownElement, DropdownStyle?)"/>
+    public static TimePickerElement Style(this TimePickerElement el, DropdownStyle? style) { el.Style = style; return el; }
+
     // ──── Slider properties ────
     public static SliderElement Value(this SliderElement el, double value) { el.Value = value; return el; }
     public static SliderElement Range(this SliderElement el, double min, double max) { el.Minimum = min; el.Maximum = max; return el; }

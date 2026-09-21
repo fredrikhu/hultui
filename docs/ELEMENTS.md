@@ -840,6 +840,21 @@ shares one shape; the strip comes from `Theme.NumericUpDown`
 (`NumericUpDownTheme`: `ButtonWidth`, chevron colour and stroke, pressed fill,
 `RepeatDelaySeconds`, `RepeatIntervalSeconds`).
 
+**One field that should not share the shape** — a compact stepper in a tight row, a
+wide picker — takes a `DropdownStyle` through `.Style(...)`: every knob of
+`DropdownTheme` made nullable (`Background`, `BorderColor`, `TextColor`,
+`PlaceholderTextColor`, `ChevronColor`, `CornerRadius`, `BorderWidth`,
+`FocusBorderWidth`, `Padding`, `FontSize`, `MinWidth`, `ChevronGap`, `ChevronShape`,
+`ChevronStrokeWidth`, `PopupGap`), laid over the theme by `DropdownTheme.Resolve`. The
+same `.Style(...)` exists on `DropdownElement`, `DatePickerElement` and
+`TimePickerElement`, so one declared style reshapes any field in the family. Declare it
+once as a static; it is compared by reference.
+
+```csharp
+static readonly DropdownStyle Compact = new() { Padding = new Thickness(2, 6), FontSize = 11f, MinWidth = 48f };
+NumericUpDown.New(count, 1, 9).Style(Compact)
+```
+
 `OnChanged` runs for user gestures only — buttons, keys, wheel, typing and
 assistive technology — never for assigning `Value`.
 
@@ -1083,6 +1098,11 @@ callbacks are for the user's own gestures.
 | `CalendarElement` | `SelectedDate`, `DisplayMonth`, `FocusedDate`, `Today`, `MinDate`, `MaxDate`, `FirstDayOfWeek`, `Culture`, `MonthFormat` (`"MMMM yyyy"`); `ShiftMonths(n)`, `SelectDate(d)`, `DateAt(row, col)` |
 | `DatePickerElement` | `Value`, `Format` (`"d"`), `Placeholder`, `Culture`, `MinDate`, `MaxDate`, `Today`, `FirstDayOfWeek`, `AllowClear`; `IsOpen`, `Calendar`, `DisplayText`, `OpenPopup()`, `ClosePopup()` |
 | `TimePickerElement` | `Value`, `ShowSeconds`, `Use12Hour`, `MinuteStep`, `Culture`, `AllowClear`; `ActiveSegment`, `Step(±1)`, `MoveSegment(±1)`, `FocusSegment(s)`, `TypeDigit(n)`, `Clear()` |
+
+Both fields draw the closed face from `Theme.Dropdown`, and both take a per-field
+`DropdownStyle` through `.Style(...)` — the same one a dropdown or a number field takes,
+see [NumericUpDownElement](#12-numericupdownelement) — for a picker that should not share
+the form's shape.
 
 Design calls that are settled:
 

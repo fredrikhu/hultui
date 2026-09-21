@@ -465,9 +465,25 @@ public class TimePickerElement : Element
 
     // ── Theme / measure / render ─────────────────────────────────────────
 
+    /// <summary>
+    /// This field's own look for the box it borrows from the dropdown, laid over the theme's —
+    /// see <see cref="DropdownStyle"/>. Compared by reference, so hand the same instance each build.
+    /// </summary>
+    public DropdownStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+    private DropdownStyle? _style;
+
     protected internal override void ApplyTheme(Theme theme)
     {
-        _boxTheme = theme.Dropdown;
+        _boxTheme = theme.Dropdown.Resolve(_style);
         _theme = theme.Get<TimeFieldTheme>();
         _focusRingColor = theme.FocusRing;
         MarkLayoutDirty();
@@ -536,6 +552,7 @@ public class TimePickerElement : Element
         base.PatchFrom(source);
         if (source is not TimePickerElement p) return;
         MinuteStep = p.MinuteStep;
+        Style = p.Style;
         Culture = p.Culture;
         AllowClear = p.AllowClear;
         OnValueChanged = p.OnValueChanged;

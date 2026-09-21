@@ -101,7 +101,7 @@ draws one exposes it:
 |---|---|---|---|
 | `ButtonTheme` | per variant `ButtonStyle`: `Border`, `HoverBorder` | `BorderWidth` (all variants; a `ButtonStyle` may override) | see [ButtonElement](ELEMENTS.md#18-buttonelement) |
 | `TextInputTheme` | `BorderColor`, `FocusBorderColor`, `UnderlineColor` | `BorderWidth`, `UnderlineThickness` | shared by `TextArea`; a per-field `TextInputStyle` layers over it, see [TextInputElement](ELEMENTS.md#3-textinputelement) |
-| `DropdownTheme` | `BorderColor` | `BorderWidth`, `FocusBorderWidth` | also the box of `DatePicker`, `TimePicker`, `NumericUpDown` |
+| `DropdownTheme` | `BorderColor` | `BorderWidth`, `FocusBorderWidth` | also the box of `DatePicker`, `TimePicker`, `NumericUpDown`; a per-field `DropdownStyle` layers over it, see [NumericUpDownElement](ELEMENTS.md#12-numericupdownelement) |
 | `CheckboxTheme`, `RadioButtonTheme` | `BorderColor` | `BorderWidth` (null keeps the element's 2px) | |
 | `ToggleSwitchTheme` | `OffBorder` | `OffBorderWidth` | the off state is outlined, the on state filled |
 | `SliderTheme` | `ThumbBorderColor` | `ThumbBorderWidth` | |

@@ -48,6 +48,60 @@ public sealed class DropdownTheme : IThemeExtension<DropdownTheme>
         PlaceholderTextColor = theme.Secondary,
         ChevronColor = theme.Secondary,
     };
+
+    /// <summary>
+    /// This theme with one element's <see cref="DropdownStyle"/> laid over it: every knob the
+    /// style names replaces the theme's, every null keeps it. The same instance back when
+    /// there is no style, so an unstyled field costs nothing.
+    /// </summary>
+    public DropdownTheme Resolve(DropdownStyle? style) => style is null ? this : new DropdownTheme
+    {
+        Background = style.Background ?? Background,
+        BorderColor = style.BorderColor ?? BorderColor,
+        TextColor = style.TextColor ?? TextColor,
+        PlaceholderTextColor = style.PlaceholderTextColor ?? PlaceholderTextColor,
+        ChevronColor = style.ChevronColor ?? ChevronColor,
+        CornerRadius = style.CornerRadius ?? CornerRadius,
+        BorderWidth = style.BorderWidth ?? BorderWidth,
+        FocusBorderWidth = style.FocusBorderWidth ?? FocusBorderWidth,
+        Padding = style.Padding ?? Padding,
+        FontSize = style.FontSize ?? FontSize,
+        MinWidth = style.MinWidth ?? MinWidth,
+        ChevronGap = style.ChevronGap ?? ChevronGap,
+        ChevronShape = style.ChevronShape ?? ChevronShape,
+        ChevronStrokeWidth = style.ChevronStrokeWidth ?? ChevronStrokeWidth,
+        PopupGap = style.PopupGap ?? PopupGap,
+    };
+}
+
+/// <summary>
+/// What one dropdown-shaped field looks like — a <see cref="Elements.DropdownElement"/>,
+/// <see cref="Elements.NumericUpDownElement"/>, <see cref="Elements.DatePickerElement"/> or
+/// <see cref="Elements.TimePickerElement"/> — every knob optional. The element's own
+/// <c>Style</c> resolves ahead of <see cref="DropdownTheme"/>, which the palette fills.
+///
+/// <para>Declare one as a static and apply it with <c>.Style(...)</c> for a reusable shape a
+/// form's dropdown does not share — a compact stepper in a tight row, a wide picker — and
+/// it follows a light or dark palette for whatever it does not name. Compared by reference,
+/// so hand the same instance each build.</para>
+/// </summary>
+public sealed class DropdownStyle
+{
+    public Color? Background { get; init; }
+    public Color? BorderColor { get; init; }
+    public Color? TextColor { get; init; }
+    public Color? PlaceholderTextColor { get; init; }
+    public Color? ChevronColor { get; init; }
+    public float? CornerRadius { get; init; }
+    public float? BorderWidth { get; init; }
+    public float? FocusBorderWidth { get; init; }
+    public Thickness? Padding { get; init; }
+    public float? FontSize { get; init; }
+    public float? MinWidth { get; init; }
+    public float? ChevronGap { get; init; }
+    public ChevronShape? ChevronShape { get; init; }
+    public float? ChevronStrokeWidth { get; init; }
+    public float? PopupGap { get; init; }
 }
 
 /// <summary>The shape of a dropdown's drop mark. See <see cref="DropdownTheme.ChevronShape"/>.</summary>
