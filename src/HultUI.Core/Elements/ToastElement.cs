@@ -143,7 +143,7 @@ public class ToastElement : BoxElement
         var t = theme.Toast;
         this.Background(t.Background ?? theme.Surface);
         this.BorderColor(t.Border ?? theme.Border);
-        Box.BorderWidth = new Thickness(1f);
+        Box.BorderWidth = new Thickness(t.BorderWidth);
         this.CornerRadius(t.CornerRadius);
         Box.Padding = t.Padding;
         _text.Inherited.FontSize = t.FontSize;

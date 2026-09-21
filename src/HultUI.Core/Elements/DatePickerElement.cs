@@ -291,7 +291,7 @@ public class DatePickerElement : Element
         var box = Layout.AbsoluteBorderBox;
         ctx.DrawRoundedRect(box, new CornerRadius(_theme.CornerRadius), _theme.Background,
             _focused ? _focusRingColor : _theme.BorderColor,
-            new Thickness(_focused ? 1.5f : 1f));
+            new Thickness(_focused ? _theme.FocusBorderWidth : _theme.BorderWidth));
 
         var style = ResolvedInherited with
         {

@@ -292,7 +292,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
         var radius = new CornerRadius(_boxTheme.CornerRadius);
         ctx.DrawRoundedRect(box, radius, _boxTheme.Background,
             _focused ? _focusRingColor : _boxTheme.BorderColor,
-            new Thickness(_focused ? 1.5f : 1f));
+            new Thickness(_focused ? _boxTheme.FocusBorderWidth : _boxTheme.BorderWidth));
 
         var content = Layout.AbsoluteContentBox;
         float buttonsX = content.Right - _theme.ButtonWidth;

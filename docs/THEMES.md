@@ -80,6 +80,39 @@ theme. Three things must follow it, and none of them happen inside:
 
 Then rebuild.
 
+## The framework's own controls
+
+Each built-in control reads its knobs from a `Theme` extension (`Theme.Button`,
+`Theme.TextInput`, …) and re-applies them on **every** style pass, so a colour or border
+set on the element itself does not stick — see "The theme owns the box" in
+[ELEMENTS.md](ELEMENTS.md#3-textinputelement). Override the extension instead:
+
+```csharp
+app.Theme = Theme.Dark
+    .With(new ButtonTheme { Secondary = new() { Border = brand } })
+    .With(new DropdownTheme { BorderWidth = 1.5f });
+```
+
+Where a colour is nullable, null means "the palette's answer", so an override of one
+knob keeps the rest. A border is the most common thing to want, and every control that
+draws one exposes it:
+
+| Extension | Colour | Width | Notes |
+|---|---|---|---|
+| `ButtonTheme` | per variant: `Border`, `HoverBorder` | `BorderWidth` (all variants) | see [ButtonElement](ELEMENTS.md#18-buttonelement) |
+| `TextInputTheme` | `BorderColor`, `FocusBorderColor`, `UnderlineColor` | `BorderWidth`, `UnderlineThickness` | shared by `TextArea` |
+| `DropdownTheme` | `BorderColor` | `BorderWidth`, `FocusBorderWidth` | also the box of `DatePicker`, `TimePicker`, `NumericUpDown` |
+| `CheckboxTheme`, `RadioButtonTheme` | `BorderColor` | `BorderWidth` (null keeps the element's 2px) | |
+| `ToggleSwitchTheme` | `OffBorder` | `OffBorderWidth` | the off state is outlined, the on state filled |
+| `SliderTheme` | `ThumbBorderColor` | `ThumbBorderWidth` | |
+| `ContextMenuTheme` | `BorderColor` | `BorderWidth` | the open list of a dropdown too |
+| `CalendarTheme` | `BorderColor` | `BorderWidth` | the open calendar of a date picker |
+| `ToastTheme` | `Border` | `BorderWidth` | |
+| `TooltipTheme` | `BorderColor` (null: none) | `BorderWidth` | |
+
+`ProgressBarTheme`, `SpinnerTheme` and `SplitterTheme` draw no border. `FocusVisualTheme`
+is the two-ring focus indicator, not a border, and is drawn outside the control.
+
 ## Adding a scheme
 
 Add a `NamedTheme` to `ThemeCatalog` and put it in `All`. Transcribe the scheme's published

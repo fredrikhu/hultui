@@ -7,11 +7,22 @@ namespace HultUI.Core.Elements;
 
 public enum ButtonVariant
 {
+    /// <summary>Filled with the primary colour: the one action a view is for.</summary>
     Primary,
+    /// <summary>Outlined on no fill: every other button in a row of them.</summary>
     Secondary,
+    /// <summary>Filled with the danger colour: deletes and discards.</summary>
     Danger,
+    /// <summary>Neither fill nor border until hovered: toolbar and inline actions.</summary>
+    Ghost,
 }
 
+/// <summary>
+/// A push button. Its look comes entirely from <see cref="ButtonTheme"/> and the palette —
+/// fill, border and label per <see cref="Variant"/>, one padding, radius, font and border
+/// width for all of them — and is re-imposed on every style pass, so style the theme, not
+/// the instance.
+/// </summary>
 public class ButtonElement : BoxElement
 {
     private ButtonVariant _variant = ButtonVariant.Primary;
@@ -21,6 +32,8 @@ public class ButtonElement : BoxElement
     private Color _baseColor;
     private Color _hoverColor;
     private Color _pressedColor;
+    private Color _borderBase;
+    private Color _borderHover;
     private Color _textColor;
     private Color _focusRingColor;
 
@@ -46,6 +59,17 @@ public class ButtonElement : BoxElement
                 ReplaceChildren(TextElement.New(value));
         }
     }
+
+    /// <summary>The resolved rest fill, after the theme and palette have had their say.</summary>
+    public Color ResolvedBackground => _baseColor;
+    /// <summary>The resolved hover fill.</summary>
+    public Color ResolvedHoverBackground => _hoverColor;
+    /// <summary>The resolved pressed fill.</summary>
+    public Color ResolvedPressedBackground => _pressedColor;
+    /// <summary>The resolved rest border colour; transparent for a variant with no visible border.</summary>
+    public Color ResolvedBorder => _borderBase;
+    /// <summary>The resolved label colour.</summary>
+    public Color ResolvedText => _textColor;
 
     public ButtonElement()
     {
@@ -107,21 +131,31 @@ public class ButtonElement : BoxElement
         var bt = theme.Button;
         CornerRadius = bt.CornerRadius;
         Box.Padding = bt.Padding;
+        Box.BorderWidth = bt.BorderWidth;
         Inherited.FontSize = bt.FontSize;
         Inherited.FontWeight = bt.FontWeight;
         _focusRingColor = theme.FocusRing;
 
-        // Resolve variant colors from theme semantic colors
-        (_baseColor, _textColor) = _variant switch
-        {
-            ButtonVariant.Primary => (theme.Primary, theme.PrimaryText),
-            ButtonVariant.Secondary => (theme.Secondary, theme.SecondaryText),
-            ButtonVariant.Danger => (theme.Danger, theme.DangerText),
-            _ => (theme.Primary, theme.PrimaryText),
-        };
+        var v = bt.For(_variant);
 
-        _hoverColor = DarkenColor(_baseColor, bt.HoverDarken);
-        _pressedColor = DarkenColor(_baseColor, bt.PressedDarken);
+        // The palette's answer for each variant, then whatever the variant theme overrides.
+        var (fill, border, text) = _variant switch
+        {
+            ButtonVariant.Secondary => (Color.Transparent, theme.Border, theme.TextColor),
+            ButtonVariant.Danger => (theme.Danger, Color.Transparent, theme.DangerText),
+            ButtonVariant.Ghost => (Color.Transparent, Color.Transparent, theme.Primary),
+            _ => (theme.Primary, Color.Transparent, theme.PrimaryText),
+        };
+        _baseColor = v.Background ?? fill;
+        _borderBase = v.Border ?? border;
+        _textColor = v.Text ?? text;
+        _borderHover = v.HoverBorder ?? _borderBase;
+
+        // A filled button darkens under the pointer; an unfilled one takes a wash of its
+        // own text colour, which is what reads as "the same button, lit" on any ground.
+        bool filled = _baseColor.A > 0;
+        _hoverColor = v.HoverBackground ?? (filled ? Darken(_baseColor, bt.HoverDarken) : Tint(_textColor, bt.HoverTint));
+        _pressedColor = v.PressedBackground ?? (filled ? Darken(_baseColor, bt.PressedDarken) : Tint(_textColor, bt.PressedTint));
 
         Inherited.TextColor = _textColor;
         UpdateVisualState();
@@ -146,14 +180,17 @@ public class ButtonElement : BoxElement
     private void UpdateVisualState()
     {
         BackgroundColor = _pressed ? _pressedColor : _hovered ? _hoverColor : _baseColor;
+        BorderColor = _hovered || _pressed ? _borderHover : _borderBase;
         MarkPaintDirty();
     }
 
-    private static Color DarkenColor(Color c, float factor) => new(
+    private static Color Darken(Color c, float factor) => new(
         (byte)(c.R * factor),
         (byte)(c.G * factor),
         (byte)(c.B * factor),
         c.A);
+
+    private static Color Tint(Color c, float alpha) => new(c.R, c.G, c.B, (byte)Math.Clamp(alpha * 255f, 0f, 255f));
 
     internal override void PatchFrom(Element source)
     {

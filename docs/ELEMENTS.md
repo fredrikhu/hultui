@@ -1084,3 +1084,60 @@ measures a *sample* date so a numeric format never resizes, but a long format
 repaint alone would clip it. Its `Value` setter marks layout for that reason; the time
 picker's digits are fixed-width, so its `Value` only repaints. Copy the distinction in
 any custom field whose text changes its width.
+
+---
+
+## 18. ButtonElement
+
+A push button. Extends `BoxElement`; focusable, activates on Enter or Space, shows a
+focus ring, sets the pointer cursor. Its whole look comes from `Theme.Button` and the
+palette, and is re-imposed on every style pass — **style the theme, not the instance**.
+
+**Builder:**
+
+```csharp
+Button.New("Save")                                   // Primary
+Button.New("Cancel", ButtonVariant.Secondary)
+Button.New("Delete", ButtonVariant.Danger)
+Button.New("More…", ButtonVariant.Ghost)
+    .OnClick(_ => ...)
+    .Variant(ButtonVariant.Secondary)                // fluent form
+```
+
+| Variant | Fill | Border | Label | For |
+|---|---|---|---|---|
+| `Primary` | `Primary` | none | `PrimaryText` | the one action a view is for |
+| `Secondary` | none | `Border` | `TextColor` | every other button in a row of them |
+| `Danger` | `Danger` | none | `DangerText` | deletes and discards |
+| `Ghost` | none | none | `Primary` | toolbar and inline actions |
+
+Under the pointer a filled variant darkens (`HoverDarken`, `PressedDarken`); an unfilled
+one takes a wash of its own label colour (`HoverTint`, `PressedTint`), which reads as
+"the same button, lit" on any ground.
+
+**`ButtonTheme`** carries what every variant shares — `CornerRadius`, `Padding`,
+`FontSize`, `FontWeight`, **`BorderWidth`** — and one `ButtonVariantTheme` per variant
+(`Primary`, `Secondary`, `Danger`, `Ghost`) with nullable `Background`, `HoverBackground`,
+`PressedBackground`, `Border`, `HoverBorder` and `Text`. Null means "what the palette
+says for this variant", so a one-knob override keeps the rest:
+
+```csharp
+app.Theme = Theme.Dark.With(new ButtonTheme
+{
+    BorderWidth = new Thickness(1.5f),
+    Secondary = new ButtonVariantTheme { Border = brand, Text = brand },
+});
+```
+
+**The border width is shared by every variant, and a variant with no visible border
+carries it transparent.** Layout reads the width regardless of colour and a fully
+transparent border is not drawn, so a button that changes variant — a tab going
+active, a toggle going primary — never moves its neighbours. The same idea as
+[Outline](LAYOUT.md#12-outline-not-a-conditional-border), applied inside one control.
+
+`Label` reads and writes the text child. `ResolvedBackground`, `ResolvedBorder`,
+`ResolvedText` and the hover/pressed pair expose what the theme resolved to, for tests.
+
+The framework's own `Dialog.Confirm` and `Dialog.Alert` build their actions from this
+element — cancel is `Secondary`, the confirming action `Primary`, and a destructive one
+`Danger` — so a themed app's dialogs match its buttons without any work.

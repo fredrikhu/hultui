@@ -28,6 +28,10 @@ public sealed class SliderTheme : IThemeExtension<SliderTheme>
     /// sets nothing here looks exactly as it did before this type existed.</summary>
     public Color? ThumbBorderColor { get; init; }
 
+    /// <summary>Width of that ring. A colour, not a size, in the sense the type remarks mean:
+    /// it changes no layout, so it is safe to re-impose every pass.</summary>
+    public float ThumbBorderWidth { get; init; } = 2f;
+
     /// <summary>
     /// The built-in defaults are literal rather than derived from the palette: they are the
     /// values this control already shipped with, and deriving them here would repaint every

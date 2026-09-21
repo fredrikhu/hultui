@@ -2293,6 +2293,8 @@ public sealed class Window : IOverlayHost, IDisposable
             .Background(tt.Background)
             .CornerRadius(tt.CornerRadius)
             .Padding(tt.Padding)
+            .BorderColor(tt.BorderColor ?? Color.Transparent)
+            .BorderWidth(tt.BorderColor is null ? 0f : tt.BorderWidth)
             .Children(
                 TextElement.New(text)
                     .FontSize(tt.FontSize)

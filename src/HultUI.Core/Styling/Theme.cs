@@ -193,6 +193,9 @@ public sealed class TooltipTheme : IThemeExtension<TooltipTheme>
 {
     public Color Background { get; init; } = new(15, 23, 42);       // slate-900
     public Color TextColor { get; init; } = new(248, 250, 252);     // slate-50
+    /// <summary>Outline of the bubble. Null draws none, which is what tooltips have always done.</summary>
+    public Color? BorderColor { get; init; }
+    public float BorderWidth { get; init; } = 1f;
     public float CornerRadius { get; init; } = 4f;
     public Thickness Padding { get; init; } = new(6, 10);
     public float FontSize { get; init; } = 13f;

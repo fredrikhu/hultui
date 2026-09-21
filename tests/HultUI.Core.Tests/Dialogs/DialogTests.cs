@@ -55,6 +55,43 @@ public class DialogTests
         });
     }
 
+    [Fact]
+    public void Confirm_UsesTheFrameworkButtons_SecondaryToCancelAndPrimaryToConfirm()
+    {
+        var host = new FakeOverlayHost();
+        _ = Dialog.Confirm(host, "Delete?", "This cannot be undone.");
+
+        var buttons = Descendants(host.Shown!).OfType<ButtonElement>().ToList();
+        Assert.Equal(2, buttons.Count);
+        Assert.Equal(ButtonVariant.Secondary, buttons[0].Variant);
+        Assert.Equal("Cancel", buttons[0].Label);
+        Assert.Equal(ButtonVariant.Primary, buttons[1].Variant);
+        Assert.Equal("OK", buttons[1].Label);
+    }
+
+    [Fact]
+    public async Task Confirm_Destructive_MakesTheConfirmingButtonDanger_AndItCloses()
+    {
+        var host = new FakeOverlayHost();
+        var task = Dialog.Confirm(host, "Delete?", "Gone for good.", destructive: true);
+
+        var confirm = Descendants(host.Shown!).OfType<ButtonElement>().Last();
+        Assert.Equal(ButtonVariant.Danger, confirm.Variant);
+
+        HultUI.Core.Events.EventDispatcher.Dispatch(new HultUI.Core.Events.ClickEvent(), confirm);
+        Assert.True(host.Closed);
+        Assert.True(await task);
+    }
+
+    private static IEnumerable<Element> Descendants(Element e)
+    {
+        foreach (var c in e.Children)
+        {
+            yield return c;
+            foreach (var d in Descendants(c)) yield return d;
+        }
+    }
+
     private sealed class FakeOverlayHost : IOverlayHost
     {
         public Element? Shown { get; private set; }

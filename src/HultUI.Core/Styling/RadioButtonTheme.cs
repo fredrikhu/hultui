@@ -6,6 +6,9 @@ public sealed class RadioButtonTheme : IThemeExtension<RadioButtonTheme>
 {
     public float Size { get; init; } = 18f;
     public Color? BorderColor { get; init; }
+    /// <summary>Stroke of the unselected ring. Null keeps the element's own
+    /// <see cref="Elements.RadioButtonElement.BorderWidth"/> (2px).</summary>
+    public float? BorderWidth { get; init; }
     public Color? SelectedColor { get; init; }
     public Color? DotColor { get; init; }
 

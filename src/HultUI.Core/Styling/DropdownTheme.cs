@@ -17,6 +17,10 @@ public sealed class DropdownTheme : IThemeExtension<DropdownTheme>
     public Color PlaceholderTextColor { get; init; } = new(148, 163, 184); // slate-400
     public Color ChevronColor { get; init; } = new(100, 116, 139);       // slate-500
     public float CornerRadius { get; init; } = 6f;
+    /// <summary>Border at rest, for the dropdown and every field that borrows this box.</summary>
+    public float BorderWidth { get; init; } = 1f;
+    /// <summary>Border while focused, drawn in the theme's focus ring colour.</summary>
+    public float FocusBorderWidth { get; init; } = 1.5f;
     public Thickness Padding { get; init; } = new(6, 10);
     public float FontSize { get; init; } = 13f;
     public float MinWidth { get; init; } = 120f;

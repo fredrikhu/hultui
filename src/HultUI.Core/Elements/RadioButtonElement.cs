@@ -41,6 +41,7 @@ public class RadioButtonElement : Element
         var rt = theme.RadioButton;
         RadioSize = rt.Size;
         CircleColor = rt.BorderColor ?? theme.Border;
+        if (rt.BorderWidth is { } bw) BorderWidth = bw;
         CheckedColor = rt.SelectedColor ?? theme.Primary;
         DotColor = rt.DotColor ?? Color.White;
         _focusRingColor = theme.FocusRing;

@@ -212,7 +212,7 @@ internal sealed class ContextMenuElement : Element
 
         // Draw background + border
         ctx.DrawRoundedRect(box, new CornerRadius(_theme.CornerRadius),
-            _theme.Background, _theme.BorderColor, new Thickness(1));
+            _theme.Background, _theme.BorderColor, new Thickness(_theme.BorderWidth));
 
         // Build item layout arrays
         if (_itemYOffsets.Length != _items.Count)

@@ -13,6 +13,7 @@ public sealed class ContextMenuTheme : IThemeExtension<ContextMenuTheme>
     public Color SeparatorColor { get; init; } = new(226, 232, 240);    // slate-200
     public Color ShortcutTextColor { get; init; } = new(148, 163, 184); // slate-400
     public float CornerRadius { get; init; } = 6f;
+    public float BorderWidth { get; init; } = 1f;
     public Thickness Padding { get; init; } = new(4, 0);
     public Thickness ItemPadding { get; init; } = new(6, 12);
     public float FontSize { get; init; } = 13f;

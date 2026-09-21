@@ -14,6 +14,7 @@ public sealed class CalendarTheme : IThemeExtension<CalendarTheme>
 {
     public Color Background { get; init; } = Color.White;
     public Color BorderColor { get; init; } = new(226, 232, 240);          // slate-200
+    public float BorderWidth { get; init; } = 1f;
     public Color TextColor { get; init; } = new(15, 23, 42);               // slate-900
     /// <summary>Days belonging to the neighbouring months, and the weekday headings.</summary>
     public Color MutedTextColor { get; init; } = new(148, 163, 184);       // slate-400

@@ -172,7 +172,8 @@ partial class ThemingDemo : Component
                         Flex.Row(gap: 8).FlexWrap(FlexWrap.Wrap).Children(
                             Button.New("Primary"),
                             Button.New("Secondary", ButtonVariant.Secondary),
-                            Button.New("Danger", ButtonVariant.Danger)
+                            Button.New("Danger", ButtonVariant.Danger),
+                            Button.New("Ghost", ButtonVariant.Ghost)
                         )
                     ),
 

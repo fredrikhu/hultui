@@ -392,7 +392,7 @@ public class CalendarElement : Element
     {
         var box = Layout.AbsoluteBorderBox;
         ctx.DrawRoundedRect(box, new CornerRadius(_theme.CornerRadius), _theme.Background,
-            _theme.BorderColor, new Thickness(1f));
+            _theme.BorderColor, new Thickness(_theme.BorderWidth));
 
         var content = Layout.AbsoluteContentBox;
         var pad = _theme.Padding;

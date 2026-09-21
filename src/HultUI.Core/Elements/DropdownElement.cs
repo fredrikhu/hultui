@@ -41,6 +41,8 @@ public class DropdownElement : Element
 
     private Color _background = Color.White;
     private Color _borderColor = new(226, 232, 240);
+    private float _borderWidth = 1f;
+    private float _focusBorderWidth = 1.5f;
     private Color _textColor = new(15, 23, 42);
     private Color _placeholderColor = new(148, 163, 184);
     private Color _chevronColor = new(100, 116, 139);
@@ -141,6 +143,8 @@ public class DropdownElement : Element
         var dt = theme.Dropdown;
         _background = dt.Background;
         _borderColor = dt.BorderColor;
+        _borderWidth = dt.BorderWidth;
+        _focusBorderWidth = dt.FocusBorderWidth;
         _textColor = dt.TextColor;
         _placeholderColor = dt.PlaceholderTextColor;
         _chevronColor = dt.ChevronColor;
@@ -319,7 +323,7 @@ public class DropdownElement : Element
 
         ctx.DrawRoundedRect(box, radius, _background,
             _focused ? _focusRingColor : _borderColor,
-            new Thickness(_focused ? 1.5f : 1f));
+            new Thickness(_focused ? _focusBorderWidth : _borderWidth));
 
         var style = ResolvedInherited with
         {

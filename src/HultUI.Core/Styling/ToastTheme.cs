@@ -15,6 +15,7 @@ public sealed class ToastTheme : IThemeExtension<ToastTheme>
     public Color? Background { get; init; }
     /// <summary>Pill outline; null takes the theme's border.</summary>
     public Color? Border { get; init; }
+    public float BorderWidth { get; init; } = 1f;
     /// <summary>Message colour; null takes the theme's text colour.</summary>
     public Color? TextColor { get; init; }
     /// <summary>The action verb's colour; null takes the theme's primary.</summary>

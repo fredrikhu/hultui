@@ -69,8 +69,8 @@ public static class Dialog
         {
             var theme = host.ActiveTheme ?? Theme.Light;
             return MessagePanel(theme, title, message,
-                Button(theme, cancelText, ButtonKind.Neutral, () => ctrl.Close(false)),
-                Button(theme, confirmText, destructive ? ButtonKind.Danger : ButtonKind.Primary, () => ctrl.Close(true)));
+                Button(cancelText, ButtonVariant.Secondary, () => ctrl.Close(false)),
+                Button(confirmText, destructive ? ButtonVariant.Danger : ButtonVariant.Primary, () => ctrl.Close(true)));
         }, options)!;
     }
 
@@ -82,7 +82,7 @@ public static class Dialog
         {
             var theme = host.ActiveTheme ?? Theme.Light;
             return MessagePanel(theme, title, message,
-                Button(theme, okText, ButtonKind.Primary, () => ctrl.Close(true)));
+                Button(okText, ButtonVariant.Primary, () => ctrl.Close(true)));
         }, options);
     }
 
@@ -101,29 +101,17 @@ public static class Dialog
                 actions));
     }
 
-    private enum ButtonKind { Neutral, Primary, Danger }
-
-    private static Element Button(Theme theme, string label, ButtonKind kind, Action onClick)
+    /// <summary>
+    /// The framework's own button, so a dialog's actions look like the app's and take the
+    /// app's <see cref="ButtonTheme"/>: cancel is the outlined secondary, the confirming
+    /// action primary, and a destructive one danger.
+    /// </summary>
+    private static Element Button(string label, ButtonVariant variant, Action onClick)
     {
-        var (bg, fg) = kind switch
-        {
-            ButtonKind.Danger => (theme.Danger, theme.DangerText),
-            ButtonKind.Primary => (theme.Primary, theme.PrimaryText),
-            _ => (theme.SurfaceVariant, theme.TextColor),
-        };
-
-        var btn = Box.New()
-            .Padding(new Thickness(8, 16, 8, 16)).CornerRadius(8f)
-            .Background(bg).Cursor(CursorType.Pointer)
-            .OnHover(b => b.Background(Darken(bg)))
-            .Transition(TransitionProperty.Background, 120f)
-            .Children(Text.New(label).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(fg));
-
+        var btn = Builders.Button.New(label, variant);
         btn.On<ClickEvent>(e => { e.StopPropagation = true; onClick(); });
         return btn;
     }
-
-    private static Color Darken(Color c) => new((byte)(c.R * 0.85f), (byte)(c.G * 0.85f), (byte)(c.B * 0.85f), c.A);
 
     private sealed class DialogController<TResult> : IDialogController<TResult>
     {

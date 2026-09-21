@@ -25,6 +25,7 @@ public class SliderElement : Element, IRangeValueElement
     private Color _fillColor = new(66, 135, 245);
     private Color _thumbColor = Color.White;
     private Color _thumbBorderColor = new(66, 135, 245);
+    private float _thumbBorderWidth = 2f;
     private Color _focusRingColor = new(66, 135, 245);
 
     public double Minimum { get => _min; set { _min = value; Value = _value; } }
@@ -92,6 +93,7 @@ public class SliderElement : Element, IRangeValueElement
         _trackColor = st.TrackColor ?? theme.Border;
         _thumbColor = st.ThumbColor ?? Color.White;
         _thumbBorderColor = st.ThumbBorderColor ?? _fillColor;
+        _thumbBorderWidth = st.ThumbBorderWidth;
     }
 
     private double Clamp(double v)
@@ -137,7 +139,7 @@ public class SliderElement : Element, IRangeValueElement
 
         float thumbX = trackLeft + trackWidth * t;
         var thumbRect = new Rect(thumbX - ThumbRadius, cy - ThumbRadius, ThumbRadius * 2, ThumbRadius * 2);
-        ctx.DrawRoundedRect(thumbRect, new CornerRadius(ThumbRadius), _thumbColor, _thumbBorderColor, new Thickness(2f));
+        ctx.DrawRoundedRect(thumbRect, new CornerRadius(ThumbRadius), _thumbColor, _thumbBorderColor, new Thickness(_thumbBorderWidth));
 
         if (_focused)
         {

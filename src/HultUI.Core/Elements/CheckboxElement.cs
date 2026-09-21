@@ -40,6 +40,7 @@ public class CheckboxElement : Element
         CheckboxSize = ct.Size;
         CornerRadius = ct.CornerRadius.TopLeft; // uniform
         BoxColor = ct.BorderColor ?? theme.Border;
+        if (ct.BorderWidth is { } bw) BorderWidth = bw;
         CheckedColor = ct.CheckedBackground ?? theme.Primary;
         CheckmarkColor = ct.CheckMarkColor ?? Color.White;
         _focusRingColor = theme.FocusRing;

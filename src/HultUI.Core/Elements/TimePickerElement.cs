@@ -500,7 +500,7 @@ public class TimePickerElement : Element
         var box = Layout.AbsoluteBorderBox;
         ctx.DrawRoundedRect(box, new CornerRadius(_boxTheme.CornerRadius), _boxTheme.Background,
             _focused ? _focusRingColor : _boxTheme.BorderColor,
-            new Thickness(_focused ? 1.5f : 1f));
+            new Thickness(_focused ? _boxTheme.FocusBorderWidth : _boxTheme.BorderWidth));
 
         var content = Layout.AbsoluteContentBox;
         var baseStyle = ResolvedInherited with

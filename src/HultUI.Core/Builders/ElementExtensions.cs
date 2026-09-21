@@ -191,6 +191,9 @@ public static class ElementExtensions
     // ──── RadioButton properties ────
     public static T OnRadioChanged<T>(this T el, Action<bool> handler) where T : RadioButtonElement { el.OnChanged = handler; return el; }
 
+    // ButtonElement
+    public static T Variant<T>(this T el, ButtonVariant variant) where T : ButtonElement { el.Variant = variant; return el; }
+
     // ──── Identity ────
     /// <summary>
     /// A developer-facing label for this element. It shows in the inspector as
