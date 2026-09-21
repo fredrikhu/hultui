@@ -379,19 +379,8 @@ public partial class CommanderApp
         return footer;
     }
 
-    private Element RenamePrimary(int n, bool enabled)
-    {
-        var b = Box.New().Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusSm)
-            .BorderColor(enabled ? Nocturne.Accent : Nocturne.Neutral700).BorderWidth(1f)
-            .Children(Text.New($"Rename {n} file{(n == 1 ? "" : "s")}").FontSize(12f)
-                .TextColor(enabled ? Nocturne.Accent200 : Nocturne.Neutral600));
-        if (enabled)
-        {
-            b.Cursor(CursorType.Pointer).OnClick(_ => CommitRename());
-            return b.HoverBg(Nocturne.Alpha(Nocturne.Accent500, 0.10), Color.Transparent);
-        }
-        return b.Opacity(0.45f);
-    }
+    private Element RenamePrimary(int n, bool enabled) =>
+        Ui.PrimaryButton($"Rename {n} file{(n == 1 ? "" : "s")}", null, CommitRename, enabled, 12f);
 
     private void ResetRename()
     {
@@ -474,11 +463,7 @@ public partial class CommanderApp
         footer.AddChild(Ui.Mono($"showing {fails.Count} failed", 10.5f, Nocturne.On(0.45)));
         footer.AddChild(Box.New().FlexGrow(1));
         footer.AddChild(SecondaryButton("Close", CloseOverlays));
-        var retry = Box.New().Cursor(CursorType.Pointer).Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusSm)
-            .BorderColor(Nocturne.Accent).BorderWidth(1f)
-            .Children(Text.New($"Retry {fails.Count} failed").FontSize(12f).TextColor(Nocturne.Accent200));
-        retry.OnClick(_ => RetryRename());
-        footer.AddChild(retry.HoverBg(Nocturne.Alpha(Nocturne.Accent500, 0.10), Color.Transparent));
+        footer.AddChild(Ui.PrimaryButton($"Retry {fails.Count} failed", null, RetryRename, fontSize: 12f));
         card.AddChild(footer);
         return Backdrop(card, topAligned: true, topPad: 46f);
     }

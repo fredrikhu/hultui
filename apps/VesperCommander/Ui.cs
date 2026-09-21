@@ -74,62 +74,47 @@ public static class Ui
         el.OnHover(b => b.BackgroundColor = hover);
 
     // ── Buttons ──────────────────────────────────────────────────────────
-    // The shared button family (mirrors Junction's Ui.*): a rounded pill with an
-    // optional leading glyph and a tinted hover. Primary = accent outline,
-    // Secondary = neutral outline, Ghost = borderless, Danger = mark-red outline.
-    // A disabled button dims its foreground and drops its hover + click.
-    private static BoxElement BtnBase(Action onClick, bool enabled)
+    // The framework's ButtonElement, in the families Nocturne.ToHultTheme() gives its
+    // ButtonTheme (mirrors Junction's Ui.*): Primary = accent outline, Secondary =
+    // neutral outline, Ghost = borderless, Danger = mark-red outline. Chrome, hover,
+    // focus, keyboard activation, the disabled state and the accessibility role are the
+    // element's; these helpers add Vesper's content — an optional leading glyph beside a
+    // label at the caller's size — and pass `enabled` through.
+
+    /// <summary>The glyph colour of each family: what the label is drawn in, which the icon
+    /// cannot inherit the way text does.</summary>
+    private static Color ButtonForeground(ButtonVariant variant) => variant switch
     {
-        var b = Flex.Row(gap: 6).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Padding(new Thickness(5, 12, 5, 12)).CornerRadius(Nocturne.RadiusMd)
-            .Cursor(enabled ? CursorType.Pointer : CursorType.Default);
-        if (enabled) b.OnClick(_ => onClick());
+        ButtonVariant.Secondary => Nocturne.Text,
+        ButtonVariant.Danger => Nocturne.MarkRed,
+        _ => Nocturne.Accent,
+    };
+
+    private static ButtonElement Btn(ButtonVariant variant, string? icon, string label, float fontSize,
+        Action onClick, bool enabled)
+    {
+        var b = Button.New(variant).Gap(6).Enabled(enabled);
+        if (icon != null) b.AddChild(Icon(icon, fontSize + 1, ButtonForeground(variant)));
+        b.AddChild(Text.New(label).FontSize(fontSize));
+        b.OnClick(_ => onClick());
         return b;
     }
 
-    private static void Fill(BoxElement b, string? icon, string label, float fontSize, Color fg)
-    {
-        if (icon != null) b.AddChild(Icon(icon, fontSize + 1, fg));
-        b.AddChild(Text.New(label).FontSize(fontSize).FontWeight(FontWeight.Medium).TextColor(fg));
-    }
+    public static ButtonElement PrimaryButton(string label, string? icon, Action onClick,
+        bool enabled = true, float fontSize = 12.5f) =>
+        Btn(ButtonVariant.Primary, icon, label, fontSize, onClick, enabled);
 
-    public static BoxElement PrimaryButton(string label, string? icon, Action onClick,
-        bool enabled = true, float fontSize = 12.5f)
-    {
-        var fg = enabled ? Nocturne.Accent : Nocturne.On(0.30);
-        var b = BtnBase(onClick, enabled)
-            .BorderColor(enabled ? Nocturne.Accent : Nocturne.On(0.18)).BorderWidth(1f);
-        Fill(b, icon, label, fontSize, fg);
-        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.12), Color.Transparent) : b;
-    }
+    public static ButtonElement SecondaryButton(string label, string? icon, Action onClick,
+        bool enabled = true, float fontSize = 12.5f) =>
+        Btn(ButtonVariant.Secondary, icon, label, fontSize, onClick, enabled);
 
-    public static BoxElement SecondaryButton(string label, string? icon, Action onClick,
-        bool enabled = true, float fontSize = 12.5f)
-    {
-        var fg = enabled ? Nocturne.Text : Nocturne.On(0.30);
-        var b = BtnBase(onClick, enabled).BorderColor(Nocturne.Divider).BorderWidth(1f);
-        Fill(b, icon, label, fontSize, fg);
-        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent) : b;
-    }
+    public static ButtonElement GhostButton(string label, string? icon, Action onClick,
+        bool enabled = true, float fontSize = 12f) =>
+        Btn(ButtonVariant.Ghost, icon, label, fontSize, onClick, enabled);
 
-    public static BoxElement GhostButton(string label, string? icon, Action onClick,
-        bool enabled = true, float fontSize = 12f)
-    {
-        var fg = enabled ? Nocturne.Accent : Nocturne.On(0.30);
-        var b = BtnBase(onClick, enabled);
-        Fill(b, icon, label, fontSize, fg);
-        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.10), Color.Transparent) : b;
-    }
-
-    public static BoxElement DangerButton(string label, string? icon, Action onClick,
-        bool enabled = true, float fontSize = 12.5f)
-    {
-        var fg = enabled ? Nocturne.MarkRed : Nocturne.On(0.30);
-        var b = BtnBase(onClick, enabled)
-            .BorderColor(enabled ? Nocturne.MarkRed : Nocturne.On(0.18)).BorderWidth(1f);
-        Fill(b, icon, label, fontSize, fg);
-        return enabled ? b.HoverBg(Nocturne.Alpha(Nocturne.MarkRed, 0.12), Color.Transparent) : b;
-    }
+    public static ButtonElement DangerButton(string label, string? icon, Action onClick,
+        bool enabled = true, float fontSize = 12.5f) =>
+        Btn(ButtonVariant.Danger, icon, label, fontSize, onClick, enabled);
 
     /// <summary>A dialog-header app-mark: a 34px accent-800 tile with an accent-200
     /// glyph — Junction's modal-header idiom, so titled dialogs read as one family.</summary>
@@ -139,16 +124,27 @@ public static class Ui
             .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
             .Children(Icon(icon, 16f, Nocturne.Accent200));
 
-    /// <summary>A square icon-only button with a hairline border (Junction's IconButton).</summary>
-    public static BoxElement IconButton(string icon, Action onClick, string? tooltip = null, float size = 34f)
+    /// <summary>
+    /// The square icon-button shape at one size: a fixed box, no padding, the secondary
+    /// family's hairline. One instance per size, because <see cref="ButtonElement.Style"/>
+    /// compares by reference and a fresh object every build would be a style pass every build.
+    /// </summary>
+    private static readonly Dictionary<float, ButtonStyle> IconStyles = new();
+
+    private static ButtonStyle IconStyle(float size)
     {
-        var b = Flex.Row(gap: 0).Width(size).Height(size)
-            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .CornerRadius(Nocturne.RadiusMd).BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .Cursor(CursorType.Pointer);
+        if (!IconStyles.TryGetValue(size, out var style))
+            IconStyles[size] = style = new ButtonStyle { Size = size, Padding = new Thickness(0) };
+        return style;
+    }
+
+    /// <summary>A square icon-only button with a hairline border (Junction's IconButton).</summary>
+    public static ButtonElement IconButton(string icon, Action onClick, string? tooltip = null, float size = 34f)
+    {
+        var b = Button.New(ButtonVariant.Secondary).Style(IconStyle(size));
         if (tooltip != null) b.Tooltip(tooltip);
         b.AddChild(Icon(icon, 15f, Nocturne.Text));
         b.OnClick(_ => onClick());
-        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+        return b;
     }
 }

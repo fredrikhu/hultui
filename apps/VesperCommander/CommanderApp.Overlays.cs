@@ -182,16 +182,16 @@ public partial class CommanderApp
     // ── Buttons (footer / detail actions) ────────────────────────────────
     // Thin adapters over the shared Ui.* button family so every call site here and
     // across the app renders one consistent, Junction-matching button set.
-    private static BoxElement GhostButton(string label, Action onClick, bool enabled = true)
+    private static ButtonElement GhostButton(string label, Action onClick, bool enabled = true)
         => Ui.GhostButton(label, null, onClick, enabled);
 
-    private static BoxElement SecondaryButton(string label, Action onClick)
+    private static ButtonElement SecondaryButton(string label, Action onClick)
         => Ui.SecondaryButton(label, null, onClick);
 
-    private static BoxElement PrimaryButton(string label, Action onClick)
+    private static ButtonElement PrimaryButton(string label, Action onClick)
         => Ui.PrimaryButton(label, null, onClick);
 
-    private static BoxElement DangerButton(string label, Action onClick)
+    private static ButtonElement DangerButton(string label, Action onClick)
         => Ui.DangerButton(label, null, onClick);
 
     // The single dialog frame: a raised Surface panel with a hairline Neutral700
