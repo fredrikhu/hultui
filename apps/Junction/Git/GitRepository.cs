@@ -659,12 +659,12 @@ public class GitRepository
     }
 
     /// <summary>Staged files (index vs HEAD) with per-file added/deleted counts.</summary>
-    public List<GitFileChange> GetStagedChanges() => GetChangeList(cached: true, includeUntracked: false);
+    public List<GitFileChange> GetStagedChanges() => GetChangeList(cached: true, workingTree: false);
 
     /// <summary>Unstaged files (working tree vs index) with counts, plus untracked files.</summary>
-    public List<GitFileChange> GetUnstagedChanges() => GetChangeList(cached: false, includeUntracked: true);
+    public List<GitFileChange> GetUnstagedChanges() => GetChangeList(cached: false, workingTree: true);
 
-    private List<GitFileChange> GetChangeList(bool cached, bool includeUntracked)
+    private List<GitFileChange> GetChangeList(bool cached, bool workingTree)
     {
         string[] statusArgs = cached
             ? ["diff", "--cached", "--name-status", "-M"]
@@ -674,15 +674,56 @@ public class GitRepository
             : ["diff", "--numstat", "-M"];
 
         var list = QueryFileChanges(statusArgs, numArgs);
-
-        if (includeUntracked)
-        {
-            foreach (var line in Query("status", "--porcelain=v1", "-uall").Lines)
-                if (line.Length >= 4 && line[0] == '?' && line[1] == '?')
-                    list.Add(new GitFileChange(line[3..], null, FileChangeKind.Untracked, 0, 0));
-        }
-
+        if (workingTree) AddStatusOnlyChanges(list);
         return list;
+    }
+
+    /// <summary>
+    /// Folds <c>git status</c> into a working-tree diff list: the untracked files, which no
+    /// diff reports, and the files status calls modified that the diff had nothing to say
+    /// about.
+    ///
+    /// <para>Those two commands disagree more often than it looks. status trusts the file
+    /// size cached in the index and answers "modified" as soon as it differs; diff goes to
+    /// the file and compares its cleaned contents. Any filter that changes a file's length
+    /// — the CRLF conversion above all — can leave a file whose bytes on disk are a
+    /// different length from the ones checked out and whose cleaned content is the
+    /// committed blob exactly. status then reports it modified on every run and diff
+    /// reports nothing, for as long as the file sits there.</para>
+    ///
+    /// <para>The badge on the Changes tab counts status, so dropping these gave a
+    /// repository that advertised a change and then showed an empty list. They are listed
+    /// as ordinary changes with no line counts: staging one is <c>git add</c>, which
+    /// rewrites the cached size and is exactly the cure.</para>
+    /// </summary>
+    private void AddStatusOnlyChanges(List<GitFileChange> list)
+    {
+        var seen = list.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+        foreach (var line in Query("status", "--porcelain=v1", "-uall").Lines)
+        {
+            if (line.Length < 4) continue;
+            var xy = line[..2];
+            var path = line[3..];
+            // "R  old -> new": the diff keyed this entry by its new path, and so must we,
+            // or the rename comes back a second time as a modification of "old -> new".
+            if (path.Contains(" -> ", StringComparison.Ordinal))
+                path = path.Split(" -> ", 2)[1];
+
+            if (xy == "??")
+            {
+                if (seen.Add(path))
+                    list.Add(new GitFileChange(path, null, FileChangeKind.Untracked, 0, 0));
+                continue;
+            }
+
+            // A space in the worktree column means the change is staged and belongs to the
+            // other list; unmerged entries get their own section, from GetConflictedFiles.
+            if (xy[1] == ' ' || ParseStatusCode(xy) == FileChangeKind.Conflicted) continue;
+            if (!seen.Add(path)) continue;
+            // The worktree column on its own: for "MD" this list wants the deletion, not
+            // the staged modification the full code would resolve to.
+            list.Add(new GitFileChange(path, null, ParseStatusCode($" {xy[1]}"), 0, 0));
+        }
     }
 
     /// <summary>

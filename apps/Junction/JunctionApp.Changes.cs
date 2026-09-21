@@ -113,6 +113,15 @@ public partial class JunctionApp
             if (ud != null) unstagedDiffs[f.Path] = ud;
         }
 
+        // Every listed file gets an entry, even an empty one. A file git status calls
+        // modified while git diff has nothing to show for it (see AddStatusOnlyChanges) is
+        // a row like any other, and the pane beside it has to read "No textual changes" —
+        // a missing entry renders as "Select a file", next to the file just selected.
+        foreach (var f in staged)
+            if (!stagedDiffs.ContainsKey(f.Path)) stagedDiffs[f.Path] = new GitFileDiff(f.Path, null, []);
+        foreach (var f in unstaged)
+            if (!unstagedDiffs.ContainsKey(f.Path)) unstagedDiffs[f.Path] = new GitFileDiff(f.Path, null, []);
+
         var assumeUnchanged = repo.GetAssumeUnchangedFiles();
         return new ChangesData(staged, unstaged, stagedDiffs, unstagedDiffs, conflicted, sequencer,
             assumeUnchanged, repo.GetLastCommitMessage());
