@@ -212,20 +212,13 @@ public partial class MeridianApp
             return cell;
         }
 
-        var box = Flex.Row(gap: 0).Height(26).FlexGrow(1).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
-            .Background(Azimuth.Surface)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius1);
-        var input = TextInput.New(doc.Values.GetValueOrDefault(key, ""));
+        var input = TextInput.New(doc.Values.GetValueOrDefault(key, "")).Style(Ui.Field);
         input.OnTextChanged(v => { doc.SetValue(key, v); MarkDirty(); })
-            .Height(Dimension.Px(22))
-            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(26)).FlexGrow(1)
             .FontFamily(Fonts.Mono).FontSize(11.5f)
             .TextColor(Azimuth.Text);
         input.AutomationId($"cell-{key}-{envName}");
-        box.AddChild(input);
-        cell.AddChild(box);
+        cell.AddChild(input);
         return cell;
     }
 
@@ -364,22 +357,15 @@ public partial class MeridianApp
 
         card.AddChild(Text.New(dialog.Title).FontSize(13.5f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Text));
 
-        var box = Flex.Row(gap: 0).Height(30).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
-            .Background(Azimuth.Bg)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius1);
-        var input = TextInput.New(_dialogValue);
+        var input = TextInput.New(_dialogValue).Style(Ui.GroundField);
         input.PlaceholderText(dialog.Placeholder)
             .OnTextChanged(v => _dialogValue = v)
-            .Height(Dimension.Px(26))
-            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(30)).FlexShrink(0)
             .FontFamily(Fonts.Mono).FontSize(12f)
             .TextColor(Azimuth.Text)
             .WithRef(_dialogRef);
         input.AutomationId("dialog-input");
-        box.AddChild(input);
-        card.AddChild(box);
+        card.AddChild(input);
 
         var buttons = Flex.Row(gap: Azimuth.S2).JustifyContent(JustifyContent.FlexEnd);
         buttons.AddChild(BarAction("cancel", "dialog-cancel", CancelDialog));

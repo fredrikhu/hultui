@@ -757,21 +757,15 @@ public partial class JunctionApp
         bar.AddChild(seg);
 
         // Input.
-        var box = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
-            .Height(32).FlexGrow(1).MaxWidth(460)
-            .Padding(new Thickness(0, 10, 0, 10))
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(_contentQuery);
+        var input = TextInput.New(_contentQuery).Style(Ui.Field());
         input.PlaceholderText(_contentRegex
                 ? "Find commits whose diff matches this regex… (Enter)"
                 : "Find commits that added or removed this text… (Enter)")
             .OnTextChanged(q => { _contentQuery = q; MarkDirty(); })
-            .Height(Dimension.Px(28)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(32)).FlexGrow(1).MaxWidth(460)
             .TextColor(Nocturne.Text).WithRef(_contentSearchRef);
         input.On<KeyDownEvent>(ContentSearchKey);
-        box.AddChild(input);
-        bar.AddChild(box);
+        bar.AddChild(input);
 
         bar.AddChild(Ui.PrimaryButton("Search", Icons.MagnifyingGlass, ApplyContentSearch, 11.5f).FlexShrink(0));
 

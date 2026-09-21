@@ -163,15 +163,12 @@ public partial class CommanderApp
 
     private Element FindField(string value, bool bad, Action<string> onChanged)
     {
-        // Box height = the field height with no vertical padding, so the input's own
-        // theme padding is the only vertical inset (double-padding would clip or, if the
-        // box is unclamped, let the growing input balloon the field).
-        var box = Box.New().FlexGrow(1).Height(Ui.FieldHeight).Padding(new Thickness(0, 8, 0, 8)).CornerRadius(4f)
-            .Background(Nocturne.Bg).BorderColor(bad ? Nocturne.Alpha(Nocturne.MarkRed, 0.55) : Nocturne.Neutral700).BorderWidth(1f);
-        var input = Ui.Field(TextInput.New(value));
+        // A bad pattern outlines the field in red; the style is the element's, so the
+        // swap is a style pass, not a rebuilt box around a rebuilt input.
+        var input = Ui.Field(TextInput.New(value))
+            .Style(Ui.Bordered(bad ? Nocturne.Alpha(Nocturne.MarkRed, 0.55) : null));
         input.OnTextChanged(onChanged);
-        box.AddChild(input);
-        return box;
+        return input;
     }
 
     // "Aa" / ".*" are labels, not icons — there is no glyph for "match case".
@@ -215,16 +212,13 @@ public partial class CommanderApp
     {
         var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
         row.AddChild(Text.New(label).FontSize(12f).TextColor(Nocturne.On(0.55)).Width(96).FlexShrink(0));
-        var box = Box.New().FlexGrow(grow).Height(Ui.FieldHeight).Padding(new Thickness(0, 8, 0, 8)).CornerRadius(4f)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Neutral700).BorderWidth(1f);
-        var input = Ui.Field(TextInput.New(value));
+        var input = Ui.Field(TextInput.New(value)).Style(Ui.Bordered()).FlexGrow(grow);
         input.PlaceholderText(placeholder);
         input.OnTextChanged(onChanged);
         input.Spans(MaskSpans(value));                 // paint-only: tokens Accent200
         input.On<FocusEvent>(_ => _renActiveMask = maskIndex);
         if (refEl != null) input.WithRef(refEl);
-        box.AddChild(input);
-        row.AddChild(box);
+        row.AddChild(input);
         return row;
     }
 

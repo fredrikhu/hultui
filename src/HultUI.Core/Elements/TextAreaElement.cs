@@ -154,33 +154,52 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
     public float ScrollbarRadius { get => _bar.Radius; set => _bar.Radius = value; }
     public float ScrollSpeed { get; set; } = 40f;
 
+    /// <summary>
+    /// This area's own look, layered over the theme's — the same <see cref="TextInputStyle"/>
+    /// a single-line field takes, resolved ahead of <see cref="TextInputTheme"/>. Compared by
+    /// reference, so hand the same instance each build.
+    /// </summary>
+    public TextInputStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+    private TextInputStyle? _style;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var ti = theme.TextInput;
-        CornerRadius = ti.CornerRadius;
-        Box.Padding = ti.Padding;
-        Box.BorderWidth = ti.BorderWidth;
+        var s = _style;
+        CornerRadius = s?.CornerRadius ?? ti.CornerRadius;
+        Box.Padding = s?.Padding ?? ti.Padding;
+        Box.BorderWidth = s?.BorderWidth ?? ti.BorderWidth;
         // Theme font size is a default: an explicit builder FontSize (e.g. a code
         // preview) wins and isn't re-clobbered every StyleResolver pass.
-        Inherited.FontSize ??= ti.FontSize;
-        BackgroundColor = ti.Background ?? theme.Background;
-        BorderColor = ti.BorderColor ?? theme.Border;
-        FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
-        UnderlineColor = ti.UnderlineColor;
-        FocusUnderlineColor = ti.FocusUnderlineColor;
-        UnderlineThickness = ti.UnderlineThickness;
-        FocusUnderlineThickness = ti.FocusUnderlineThickness;
-        FocusBackground = ti.FocusBackground;
-        PlaceholderColor = ti.PlaceholderColor ?? theme.Secondary;
-        SelectionColor = ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
-        CursorColor = ti.CursorColor ?? theme.TextColor;
+        Inherited.FontSize ??= s?.FontSize ?? ti.FontSize;
+        BackgroundColor = s?.Background ?? ti.Background ?? theme.Background;
+        BorderColor = s?.Border ?? ti.BorderColor ?? theme.Border;
+        FocusBorderColor = s?.FocusBorder ?? ti.FocusBorderColor ?? theme.Primary;
+        UnderlineColor = s?.Underline ?? ti.UnderlineColor;
+        FocusUnderlineColor = s?.FocusUnderline ?? ti.FocusUnderlineColor;
+        UnderlineThickness = s?.UnderlineThickness ?? ti.UnderlineThickness;
+        FocusUnderlineThickness = s?.FocusUnderlineThickness ?? ti.FocusUnderlineThickness;
+        FocusBackground = s?.FocusBackground ?? ti.FocusBackground;
+        PlaceholderColor = s?.Placeholder ?? ti.PlaceholderColor ?? theme.Secondary;
+        SelectionColor = s?.Selection ?? ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
+        CursorColor = s?.Cursor ?? ti.CursorColor ?? theme.TextColor;
     }
 
     public TextAreaElement()
     {
         IsFocusable = true;
         Box.Padding = new Thickness(4, 8, 4, 8);
-        Inherited.FontSize = 14f;
+        // No font size of its own — see TextInputElement: a default here made the theme's
+        // FontSize dead, because ApplyTheme's `??=` never saw a null.
         Inherited.Cursor = CursorType.Text;
 
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
@@ -1287,6 +1306,7 @@ public class TextAreaElement : BoxElement, IScrollbarDraggable, IAutoScrollable
         if (source is TextAreaElement area)
         {
             Placeholder = area.Placeholder;
+            Style = area.Style;
             PlaceholderColor = area.PlaceholderColor;
             SelectionColor = area.SelectionColor;
             CursorColor = area.CursorColor;

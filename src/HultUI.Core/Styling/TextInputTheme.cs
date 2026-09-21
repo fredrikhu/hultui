@@ -52,3 +52,67 @@ public sealed class TextInputTheme : IThemeExtension<TextInputTheme>
     /// </summary>
     public static TextInputTheme CreateDefault(Theme theme) => new();
 }
+
+/// <summary>
+/// What one text field looks like, every knob optional: the element's own
+/// <see cref="Elements.TextInputElement.Style"/> (or <see cref="Elements.TextAreaElement.Style"/>),
+/// resolved ahead of <see cref="TextInputTheme"/>, which resolves ahead of the palette.
+///
+/// <para>Declare one as a static and apply it with <c>.Style(...)</c> for a reusable look —
+/// a bordered form field, a compact grid cell — where the theme's field is flush. A style
+/// names only what it changes, so it follows a light or dark palette for the rest, and a
+/// height the style does not name is left to the element, which centres its line inside
+/// whatever height it was given. This is what a bordered wrapper box used to be for.</para>
+/// </summary>
+public sealed class TextInputStyle
+{
+    // ── Colours ──────────────────────────────────────────────────────────
+
+    /// <summary>Fill at rest. Null: <see cref="TextInputTheme.Background"/>, then the palette's background.</summary>
+    public Color? Background { get; init; }
+
+    /// <summary>Fill while focused. Null: <see cref="TextInputTheme.FocusBackground"/>, then the rest fill.</summary>
+    public Color? FocusBackground { get; init; }
+
+    /// <summary>Border at rest. Null: <see cref="TextInputTheme.BorderColor"/>, then <see cref="Theme.Border"/>.</summary>
+    public Color? Border { get; init; }
+
+    /// <summary>Border while focused. Null: <see cref="TextInputTheme.FocusBorderColor"/>, then <see cref="Theme.Primary"/>.</summary>
+    public Color? FocusBorder { get; init; }
+
+    /// <summary>The bottom edge; see <see cref="TextInputTheme.UnderlineColor"/>. Null: the theme's.</summary>
+    public Color? Underline { get; init; }
+
+    /// <summary>The bottom edge while focused. Null: the theme's, then <see cref="Underline"/>.</summary>
+    public Color? FocusUnderline { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.PlaceholderColor"/>, then <see cref="Theme.Secondary"/>.</summary>
+    public Color? Placeholder { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.CursorColor"/>, then the text colour.</summary>
+    public Color? Cursor { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.SelectionColor"/>, then the primary colour at low alpha.</summary>
+    public Color? Selection { get; init; }
+
+    // ── Geometry ─────────────────────────────────────────────────────────
+
+    /// <summary>Null: <see cref="TextInputTheme.Padding"/>.</summary>
+    public Thickness? Padding { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.BorderWidth"/>.</summary>
+    public Thickness? BorderWidth { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.CornerRadius"/>.</summary>
+    public CornerRadius? CornerRadius { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.FontSize"/>. A builder <c>.FontSize()</c> on the
+    /// element wins over both, as it always has.</summary>
+    public float? FontSize { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.UnderlineThickness"/>.</summary>
+    public float? UnderlineThickness { get; init; }
+
+    /// <summary>Null: <see cref="TextInputTheme.FocusUnderlineThickness"/>.</summary>
+    public float? FocusUnderlineThickness { get; init; }
+}

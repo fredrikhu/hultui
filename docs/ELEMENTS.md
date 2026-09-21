@@ -303,21 +303,44 @@ third — so `feature/my-branch` and `src/core/Foo.cs` are several stops, not on
 lives in `WordBoundary` and is shared by `TextInputElement`, `TextAreaElement` and
 `TextElement`.
 
-**The theme owns the box.** `ApplyTheme` runs on *every* style pass, not once, and it
-re-imposes `Theme.TextInput`'s `Padding`, `BorderWidth`, `CornerRadius`, `BackgroundColor`
-and `BorderColor` each time. A `.Padding(...)` or `.Background(...)` set on the input
-itself survives exactly until the next pass and then silently reverts. Two ways out:
+**The theme owns the box — style the theme or give the element a `Style`.** `ApplyTheme`
+runs on *every* style pass, not once, and it re-imposes `Padding`, `BorderWidth`,
+`CornerRadius`, `BackgroundColor` and `BorderColor` each time. A `.Padding(...)` or
+`.Background(...)` set on the input itself survives exactly until the next pass and then
+silently reverts. Three ways to a field that differs from the theme's:
+
+- **`.Style(TextInputStyle)`** — a reusable look, resolved ahead of the theme: every knob
+  of `TextInputStyle` is nullable (`Background`, `FocusBackground`, `Border`,
+  `FocusBorder`, `Underline`, `FocusUnderline`, `Placeholder`, `Cursor`, `Selection`,
+  `Padding`, `BorderWidth`, `CornerRadius`, `FontSize`, `UnderlineThickness`,
+  `FocusUnderlineThickness`), and null falls through to `Theme.TextInput`, then the
+  palette. Declare it once as a static and apply it per field; it is compared by
+  reference, so a fresh object every build is a style pass every build. A height the
+  style does not name is left to the element, and **the line is centred in whatever height
+  the field has**, the same place the caret goes — so a bordered form field is one
+  element:
+
+  ```csharp
+  static readonly TextInputStyle Field = new()
+  {
+      Background = Bg, Border = Divider, BorderWidth = new Thickness(1f),
+      CornerRadius = new CornerRadius(8f), Padding = new Thickness(0, 10, 0, 10),
+  };
+
+  TextInput.New(value).Style(Ui.Field).Height(34f).FlexGrow(1)
+  ```
 
 - **`DrawsChrome = false`** hands the box back to you: the theme then leaves padding,
   border, radius and fill alone, and the element draws only its text, caret and selection.
   Use it for an input embedded in a search box or a toolbar that draws its own frame.
-- **Wrap the input in a `Box`** that carries the border, padding and fill, and keep the
-  input flush inside it. This is how the apps in this repository build a bordered field.
+- **Wrap the input in a `Box`** that carries the frame, for a composed control — a
+  magnifier beside the text, a button inside the field. A plain bordered field no longer
+  needs this.
 
 `FontSize` is the exception: the theme value is only a default (`??=`), so a builder
-`.FontSize(...)` on the input wins. `TextColor` and `FontFamily` are not touched by the
-theme at all. `TextAreaElement` behaves the same way and has **no** `DrawsChrome`, so
-for a text area the wrapper box is the only route.
+`.FontSize(...)` on the input wins over both the style and the theme. `TextColor` and
+`FontFamily` are not touched by the theme at all. `TextAreaElement` takes the same
+`TextInputStyle` through its own `.Style(...)` and has **no** `DrawsChrome`.
 
 **Example:**
 

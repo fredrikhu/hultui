@@ -969,34 +969,27 @@ public partial class JunctionApp
         }
 
         // Summary
-        var sumBox = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(34).Padding(new Thickness(0, 10, 0, 10))
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
-        var summary = TextInput.New(_commitSummary);
+        var summary = TextInput.New(_commitSummary).Style(Ui.Field());
         summary.PlaceholderText("Summary (required)")
             .OnTextChanged(q => { _commitSummary = q; NoteComposerTyping(summary: true, _summaryRef.Current?.CursorPosition ?? q.Length); MarkDirty(); })
-            .Height(Dimension.Px(30)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(34)).FlexShrink(0)
             .TextColor(Nocturne.Text).WithRef(_summaryRef);
-        sumBox.AddChild(summary);
         // Every child of the composer is keyed, and that is all-or-nothing: a keyed child
         // among unkeyed siblings makes the reconciler match the whole list by key, and the
         // unkeyed ones are then *replaced* rather than patched — which threw away the field
         // you were typing in after the first character.
-        sumBox.Key = "composer-summary";
-        box.AddChild(sumBox);
+        summary.Key = "composer-summary";
+        box.AddChild(summary);
 
         // Description
-        var descBox = Flex.Column(gap: 0)
-            .Padding(new Thickness(6, 10, 6, 10))
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
-        var desc = TextArea.New(_commitDescription);
+        // The wrapper's 6px and the theme's 6px of vertical inset, and its 56px of lines.
+        var desc = TextArea.New(_commitDescription).Style(Ui.Field(verticalPadding: 12f));
         desc.PlaceholderText("Description")
             .OnTextChanged(q => { _commitDescription = q; NoteComposerTyping(summary: false, _descRef.Current?.CursorPosition ?? q.Length); MarkDirty(); })
-            .Height(Dimension.Px(56))
+            .Height(Dimension.Px(82))
             .TextColor(Nocturne.Text).WithRef(_descRef);
-        descBox.AddChild(desc);
-        descBox.Key = "composer-description";
-        box.AddChild(descBox);
+        desc.Key = "composer-description";
+        box.AddChild(desc);
 
         // "Closes #1042 will close the issue when this reaches main." — one line, only when
         // the message says so and the repository is on GitLab.

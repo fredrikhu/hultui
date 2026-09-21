@@ -151,9 +151,13 @@ public static class ElementExtensions
     /// unreachable, because <c>input.Chromeless()</c> would bind to invoking the bool.</summary>
     public static T Chromeless<T>(this T el, bool value = true) where T : TextInputElement { el.DrawsChrome = !value; return el; }
     public static T OnTextChanged<T>(this T el, Action<string> handler) where T : TextInputElement { el.TextChanged = handler; return el; }
+    /// <summary>A reusable look for this field, layered over the theme's; see <see cref="TextInputStyle"/>.</summary>
+    public static T Style<T>(this T el, TextInputStyle? style) where T : TextInputElement { el.Style = style; return el; }
 
     // ──── TextArea properties ────
     public static TextAreaElement PlaceholderText(this TextAreaElement el, string text) { el.Placeholder = text; return el; }
+    /// <summary>A reusable look for this area, layered over the theme's; see <see cref="TextInputStyle"/>.</summary>
+    public static TextAreaElement Style(this TextAreaElement el, TextInputStyle? style) { el.Style = style; return el; }
     public static TextAreaElement OnTextChanged(this TextAreaElement el, Action<string> handler) { el.TextChanged = handler; return el; }
     public static TextAreaElement ReadOnly(this TextAreaElement el, bool value = true) { el.ReadOnly = value; return el; }
     public static TextAreaElement Spans(this TextAreaElement el, IReadOnlyList<TextSpan>? spans) { el.Spans = spans; return el; }

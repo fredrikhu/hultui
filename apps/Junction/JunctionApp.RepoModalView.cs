@@ -180,19 +180,15 @@ public partial class JunctionApp
     private Element ModalInput(string value, string placeholder, Action<string> onChange,
         Ref<TextInputElement>? refEl, bool mono)
     {
-        var boxEl = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(38).Padding(new Thickness(0, 12, 0, 12))
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(value)
+        var input = TextInput.New(value).Style(Ui.Field(sidePadding: 12f))
             .PlaceholderText(placeholder)
             .OnTextChanged(v => { onChange(v); MarkDirty(); })
-            .Height(Dimension.Px(30)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(38)).FlexShrink(0)
             .TextColor(Nocturne.Text);
         if (mono) input.FontFamily(Fonts.Mono).FontSize(12f);
         if (refEl != null) input.WithRef(refEl);
         input.On<KeyDownEvent>(e => { if (e.Key == KeyCode.Enter) { SubmitModal(); e.StopPropagation = true; } });
-        boxEl.AddChild(input);
-        return boxEl;
+        return input;
     }
 
     private Element ModalInputWithBrowse(ModalForm f, string value, string placeholder, Action<string> onChange,

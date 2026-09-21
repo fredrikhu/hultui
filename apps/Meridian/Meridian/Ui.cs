@@ -158,4 +158,25 @@ public static class Ui
     {
         Padding = new Thickness(3, 6, 3, 6), FontSize = 11f, FontWeight = FontWeight.Regular,
     };
+
+    // ── Fields ───────────────────────────────────────────────────────────
+    // The theme's field is flush; these are the bordered ones the views draw — what a
+    // wrapper box used to supply. The element centres its line in whatever height the
+    // caller gives it. Azimuth's colours are fixed, so a static is safe.
+
+    /// <summary>A field on the raised Surface: a grid cell, a find box.</summary>
+    public static readonly TextInputStyle Field = new()
+    {
+        Background = Azimuth.Surface, Border = Azimuth.Border, FocusBorder = Azimuth.Border,
+        BorderWidth = new Thickness(1f), CornerRadius = new CornerRadius(Azimuth.Radius1),
+        Padding = new Thickness(0, Azimuth.S2, 0, Azimuth.S2),
+    };
+
+    /// <summary>A field on the app ground: a dialog's input, the response finder.</summary>
+    public static readonly TextInputStyle GroundField = new()
+    {
+        Background = Azimuth.Bg, Border = Azimuth.Border, FocusBorder = Azimuth.Border,
+        BorderWidth = new Thickness(1f), CornerRadius = new CornerRadius(Azimuth.Radius1),
+        Padding = new Thickness(0, Azimuth.S2, 0, Azimuth.S2),
+    };
 }

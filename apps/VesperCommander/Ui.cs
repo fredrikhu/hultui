@@ -56,6 +56,36 @@ public static class Ui
     /// should set <c>.Width(...).Height(Ui.FieldHeight)</c> directly.)</summary>
     public static TextInputElement Field(TextInputElement input) => input.FlexGrow(1).Height(FieldHeight);
 
+    /// <summary>
+    /// The bordered field: Bg fill, a hairline, a small radius and side padding — what a
+    /// wrapper box used to supply around the theme's flush input. The element centres its
+    /// line in whatever <c>.Height()</c> it is given. One instance per shape, rebuilt when the
+    /// scheme changes: the colours are the scheme's, and a style is compared by reference.
+    /// </summary>
+    public static TextInputStyle Bordered(Color? border = null, float radius = 4f,
+        float sidePadding = 8f, float verticalPadding = 0f)
+    {
+        var scheme = (Nocturne.Theme, Nocturne.Accent, Nocturne.Bg);
+        if (_borderedScheme != scheme) { _bordered.Clear(); _borderedScheme = scheme; }
+        var key = (border, radius, sidePadding, verticalPadding);
+        if (!_bordered.TryGetValue(key, out var style))
+        {
+            var edge = border ?? Nocturne.Neutral700;
+            _bordered[key] = style = new TextInputStyle
+            {
+                Background = Nocturne.Bg,
+                Border = edge, FocusBorder = edge,
+                BorderWidth = new Thickness(1f),
+                CornerRadius = new CornerRadius(radius),
+                Padding = new Thickness(verticalPadding, sidePadding, verticalPadding, sidePadding),
+            };
+        }
+        return style;
+    }
+
+    private static readonly Dictionary<(Color?, float, float, float), TextInputStyle> _bordered = new();
+    private static (object?, Color, Color) _borderedScheme;
+
     /// <summary>A keycap chip (10px mono, hairline border) as in the design's <c>.kbd</c>.</summary>
     public static BoxElement Kbd(string text) =>
         Box.New()

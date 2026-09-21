@@ -403,19 +403,15 @@ public partial class JunctionApp
         return col;
     }
 
-    private static BoxElement CreateMrInput(string value, string placeholder, Action<string> onChange, string automationId)
+    private static Element CreateMrInput(string value, string placeholder, Action<string> onChange, string automationId)
     {
-        var boxEl = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(36).Padding(new Thickness(0, 10, 0, 10))
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(value)
+        var input = TextInput.New(value).Style(Ui.Field())
             .PlaceholderText(placeholder)
             .OnTextChanged(onChange)
-            .Height(Dimension.Px(28)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(36)).FlexShrink(0)
             .FontSize(13f).TextColor(Nocturne.Text);
         input.AutomationId = automationId;
-        boxEl.AddChild(input);
-        return boxEl;
+        return input;
     }
 
     private static Element CreateMrCheck(string label, bool on, Action<bool> onChange, string automationId)

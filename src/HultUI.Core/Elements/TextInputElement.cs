@@ -171,37 +171,59 @@ public class TextInputElement : BoxElement
             _focused ? FocusUnderlineThickness : UnderlineThickness);
     }
 
+    /// <summary>
+    /// This field's own look, layered over the theme's: each knob resolves from here, then
+    /// <see cref="TextInputTheme"/>, then the palette. Null: the theme's field. Compared by
+    /// reference, so hand the same instance each build — a static on the app's UI helpers.
+    /// Where the theme's field is flush, this is how a view gets a bordered one without a
+    /// wrapper box.
+    /// </summary>
+    public TextInputStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+    private TextInputStyle? _style;
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var ti = theme.TextInput;
+        var s = _style;
         if (DrawsChrome)
         {
-            CornerRadius = ti.CornerRadius;
-            Box.Padding = ti.Padding;
-            Box.BorderWidth = ti.BorderWidth;
-            BackgroundColor = ti.Background ?? theme.Background;
-            BorderColor = ti.BorderColor ?? theme.Border;
+            CornerRadius = s?.CornerRadius ?? ti.CornerRadius;
+            Box.Padding = s?.Padding ?? ti.Padding;
+            Box.BorderWidth = s?.BorderWidth ?? ti.BorderWidth;
+            BackgroundColor = s?.Background ?? ti.Background ?? theme.Background;
+            BorderColor = s?.Border ?? ti.BorderColor ?? theme.Border;
         }
         // Theme font size is a default: an explicit builder FontSize wins and isn't
         // re-clobbered on the StyleResolver passes that aren't preceded by a rebuild
         // (matches TextAreaElement).
-        Inherited.FontSize ??= ti.FontSize;
-        FocusBorderColor = ti.FocusBorderColor ?? theme.Primary;
-        UnderlineColor = ti.UnderlineColor;
-        FocusUnderlineColor = ti.FocusUnderlineColor;
-        UnderlineThickness = ti.UnderlineThickness;
-        FocusUnderlineThickness = ti.FocusUnderlineThickness;
-        FocusBackground = ti.FocusBackground;
-        PlaceholderColor = ti.PlaceholderColor ?? theme.Secondary;
-        SelectionColor = ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
-        CursorColor = ti.CursorColor ?? theme.TextColor;
+        Inherited.FontSize ??= s?.FontSize ?? ti.FontSize;
+        FocusBorderColor = s?.FocusBorder ?? ti.FocusBorderColor ?? theme.Primary;
+        UnderlineColor = s?.Underline ?? ti.UnderlineColor;
+        FocusUnderlineColor = s?.FocusUnderline ?? ti.FocusUnderlineColor;
+        UnderlineThickness = s?.UnderlineThickness ?? ti.UnderlineThickness;
+        FocusUnderlineThickness = s?.FocusUnderlineThickness ?? ti.FocusUnderlineThickness;
+        FocusBackground = s?.FocusBackground ?? ti.FocusBackground;
+        PlaceholderColor = s?.Placeholder ?? ti.PlaceholderColor ?? theme.Secondary;
+        SelectionColor = s?.Selection ?? ti.SelectionColor ?? new Color(theme.Primary.R, theme.Primary.G, theme.Primary.B, 80);
+        CursorColor = s?.Cursor ?? ti.CursorColor ?? theme.TextColor;
     }
 
     public TextInputElement()
     {
         IsFocusable = true;
         Box.Padding = new Thickness(4, 8, 4, 8);
-        Inherited.FontSize = 14f;
+        // No font size of its own: ApplyTheme's `??=` fills it from the style or the theme,
+        // and a builder .FontSize() set before that wins. A default here made the theme's
+        // FontSize dead — the coalesce never saw a null.
         Inherited.Cursor = CursorType.Text;
 
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
@@ -660,23 +682,29 @@ public class TextInputElement : BoxElement
                     r.X1 - r.X0, contentBox.Height), SelectionColor);
         }
 
+        // The line sits in the middle of the content box, however tall the box is — the same
+        // place the caret goes. Drawn into the whole box it sat at the top, which is why every
+        // fixed-height field used to be an input inside a centring row.
+        // A box shorter than the line trims both edges evenly rather than lopping off the
+        // descenders, which is the kinder failure.
+        float textHeight = ctx.MeasureText("X", style).Height;
+        float textTop = contentBox.Y + (contentBox.Height - textHeight) / 2;
+
         // Draw text or placeholder
         if (displayText.Length == 0 && !string.IsNullOrEmpty(Placeholder) && !_focused)
         {
             var placeholderStyle = style with { TextColor = PlaceholderColor };
-            ctx.DrawText(Placeholder, contentBox, placeholderStyle, TextOverflow.Clip, 1);
+            ctx.DrawText(Placeholder, new Rect(contentBox.X, textTop, contentBox.Width, textHeight),
+                placeholderStyle, TextOverflow.Clip, 1);
         }
         else if (displayText.Length > 0)
         {
-            var textRect = new Rect(contentBox.X - _scrollOffset, contentBox.Y, totalTextWidth + scrollPadding, contentBox.Height);
+            var textRect = new Rect(contentBox.X - _scrollOffset, textTop, totalTextWidth + scrollPadding, textHeight);
             // Paint-only syntax spans (e.g. mask token highlighting) — only when the display
             // text is the real value (not masked bullets or an IME preedit).
             var spans = Masked || composing ? null : Spans;
             ctx.DrawText(displayText, textRect, style, TextOverflow.Clip, 1, spans);
         }
-
-        float textHeight = ctx.MeasureText("X", style).Height;
-        float textTop = contentBox.Y + (contentBox.Height - textHeight) / 2;
 
         // Preedit underline
         if (composing)
@@ -719,6 +747,7 @@ public class TextInputElement : BoxElement
         {
             Placeholder = input.Placeholder;
             DrawsChrome = input.DrawsChrome;
+            Style = input.Style;
             PlaceholderColor = input.PlaceholderColor;
             SelectionColor = input.SelectionColor;
             CursorColor = input.CursorColor;

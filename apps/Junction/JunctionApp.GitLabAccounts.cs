@@ -353,15 +353,12 @@ public partial class JunctionApp
         return row;
     }
 
-    private BoxElement HostInput(string value, string placeholder, Action<string> onChange, bool masked, string automationId)
+    private Element HostInput(string value, string placeholder, Action<string> onChange, bool masked, string automationId)
     {
-        var boxEl = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(36).Padding(new Thickness(0, 10, 0, 10))
-            .Background(Nocturne.Surface).BorderColor(Nocturne.Divider).BorderWidth(1f).CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(value)
+        var input = TextInput.New(value).Style(Ui.Field(background: Nocturne.Surface))
             .PlaceholderText(placeholder)
             .OnTextChanged(onChange)
-            .Height(Dimension.Px(28)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(36)).FlexShrink(0)
             .FontFamily(Fonts.Mono).FontSize(12f).TextColor(Nocturne.Text);
         input.Masked = masked;
         input.AutomationId = automationId;
@@ -372,8 +369,7 @@ public partial class JunctionApp
             if (_hostCard is { State: HostCardState.Verified }) AddHostAccount();
             else TestHostCard();
         });
-        boxEl.AddChild(input);
-        return boxEl;
+        return input;
     }
 
     /// <summary>Any edit puts the card back to idle: a verdict belongs to the text it was

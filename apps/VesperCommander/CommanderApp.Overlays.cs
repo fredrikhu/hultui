@@ -255,18 +255,14 @@ public partial class CommanderApp
         head.AddChild(Ui.Mono(spec.Subtitle, 11f, Nocturne.On(0.45)).MaxLines(1).TextOverflow(TextOverflow.Ellipsis));
         card.AddChild(head);
 
-        // The theme forces inputs flush/borderless, so wrap in a bordered box. Give
-        // the input explicit width/height — a bare flex child here can lay out with a
-        // collapsed content box and paint nothing.
-        var field = Box.New()
+        // A bordered field on the app ground (darker than the Surface card, so it reads),
+        // outlined in the accent because it is the one thing in the dialog to type into.
+        // Explicit height: a bare flex child here can lay out with a collapsed content box
+        // and paint nothing; the wrapper's 3px and the theme's 6px of inset become 36.
+        var input = TextInput.New(_namePromptValue)
+            .Style(Ui.Bordered(Nocturne.Accent700, radius: Nocturne.RadiusSm, sidePadding: 6f))
             .Margin(new Thickness(0, 16, 14, 16))
-            .Padding(new Thickness(3, 6, 3, 6))
-            .Background(Nocturne.Bg)   // darker than the Surface card so the field reads
-            .BorderColor(Nocturne.Accent700).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusSm);
-        // Height must clear the theme's vertical input padding (~6px each side) plus
-        // the ~13.5px font, or the input's own content-box clip crops the glyphs.
-        var input = TextInput.New(_namePromptValue).Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
+            .Height(Ui.FieldHeight + 6f);
         input.PlaceholderText(spec.Placeholder);
         // Clear a stale error as soon as the user edits; keep the value in sync so
         // Enter (handled globally) commits the current text.
@@ -276,8 +272,7 @@ public partial class CommanderApp
             if (_namePromptError != null) { _namePromptError = null; MarkDirty(); }
         });
         input.WithRef(_namePromptRef);
-        field.AddChild(input);
-        card.AddChild(field);
+        card.AddChild(input);
 
         if (_namePromptError != null)
             card.AddChild(Text.New(_namePromptError).FontSize(11.5f).TextColor(Nocturne.MarkRed)

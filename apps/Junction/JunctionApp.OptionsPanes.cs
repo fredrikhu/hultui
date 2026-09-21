@@ -223,18 +223,13 @@ public partial class JunctionApp
         col.AddChild(IndentedRow(null, editors));
         if (t.Editor == EditorPreset.Custom)
         {
-            var field = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-                .Height(32).Padding(new Thickness(0, 10, 0, 10)).FlexGrow(1)
-                .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
-                .CornerRadius(Nocturne.RadiusMd);
-            var input = TextInput.New(t.EditorCommand)
+            var input = TextInput.New(t.EditorCommand).Style(Ui.Field())
                 .PlaceholderText("code --wait --diff {left} {right}")
                 .OnTextChanged(v => t.EditorCommand = v)   // persisted when Options closes
-                .Height(Dimension.Px(26)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+                .Height(Dimension.Px(32)).FlexGrow(1)
                 .FontFamily(Fonts.Mono).FontSize(12f).TextColor(Nocturne.Text);
             input.AutomationId = "editor-command";
-            field.AddChild(input);
-            col.AddChild(IndentedRow("Command", field));
+            col.AddChild(IndentedRow("Command", input));
         }
 
         var terminals = Flex.Row(gap: 6).AlignItems(AlignItems.Center);
@@ -281,18 +276,13 @@ public partial class JunctionApp
     /// like the code font — a file write per keystroke is not a setting saving.</summary>
     private static Element OptionTextField(string value, string placeholder, Action<string> onChange, string automationId)
     {
-        var field = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(32).Padding(new Thickness(0, 10, 0, 10)).FlexGrow(1)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(value)
+        var input = TextInput.New(value).Style(Ui.Field())
             .PlaceholderText(placeholder)
             .OnTextChanged(onChange)
-            .Height(Dimension.Px(26)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(32)).FlexGrow(1)
             .FontFamily(Fonts.Mono).FontSize(12f).TextColor(Nocturne.Text);
         input.AutomationId = automationId;
-        field.AddChild(input);
-        return field;
+        return input;
     }
 
     /// <summary>Runs the custom command on a file — from the Files and Changes menus.</summary>

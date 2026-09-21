@@ -128,22 +128,15 @@ public partial class JunctionApp
         // A confirm-only prompt (no placeholder) has no field at all.
         if (spec.Placeholder is { } placeholder)
         {
-            var inputBox = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-                .Height(38).Padding(new Thickness(0, 12, 0, 12))
-                .Background(Nocturne.Bg)
-                .BorderColor(Nocturne.Divider).BorderWidth(1f)
-                .CornerRadius(Nocturne.RadiusMd);
-            var input = TextInput.New(_dialogValue);
+            var input = TextInput.New(_dialogValue).Style(Ui.Field(sidePadding: 12f));
             input.PlaceholderText(placeholder)
                 .OnTextChanged(v => { _dialogValue = v; MarkDirty(); })
-                .Height(Dimension.Px(30))
-                .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+                .Height(Dimension.Px(38)).FlexShrink(0)
                 .TextColor(Nocturne.Text)
                 .WithRef(_dialogRef);
             input.On<KeyDownEvent>(DialogKey);
-            inputBox.AddChild(input);
-            inputBox.Key = "dialog-input";
-            card.AddChild(inputBox);
+            input.Key = "dialog-input";
+            card.AddChild(input);
         }
 
         // The rule the host enforces, when there is one: a quiet box, a lock, one sentence.

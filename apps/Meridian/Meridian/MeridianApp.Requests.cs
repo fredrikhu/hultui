@@ -562,22 +562,14 @@ public partial class MeridianApp
 
     private Element FormInput(string value, Action<string> onChanged, float width, string automationId)
     {
-        var box = Flex.Row(gap: 0).Height(28).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
-            .Background(Azimuth.Surface)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius1);
-        if (width > 0) box.Width(width).FlexShrink(0);
-        else box.FlexGrow(1);
-        var input = TextInput.New(value);
+        var input = TextInput.New(value).Style(Ui.Field).Height(Dimension.Px(28));
+        if (width > 0) input.Width(width).FlexShrink(0);
+        else input.FlexGrow(1);
         input.OnTextChanged(onChanged)
-            .Height(Dimension.Px(24))
-            .FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
             .FontFamily(Fonts.Mono).FontSize(12f)
             .TextColor(Azimuth.Text);
         input.AutomationId(automationId);
-        box.AddChild(input);
-        return box;
+        return input;
     }
 
     private static Element RemoveButton(string accessibleName, Action onClick) =>

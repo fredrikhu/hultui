@@ -109,18 +109,13 @@ public partial class JunctionApp
 
         var row = Flex.Row(gap: 10).AlignItems(AlignItems.Center);
 
-        var field = Flex.Row(gap: 0).AlignItems(AlignItems.Center)
-            .Height(32).Padding(new Thickness(0, 10, 0, 10)).FlexGrow(1)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f)
-            .CornerRadius(Nocturne.RadiusMd);
-        var input = TextInput.New(_settings.Appearance.CodeFont)
+        var input = TextInput.New(_settings.Appearance.CodeFont).Style(Ui.Field())
             .PlaceholderText(Fonts.Mono)
             .OnTextChanged(UseCodeFont)
-            .Height(Dimension.Px(26)).FlexGrow(1).FlexShrink(1).FlexBasis(Dimension.Px(0))
+            .Height(Dimension.Px(32)).FlexGrow(1)
             .FontSize(12.5f).TextColor(Nocturne.Text);
         input.AutomationId = "code-font-name";
-        field.AddChild(input);
-        row.AddChild(field);
+        row.AddChild(input);
 
         row.AddChild(StepButton(Icons.Minus, "Smaller", () => NudgeCodeFontSize(-1f),
             _settings.Appearance.CodeFontSize > JunctionSettingsData.MinCodeFontSize));

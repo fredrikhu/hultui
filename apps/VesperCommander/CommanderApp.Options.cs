@@ -385,17 +385,14 @@ public partial class CommanderApp
     /// preview under it is rebuilt on save, which is when the choice takes effect.</summary>
     private Element TextFontField()
     {
-        var box = Box.New().FlexGrow(1)
-            .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(3f)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f);
-        box.Key = "opt-text-font";
         var input = TextInput.New(_draft.TextFont)
-            .Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
+            .Style(Ui.Bordered(Nocturne.Divider, radius: 3f))
+            .FlexGrow(1).Height(Ui.FieldHeight);
+        input.Key = "opt-text-font";
         input.PlaceholderText(Fonts.Mono);
         input.OnTextChanged(v => _draft.TextFont = v);
         input.AutomationId = "opt-text-font-input";
-        box.AddChild(input);
-        return box;
+        return input;
     }
 
     private Element TextFontSizeStepper()
@@ -596,16 +593,13 @@ public partial class CommanderApp
     /// what loses the caret. Keyed because search results place it in a different subtree.</summary>
     private Element FindExcludeField()
     {
-        var box = Box.New().FlexGrow(1)
-            .Padding(new Thickness(0, 8, 0, 8)).CornerRadius(3f)
-            .Background(Nocturne.Bg).BorderColor(Nocturne.Divider).BorderWidth(1f);
-        box.Key = "opt-find-exclude";
         var input = TextInput.New(_draft.FindExcludeFolders)
-            .Width(Dimension.Percent(100)).Height(Ui.FieldHeight);
+            .Style(Ui.Bordered(Nocturne.Divider, radius: 3f))
+            .FlexGrow(1).Height(Ui.FieldHeight);
+        input.Key = "opt-find-exclude";
         input.PlaceholderText(".git;.vs");
         input.OnTextChanged(v => _draft.FindExcludeFolders = v);
-        box.AddChild(input);
-        return box;
+        return input;
     }
 
 

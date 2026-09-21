@@ -531,19 +531,14 @@ public partial class MeridianApp
             .Background(Azimuth.Surface)
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        var inputBox = Flex.Row(gap: 0).Height(26).Width(220).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
-            .Background(Azimuth.Bg)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius1);
-        var input = TextInput.New(search.Query).Height(Dimension.Px(22)).FlexGrow(1);
+        var input = TextInput.New(search.Query).Style(Ui.GroundField)
+            .Height(Dimension.Px(26)).Width(220).FlexShrink(0);
         input.PlaceholderText("find in response…");
         input.OnTextChanged(v => { search.SetQuery(v); s.PendingReveal = true; });
         input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
         input.WithRef(s.FieldRef);
         input.AutomationId("find-input");
-        row.AddChild(inputBox);
-        inputBox.AddChild(input);
+        row.AddChild(input);
 
         string status = search.Query.Length == 0 ? ""
             : search.Error is { } why ? why

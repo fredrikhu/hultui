@@ -205,6 +205,35 @@ public static class Ui
     public static ButtonElement DisabledIconButton(string glyph, string reason, float size = 34f) =>
         IconButton(glyph, static () => { }, reason, size).Enabled(false);
 
+    // ── Fields ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The bordered form field: a fill, the hairline Divider, RadiusMd, and side padding —
+    /// what a wrapper box used to supply around the theme's flush input. The element centres
+    /// its line in whatever <c>.Height()</c> the caller gives it. One instance per shape, and
+    /// rebuilt when the scheme changes: the colours are the scheme's, and a style is compared
+    /// by reference, so a fresh object every build would be a style pass every build.
+    /// </summary>
+    public static TextInputStyle Field(float sidePadding = 10f, Color? background = null, float verticalPadding = 0f)
+    {
+        var scheme = (Nocturne.Theme, Nocturne.Accent, Nocturne.Bg);
+        if (_fieldScheme != scheme) { _fields.Clear(); _fieldScheme = scheme; }
+        var key = (sidePadding, background, verticalPadding);
+        if (!_fields.TryGetValue(key, out var style))
+            _fields[key] = style = new TextInputStyle
+            {
+                Background = background ?? Nocturne.Bg,
+                Border = Nocturne.Divider, FocusBorder = Nocturne.Divider,
+                BorderWidth = new Thickness(1f),
+                CornerRadius = new CornerRadius(Nocturne.RadiusMd),
+                Padding = new Thickness(verticalPadding, sidePadding, verticalPadding, sidePadding),
+            };
+        return style;
+    }
+
+    private static readonly Dictionary<(float, Color?, float), TextInputStyle> _fields = new();
+    private static (object?, Color, Color) _fieldScheme;
+
     // ── Pipeline status ──────────────────────────────────────────────────
 
     /// <summary>The one glyph vocabulary for a pipeline's status, shape-coded so it survives

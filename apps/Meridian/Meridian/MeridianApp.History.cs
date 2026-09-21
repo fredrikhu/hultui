@@ -176,19 +176,14 @@ public partial class MeridianApp
             .Padding(new Thickness(0, Azimuth.S3, 0, Azimuth.S3))
             .BorderColor(Azimuth.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
-        var box = Flex.Row(gap: 0).Height(26).Width(260).AlignItems(AlignItems.Center)
-            .Padding(new Thickness(0, Azimuth.S2, 0, Azimuth.S2))
-            .Background(Azimuth.Surface)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .CornerRadius(Azimuth.Radius1);
-        var input = TextInput.New(_historyFind.Search.Query).Height(Dimension.Px(22)).FlexGrow(1);
+        var input = TextInput.New(_historyFind.Search.Query).Style(Ui.Field)
+            .Height(Dimension.Px(26)).Width(260).FlexShrink(0);
         input.PlaceholderText("find in history…");
         input.OnTextChanged(v => { _historyFind.Search.SetQuery(v); MarkDirty(); });
         input.FontFamily(Fonts.Mono).FontSize(11.5f).TextColor(Azimuth.Text);
         input.WithRef(_historyFind.FieldRef);
         input.AutomationId("history-search");
-        box.AddChild(input);
-        bar.AddChild(box);
+        bar.AddChild(input);
 
         foreach (var method in new[] { "GET", "POST", "PUT", "PATCH", "DELETE" })
             bar.AddChild(FilterChip(method, _filterMethod == method, Azimuth.MethodColor(method),
