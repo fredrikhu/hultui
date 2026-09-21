@@ -99,7 +99,7 @@ draws one exposes it:
 
 | Extension | Colour | Width | Notes |
 |---|---|---|---|
-| `ButtonTheme` | per variant: `Border`, `HoverBorder` | `BorderWidth` (all variants) | see [ButtonElement](ELEMENTS.md#18-buttonelement) |
+| `ButtonTheme` | per variant `ButtonStyle`: `Border`, `HoverBorder` | `BorderWidth` (all variants; a `ButtonStyle` may override) | see [ButtonElement](ELEMENTS.md#18-buttonelement) |
 | `TextInputTheme` | `BorderColor`, `FocusBorderColor`, `UnderlineColor` | `BorderWidth`, `UnderlineThickness` | shared by `TextArea` |
 | `DropdownTheme` | `BorderColor` | `BorderWidth`, `FocusBorderWidth` | also the box of `DatePicker`, `TimePicker`, `NumericUpDown` |
 | `CheckboxTheme`, `RadioButtonTheme` | `BorderColor` | `BorderWidth` (null keeps the element's 2px) | |

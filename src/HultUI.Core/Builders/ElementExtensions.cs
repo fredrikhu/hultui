@@ -193,6 +193,10 @@ public static class ElementExtensions
 
     // ButtonElement
     public static T Variant<T>(this T el, ButtonVariant variant) where T : ButtonElement { el.Variant = variant; return el; }
+    /// <summary>A reusable look for this button, layered over its variant's; see <see cref="ButtonStyle"/>.</summary>
+    public static T Style<T>(this T el, ButtonStyle? style) where T : ButtonElement { el.Style = style; return el; }
+    /// <summary>Off: dimmed, unfocusable, and its click goes nowhere — but its tooltip still shows.</summary>
+    public static T Enabled<T>(this T el, bool enabled = true) where T : ButtonElement { el.IsEnabled = enabled; return el; }
 
     // ──── Identity ────
     /// <summary>

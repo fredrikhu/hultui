@@ -417,11 +417,9 @@ public partial class JunctionApp
         var box = Flex.Row(gap: 5).GridColumn(5)
             .JustifyContent(JustifyContent.FlexEnd).AlignItems(AlignItems.Center);
 
-        if (b.IsCurrent)
-            box.AddChild(DisabledSecondary("Checkout", Icons.BendDownRight, 11.5f));
-        else
-            box.AddChild(Ui.SecondaryButton("Checkout", Icons.BendDownRight,
-                () => CheckoutBranch(checkoutTarget), 11.5f));
+        // The current branch's Checkout is inert and dimmed: already here.
+        box.AddChild(Ui.SecondaryButton("Checkout", Icons.BendDownRight,
+            () => CheckoutBranch(checkoutTarget), 11.5f).Enabled(!b.IsCurrent));
 
         // Push / Pull / Delete apply to local branches; a remote-tracking ref
         // is checked out (creating a local tracking branch) but not managed here.
@@ -445,16 +443,6 @@ public partial class JunctionApp
         var b = Ui.IconButton(glyph, onClick, tooltip, 30f);
         // Icon buttons in a row shouldn't also trigger the row's select handler.
         b.OnClick(e => e.StopPropagation = true);
-        return b;
-    }
-
-    private static Element DisabledSecondary(string label, string glyph, float fontSize)
-    {
-        var b = Flex.Row(gap: 6).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Padding(new Thickness(5, 10, 5, 10)).CornerRadius(Nocturne.RadiusMd)
-            .BorderColor(Nocturne.Divider).BorderWidth(1f);
-        b.AddChild(Ui.Icon(glyph, fontSize + 1f, Nocturne.On(0.32)));
-        b.AddChild(Text.New(label).FontSize(fontSize).FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.32)));
         return b;
     }
 

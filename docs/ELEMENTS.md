@@ -1089,9 +1089,12 @@ any custom field whose text changes its width.
 
 ## 18. ButtonElement
 
-A push button. Extends `BoxElement`; focusable, activates on Enter or Space, shows a
-focus ring, sets the pointer cursor. Its whole look comes from `Theme.Button` and the
-palette, and is re-imposed on every style pass — **style the theme, not the instance**.
+A push button. Extends `BoxElement`; focusable, activates on Enter or Space, sets the
+pointer cursor, and is a `Button` to assistive technology before anything subscribes to
+its click. Its whole look comes from the theme and is re-imposed on every style pass —
+**style the theme or give the element a `Style`, not its box**. Focus shows through the
+window's focus visual (`ShowsFocusVisual`), which the theme keeps to keyboard focus by
+default, so a click leaves no ring behind.
 
 **Builder:**
 
@@ -1102,7 +1105,44 @@ Button.New("Delete", ButtonVariant.Danger)
 Button.New("More…", ButtonVariant.Ghost)
     .OnClick(_ => ...)
     .Variant(ButtonVariant.Secondary)                // fluent form
+Button.New(ButtonVariant.Ghost)                      // empty: add a glyph and a label
+    .Children(Icon(...), Text.New("Fetch"))
+Button.New("Start").Enabled(false).Tooltip("Nothing older to squash into")
 ```
+
+**Variant is meaning, style is shape.** The variant picks the colours from the palette;
+a `ButtonStyle` names whatever it wants different — colours or geometry — and leaves the
+rest to the layers beneath it. Each knob resolves in this order: the element's own
+`.Style(...)`, the theme's style for its variant (`ButtonTheme.Secondary`, …), the
+shared values on `ButtonTheme`, then the palette. A reusable look is therefore a style
+declared once and applied per element:
+
+```csharp
+// once, in the app's UI helpers
+static readonly ButtonStyle IconButton = new()
+{
+    Size = 28f, Padding = new Thickness(0), Circular = true,
+};
+
+// at every use site: secondary colours, round geometry, nothing restated
+Button.New(ButtonVariant.Secondary).Style(Ui.IconButton).Children(Icon(Icons.Plus))
+```
+
+Hand the same style instance each build (a static), not a fresh one: `Style` compares by
+reference, and a new object every rebuild is a style pass every rebuild.
+
+A `ButtonStyle` carries nullable `Background`, `HoverBackground`, `PressedBackground`,
+`Border`, `HoverBorder`, `Text`, `Padding`, `CornerRadius`, `BorderWidth`, `FontSize`,
+`FontWeight`, `Size` (a fixed square), `MinWidth`, `MinHeight` and `Circular`. A size the
+style does not name is left to the app — `.Width(Dimension.Percent(100))` on a button
+survives the style pass — while padding, radius, font and border width are always the
+theme's. `Circular` with a `Size` sets the radius up front, so the focus ring follows it;
+without one, the radius is taken from the laid-out box at paint time.
+
+**Disabled** (`IsEnabled`, `.Enabled(false)`): drawn at `ButtonTheme.DisabledOpacity`
+over the app's own `Opacity`, dropped from the Tab ring, and its click is swallowed
+before any handler runs — the app's or a row's behind it. It stays under the pointer, so a
+tooltip can say why. Assistive technology sees it as disabled.
 
 | Variant | Fill | Border | Label | For |
 |---|---|---|---|---|
@@ -1116,16 +1156,17 @@ one takes a wash of its own label colour (`HoverTint`, `PressedTint`), which rea
 "the same button, lit" on any ground.
 
 **`ButtonTheme`** carries what every variant shares — `CornerRadius`, `Padding`,
-`FontSize`, `FontWeight`, **`BorderWidth`** — and one `ButtonVariantTheme` per variant
-(`Primary`, `Secondary`, `Danger`, `Ghost`) with nullable `Background`, `HoverBackground`,
-`PressedBackground`, `Border`, `HoverBorder` and `Text`. Null means "what the palette
-says for this variant", so a one-knob override keeps the rest:
+`FontSize`, `FontWeight`, **`BorderWidth`**, `DisabledOpacity` — and one `ButtonStyle`
+per variant (`Primary`, `Secondary`, `Danger`, `Ghost`). Null on a variant's style means
+"what the theme and palette say", so a one-knob override keeps the rest, and a variant
+can be reshaped as well as recoloured:
 
 ```csharp
 app.Theme = Theme.Dark.With(new ButtonTheme
 {
     BorderWidth = new Thickness(1.5f),
-    Secondary = new ButtonVariantTheme { Border = brand, Text = brand },
+    Secondary = new ButtonStyle { Border = brand, Text = brand },
+    Ghost = new ButtonStyle { Padding = new Thickness(3, 4, 3, 4) },   // tighter inline actions
 });
 ```
 

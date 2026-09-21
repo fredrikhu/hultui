@@ -298,6 +298,19 @@ public abstract class Element
     }
 
     /// <summary>
+    /// What the renderer paints this subtree at: <see cref="Opacity"/>, times whatever a
+    /// control adds for a state of its own — a disabled button dims through here rather
+    /// than by writing <see cref="Opacity"/>, which is the app's to set and animate.
+    /// </summary>
+    internal virtual float RenderOpacity => _opacity;
+
+    /// <summary>
+    /// Whether assistive technology should offer this element as enabled. A control with a
+    /// disabled state overrides it; everything else is enabled.
+    /// </summary>
+    internal virtual bool IsEnabledForAccessibility => true;
+
+    /// <summary>
     /// A 2D transform (rotate/scale/translate) applied to this element and its
     /// subtree at render and hit-test time. Null = identity (no cost).
     /// </summary>

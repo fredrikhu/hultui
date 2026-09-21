@@ -38,9 +38,10 @@ public static class ElementRenderer
             : tracer.Begin("Render", element.GetType().Name, element.Key ?? element.Name);
 
 
-        bool hasOpacity = element.Opacity < 1f;
+        float opacity = element.RenderOpacity;
+        bool hasOpacity = opacity < 1f;
         if (hasOpacity)
-            ctx.PushOpacity(element.Opacity);
+            ctx.PushOpacity(opacity);
 
         // A transform rotates/scales the element and its subtree about its centre.
         // Once transformed, the screen-axis-aligned cull rect no longer bounds the

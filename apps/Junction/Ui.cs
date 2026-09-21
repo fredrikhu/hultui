@@ -138,74 +138,72 @@ public static class Ui
         el.OnHover(b => b.BackgroundColor = hover);
 
     // ── Buttons ──────────────────────────────────────────────────────────
+    //
+    // The framework's ButtonElement, in the families Nocturne.ToHultTheme() gives its
+    // ButtonTheme: the outlined accent primary, the hairline secondary, the bare ghost.
+    // Chrome, hover, focus, keyboard activation and the accessibility role are the
+    // element's; what these helpers add is Junction's content — a glyph beside a label at
+    // the caller's size — and the tooltip. A caller's OnClick still runs after the
+    // element's own, so `e.StopPropagation = true` to keep a row from also selecting works
+    // as it always did.
 
-    private static BoxElement BtnBase(Action onClick)
+    /// <summary>The glyph colour of each family: what the label is drawn in, which the icon
+    /// cannot inherit the way text does.</summary>
+    private static Color ButtonForeground(ButtonVariant variant) => variant switch
     {
-        var b = Flex.Row(gap: 6)
-            .AlignItems(AlignItems.Center)
-            .JustifyContent(JustifyContent.Center)
-            .Padding(new Thickness(5, 10, 5, 10))
-            .CornerRadius(Nocturne.RadiusMd)
-            .Cursor(CursorType.Pointer);
+        ButtonVariant.Secondary => Nocturne.Text,
+        ButtonVariant.Danger => Nocturne.DangerText,
+        _ => Nocturne.Accent,
+    };
+
+    private static ButtonElement Btn(ButtonVariant variant, string? glyph, string? label, float fontSize, Action onClick)
+    {
+        var b = Button.New(variant).Gap(6);
+        if (glyph != null) b.AddChild(Icon(glyph, fontSize + 1f, ButtonForeground(variant)));
+        if (label != null) b.AddChild(Text.New(label).FontSize(fontSize));
         b.OnClick(_ => onClick());
         return b;
     }
 
-    private static BoxElement WithContent(BoxElement b, string? glyph, string? label, Color fg, float fontSize)
+    public static ButtonElement PrimaryButton(string label, string? glyph, Action onClick, float fontSize = 13f) =>
+        Btn(ButtonVariant.Primary, glyph, label, fontSize, onClick);
+
+    public static ButtonElement SecondaryButton(string label, string? glyph, Action onClick, float fontSize = 13f) =>
+        Btn(ButtonVariant.Secondary, glyph, label, fontSize, onClick);
+
+    public static ButtonElement GhostButton(string label, string? glyph, Action onClick, float fontSize = 12f) =>
+        Btn(ButtonVariant.Ghost, glyph, label, fontSize, onClick);
+
+    /// <summary>
+    /// The square icon-button shape at one size: a fixed box, no padding, the secondary
+    /// family's hairline. One instance per size, because <see cref="ButtonElement.Style"/>
+    /// compares by reference and a fresh object every build would be a style pass every build.
+    /// </summary>
+    private static readonly Dictionary<float, ButtonStyle> IconStyles = new();
+
+    private static ButtonStyle IconStyle(float size)
     {
-        if (glyph != null) b.AddChild(Icon(glyph, fontSize + 1f, fg));
-        if (label != null) b.AddChild(Text.New(label).FontSize(fontSize).FontWeight(FontWeight.Medium).TextColor(fg));
-        return b;
+        if (!IconStyles.TryGetValue(size, out var style))
+            IconStyles[size] = style = new ButtonStyle { Size = size, Padding = new Thickness(0) };
+        return style;
     }
 
-    public static BoxElement PrimaryButton(string label, string? glyph, Action onClick, float fontSize = 13f)
+    public static ButtonElement IconButton(string glyph, Action onClick, string? tooltip = null, float size = 34f)
     {
-        var b = BtnBase(onClick).BorderColor(Nocturne.Accent).BorderWidth(1f);
-        WithContent(b, glyph, label, Nocturne.Accent, fontSize);
-        return b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.12), Color.Transparent);
-    }
-
-    public static BoxElement SecondaryButton(string label, string? glyph, Action onClick, float fontSize = 13f)
-    {
-        var b = BtnBase(onClick).BorderColor(Nocturne.Divider).BorderWidth(1f);
-        WithContent(b, glyph, label, Nocturne.Text, fontSize);
-        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
-    }
-
-    public static BoxElement GhostButton(string label, string? glyph, Action onClick, float fontSize = 12f)
-    {
-        var b = BtnBase(onClick).Padding(new Thickness(3, 4, 3, 4));
-        WithContent(b, glyph, label, Nocturne.Accent, fontSize);
-        return b.HoverBg(Nocturne.Alpha(Nocturne.Accent, 0.10), Color.Transparent);
-    }
-
-    public static BoxElement IconButton(string glyph, Action onClick, string? tooltip = null, float size = 34f)
-    {
-        var b = BtnBase(onClick)
-            .Width(size).Height(size)
-            .Padding(new Thickness(0))
-            .BorderColor(Nocturne.Divider).BorderWidth(1f);
+        var b = Button.New(ButtonVariant.Secondary).Style(IconStyle(size));
         b.AddChild(Icon(glyph, 15f, Nocturne.Text));
         if (tooltip != null) b.Tooltip(tooltip);
-        return b.HoverBg(Nocturne.Alpha(Nocturne.Text, 0.07), Color.Transparent);
+        b.OnClick(_ => onClick());
+        return b;
     }
 
     /// <summary>
-    /// An icon button that cannot be pressed: the same footprint, dimmed, with no click
-    /// handler and no hover tint. <paramref name="reason"/> becomes the tooltip, because a
-    /// control that does nothing has to say why rather than just look inert.
+    /// An icon button that cannot be pressed: the same footprint, dimmed, its click swallowed
+    /// by the element. <paramref name="reason"/> becomes the tooltip, because a control that
+    /// does nothing has to say why rather than just look inert.
     /// </summary>
-    public static BoxElement DisabledIconButton(string glyph, string reason, float size = 34f)
-    {
-        var b = Flex.Row(gap: 6)
-            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Width(size).Height(size)
-            .CornerRadius(Nocturne.RadiusMd)
-            .BorderColor(Nocturne.Alpha(Nocturne.Divider, 0.55)).BorderWidth(1f)
-            .Tooltip(reason);
-        b.AddChild(Icon(glyph, 15f, Nocturne.On(0.26)));
-        return b;
-    }
+    public static ButtonElement DisabledIconButton(string glyph, string reason, float size = 34f) =>
+        IconButton(glyph, static () => { }, reason, size).Enabled(false);
 
     // ── Pipeline status ──────────────────────────────────────────────────
 

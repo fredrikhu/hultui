@@ -76,7 +76,7 @@ public static class AccessibilityTreeBuilder
             onScreen,
             isFocusable: element.IsFocusable,
             isFocused: focusManager is not null && ReferenceEquals(focusManager.FocusedElement, element),
-            isEnabled: true,
+            isEnabled: element.IsEnabledForAccessibility,
             isToggled: ResolveIsToggled(element),
             value: ResolveValue(element),
             automationId: element.AutomationId,
@@ -216,6 +216,8 @@ public static class AccessibilityTreeBuilder
         IAccessibleItemSource => AccessibilityRole.List,
         ScrollViewElement => AccessibilityRole.ScrollView,
         CanvasElement => AccessibilityRole.Group,
+        // A button is a button whether or not anything has subscribed to its click yet.
+        ButtonElement => AccessibilityRole.Button,
         BoxElement box when box.HasEventHandler<ClickEvent>() => AccessibilityRole.Button,
         _ => AccessibilityRole.None
     };

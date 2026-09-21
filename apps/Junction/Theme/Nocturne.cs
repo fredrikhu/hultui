@@ -157,6 +157,38 @@ public static class Nocturne
         Border = Neutral700,
         SurfaceVariant = Neutral800,
         Danger = DangerText,
+        // Junction's button families, as Ui.cs drew them by hand before ButtonElement took
+        // over: every one outlined or bare on no fill, lit by a wash of its own colour. The
+        // framework's filled primary would be the loudest thing in any view here. Danger
+        // follows the same shape so a framework dialog's destructive action belongs too.
+        Button = new ButtonTheme
+        {
+            CornerRadius = new(RadiusMd),
+            Padding = new(5, 10, 5, 10),
+            FontSize = 13f,
+            FontWeight = FontWeight.Medium,
+            DisabledOpacity = 0.4f,
+            Primary = new ButtonStyle
+            {
+                Background = Color.Transparent, Border = Accent, Text = Accent,
+                HoverBackground = Alpha(Accent, 0.12), PressedBackground = Alpha(Accent, 0.20),
+            },
+            Secondary = new ButtonStyle
+            {
+                Border = Divider, Text = Text,
+                HoverBackground = Alpha(Text, 0.07), PressedBackground = Alpha(Text, 0.14),
+            },
+            Ghost = new ButtonStyle
+            {
+                Padding = new Thickness(3, 4, 3, 4), Text = Accent,
+                HoverBackground = Alpha(Accent, 0.10), PressedBackground = Alpha(Accent, 0.18),
+            },
+            Danger = new ButtonStyle
+            {
+                Background = Color.Transparent, Border = DangerText, Text = DangerText,
+                HoverBackground = Alpha(DangerText, 0.12), PressedBackground = Alpha(DangerText, 0.20),
+            },
+        },
         // Text fields are flush and borderless by default — StyleResolver re-applies
         // this every pass, so per-element border overrides don't stick. Views that
         // want a bordered field wrap the input in a bordered box instead.

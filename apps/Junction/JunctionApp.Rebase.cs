@@ -489,26 +489,13 @@ public partial class JunctionApp
 
         bar.AddChild(Box.New().FlexGrow(1));
         bar.AddChild(Ui.SecondaryButton("Cancel", null, CloseRebase, 12.5f));
-        // Key by state so the enabled/disabled variants swap as fresh elements
-        // rather than patching into each other (they carry different hover styling).
-        var start = bad ? DisabledStartButton() : Ui.PrimaryButton("Start rebase", Icons.Play, RunRebase, 12.5f);
-        start.Key = "rebase-start-" + (bad ? "off" : "on");
+        // Inert and dimmed while the oldest row is squash/fixup (nothing older to meld
+        // into). One element either way: the enabled state patches across rebuilds.
+        var start = Ui.PrimaryButton("Start rebase", Icons.Play, RunRebase, 12.5f).Enabled(!bad);
+        if (bad) start.Tooltip("The oldest commit has nothing older to squash into");
+        start.Key = "rebase-start";
         bar.AddChild(start);
         return bar;
-    }
-
-    /// <summary>The Start button rendered inert + dimmed while the oldest row is
-    /// squash/fixup (nothing older to meld into).</summary>
-    private static Element DisabledStartButton()
-    {
-        var muted = Nocturne.On(0.32);
-        return Flex.Row(gap: 6).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Padding(new Thickness(5, 10, 5, 10)).CornerRadius(Nocturne.RadiusMd)
-            .BorderColor(Nocturne.On(0.18)).BorderWidth(1f)
-            .Cursor(CursorType.Default)
-            .Children(
-                Ui.Icon(Icons.Play, 13.5f, muted),
-                Text.New("Start rebase").FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(muted));
     }
 
     // ── Reword sub-dialog ────────────────────────────────────────────────

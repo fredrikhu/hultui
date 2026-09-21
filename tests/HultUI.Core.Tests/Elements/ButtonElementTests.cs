@@ -64,7 +64,7 @@ public class ButtonElementTests
         var brand = new Color(200, 30, 30);
         var themed = Theme.Dark.With(new ButtonTheme
         {
-            Secondary = new ButtonVariantTheme { Border = brand },
+            Secondary = new ButtonStyle { Border = brand },
         });
         var b = Button.New("Cancel", ButtonVariant.Secondary);
         b.ApplyTheme(themed);
@@ -80,7 +80,7 @@ public class ButtonElementTests
         var hoverBorder = new Color(1, 2, 3);
         var themed = Theme.Light.With(new ButtonTheme
         {
-            Primary = new ButtonVariantTheme { HoverBorder = hoverBorder },
+            Primary = new ButtonStyle { HoverBorder = hoverBorder },
         });
         var b = Button.New("Go");
         b.ApplyTheme(themed);
@@ -107,5 +107,140 @@ public class ButtonElementTests
         var live = Button.New("x");
         live.PatchFrom(Button.New("x", ButtonVariant.Ghost));
         Assert.Equal(ButtonVariant.Ghost, live.Variant);
+    }
+
+    // ── Styles ───────────────────────────────────────────────────────────
+
+    private static readonly ButtonStyle RoundIcon = new()
+    {
+        Size = 28f, Padding = new Thickness(0), Circular = true,
+    };
+
+    [Fact]
+    public void AStyle_LayersOverTheVariant_AndKeepsTheColoursItDoesNotName()
+    {
+        var b = Button.New(ButtonVariant.Secondary).Style(RoundIcon);
+        b.ApplyTheme(Theme.Dark);
+
+        Assert.Equal(Dimension.Px(28f), b.Box.Width);
+        Assert.Equal(Dimension.Px(28f), b.Box.Height);
+        Assert.Equal(new Thickness(0), b.Box.Padding);
+        Assert.Equal(new CornerRadius(14f), b.CornerRadius);       // half the size: round
+        Assert.Equal(Theme.Dark.Border, b.ResolvedBorder);          // still the secondary outline
+        Assert.Equal(Theme.Dark.TextColor, b.ResolvedText);
+        Assert.Equal(new Thickness(1f), b.Box.BorderWidth);         // still the shared width
+    }
+
+    [Fact]
+    public void AStyleOnTheThemeVariant_ReshapesEveryButtonOfIt()
+    {
+        var themed = Theme.Light.With(new ButtonTheme
+        {
+            Ghost = new ButtonStyle { Padding = new Thickness(3, 4, 3, 4), FontWeight = FontWeight.Medium },
+        });
+        var ghost = Button.New("More", ButtonVariant.Ghost);
+        var primary = Button.New("Go");
+        ghost.ApplyTheme(themed);
+        primary.ApplyTheme(themed);
+
+        Assert.Equal(new Thickness(3, 4, 3, 4), ghost.Box.Padding);
+        Assert.Equal(FontWeight.Medium, ghost.Inherited.FontWeight);
+        Assert.Equal(new Thickness(8, 16, 8, 16), primary.Box.Padding);   // untouched
+    }
+
+    [Fact]
+    public void TheElementsStyle_WinsOverTheThemeVariants()
+    {
+        var themed = Theme.Light.With(new ButtonTheme
+        {
+            Secondary = new ButtonStyle { Padding = new Thickness(9), CornerRadius = new CornerRadius(2f) },
+        });
+        var b = Button.New(ButtonVariant.Secondary).Style(RoundIcon);
+        b.ApplyTheme(themed);
+
+        Assert.Equal(new Thickness(0), b.Box.Padding);
+        Assert.Equal(new CornerRadius(14f), b.CornerRadius);
+    }
+
+    [Fact]
+    public void ASizeTheStyleDoesNotName_IsLeftToTheApp()
+    {
+        var b = Button.New("Commit").Width(Dimension.Percent(100));
+        b.ApplyTheme(Theme.Dark);
+        Assert.Equal(Dimension.Percent(100), b.Box.Width);
+    }
+
+    [Fact]
+    public void Style_FluentAndPatch_BothChangeIt()
+    {
+        var b = Button.New("x").Style(RoundIcon);
+        Assert.Same(RoundIcon, b.Style);
+
+        var live = Button.New("x");
+        live.PatchFrom(Button.New("x").Style(RoundIcon));
+        Assert.Same(RoundIcon, live.Style);
+        live.PatchFrom(Button.New("x"));
+        Assert.Null(live.Style);
+    }
+
+    [Fact]
+    public void AButton_IsAButtonToAssistiveTechnology_BeforeAnythingSubscribesToIt()
+    {
+        Assert.Equal(Core.Accessibility.AccessibilityRole.Button,
+            Core.Accessibility.AccessibilityTreeBuilder.InferRole(Button.New("x")));
+    }
+
+    // ── Disabled ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Disabled_SwallowsItsClick_LeavesTheTabRing_AndDims()
+    {
+        int clicks = 0;
+        var b = Button.New("Start").OnClick(_ => clicks++).Enabled(false);
+        b.ApplyTheme(Theme.Dark);
+
+        EventDispatcher.DispatchDirect(new ClickEvent(), b);
+        Assert.Equal(0, clicks);
+        Assert.False(b.IsFocusable);
+        Assert.False(b.IsEnabledForAccessibility);
+        Assert.Equal(Theme.Dark.Button.DisabledOpacity, b.RenderOpacity);
+        Assert.Equal(CursorType.Default, b.Inherited.Cursor);
+
+        b.IsEnabled = true;
+        b.ApplyTheme(Theme.Dark);
+        EventDispatcher.DispatchDirect(new ClickEvent(), b);
+        Assert.Equal(1, clicks);
+        Assert.True(b.IsFocusable);
+        Assert.Equal(1f, b.RenderOpacity);
+    }
+
+    [Fact]
+    public void Disabled_DoesNotLightUnderThePointer()
+    {
+        var b = Button.New("Go").Enabled(false);
+        b.ApplyTheme(Theme.Light);
+
+        EventDispatcher.DispatchDirect(new PointerEnterEvent(), b);
+        EventDispatcher.DispatchDirect(new PointerDownEvent(), b);
+        Assert.Equal(b.ResolvedBackground, b.BackgroundColor);
+        Assert.Equal(b.ResolvedBorder, b.BorderColor);
+    }
+
+    [Fact]
+    public void Disabled_DimsTheAppsOwnOpacity_RatherThanReplacingIt()
+    {
+        var b = Button.New("Go").Opacity(0.5f).Enabled(false);
+        b.ApplyTheme(Theme.Light);
+        Assert.Equal(0.5f, b.Opacity);                                     // the app's, untouched
+        Assert.Equal(0.5f * Theme.Light.Button.DisabledOpacity, b.RenderOpacity, 3);
+    }
+
+    [Fact]
+    public void Enabled_Patch_CopiesIt()
+    {
+        var live = Button.New("x");
+        live.PatchFrom(Button.New("x").Enabled(false));
+        Assert.False(live.IsEnabled);
+        Assert.False(live.IsFocusable);
     }
 }

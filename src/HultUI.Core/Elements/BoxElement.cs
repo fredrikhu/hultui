@@ -93,9 +93,17 @@ public class BoxElement : Element
         }
     }
 
+    /// <summary>
+    /// The radius this box is painted with. <see cref="CornerRadius"/> unless a subclass
+    /// only knows it once laid out — a circular button is half its box, whatever the box
+    /// turned out to be.
+    /// </summary>
+    protected virtual CornerRadius RenderCornerRadius(in Rect box) => CornerRadius;
+
     public override void Render(IRenderContext ctx)
     {
         var box = Layout.AbsoluteBorderBox;
+        var radius = RenderCornerRadius(in box);
 
         // Shadows sit behind the box; draw them first so the background paints over
         // the portion beneath the box. Enumerate the field directly — DirtyList
@@ -104,7 +112,7 @@ public class BoxElement : Element
         if (_boxShadows is { Count: > 0 } shadows)
         {
             foreach (var shadow in shadows)
-                ctx.DrawBoxShadow(box, CornerRadius, shadow);
+                ctx.DrawBoxShadow(box, radius, shadow);
         }
 
         var w = BoxRead.BorderWidth;
@@ -117,21 +125,21 @@ public class BoxElement : Element
 
         if (BackgroundGradient is { } gradient)
         {
-            ctx.DrawGradientRect(box, CornerRadius, gradient);
+            ctx.DrawGradientRect(box, radius, gradient);
             if (advancedBorder)
-                ctx.DrawBorder(box, CornerRadius, BorderColor, w, BorderStyle);
+                ctx.DrawBorder(box, radius, BorderColor, w, BorderStyle);
             else if (hasBorder)
-                ctx.DrawRoundedRect(box, CornerRadius, Color.Transparent, BorderColor, w);
+                ctx.DrawRoundedRect(box, radius, Color.Transparent, BorderColor, w);
         }
         else if (advancedBorder)
         {
             if (BackgroundColor.A > 0)
-                ctx.DrawRoundedRect(box, CornerRadius, BackgroundColor, Color.Transparent, default);
-            ctx.DrawBorder(box, CornerRadius, BorderColor, w, BorderStyle);
+                ctx.DrawRoundedRect(box, radius, BackgroundColor, Color.Transparent, default);
+            ctx.DrawBorder(box, radius, BorderColor, w, BorderStyle);
         }
         else if (BackgroundColor.A > 0 || hasBorder)
         {
-            ctx.DrawRoundedRect(box, CornerRadius, BackgroundColor, hasBorder ? BorderColor : Color.Transparent, w);
+            ctx.DrawRoundedRect(box, radius, BackgroundColor, hasBorder ? BorderColor : Color.Transparent, w);
         }
 
         // Last, and outside everything: the ring is painted over the element's own box the way
@@ -144,7 +152,7 @@ public class BoxElement : Element
             // surrounds stays round.
             float outer = _outline.Offset + _outline.Width;
             var ring = box.Inflate(new Thickness(outer));
-            ctx.DrawRoundedRect(ring, CornerRadius.Inflate(outer), Color.Transparent,
+            ctx.DrawRoundedRect(ring, radius.Inflate(outer), Color.Transparent,
                 _outline.Color, new Thickness(_outline.Width));
         }
     }

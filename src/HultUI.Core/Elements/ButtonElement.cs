@@ -1,6 +1,6 @@
 using HultUI.Core.Events;
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
-using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 
 namespace HultUI.Core.Elements;
@@ -18,24 +18,36 @@ public enum ButtonVariant
 }
 
 /// <summary>
-/// A push button. Its look comes entirely from <see cref="ButtonTheme"/> and the palette —
-/// fill, border and label per <see cref="Variant"/>, one padding, radius, font and border
-/// width for all of them — and is re-imposed on every style pass, so style the theme, not
-/// the instance.
+/// A push button. Its look comes from the theme and is re-imposed on every style pass, so
+/// style the theme or give the element a <see cref="Style"/>, not its box: each knob
+/// resolves from the element's own <see cref="Style"/>, then the theme's style for its
+/// <see cref="Variant"/>, then the shared values on <see cref="ButtonTheme"/>, then the
+/// palette. The variant is the button's meaning and supplies its colours; the style is
+/// its shape, and a reusable one is declared once and applied per element.
+///
+/// <para>Any children: a label, a glyph, or both. <see cref="Label"/> is the shorthand for
+/// the text-only case. Focus shows through the window's focus visual, which the theme
+/// keeps to keyboard focus by default, so a click does not leave a ring behind.</para>
+///
+/// <para>A disabled button is drawn at <see cref="ButtonTheme.DisabledOpacity"/>, leaves
+/// the Tab ring, and swallows its click before any handler sees it — but stays under the
+/// pointer, so a tooltip can still say why.</para>
 /// </summary>
 public class ButtonElement : BoxElement
 {
     private ButtonVariant _variant = ButtonVariant.Primary;
+    private ButtonStyle? _style;
+    private bool _enabled = true;
     private bool _hovered;
     private bool _pressed;
-    private bool _focused;
+    private bool _circular;
+    private float _disabledOpacity = 0.45f;
     private Color _baseColor;
     private Color _hoverColor;
     private Color _pressedColor;
     private Color _borderBase;
     private Color _borderHover;
     private Color _textColor;
-    private Color _focusRingColor;
 
     public ButtonVariant Variant
     {
@@ -44,6 +56,41 @@ public class ButtonElement : BoxElement
         {
             if (_variant == value) return;
             _variant = value;
+            MarkStyleDirty();
+        }
+    }
+
+    /// <summary>
+    /// This button's own look, layered over its variant's. Null: the variant as the theme
+    /// styles it. Compared by reference, so hand the same instance each build — a static
+    /// on the app's UI helpers — rather than a fresh one.
+    /// </summary>
+    public ButtonStyle? Style
+    {
+        get => _style;
+        set
+        {
+            if (ReferenceEquals(_style, value)) return;
+            _style = value;
+            MarkStyleDirty();
+        }
+    }
+
+    /// <summary>
+    /// Off: dimmed, out of the Tab ring, and its click goes nowhere. It stays hit-testable so
+    /// a tooltip can explain why. Turning a focused button off does not move focus; the
+    /// window's next traversal skips it.
+    /// </summary>
+    public bool IsEnabled
+    {
+        get => _enabled;
+        set
+        {
+            if (_enabled == value) return;
+            _enabled = value;
+            IsFocusable = value;
+            _hovered = false;
+            _pressed = false;
             MarkStyleDirty();
         }
     }
@@ -74,9 +121,21 @@ public class ButtonElement : BoxElement
     public ButtonElement()
     {
         IsFocusable = true;
+        ShowsFocusVisual = true;
         Flex.FlexShrink = 0;
+        // A row with its content centred: a glyph sits beside its label, and a label in a
+        // button wider than itself sits in the middle, which is what a button is.
+        Flex.Direction = FlexDirection.Row;
+        Flex.AlignItems = AlignItems.Center;
+        Flex.JustifyContent = JustifyContent.Center;
         Inherited.Cursor = CursorType.Pointer;
 
+        // Registered before any app handler, so a disabled button's click stops here: the
+        // app's OnClick never runs, and nor does a row's behind it.
+        OnOwn<ClickEvent>(evt =>
+        {
+            if (!_enabled) evt.StopPropagation = true;
+        });
         OnOwn<PointerEnterEvent>(_ =>
         {
             _hovered = true;
@@ -98,19 +157,9 @@ public class ButtonElement : BoxElement
             _pressed = false;
             UpdateVisualState();
         });
-        OnOwn<FocusEvent>(_ =>
-        {
-            _focused = true;
-            MarkPaintDirty();
-        });
-        OnOwn<BlurEvent>(_ =>
-        {
-            _focused = false;
-            MarkPaintDirty();
-        });
         OnOwn<KeyDownEvent>(evt =>
         {
-            if (!_focused) return;
+            if (!IsFocused || !_enabled) return;
             if (evt.Key is KeyCode.Enter or KeyCode.Space)
             {
                 // Synthesize a click event for keyboard activation
@@ -126,19 +175,45 @@ public class ButtonElement : BoxElement
         return btn.WithOrigin(file, line);
     }
 
+    /// <summary>An empty button of one variant, for content that is not a plain label —
+    /// a glyph, or a glyph and a label — added as children.</summary>
+    public static ButtonElement New(ButtonVariant variant, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
+        new ButtonElement { _variant = variant }.WithOrigin(file, line);
+
     protected internal override void ApplyTheme(Theme theme)
     {
         var bt = theme.Button;
-        CornerRadius = bt.CornerRadius;
-        Box.Padding = bt.Padding;
-        Box.BorderWidth = bt.BorderWidth;
-        Inherited.FontSize = bt.FontSize;
-        Inherited.FontWeight = bt.FontWeight;
-        _focusRingColor = theme.FocusRing;
-
         var v = bt.For(_variant);
+        var s = _style;
 
-        // The palette's answer for each variant, then whatever the variant theme overrides.
+        // Geometry: the element's style, the variant's, then the theme's shared values.
+        Box.Padding = s?.Padding ?? v.Padding ?? bt.Padding;
+        Box.BorderWidth = s?.BorderWidth ?? v.BorderWidth ?? bt.BorderWidth;
+        Inherited.FontSize = s?.FontSize ?? v.FontSize ?? bt.FontSize;
+        Inherited.FontWeight = s?.FontWeight ?? v.FontWeight ?? bt.FontWeight;
+        Inherited.Cursor = _enabled ? CursorType.Pointer : CursorType.Default;
+        _disabledOpacity = bt.DisabledOpacity;
+
+        // A size the style does not name is left to the app: a primary button stretched to
+        // the width of its composer keeps that width across style passes.
+        float? size = s?.Size ?? v.Size;
+        if (size is { } fixed_)
+        {
+            Box.Width = Dimension.Px(fixed_);
+            Box.Height = Dimension.Px(fixed_);
+        }
+        if ((s?.MinWidth ?? v.MinWidth) is { } minW) Box.MinWidth = minW;
+        if ((s?.MinHeight ?? v.MinHeight) is { } minH) Box.MinHeight = minH;
+
+        // Round is a statement about the radius, so a nearer layer saying "round" beats a
+        // farther one naming a radius, the same as it would beat a farther "round".
+        _circular = s?.Circular ?? v.Circular ?? false;
+        CornerRadius = RadiusOf(s) ?? RadiusOf(v) ?? bt.CornerRadius;
+
+        CornerRadius? RadiusOf(ButtonStyle? st) => st is null ? null
+            : st.CornerRadius ?? (st.Circular == true && size is { } d ? new CornerRadius(d / 2f) : null);
+
+        // The palette's answer for each variant, then whatever the styles override.
         var (fill, border, text) = _variant switch
         {
             ButtonVariant.Secondary => (Color.Transparent, theme.Border, theme.TextColor),
@@ -146,41 +221,35 @@ public class ButtonElement : BoxElement
             ButtonVariant.Ghost => (Color.Transparent, Color.Transparent, theme.Primary),
             _ => (theme.Primary, Color.Transparent, theme.PrimaryText),
         };
-        _baseColor = v.Background ?? fill;
-        _borderBase = v.Border ?? border;
-        _textColor = v.Text ?? text;
-        _borderHover = v.HoverBorder ?? _borderBase;
+        _baseColor = s?.Background ?? v.Background ?? fill;
+        _borderBase = s?.Border ?? v.Border ?? border;
+        _textColor = s?.Text ?? v.Text ?? text;
+        _borderHover = s?.HoverBorder ?? v.HoverBorder ?? _borderBase;
 
         // A filled button darkens under the pointer; an unfilled one takes a wash of its
         // own text colour, which is what reads as "the same button, lit" on any ground.
         bool filled = _baseColor.A > 0;
-        _hoverColor = v.HoverBackground ?? (filled ? Darken(_baseColor, bt.HoverDarken) : Tint(_textColor, bt.HoverTint));
-        _pressedColor = v.PressedBackground ?? (filled ? Darken(_baseColor, bt.PressedDarken) : Tint(_textColor, bt.PressedTint));
+        _hoverColor = s?.HoverBackground ?? v.HoverBackground
+            ?? (filled ? Darken(_baseColor, bt.HoverDarken) : Tint(_textColor, bt.HoverTint));
+        _pressedColor = s?.PressedBackground ?? v.PressedBackground
+            ?? (filled ? Darken(_baseColor, bt.PressedDarken) : Tint(_textColor, bt.PressedTint));
 
         Inherited.TextColor = _textColor;
         UpdateVisualState();
     }
 
-    public override void Render(IRenderContext ctx)
-    {
-        base.Render(ctx);
+    protected override CornerRadius RenderCornerRadius(in Rect box) =>
+        _circular ? new CornerRadius(MathF.Min(box.Width, box.Height) / 2f) : CornerRadius;
 
-        if (_focused)
-        {
-            var box = Layout.AbsoluteBorderBox;
-            float offset = 2f;
-            var ringRect = new Rect(box.X - offset, box.Y - offset, box.Width + offset * 2, box.Height + offset * 2);
-            var ringRadius = new CornerRadius(
-                CornerRadius.TopLeft + offset, CornerRadius.TopRight + offset,
-                CornerRadius.BottomRight + offset, CornerRadius.BottomLeft + offset);
-            ctx.DrawRoundedRect(ringRect, ringRadius, Color.Transparent, _focusRingColor, new Thickness(2f));
-        }
-    }
+    internal override float RenderOpacity => _enabled ? base.RenderOpacity : base.RenderOpacity * _disabledOpacity;
+
+    internal override bool IsEnabledForAccessibility => _enabled;
 
     private void UpdateVisualState()
     {
-        BackgroundColor = _pressed ? _pressedColor : _hovered ? _hoverColor : _baseColor;
-        BorderColor = _hovered || _pressed ? _borderHover : _borderBase;
+        bool lit = _enabled && (_hovered || _pressed);
+        BackgroundColor = !_enabled ? _baseColor : _pressed ? _pressedColor : _hovered ? _hoverColor : _baseColor;
+        BorderColor = lit ? _borderHover : _borderBase;
         MarkPaintDirty();
     }
 
@@ -198,6 +267,8 @@ public class ButtonElement : BoxElement
         if (source is ButtonElement btn)
         {
             Variant = btn.Variant;
+            Style = btn.Style;
+            IsEnabled = btn.IsEnabled;
         }
     }
 }

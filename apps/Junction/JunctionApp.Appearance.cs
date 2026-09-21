@@ -145,12 +145,8 @@ public partial class JunctionApp
     private static Element SectionTitle(string text) =>
         Text.New(text).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(Nocturne.Text);
 
-    private Element StepButton(string glyph, string tooltip, Action onClick, bool enabled)
-    {
-        if (!enabled) return Ui.DisabledIconButton(glyph, tooltip, 28f);
-        var b = Ui.IconButton(glyph, onClick, tooltip, 28f);
-        return b;
-    }
+    private Element StepButton(string glyph, string tooltip, Action onClick, bool enabled) =>
+        Ui.IconButton(glyph, onClick, tooltip, 28f).Enabled(enabled);
 
     /// <summary>
     /// Apply a zoom and remember it. Like the scheme cards above, it takes effect at once —
