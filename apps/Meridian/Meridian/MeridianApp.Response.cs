@@ -225,17 +225,12 @@ public partial class MeridianApp
         status.AddChild(Box.New().FlexGrow(1));
         if (!_forceResponseBottom)
         {
-            var flip = Flex.Row(gap: 4).AlignItems(AlignItems.Center)
-                .Padding(new Thickness(3, 6, 3, 6))
-                .CornerRadius(Azimuth.Radius1)
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button)
+            // Keycap first, then the label — the one button whose hint leads.
+            var flip = Button.New(ButtonVariant.Ghost).Gap(4).Style(Ui.Tiny)
                 .AccessibleName(ResponseAtBottom ? "Move response pane right" : "Move response pane to bottom")
-                .AutomationId("flip-pane");
-            flip.AddChild(Ui.Kbd("Ctrl \\"));
-            flip.AddChild(Text.New("flip pane").FontSize(11f).TextColor(Azimuth.TextMuted));
+                .AutomationId("flip-pane")
+                .Children(Ui.Kbd("Ctrl \\"), Text.New("flip pane"));
             flip.OnClick(_ => FlipResponsePane());
-            flip.HoverBg(Azimuth.Raised, Color.Transparent);
             status.AddChild(flip);
         }
         return status;

@@ -1139,6 +1139,11 @@ survives the style pass — while padding, radius, font and border width are alw
 theme's. `Circular` with a `Size` sets the radius up front, so the focus ring follows it;
 without one, the radius is taken from the laid-out box at paint time.
 
+**Hover and pressed are interaction styles**, the same mechanism as `.OnHover` and
+`.OnPressed`, so `.Transition(TransitionProperty.Background, 90f)` on a button fades them
+and an app's own `.OnHover` layers over them rather than fighting them. A theme change
+mid-hover keeps the button lit, in the new colours.
+
 **Disabled** (`IsEnabled`, `.Enabled(false)`): drawn at `ButtonTheme.DisabledOpacity`
 over the app's own `Opacity`, dropped from the Tab ring, and its click is swallowed
 before any handler runs — the app's or a row's behind it. It stays under the pointer, so a

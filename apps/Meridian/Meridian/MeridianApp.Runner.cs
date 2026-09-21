@@ -178,45 +178,29 @@ public partial class MeridianApp
         panel.AddChild(Box.New().Height(Azimuth.S3));
 
         int scopeCount = ScopeRequestsCountFor(_runScopePath);
+        // Keyed by state so Run, its disabled twin and Abort swap as fresh elements rather
+        // than patching into one another.
         if (_runState == RunState.Running)
         {
-            var abort = Flex.Row(gap: 6).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-                .Padding(new Thickness(7, Azimuth.S4, 7, Azimuth.S4))
-                .CornerRadius(Azimuth.Radius1)
-                .BorderColor(Azimuth.StatusWarn).BorderWidth(1f)
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button).AccessibleName("Abort run")
-                .AutomationId("run-abort");
-            abort.AddChild(Text.New("Abort").FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(Azimuth.StatusWarn));
-            abort.AddChild(Ui.Kbd("Esc"));
-            abort.OnClick(_ => AbortRun());
+            var abort = Ui.Button(ButtonVariant.Secondary, "Abort", AbortRun, "run-abort", kbd: "Esc", style: Ui.Warn)
+                .AccessibleName("Abort run");
+            abort.Key = "run-abort";
             panel.AddChild(abort);
         }
         else if (scopeCount == 0)
         {
-            panel.AddChild(Flex.Column(gap: 4)
-                .Padding(new Thickness(7, Azimuth.S3, 7, Azimuth.S3))
-                .CornerRadius(Azimuth.Radius1)
-                .BorderColor(Azimuth.Border).BorderWidth(1f)
-                .Opacity(0.45f)
-                .Children(Text.New("Run").FontSize(12.5f).TextColor(Azimuth.TextMuted))
-                .AutomationId("run-disabled"));
+            var off = Ui.Button(ButtonVariant.Secondary, "Run", StartRun, "run-disabled").Enabled(false)
+                .Tooltip("0 requests in scope");
+            off.Key = "run-disabled";
+            panel.AddChild(off);
             panel.AddChild(Text.New("0 requests in scope — Run is disabled until the scope is non-empty.")
                 .FontSize(11f).TextColor(Azimuth.TextMuted).AutomationId("run-zero-scope"));
         }
         else
         {
-            var run = Flex.Row(gap: 6).AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-                .Padding(new Thickness(7, Azimuth.S4, 7, Azimuth.S4))
-                .CornerRadius(Azimuth.Radius1)
-                .BorderColor(Azimuth.Accent).BorderWidth(1f)
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button).AccessibleName($"Run {scopeCount} requests")
-                .AutomationId("run-start");
-            run.AddChild(Text.New($"Run · {scopeCount} req").FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Accent));
-            run.AddChild(Ui.Kbd("Ctrl R"));
-            run.OnClick(_ => StartRun());
-            run.HoverBg(Azimuth.Tint(Azimuth.Accent), Color.Transparent);
+            var run = Ui.Button(ButtonVariant.Primary, $"Run · {scopeCount} req", StartRun, "run-start", kbd: "Ctrl R")
+                .AccessibleName($"Run {scopeCount} requests");
+            run.Key = "run-start";
             panel.AddChild(run);
         }
 

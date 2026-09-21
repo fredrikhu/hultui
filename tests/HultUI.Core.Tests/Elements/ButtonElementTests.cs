@@ -86,14 +86,14 @@ public class ButtonElementTests
         b.ApplyTheme(themed);
         Assert.Equal(b.ResolvedBackground, b.BackgroundColor);
 
-        EventDispatcher.DispatchDirect(new PointerEnterEvent(), b);
+        b.SetInteractionHovered(true);
         Assert.Equal(b.ResolvedHoverBackground, b.BackgroundColor);
         Assert.Equal(hoverBorder, b.BorderColor);
 
-        EventDispatcher.DispatchDirect(new PointerDownEvent(), b);
+        b.SetInteractionPressed(true);
         Assert.Equal(b.ResolvedPressedBackground, b.BackgroundColor);
 
-        EventDispatcher.DispatchDirect(new PointerLeaveEvent(), b);
+        b.SetInteractionPressed(false); b.SetInteractionHovered(false);
         Assert.Equal(b.ResolvedBackground, b.BackgroundColor);
         Assert.Equal(b.ResolvedBorder, b.BorderColor);
     }
@@ -220,8 +220,8 @@ public class ButtonElementTests
         var b = Button.New("Go").Enabled(false);
         b.ApplyTheme(Theme.Light);
 
-        EventDispatcher.DispatchDirect(new PointerEnterEvent(), b);
-        EventDispatcher.DispatchDirect(new PointerDownEvent(), b);
+        b.SetInteractionHovered(true);
+        b.SetInteractionPressed(true);
         Assert.Equal(b.ResolvedBackground, b.BackgroundColor);
         Assert.Equal(b.ResolvedBorder, b.BorderColor);
     }
@@ -242,5 +242,50 @@ public class ButtonElementTests
         live.PatchFrom(Button.New("x").Enabled(false));
         Assert.False(live.IsEnabled);
         Assert.False(live.IsFocusable);
+    }
+
+    // ── Interaction ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void AThemeChangeMidHover_KeepsTheButtonLit_InTheNewColours()
+    {
+        var b = Button.New("Go");
+        b.ApplyTheme(Theme.Light);
+        b.SetInteractionHovered(true);
+
+        b.ApplyTheme(Theme.Dark);
+        Assert.Equal(b.ResolvedHoverBackground, b.BackgroundColor);
+        Assert.NotEqual(Theme.Light.Primary, b.ResolvedBackground);
+    }
+
+    [Fact]
+    public void AnAppsOwnHoverStyle_LayersOverTheButtons()
+    {
+        var ring = new Color(9, 9, 9);
+        var b = Button.New("Go").OnHover(e => e.BorderColor = ring);
+        b.ApplyTheme(Theme.Light);
+
+        b.SetInteractionHovered(true);
+        Assert.Equal(b.ResolvedHoverBackground, b.BackgroundColor);   // the button's own hover fill
+        Assert.Equal(ring, b.BorderColor);                             // the app's border on top
+
+        b.SetInteractionHovered(false);
+        Assert.Equal(b.ResolvedBorder, b.BorderColor);
+    }
+
+    [Fact]
+    public void AReconciledButton_LightsInItsOwnColours_NotTheDiscardedBuildS()
+    {
+        // The hover style is copied from the incoming build; it must read the retained
+        // element it is handed, not the discarded one it was constructed on.
+        var live = Button.New("Go");
+        live.ApplyTheme(Theme.Light);
+        var incoming = Button.New("Go", ButtonVariant.Danger);
+        incoming.ApplyTheme(Theme.Light);
+        live.PatchFrom(incoming);
+        live.ApplyTheme(Theme.Light);
+
+        live.SetInteractionHovered(true);
+        Assert.Equal(live.ResolvedHoverBackground, live.BackgroundColor);
     }
 }

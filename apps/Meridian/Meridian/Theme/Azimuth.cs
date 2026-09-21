@@ -107,6 +107,38 @@ public static class Azimuth
         Border = BorderStrong,
         SurfaceVariant = Raised,
         Danger = StatusFail,
+        // Meridian's button families, as the views drew them by hand before ButtonElement
+        // took over: outlined or bare on no fill, lit by a wash of the accent or the raised
+        // step. Danger follows the same shape so a framework dialog's destructive action
+        // belongs too.
+        Button = new ButtonTheme
+        {
+            CornerRadius = new(Radius1),
+            Padding = new(6, S4, 6, S4),
+            FontSize = 12.5f,
+            FontWeight = FontWeight.Medium,
+            DisabledOpacity = 0.45f,
+            Primary = new ButtonStyle
+            {
+                Background = Color.Transparent, Border = Accent, Text = Accent,
+                HoverBackground = Tint(Accent), PressedBackground = Alpha(Accent, 0.24),
+            },
+            Secondary = new ButtonStyle
+            {
+                Border = Border, Text = TextDim,
+                HoverBackground = Raised, PressedBackground = Raised,
+            },
+            Ghost = new ButtonStyle
+            {
+                Text = TextMuted,
+                HoverBackground = Raised, PressedBackground = Raised,
+            },
+            Danger = new ButtonStyle
+            {
+                Background = Color.Transparent, Border = StatusFail, Text = StatusFail,
+                HoverBackground = Tint(StatusFail), PressedBackground = Alpha(StatusFail, 0.24),
+            },
+        },
         Toast = new ToastTheme { Background = Raised },
         // Inputs are az-surface on az-border per the sheet, but StyleResolver
         // re-applies the theme every pass (per-element border overrides don't

@@ -29,6 +29,10 @@ public enum ButtonVariant
 /// the text-only case. Focus shows through the window's focus visual, which the theme
 /// keeps to keyboard focus by default, so a click does not leave a ring behind.</para>
 ///
+/// <para>Hover and pressed are interaction styles, the same mechanism as <c>.OnHover</c>,
+/// so an app's <c>.Transition(TransitionProperty.Background, …)</c> fades them and its own
+/// <c>.OnHover</c> layers over them rather than fighting them.</para>
+///
 /// <para>A disabled button is drawn at <see cref="ButtonTheme.DisabledOpacity"/>, leaves
 /// the Tab ring, and swallows its click before any handler sees it — but stays under the
 /// pointer, so a tooltip can still say why.</para>
@@ -38,8 +42,6 @@ public class ButtonElement : BoxElement
     private ButtonVariant _variant = ButtonVariant.Primary;
     private ButtonStyle? _style;
     private bool _enabled = true;
-    private bool _hovered;
-    private bool _pressed;
     private bool _circular;
     private float _disabledOpacity = 0.45f;
     private Color _baseColor;
@@ -89,8 +91,6 @@ public class ButtonElement : BoxElement
             if (_enabled == value) return;
             _enabled = value;
             IsFocusable = value;
-            _hovered = false;
-            _pressed = false;
             MarkStyleDirty();
         }
     }
@@ -130,32 +130,18 @@ public class ButtonElement : BoxElement
         Flex.JustifyContent = JustifyContent.Center;
         Inherited.Cursor = CursorType.Pointer;
 
+        // Static, and reading the element they are handed: reconciliation copies the
+        // incoming build's interaction config onto the retained element, so a lambda
+        // that closed over `this` would light the retained button in a discarded one's
+        // colours.
+        AddHoverStyle(static e => ((ButtonElement)e).ApplyLit(pressed: false));
+        AddPressedStyle(static e => ((ButtonElement)e).ApplyLit(pressed: true));
+
         // Registered before any app handler, so a disabled button's click stops here: the
         // app's OnClick never runs, and nor does a row's behind it.
         OnOwn<ClickEvent>(evt =>
         {
             if (!_enabled) evt.StopPropagation = true;
-        });
-        OnOwn<PointerEnterEvent>(_ =>
-        {
-            _hovered = true;
-            UpdateVisualState();
-        });
-        OnOwn<PointerLeaveEvent>(_ =>
-        {
-            _hovered = false;
-            _pressed = false;
-            UpdateVisualState();
-        });
-        OnOwn<PointerDownEvent>(_ =>
-        {
-            _pressed = true;
-            UpdateVisualState();
-        });
-        OnOwn<PointerUpEvent>(_ =>
-        {
-            _pressed = false;
-            UpdateVisualState();
         });
         OnOwn<KeyDownEvent>(evt =>
         {
@@ -235,7 +221,20 @@ public class ButtonElement : BoxElement
             ?? (filled ? Darken(_baseColor, bt.PressedDarken) : Tint(_textColor, bt.PressedTint));
 
         Inherited.TextColor = _textColor;
-        UpdateVisualState();
+
+        // The rest look is the interaction base: write it, re-snapshot, and re-apply
+        // whatever state the pointer is in — a theme change mid-hover keeps the button lit,
+        // in the new theme's colours.
+        BackgroundColor = _baseColor;
+        BorderColor = _borderBase;
+        RefreshInteractionAfterPatch();
+    }
+
+    private void ApplyLit(bool pressed)
+    {
+        if (!_enabled) return;
+        BackgroundColor = pressed ? _pressedColor : _hoverColor;
+        BorderColor = _borderHover;
     }
 
     protected override CornerRadius RenderCornerRadius(in Rect box) =>
@@ -244,14 +243,6 @@ public class ButtonElement : BoxElement
     internal override float RenderOpacity => _enabled ? base.RenderOpacity : base.RenderOpacity * _disabledOpacity;
 
     internal override bool IsEnabledForAccessibility => _enabled;
-
-    private void UpdateVisualState()
-    {
-        bool lit = _enabled && (_hovered || _pressed);
-        BackgroundColor = !_enabled ? _baseColor : _pressed ? _pressedColor : _hovered ? _hoverColor : _baseColor;
-        BorderColor = lit ? _borderHover : _borderBase;
-        MarkPaintDirty();
-    }
 
     private static Color Darken(Color c, float factor) => new(
         (byte)(c.R * factor),

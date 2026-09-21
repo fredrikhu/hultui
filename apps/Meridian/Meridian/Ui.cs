@@ -2,6 +2,7 @@ using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Styling;
 using HultUI.Icons;
 using Meridian.Theme;
 
@@ -88,4 +89,73 @@ public static class Ui
             .CornerRadius(Azimuth.Radius1)
             .BorderColor(Azimuth.Border).BorderWidth(1f)
             .Children(Mono(text, 10f, Azimuth.TextMuted));
+
+    // ── Buttons ──────────────────────────────────────────────────────────
+    // The framework's ButtonElement in the families Azimuth.ToHultTheme() gives its
+    // ButtonTheme: the accent outline primary, the az-border secondary, the bare ghost,
+    // the status-fail danger. Chrome, hover, focus, keyboard activation, the disabled
+    // state and the accessibility role are the element's; what this adds is Meridian's
+    // content — the label, an optional keycap — and the automation id every control here
+    // carries. Tabs, rows, chips and cards are not buttons and keep their own boxes.
+
+    /// <param name="onClick">Null when the caller wires the click itself — a handler that
+    /// needs the event, or one that opens a dialog with a closure over the row.</param>
+    public static ButtonElement Button(ButtonVariant variant, string label, Action? onClick,
+        string? automationId = null, string? kbd = null, ButtonStyle? style = null)
+    {
+        var b = HultUI.Core.Builders.Button.New(variant).Gap(6).Style(style);
+        // Named for the label alone: the keycap is a hint for sighted users, and a screen
+        // reader announcing "Send Ctrl ↵" would be reading the furniture.
+        b.AccessibleName = label;
+        b.AddChild(Text.New(label));
+        if (kbd != null) b.AddChild(Kbd(kbd));
+        if (automationId != null) b.AutomationId(automationId);
+        if (onClick != null) b.OnClick(_ => onClick());
+        return b;
+    }
+
+    /// <summary>The warn-coloured outline: Cancel and Abort, which interrupt rather than destroy.</summary>
+    public static readonly ButtonStyle Warn = new()
+    {
+        Border = Azimuth.StatusWarn, Text = Azimuth.StatusWarn,
+        HoverBackground = Azimuth.Tint(Azimuth.StatusWarn), PressedBackground = Azimuth.Alpha(Azimuth.StatusWarn, 0.24),
+    };
+
+    /// <summary>A bar's small action — reload, keep mine, a dialog's cancel.</summary>
+    public static readonly ButtonStyle Small = new()
+    {
+        Padding = new Thickness(4, Azimuth.S2, 4, Azimuth.S2), FontSize = 11.5f, FontWeight = FontWeight.Regular,
+    };
+
+    /// <summary>A dialog's confirming action: the primary outline at the dialog's size.</summary>
+    public static readonly ButtonStyle Dialog = new()
+    {
+        Padding = new Thickness(4, Azimuth.S3, 4, Azimuth.S3), FontSize = 12f,
+    };
+
+    /// <summary>The warn-filled fix-it cell: "missing — add to dev", "not set — set value".</summary>
+    public static readonly ButtonStyle WarnFill = new()
+    {
+        Background = Azimuth.Alpha(Azimuth.StatusWarn, 0.10), Text = Azimuth.StatusWarn,
+        HoverBackground = Azimuth.Alpha(Azimuth.StatusWarn, 0.18), PressedBackground = Azimuth.Alpha(Azimuth.StatusWarn, 0.26),
+        Padding = new Thickness(4, Azimuth.S2, 4, Azimuth.S2), FontSize = 10.5f, FontWeight = FontWeight.Regular,
+    };
+
+    /// <summary>A 22px ✕ that removes its row.</summary>
+    public static readonly ButtonStyle Remove = new()
+    {
+        Size = 22f, Padding = new Thickness(0), Text = Azimuth.TextFaint, FontSize = 10f, FontWeight = FontWeight.Regular,
+    };
+
+    /// <summary>A ghost action that adds a row — "＋ header" — in the editor's muted text.</summary>
+    public static readonly ButtonStyle AddRow = new()
+    {
+        Padding = new Thickness(5, Azimuth.S2, 5, Azimuth.S2), FontSize = 11.5f, FontWeight = FontWeight.Regular,
+    };
+
+    /// <summary>The smallest ghost action in a bar: flip pane.</summary>
+    public static readonly ButtonStyle Tiny = new()
+    {
+        Padding = new Thickness(3, 6, 3, 6), FontSize = 11f, FontWeight = FontWeight.Regular,
+    };
 }

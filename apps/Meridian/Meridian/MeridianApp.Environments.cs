@@ -205,16 +205,9 @@ public partial class MeridianApp
         if (!doc.Keys.Contains(key))
         {
             // Missing here: the warn cell with the one-click fix.
-            var add = Box.New()
-                .Padding(new Thickness(4, Azimuth.S2, 4, Azimuth.S2))
-                .CornerRadius(Azimuth.Radius1)
-                .Background(Azimuth.Alpha(Azimuth.StatusWarn, 0.10))
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button)
-                .AccessibleName($"add {key} to {envName}")
-                .AutomationId($"add-{key}-to-{envName}")
-                .Children(Text.New($"! missing — add to {envName}").FontSize(10.5f).TextColor(Azimuth.StatusWarn));
-            add.OnClick(_ => { doc.SetValue(key, ""); MarkDirty(); });
+            var add = Ui.Button(ButtonVariant.Ghost, $"! missing — add to {envName}",
+                    () => { doc.SetValue(key, ""); MarkDirty(); }, $"add-{key}-to-{envName}", style: Ui.WarnFill)
+                .AccessibleName($"add {key} to {envName}");
             cell.AddChild(add);
             return cell;
         }
@@ -248,15 +241,9 @@ public partial class MeridianApp
 
         if (value == null)
         {
-            var set = Box.New()
-                .Padding(new Thickness(4, Azimuth.S2, 4, Azimuth.S2))
-                .CornerRadius(Azimuth.Radius1)
-                .Background(Azimuth.Alpha(Azimuth.StatusWarn, 0.10))
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button)
-                .AccessibleName($"set {key} for this machine")
-                .AutomationId($"set-secret-{key}")
-                .Children(Text.New("! not set on this machine — set value").FontSize(10.5f).TextColor(Azimuth.StatusWarn));
+            var set = Ui.Button(ButtonVariant.Ghost, "! not set on this machine — set value", null,
+                    $"set-secret-{key}", style: Ui.WarnFill)
+                .AccessibleName($"set {key} for this machine");
             set.OnClick(_ => OpenDialog($"Secret {key}", "value — stored in the OS keyring, never in the file", v =>
             {
                 if (!_keyring.Set(ws.Root, key, v))
@@ -396,16 +383,7 @@ public partial class MeridianApp
 
         var buttons = Flex.Row(gap: Azimuth.S2).JustifyContent(JustifyContent.FlexEnd);
         buttons.AddChild(BarAction("cancel", "dialog-cancel", CancelDialog));
-        var ok = Box.New()
-            .Padding(new Thickness(4, Azimuth.S3, 4, Azimuth.S3))
-            .CornerRadius(Azimuth.Radius1)
-            .BorderColor(Azimuth.Accent).BorderWidth(1f)
-            .Cursor(CursorType.Pointer)
-            .AccessibleRole(AccessibilityRole.Button).AccessibleName("OK")
-            .AutomationId("dialog-ok")
-            .Children(Text.New("OK").FontSize(12f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Accent));
-        ok.OnClick(_ => SubmitDialog());
-        buttons.AddChild(ok);
+        buttons.AddChild(Ui.Button(ButtonVariant.Primary, "OK", SubmitDialog, "dialog-ok", style: Ui.Dialog));
         card.AddChild(buttons);
 
         backdrop.AddChild(card);

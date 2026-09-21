@@ -193,20 +193,29 @@ public static class F
     /// outer box draws the bottom edge and the inner one draws the other three — 1px in total
     /// either way, and the two-tone survives.</para>
     /// </summary>
+    /// <summary>
+    /// The outer box's shape: no padding of its own — the inner box carries it, along with
+    /// the top edge of the two-tone stroke — and only the bottom edge of the border, whose
+    /// colour the palette's <c>ButtonTheme</c> supplies per family. The fills, hover and
+    /// pressed colours come from the theme too, so the framework's own dialog buttons and
+    /// this one read the same tokens.
+    /// </summary>
+    private static readonly ButtonStyle ButtonShape = new()
+    {
+        Padding = new Thickness(0),
+        BorderWidth = new Thickness(0, 0, 1, 0),
+    };
+
     public static Element Button(
         FluentPalette p, string label, Action onClick, bool accent = false, Icon? icon = null)
     {
-        var fill = accent ? p.Accent : p.ControlFill;
-        var hover = accent ? p.AccentHover : p.ControlHover;
-        var pressed = accent ? p.AccentPressed : p.ControlPressed;
         var text = accent ? p.TextOnAccent : p.TextPrimary;
+        var strokeTop = accent ? p.AccentStrokeTop : p.ControlStroke;
 
-        // An accent button's own border is a highlight rather than an outline: white along the
-        // top, black along the bottom, both at a few percent over the accent itself.
-        var strokeTop = accent ? new Color(255, 255, 255, (byte)(p.IsDark ? 20 : 36)) : p.ControlStroke;
-        var strokeBottom = accent ? new Color(0, 0, 0, (byte)(p.IsDark ? 36 : 64)) : p.ControlStrokeBottom;
-
-        var inner = Flex.Row(gap: 8f).FlexGrow(1)
+        // The inner box is stretched to the outer's height (the button aligns its content
+        // Stretch rather than its default Center) so its top edge draws at the top of the
+        // control; it must not grow sideways, or a button in a wrapping row fills the row.
+        var inner = Flex.Row(gap: 8f)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Padding(new Thickness(0, 11, 0, 11))
             .CornerRadius(Fluent.ControlRadius)
@@ -215,40 +224,43 @@ public static class F
                 ? [Body(p, label).TextColor(text)]
                 : new Element[] { IconRenderer.Draw(icon.Value, 16f, text), Body(p, label).TextColor(text) });
 
-        return Focusable(Box.New().FlexShrink(0)
+        // The framework's button: focusable, Space and Enter, the focus visual, the role.
+        // Its hover and pressed states are interaction styles, so the 90ms fade applies.
+        return HultUI.Core.Builders.Button.New(accent ? ButtonVariant.Primary : ButtonVariant.Secondary)
+            .Style(ButtonShape)
+            .AlignItems(AlignItems.Stretch)
             .Height(Fluent.ControlHeight)
-            .CornerRadius(Fluent.ControlRadius)
-            .Background(fill)
-            .Border(new Thickness(0, 0, 1, 0), strokeBottom)
-            .Cursor(CursorType.Pointer)
-            .OnHover(b => b.Background(hover))
-            .OnPressed(b => b.Background(pressed))
             .Transition(TransitionProperty.Background, 90f)
             .OnClick(_ => onClick())
-            .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(label)
-            .Children(inner), onClick);
+            .Children(inner);
+    }
+
+    /// <summary>The subtle button's shape at one size, with an optional hover fill of its
+    /// own (the InfoBar's close). One instance per pair: a style is compared by reference.</summary>
+    private static readonly Dictionary<(float Size, Color? Hover), ButtonStyle> SubtleShapes = new();
+
+    private static ButtonStyle SubtleShape(float size, Color? hoverFill)
+    {
+        var key = (size, hoverFill);
+        if (!SubtleShapes.TryGetValue(key, out var shape))
+            SubtleShapes[key] = shape = new ButtonStyle
+            {
+                Size = size, Padding = new Thickness(0), HoverBackground = hoverFill,
+            };
+        return shape;
     }
 
     /// <summary>A borderless square button — the title bar's and the InfoBar's. Fluent calls
     /// this the subtle style: nothing at rest, a faint fill under the pointer.</summary>
     public static Element SubtleIconButton(
         FluentPalette p, Icon icon, string name, Action onClick,
-        float size = 32f, float glyph = 16f, Color? tint = null, Color? hoverFill = null)
-    {
-        return Focusable(Box.New().FlexShrink(0)
-            .Width(size).Height(size)
-            .CornerRadius(Fluent.ControlRadius)
-            .Background(Color.Transparent)
-            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
-            .Cursor(CursorType.Pointer)
-            .OnHover(b => b.Background(hoverFill ?? p.SubtleHover))
-            .OnPressed(b => b.Background(p.SubtlePressed))
+        float size = 32f, float glyph = 16f, Color? tint = null, Color? hoverFill = null) =>
+        HultUI.Core.Builders.Button.New(ButtonVariant.Ghost)
+            .Style(SubtleShape(size, hoverFill))
             .OnClick(_ => onClick())
-            .AccessibleRole(AccessibilityRole.Button)
             .AccessibleName(name)
-            .Children(IconRenderer.Draw(icon, glyph, tint ?? p.TextPrimary)), onClick);
-    }
+            .Children(IconRenderer.Draw(icon, glyph, tint ?? p.TextPrimary));
 
     /// <summary>
     /// The toggle switch, which is the single most WinUI-looking control there is.

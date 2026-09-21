@@ -332,33 +332,18 @@ public partial class MeridianApp
         bar.AddChild(urlBox);
 
         // Send / Cancel.
+        // Keyed by state so the two swap as fresh elements: a retained Send patched into a
+        // Cancel would keep Send's focus and pointer state across the swap.
         if (tab.Sending == null)
         {
-            var send = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
-                .Padding(new Thickness(6, Azimuth.S4, 6, Azimuth.S4))
-                .CornerRadius(Azimuth.Radius1)
-                .BorderColor(Azimuth.Accent).BorderWidth(1f)
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button).AccessibleName("Send")
-                .AutomationId("send");
-            send.AddChild(Text.New("Send").FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(Azimuth.Accent));
-            send.AddChild(Ui.Kbd("Ctrl ↵"));
-            send.OnClick(_ => SendActive());
-            send.HoverBg(Azimuth.Tint(Azimuth.Accent), Color.Transparent);
+            var send = Ui.Button(ButtonVariant.Primary, "Send", SendActive, "send", kbd: "Ctrl ↵");
+            send.Key = "send";
             bar.AddChild(send);
         }
         else
         {
-            var cancel = Flex.Row(gap: 6).AlignItems(AlignItems.Center)
-                .Padding(new Thickness(6, Azimuth.S4, 6, Azimuth.S4))
-                .CornerRadius(Azimuth.Radius1)
-                .BorderColor(Azimuth.StatusWarn).BorderWidth(1f)
-                .Cursor(CursorType.Pointer)
-                .AccessibleRole(AccessibilityRole.Button).AccessibleName("Cancel")
-                .AutomationId("cancel");
-            cancel.AddChild(Text.New("Cancel").FontSize(12.5f).FontWeight(FontWeight.Medium).TextColor(Azimuth.StatusWarn));
-            cancel.AddChild(Ui.Kbd("Esc"));
-            cancel.OnClick(_ => CancelActive());
+            var cancel = Ui.Button(ButtonVariant.Secondary, "Cancel", CancelActive, "cancel", kbd: "Esc", style: Ui.Warn);
+            cancel.Key = "cancel";
             bar.AddChild(cancel);
         }
         return bar;
@@ -595,28 +580,12 @@ public partial class MeridianApp
         return box;
     }
 
-    private Element RemoveButton(string accessibleName, Action onClick)
-    {
-        var b = Box.New().Width(22).Height(22)
-            .JustifyContent(JustifyContent.Center).AlignItems(AlignItems.Center)
-            .CornerRadius(Azimuth.Radius1).Cursor(CursorType.Pointer)
-            .AccessibleRole(AccessibilityRole.Button).AccessibleName(accessibleName)
-            .Children(Text.New("✕").FontSize(10f).TextColor(Azimuth.TextFaint));
-        b.OnClick(_ => onClick());
-        return b.HoverBg(Azimuth.Raised, Color.Transparent);
-    }
+    private static Element RemoveButton(string accessibleName, Action onClick) =>
+        Ui.Button(ButtonVariant.Ghost, "✕", onClick, style: Ui.Remove).AccessibleName(accessibleName);
 
-    private Element AddRowButton(string label, string automationId, Action onClick)
-    {
-        var b = Box.New()
-            .Padding(new Thickness(5, Azimuth.S2, 5, Azimuth.S2))
-            .CornerRadius(Azimuth.Radius1).Cursor(CursorType.Pointer)
-            .AccessibleRole(AccessibilityRole.Button).AccessibleName(label.TrimStart('＋', ' '))
-            .AutomationId(automationId)
-            .Children(Text.New(label).FontSize(11.5f).TextColor(Azimuth.TextMuted));
-        b.OnClick(_ => onClick());
-        return b.HoverBg(Azimuth.Raised, Color.Transparent);
-    }
+    private static Element AddRowButton(string label, string automationId, Action onClick) =>
+        Ui.Button(ButtonVariant.Ghost, label, onClick, automationId, style: Ui.AddRow)
+            .AccessibleName(label.TrimStart('＋', ' '));
 
     /// <summary>Status glyph + colour per the Azimuth register: 2xx pass ✓,
     /// 3xx skip −, 4xx warn !, 5xx fail ✗ — glyph always beside colour.</summary>
@@ -685,19 +654,8 @@ public partial class MeridianApp
         return bar;
     }
 
-    private Element BarAction(string label, string automationId, Action onClick)
-    {
-        var b = Box.New()
-            .Padding(new Thickness(4, Azimuth.S2, 4, Azimuth.S2))
-            .CornerRadius(Azimuth.Radius1)
-            .BorderColor(Azimuth.Border).BorderWidth(1f)
-            .Cursor(CursorType.Pointer)
-            .AccessibleRole(AccessibilityRole.Button).AccessibleName(label)
-            .AutomationId(automationId)
-            .Children(Text.New(label).FontSize(11.5f).TextColor(Azimuth.TextDim));
-        b.OnClick(_ => onClick());
-        return b.HoverBg(Azimuth.Raised, Color.Transparent);
-    }
+    private static Element BarAction(string label, string automationId, Action onClick) =>
+        Ui.Button(ButtonVariant.Secondary, label, onClick, automationId, style: Ui.Small);
 
     // ── Popover (method picker) ──────────────────────────────────────────
 

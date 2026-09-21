@@ -107,6 +107,11 @@ public sealed record FluentPalette
     /// getting it backwards is the fastest way to look like something else.</summary>
     public required Color TextOnAccent { get; init; }       // TextOnAccentFillColorPrimary
 
+    /// <summary>An accent button's own border is a highlight rather than an outline: white
+    /// along the top, black along the bottom, both at a few percent over the accent itself.</summary>
+    public Color AccentStrokeTop => new(255, 255, 255, (byte)(IsDark ? 20 : 36));
+    public Color AccentStrokeBottom => new(0, 0, 0, (byte)(IsDark ? 36 : 64));
+
     // ── Severity (InfoBar) ──
     public required Color Success { get; init; }
     public required Color SuccessBg { get; init; }
@@ -227,14 +232,35 @@ public sealed record FluentPalette
         DangerText = TextOnAccent,
         FocusRing = Accent,
 
+        // Fluent's fills and strokes per family, so Controls.Button and the framework's own
+        // dialog buttons read the same tokens. The border here is the bottom edge of the
+        // two-tone stroke — the darker line that seats a control on the page; the lighter
+        // top edge is the inner box Controls.Button adds, since a box has one border colour.
         Button = new ButtonTheme
         {
             CornerRadius = new CornerRadius(Fluent.ControlRadius),
             Padding = new Thickness(5, 12, 6, 12),
             FontSize = Fluent.BodySize,
             FontWeight = FontWeight.Regular,
-            HoverDarken = IsDark ? 0.90f : 1.0f,
-            PressedDarken = IsDark ? 0.80f : 1.0f,
+            Primary = new ButtonStyle
+            {
+                Background = Accent, HoverBackground = AccentHover, PressedBackground = AccentPressed,
+                Text = TextOnAccent, Border = AccentStrokeBottom,
+            },
+            Secondary = new ButtonStyle
+            {
+                Background = ControlFill, HoverBackground = ControlHover, PressedBackground = ControlPressed,
+                Text = TextPrimary, Border = ControlStrokeBottom,
+            },
+            Ghost = new ButtonStyle
+            {
+                Background = Color.Transparent, HoverBackground = SubtleHover, PressedBackground = SubtlePressed,
+                Text = TextPrimary,
+            },
+            Danger = new ButtonStyle
+            {
+                Background = Critical, Text = TextOnAccent, Border = AccentStrokeBottom,
+            },
         },
         Slider = new SliderTheme
         {
