@@ -473,6 +473,12 @@ works. `_pan.Scrollbar(track, thumb, border)` builds a draggable bar under the l
 
 ---
 
+**A rounded box clips round.** `Overflow.Hidden` on a box with a corner radius cuts its
+children to the rounded shape, the way `overflow: hidden` does with a `border-radius` — so
+an image inside a circular avatar is a circle, and artwork filling a rounded card follows
+the card's corners instead of squaring them off. Without `Hidden` nothing is clipped at
+all, rounded or not.
+
 ## 12. Outline, not a conditional border
 
 A common bug: selecting a tab or a swatch makes its neighbours shift, because the

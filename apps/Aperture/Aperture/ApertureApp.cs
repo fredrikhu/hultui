@@ -22,7 +22,7 @@ public enum ApertureStage { Connect, Browsing }
 /// <param name="Id">The library or item the view is about; null for Home and Search.</param>
 public sealed record Route(ApertureView View, string? Id = null, string? Title = null);
 
-public enum ApertureView { Home, Library, Detail, Search, Settings }
+public enum ApertureView { Home, Library, Detail, Person, Favourites, Search, Settings }
 
 /// <summary>
 /// Root of Aperture, the Jellyfin client: a Halide-themed shell — title bar, 64dip rail,
@@ -175,6 +175,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         {
             ApertureView.Library => BuildLibraryView(Current),
             ApertureView.Detail => BuildDetailView(Current),
+            ApertureView.Person => BuildPersonView(Current),
+            ApertureView.Favourites => BuildFavouritesView(),
             ApertureView.Search => BuildSearchView(),
             ApertureView.Settings => BuildSettingsView(),
             _ => BuildHomeView(),
@@ -284,6 +286,9 @@ public sealed partial class ApertureApp : Component, IDisposable
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
+        rail.AddChild(RailButton(Icons.FavoriteOn, "Favourites", "0",
+            active: Current.View == ApertureView.Favourites,
+            onClick: () => Navigate(new Route(ApertureView.Favourites))));
         rail.AddChild(RailButton(Icons.Search, "Search", "/",
             active: Current.View == ApertureView.Search,
             onClick: () => Navigate(new Route(ApertureView.Search))));
@@ -387,6 +392,10 @@ public sealed partial class ApertureApp : Component, IDisposable
                 return;
             case KeyCode.Slash:
                 Navigate(new Route(ApertureView.Search));
+                e.Handled = true;
+                return;
+            case KeyCode.Digit0:
+                Navigate(new Route(ApertureView.Favourites));
                 e.Handled = true;
                 return;
             case KeyCode.F5:

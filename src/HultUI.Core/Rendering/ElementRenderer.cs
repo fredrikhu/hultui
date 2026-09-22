@@ -96,7 +96,13 @@ public static class ElementRenderer
         if (needsClip)
         {
             var clipRect = element.Layout.AbsoluteContentBox;
-            ctx.PushClip(clipRect);
+            // A rounded box clips round, the way `overflow: hidden` does with a
+            // border-radius: otherwise an image inside a circular avatar is still a
+            // square, and the corners of a rounded card square off wherever a child
+            // paints over them.
+            var radius = element is BoxElement rounded ? rounded.CornerRadius : CornerRadius.Zero;
+            if (radius.IsZero) ctx.PushClip(clipRect);
+            else ctx.PushRoundedClip(clipRect, radius);
             var clipScreen = clipRect.Translate(offsetX, offsetY);
             childrenCull = cull is Rect outer ? outer.Intersect(clipScreen) : clipScreen;
         }

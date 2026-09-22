@@ -97,6 +97,8 @@ public sealed class JellyfinLibrary : IMediaLibrary
                 if (query.Kinds.Count > 0) p.IncludeItemTypes = [.. query.Kinds.Select(MapKind)];
                 if (query.Played is { } played) p.IsPlayed = played;
                 if (query.Favorite is { } fav) p.IsFavorite = fav;
+                if (ParseId(query.PersonId) is { } person) p.PersonIds = [person];
+                if (ParseId(query.GenreId) is { } genre) p.GenreIds = [genre];
             }, ct).ConfigureAwait(false);
 
             var items = (result?.Items ?? []).Select(Map).ToList();
@@ -192,6 +194,9 @@ public sealed class JellyfinLibrary : IMediaLibrary
             {
                 q.QueryParameters.UserId = User.Id;
             }, ct).ConfigureAwait(false);
+            // The single-item endpoint sends the heavy fields (people, chapters, media
+            // sources) without being asked; a list query never does, which is why
+            // MediaItem.People is empty everywhere except here.
             if (dto is null)
                 return ApertureResult<MediaItem>.Fail(ApertureFailureKind.NotFound, "No such item");
             return ApertureResult<MediaItem>.Success(Map(dto));
@@ -388,12 +393,50 @@ public sealed class JellyfinLibrary : IMediaLibrary
         IndexNumber = dto.IndexNumber,
         ParentIndexNumber = dto.ParentIndexNumber,
         ChildCount = dto.ChildCount ?? dto.RecursiveItemCount,
+        People = MapPeople(dto.People),
+        Chapters = MapChapters(dto.Chapters),
         Played = dto.UserData?.Played ?? false,
         ResumePosition = dto.UserData?.PlaybackPositionTicks is { } pos and > 0 ? new TimeSpan(pos) : null,
         PlayedPercentage = dto.UserData?.PlayedPercentage,
         IsFavorite = dto.UserData?.IsFavorite ?? false,
         UnplayedItemCount = dto.UserData?.UnplayedItemCount,
     };
+
+    private static IReadOnlyList<MediaPerson> MapPeople(List<BaseItemPerson>? people) =>
+        people is null ? [] : people
+            .Where(p => p.Id is not null && !string.IsNullOrEmpty(p.Name))
+            .Select(p => new MediaPerson(
+                p.Id!.Value.ToString("N"),
+                p.Name!,
+                MapPersonKind(p.Type),
+                string.IsNullOrWhiteSpace(p.Role) ? null : p.Role,
+                p.PrimaryImageTag))
+            .ToList();
+
+    internal static PersonKind MapPersonKind(BaseItemPerson_Type? type) => type switch
+    {
+        BaseItemPerson_Type.Actor => PersonKind.Actor,
+        BaseItemPerson_Type.GuestStar => PersonKind.GuestStar,
+        BaseItemPerson_Type.Director => PersonKind.Director,
+        BaseItemPerson_Type.Writer => PersonKind.Writer,
+        BaseItemPerson_Type.Producer => PersonKind.Producer,
+        BaseItemPerson_Type.Composer => PersonKind.Composer,
+        _ => PersonKind.Other,
+    };
+
+    /// <summary>
+    /// Chapter marks, with the two kinds of nonsense a scan can leave behind filtered out:
+    /// a mark without a position, and the unnamed ones some encoders write every ten
+    /// minutes. A chapter list of "Chapter 1 … Chapter 24" is worse than none.
+    /// </summary>
+    private static IReadOnlyList<MediaChapter> MapChapters(List<ChapterInfo>? chapters) =>
+        chapters is null ? [] : chapters
+            .Where(c => c.StartPositionTicks is >= 0)
+            .Select((c, i) => new MediaChapter(
+                new TimeSpan(c.StartPositionTicks!.Value),
+                string.IsNullOrWhiteSpace(c.Name) ? $"Chapter {i + 1}" : c.Name!,
+                c.ImageTag))
+            .ToList();
 
     /// <summary>
     /// Image tags arrive as a free-form object — <c>{"Primary": "a1b2…"}</c> — which Kiota

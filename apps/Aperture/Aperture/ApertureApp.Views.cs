@@ -91,6 +91,74 @@ public sealed partial class ApertureApp
         return row;
     }
 
+    // ── One person, and what has been hearted ────────────────────────────
+
+    /// <summary>Everything the server credits this person with, newest first.</summary>
+    private Element BuildPersonView(Route route)
+    {
+        var personId = route.Id!;
+        EnsurePersonItems(personId);
+        return ShelfView(route.Title ?? "Person", PersonItems, PersonItemsLoading,
+            "person-view", Icons.User,
+            emptyHeadline: $"Nothing here credits {route.Title}",
+            emptyHint: "The server knows the name, but nothing in your libraries lists it.");
+    }
+
+    private Element BuildFavouritesView()
+    {
+        EnsureFavourites();
+        return ShelfView("Favourites", Favourites, FavouritesLoading,
+            "favourites-view", Icons.FavoriteOn,
+            emptyHeadline: "Nothing hearted yet",
+            emptyHint: "The heart on a film or series puts it here.");
+    }
+
+    /// <summary>
+    /// A titled wrap of posters over a list that is already loaded in full — a person's
+    /// credits, the favourites. Not the library grid: these lists are tens of items, not
+    /// thousands, so they need no virtualization and no paging, and a wrap reads better
+    /// than a strict grid when the count is odd.
+    /// </summary>
+    private Element ShelfView(string title, IReadOnlyList<MediaItem> items, bool loading,
+        string automationId, string glyph, string emptyHeadline, string emptyHint)
+    {
+        var column = Flex.Column(gap: Halide.S4).FlexGrow(1).AutomationId(automationId);
+
+        var bar = Flex.Row(gap: Halide.S3).FlexShrink(0)
+            .Height(56).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, Halide.S5, 0, Halide.S5))
+            .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
+        bar.AddChild(Ui.IconButton(Icons.Back, "Back (Esc)", () => GoBack(), 15f, Halide.TextMuted,
+            automationId + "-back"));
+        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        if (items.Count > 0) bar.AddChild(Ui.Mono(items.Count.ToString(), 11.5f, Halide.TextFaint));
+        column.AddChild(bar);
+
+        if (items.Count == 0)
+        {
+            var empty = Flex.Column(gap: Halide.S2).FlexGrow(1)
+                .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
+            empty.AddChild(Ui.Icon(loading ? Icons.Loading : glyph, 24f, Halide.TextFaint));
+            empty.AddChild(Text.New(loading ? "Asking the server…" : emptyHeadline)
+                .FontSize(15f).FontWeight(FontWeight.SemiBold).TextColor(Halide.TextDim));
+            if (!loading)
+                empty.AddChild(Text.New(emptyHint).FontSize(12f).TextColor(Halide.TextMuted));
+            column.AddChild(empty);
+            return column;
+        }
+
+        var scroll = ScrollView.Vertical().FlexGrow(1);
+        var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart)
+            .Padding(new Thickness(0, Halide.S5, Halide.S5, Halide.S5));
+        wrap.Flex.Wrap = FlexWrap.Wrap;
+        wrap.Gap(Halide.PosterGap);
+        foreach (var item in items)
+            wrap.AddChild(PosterCard(item, 150f));
+        scroll.AddChild(wrap);
+        column.AddChild(scroll);
+        return column;
+    }
+
     // ── Settings ─────────────────────────────────────────────────────────
 
     /// <summary>

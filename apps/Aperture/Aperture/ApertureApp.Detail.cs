@@ -67,6 +67,9 @@ public sealed partial class ApertureApp
                 break;
         }
 
+        if (item.People.Count > 0)
+            body.AddChild(CastSection(item));
+
         page.AddChild(body);
         scroll.AddChild(page);
         return scroll;
@@ -296,6 +299,98 @@ public sealed partial class ApertureApp
         row.OnClick(_ => Play(episode, episode.ResumePosition ?? TimeSpan.Zero));
         row.HoverBg(Halide.Raised);
         return row;
+    }
+
+    // ── Cast and crew ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Billing order, actors first: the server sends People in the order the credits run,
+    /// so the first faces are the ones a poster would name. Crew follows as one line of
+    /// names rather than more cards — a director is a fact about the film, not a shelf.
+    /// </summary>
+    private Element CastSection(MediaItem item)
+    {
+        var column = Flex.Column(gap: Halide.S3).AutomationId("cast");
+
+        var cast = item.People.Where(p => p.Kind is PersonKind.Actor or PersonKind.GuestStar).ToList();
+        if (cast.Count > 0)
+            column.AddChild(CardRow("Cast", cast.Count, i => PersonCard(cast[i]), PersonCardWidth,
+                "row-cast-" + item.Id));
+
+        var crew = item.People.Where(p => p.Kind is not (PersonKind.Actor or PersonKind.GuestStar)).ToList();
+        if (crew.Count > 0)
+        {
+            var line = Flex.Row(gap: Halide.S3).AlignItems(AlignItems.Center);
+            line.Flex.Wrap = FlexWrap.Wrap;
+            foreach (var group in crew.GroupBy(p => p.Kind).OrderBy(g => (int)g.Key))
+            {
+                var names = string.Join(", ", group.Select(p => p.Name).Take(3));
+                var chunk = Flex.Row(gap: 6).AlignItems(AlignItems.Center).FlexShrink(0);
+                chunk.AddChild(Ui.Line(KindLabel(group.Key, group.Count()), 11.5f, Halide.TextFaint));
+                chunk.AddChild(Ui.Line(names, 12f, Halide.TextDim));
+                line.AddChild(chunk);
+            }
+            column.AddChild(line);
+        }
+        return column;
+    }
+
+    private static string KindLabel(PersonKind kind, int count) => kind switch
+    {
+        PersonKind.Director => count == 1 ? "Director" : "Directors",
+        PersonKind.Writer => count == 1 ? "Writer" : "Writers",
+        PersonKind.Producer => count == 1 ? "Producer" : "Producers",
+        PersonKind.Composer => "Music",
+        _ => "Crew",
+    };
+
+    internal const float PersonCardWidth = 104f;
+
+    /// <summary>A face, a name, and the character — clicking opens everything they are in.</summary>
+    private Element PersonCard(MediaPerson person)
+    {
+        var card = Flex.Column(gap: Halide.S2)
+            .Width(PersonCardWidth).FlexShrink(0)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(AccessibilityRole.Button)
+            .AccessibleName(person.Role is { Length: > 0 } role ? $"{person.Name} as {role}" : person.Name)
+            .AutomationId("person-" + person.Id)
+            .Tooltip(person.Role is { Length: > 0 } r ? $"{person.Name} — {r}" : person.Name);
+
+        // Round, so a face reads as a person and not as another poster on the shelf.
+        var portrait = Box.New()
+            .Width(PersonCardWidth).Height(PersonCardWidth)
+            .CornerRadius(PersonCardWidth / 2)
+            .Background(Halide.Raised)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
+        // The picture is square and the frame is a circle, so the frame has to do the
+        // cutting — a rounded box clips its children round (ElementRenderer).
+        portrait.Box.OverflowX = Overflow.Hidden;
+        portrait.Box.OverflowY = Overflow.Hidden;
+
+        var url = _library?.ImageUrl(person.Id, ImageKind.Primary, person.PrimaryImageTag,
+            maxWidth: (int)(PersonCardWidth * 2));
+        var (image, status) = _posters.Get(url);
+        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        {
+            var picture = Image.New(image);
+            picture.Fit = ImageFit.Cover;
+            portrait.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
+        }
+        else
+        {
+            portrait.AddChild(Ui.Icon(Icons.User, 30f, Halide.TextFaint));
+        }
+        card.AddChild(portrait);
+
+        var caption = Flex.Column(gap: 1).Width(PersonCardWidth);
+        caption.AddChild(Ui.Line(person.Name, 12f, Halide.Text).TextAlign(TextAlign.Center));
+        if (person.Role is { Length: > 0 } role2)
+            caption.AddChild(Ui.Line(role2, 11f, Halide.TextMuted).TextAlign(TextAlign.Center));
+        card.AddChild(caption);
+
+        card.OnClick(_ => Navigate(new Route(ApertureView.Person, person.Id, person.Name)));
+        return card;
     }
 
     private Element ChildrenPlaceholder(string what)

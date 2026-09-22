@@ -64,6 +64,14 @@ public sealed record MediaItem
     /// <summary>Episodes in a season, seasons in a series, items in a folder.</summary>
     public int? ChildCount { get; init; }
 
+    /// <summary>Cast and crew, in the order the server lists them — which is billing order
+    /// for actors, so the first few are the ones a poster would name. Only ever filled in
+    /// for a single item fetched for its detail page; a list query does not ask for it.</summary>
+    public IReadOnlyList<MediaPerson> People { get; init; } = [];
+
+    /// <summary>The item's own chapter marks, when the file carries them.</summary>
+    public IReadOnlyList<MediaChapter> Chapters { get; init; } = [];
+
     // Per-user state.
     public bool Played { get; init; }
     public TimeSpan? ResumePosition { get; init; }
@@ -91,6 +99,9 @@ public sealed record ItemPage(IReadOnlyList<MediaItem> Items, int TotalCount, in
     public static readonly ItemPage Empty = new([], 0, 0);
 }
 
+/// <summary>One chapter mark: where it starts and what it is called.</summary>
+public sealed record MediaChapter(TimeSpan Start, string Name, string? ImageTag);
+
 /// <summary>How a library view is sorted. The server's own names, kept out of the views.</summary>
 public enum ItemSort { Name, DateAdded, PremiereDate, CommunityRating, Runtime, Random }
 
@@ -113,7 +124,24 @@ public sealed record ItemQuery
     /// <summary>Null lists everything; true only watched, false only unwatched.</summary>
     public bool? Played { get; init; }
     public bool? Favorite { get; init; }
+
+    /// <summary>Only items this person worked on — what a name in the cast list opens.</summary>
+    public string? PersonId { get; init; }
+
+    /// <summary>Only items in this genre.</summary>
+    public string? GenreId { get; init; }
 }
+
+/// <summary>
+/// Someone in an item's credits. <paramref name="Role"/> is the character for an actor and
+/// null for everyone else, which is why the cast row reads "Paul Rudd / Scott Lang" and the
+/// crew row reads "Peyton Reed".
+/// </summary>
+public sealed record MediaPerson(string Id, string Name, PersonKind Kind, string? Role, string? PrimaryImageTag);
+
+/// <summary>The credit kinds worth separating. Everything else the server sends — mixers,
+/// letterers, colorists — is <see cref="Other"/> and lives under the crew heading.</summary>
+public enum PersonKind { Actor, Director, Writer, Producer, GuestStar, Composer, Other }
 
 /// <summary>Which image of an item to fetch.</summary>
 public enum ImageKind { Primary, Backdrop, Thumb, Logo }

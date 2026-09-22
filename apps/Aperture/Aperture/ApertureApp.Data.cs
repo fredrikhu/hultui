@@ -216,6 +216,49 @@ public sealed partial class ApertureApp
     internal MediaItem? NextInSeries(string seriesId) =>
         _seriesNext.Value.FirstOrDefault(e => e.SeriesId == seriesId);
 
+    // ── One person's work, and what has been hearted ─────────────────────
+
+    private readonly AsyncLoader<ItemPage> _personItems = new(ItemPage.Empty);
+    private readonly AsyncLoader<ItemPage> _favourites = new(ItemPage.Empty);
+
+    private void EnsurePersonItems(string personId)
+    {
+        if (_library is not { } lib) return;
+        _personItems.Load(("person", _dataGeneration, personId), () => Fetch(
+            () => lib.GetItemsAsync(new ItemQuery
+            {
+                PersonId = personId,
+                Limit = 120,
+                Recursive = true,
+                Sort = ItemSort.PremiereDate,
+                Descending = true,
+                // A person's page is things you can watch, not the seasons and series
+                // rows that would otherwise repeat every episode they appeared in.
+                Kinds = [MediaKind.Movie, MediaKind.Series],
+            }),
+            ItemPage.Empty, "That person's work"));
+    }
+
+    internal IReadOnlyList<MediaItem> PersonItems => _personItems.Value.Items;
+    internal bool PersonItemsLoading => _personItems.IsLoading;
+
+    private void EnsureFavourites()
+    {
+        if (_library is not { } lib) return;
+        _favourites.Load(("favourites", _dataGeneration), () => Fetch(
+            () => lib.GetItemsAsync(new ItemQuery
+            {
+                Favorite = true,
+                Limit = 200,
+                Recursive = true,
+                Sort = ItemSort.Name,
+            }),
+            ItemPage.Empty, "Your favourites"));
+    }
+
+    internal IReadOnlyList<MediaItem> Favourites => _favourites.Value.Items;
+    internal bool FavouritesLoading => _favourites.IsLoading;
+
     // ── Search ───────────────────────────────────────────────────────────
 
     private string _searchTerm = "";

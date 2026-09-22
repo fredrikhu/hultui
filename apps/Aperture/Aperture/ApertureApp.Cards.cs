@@ -96,6 +96,10 @@ public sealed partial class ApertureApp
             .CornerRadius(radius)
             .Background(Halide.Raised)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
+        // Artwork fills the box edge to edge, so the box's corners have to cut it —
+        // otherwise every poster is a square sitting on a rounded backing.
+        box.Box.OverflowX = Overflow.Hidden;
+        box.Box.OverflowY = Overflow.Hidden;
 
         var url = ImageUrlFor(item, kind, (int)(width * 2));
         var (image, status) = _posters.Get(url);
@@ -200,12 +204,18 @@ public sealed partial class ApertureApp
     /// wheel-capture trap, and a row of twelve posters does not need momentum — it needs
     /// to show the next six.</summary>
     internal Element CardRow(string title, IReadOnlyList<MediaItem> items, Func<MediaItem, Element> card,
+        float cardWidth, string automationId, string? trailing = null) =>
+        CardRow(title, items.Count, i => card(items[i]), cardWidth, automationId, trailing);
+
+    /// <summary>The same row over anything that can be built by index — what the cast row
+    /// needs, since a person is not a <see cref="MediaItem"/>.</summary>
+    internal Element CardRow(string title, int count, Func<int, Element> card,
         float cardWidth, string automationId, string? trailing = null)
     {
         var column = Flex.Column(gap: Halide.S3).FlexShrink(0).AutomationId(automationId);
 
         int perPage = Math.Max(1, VisibleCards(cardWidth));
-        int pages = Math.Max(1, (items.Count + perPage - 1) / perPage);
+        int pages = Math.Max(1, (count + perPage - 1) / perPage);
         int page = Math.Clamp(_rowPages.GetValueOrDefault(automationId), 0, pages - 1);
 
         var heading = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
@@ -225,8 +235,8 @@ public sealed partial class ApertureApp
         column.AddChild(heading);
 
         var row = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart);
-        foreach (var item in items.Skip(page * perPage).Take(perPage))
-            row.AddChild(card(item));
+        for (int i = page * perPage; i < Math.Min(count, (page + 1) * perPage); i++)
+            row.AddChild(card(i));
         column.AddChild(row);
         return column;
     }

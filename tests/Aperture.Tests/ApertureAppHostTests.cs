@@ -41,6 +41,17 @@ public class ApertureAppHostTests
             PrimaryImageTag = "tag-e1",
         }, "s1");
 
+        // Credits on one film, so the cast row and the person page have something real.
+        library.Update(library.Item("m1")! with
+        {
+            People =
+            [
+                new MediaPerson("p1", "Alexander Kaidanovsky", PersonKind.Actor, "Stalker", null),
+                new MediaPerson("p2", "Andrei Tarkovsky", PersonKind.Director, null, null),
+            ],
+        });
+        library.Update(library.Item("m3")! with { IsFavorite = true });
+
         library.ResumeIds.Add("m2");
         library.ResumeIds.Add("e1");
         return library;
@@ -197,6 +208,64 @@ public class ApertureAppHostTests
             Assert.Equal(ApertureView.Detail, app.Current.View);
             PumpUntilShown(session, "I Went to Market");
             Assert.Null(app.Playback);
+        });
+    }
+
+    // ── Cast, people and favourites ──────────────────────────────────────
+
+    [Fact]
+    public void TheDetailPageCreditsTheCastAndTheCrew()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+
+            // An actor is named with the character; the crew is a line of names.
+            Assert.True(Shows(session, "Alexander Kaidanovsky"), session.Window.DumpAccessibilityTree());
+            Assert.True(Shows(session, "Andrei Tarkovsky"), "the director is not credited");
+            Assert.NotNull(session.Window.FindByAutomationId("person-p1"));
+        });
+    }
+
+    [Fact]
+    public void ANameInTheCastOpensEverythingTheyAreIn()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Alexander Kaidanovsky");
+
+            session.Window.FindByAutomationId("person-p1")!.Click();
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Person, app.Current.View);
+            Assert.Equal("p1", app.Current.Id);
+            Assert.Contains(library.Calls, c => c.Contains("person=p1", StringComparison.Ordinal));
+            PumpUntilShown(session, "Stalker");
+        });
+    }
+
+    [Fact]
+    public void TheFavouritesViewListsWhatHasBeenHearted()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Digit0);
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Favourites, app.Current.View);
+            PumpUntilShown(session, "The Mirror");
+            // Only the hearted one.
+            Assert.False(Shows(session, "Stalker"), "an unhearted film is in favourites");
         });
     }
 

@@ -95,7 +95,9 @@ public sealed class FakeMediaLibrary : IMediaLibrary
     {
         Calls.Add($"GetItems(parent={query.ParentId ?? "-"}, start={query.StartIndex}, limit={query.Limit}, " +
                   $"sort={query.Sort}{(query.Descending ? " desc" : "")}" +
-                  $"{(query.SearchTerm is { Length: > 0 } s ? $", search={s}" : "")})");
+                  $"{(query.SearchTerm is { Length: > 0 } s ? $", search={s}" : "")}" +
+                  $"{(query.PersonId is { Length: > 0 } p ? $", person={p}" : "")}" +
+                  $"{(query.Favorite is { } f2 ? $", favourite={f2}" : "")})");
 
         IEnumerable<MediaItem> source = query.ParentId is { } parent
             ? (_children.GetValueOrDefault(parent) ?? []).Select(id => _items[id])
@@ -104,6 +106,10 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         if (query.SearchTerm is { Length: > 0 } term)
             source = source.Where(i => i.Name.Contains(term, StringComparison.OrdinalIgnoreCase));
         if (query.Kinds.Count > 0) source = source.Where(i => query.Kinds.Contains(i.Kind));
+        if (query.PersonId is { Length: > 0 } person)
+            source = source.Where(i => i.People.Any(p => p.Id == person));
+        if (query.GenreId is { Length: > 0 } genre)
+            source = source.Where(i => i.Genres.Contains(genre, StringComparer.OrdinalIgnoreCase));
         if (query.Played is { } played) source = source.Where(i => i.Played == played);
         if (query.Favorite is { } fav) source = source.Where(i => i.IsFavorite == fav);
 
