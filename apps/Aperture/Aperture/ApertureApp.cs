@@ -122,6 +122,12 @@ public sealed partial class ApertureApp : Component, IDisposable
         }
     }
 
+    protected override void OnAfterBuild()
+    {
+        FocusCursorCard();
+        FocusPendingSearchField();
+    }
+
     public override Element Build()
     {
         // Track the revision signal so Rerender() re-runs Build through the Effect.
@@ -398,6 +404,14 @@ public sealed partial class ApertureApp : Component, IDisposable
             return;
         }
         if (_stage == ApertureStage.Connect) return;
+
+        // The shelves take the arrows, Enter and Space — but only when the keyboard is not
+        // in a text field, where they mean what they always mean.
+        if (e.Target is not TextInputElement && HandleCursorKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
 
         switch (e.Key)
         {

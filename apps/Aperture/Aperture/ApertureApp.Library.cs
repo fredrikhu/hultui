@@ -42,6 +42,9 @@ public sealed partial class ApertureApp
         EnsureGridPage(libraryId, (visibleRows * 2 + 1) * perRow);
 
         var items = GridItems;
+        // What the arrows walk in this view, and how many fit across.
+        SetCursorList($"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}", items, perRow);
+
         if (items.Count == 0)
         {
             column.AddChild(GridEmptyState());
@@ -53,6 +56,13 @@ public sealed partial class ApertureApp
         var rows = new List<int>(rowCount + 1);
         for (int r = 0; r < rowCount; r++) rows.Add(r);
         if (GridHasMore) rows.Add(-1);
+
+        // Keep the cursor on screen as the arrows walk past the realized window.
+        if (_gridList.Current is { } mounted && CursorIndex >= 0)
+        {
+            int cursorRow = CursorIndex / perRow;
+            mounted.ScrollRangeIntoView(cursorRow * rowStride, rowStride);
+        }
 
         var list = VirtualListElement<int>.New();
         // Each item here is a row of posters, and every poster is its own button — so the
@@ -131,7 +141,7 @@ public sealed partial class ApertureApp
         {
             int i = start + k;
             if (i >= items.Count) break;
-            row.AddChild(PosterCard(items[i]));
+            row.AddChild(PosterCard(items[i], cursorIndex: i));
         }
         return row;
     }

@@ -230,6 +230,100 @@ public class ApertureAppHostTests
         });
     }
 
+    // ── Keyboard ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ArrowsWalkTheGridAndEnterOpensWhatTheyLandOn()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            // Nothing is under the cursor until an arrow says so; the first press lands
+            // on the first card rather than moving from nowhere.
+            Assert.Equal(-1, app.CursorIndex);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.Equal(0, app.CursorIndex);
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.Equal(1, app.CursorIndex);
+            var landed = app.CursorItem;
+            Assert.NotNull(landed);
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Enter);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Detail, app.Current.View);
+            Assert.Equal(landed!.Id, app.Current.Id);
+        });
+    }
+
+    [Fact]
+    public void SpacePlaysWhatTheCursorIsOn()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            var target = app.CursorItem!;
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Space);
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Equal(target.Id, app.PlayingItem?.Id);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void TheCursorStartsOverWhenTheListDoes()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.Equal(1, app.CursorIndex);
+
+            // A different library is a different list: "the second poster" means nothing
+            // in it, so the cursor is put away rather than carried over.
+            session.Window.FindByAutomationId("rail-series")!.Click();
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+            Assert.Equal(-1, app.CursorIndex);
+        });
+    }
+
+    [Fact]
+    public void TypingInSearchIsNotTheCursorsBusiness()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Slash);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            session.Window.TypeText("sta");
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+            PumpUntilShown(session, "Stalker");
+
+            // The caret keys belong to the field while it has the keyboard.
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Left);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.Equal(-1, app.CursorIndex);
+        });
+    }
+
     // ── Cast, people and favourites ──────────────────────────────────────
 
     [Fact]

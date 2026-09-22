@@ -40,19 +40,42 @@ public sealed partial class ApertureApp
             return scroll;
         }
 
+        // Home is several rows but one walk: the arrows run along a row and then into the
+        // next, which is how every shelf on a television behaves. The flat list is built
+        // in the order the rows are drawn, and each card is handed its place in it.
+        var walk = new List<MediaItem>();
+        walk.AddRange(resume);
+        walk.AddRange(next);
+        foreach (var library in libraries) walk.AddRange(LatestIn(library.Id));
+        SetCursorList("home:" + walk.Count, walk, VisibleCards(Halide.PosterWidth));
+        int cursorBase = 0;
+
         if (resume.Count > 0)
-            page.AddChild(CardRow("Continue watching", resume, StillCard, Halide.StillWidth, "row-resume"));
+        {
+            int start = cursorBase;
+            page.AddChild(CardRow("Continue watching", resume.Count,
+                i => StillCard(resume[i], cursorIndex: start + i), Halide.StillWidth, "row-resume"));
+            cursorBase += resume.Count;
+        }
 
         if (next.Count > 0)
-            page.AddChild(CardRow("Next up", next, item => PosterCard(item), Halide.PosterWidth, "row-nextup"));
+        {
+            int start = cursorBase;
+            page.AddChild(CardRow("Next up", next.Count,
+                i => PosterCard(next[i], cursorIndex: start + i), Halide.PosterWidth, "row-nextup"));
+            cursorBase += next.Count;
+        }
 
         foreach (var library in libraries)
         {
             var latest = LatestIn(library.Id);
             if (latest.Count == 0) continue;
             var id = library.Id;
-            page.AddChild(CardRow($"Latest in {library.Name}", latest, item => PosterCard(item),
+            int start = cursorBase;
+            page.AddChild(CardRow($"Latest in {library.Name}", latest.Count,
+                i => PosterCard(latest[i], cursorIndex: start + i),
                 Halide.PosterWidth, "row-latest-" + id, trailing: "open"));
+            cursorBase += latest.Count;
         }
 
         scroll.AddChild(page);

@@ -21,13 +21,12 @@ public sealed partial class ApertureApp
     /// the element does not exist until the tree is mounted.</summary>
     private bool _pendingSearchFocus;
 
-    protected override void OnAfterBuild()
+    /// <summary>Called from the app's own OnAfterBuild — a component has one.</summary>
+    private void FocusPendingSearchField()
     {
-        if (_pendingSearchFocus)
-        {
-            _pendingSearchFocus = false;
-            _searchField.Current?.Focus();
-        }
+        if (!_pendingSearchFocus) return;
+        _pendingSearchFocus = false;
+        _searchField.Current?.Focus();
     }
 
     private Element BuildSearchView()
@@ -76,8 +75,11 @@ public sealed partial class ApertureApp
         var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart);
         wrap.Flex.Wrap = FlexWrap.Wrap;
         wrap.Gap(Halide.PosterGap);
-        foreach (var item in SearchResults)
-            wrap.AddChild(PosterCard(item, 140f));
+        // The field keeps the keyboard while you type; the arrows walk the results only
+        // once one has been reached, which is why the cursor starts unset.
+        SetCursorList("search:" + term, SearchResults, VisibleCards(140f));
+        for (int i = 0; i < SearchResults.Count; i++)
+            wrap.AddChild(PosterCard(SearchResults[i], 140f, cursorIndex: i));
         scroll.AddChild(wrap);
         column.AddChild(scroll);
         return column;
@@ -152,8 +154,9 @@ public sealed partial class ApertureApp
             .Padding(new Thickness(0, Halide.S5, Halide.S5, Halide.S5));
         wrap.Flex.Wrap = FlexWrap.Wrap;
         wrap.Gap(Halide.PosterGap);
-        foreach (var item in items)
-            wrap.AddChild(PosterCard(item, 150f));
+        SetCursorList(automationId, items, VisibleCards(150f));
+        for (int i = 0; i < items.Count; i++)
+            wrap.AddChild(PosterCard(items[i], 150f, cursorIndex: i));
         scroll.AddChild(wrap);
         column.AddChild(scroll);
         return column;

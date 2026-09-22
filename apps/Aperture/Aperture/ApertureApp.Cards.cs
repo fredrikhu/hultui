@@ -19,7 +19,7 @@ namespace Aperture;
 public sealed partial class ApertureApp
 {
     /// <summary>A poster tile: artwork, title, subline. Clicking opens the item.</summary>
-    internal Element PosterCard(MediaItem item, float width = Halide.PosterWidth)
+    internal Element PosterCard(MediaItem item, float width = Halide.PosterWidth, int cursorIndex = -1)
     {
         float height = MathF.Round(width * 1.5f);
         var card = Flex.Column(gap: Halide.S2)
@@ -30,6 +30,7 @@ public sealed partial class ApertureApp
             .AccessibleName(AccessibleNameFor(item))
             .AutomationId("card-" + item.Id)
             .Tooltip(item.Name);
+        MarkCursor(card, cursorIndex);
 
         card.AddChild(Artwork(item, ImageKind.Primary, width, height, Halide.Radius2));
 
@@ -56,7 +57,7 @@ public sealed partial class ApertureApp
     /// progress sliver. Clicking <i>plays</i> rather than opening the detail page — this
     /// row exists to get someone back into a film in one click.
     /// </summary>
-    internal Element StillCard(MediaItem item)
+    internal Element StillCard(MediaItem item, int cursorIndex = -1)
     {
         var card = Flex.Column(gap: Halide.S2)
             .Width(Halide.StillWidth).FlexShrink(0)
@@ -65,6 +66,7 @@ public sealed partial class ApertureApp
             .AccessibleName(ResumeAccessibleName(item))
             .AutomationId("resume-" + item.Id)
             .Tooltip(item.Name);
+        MarkCursor(card, cursorIndex);
 
         // The backdrop of an episode usually lives on its series, which is what
         // BackdropItemId points at; the item's own thumb is the fallback.
@@ -135,6 +137,20 @@ public sealed partial class ApertureApp
             box.AddChild(sliver);
         }
         return box;
+    }
+
+    /// <summary>
+    /// Makes a card reachable by keyboard, and rings it when the cursor is on it. The ring
+    /// is an outline rather than a border: a border would take layout space and shift every
+    /// card beside it as the cursor moves through the row.
+    /// </summary>
+    private void MarkCursor(BoxElement card, int cursorIndex)
+    {
+        card.IsFocusable = true;
+        if (cursorIndex < 0) return;
+        TrackCursor(card, cursorIndex);
+        if (IsCursor(cursorIndex))
+            card.Outline(2f, Halide.Accent, offset: 3f);
     }
 
     /// <summary>The watched mark: a filled accent disc with a tick, top-right.</summary>

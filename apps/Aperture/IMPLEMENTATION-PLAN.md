@@ -27,22 +27,41 @@ Three things found on the way, each worth knowing before touching this code:
    "recently added" row is empty. Aperture asks the ordinary item query sorted by
    date instead.
 
-## Slice 2 — the next obvious things
+## Slice 2 — the Wholphin gap list, top tier (**done**)
+
+Ranked against [Wholphin](https://github.com/damontecres/Wholphin)'s feature list, then
+checked against what this server actually serves — which moved two of its headline
+features down and one of ours up.
+
+| | |
+|---|---|
+| Cast & crew | the detail page credits them, and a name opens everything that person is in |
+| Favourites | a view and a rail key (0); the heart had nowhere to lead |
+| Auto-play next | the server decides what follows; three in a row and it asks instead |
+| Chapters | a list (C) and Page Up/Down; the films here carry 27 of them |
+| Track memory | audio and subtitles remembered by language, "off" stays off |
+| Keyboard | arrows walk every shelf, Enter opens, Space plays, and cards take real focus |
+
+Framework changes that fell out: a rounded box clips its children round, and
+`VideoPlayer.FocusPicture()` hands the picture the keyboard when it opens.
+
+**What the server does not have yet**, which is why they are not here: trickplay images
+are not generated (no scrubber previews), `/MediaSegments` answers empty (no skip intro),
+and there are no collections or playlists to browse.
+
+## Slice 3 — the next obvious things
 
 - **Season and episode pages beyond one level.** A season page lists episodes;
-  a series with many seasons pages them. Next-up is wired, seasons are not deep.
+  a series with many seasons pages them.
 - **Resume across devices mid-playback.** The heartbeat is there; what is missing
   is noticing that another client moved the position while this one was paused.
-- **Audio and subtitle tracks.** `MediaPlayer` exposes both track lists and the
-  selection; the server's `PlaybackInfo` names the defaults. The overlay has the
-  CC button already — it needs the menu behind it.
-- **Keyboard through the grid.** Arrow keys move a cursor between posters, Enter
-  opens, Space plays. Today the grid is pointer-driven; the rail and the player
-  have their keys.
+- **Play queue** — play a season, shuffle, see and reorder what is next.
+- **Filters that match the library** — genre, year, official rating. The query
+  already takes a genre; nothing offers one.
 - **Search that searches as you type**, debounced, over `SearchTerm` — currently
   every keystroke past two letters starts a query.
 
-## Slice 3 — what would make it a daily driver
+## Slice 4 — what would make it a daily driver
 
 - **Native AOT publish.** `IsAotCompatible` is on and ILC compiles the Kiota SDK
   without a trim warning, but nothing has run as a native binary; `PublishAot`
