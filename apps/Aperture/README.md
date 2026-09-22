@@ -23,6 +23,10 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
 - **Home** is Continue watching, Next up, then what each library has added. Rows
   page sideways with two buttons rather than scrolling — a horizontal scroller
   nested in the page's vertical one is the framework's wheel-capture trap.
+  That order is a default: the menu in each row's heading moves it, hides it, or
+  folds the two “what now” rows into one “Up next”. The choices are keyed by row
+  in the settings file, and a hidden row is listed at the foot of the page with a
+  button that brings it back.
 - **The grid** is rows of posters through a `VirtualListElement`, so a library of
   thousands realizes only the rows on screen and only those ask for artwork.
   Paging follows the viewport: the row that scrolls in asks for the page that

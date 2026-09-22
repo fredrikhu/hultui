@@ -1,4 +1,4 @@
-using Aperture;
+﻿using Aperture;
 using Aperture.Core;
 using Aperture.Core.Testing;
 using HultUI.Core.Accessibility;
@@ -706,6 +706,104 @@ public class ApertureAppHostTests
             Assert.NotNull(card);
             Assert.Contains("Stalker", card!.Name);
         });
+    }
+
+    // ── Home layout ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Where a row sits in the drawn order. Read from each row's menu button: a shelf is a
+    /// plain box, which the accessibility tree does not publish, and its heading menu is
+    /// the one node that is both per-row and in document order.
+    /// </summary>
+    private static int RowPosition(HeadlessSession session, string automationId)
+    {
+        var rows = Walk(session.Window.AccessibilityTree)
+            .Select(n => n.AutomationId)
+            .Where(id => id?.StartsWith("row-", StringComparison.Ordinal) == true &&
+                         id.EndsWith("-menu", StringComparison.Ordinal))
+            .Select(id => id![..^"-menu".Length])
+            .ToList();
+        return rows.IndexOf(automationId);
+    }
+
+    [Fact]
+    public void AHomeRowCanBeMovedAndStaysWhereItWasPut()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PumpUntilShown(session, "Latest in Films");
+            Assert.True(RowPosition(session, "row-resume") < RowPosition(session, "row-latest-movies"),
+                session.Window.DumpAccessibilityTree());
+
+            // Up twice: past "Next up", then past "Continue watching".
+            app.MoveHomeRow("latest-movies", -1);
+            app.MoveHomeRow("latest-movies", -1);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.Equal(0, RowPosition(session, "row-latest-movies"));
+            // And it is written down, so the next launch opens the same way.
+            Assert.Equal("latest-movies", app.Settings.Data.HomeRowOrder.First());
+
+            app.ResetHomeLayout();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.Equal(0, RowPosition(session, "row-resume"));
+            Assert.Empty(app.Settings.Data.HomeRowOrder);
+        });
+    }
+
+    [Fact]
+    public void HidingAHomeRowLeavesAWayToBringItBack()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+
+            app.SetHomeRowHidden(ApertureApp.ResumeRowKey, true);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.Equal(-1, RowPosition(session, "row-resume"));
+            var back = session.Window.FindByAutomationId("home-show-resume");
+            Assert.NotNull(back);
+
+            back!.Click();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.True(RowPosition(session, "row-resume") >= 0, session.Window.DumpAccessibilityTree());
+            Assert.Empty(app.Settings.Data.HiddenHomeRows);
+        });
+    }
+
+    [Fact]
+    public void TheTwoWhatNowRowsCanBeDrawnAsOne()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+
+            app.SetCombineUpNext(true);
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.True(Shows(session, "Up next"), session.Window.DumpAccessibilityTree());
+            Assert.False(Shows(session, "Continue watching"), "the folded row is still drawn");
+            Assert.Equal(-1, RowPosition(session, "row-nextup"));
+            // What was part-way through is still on the shelf, under the new heading.
+            Assert.NotNull(session.Window.FindByAutomationId("card-m2"));
+        });
+    }
+
+    [Fact]
+    public void CombiningNeverListsTheSameEpisodeTwice()
+    {
+        var resume = new List<MediaItem> { new() { Id = "e1", Name = "Episode one", Kind = MediaKind.Episode } };
+        var next = new List<MediaItem>
+        {
+            new() { Id = "e1", Name = "Episode one", Kind = MediaKind.Episode },
+            new() { Id = "e2", Name = "Episode two", Kind = MediaKind.Episode },
+        };
+
+        var merged = ApertureApp.MergeUpNext(resume, next);
+
+        Assert.Equal(["e1", "e2"], merged.Select(i => i.Id));
     }
 
     // ── The card menu ────────────────────────────────────────────────────

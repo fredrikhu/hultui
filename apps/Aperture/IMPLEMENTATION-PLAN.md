@@ -49,19 +49,30 @@ Framework changes that fell out: a rounded box clips its children round, and
 are not generated (no scrubber previews), `/MediaSegments` answers empty (no skip intro),
 and there are no collections or playlists to browse.
 
-## Slice 3 — the next obvious things
+## Slice 3 — the second tier (**done**)
+
+| | |
+|---|---|
+| Play queue | play all, shuffle, and a queue you can see and jump around in |
+| Filters | genre, unwatched and favourites, built from what the library actually holds |
+| Card actions | mark watched, heart, play from the start — without leaving the shelf |
+| Library as a list | the same virtual grid one across, with year, rating, runtime and genres |
+| Home layout | rows move, hide and come back; the two “what now” rows fold into one |
+
+Framework changes that fell out: menus and other overlays are in the accessibility
+tree, at the coordinates they are drawn, so assistive tech and the driver can reach
+a menu entry at all.
+
+## Slice 4 — the next obvious things
 
 - **Season and episode pages beyond one level.** A season page lists episodes;
   a series with many seasons pages them.
 - **Resume across devices mid-playback.** The heartbeat is there; what is missing
   is noticing that another client moved the position while this one was paused.
-- **Play queue** — play a season, shuffle, see and reorder what is next.
-- **Filters that match the library** — genre, year, official rating. The query
-  already takes a genre; nothing offers one.
 - **Search that searches as you type**, debounced, over `SearchTerm` — currently
   every keystroke past two letters starts a query.
 
-## Slice 4 — what would make it a daily driver
+## Slice 5 — what would make it a daily driver
 
 - **Native AOT publish.** `IsAotCompatible` is on and ILC compiles the Kiota SDK
   without a trim warning, but nothing has run as a native binary; `PublishAot`

@@ -64,6 +64,25 @@ public sealed class ApertureSettingsData
     /// nothing is lost to a screen reader.</summary>
     public bool ShowCardTitles { get; set; } = true;
 
+    /// <summary>
+    /// The home rows in the order they are drawn, by key: <c>resume</c>, <c>nextup</c>,
+    /// <c>upnext</c> for the combined row, and <c>latest:{libraryId}</c> for a library.
+    /// Empty means the built-in order. A key that no longer exists is ignored rather than
+    /// pruned — a library that is unshared for a week should come back where it was.
+    /// </summary>
+    public List<string> HomeRowOrder { get; set; } = [];
+
+    /// <summary>Home rows that have been hidden, by the same keys. Hiding is not
+    /// forgetting: home lists what it is not showing, and one click brings it back.</summary>
+    public List<string> HiddenHomeRows { get; set; } = [];
+
+    /// <summary>
+    /// Whether "Continue watching" and "Next up" are drawn as one row. They answer the
+    /// same question — what do I put on now — and on a server with an active household
+    /// they are two half-empty shelves saying nearly the same thing.
+    /// </summary>
+    public bool CombineUpNext { get; set; }
+
     /// <summary>Whether subtitles were on when they were last touched. Separate from the
     /// language because "off" is a choice a client must not quietly forget — a file whose
     /// only subtitle track happens to match a remembered language should not turn them
@@ -74,6 +93,11 @@ public sealed class ApertureSettingsData
     {
         Servers ??= [];
         Servers.RemoveAll(s => string.IsNullOrWhiteSpace(s.Address) || string.IsNullOrWhiteSpace(s.ServerId));
+        HomeRowOrder ??= [];
+        HiddenHomeRows ??= [];
+        // A key listed twice would make "move up" swap a row with itself.
+        HomeRowOrder = HomeRowOrder.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.Ordinal).ToList();
+        HiddenHomeRows = HiddenHomeRows.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.Ordinal).ToList();
         if (string.IsNullOrWhiteSpace(DeviceId)) DeviceId = Guid.NewGuid().ToString("N");
         Volume = Math.Clamp(Volume, 0f, 1f);
         if (ActiveServerId is not null && !Servers.Any(s => s.ServerId == ActiveServerId))

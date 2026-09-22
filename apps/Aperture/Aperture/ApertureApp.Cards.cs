@@ -287,7 +287,7 @@ public sealed partial class ApertureApp
     /// <summary>The same row over anything that can be built by index — what the cast row
     /// needs, since a person is not a <see cref="MediaItem"/>.</summary>
     internal Element CardRow(string title, int count, Func<int, Element> card,
-        float cardWidth, string automationId, string? trailing = null)
+        float cardWidth, string automationId, string? trailing = null, Element? headingExtra = null)
     {
         var column = Flex.Column(gap: Halide.S3).FlexShrink(0).AutomationId(automationId);
 
@@ -309,6 +309,7 @@ public sealed partial class ApertureApp
             heading.AddChild(PageButton(Icons.Previous, "Previous", automationId, page - 1, page > 0));
             heading.AddChild(PageButton(Icons.Next, "Next", automationId, page + 1, page < pages - 1));
         }
+        if (headingExtra is not null) heading.AddChild(headingExtra);
         column.AddChild(heading);
 
         var row = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart);
