@@ -89,6 +89,7 @@ menu, full-screen button) that appears on pointer movement and fades out.
 | `FadeDuration` | 300 ms | fade-out; fade-in is half of it |
 | `SeekStep` | 5 s | Left / Right |
 | `JumpStep` | 10 s | J / L and the two buttons; signal-backed |
+| `FocusPicture()` | | hands the keyboard to the picture so the transport keys work without clicking it first. Takes effect on a later build when called before the player is mounted — a component's first build runs in its constructor, where there is no focus manager to ask |
 | `FullscreenRequested`, `IsFullscreen` | | the component knows no window: it raises the event and you set the flag once you have done whatever full screen means for the app. `Window.SetFullscreen` / `ToggleFullscreen` is the borderless kind — the window covers its display with no chrome and the display mode is left alone. An app that draws its own title bar must stop drawing it while `Window.IsFullscreen`; maximizing instead leaves the task bar over the picture |
 | `ControlsVisible` | | true whenever paused |
 

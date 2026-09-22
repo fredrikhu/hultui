@@ -160,6 +160,38 @@ public sealed class JellyfinLibrary : IMediaLibrary
         }
     }
 
+    public async Task<ApertureResult<MediaItem?>> GetNextEpisodeAsync(MediaItem episode, CancellationToken ct = default)
+    {
+        if (episode.Kind != MediaKind.Episode || ParseId(episode.SeriesId) is not { } series)
+            return ApertureResult<MediaItem?>.Success(null);
+        try
+        {
+            // StartItemId makes the list begin at this episode, so the next one is the
+            // second entry — and because the list is the whole series, the last episode of
+            // a season is followed by the first of the next.
+            var result = await _client.Shows[series].Episodes.GetAsync(q =>
+            {
+                var p = q.QueryParameters;
+                p.UserId = User.Id;
+                p.StartItemId = ParseId(episode.Id);
+                p.Limit = 2;
+                p.Fields = ListFields;
+                p.EnableImageTypes = ListImages;
+                p.ImageTypeLimit = 1;
+                p.EnableUserData = true;
+            }, ct).ConfigureAwait(false);
+
+            var items = result?.Items ?? [];
+            // The first entry is the episode we just watched; anything after it is next.
+            var next = items.Count > 1 ? items[1] : null;
+            return ApertureResult<MediaItem?>.Success(next is null ? null : Map(next));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ApertureResult<MediaItem?>.Fail(JellyfinConnection.Classify(ex, Server.Host));
+        }
+    }
+
     /// <summary>
     /// What arrived in a library most recently — the home screen's shelf per library.
     ///

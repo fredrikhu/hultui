@@ -34,6 +34,16 @@ public interface IMediaLibrary : IDisposable
     Task<ApertureResult<IReadOnlyList<MediaItem>>> GetNextUpAsync(int limit = 12, string? seriesId = null,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// The episode that follows this one, across the season boundary — what auto-play
+    /// plays next. Null when this was the last one, or when the item is not an episode.
+    ///
+    /// <para>Asked of the series rather than worked out from a season's children: only the
+    /// server knows the running order once specials, missing episodes and a season that
+    /// ends mid-numbering are in play.</para>
+    /// </summary>
+    Task<ApertureResult<MediaItem?>> GetNextEpisodeAsync(MediaItem episode, CancellationToken ct = default);
+
     /// <summary>Recently added items in a library, newest first.</summary>
     Task<ApertureResult<IReadOnlyList<MediaItem>>> GetLatestAsync(string libraryId, int limit = 16, CancellationToken ct = default);
 

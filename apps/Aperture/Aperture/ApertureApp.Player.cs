@@ -76,7 +76,9 @@ public sealed partial class ApertureApp
     /// call is what produces the play-session id, and it is also where a server decides
     /// to transcode — both of which the UI then shows.
     /// </summary>
-    internal void Play(MediaItem item, TimeSpan from)
+    /// <param name="countsAsDeliberate">A person pressed play, so the pass-out counter
+    /// starts over. False when the countdown started it.</param>
+    internal void Play(MediaItem item, TimeSpan from, bool countsAsDeliberate = true)
     {
         if (_library is not { } lib) return;
         if (_backends is null)
@@ -92,7 +94,9 @@ public sealed partial class ApertureApp
             return;
         }
 
-        StopPlayback(report: true);
+        if (countsAsDeliberate) _autoPlayedInARow = 0;
+        DismissUpNext();
+        StopPlayback(report: true, keepSheet: true);
         _playingItem = item;
         _resumeTo = from;
         _resumeApplied = from <= TimeSpan.Zero;
@@ -140,6 +144,11 @@ public sealed partial class ApertureApp
         // Play() straight after Open() is a no-op with mpv — the backend ignores commands
         // until the file has loaded — so the autoPlay flag is what starts it.
         _player.Open(MediaSource.FromUri(target.StreamUrl), autoPlay: true);
+        // The picture takes the keyboard as it opens, so the transport keys — seek, jump,
+        // chapters, Home/End — work without clicking the picture first. Escape, Space and
+        // F still reach the app's own handler, because the overlay leaves them alone.
+        _videoPlayer.FocusPicture();
+        ForgetPlaybackEnding();
         _lastReportTicks = 0;
         Rerender();
     }
@@ -149,8 +158,11 @@ public sealed partial class ApertureApp
     /// on starting something else, on sign-out and on dispose — so it has to be safe when
     /// nothing is playing.
     /// </summary>
-    internal void StopPlayback(bool report)
+    /// <param name="keepSheet">True when another item is about to open: the sheet stays,
+    /// so starting the next episode does not flash the library between the two.</param>
+    internal void StopPlayback(bool report, bool keepSheet = false)
     {
+        if (!keepSheet) DismissUpNext();
         var target = _playback;
         var position = _player?.Position ?? TimeSpan.Zero;
 
@@ -211,6 +223,13 @@ public sealed partial class ApertureApp
         if (_player is not { } player || _playback is not { } target || _library is not { } lib) return;
 
         ApplyResumeSeek(player);
+
+        // The file ran out: report it as a stop at the end (which is what marks it
+        // watched), then ask what comes next.
+        if (player.State == PlaybackState.Ended && _upNext is null)
+        {
+            OnPlaybackEnded();
+        }
 
         bool paused = !player.IsPlaying;
         long now = Environment.TickCount64;
@@ -280,6 +299,13 @@ public sealed partial class ApertureApp
         // bar's own visibility so a still frame is never permanently captioned.
         if (_videoPlayer is null || _videoPlayer.ControlsVisible)
             column.AddChild(PlayerTitleStrip());
+
+        if (_upNext is { } next)
+        {
+            var card = BuildUpNextCard(next);
+            card.Key = "up-next";
+            column.AddChild(card);
+        }
 
         sheet.AddChild(column);
         sheet.On<KeyDownEvent>(e =>

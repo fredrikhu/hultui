@@ -152,6 +152,68 @@ public sealed class VideoPlayer : Component
 
     // ──── Build ────
 
+    /// <summary>
+    /// The picture element that is actually mounted — what <see cref="FocusPicture"/> hands
+    /// the keyboard to. A <see cref="Ref{T}"/> rather than the instance this component's
+    /// Build returned: the reconciler patches a rebuilt element into the mounted one and
+    /// throws the new instance away, so focusing what Build made would focus an element
+    /// that is no longer in the tree.
+    /// </summary>
+    private readonly Ref<VideoPlayerRootElement> _root = new();
+    private bool _pendingFocus;
+
+    /// <summary>
+    /// Gives the picture the keyboard, so the transport keys work without clicking it
+    /// first. An app that opens the player as its own screen calls this when it appears;
+    /// one that embeds the player in a page usually should not, since focus belongs to
+    /// whatever the person was doing.
+    /// </summary>
+    public void FocusPicture()
+    {
+        _pendingFocus = true;
+        _focusAttemptsLeft = FocusAttempts;
+        MarkDirty();
+    }
+
+    /// <summary>
+    /// How many builds a pending focus waits for the tree to be ready. Generous because
+    /// these are frames, not seconds: the player rebuilds on every position change while
+    /// it plays, so the wait is over in one or two.
+    /// </summary>
+    private const int FocusAttempts = 60;
+    private int _focusAttemptsLeft;
+
+    /// <summary>
+    /// Focus is taken after a build, and not necessarily the first one.
+    ///
+    /// <para>A component's first build runs eagerly in its constructor, before anything has
+    /// mounted it — and an element that is not in a window yet has no focus manager to ask,
+    /// so focusing it there does nothing at all. Retrying on each later build costs nothing
+    /// (the player rebuilds as it plays) and lands the moment the tree is real. It is not
+    /// retried by marking the component dirty, which would just run the same unmounted
+    /// build again in the same breath.</para>
+    /// </summary>
+    protected internal override void OnAfterBuild()
+    {
+        if (!_pendingFocus) return;
+        if (_root.Current is { } picture && CanTakeFocus(picture))
+        {
+            _pendingFocus = false;
+            picture.Focus();
+            return;
+        }
+        if (--_focusAttemptsLeft <= 0) _pendingFocus = false;
+    }
+
+    /// <summary>Whether the element is in a tree that can hold focus — the same walk
+    /// <see cref="Element.Focus"/> does, asked before rather than after.</summary>
+    private static bool CanTakeFocus(Element element)
+    {
+        for (var e = element; e is not null; e = e.Parent)
+            if (e.FocusManager is not null) return true;
+        return false;
+    }
+
     public override Element Build()
     {
         var theme = _theme.Value;
@@ -178,6 +240,7 @@ public sealed class VideoPlayer : Component
         // Explicit: a box with a click handler would otherwise be announced as a button.
         root.Role = AccessibilityRole.Group;
         root.On<PointerMoveEvent>(_ => Reveal());
+        root.WithRef(_root);
 
         root.Children(
             Video.New(player).Width(Dimension.Percent(100)).Height(Dimension.Percent(100)),

@@ -52,6 +52,16 @@ public class ApertureAppHostTests
         });
         library.Update(library.Item("m3")! with { IsFavorite = true });
 
+        // Enough episodes after e1 that auto-play can run past the pass-out threshold
+        // and still have one left to offer.
+        for (int n = 5; n <= 9; n++)
+            library.AddItem(new MediaItem
+            {
+                Id = "e" + n, Name = "Episode " + n, Kind = MediaKind.Episode,
+                SeriesId = "s1", SeriesName = "Bleach", ParentIndexNumber = 1, IndexNumber = n,
+                RunTime = TimeSpan.FromMinutes(24), PrimaryImageTag = "tag-e" + n,
+            }, "s1");
+
         library.ResumeIds.Add("m2");
         library.ResumeIds.Add("e1");
         return library;
@@ -388,6 +398,140 @@ public class ApertureAppHostTests
             // A library filling the display with no task bar and no way out is a trap.
             Assert.False(session.Window.Window.IsFullscreen);
             Assert.Null(app.Playback);
+        }, () => backend);
+    }
+
+    // ── Auto-play ────────────────────────────────────────────────────────
+
+    /// <summary>Plays an episode and runs it to the end, the way the backend would.</summary>
+    private static void PlayToTheEnd(HeadlessSession session, ApertureApp app, FakeMediaBackend backend,
+        string automationId)
+    {
+        session.Window.FindByAutomationId(automationId)!.Click();
+        for (int i = 0; i < 10; i++) session.PumpFrame();
+        backend.Raise(new BackendEvent.EndReached());
+        for (int i = 0; i < 10; i++) session.PumpFrame();
+    }
+
+    [Fact]
+    public void AFinishedEpisodeOffersTheNextOneOnACountdown()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PlayToTheEnd(session, app, backend, "resume-e1");
+
+            Assert.NotNull(app.UpNextItem);
+            Assert.Equal("e5", app.UpNextItem!.Id);
+            Assert.False(app.UpNextIsAsking, "the first episode in a row should not ask");
+            Assert.InRange(app.UpNextSecondsLeft, 1, (int)ApertureApp.UpNextCountdown.TotalSeconds);
+            Assert.True(Shows(session, "Up next"), session.Window.DumpAccessibilityTree());
+        }, () => backend);
+    }
+
+    [Fact]
+    public void PlayNowStartsTheNextEpisodeAndTellsTheServer()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PlayToTheEnd(session, app, backend, "resume-e1");
+
+            session.Window.FindByAutomationId("up-next-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Equal("e5", app.PlayingItem?.Id);
+            Assert.Null(app.UpNextItem);
+            Assert.Contains(library.Calls, c => c.StartsWith("StartPlayback(e5", StringComparison.Ordinal));
+        }, () => backend);
+    }
+
+    [Fact]
+    public void NotNowLeavesThePictureWhereItEnded()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PlayToTheEnd(session, app, backend, "resume-e1");
+
+            session.Window.FindByAutomationId("up-next-dismiss")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Null(app.UpNextItem);
+            Assert.Equal("e1", app.PlayingItem?.Id);   // still the finished episode, not the library
+        }, () => backend);
+    }
+
+    [Fact]
+    public void AfterThreeEpisodesInARowItAsksInsteadOfCountingDown()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PlayToTheEnd(session, app, backend, "resume-e1");
+
+            // Three that started themselves: e5, e6, e7.
+            for (int i = 0; i < ApertureApp.AutoPlaysBeforeAsking; i++)
+            {
+                Assert.False(app.UpNextIsAsking, $"asked too early, after {i} auto-plays");
+                app.PlayUpNext();                       // as the countdown would
+                for (int f = 0; f < 10; f++) session.PumpFrame();
+                backend.Raise(new BackendEvent.EndReached());
+                for (int f = 0; f < 10; f++) session.PumpFrame();
+            }
+
+            Assert.True(app.UpNextIsAsking, "a fourth episode started without asking");
+            Assert.Equal(0, app.UpNextSecondsLeft);
+            Assert.True(Shows(session, "Still watching?"), session.Window.DumpAccessibilityTree());
+            Assert.NotNull(session.Window.FindByAutomationId("up-next-continue"));
+        }, () => backend);
+    }
+
+    [Fact]
+    public void KeepWatchingRestartsTheCountdownAndTheRun()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PlayToTheEnd(session, app, backend, "resume-e1");
+            for (int i = 0; i < ApertureApp.AutoPlaysBeforeAsking; i++)
+            {
+                app.PlayUpNext();
+                for (int f = 0; f < 10; f++) session.PumpFrame();
+                backend.Raise(new BackendEvent.EndReached());
+                for (int f = 0; f < 10; f++) session.PumpFrame();
+            }
+            Assert.True(app.UpNextIsAsking);
+
+            session.Window.FindByAutomationId("up-next-continue")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.False(app.UpNextIsAsking, "the question stayed up after being answered");
+            Assert.InRange(app.UpNextSecondsLeft, 1, (int)ApertureApp.UpNextCountdown.TotalSeconds);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void AFilmEndsWithoutOfferingAnything()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PlayToTheEnd(session, app, backend, "resume-m2");
+
+            Assert.Null(app.UpNextItem);
         }, () => backend);
     }
 

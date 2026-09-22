@@ -144,6 +144,21 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         return Result<IReadOnlyList<MediaItem>>(items.Take(limit).ToList());
     }
 
+    public Task<ApertureResult<MediaItem?>> GetNextEpisodeAsync(MediaItem episode, CancellationToken ct = default)
+    {
+        Calls.Add($"GetNextEpisode({episode.Id})");
+        if (episode.Kind != MediaKind.Episode || episode.SeriesId is not { } seriesId)
+            return Result<MediaItem?>(null);
+
+        // The fixture's running order is the order episodes were added under the series.
+        var siblings = (_children.GetValueOrDefault(seriesId) ?? [])
+            .Select(id => _items[id])
+            .Where(i => i.Kind == MediaKind.Episode)
+            .ToList();
+        int index = siblings.FindIndex(i => i.Id == episode.Id);
+        return Result(index >= 0 && index + 1 < siblings.Count ? siblings[index + 1] : null);
+    }
+
     public Task<ApertureResult<IReadOnlyList<MediaItem>>> GetLatestAsync(string libraryId, int limit = 16,
         CancellationToken ct = default)
     {
