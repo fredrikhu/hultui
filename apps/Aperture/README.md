@@ -64,6 +64,13 @@ which is where a server decides to transcode, and hands the resulting URL to
 such in the title strip, because the two feel identical until something stutters
 and then it is the first question.
 
+Settings → Playback → Quality caps the stream. **A bitrate on its own is
+advisory**: with no device profile to evaluate, this server hands back the file and
+the ceiling means nothing (measured against 10.10). So a capped request also sends a
+profile that can direct-play nothing and transcodes to H.264/AAC over HLS — which is
+what turns "keep it under this" into real re-encoding. Changing the ceiling re-opens
+what is playing at the position it had reached.
+
 Playback is reported back the way Jellyfin's own clients report it — started,
 progress every ten seconds and on every pause, stopped — which is what drives
 "now playing" in the dashboard, the Continue watching row, and the resume point

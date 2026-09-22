@@ -1,4 +1,4 @@
-using Jellyfin.Sdk;
+﻿using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Kiota.Http.HttpClientLibrary;
 
@@ -286,24 +286,34 @@ public sealed class JellyfinLibrary : IMediaLibrary
     }
 
     public async Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
-        CancellationToken ct = default)
+        int? maxBitrateBps = null, CancellationToken ct = default)
     {
         if (ParseId(itemId) is not { } id)
             return ApertureResult<PlaybackTarget>.Fail(ApertureFailureKind.NotFound, $"'{itemId}' is not an item id");
         try
         {
+            // A ceiling only means something if the two paths that ignore it are closed:
+            // direct play sends the file, direct stream remuxes it, and both keep the
+            // source's bitrate. Asking for a cap is asking the server to re-encode.
+            bool capped = maxBitrateBps is > 0;
             var info = await _client.Items[id].PlaybackInfo.PostAsync(new PlaybackInfoDto
             {
                 UserId = User.Id,
                 StartTimeTicks = startPosition.Ticks,
                 // mpv plays essentially any container the server can hand it, so ask for
                 // the file itself and let the server transcode only when it insists.
-                EnableDirectPlay = true,
-                EnableDirectStream = true,
+                EnableDirectPlay = !capped,
+                EnableDirectStream = !capped,
                 EnableTranscoding = true,
-                AllowVideoStreamCopy = true,
-                AllowAudioStreamCopy = true,
+                AllowVideoStreamCopy = !capped,
+                AllowAudioStreamCopy = !capped,
                 AutoOpenLiveStream = true,
+                MaxStreamingBitrate = capped ? maxBitrateBps : null,
+                // A bitrate on its own is advisory: with no profile to evaluate, the
+                // server hands back the file and the ceiling means nothing (measured
+                // against 10.10). A profile that can direct-play nothing is what turns
+                // "please keep it under this" into a transcode.
+                DeviceProfile = capped ? CeilingProfile(maxBitrateBps!.Value) : null,
             }, cancellationToken: ct).ConfigureAwait(false);
 
             if (info?.MediaSources is not { Count: > 0 } sources)
@@ -331,6 +341,30 @@ public sealed class JellyfinLibrary : IMediaLibrary
             return ApertureResult<PlaybackTarget>.Fail(JellyfinConnection.Classify(ex, Server.Host));
         }
     }
+
+    /// <summary>
+    /// The profile a capped stream is asked for: nothing may be played directly, and what
+    /// comes back is H.264 and AAC in an MPEG-TS stream under the ceiling — the shape every
+    /// Jellyfin server can produce, and one mpv opens without a second thought.
+    /// </summary>
+    private static DeviceProfile CeilingProfile(int maxBitrateBps) => new()
+    {
+        MaxStreamingBitrate = maxBitrateBps,
+        MaxStaticBitrate = maxBitrateBps,
+        DirectPlayProfiles = [],
+        TranscodingProfiles =
+        [
+            new TranscodingProfile
+            {
+                Container = "ts",
+                Type = TranscodingProfile_Type.Video,
+                VideoCodec = "h264",
+                AudioCodec = "aac",
+                Protocol = TranscodingProfile_Protocol.Hls,
+                Context = TranscodingProfile_Context.Streaming,
+            },
+        ],
+    };
 
     /// <summary>The original file, byte for byte: <c>static=true</c> is what makes the
     /// server stop deciding and start sending.</summary>

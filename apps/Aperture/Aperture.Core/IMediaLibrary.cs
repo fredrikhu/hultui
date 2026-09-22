@@ -61,9 +61,15 @@ public interface IMediaLibrary : IDisposable
     /// the caller: an item with no tag simply gets no URL.</summary>
     Uri? ImageUrl(string itemId, ImageKind kind, string? tag, int? maxWidth = null, int? maxHeight = null);
 
-    /// <summary>Opens a playback session: asks the server how this item can be played, and
-    /// comes back with the URL to hand the media backend.</summary>
-    Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition, CancellationToken ct = default);
+    /// <summary>
+    /// Opens a playback session: asks the server how this item can be played, and comes
+    /// back with the URL to hand the media backend.
+    /// </summary>
+    /// <param name="maxBitrateBps">A ceiling for the stream, or null for the file as it
+    /// is. A ceiling is a request to transcode when the source is bigger than it — which
+    /// is the point of having one, and costs the server real work.</param>
+    Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
+        int? maxBitrateBps = null, CancellationToken ct = default);
 
     /// <summary>Tells the server playback began — this is what puts the app in "now playing".</summary>
     Task<ApertureResult<bool>> ReportStartedAsync(PlaybackTarget target, TimeSpan position, bool paused, CancellationToken ct = default);

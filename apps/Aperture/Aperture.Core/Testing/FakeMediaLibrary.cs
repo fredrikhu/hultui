@@ -1,4 +1,4 @@
-namespace Aperture.Core.Testing;
+﻿namespace Aperture.Core.Testing;
 
 /// <summary>
 /// A library with no server behind it: a fixture the headless tests and the screenshot
@@ -196,15 +196,18 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         tag is null ? null : new Uri($"{Server.Address}/Items/{itemId}/Images/{kind}?tag={tag}");
 
     public Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
-        CancellationToken ct = default)
+        int? maxBitrateBps = null, CancellationToken ct = default)
     {
-        Calls.Add($"StartPlayback({itemId}, at={startPosition:g})");
+        Calls.Add($"StartPlayback({itemId}, at={startPosition:g}"
+            + (maxBitrateBps is { } bps ? $", max={bps}" : "") + ")");
         if (FailWith is { } f) { FailWith = null; return Task.FromResult(ApertureResult<PlaybackTarget>.Fail(f)); }
         if (!_items.TryGetValue(itemId, out var item))
             return Task.FromResult(ApertureResult<PlaybackTarget>.Fail(ApertureFailureKind.NotFound, "No such item"));
         return Task.FromResult(ApertureResult<PlaybackTarget>.Success(new PlaybackTarget(
             new Uri($"{Server.Address}/Videos/{itemId}/stream?static=true"),
-            itemId, "play-session-" + itemId, "source-" + itemId, Transcoding: false, startPosition, item.RunTime)));
+            itemId, "play-session-" + itemId, "source-" + itemId,
+            // A ceiling is what makes a server transcode, so a capped start reports one.
+            Transcoding: maxBitrateBps is > 0, startPosition, item.RunTime)));
     }
 
     public Task<ApertureResult<bool>> ReportStartedAsync(PlaybackTarget target, TimeSpan position, bool paused,

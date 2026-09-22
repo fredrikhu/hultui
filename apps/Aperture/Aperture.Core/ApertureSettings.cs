@@ -83,6 +83,14 @@ public sealed class ApertureSettingsData
     /// </summary>
     public bool CombineUpNext { get; set; }
 
+    /// <summary>
+    /// A ceiling for the stream in kilobits per second, or null for the file as it is.
+    /// Null is right on a home network — the server sends the original and spends no CPU
+    /// — and wrong over a link that cannot carry a 40 Mbit remux, which is the whole
+    /// reason to set one.
+    /// </summary>
+    public int? MaxStreamingKbps { get; set; }
+
     /// <summary>Whether subtitles were on when they were last touched. Separate from the
     /// language because "off" is a choice a client must not quietly forget — a file whose
     /// only subtitle track happens to match a remembered language should not turn them

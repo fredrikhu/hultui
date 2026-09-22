@@ -1291,6 +1291,57 @@ public class ApertureAppHostTests
         });
     }
 
+    // ── Streaming quality ────────────────────────────────────────────────
+
+    [Fact]
+    public void AQualityCeilingIsAskedForAndTakesEffectOnWhatIsPlaying()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            // No ceiling by default: the file as it is.
+            Assert.Contains("StartPlayback(m1, at=0:00:00)", library.Calls);
+            Assert.False(app.Playback!.Transcoding);
+
+            app.SetMaxStreamingKbps(2_000);
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            // Re-opened under the new ceiling rather than waiting for the next film.
+            Assert.Contains(library.Calls, c => c.Contains("max=2000000", StringComparison.Ordinal));
+            Assert.Equal("m1", app.PlayingItem!.Id);
+            Assert.True(app.Playback!.Transcoding);
+            Assert.Equal(2_000, app.Settings.Data.MaxStreamingKbps);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void TheQualityChoiceIsWhereTheOtherPlaybackFactsAre()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-settings")!.Click();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            var chip = session.Window.FindByAutomationId("settings-quality");
+            Assert.NotNull(chip);
+            Assert.Contains("Original", chip!.Name);
+
+            app.SetMaxStreamingKbps(4_000);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.Contains("4 Mbps", session.Window.FindByAutomationId("settings-quality")!.Name);
+        });
+    }
+
     // ── Quick Connect ────────────────────────────────────────────────────
 
     [Fact]

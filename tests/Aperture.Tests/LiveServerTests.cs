@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Xunit;
 
 namespace Aperture.Tests;
@@ -107,7 +107,7 @@ public class LiveServerTests
         var item = await FirstPlayableAsync(library);
         if (Absent(item is null, "The server has nothing playable.")) return;
 
-        var target = await library.StartPlaybackAsync(item!.Id, TimeSpan.Zero, Ct);
+        var target = await library.StartPlaybackAsync(item!.Id, TimeSpan.Zero, ct: Ct);
         Assert.True(target.Ok, target.Failure?.Message);
         Assert.False(string.IsNullOrEmpty(target.Value.PlaySessionId));
 
@@ -118,6 +118,28 @@ public class LiveServerTests
         request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 1024);
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Ct);
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode} for the stream URL");
+    }
+
+    [LiveServerFact]
+    public async Task ACeilingMakesTheServerReEncodeInsteadOfSendingTheFile()
+    {
+        using var library = await LiveServer.ConnectAsync(Ct);
+        var item = await FirstPlayableAsync(library);
+        if (Absent(item is null, "The server has nothing playable.")) return;
+
+        // Uncapped, this server sends the file itself — that is the whole point of pairing
+        // it with mpv, and the baseline the cap has to change.
+        var open = await library.StartPlaybackAsync(item!.Id, TimeSpan.Zero, ct: Ct);
+        Assert.True(open.Ok, open.Failure?.Message);
+        Assert.False(open.Value.Transcoding);
+
+        // One megabit is below anything a real film is stored at, so the server has to
+        // re-encode to honour it.
+        var capped = await library.StartPlaybackAsync(item.Id, TimeSpan.Zero, 1_000_000, Ct);
+        Assert.True(capped.Ok, capped.Failure?.Message);
+        Assert.True(capped.Value.Transcoding,
+            "the server offered a direct stream despite a 1 Mbps ceiling");
+        Assert.Contains("videos", capped.Value.StreamUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase);
     }
 
     [LiveServerFact]
@@ -135,7 +157,7 @@ public class LiveServerTests
         if (Absent(runtime < TimeSpan.FromMinutes(12), "Nothing long enough to hold a resume point.")) return;
         var at = TimeSpan.FromSeconds(Math.Max(360, runtime.TotalSeconds * 0.12));
 
-        var target = (await library.StartPlaybackAsync(item.Id, TimeSpan.Zero, Ct)).Value;
+        var target = (await library.StartPlaybackAsync(item.Id, TimeSpan.Zero, ct: Ct)).Value;
         try
         {
             Assert.True((await library.ReportStartedAsync(target, TimeSpan.Zero, paused: false, Ct)).Ok);
@@ -155,7 +177,7 @@ public class LiveServerTests
         finally
         {
             // Leave the account as we found it: the user's Continue watching row is theirs.
-            var restore = (await library.StartPlaybackAsync(item.Id, TimeSpan.Zero, Ct)).Value;
+            var restore = (await library.StartPlaybackAsync(item.Id, TimeSpan.Zero, ct: Ct)).Value;
             await library.ReportStoppedAsync(restore, before ?? TimeSpan.Zero, Ct);
         }
     }

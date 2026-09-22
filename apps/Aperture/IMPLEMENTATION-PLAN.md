@@ -59,6 +59,7 @@ and there are no collections or playlists to browse.
 | Library as a list | the same virtual grid one across, with year, rating, runtime and genres |
 | Home layout | rows move, hide and come back; the two “what now” rows fold into one |
 | Quick Connect | sign in by approving a code, no password typed into this window |
+| Streaming quality | a bitrate ceiling that really transcodes, applied to what is playing |
 
 Framework changes that fell out: menus and other overlays are in the accessibility
 tree, at the coordinates they are drawn, so assistive tech and the driver can reach
@@ -93,9 +94,11 @@ at the top of a frame, it freezes the whole pump.
 
 ## Things deliberately not done
 
-- **A device profile.** Aperture tells the server it can direct-play and lets it
-  decide, because mpv plays what the server would otherwise spend CPU converting.
-  A profile would be needed for a client that could not.
+- **A device profile, by default.** Aperture tells the server it can direct-play and
+  lets it decide, because mpv plays what the server would otherwise spend CPU
+  converting. The one exception is a quality ceiling: a `MaxStreamingBitrate` with no
+  profile behind it is ignored, so a capped request sends a profile that can
+  direct-play nothing (see the README).
 - **SyncPlay, live TV, music.** Each is its own app inside the API; the music
   libraries are filtered out of the home screen rather than half-rendered.
 - **Writing metadata.** Aperture reads the library and reports playback. Editing

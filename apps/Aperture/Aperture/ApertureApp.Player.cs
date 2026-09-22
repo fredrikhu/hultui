@@ -80,6 +80,30 @@ public sealed partial class ApertureApp
     /// starts over. False when the countdown started it.</param>
     /// <param name="keepQueue">The queue is driving this. Anything else ends it: a queue
     /// that survived someone picking a different film would follow them around.</param>
+    /// <summary>The ceiling to ask the server for, in bits per second, or null for the
+    /// file as it is. Kept in kilobits where a person reads it and converted here.</summary>
+    internal int? MaxStreamingBitrateBps =>
+        _settings.Data.MaxStreamingKbps is > 0 ? _settings.Data.MaxStreamingKbps * 1000 : null;
+
+    /// <summary>
+    /// Changes the ceiling. What is playing was fetched under the old one, so it is
+    /// re-opened at the position it had reached — a quality control that only takes effect
+    /// next time is a quality control nobody trusts.
+    /// </summary>
+    internal void SetMaxStreamingKbps(int? kbps)
+    {
+        if (_settings.Data.MaxStreamingKbps == kbps) return;
+        _settings.Data.MaxStreamingKbps = kbps;
+        _settings.Save();
+
+        if (_playingItem is { } item)
+        {
+            var at = _player?.Position ?? TimeSpan.Zero;
+            Play(item, at, countsAsDeliberate: false, keepQueue: true);
+        }
+        Rerender();
+    }
+
     internal void Play(MediaItem item, TimeSpan from, bool countsAsDeliberate = true, bool keepQueue = false)
     {
         if (_library is not { } lib) return;
@@ -110,7 +134,7 @@ public sealed partial class ApertureApp
 
     private async Task StartAsync(IMediaLibrary lib, MediaItem item, TimeSpan from)
     {
-        var target = await lib.StartPlaybackAsync(item.Id, from).ConfigureAwait(false);
+        var target = await lib.StartPlaybackAsync(item.Id, from, MaxStreamingBitrateBps).ConfigureAwait(false);
         Application.InvokeOnMainThread(() =>
         {
             if (!target.Ok)

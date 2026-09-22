@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -205,6 +205,11 @@ public sealed partial class ApertureApp
         var playback = Card("Playback");
         playback.AddChild(Row("Decoder", _backends is null ? "no libmpv found" : "libmpv"));
         playback.AddChild(Row("Volume", $"{(int)Math.Round(_settings.Data.Volume * 100)}%"));
+        playback.AddChild(SettingRow("Quality", QualityChip()));
+        playback.AddChild(Text.New(_settings.Data.MaxStreamingKbps is null
+                ? "The file as it is: the server sends it untouched and spends no CPU."
+                : "A ceiling makes the server re-encode anything bigger — for a link that can't carry the original.")
+            .FontSize(11.5f).TextColor(Halide.TextFaint));
         page.AddChild(playback);
 
         scroll.AddChild(page);
@@ -220,6 +225,64 @@ public sealed partial class ApertureApp
             .BorderColor(Halide.Border).BorderWidth(1f);
         card.AddChild(Text.New(title).FontSize(13f).FontWeight(FontWeight.SemiBold).TextColor(Halide.TextDim));
         return card;
+    }
+
+    /// <summary>A settings row whose right-hand side is something to press rather than
+    /// something to read.</summary>
+    private static Element SettingRow(string label, Element control)
+    {
+        var row = Flex.Row(gap: Halide.S4).AlignItems(AlignItems.Center);
+        row.AddChild(Text.New(label).FontSize(12f).TextColor(Halide.TextMuted).Width(Dimension.Px(130)));
+        row.AddChild(control);
+        return row;
+    }
+
+    /// <summary>The streaming ceilings worth offering, coarsest first. Kilobits, because
+    /// that is what the server's own settings page speaks.</summary>
+    private static readonly (int? Kbps, string Label)[] QualityChoices =
+    [
+        (null, "Original"),
+        (20_000, "20 Mbps"),
+        (10_000, "10 Mbps"),
+        (4_000, "4 Mbps"),
+        (2_000, "2 Mbps"),
+        (1_000, "1 Mbps"),
+    ];
+
+    internal static string QualityLabel(int? kbps) =>
+        QualityChoices.FirstOrDefault(c => c.Kbps == kbps).Label ?? $"{kbps} kbps";
+
+    private Element QualityChip()
+    {
+        var current = _settings.Data.MaxStreamingKbps;
+        var chip = Box.New()
+            .Padding(new Thickness(5, Halide.S3, 5, Halide.S3))
+            .CornerRadius(Halide.Radius1)
+            .BorderColor(Halide.Border).BorderWidth(1f)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ComboBox)
+            .AccessibleName($"Quality: {QualityLabel(current)}")
+            .AutomationId("settings-quality")
+            .ContextMenu(QualityMenu)
+            .Children(Ui.Line(QualityLabel(current), 11.5f, Halide.TextDim));
+        chip.OnClick(e => _window.OpenContextMenu(e.CurrentTarget, e.Position));
+        return chip.HoverBg(Halide.Raised);
+    }
+
+    private IReadOnlyList<ContextMenuItem> QualityMenu()
+    {
+        var current = _settings.Data.MaxStreamingKbps;
+        var items = new List<ContextMenuItem>();
+        foreach (var (kbps, label) in QualityChoices)
+        {
+            var choice = kbps;
+            items.Add(new ContextMenuItem
+            {
+                Label = (current == choice ? "• " : "   ") + label,
+                Action = () => SetMaxStreamingKbps(choice),
+            });
+        }
+        return items;
     }
 
     private static Element Row(string label, string value)
