@@ -281,7 +281,15 @@ providers), a UIA `ItemContainer` on virtualized lists.
 - `org.a11y.atspi.Text` / `EditableText` for AT-SPI.
 - macOS `NSAccessibility`.
 - UIA `LiveRegion` / AT-SPI live regions.
-- Accessibility for overlays, tooltips, context menus.
+- ~~Accessibility for overlays, tooltips, context menus.~~ **Done 2026-09-22.** The
+  window's snapshot now includes every hit-testable overlay — context menus, dropdown
+  lists, dialogs — built with the overlay's own origin, since overlay content is positioned
+  at render time and its element boxes are otherwise relative to the overlay rather than
+  the window. A context menu publishes its entries as virtual items (`IAccessibleItemSource`,
+  the contract virtualized lists use), because it draws them rather than building an element
+  each; separators are left out, and an entry's shortcut is part of its name. Tooltips stay
+  out on purpose: they belong to the element they describe, and a sibling node would be read
+  twice.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

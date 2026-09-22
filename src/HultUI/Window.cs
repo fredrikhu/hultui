@@ -417,7 +417,29 @@ public sealed class Window : IOverlayHost, IDisposable
     /// per-frame build that only runs while a bridge is active.
     /// </summary>
     internal AccessibilityNode? BuildAccessibilityTree()
-        => _root is null ? null : AccessibilityTreeBuilder.Build(_root, _focusManager);
+        => _root is null ? null : BuildAccessibilityTreeWithOverlays(_root);
+
+    /// <summary>
+    /// The window's content, plus whatever is open over it.
+    ///
+    /// <para>Overlays live outside the root element tree, so a snapshot of the root alone
+    /// leaves out every context menu, dropdown list and dialog — the parts of a window a
+    /// screen reader most needs when one is open, because they are also the parts that
+    /// have just taken the keyboard. Tooltips stay out: they are not hit-testable, they
+    /// belong to the element they describe, and announcing one as a sibling of the window
+    /// would read it twice.</para>
+    /// </summary>
+    private AccessibilityNode BuildAccessibilityTreeWithOverlays(Element root)
+    {
+        var tree = AccessibilityTreeBuilder.Build(root, _focusManager);
+        for (int i = 0; i < _overlays.Count; i++)
+        {
+            var overlay = _overlays[i];
+            if (!overlay.IsHitTestable) continue;
+            tree.AddChild(AccessibilityTreeBuilder.Build(overlay.Content, _focusManager, overlay.X, overlay.Y));
+        }
+        return tree;
+    }
 
     /// <summary>
     /// Replaces the platform accessibility bridge. Used by headless sessions to
@@ -726,7 +748,7 @@ public sealed class Window : IOverlayHost, IDisposable
         {
             using (_tracer.Begin("Phase", "A11y"))
             {
-                var newTree = AccessibilityTreeBuilder.Build(_root, _focusManager);
+                var newTree = BuildAccessibilityTreeWithOverlays(_root);
                 var diff = AccessibilityTreeDiffer.Diff(_previousA11yTree, newTree);
                 if (!diff.IsEmpty)
                     _accessibilityBridge.ApplyChanges(diff, newTree);

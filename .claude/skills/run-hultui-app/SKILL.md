@@ -71,7 +71,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `dump` | Prints the accessibility tree — the fastest way to find a target. |
 | `key:<KeyCode>[+Ctrl][+Shift][+Alt]` | e.g. `key:Digit4`, `key:Down+Shift`, `key:F+Ctrl`. Names come from `KeyCode`. |
 | `type:<text>` | Types into whatever has the keyboard, as text input rather than synthesized key presses. Anything driven by a search box needs this — the filter runs off `OnTextChanged`, which a `key:` step never raises. Quote a step containing spaces. |
-| `click:<x>,<y>` or `click:@<text>` | `@` finds an element by its accessible name and clicks its centre. |
+| `click:<x>,<y>` or `click:@<text>` | `@` finds an element by its accessible name and clicks its centre — or, when the name belongs to a *virtual* item (a context-menu row, a row of a virtual list), the centre of the rectangle the accessibility tree reports for it. Those have no element to resolve, which is why `FindByText` alone used to come back empty for something plainly on screen. |
 | `drag:<x1>,<y1>,<x2>,<y2>` or `drag:@<text>,<dx>[,<dy>]` | Press, move, release as separate events. |
 | `autoscroll:<x>,<y>,<dy>[,<ms>]` or `autoscroll:@<text>,<dy>[,<ms>]` | Middle-button autoscroll: presses at the anchor, parks the pointer `dy` away, runs frames for `ms` (default 600), releases. `drag` cannot show this — the pointer's distance from the anchor is a *speed*, so the scrolling happens between input events, and a press-move-release with no frames in between leaves the view exactly where it was. |
 | `wheel:<x>,<y>,<notches>` | Turns the wheel at a point. Negative scrolls down. Reaches anything below the fold. |
@@ -167,12 +167,14 @@ it opens and rewrites the user's real settings.
   helper that turns an element into a point, do the same.
 - **Not everything has an accessible name.** The pane splitter is a bare box with a cursor and
   no label, so `@` cannot find it — take a `shot`, read the x off it, and drag by coordinates.
-- **`@` cannot reach inside a virtualised list's rows.** A `VirtualListElement` exposes its
-  *items* to the accessibility tree (one `ListItem` per item, named from the item), not the
-  elements it realized for them — so a button, a field or a card inside a diff row, a branch
-  row or a file row is invisible to `@` and to `dump`, however it is named. Junction's review
-  composer, thread replies and Resolve buttons live there. Take a `shot` and click by
-  coordinates; the header, the strips and the panel buttons outside the list are still `@`-able.
+- **`@` reaches a virtualised list's rows, but not always the controls inside them.** A
+  `VirtualListElement` exposes its *items* (one `ListItem` per item, named from the item)
+  rather than the elements it realized for them, so the row itself is `@`-able — clicks on a
+  name with no element fall back to the rectangle the tree reports — while a button or a
+  field *inside* a row stays invisible to `@` and to `dump`. Junction's review composer,
+  thread replies and Resolve buttons live there: take a `shot` and click by coordinates. A
+  list whose rows are composite sets `RowsAreComposite` and then publishes the real controls
+  (Aperture's poster grid does), which is the way out if you own the list.
 - **Junction's view keys are Digit1–Digit6**: Overview, History, Commit, Changes, Branches,
   Tags.
 - **`/tmp` in the Bash tool is not `/tmp` in PowerShell.** Git Bash maps it to

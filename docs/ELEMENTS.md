@@ -1015,6 +1015,11 @@ honoured, not clamped back to 0.
 **Accessibility.** The list is announced as a `List`; `AccessibleItemLabel` names each
 row without realizing it, so a reader can walk 20,000 items that were never built.
 
+**Items that are drawn, not built.** `IAccessibleItemSource` is not only for lists that
+virtualize: a container that paints its own rows — the context menu does — implements it so
+those rows reach assistive tech at all. `ItemBounds(i)` places them when they are not a
+uniform height (a menu with separators in it).
+
 **A row that is not one thing.** Drive a wrap grid through the list — one item per *row*
 of cards — and that model inverts: the list would publish one node per row, named after
 all the cards in it, and every card's own name, role and automation id would vanish from

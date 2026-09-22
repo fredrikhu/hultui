@@ -11,7 +11,7 @@ namespace HultUI.Core.Elements;
 /// Renders a context menu as a single leaf element. Tracks hover/selection
 /// index and exposes methods for the Window to drive keyboard navigation.
 /// </summary>
-internal sealed class ContextMenuElement : Element
+internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleItemSource
 {
     private const string SubmenuArrow = "▸";
 
@@ -39,6 +39,88 @@ internal sealed class ContextMenuElement : Element
     }
 
     public int HoveredIndex => _hoveredIndex;
+
+    // ──── Accessibility ────
+    // The menu draws its items itself rather than building an element each, which used to
+    // mean a screen reader found a box with nothing in it: the whole menu was one node with
+    // no name. The items are published as virtual ones instead — the same contract a
+    // virtualized list uses — so they can be read, hit-tested and invoked.
+    //
+    // Separators are left out: they are a line, not a choice, and an unnamed item in a menu
+    // is worse than no item. Indices are therefore the menu's own, mapped through here.
+
+    private int[] ChoiceMap
+    {
+        get
+        {
+            if (_choiceMap is not null && _choiceMapItems == _items.Count) return _choiceMap;
+            var map = new List<int>(_items.Count);
+            for (int i = 0; i < _items.Count; i++)
+                if (!_items[i].IsSeparator) map.Add(i);
+            _choiceMapItems = _items.Count;
+            return _choiceMap = [.. map];
+        }
+    }
+    private int[]? _choiceMap;
+    private int _choiceMapItems = -1;
+
+    int Accessibility.IAccessibleItemSource.ItemCount => ChoiceMap.Length;
+
+    float Accessibility.IAccessibleItemSource.ItemHeight =>
+        _itemHeights.Length > 0 ? _itemHeights[0] : 0f;
+
+    (float Top, float Height)? Accessibility.IAccessibleItemSource.ItemBounds(int index)
+    {
+        int item = ItemIndex(index);
+        if (item < 0 || item >= _itemYOffsets.Length || item >= _itemHeights.Length) return null;
+        return (_itemYOffsets[item], _itemHeights[item]);
+    }
+
+    int Accessibility.IAccessibleItemSource.SelectedIndex
+    {
+        get
+        {
+            var map = ChoiceMap;
+            for (int i = 0; i < map.Length; i++)
+                if (map[i] == _hoveredIndex) return i;
+            return -1;
+        }
+    }
+
+    string? Accessibility.IAccessibleItemSource.GetItemLabel(int index)
+    {
+        int item = ItemIndex(index);
+        if (item < 0) return null;
+        var menuItem = _items[item];
+        // The shortcut is part of what the item is — "Copy, Ctrl C" is how a reader
+        // announces it everywhere else.
+        return string.IsNullOrEmpty(menuItem.ShortcutHint) ? menuItem.Label : $"{menuItem.Label}, {menuItem.ShortcutHint}";
+    }
+
+    void Accessibility.IAccessibleItemSource.ActivateItem(int index)
+    {
+        int item = ItemIndex(index);
+        if (item < 0) return;
+        var menuItem = _items[item];
+        if (menuItem.IsDisabled) return;
+
+        if (menuItem.HasChildren)
+        {
+            // Opening a submenu is what activating its parent means; the host owns the
+            // flyout, so it is told rather than opened from here.
+            _hoveredIndex = item;
+            HoverChanged?.Invoke(item);
+            return;
+        }
+        _closeMenu();
+        menuItem.Action?.Invoke();
+    }
+
+    private int ItemIndex(int choice)
+    {
+        var map = ChoiceMap;
+        return choice >= 0 && choice < map.Length ? map[choice] : -1;
+    }
 
     /// <summary>Raised when the hovered item changes (index, or −1 for none).
     /// The menu host uses it to open/close the flyout for items with

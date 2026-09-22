@@ -54,6 +54,15 @@ public interface IAccessibleItemSource
     float ItemHeight { get; }
 
     /// <summary>
+    /// Where item <paramref name="index"/> sits inside the container's content box, for a
+    /// container whose items are not all the same height — a menu with separators, a list
+    /// with per-row heights. Null (the default) means the items stack at
+    /// <see cref="ItemHeight"/>, which is what a uniform list wants and what the bounds
+    /// are computed from when this returns nothing.
+    /// </summary>
+    (float Top, float Height)? ItemBounds(int index) => null;
+
+    /// <summary>
     /// Index of the currently selected item, or -1 if none. Exposed so assistive
     /// tech can report and move to the selection (UIA SelectionItem). Single-select.
     /// </summary>

@@ -440,8 +440,36 @@ void WaitFor(string arg)
 
 (float X, float Y) Point(string arg) =>
     arg.StartsWith('@')
-        ? Center(Find(arg[1..]))
+        ? PointOf(arg[1..])
         : (float.Parse(arg.Split(',')[0]), float.Parse(arg.Split(',')[1]));
+
+// An element if there is one, otherwise the accessibility node's own rectangle. The second
+// case is a *virtual* item — a context-menu row, an unrealized row of a virtual list —
+// which has bounds but no element to resolve, so FindByText comes back empty while the
+// thing is plainly on screen. Those rows are clickable by position like anything else.
+(float X, float Y) PointOf(string text)
+{
+    if (session.Window.FindByText(text) is { } element) return Center(element);
+
+    foreach (var node in Walk(session.Window.AccessibilityTree))
+    {
+        if (node.Name != text && node.Value != text) continue;
+        var r = node.BoundingRect;
+        if (r.Width <= 0 || r.Height <= 0) continue;
+        return (r.X + r.Width / 2f, r.Y + r.Height / 2f);
+    }
+    throw new InvalidOperationException(
+        $"nothing on screen reads \"{text}\" — run with no steps, or add a dump step, to see the tree");
+}
+
+static IEnumerable<HultUI.Core.Accessibility.AccessibilityNode> Walk(
+    HultUI.Core.Accessibility.AccessibilityNode node)
+{
+    yield return node;
+    foreach (var child in node.Children)
+        foreach (var descendant in Walk(child))
+            yield return descendant;
+}
 
 HeadlessElement Find(string text) =>
     session.Window.FindByText(text)

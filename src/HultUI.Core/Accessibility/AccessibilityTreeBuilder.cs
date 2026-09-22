@@ -24,13 +24,24 @@ public static class AccessibilityTreeBuilder
     /// When <paramref name="focusManager"/> is supplied, the focused element gets
     /// <see cref="AccessibilityNode.IsFocused"/> set.
     /// </summary>
-    public static AccessibilityNode Build(Element root, FocusManager? focusManager = null)
+    /// <param name="originX">Where this tree's root sits on screen, when its elements do
+    /// not know. Overlay content — a context menu, a dropdown list, a dialog — is placed by
+    /// the overlay system at render time, so its element boxes are relative to the overlay
+    /// and every node would otherwise report bounds near the window's top-left corner:
+    /// wrong for a screen reader's highlight, and wrong for anything hit-testing off the
+    /// snapshot.</param>
+    /// <param name="originY">The vertical half of <paramref name="originX"/>.</param>
+    public static AccessibilityNode Build(Element root, FocusManager? focusManager = null,
+        float originX = 0f, float originY = 0f)
     {
-        var node = CreateNode(root, focusManager, 0f, 0f);
-        var (cx, cy) = ChildScroll(root, 0f, 0f);
+        // Threaded as a negative scroll: the builder already subtracts an accumulated
+        // offset from every box, which is exactly this with the other sign.
+        float ox = -originX, oy = -originY;
+        var node = CreateNode(root, focusManager, ox, oy);
+        var (cx, cy) = ChildScroll(root, ox, oy);
         // The root is the top-level visible region; descendants clipped out of it
         // (and out of any scroll view along the way) are marked offscreen.
-        var childClip = ClipForChildren(root, node.BoundingRect, 0f, 0f);
+        var childClip = ClipForChildren(root, node.BoundingRect, ox, oy);
         if (!TryBuildVirtualItems(root, node, cx, cy, childClip))
             BuildChildren(root, node, focusManager, cx, cy, childClip);
         return node;
@@ -152,8 +163,11 @@ public static class AccessibilityTreeBuilder
         var content = list.Layout.AbsoluteContentBox;
         for (int i = 0; i < count; i++)
         {
-            float top = content.Y + i * itemHeight;
-            var rect = new Rect(content.X - scrollX, top - scrollY, content.Width, itemHeight);
+            // A container with uneven items (a menu with separators in it) places them
+            // itself; everything else stacks at one height.
+            var (localTop, height) = source.ItemBounds(i) ?? (i * itemHeight, itemHeight);
+            float top = content.Y + localTop;
+            var rect = new Rect(content.X - scrollX, top - scrollY, content.Width, height);
             listNode.AddChild(new AccessibilityNode(
                 VirtualItemId.For(list.Id, i),
                 AccessibilityRole.ListItem,
