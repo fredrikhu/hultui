@@ -30,7 +30,7 @@ public sealed partial class ApertureApp
             .AccessibleName(AccessibleNameFor(item))
             .AutomationId("card-" + item.Id)
             .Tooltip(item.Name);
-        MarkCursor(card, cursorIndex);
+        MarkCursor(card, cursorIndex, item);
 
         card.AddChild(Artwork(item, ImageKind.Primary, width, height, Halide.Radius2));
 
@@ -66,7 +66,7 @@ public sealed partial class ApertureApp
             .AccessibleName(ResumeAccessibleName(item))
             .AutomationId("resume-" + item.Id)
             .Tooltip(item.Name);
-        MarkCursor(card, cursorIndex);
+        MarkCursor(card, cursorIndex, item);
 
         // The backdrop of an episode usually lives on its series, which is what
         // BackdropItemId points at; the item's own thumb is the fallback.
@@ -140,13 +140,64 @@ public sealed partial class ApertureApp
     }
 
     /// <summary>
+    /// What a card offers on a right click — and what the More key (the context-menu key,
+    /// or Shift+F10) opens on the card under the cursor.
+    ///
+    /// <para>Everything here is a thing you would otherwise open the item to do. The point
+    /// of a shelf is that you can work along it: mark an episode watched, heart a film,
+    /// jump to the series an episode belongs to, without losing your place.</para>
+    /// </summary>
+    internal IReadOnlyList<ContextMenuItem> CardMenu(MediaItem item)
+    {
+        var items = new List<ContextMenuItem>();
+
+        if (item.IsPlayable)
+        {
+            if (item.ResumePosition is { } at)
+            {
+                items.Add(new ContextMenuItem { Label = $"Resume {Ui.Runtime(at)} in", Action = () => Play(item, at) });
+                items.Add(new ContextMenuItem { Label = "Play from the start", Action = () => Play(item, TimeSpan.Zero) });
+            }
+            else
+            {
+                items.Add(new ContextMenuItem { Label = "Play", Action = () => Play(item, TimeSpan.Zero) });
+            }
+        }
+
+        items.Add(new ContextMenuItem { Label = "Open", Action = () => Open(item) });
+        items.Add(ContextMenuItem.Separator());
+        items.Add(new ContextMenuItem
+        {
+            Label = item.Played ? "Mark unwatched" : "Mark watched",
+            Action = () => ToggleWatched(item, reload: false),
+        });
+        items.Add(new ContextMenuItem
+        {
+            Label = item.IsFavorite ? "Remove from favourites" : "Add to favourites",
+            Action = () => ToggleFavorite(item, reload: false),
+        });
+
+        if (item.Kind == MediaKind.Episode && item.SeriesId is { Length: > 0 } seriesId)
+        {
+            items.Add(ContextMenuItem.Separator());
+            items.Add(new ContextMenuItem
+            {
+                Label = $"Go to {item.SeriesName}",
+                Action = () => Navigate(new Route(ApertureView.Detail, seriesId, item.SeriesName)),
+            });
+        }
+        return items;
+    }
+
+    /// <summary>
     /// Makes a card reachable by keyboard, and rings it when the cursor is on it. The ring
     /// is an outline rather than a border: a border would take layout space and shift every
     /// card beside it as the cursor moves through the row.
     /// </summary>
-    private void MarkCursor(BoxElement card, int cursorIndex)
+    private void MarkCursor(BoxElement card, int cursorIndex, MediaItem? item = null)
     {
         card.IsFocusable = true;
+        if (item is { } subject) card.ContextMenu(() => CardMenu(subject));
         if (cursorIndex < 0) return;
         TrackCursor(card, cursorIndex);
         if (IsCursor(cursorIndex))

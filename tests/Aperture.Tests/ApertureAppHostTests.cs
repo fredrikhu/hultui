@@ -661,6 +661,87 @@ public class ApertureAppHostTests
         }, () => backend);
     }
 
+    // ── The card menu ────────────────────────────────────────────────────
+
+    [Fact]
+    public void MarkingWatchedFromACardKeepsTheShelfWhereItWas()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            // Put the cursor somewhere, then act on that card the way the menu does.
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            int cursor = app.CursorIndex;
+            var item = app.CursorItem!;
+            Assert.False(item.Played);
+
+            var menu = app.CardMenu(item);
+            menu.First(m => m.Label == "Mark watched").Action!();
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.Contains(library.Calls, c => c == $"SetPlayed({item.Id}, True)");
+            // The grid was not thrown away and re-read: the cursor is where it was, and
+            // the card now shows a tick.
+            Assert.Equal(cursor, app.CursorIndex);
+            Assert.True(app.CursorItem!.Played);
+        });
+    }
+
+    [Fact]
+    public void TheMenuKeyOpensTheCardMenuOverTheCursor()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Right);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Empty(session.Window.OverlayContents);
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Menu);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            // The menu is an overlay over the grid — and it opened without a pointer,
+            // which is the whole point of the key.
+            Assert.Single(session.Window.OverlayContents);
+        });
+    }
+
+    [Fact]
+    public void TheCardMenuOffersWhatTheItemCanDo()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+
+            // A part-watched film offers both ways in.
+            var labels = app.CardMenu(library.Item("m2")!).Select(m => m.Label).ToList();
+            Assert.Contains(labels, l => l!.StartsWith("Resume", StringComparison.Ordinal));
+            Assert.Contains("Play from the start", labels);
+            Assert.Contains("Mark watched", labels);
+            Assert.Contains("Add to favourites", labels);
+
+            // A hearted, watched film says the opposite of both.
+            var watched = app.CardMenu(library.Item("m3")!).Select(m => m.Label).ToList();
+            Assert.Contains("Mark unwatched", watched);
+            Assert.Contains("Remove from favourites", watched);
+
+            // An episode can jump to its series; a film has nowhere to jump.
+            var episode = app.CardMenu(library.Item("e1")!).Select(m => m.Label).ToList();
+            Assert.Contains("Go to Bleach", episode);
+            Assert.DoesNotContain(labels, l => l!.StartsWith("Go to", StringComparison.Ordinal));
+        });
+    }
+
     // ── Filters ──────────────────────────────────────────────────────────
 
     [Fact]

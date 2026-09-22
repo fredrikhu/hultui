@@ -120,6 +120,12 @@ public sealed partial class ApertureApp
                 Open(item);
                 return true;
 
+            // The card's menu, from the keyboard: the dedicated menu key where a keyboard
+            // has one, and Shift+F10 where it does not.
+            case KeyCode.Menu:
+            case KeyCode.F10 when e.Modifiers.HasFlag(KeyModifiers.Shift):
+                return OpenCursorMenu();
+
             // Space plays what is under the cursor — a series opens instead, because
             // "play a series" is a question the detail page answers better than a guess.
             case KeyCode.Space when CursorItem is { } playable:
@@ -128,6 +134,20 @@ public sealed partial class ApertureApp
                 return true;
         }
         return false;
+    }
+
+    /// <summary>Opens the cursor card's menu over the card itself, so it appears where
+    /// the ring is rather than under the pointer, which may be somewhere else entirely.</summary>
+    private bool OpenCursorMenu()
+    {
+        if (_cursorCard.Current is not { } card || CursorItem is null) return false;
+
+        // The window rather than the element's OverlayHost: a card realized inside a
+        // virtual list has not been through a style pass yet, and that is where the host
+        // is handed down. The app has known its window since it was constructed.
+        var box = card.Layout.AbsoluteBorderBox;
+        _window.OpenContextMenu(card, new HultUI.Core.Primitives.Point(box.X + 24f, box.Y + box.Height - 24f));
+        return true;
     }
 
     /// <summary>Hands the keyboard to the card the cursor moved to, once it is built.

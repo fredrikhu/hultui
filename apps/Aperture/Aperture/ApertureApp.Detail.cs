@@ -438,20 +438,46 @@ public sealed partial class ApertureApp
 
     // ── The two toggles ──────────────────────────────────────────────────
 
-    private void ToggleWatched(MediaItem item)
+    /// <param name="reload">True from the detail page, whose whole content is this item.
+    /// False from a card, where re-reading the library would throw away the grid, the
+    /// scroll position and the cursor to change one tick.</param>
+    private void ToggleWatched(MediaItem item, bool reload = true)
     {
         if (_library is not { } lib) return;
         bool played = !item.Played;
         _ = ApplyAsync(() => lib.SetPlayedAsync(item.Id, played),
-            played ? "Marked watched" : "Marked unwatched");
+            played ? "Marked watched" : "Marked unwatched", reload,
+            () => PatchItem(item.Id, i => i with
+            {
+                Played = played,
+                // Watching something to the end is what clears its resume point, and
+                // marking it watched by hand means the same thing.
+                ResumePosition = played ? null : i.ResumePosition,
+                PlayedPercentage = played ? 100 : null,
+            }));
     }
 
-    private void ToggleFavorite(MediaItem item)
+    private void ToggleFavorite(MediaItem item, bool reload = true)
     {
         if (_library is not { } lib) return;
         bool favorite = !item.IsFavorite;
         _ = ApplyAsync(() => lib.SetFavoriteAsync(item.Id, favorite),
-            favorite ? "Added to favourites" : "Removed from favourites");
+            favorite ? "Added to favourites" : "Removed from favourites", reload,
+            () => PatchItem(item.Id, i => i with { IsFavorite = favorite }));
+    }
+
+    /// <summary>
+    /// Applies a change the server has confirmed to the copies already on screen. Not a
+    /// cache: the next load re-reads everything. It exists so that acting on a card leaves
+    /// the shelf where it was, which is the whole reason to act on a card.
+    /// </summary>
+    private void PatchItem(string itemId, Func<MediaItem, MediaItem> change)
+    {
+        for (int i = 0; i < _gridItems.Count; i++)
+            if (_gridItems[i].Id == itemId) _gridItems[i] = change(_gridItems[i]);
+        for (int i = 0; i < _queue.Count; i++)
+            if (_queue[i].Id == itemId) _queue[i] = change(_queue[i]);
+        Rerender();
     }
 
     /// <summary>
@@ -459,20 +485,20 @@ public sealed partial class ApertureApp
     /// the point — the watched flag lives on the server, and a client that flips its own
     /// copy is one failed request away from lying.
     /// </summary>
-    private async Task ApplyAsync(Func<Task<ApertureResult<bool>>> call, string done)
+    private async Task ApplyAsync(Func<Task<ApertureResult<bool>>> call, string done,
+        bool reload = true, Action? patch = null)
     {
         var result = await call().ConfigureAwait(false);
         HultUI.Application.InvokeOnMainThread(() =>
         {
-            if (result.Ok)
-            {
-                Flash(done);
-                Refresh();
-            }
-            else
+            if (!result.Ok)
             {
                 FlashFailure(result.Failure!);
+                return;
             }
+            Flash(done);
+            if (reload) Refresh();
+            else patch?.Invoke();
         });
     }
 }
