@@ -29,7 +29,10 @@ player.Open(MediaSource.FromFile(path), autoPlay: true);
 var view = Video.New(player).FlexGrow(1);              // a VideoElement: an ImageElement fed by the player
 // or the whole overlay — transport bar, keys, auto-hide:
 var ui = new VideoPlayer(player) { JumpStep = TimeSpan.FromSeconds(10) };
-ui.FullscreenRequested += () => ToggleFullscreen();    // full screen is the app's to grant
+ui.FullscreenRequested += () => {                      // full screen is the app's to grant
+    window.ToggleFullscreen();                        // borderless, no mode change
+    ui.IsFullscreen = window.IsFullscreen;            // the overlay draws off its own flag
+};
 ```
 
 `MediaPlayer` is signal-backed: `State`, `Position`, `Duration`, `VideoSize`,
@@ -86,7 +89,7 @@ menu, full-screen button) that appears on pointer movement and fades out.
 | `FadeDuration` | 300 ms | fade-out; fade-in is half of it |
 | `SeekStep` | 5 s | Left / Right |
 | `JumpStep` | 10 s | J / L and the two buttons; signal-backed |
-| `FullscreenRequested`, `IsFullscreen` | | the component knows no window: it raises the event and you set the flag once you have done whatever full screen means for the app |
+| `FullscreenRequested`, `IsFullscreen` | | the component knows no window: it raises the event and you set the flag once you have done whatever full screen means for the app. `Window.SetFullscreen` / `ToggleFullscreen` is the borderless kind — the window covers its display with no chrome and the display mode is left alone. An app that draws its own title bar must stop drawing it while `Window.IsFullscreen`; maximizing instead leaves the task bar over the picture |
 | `ControlsVisible` | | true whenever paused |
 
 Keys: Space or K play/pause, Left/Right and J/L seek, Up/Down volume, M mute, F full

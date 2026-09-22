@@ -101,6 +101,28 @@ public interface IPlatformWindow : IDisposable
     /// <summary>Presents the back buffer. No-op for surfaces without swap chains.</summary>
     void SwapBuffers();
 
+    /// <summary>
+    /// True while the window covers a whole display with no chrome. Distinct from
+    /// <see cref="IsMaximized"/>, which fills the work area and leaves the task bar and
+    /// the window's own frame in place.
+    /// </summary>
+    bool IsFullscreen => false;
+
+    /// <summary>
+    /// Takes the window fullscreen, or brings it back to where it was.
+    ///
+    /// <para>This is the <i>windowed</i> kind — what games call borderless fullscreen: the
+    /// window is resized to the display it is on and stripped of chrome, and the display
+    /// mode is left alone. No mode switch means no black flash, no rearranged desktop when
+    /// the app crashes, and an alt-tab that is instant rather than a resolution change.
+    /// Exclusive fullscreen buys a video player nothing.</para>
+    ///
+    /// <para>A platform that cannot do it (a hosted control, a headless surface) leaves
+    /// this a no-op and keeps answering false — callers treat that as "this window does
+    /// not do fullscreen", not as an error.</para>
+    /// </summary>
+    void SetFullscreen(bool fullscreen) { }
+
     void Close();
     void Minimize();
     void Maximize();

@@ -488,6 +488,85 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public bool IsMaximized =>
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
 
+    public bool IsFullscreen =>
+        _window != null &&
+        ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_FULLSCREEN) != 0;
+
+    /// <summary>Which edges could be dragged before fullscreen took them away.</summary>
+    private ResizeEdges _edgesBeforeFullscreen = ResizeEdges.All;
+
+    /// <summary>The windowed size to come back to, in SDL window coordinates.</summary>
+    private (int Width, int Height) _sizeBeforeFullscreen;
+
+    /// <summary>
+    /// Borderless fullscreen: the window grows to the display it is on, keeping the
+    /// display's own mode.
+    ///
+    /// <para>SDL3 makes that the default meaning of a fullscreen window — an exclusive
+    /// mode only happens when one has been set with <c>SDL_SetWindowFullscreenMode</c> —
+    /// so the mode is cleared first rather than trusted to be unset. The call is
+    /// asynchronous on every backend (Wayland in particular answers on its own schedule),
+    /// and <c>SDL_SyncWindow</c> waits for the size to actually land, so the frame after
+    /// this one lays out against the new size instead of the old one.</para>
+    ///
+    /// <para>The resize edges go with the chrome. Windows drives resizing through the
+    /// custom frame's hit test, which would otherwise keep reporting <c>HTLEFT</c> and
+    /// friends along the screen border — a resize cursor on the edge of a fullscreen
+    /// picture, and a drag that half-restores the window.</para>
+    /// </summary>
+    public void SetFullscreen(bool fullscreen)
+    {
+        if (_window == null || IsFullscreen == fullscreen) return;
+
+        if (fullscreen)
+        {
+            _edgesBeforeFullscreen = ResizableEdges;
+            ResizableEdges = ResizeEdges.None;
+            int w, h;
+            SDL_GetWindowSize(_window, &w, &h);
+            _sizeBeforeFullscreen = (w, h);
+            SDL_SetWindowFullscreenMode(_window, null);   // desktop mode, never exclusive
+        }
+        else
+        {
+            ResizableEdges = _edgesBeforeFullscreen;
+        }
+
+        SDL_SetWindowFullscreen(_window, fullscreen);
+        SDL_SyncWindow(_window);
+
+        // Coming back, put the size back by hand — and then check.
+        //
+        // SDL restores the windowed rect it saved by running the client size through
+        // AdjustWindowRectEx, which assumes the standard caption this window does not
+        // have: the Windows custom frame reclaims the title-bar strip as client area (see
+        // WindowsCustomFrame.HandleNcCalcSize). The two disagree by exactly one caption
+        // height, so the window grew by that much on every round trip — 900x631 in,
+        // 900x662 back, 900x693 after the next one, and so on up the screen.
+        //
+        // The delta is measured rather than derived. A caption height is a per-DPI system
+        // metric on Windows and nothing at all elsewhere, and asking for a size and seeing
+        // what arrives is true on every platform — one correction converges because the
+        // difference is a constant.
+        if (!fullscreen && _sizeBeforeFullscreen is { Width: > 0, Height: > 0 } size)
+        {
+            SDL_SetWindowSize(_window, size.Width, size.Height);
+            SDL_SyncWindow(_window);
+
+            int gotW, gotH;
+            SDL_GetWindowSize(_window, &gotW, &gotH);
+            if (gotW != size.Width || gotH != size.Height)
+            {
+                SDL_SetWindowSize(_window,
+                    Math.Max(1, size.Width - (gotW - size.Width)),
+                    Math.Max(1, size.Height - (gotH - size.Height)));
+                SDL_SyncWindow(_window);
+            }
+        }
+
+        ResizePending = true;
+    }
+
     /// <summary>
     /// Constrains how small the user can resize the window, in density-independent
     /// (layout) units. SDL takes the limit in window coordinates, so convert via

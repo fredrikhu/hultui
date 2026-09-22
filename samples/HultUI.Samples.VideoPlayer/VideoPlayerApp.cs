@@ -132,11 +132,16 @@ public sealed class VideoPlayerApp : IDisposable
         if (path is not null) Open(path);
     }
 
+    /// <summary>
+    /// Borderless fullscreen: the window covers its display, keeps the display's mode, and
+    /// the overlay is told so it can draw the exit glyph. Maximizing is a different thing —
+    /// it fills the work area and leaves the task bar over the picture.
+    /// </summary>
     private void ToggleFullscreen()
     {
         if (_videoPlayer is null) return;
-        if (_window.IsMaximized) _window.Restore(); else _window.Maximize();
-        _videoPlayer.IsFullscreen = !_videoPlayer.IsFullscreen;
+        _window.ToggleFullscreen();
+        _videoPlayer.IsFullscreen = _window.IsFullscreen;
     }
 
     public void Dispose() => _player?.Dispose();

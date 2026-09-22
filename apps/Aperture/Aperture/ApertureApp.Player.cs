@@ -167,6 +167,10 @@ public sealed partial class ApertureApp
         _playingItem = null;
         _resumeApplied = false;
 
+        // Full screen was for the film. Coming back to a library that fills the display
+        // with no way to reach the task bar is a trap, so leaving playback leaves it.
+        SetFullscreen(false);
+
         if (report && target is not null && _library is { } lib)
         {
             // Kept, not abandoned: this report is what fixes the resume point, and the
@@ -178,11 +182,21 @@ public sealed partial class ApertureApp
         Rerender();
     }
 
-    private void ToggleFullscreen()
+    /// <summary>
+    /// Borderless fullscreen — the window covers the display, the app stops drawing its
+    /// title bar, and the screen mode is untouched. Maximizing is not the same thing: it
+    /// leaves the task bar over the picture and the title bar above it, which is what this
+    /// used to do and what made full screen feel like a bigger window.
+    /// </summary>
+    private void ToggleFullscreen() => SetFullscreen(!_window.IsFullscreen);
+
+    private void SetFullscreen(bool fullscreen)
     {
-        if (_videoPlayer is null) return;
-        if (_window.IsMaximized) _window.Restore(); else _window.Maximize();
-        _videoPlayer.IsFullscreen = !_videoPlayer.IsFullscreen;
+        if (_window.IsFullscreen == fullscreen) return;
+        _window.SetFullscreen(fullscreen);
+        // The overlay draws the enter/exit glyph off its own flag, so it has to be told.
+        if (_videoPlayer is not null) _videoPlayer.IsFullscreen = fullscreen;
+        Rerender();
     }
 
     // ── Reporting ────────────────────────────────────────────────────────

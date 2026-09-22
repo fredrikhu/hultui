@@ -207,6 +207,24 @@ public sealed class Window : IOverlayHost, IDisposable
     public void Raise() => PlatformWindow.Raise();
     public void ToggleMaximize() { if (IsMaximized) Restore(); else Maximize(); }
 
+    /// <summary>
+    /// True while the window covers its whole display with no chrome — the borderless
+    /// kind games call windowed fullscreen. Not the same as <see cref="IsMaximized"/>,
+    /// which fills the work area and leaves the task bar showing.
+    /// </summary>
+    public bool IsFullscreen => PlatformWindow.IsFullscreen;
+
+    /// <summary>
+    /// Takes the window fullscreen or brings it back. The display mode is never changed,
+    /// so there is no black flash on the way in and alt-tab stays instant.
+    ///
+    /// <para>The chrome is the window's, not the app's: an app that draws its own title
+    /// bar has to stop drawing it while this is true.</para>
+    /// </summary>
+    public void SetFullscreen(bool fullscreen) => PlatformWindow.SetFullscreen(fullscreen);
+
+    public void ToggleFullscreen() => SetFullscreen(!IsFullscreen);
+
     /// <summary>Current viewport width in density-independent (layout) units.</summary>
     public float LayoutWidth => PlatformWindow.LayoutWidth;
 

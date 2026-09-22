@@ -138,6 +138,29 @@ bool max = window.IsMaximized;  // query current state
 
 Use these to wire up your custom window control buttons.
 
+### Full screen is not a bigger maximize
+
+```csharp
+window.SetFullscreen(true);     // covers the display, no chrome, no mode change
+window.ToggleFullscreen();
+bool fs = window.IsFullscreen;  // distinct from IsMaximized, which stays false
+```
+
+`Maximize` fills the *work area*: the task bar stays, and so does the window's frame —
+which for a custom-chrome app means your own title bar is still across the top. Full
+screen is the borderless kind games use: the window takes the whole display and the
+display mode is untouched, so there is no black flash going in and alt-tab is instant.
+
+Two things are the app's job, because the framework cannot know them:
+
+- **Stop drawing your chrome.** Build the title bar only `if (!window.IsFullscreen)`, or a
+  strip of app furniture sits over the content.
+- **Offer a way out.** The window has no close button while it is fullscreen; wire Escape,
+  or the same key that entered it, to `SetFullscreen(false)`.
+
+Resize edges are dropped while fullscreen and restored on the way out, so the screen
+border does not hand back a resize cursor.
+
 ---
 
 ## Window Style Query

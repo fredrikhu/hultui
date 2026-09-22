@@ -58,6 +58,14 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public bool IsOpen { get; private set; }
     public bool IsMaximized { get; private set; }
 
+    /// <summary>
+    /// Recorded rather than acted on: a headless surface is a fixed-size buffer, and
+    /// resizing it to "the display" would mean inventing one. The flag is what an app's
+    /// fullscreen wiring is tested against — that F reaches the window at all, and that
+    /// the app stops drawing its own title bar while it is set.
+    /// </summary>
+    public bool IsFullscreen { get; private set; }
+
     /// <summary>True after the first presented frame revealed the window (mirrors the real platform's hidden-until-first-frame behavior).</summary>
     public bool IsShown { get; private set; }
 
@@ -141,6 +149,8 @@ internal sealed class HeadlessPlatformWindow : IPlatformWindow
     public void Maximize() => IsMaximized = true;
 
     public void Restore() => IsMaximized = false;
+
+    public void SetFullscreen(bool fullscreen) => IsFullscreen = fullscreen;
     public void Raise() { }
 
     public void SetMinimumSize(int layoutWidth, int layoutHeight) { }

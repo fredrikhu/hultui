@@ -133,8 +133,14 @@ public sealed partial class ApertureApp : Component, IDisposable
             .TextColor(Halide.Text)
             .FontSize(13f);
 
-        var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
-        root.AddChild(titleBar);
+        // Full screen means the window has no chrome — so neither do we. The app's own
+        // title bar is the only chrome there is here, and leaving it up would put a strip
+        // of app furniture across the top of a film.
+        if (!_window.IsFullscreen)
+        {
+            var titleBar = BuildTitleBar(); titleBar.Key = "titlebar";
+            root.AddChild(titleBar);
+        }
 
         var body = _stage == ApertureStage.Connect ? BuildConnectView() : BuildBrowsing();
         body.Key = "body";

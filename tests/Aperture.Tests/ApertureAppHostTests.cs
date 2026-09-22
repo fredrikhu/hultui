@@ -270,6 +270,58 @@ public class ApertureAppHostTests
         });   // no backends: this machine has no libmpv
     }
 
+    [Fact]
+    public void FullScreenCoversTheWindowRatherThanMaximizingIt()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.True(Shows(session, "APERTURE"), "the title bar should be up in a window");
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+
+            Assert.True(session.Window.Window.IsFullscreen, "F did not take the window fullscreen");
+            // Maximizing is the thing this must not do: it leaves the task bar and the
+            // title bar over the picture.
+            Assert.False(session.Window.Window.IsMaximized, "full screen must not be a maximize");
+            Assert.False(Shows(session, "APERTURE"), "the app's title bar survived into full screen");
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.False(session.Window.Window.IsFullscreen);
+            Assert.True(Shows(session, "APERTURE"));
+        }, () => backend);
+    }
+
+    [Fact]
+    public void StoppingAFilmLeavesFullScreenBehind()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.F);
+            for (int i = 0; i < 3; i++) session.PumpFrame();
+            Assert.True(session.Window.Window.IsFullscreen);
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Escape);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            // A library filling the display with no task bar and no way out is a trap.
+            Assert.False(session.Window.Window.IsFullscreen);
+            Assert.Null(app.Playback);
+        }, () => backend);
+    }
+
     // ── Failures ─────────────────────────────────────────────────────────
 
     [Fact]
