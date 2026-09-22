@@ -161,6 +161,15 @@ Two things are the app's job, because the framework cannot know them:
 Resize edges are dropped while fullscreen and restored on the way out, so the screen
 border does not hand back a resize cursor.
 
+**How it is done, and why it matters.** On Windows this is the custom frame moving an
+ordinary window over the monitor — not SDL's fullscreen, which swaps the window to a popup
+sized exactly to the display. That exact match is what Windows and the display driver read
+as a request for the screen itself, and alt-tabbing out of one blanks the display for a
+moment while the compositor takes it back. Staying an ordinary composited window one pixel
+proud of the monitor on each edge keeps switching instant; the task bar still steps aside,
+because the shell hides it for any foreground window that covers the display. Elsewhere
+(X11, Wayland, macOS) the compositor handles it and `SDL_SetWindowFullscreen` is used.
+
 ---
 
 ## Window Style Query

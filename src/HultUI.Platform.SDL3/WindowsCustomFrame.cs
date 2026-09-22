@@ -62,6 +62,9 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const uint TPM_RETURNCMD = 0x0100;
 
     private const int HTCLIENT = 1;
+    private const int SW_MAXIMIZE = 3;
+    private const int SW_RESTORE = 9;
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
     private const int HTCAPTION = 2;
     private const int HTMAXBUTTON = 9;
     private const int HTLEFT = 10;
@@ -101,6 +104,26 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private bool _maxPressed;      // a left-press landed on the maximize button
     private bool _maxLeaveTracked; // WM_NCMOUSELEAVE is armed for the current NC hover
     private bool _wasZoomed;       // maximized state at the last WM_SIZE (see ExtendFrame)
+
+    // ──── Windowed fullscreen ────
+    private RECT _rectBeforeFullscreen;   // window rect to come back to
+    private bool _zoomedBeforeFullscreen; // it was maximized when we took over
+
+    /// <summary>
+    /// How far past the monitor the window is pushed on each edge while fullscreen.
+    ///
+    /// <para>A window whose rect matches the monitor <i>exactly</i> is what Windows and
+    /// the display driver look for before handing it the screen directly — the "exclusive
+    /// flip" path. That path is why alt-tabbing out of a fullscreen OpenGL window blacks
+    /// the screen out for a moment: the compositor has to take the display back. One pixel
+    /// of overscan keeps the window ordinary and composited, so switching away is as
+    /// instant as any other window, and the pixel that falls off each edge is a pixel of
+    /// letterbox nobody can see.</para>
+    /// </summary>
+    private const int FullscreenOverscan = 1;
+
+    /// <summary>True while the window is covering its monitor with no chrome.</summary>
+    public bool IsFullscreen { get; private set; }
 
     private WindowsCustomFrame(SDL3Window window, IntPtr hwnd)
     {
@@ -145,6 +168,53 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 
         return frame;
+    }
+
+    /// <summary>
+    /// Windowed fullscreen: the window is moved and sized to cover its monitor, and the
+    /// frame stops reserving anything — <see cref="HandleNcCalcSize"/> hands the whole
+    /// window rect over as client area, so the picture runs edge to edge.
+    ///
+    /// <para>Deliberately not SDL's fullscreen. That one swaps the window to a popup
+    /// exactly the size of the monitor, which is the shape Windows grants the display to;
+    /// this stays an ordinary composited window that happens to be as big as the screen.
+    /// The task bar still gets out of the way — the shell hides it for a foreground window
+    /// that covers the monitor — and alt-tab costs nothing.</para>
+    /// </summary>
+    public void SetFullscreen(bool fullscreen)
+    {
+        if (IsFullscreen == fullscreen) return;
+
+        if (fullscreen)
+        {
+            _zoomedBeforeFullscreen = IsZoomed(_hwnd);
+            // A maximized window cannot simply be moved: Windows keeps the maximized
+            // state and snaps the rect back. Restore first, then take the screen.
+            if (_zoomedBeforeFullscreen) ShowWindow(_hwnd, SW_RESTORE);
+            GetWindowRect(_hwnd, out _rectBeforeFullscreen);
+
+            var monitor = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
+            var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfoW(monitor, ref info)) return;
+
+            IsFullscreen = true;
+            var m = info.rcMonitor;
+            SetWindowPos(_hwnd, IntPtr.Zero,
+                m.Left - FullscreenOverscan, m.Top - FullscreenOverscan,
+                m.Right - m.Left + FullscreenOverscan * 2,
+                m.Bottom - m.Top + FullscreenOverscan * 2,
+                SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        }
+        else
+        {
+            IsFullscreen = false;
+            var r = _rectBeforeFullscreen;
+            SetWindowPos(_hwnd, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top,
+                SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+            // The window was maximized when full screen took over, so put that back too.
+            if (_zoomedBeforeFullscreen) ShowWindow(_hwnd, SW_MAXIMIZE);
+        }
+        ExtendFrame();
     }
 
     private void ExtendFrame()
@@ -281,6 +351,11 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // it becomes the client area.
         var p = (NCCALCSIZE_PARAMS*)lParam;
 
+        // Fullscreen: every pixel of the window is ours. Leaving the proposed rect
+        // untouched is what makes the client area the whole window — no frame, no
+        // reclaimed caption, nothing inset from the screen edges.
+        if (IsFullscreen) return;
+
         // A maximized WS_THICKFRAME window is positioned slightly larger than the
         // monitor so its frame sits off-screen. Inset by the frame size so our
         // content isn't clipped off the edges of the screen.
@@ -307,6 +382,10 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     private int HandleNcHitTest(IntPtr hwnd, IntPtr lParam)
     {
+        // Fullscreen has no frame to grab and no caption to drag: a resize cursor on the
+        // screen edge, or a drag that half-restores the window, would both be wrong.
+        if (IsFullscreen) return HTCLIENT;
+
         long packed = lParam.ToInt64();
         var pt = new POINT { X = unchecked((short)(packed & 0xFFFF)), Y = unchecked((short)((packed >> 16) & 0xFFFF)) };
         ScreenToClient(hwnd, ref pt);
@@ -515,6 +594,15 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private struct RECT { public int Left, Top, Right, Bottom; }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public uint cbSize;
+        public RECT rcMonitor;   // the whole display
+        public RECT rcWork;      // the display minus the task bar — deliberately not used
+        public uint dwFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -557,6 +645,12 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [DllImport("user32")]
     private static extern bool IsZoomed(IntPtr hWnd);
+    [DllImport("user32")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
+    [DllImport("user32", EntryPoint = "GetMonitorInfoW")]
+    private static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
 
     [DllImport("user32")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);

@@ -489,8 +489,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_MAXIMIZED) != 0;
 
     public bool IsFullscreen =>
-        _window != null &&
-        ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_FULLSCREEN) != 0;
+        _customFrame is { } frame ? frame.IsFullscreen
+        : _window != null && ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_FULLSCREEN) != 0;
 
     /// <summary>Which edges could be dragged before fullscreen took them away.</summary>
     private ResizeEdges _edgesBeforeFullscreen = ResizeEdges.All;
@@ -517,6 +517,20 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public void SetFullscreen(bool fullscreen)
     {
         if (_window == null || IsFullscreen == fullscreen) return;
+
+        // Windows: the custom frame owns this one. SDL's fullscreen makes the window a
+        // popup exactly the size of the monitor, which is the shape the display driver
+        // takes as a request for the screen itself — and alt-tabbing out of that blacks
+        // the display out while the compositor takes it back. The frame instead moves an
+        // ordinary window over the monitor, which switches like any other window.
+        if (OperatingSystem.IsWindows() && _customFrame is { } frame)
+        {
+            if (fullscreen) _edgesBeforeFullscreen = ResizableEdges;
+            ResizableEdges = fullscreen ? ResizeEdges.None : _edgesBeforeFullscreen;
+            frame.SetFullscreen(fullscreen);
+            ResizePending = true;
+            return;
+        }
 
         if (fullscreen)
         {
