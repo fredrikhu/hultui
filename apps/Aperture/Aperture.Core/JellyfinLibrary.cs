@@ -216,6 +216,29 @@ public sealed class JellyfinLibrary : IMediaLibrary
             : page.As<IReadOnlyList<MediaItem>>();
     }
 
+    public async Task<ApertureResult<IReadOnlyList<MediaGenre>>> GetGenresAsync(string libraryId,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await _client.Genres.GetAsync(q =>
+            {
+                q.QueryParameters.UserId = User.Id;
+                if (ParseId(libraryId) is { } parent) q.QueryParameters.ParentId = parent;
+            }, ct).ConfigureAwait(false);
+
+            var genres = (result?.Items ?? [])
+                .Where(g => g.Id is not null && !string.IsNullOrEmpty(g.Name))
+                .Select(g => new MediaGenre(g.Id!.Value.ToString("N"), g.Name!))
+                .ToList();
+            return ApertureResult<IReadOnlyList<MediaGenre>>.Success(genres);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ApertureResult<IReadOnlyList<MediaGenre>>.Fail(JellyfinConnection.Classify(ex, Server.Host));
+        }
+    }
+
     public async Task<ApertureResult<MediaItem>> GetItemAsync(string itemId, CancellationToken ct = default)
     {
         if (ParseId(itemId) is not { } id)

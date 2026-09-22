@@ -167,6 +167,22 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         return Result<IReadOnlyList<MediaItem>>(kids);
     }
 
+    /// <summary>The genres of everything under a library, which is how a real server
+    /// answers it too.</summary>
+    public Task<ApertureResult<IReadOnlyList<MediaGenre>>> GetGenresAsync(string libraryId,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"GetGenres({libraryId})");
+        var genres = (_children.GetValueOrDefault(libraryId) ?? [])
+            .Select(id => _items[id])
+            .SelectMany(i => i.Genres)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new MediaGenre(g, g))
+            .ToList();
+        return Result<IReadOnlyList<MediaGenre>>(genres);
+    }
+
     public Task<ApertureResult<MediaItem>> GetItemAsync(string itemId, CancellationToken ct = default)
     {
         Calls.Add($"GetItem({itemId})");

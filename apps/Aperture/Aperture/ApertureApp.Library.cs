@@ -82,6 +82,8 @@ public sealed partial class ApertureApp
 
     private Element BuildLibraryBar(string title, string libraryId)
     {
+        EnsureGenres(libraryId);
+
         var bar = Flex.Row(gap: Halide.S3).FlexShrink(0)
             .Height(56)
             .AlignItems(AlignItems.Center)
@@ -89,24 +91,86 @@ public sealed partial class ApertureApp
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
 
         bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        // With a filter on, the count is of what the filter leaves — say so, or "12 of 16"
+        // reads as a paging bug.
         var count = GridTotal > 0
-            ? $"{GridItems.Count} of {GridTotal}"
+            ? GridHasFilters ? $"{GridItems.Count} of {GridTotal} matching"
+                             : $"{GridItems.Count} of {GridTotal}"
             : GridIsLoading ? "…" : "";
         if (count.Length > 0) bar.AddChild(Ui.Mono(count, 11.5f, Halide.TextFaint));
 
         bar.AddChild(Box.New().FlexGrow(1));
 
-        bar.AddChild(FilterChip("All", GridPlayedFilter is null, () => SetGridPlayedFilter(null), "filter-all"));
-        bar.AddChild(FilterChip("Unwatched", GridPlayedFilter == false, () => SetGridPlayedFilter(false), "filter-unwatched"));
+        if (GridHasFilters)
+            bar.AddChild(Ui.IconButton(Icons.WinClose, "Clear filters", ClearGridFilters, 12f,
+                Halide.TextMuted, "filter-clear"));
+
+        bar.AddChild(GenreChip());
+        bar.AddChild(FilterChip("Unwatched", GridPlayedFilter == false,
+            () => SetGridPlayedFilter(GridPlayedFilter == false ? null : false), "filter-unwatched"));
+        bar.AddChild(FilterChip("Favourites", GridFavouritesOnly,
+            () => SetGridFavouritesOnly(!GridFavouritesOnly), "filter-favourites"));
 
         bar.AddChild(Box.New().Width(Halide.S2));
         bar.AddChild(SortChip("A–Z", ItemSort.Name, false, "sort-name"));
         bar.AddChild(SortChip("Newest", ItemSort.DateAdded, true, "sort-added"));
+        bar.AddChild(SortChip("Year", ItemSort.PremiereDate, true, "sort-year"));
         bar.AddChild(SortChip("Rating", ItemSort.CommunityRating, true, "sort-rating"));
 
         bar.AddChild(Box.New().Width(Halide.S2));
         bar.AddChild(Ui.IconButton(Icons.Refresh, "Refresh (F5)", Refresh, 15f, Halide.TextMuted, "library-refresh"));
         return bar;
+    }
+
+    /// <summary>
+    /// The genre filter: a chip that opens the library's own genres. A menu rather than a
+    /// row of chips because there are eleven of them here and thirty on a bigger server,
+    /// and a filter bar that wraps to two lines has stopped being a bar.
+    /// </summary>
+    private Element GenreChip()
+    {
+        bool active = GridGenre is not null;
+        var chip = Box.New()
+            .Padding(new Thickness(5, Halide.S3, 5, Halide.S3))
+            .CornerRadius(Halide.Radius1)
+            .BorderColor(active ? Halide.Accent : Halide.Border).BorderWidth(1f)
+            .Background(active ? Halide.Tint(Halide.Accent) : Color.Transparent)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ComboBox)
+            .AccessibleName(active ? $"Genre: {GridGenre!.Name}" : "Any genre")
+            .AutomationId("filter-genre")
+            .ContextMenu(GenreMenu)
+            .Children(Ui.Line(active ? GridGenre!.Name : "Genre", 11.5f,
+                active ? Halide.Accent300 : Halide.TextMuted));
+
+        // Left click opens the same menu the right button would — a chip that only
+        // answers to a right click is a chip nobody finds.
+        chip.OnClick(e =>
+        {
+            if (Genres.Count == 0) return;
+            if (e.CurrentTarget.OverlayHost is HultUI.Window window)
+                window.OpenContextMenu(e.CurrentTarget, e.Position);
+        });
+        if (!active) chip.HoverBg(Halide.Raised);
+        return chip;
+    }
+
+    private IReadOnlyList<ContextMenuItem> GenreMenu()
+    {
+        var items = new List<ContextMenuItem>
+        {
+            new() { Label = (GridGenre is null ? "• " : "   ") + "Any genre", Action = () => SetGridGenre(null) },
+        };
+        foreach (var genre in Genres)
+        {
+            var g = genre;
+            items.Add(new ContextMenuItem
+            {
+                Label = (GridGenre?.Id == g.Id ? "• " : "   ") + g.Name,
+                Action = () => SetGridGenre(g),
+            });
+        }
+        return items;
     }
 
     private Element FilterChip(string label, bool active, Action onClick, string automationId) =>

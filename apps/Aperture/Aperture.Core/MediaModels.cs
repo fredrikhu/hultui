@@ -99,6 +99,9 @@ public sealed record ItemPage(IReadOnlyList<MediaItem> Items, int TotalCount, in
     public static readonly ItemPage Empty = new([], 0, 0);
 }
 
+/// <summary>A genre, as a thing to filter by rather than a word under a title.</summary>
+public sealed record MediaGenre(string Id, string Name);
+
 /// <summary>One chapter mark: where it starts and what it is called.</summary>
 public sealed record MediaChapter(TimeSpan Start, string Name, string? ImageTag);
 

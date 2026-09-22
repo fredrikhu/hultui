@@ -86,6 +86,24 @@ public sealed partial class ApertureApp
     internal bool GridDescending { get; private set; }
     internal bool? GridPlayedFilter { get; private set; }
 
+    /// <summary>The genre the grid is filtered to, or null for all of them.</summary>
+    internal MediaGenre? GridGenre { get; private set; }
+
+    /// <summary>True when the grid is showing only what has been hearted.</summary>
+    internal bool GridFavouritesOnly { get; private set; }
+
+    private readonly AsyncLoader<IReadOnlyList<MediaGenre>> _genres = new([]);
+
+    /// <summary>The genres of the library on screen, for the filter menu.</summary>
+    internal IReadOnlyList<MediaGenre> Genres => _genres.Value;
+
+    private void EnsureGenres(string libraryId)
+    {
+        if (_library is not { } lib) return;
+        _genres.Load(("genres", _dataGeneration, libraryId), () => Fetch(
+            () => lib.GetGenresAsync(libraryId), (IReadOnlyList<MediaGenre>)[], "The genres"));
+    }
+
     /// <summary>How many items a page asks for. Large enough that scrolling a film
     /// library rarely waits, small enough that the first screenful arrives at once.</summary>
     internal const int GridPageSize = 100;
@@ -102,7 +120,8 @@ public sealed partial class ApertureApp
     {
         if (_library is not { } lib) return;
 
-        var key = $"{_dataGeneration}|{libraryId}|{GridSort}|{(GridDescending ? "desc" : "asc")}|{GridPlayedFilter}";
+        var key = $"{_dataGeneration}|{libraryId}|{GridSort}|{(GridDescending ? "desc" : "asc")}" +
+                  $"|{GridPlayedFilter}|{GridGenre?.Id}|{GridFavouritesOnly}";
         if (_gridKey != key)
         {
             // A different list: start it over. (Not a rebuild — the key only changes when
@@ -124,6 +143,8 @@ public sealed partial class ApertureApp
         var sort = GridSort;
         bool desc = GridDescending;
         var played = GridPlayedFilter;
+        var genreId = GridGenre?.Id;
+        bool favourites = GridFavouritesOnly;
 
         _gridPage.Load((key, start), () => Fetch(() => lib.GetItemsAsync(new ItemQuery
         {
@@ -133,6 +154,8 @@ public sealed partial class ApertureApp
             Sort = sort,
             Descending = desc,
             Played = played,
+            GenreId = genreId,
+            Favorite = favourites ? true : null,
             // A film library holds films; a series library holds series, not every episode
             // in it. Both are "what the shelf shows", which is what Recursive would ruin.
             Recursive = false,
@@ -160,6 +183,33 @@ public sealed partial class ApertureApp
         GridPlayedFilter = played;
         Rerender();
     }
+
+    internal void SetGridGenre(MediaGenre? genre)
+    {
+        if (GridGenre?.Id == genre?.Id) return;
+        GridGenre = genre;
+        Rerender();
+    }
+
+    internal void SetGridFavouritesOnly(bool only)
+    {
+        if (GridFavouritesOnly == only) return;
+        GridFavouritesOnly = only;
+        Rerender();
+    }
+
+    /// <summary>Puts every filter back — what the "clear" chip does, and what opening a
+    /// different library should feel like.</summary>
+    internal void ClearGridFilters()
+    {
+        if (GridGenre is null && !GridFavouritesOnly && GridPlayedFilter is null) return;
+        GridGenre = null;
+        GridFavouritesOnly = false;
+        GridPlayedFilter = null;
+        Rerender();
+    }
+
+    internal bool GridHasFilters => GridGenre is not null || GridFavouritesOnly || GridPlayedFilter is not null;
 
     // ── Detail and its children ──────────────────────────────────────────
 

@@ -28,6 +28,10 @@ public class ApertureAppHostTests
         library.AddMovie("m1", "Stalker", "movies", 1979, 162);
         library.AddMovie("m2", "Solaris", "movies", 1972, 167, resume: TimeSpan.FromMinutes(58));
         library.AddMovie("m3", "The Mirror", "movies", 1975, 107, played: true);
+        // Genres, so the filter has something to filter on.
+        library.Update(library.Item("m1")! with { Genres = ["Science Fiction"] });
+        library.Update(library.Item("m2")! with { Genres = ["Science Fiction"] });
+        library.Update(library.Item("m3")! with { Genres = ["Drama"] });
         library.AddItem(new MediaItem
         {
             Id = "s1", Name = "Bleach", Kind = MediaKind.Series, PrimaryImageTag = "tag-s1",
@@ -655,6 +659,87 @@ public class ApertureAppHostTests
 
             Assert.Null(app.UpNextItem);
         }, () => backend);
+    }
+
+    // ── Filters ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AGenreFilterNarrowsTheGridAndTheCountSaysSo()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "The Mirror");
+
+            app.SetGridGenre(app.Genres.First(g => g.Name == "Science Fiction"));
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.True(Shows(session, "Stalker"));
+            Assert.False(Shows(session, "The Mirror"), "a drama survived the science-fiction filter");
+            Assert.True(Shows(session, "matching"), session.Window.DumpAccessibilityTree());
+        });
+    }
+
+    [Fact]
+    public void FavouritesOnlyLeavesTheHeartedOnes()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            session.Window.FindByAutomationId("filter-favourites")!.Click();
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.True(Shows(session, "The Mirror"), session.Window.DumpAccessibilityTree());
+            Assert.False(Shows(session, "Stalker"), "an unhearted film survived the favourites filter");
+        });
+    }
+
+    [Fact]
+    public void ClearingFiltersBringsTheWholeLibraryBack()
+    {
+        var library = Library();
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            session.Window.FindByAutomationId("filter-unwatched")!.Click();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            app.SetGridGenre(app.Genres.First(g => g.Name == "Science Fiction"));
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.True(app.GridHasFilters);
+
+            session.Window.FindByAutomationId("filter-clear")!.Click();
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            Assert.False(app.GridHasFilters);
+            Assert.True(Shows(session, "The Mirror"), "the watched drama did not come back");
+        });
+    }
+
+    [Fact]
+    public void TheUnwatchedChipTurnsItselfOffAgain()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            session.Window.FindByAutomationId("filter-unwatched")!.Click();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            Assert.False(Shows(session, "The Mirror"));
+
+            session.Window.FindByAutomationId("filter-unwatched")!.Click();
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+            Assert.True(Shows(session, "The Mirror"), "the chip did not toggle back off");
+        });
     }
 
     // ── The queue ────────────────────────────────────────────────────────

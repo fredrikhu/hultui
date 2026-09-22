@@ -47,6 +47,13 @@ public interface IMediaLibrary : IDisposable
     /// <summary>Recently added items in a library, newest first.</summary>
     Task<ApertureResult<IReadOnlyList<MediaItem>>> GetLatestAsync(string libraryId, int limit = 16, CancellationToken ct = default);
 
+    /// <summary>
+    /// The genres in one library, in the server's own order. Asked per library because
+    /// "Action &amp; Adventure" belongs to the shows and "Film-Noir" to the films, and a
+    /// combined list offers filters that match nothing.
+    /// </summary>
+    Task<ApertureResult<IReadOnlyList<MediaGenre>>> GetGenresAsync(string libraryId, CancellationToken ct = default);
+
     /// <summary>One item in full — the detail page's overview, cast, ratings.</summary>
     Task<ApertureResult<MediaItem>> GetItemAsync(string itemId, CancellationToken ct = default);
 
