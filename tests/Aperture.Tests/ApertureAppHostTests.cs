@@ -61,6 +61,20 @@ public class ApertureAppHostTests
             ],
         });
 
+        // A season, so Play all has a list that is not the whole series.
+        library.AddItem(new MediaItem
+        {
+            Id = "se1", Name = "Season 1", Kind = MediaKind.Season, SeriesId = "s1",
+            SeriesName = "Bleach", IndexNumber = 1, ChildCount = 3,
+        }, "s1");
+        for (int n = 1; n <= 3; n++)
+            library.AddItem(new MediaItem
+            {
+                Id = "s1e" + n, Name = "Season one, episode " + n, Kind = MediaKind.Episode,
+                SeriesId = "s1", SeriesName = "Bleach", ParentIndexNumber = 1, IndexNumber = n,
+                RunTime = TimeSpan.FromMinutes(24), PrimaryImageTag = "tag-s1e" + n,
+            }, "se1");
+
         // Enough episodes after e1 that auto-play can run past the pass-out threshold
         // and still have one left to offer.
         for (int n = 5; n <= 9; n++)
@@ -212,7 +226,7 @@ public class ApertureAppHostTests
     }
 
     [Fact]
-    public void ASeriesOpensItsEpisodesRatherThanTryingToPlayIt()
+    public void ASeriesOpensItsSeasonsRatherThanTryingToPlayIt()
     {
         var library = Library();
         Host(library, (session, app) =>
@@ -225,8 +239,13 @@ public class ApertureAppHostTests
             for (int i = 0; i < 8; i++) session.PumpFrame();
 
             Assert.Equal(ApertureView.Detail, app.Current.View);
-            PumpUntilShown(session, "I Went to Market");
+            // A series shows its seasons; the episodes are one level down.
+            PumpUntilShown(session, "Season 1");
             Assert.Null(app.Playback);
+
+            session.Window.FindByAutomationId("card-se1")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            PumpUntilShown(session, "Season one, episode 1");
         });
     }
 
@@ -635,6 +654,153 @@ public class ApertureAppHostTests
             PlayToTheEnd(session, app, backend, "resume-m2");
 
             Assert.Null(app.UpNextItem);
+        }, () => backend);
+    }
+
+    // ── The queue ────────────────────────────────────────────────────────
+
+    /// <summary>Opens the fixture's season page, where Play all lives.</summary>
+    private static void OpenSeason(HeadlessSession session, ApertureApp app)
+    {
+        PumpUntilShown(session, "Series");
+        session.Window.FindByAutomationId("rail-series")!.Click();
+        PumpUntilShown(session, "Bleach");
+        session.Window.FindByAutomationId("card-s1")!.Click();
+        PumpUntilShown(session, "Season 1");
+        session.Window.FindByAutomationId("card-se1")!.Click();
+        for (int i = 0; i < 10; i++) session.PumpFrame();
+    }
+
+    [Fact]
+    public void PlayAllQueuesTheSeasonAndPlaysTheFirstEpisode()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            OpenSeason(session, app);
+            session.Window.FindByAutomationId("detail-play-all")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.True(app.QueueIsRunning);
+            Assert.Equal(3, app.Queue.Count);
+            Assert.Equal(0, app.QueueIndex);
+            Assert.Equal("s1e1", app.PlayingItem?.Id);
+            Assert.Equal("s1e2", app.QueueNext?.Id);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void TheQueueDecidesWhatFollowsRatherThanTheServer()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            OpenSeason(session, app);
+            session.Window.FindByAutomationId("detail-play-all")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            library.Calls.Clear();
+            backend.Raise(new BackendEvent.EndReached());
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Equal("s1e2", app.UpNextItem?.Id);
+            Assert.DoesNotContain(library.Calls, c => c.StartsWith("GetNextEpisode", StringComparison.Ordinal));
+
+            session.Window.FindByAutomationId("up-next-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Equal(1, app.QueueIndex);
+            Assert.Equal("s1e2", app.PlayingItem?.Id);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void StartingSomethingElseEndsTheQueue()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            OpenSeason(session, app);
+            session.Window.FindByAutomationId("detail-play-all")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            Assert.True(app.QueueIsRunning);
+
+            // Away to a film, by hand.
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Escape);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.False(app.QueueIsRunning, "the queue followed the viewer to another film");
+        }, () => backend);
+    }
+
+    [Fact]
+    public void QOpensTheQueueAndARowJumpsToIt()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            OpenSeason(session, app);
+            session.Window.FindByAutomationId("detail-play-all")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Q);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.True(app.QueueOpen);
+            Assert.True(Shows(session, "Playing next"), session.Window.DumpAccessibilityTree());
+
+            session.Window.FindByAutomationId("queue-2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.False(app.QueueOpen);
+            Assert.Equal(2, app.QueueIndex);
+            Assert.Equal("s1e3", app.PlayingItem?.Id);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void ShuffleKeepsTheOneYouStartedWithFirst()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            OpenSeason(session, app);
+            session.Window.FindByAutomationId("detail-shuffle")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.True(app.QueueIsRunning);
+            Assert.Equal(3, app.Queue.Count);
+            Assert.Equal("s1e1", app.Queue[0].Id);
+            Assert.Equal("s1e1", app.PlayingItem?.Id);
+            // Every episode is still in there, once.
+            Assert.Equal(3, app.Queue.Select(i => i.Id).Distinct().Count());
+        }, () => backend);
+    }
+
+    [Fact]
+    public void AnEpisodeRowPlaysTheRestOfTheSeasonAfterIt()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            OpenSeason(session, app);
+            session.Window.FindByAutomationId("episode-s1e2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            Assert.Equal("s1e2", app.PlayingItem?.Id);
+            Assert.Equal(1, app.QueueIndex);
+            Assert.Equal("s1e3", app.QueueNext?.Id);
         }, () => backend);
     }
 

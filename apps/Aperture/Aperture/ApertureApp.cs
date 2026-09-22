@@ -390,6 +390,10 @@ public sealed partial class ApertureApp : Component, IDisposable
                     ToggleChapters();
                     e.Handled = true;
                     break;
+                case KeyCode.Q:
+                    ToggleQueue();
+                    e.Handled = true;
+                    break;
                 // Page keys step chapters without opening anything — the transport keys
                 // the overlay owns are all taken, and these two are idle in a player.
                 case KeyCode.PageDown:

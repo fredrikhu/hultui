@@ -70,6 +70,14 @@ public sealed partial class ApertureApp
         if (_endHandledFor == finished.Id) return;     // this ending has been answered
         _endHandledFor = finished.Id;
 
+        // A queue already knows what follows — it was decided when Play all was pressed,
+        // and asking the server instead would quietly leave the list.
+        if (QueueNext is { } queued)
+        {
+            OfferNext(queued);
+            return;
+        }
+
         // The server needs to know it was watched to the end before it is asked what
         // follows, or next-up answers with the episode that just finished.
         _ = FindNextAsync(lib, finished);
@@ -135,6 +143,14 @@ public sealed partial class ApertureApp
         if (_upNext is not { } next) return;
         _autoPlayedInARow = deliberate ? 0 : _autoPlayedInARow + 1;
         DismissUpNext();
+
+        // Inside a queue, "next" means the next row — advancing keeps the place, where
+        // playing the item directly would drop out of the list.
+        if (QueueNext is { } queued && queued.Id == next.Id)
+        {
+            AdvanceQueue();
+            return;
+        }
         Play(next, next.ResumePosition ?? TimeSpan.Zero, countsAsDeliberate: false);
     }
 

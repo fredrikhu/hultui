@@ -78,7 +78,9 @@ public sealed partial class ApertureApp
     /// </summary>
     /// <param name="countsAsDeliberate">A person pressed play, so the pass-out counter
     /// starts over. False when the countdown started it.</param>
-    internal void Play(MediaItem item, TimeSpan from, bool countsAsDeliberate = true)
+    /// <param name="keepQueue">The queue is driving this. Anything else ends it: a queue
+    /// that survived someone picking a different film would follow them around.</param>
+    internal void Play(MediaItem item, TimeSpan from, bool countsAsDeliberate = true, bool keepQueue = false)
     {
         if (_library is not { } lib) return;
         if (_backends is null)
@@ -95,6 +97,7 @@ public sealed partial class ApertureApp
         }
 
         if (countsAsDeliberate) _autoPlayedInARow = 0;
+        if (!keepQueue) ClearQueue();
         DismissUpNext();
         StopPlayback(report: true, keepSheet: true);
         _playingItem = item;
@@ -179,6 +182,8 @@ public sealed partial class ApertureApp
         _playback = null;
         _playingItem = null;
         _resumeApplied = false;
+
+        if (!keepSheet) ClearQueue();
 
         // Full screen was for the film. Coming back to a library that fills the display
         // with no way to reach the task bar is a trap, so leaving playback leaves it.
@@ -309,10 +314,18 @@ public sealed partial class ApertureApp
             column.AddChild(card);
         }
 
+        // One panel at a time: they occupy the same side, and stacking them would hide
+        // the picture entirely.
         if (_chaptersOpen && PlayingChapters.Count > 0)
         {
             var panel = BuildChapterPanel();
             panel.Key = "chapters";
+            column.AddChild(panel);
+        }
+        else if (_queueOpen && QueueIsRunning)
+        {
+            var panel = BuildQueuePanel();
+            panel.Key = "queue";
             column.AddChild(panel);
         }
 
@@ -366,6 +379,10 @@ public sealed partial class ApertureApp
             if (sub.Length > 0) titles.AddChild(Ui.Line(sub, 11.5f, Halide.TextMuted));
         }
         strip.AddChild(titles);
+
+        if (QueueIsRunning)
+            strip.AddChild(Ui.IconButton(Icons.Episodes, $"Queue — {_queueIndex + 1} of {_queue.Count} (Q)",
+                ToggleQueue, 15f, _queueOpen ? Halide.Accent : Halide.TextDim, "player-queue"));
 
         if (PlayingChapters.Count > 0)
             strip.AddChild(Ui.IconButton(Icons.Episodes, $"Chapters ({PlayingChapters.Count}) — C",

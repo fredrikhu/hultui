@@ -210,6 +210,17 @@ public sealed partial class ApertureApp
                     next.ResumePosition is null ? Icons.Play : Icons.Resume));
         }
 
+        // A season, a series or a box set can be played straight through. The list comes
+        // from what is already on screen, so "play all" plays what you are looking at.
+        var queueable = QueueableChildren(item);
+        if (queueable.Count > 1)
+        {
+            row.AddChild(Ui.Button(ButtonVariant.Secondary, "Play all",
+                () => PlayQueue(queueable, QueueTitleFor(item)), "detail-play-all", Icons.Episodes));
+            row.AddChild(Ui.Button(ButtonVariant.Secondary, "Shuffle",
+                () => PlayQueue(queueable, QueueTitleFor(item), shuffle: true), "detail-shuffle", "shuffle"));
+        }
+
         row.AddChild(ToggleButton(item.Played ? Icons.Watched : "check", item.Played ? "Watched" : "Mark watched",
             item.Played, () => ToggleWatched(item), "detail-watched"));
         row.AddChild(ToggleButton(item.IsFavorite ? Icons.FavoriteOn : Icons.Favorite,
@@ -217,6 +228,22 @@ public sealed partial class ApertureApp
             item.IsFavorite, () => ToggleFavorite(item), "detail-favorite"));
         return row;
     }
+
+    /// <summary>
+    /// What "play all" would play here: the episodes under a season, everything playable
+    /// under a box set. A series' own children are seasons, so its list is whatever season
+    /// page you open — queueing a whole series from its poster would be a different
+    /// feature, and a noisier one.
+    /// </summary>
+    internal IReadOnlyList<MediaItem> QueueableChildren(MediaItem item) =>
+        item.Kind is MediaKind.Season or MediaKind.BoxSet or MediaKind.Folder
+            ? Children.Where(c => c.IsPlayable).ToList()
+            : [];
+
+    private static string QueueTitleFor(MediaItem item) =>
+        item.Kind == MediaKind.Season && item.SeriesName is { Length: > 0 } series
+            ? $"{series} · {item.Name}"
+            : item.Name;
 
     private Element ToggleButton(string glyph, string label, bool on, Action onClick, string automationId)
     {
@@ -296,7 +323,15 @@ public sealed partial class ApertureApp
             right.AddChild(Ui.Line(Ui.Remaining(total, at), 11.5f, Halide.Accent300));
         row.AddChild(right);
 
-        row.OnClick(_ => Play(episode, episode.ResumePosition ?? TimeSpan.Zero));
+        // Starting from an episode queues the rest of them: clicking the fourth of twelve
+        // means "from here", not "this one only".
+        row.OnClick(_ =>
+        {
+            var season = Children.Where(c => c.IsPlayable).ToList();
+            int at = season.FindIndex(c => c.Id == episode.Id);
+            if (at >= 0) PlayQueue(season, episode.SeasonName ?? episode.SeriesName ?? "", at);
+            else Play(episode, episode.ResumePosition ?? TimeSpan.Zero);
+        });
         row.HoverBg(Halide.Raised);
         return row;
     }
