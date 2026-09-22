@@ -23,10 +23,11 @@ public sealed class JellyfinLibrary : IMediaLibrary
     private readonly DeviceIdentity _device;
     private bool _disposed;
 
-    /// <summary>What every list asks the server to fill in. Kept in one place because a
-    /// missing field shows up as a blank line in the UI rather than an error.</summary>
+    /// <summary>What every list asks for. Genres are in here because the list layout puts
+    /// them under the title and a second request per row would be absurd; they cost a few
+    /// words per item.</summary>
     private static readonly ItemFields[] ListFields =
-        [ItemFields.PrimaryImageAspectRatio, ItemFields.Overview];
+        [ItemFields.PrimaryImageAspectRatio, ItemFields.Overview, ItemFields.Genres];
 
     private static readonly ItemFields[] DetailFields =
         [ItemFields.PrimaryImageAspectRatio, ItemFields.Overview, ItemFields.Genres, ItemFields.Studios,

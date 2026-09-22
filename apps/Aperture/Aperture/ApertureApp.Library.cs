@@ -32,8 +32,14 @@ public sealed partial class ApertureApp
 
         // How far down the list the viewport reaches decides what to ask for next. Before
         // the first frame there is no list yet, so one screenful is the estimate.
-        int perRow = VisibleCards(Halide.PosterWidth);
-        float rowStride = Halide.PosterHeight + Halide.PosterCaption + Halide.PosterGap;
+        // A list is a grid one across, with a short row: everything below — paging,
+        // the cursor, the virtual list — is the same either way, which is the point of
+        // treating layout as two numbers rather than two views.
+        bool asList = _settings.Data.Layout == LibraryLayout.List;
+        int perRow = asList ? 1 : VisibleCards(Halide.PosterWidth);
+        float rowStride = asList
+            ? ListRowHeight + Halide.S2
+            : Halide.PosterHeight + (_settings.Data.ShowCardTitles ? Halide.PosterCaption : 0f) + Halide.PosterGap;
         float viewportHeight = _gridList.Current?.Layout.AbsoluteContentBox.Height
             ?? Math.Max(200f, _window.LayoutHeight - Halide.TitleBarHeight - 110f);
         int visibleRows = Math.Max(1, (int)Math.Ceiling(viewportHeight / rowStride));
@@ -43,7 +49,7 @@ public sealed partial class ApertureApp
 
         var items = GridItems;
         // What the arrows walk in this view, and how many fit across.
-        SetCursorList($"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}", items, perRow);
+        SetCursorList($"library:{libraryId}:{GridSort}:{GridDescending}:{GridPlayedFilter}:{GridGenre?.Id}:{GridFavouritesOnly}", items, perRow);
 
         if (items.Count == 0)
         {
@@ -51,7 +57,7 @@ public sealed partial class ApertureApp
             return column;
         }
 
-        int rowCount = (items.Count + perRow - 1) / perRow;
+        int rowCount = asList ? items.Count : (items.Count + perRow - 1) / perRow;
         // A trailing row for the "loading more" line, when there is more to come.
         var rows = new List<int>(rowCount + 1);
         for (int r = 0; r < rowCount; r++) rows.Add(r);
@@ -72,7 +78,9 @@ public sealed partial class ApertureApp
         column.AddChild(list
             .ItemHeight((int)rowStride)
             .Items(rows)   // a fresh list each build → visible rows re-realize against current state
-            .RenderWith(r => r < 0 ? GridTailRow(perRow) : GridRow(items, r * perRow, perRow))
+            .RenderWith(r => r < 0 ? GridTailRow(perRow)
+                                   : asList ? ListRow(items[r], r)
+                                            : GridRow(items, r * perRow, perRow))
             .WithRef(_gridList)
             .Padding(new Thickness(0, Halide.S5, Halide.S5, Halide.S5))
             .AutomationId("library-grid")
@@ -118,6 +126,7 @@ public sealed partial class ApertureApp
         bar.AddChild(SortChip("Rating", ItemSort.CommunityRating, true, "sort-rating"));
 
         bar.AddChild(Box.New().Width(Halide.S2));
+        bar.AddChild(ViewChip());
         bar.AddChild(Ui.IconButton(Icons.Refresh, "Refresh (F5)", Refresh, 15f, Halide.TextMuted, "library-refresh"));
         return bar;
     }
@@ -153,6 +162,59 @@ public sealed partial class ApertureApp
         });
         if (!active) chip.HoverBg(Halide.Raised);
         return chip;
+    }
+
+    /// <summary>How the library is drawn — a shelf or a list — and whether the shelf is
+    /// captioned. A menu because these are settings, not filters: they belong together and
+    /// they are changed rarely.</summary>
+    private Element ViewChip()
+    {
+        bool list = _settings.Data.Layout == LibraryLayout.List;
+        var chip = Box.New()
+            .Padding(new Thickness(5, Halide.S3, 5, Halide.S3))
+            .CornerRadius(Halide.Radius1)
+            .BorderColor(Halide.Border).BorderWidth(1f)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ComboBox)
+            .AccessibleName(list ? "View: list" : "View: grid")
+            .AutomationId("library-view")
+            .ContextMenu(ViewMenu)
+            .Children(Ui.Line(list ? "List" : "Grid", 11.5f, Halide.TextMuted));
+        chip.OnClick(e => _window.OpenContextMenu(e.CurrentTarget, e.Position));
+        chip.HoverBg(Halide.Raised);
+        return chip;
+    }
+
+    private IReadOnlyList<ContextMenuItem> ViewMenu()
+    {
+        var data = _settings.Data;
+        return
+        [
+            new ContextMenuItem
+            {
+                Label = (data.Layout == LibraryLayout.Grid ? "• " : "   ") + "Grid",
+                Action = () => SetLayout(LibraryLayout.Grid),
+            },
+            new ContextMenuItem
+            {
+                Label = (data.Layout == LibraryLayout.List ? "• " : "   ") + "List",
+                Action = () => SetLayout(LibraryLayout.List),
+            },
+            ContextMenuItem.Separator(),
+            new ContextMenuItem
+            {
+                Label = (data.ShowCardTitles ? "• " : "   ") + "Titles under posters",
+                Action = () => { data.ShowCardTitles = !data.ShowCardTitles; _settings.Save(); Rerender(); },
+            },
+        ];
+    }
+
+    internal void SetLayout(LibraryLayout layout)
+    {
+        if (_settings.Data.Layout == layout) return;
+        _settings.Data.Layout = layout;
+        _settings.Save();
+        Rerender();
     }
 
     private IReadOnlyList<ContextMenuItem> GenreMenu()
@@ -207,6 +269,56 @@ public sealed partial class ApertureApp
             if (i >= items.Count) break;
             row.AddChild(PosterCard(items[i], cursorIndex: i));
         }
+        return row;
+    }
+
+    internal const float ListRowHeight = 68f;
+
+    /// <summary>
+    /// One item as a row: a small still, the title, and the facts that fit on a line. What
+    /// a list is for is comparing — year, runtime, rating side by side — so the row leads
+    /// with the title and lines the rest up behind it.
+    /// </summary>
+    private Element ListRow(MediaItem item, int cursorIndex)
+    {
+        var row = Flex.Row(gap: Halide.S4).AlignItems(AlignItems.Center)
+            .Height(ListRowHeight)
+            .Padding(new Thickness(Halide.S1, Halide.S2, Halide.S1, Halide.S2))
+            .CornerRadius(Halide.Radius1)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.Button)
+            .AccessibleName(AccessibleNameFor(item))
+            .AutomationId("card-" + item.Id);
+        MarkCursor(row, cursorIndex, item);
+
+        row.AddChild(Artwork(item, ImageKind.Primary, 38f, 56f, Halide.Radius1));
+
+        var title = Flex.Column(gap: 2).FlexGrow(1).FlexShrink(1);
+        title.AddChild(Ui.Line(item.Name, 13.5f, Halide.Text));
+        if (item.Genres.Count > 0)
+            title.AddChild(Ui.Line(string.Join(" · ", item.Genres.Take(3)), 11.5f, Halide.TextFaint));
+        row.AddChild(title);
+
+        if (item.CommunityRating is { } score)
+        {
+            var star = Flex.Row(gap: 4).AlignItems(AlignItems.Center).FlexShrink(0).Width(Dimension.Px(56));
+            star.AddChild(Ui.Icon(Icons.Rating, 11f, Halide.Accent));
+            star.AddChild(Ui.Mono(score.ToString("0.0"), 11.5f, Halide.TextDim));
+            row.AddChild(star);
+        }
+        if (item.RunTime is { } run)
+            row.AddChild(Ui.Mono(Ui.Runtime(run), 11.5f, Halide.TextFaint).Width(Dimension.Px(64)).FlexShrink(0));
+        row.AddChild(Ui.Mono(item.ProductionYear?.ToString() ?? "", 11.5f, Halide.TextFaint)
+            .Width(Dimension.Px(44)).FlexShrink(0));
+
+        // The tick lives at the end of the row rather than over the artwork: at this size
+        // a badge on a 38-pixel poster is a smudge.
+        row.AddChild(item.Played
+            ? Ui.Icon(Icons.Watched, 14f, Halide.StatusOk)
+            : Box.New().Width(14).Height(14));
+
+        row.OnClick(_ => Open(item));
+        if (!IsCursor(cursorIndex)) row.HoverBg(Halide.Raised);
         return row;
     }
 

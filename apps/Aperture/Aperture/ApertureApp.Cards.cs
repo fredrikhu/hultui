@@ -34,6 +34,14 @@ public sealed partial class ApertureApp
 
         card.AddChild(Artwork(item, ImageKind.Primary, width, height, Halide.Radius2));
 
+        // The caption is a setting: a shelf of covers with no words under it is a real way
+        // to browse, and the card's accessible name still says the title either way.
+        if (!_settings.Data.ShowCardTitles)
+        {
+            card.OnClick(_ => Open(item));
+            return card;
+        }
+
         var caption = Flex.Column(gap: 1).Width(width);
         caption.AddChild(Ui.Line(item.Name, 12.5f, Halide.Text));
         var sub = item.Kind switch
@@ -120,7 +128,9 @@ public sealed partial class ApertureApp
             box.AddChild(glyph);
         }
 
-        if (item.Played)
+        // The tick is a badge on a poster, not on a thumbnail: at list size it would cover
+        // most of the artwork, and the row draws its own mark at the end instead.
+        if (item.Played && width >= 100f)
             box.AddChild(WatchedTick());
 
         // The sliver rides the bottom edge of the artwork, inside its corner radius.

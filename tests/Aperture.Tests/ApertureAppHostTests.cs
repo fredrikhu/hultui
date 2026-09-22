@@ -661,6 +661,53 @@ public class ApertureAppHostTests
         }, () => backend);
     }
 
+    // ── Layout ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheLibraryCanBeAListInsteadOfAShelf()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            app.SetLayout(LibraryLayout.List);
+            for (int i = 0; i < 8; i++) session.PumpFrame();
+
+            // Same items, same cards by id — a different shape.
+            Assert.True(Shows(session, "Stalker"), session.Window.DumpAccessibilityTree());
+            Assert.NotNull(session.Window.FindByAutomationId("card-m1"));
+            Assert.Equal(LibraryLayout.List, app.Settings.Data.Layout);
+
+            // And the arrows still walk it, one row at a time.
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.Down);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Equal(1, app.CursorIndex);
+        });
+    }
+
+    [Fact]
+    public void TitlesUnderPostersCanBeTurnedOffWithoutLosingThem()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+
+            app.Settings.Data.ShowCardTitles = false;
+            app.Refresh();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            // The caption is gone; the card still says what it is to a screen reader.
+            var card = session.Window.FindByAutomationId("card-m1");
+            Assert.NotNull(card);
+            Assert.Contains("Stalker", card!.Name);
+        });
+    }
+
     // ── The card menu ────────────────────────────────────────────────────
 
     [Fact]

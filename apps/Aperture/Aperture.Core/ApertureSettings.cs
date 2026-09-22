@@ -25,6 +25,9 @@ public sealed class ServerAccountData
     public ServerInfo ToServerInfo() => new(Address, ServerName, Version, ServerId);
 }
 
+/// <summary>How a library draws what it holds.</summary>
+public enum LibraryLayout { Grid, List }
+
 public sealed class ApertureSettingsData
 {
     /// <summary>This installation's device id, generated on first run and never changed:
@@ -51,6 +54,15 @@ public sealed class ApertureSettingsData
 
     /// <summary>The subtitle language last chosen, on the same terms.</summary>
     public string? PreferredSubtitleLanguage { get; set; }
+
+    /// <summary>How a library draws its items: a shelf of posters, or a list of rows.
+    /// A preference about reading, not about one library, so it is remembered once.</summary>
+    public LibraryLayout Layout { get; set; } = LibraryLayout.Grid;
+
+    /// <summary>Whether the poster grid captions its cards. Off is for people who know
+    /// their own shelves by their covers; the accessible name still carries the title, so
+    /// nothing is lost to a screen reader.</summary>
+    public bool ShowCardTitles { get; set; } = true;
 
     /// <summary>Whether subtitles were on when they were last touched. Separate from the
     /// language because "off" is a choice a client must not quietly forget — a file whose
