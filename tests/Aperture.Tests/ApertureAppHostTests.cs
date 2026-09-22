@@ -1290,4 +1290,81 @@ public class ApertureAppHostTests
                 session.Window.DumpAccessibilityTree());
         });
     }
+
+    // ── Quick Connect ────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheFrontDoorOffersACodeAndWantsAnAddressFirst()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.SignOut(keepAccount: false);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            var code = session.Window.FindByAutomationId("connect-quickconnect");
+            Assert.NotNull(code);
+
+            // No address, so there is no server to ask — and the form says which field.
+            code!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.False(app.QuickConnectActive, "an attempt started without a server to ask");
+            Assert.True(Shows(session, "Enter your server's address"), session.Window.DumpAccessibilityTree());
+            Assert.Null(session.Window.FindByAutomationId("quickconnect-panel"));
+        });
+    }
+
+    [Fact]
+    public void AnAbandonedCodeLeavesTheFormAsItWas()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.SignOut(keepAccount: false);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            session.Window.FindByAutomationId("connect-address")!.Click();
+            session.Window.TypeText("jellyfin.example");
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            // State, not frames: the attempt is abandoned before any build runs it, so
+            // this test never asks a name server about anything.
+            app.BeginQuickConnect();
+            Assert.True(app.QuickConnectActive);
+
+            app.CancelQuickConnect();
+            Assert.False(app.QuickConnectActive);
+            Assert.Null(app.QuickConnectCode);
+
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.NotNull(session.Window.FindByAutomationId("connect-password"));
+            Assert.Null(session.Window.FindByAutomationId("quickconnect-panel"));
+        });
+    }
+
+    [Fact]
+    public void ACodeAttemptAgainstNothingPutsTheFormBackWithASentence()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.SignOut(keepAccount: false);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            // A scheme and nothing else: it fails in the address walk, before a socket.
+            session.Window.FindByAutomationId("connect-address")!.Click();
+            session.Window.TypeText("http://");
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            app.BeginQuickConnect();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.False(app.QuickConnectActive);
+            Assert.Null(app.QuickConnectCode);
+            // The complaint is the sentence itself, not a line about what a host answered.
+            Assert.True(Shows(session, "That isn't an address"), session.Window.DumpAccessibilityTree());
+            Assert.NotNull(session.Window.FindByAutomationId("connect-password"));
+        });
+    }
 }

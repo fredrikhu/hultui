@@ -297,8 +297,10 @@ public class ApertureUnitTests
             var message = new ApertureFailure(kind, "raw message").UserMessage("jellyfin.home", "That film");
             Assert.False(string.IsNullOrWhiteSpace(message));
             // The raw message is a developer's sentence; only the kinds without their own
-            // copy fall back to it.
-            if (kind is not (ApertureFailureKind.Network or ApertureFailureKind.Timeout))
+            // copy fall back to it. Invalid is the exception on purpose: nothing was asked
+            // of a server, so the message it carries is the sentence to show.
+            if (kind is not (ApertureFailureKind.Network or ApertureFailureKind.Timeout
+                          or ApertureFailureKind.Invalid))
                 Assert.NotEqual("raw message", message);
         }
     }

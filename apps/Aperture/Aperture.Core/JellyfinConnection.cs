@@ -1,4 +1,4 @@
-using Jellyfin.Sdk;
+﻿using Jellyfin.Sdk;
 using Jellyfin.Sdk.Generated.Models;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Authentication;
@@ -137,7 +137,7 @@ public static class JellyfinConnection
     {
         var candidates = Candidates(input);
         if (candidates.Count == 0)
-            return ApertureResult<ServerInfo>.Fail(ApertureFailureKind.NotJellyfin, "That isn't an address");
+            return ApertureResult<ServerInfo>.Fail(ApertureFailureKind.Invalid, "That isn't an address");
 
         ApertureFailure? first = null;
         foreach (var candidate in candidates)
@@ -238,6 +238,136 @@ public static class JellyfinConnection
         }
     }
 
+    // ── Quick Connect ────────────────────────────────────────────────────
+
+    /// <summary>How often the client asks the server whether the code has been approved.
+    /// Two seconds: the person is standing at another screen typing six characters, and
+    /// the wait between finishing and this window moving on is the whole experience.</summary>
+    public static readonly TimeSpan QuickConnectPollInterval = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a code is waited on before the attempt is abandoned. The server
+    /// expires its own codes — this is only so a window left open overnight stops asking.</summary>
+    public static readonly TimeSpan QuickConnectTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Opens a Quick Connect request: the server hands back a code to type into a screen
+    /// that is <i>already</i> signed in, and a secret this client keeps to itself. The
+    /// secret is the credential — it is what turns into an access token once a signed-in
+    /// user approves the code — so it never leaves the process.
+    /// </summary>
+    public static async Task<ApertureResult<QuickConnectCode>> StartQuickConnectAsync(ServerInfo server,
+        DeviceIdentity device, CancellationToken ct = default)
+    {
+        using var http = NewHttpClient();
+        var auth = new JellyfinAuthProvider(device);
+        using var adapter = NewAdapter(auth, http, server.Address);
+        var client = new JellyfinApiClient(adapter);
+        try
+        {
+            // Asked first, because a server with it switched off answers the initiate call
+            // with a 401 — which would otherwise be reported as a rejected sign-in.
+            var enabled = await client.QuickConnect.Enabled.GetAsync(cancellationToken: ct).ConfigureAwait(false);
+            if (enabled != true)
+                return ApertureResult<QuickConnectCode>.Fail(ApertureFailureKind.Forbidden,
+                    $"{server.Host} has Quick Connect switched off");
+
+            var result = await client.QuickConnect.Initiate.PostAsync(cancellationToken: ct).ConfigureAwait(false);
+            if (result?.Code is not { Length: > 0 } code || result.Secret is not { Length: > 0 } secret)
+                return ApertureResult<QuickConnectCode>.Fail(ApertureFailureKind.NotJellyfin,
+                    "The server started Quick Connect but sent no code");
+
+            return ApertureResult<QuickConnectCode>.Success(new QuickConnectCode(code, secret));
+        }
+        catch (Exception ex)
+        {
+            return ApertureResult<QuickConnectCode>.Fail(Classify(ex, server.Host));
+        }
+    }
+
+    /// <summary>
+    /// One look at whether the code has been approved yet. A single short request, so the
+    /// caller owns the waiting: a client that blocks for minutes inside one call has no
+    /// way to draw the code it is waiting on.
+    /// </summary>
+    public static async Task<ApertureResult<bool>> PollQuickConnectAsync(ServerInfo server,
+        QuickConnectCode code, DeviceIdentity device, CancellationToken ct = default)
+    {
+        using var http = NewHttpClient();
+        var auth = new JellyfinAuthProvider(device);
+        using var adapter = NewAdapter(auth, http, server.Address);
+        var client = new JellyfinApiClient(adapter);
+        try
+        {
+            var state = await client.QuickConnect.Connect
+                .GetAsync(r => r.QueryParameters.Secret = code.Secret, cancellationToken: ct)
+                .ConfigureAwait(false);
+            return ApertureResult<bool>.Success(state?.Authenticated == true);
+        }
+        catch (Exception ex)
+        {
+            return ApertureResult<bool>.Fail(Classify(ex, server.Host));
+        }
+    }
+
+    /// <summary>
+    /// Trades an approved secret for a session. Called once <see cref="PollQuickConnectAsync"/>
+    /// has said yes; a secret that is not approved comes back as
+    /// <see cref="ApertureFailureKind.Unauthorized"/>.
+    /// </summary>
+    public static async Task<ApertureResult<IMediaLibrary>> CompleteQuickConnectAsync(ServerInfo server,
+        QuickConnectCode code, DeviceIdentity device, CancellationToken ct = default)
+    {
+        var http = NewHttpClient();
+        var auth = new JellyfinAuthProvider(device);
+        var adapter = NewAdapter(auth, http, server.Address);
+        var client = new JellyfinApiClient(adapter);
+        try
+        {
+            var result = await client.Users.AuthenticateWithQuickConnect
+                .PostAsync(new QuickConnectDto { Secret = code.Secret }, cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            if (result?.AccessToken is not { Length: > 0 } token || result.User?.Id is not { } userId)
+            {
+                adapter.Dispose(); http.Dispose();
+                return ApertureResult<IMediaLibrary>.Fail(ApertureFailureKind.NotJellyfin,
+                    "The code was approved but the server sent no token");
+            }
+
+            auth.Token = token;
+            var user = new SignedInUser(userId, result.User.Name ?? "", token, result.User.PrimaryImageTag);
+            return ApertureResult<IMediaLibrary>.Success(
+                new JellyfinLibrary(server, user, device, client, adapter, http));
+        }
+        catch (Exception ex)
+        {
+            adapter.Dispose(); http.Dispose();
+            return ApertureResult<IMediaLibrary>.Fail(Classify(ex, server.Host));
+        }
+    }
+
+    /// <summary>
+    /// Poll and complete in one call, for a caller that can afford to sit and wait — a
+    /// test, a script. The app does not use it: it draws the code while it waits, which
+    /// means it owns the clock.
+    /// </summary>
+    public static async Task<ApertureResult<IMediaLibrary>> WaitForQuickConnectAsync(ServerInfo server,
+        QuickConnectCode code, DeviceIdentity device, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? QuickConnectTimeout);
+        while (true)
+        {
+            var polled = await PollQuickConnectAsync(server, code, device, ct).ConfigureAwait(false);
+            if (!polled.Ok) return ApertureResult<IMediaLibrary>.Fail(polled.Failure!);
+            if (polled.Value) return await CompleteQuickConnectAsync(server, code, device, ct).ConfigureAwait(false);
+
+            if (DateTimeOffset.UtcNow >= deadline)
+                return ApertureResult<IMediaLibrary>.Fail(ApertureFailureKind.Timeout,
+                    $"Nobody approved the code on {server.Host}");
+            await Task.Delay(QuickConnectPollInterval, ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>
     /// Re-opens a session from a token that was kept in the credential store, checking it
     /// still works. A revoked token comes back as <see cref="ApertureFailureKind.Unauthorized"/>,
@@ -299,7 +429,7 @@ public static class JellyfinConnection
             >= 500 => new ApertureFailure(ApertureFailureKind.Server, api.Message, api.ResponseStatusCode),
             _ => new ApertureFailure(ApertureFailureKind.NotJellyfin, api.Message, api.ResponseStatusCode),
         },
-        TaskCanceledException or TimeoutException =>
+        OperationCanceledException or TimeoutException =>
             new ApertureFailure(ApertureFailureKind.Timeout, $"{host} did not answer within {ConnectTimeout.TotalSeconds:0} s"),
         HttpRequestException http =>
             new ApertureFailure(ApertureFailureKind.Network, http.Message, (int?)http.StatusCode),

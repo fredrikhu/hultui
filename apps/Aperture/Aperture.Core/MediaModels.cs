@@ -13,6 +13,14 @@ public sealed record ServerInfo(string Address, string Name, string Version, str
 /// credential store, never in the settings file.</summary>
 public sealed record SignedInUser(Guid Id, string Name, string AccessToken, string? PrimaryImageTag);
 
+/// <summary>
+/// A Quick Connect request in flight. <paramref name="Code"/> is the six characters shown
+/// on screen for someone to type into a client that is already signed in;
+/// <paramref name="Secret"/> is what this client trades for an access token once they do,
+/// so it is shown to nobody and stored nowhere.
+/// </summary>
+public sealed record QuickConnectCode(string Code, string Secret);
+
 /// <summary>The kinds of item Aperture renders differently. Anything else the server sends
 /// lands in <see cref="Other"/> and is shown as a plain card.</summary>
 public enum MediaKind { Movie, Series, Season, Episode, Video, BoxSet, Folder, Person, Other }

@@ -36,6 +36,11 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
 
 ## Signing in
 
+**Signing in** takes a password or a code. Quick Connect asks the server for a
+six-character code, shows it, and polls on a timer until someone approves it on a
+client that is already signed in — nothing secret is typed into this window, which
+is what makes it the right door on a shared machine or a television.
+
 The address is what people actually type. `jellyfin.home` is tried on port 80,
 then **8096** — Jellyfin's own port, and the reason a bare hostname otherwise
 answers "connection refused" on a stock install — then the same two over HTTPS.

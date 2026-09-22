@@ -132,6 +132,12 @@ it opens and rewrites the user's real settings.
 
 ## Gotchas
 
+- **An AsyncLoader producer runs inline here.** Under the headless session the producers
+  queued by a build run at the top of the next frame, on the pump thread — not on the
+  thread pool. A producer that polls, sleeps or waits on a person freezes the driver for
+  as long as it takes (a five-minute sign-in wait is a five-minute `settle`), and nothing
+  it publishes mid-flight is ever drawn. Keep a producer to one request and let a timer
+  own the waiting.
 - **Never capture the real window.** `SetForegroundWindow` from a background shell routinely
   fails to raise an SDL window, so a screen grab at the window's rectangle returns whatever
   is sitting on top of it — the user's own screen, not the app. Synthesized input has the

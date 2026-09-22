@@ -1,4 +1,4 @@
-namespace Aperture.Core;
+﻿namespace Aperture.Core;
 
 /// <summary>Why a call to a Jellyfin server did not produce a value.</summary>
 public enum ApertureFailureKind
@@ -25,6 +25,10 @@ public enum ApertureFailureKind
     /// server does not have. Distinct from <see cref="Unauthorized"/>, which is a token
     /// that stopped working.</summary>
     BadCredentials,
+    /// <summary>What was typed cannot be used as it stands — an empty field, or an
+    /// address that is not an address. Nothing was asked of any server, so the message is
+    /// the sentence to show rather than something about a host.</summary>
+    Invalid,
 }
 
 /// <summary>A failed call: what kind, what the server said, and the HTTP status if there
@@ -43,6 +47,7 @@ public sealed record ApertureFailure(ApertureFailureKind Kind, string Message, i
         ApertureFailureKind.Server => $"{host} had a problem with that request",
         ApertureFailureKind.NotJellyfin => $"{host} answered, but not like a Jellyfin server",
         ApertureFailureKind.BadCredentials => "Wrong username or password",
+        ApertureFailureKind.Invalid => Message,
         _ => Message,
     };
 }

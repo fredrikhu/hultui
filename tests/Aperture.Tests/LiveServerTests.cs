@@ -27,6 +27,29 @@ public class LiveServerTests
     }
 
     [LiveServerFact]
+    public async Task QuickConnectHandsOutACodeToTypeSomewhereElse()
+    {
+        var device = DeviceIdentity.New("aperture-tests");
+        var probe = await JellyfinConnection.DiscoverAsync(LiveServer.Address!, device, Ct);
+        Assert.True(probe.Ok, probe.Failure?.Message);
+
+        var started = await JellyfinConnection.StartQuickConnectAsync(probe.Value, device, Ct);
+
+        // A server with Quick Connect switched off says so in its own sentence rather than
+        // failing as a rejected sign-in — which is the half of this worth proving either way.
+        if (Absent(!started.Ok, started.Failure?.Message ?? "Quick Connect is off on this server.")) return;
+
+        Assert.False(string.IsNullOrWhiteSpace(started.Value.Code));
+        Assert.False(string.IsNullOrWhiteSpace(started.Value.Secret));
+        // Nobody is going to approve it, so the wait is expected to run out — and the code
+        // expires on the server by itself.
+        var waited = await JellyfinConnection.WaitForQuickConnectAsync(probe.Value, started.Value, device,
+            timeout: TimeSpan.FromSeconds(3), ct: Ct);
+        Assert.False(waited.Ok);
+        Assert.Equal(ApertureFailureKind.Timeout, waited.Failure!.Kind);
+    }
+
+    [LiveServerFact]
     public async Task SignInYieldsAUserAndTheLibraries()
     {
         using var library = await LiveServer.ConnectAsync(Ct);

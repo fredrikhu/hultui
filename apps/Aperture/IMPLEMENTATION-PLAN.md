@@ -58,10 +58,16 @@ and there are no collections or playlists to browse.
 | Card actions | mark watched, heart, play from the start — without leaving the shelf |
 | Library as a list | the same virtual grid one across, with year, rating, runtime and genres |
 | Home layout | rows move, hide and come back; the two “what now” rows fold into one |
+| Quick Connect | sign in by approving a code, no password typed into this window |
 
 Framework changes that fell out: menus and other overlays are in the accessibility
 tree, at the coordinates they are drawn, so assistive tech and the driver can reach
 a menu entry at all.
+
+One shape worth copying: Quick Connect waits on a **timer, one request per tick**,
+not inside a single long call. A producer that blocks for minutes cannot draw the
+code it is waiting for — and under the headless session, where producers run inline
+at the top of a frame, it freezes the whole pump.
 
 ## Slice 4 — the next obvious things
 
@@ -84,8 +90,6 @@ a menu entry at all.
   the app open instantly and survive a reboot.
 - **Downloads.** `/Items/{id}/Download` is one call; the work is the library of
   what has been downloaded and playing from it when the server is unreachable.
-- **Quick Connect.** `client.QuickConnect` is in the SDK: sign in by typing a code
-  on the server's web UI rather than a password into this window.
 
 ## Things deliberately not done
 

@@ -481,6 +481,10 @@ public sealed partial class ApertureApp : Component, IDisposable
         // Closing the window is the ordinary way to stop watching, so the resume point has
         // to survive it: give the report its moment before the connection goes.
         WaitForStopReport();
+        StopQuickConnectTimer();
+        _quickConnectCts?.Cancel();
+        _quickConnectCts?.Dispose();
+        _quickConnectCts = null;
         _posters.Dispose();
         _library?.Dispose();
         _library = null;

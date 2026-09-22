@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI;
 using HultUI.Core.Accessibility;
@@ -85,8 +85,8 @@ public sealed partial class ApertureApp
     /// address to server to session — because to the person waiting it is one action.</summary>
     private void StartSignIn()
     {
-        if (string.IsNullOrWhiteSpace(_address)) { _connectFailure = new ApertureFailure(ApertureFailureKind.NotJellyfin, "Enter your server's address"); Rerender(); return; }
-        if (string.IsNullOrWhiteSpace(_username)) { _connectFailure = new ApertureFailure(ApertureFailureKind.BadCredentials, "Enter your username"); Rerender(); return; }
+        if (string.IsNullOrWhiteSpace(_address)) { _connectFailure = new ApertureFailure(ApertureFailureKind.Invalid, "Enter your server's address"); Rerender(); return; }
+        if (string.IsNullOrWhiteSpace(_username)) { _connectFailure = new ApertureFailure(ApertureFailureKind.Invalid, "Enter your username"); Rerender(); return; }
 
         _connectFailure = null;
         _signInAttempt++;
@@ -168,6 +168,7 @@ public sealed partial class ApertureApp
     {
         EnsureAutoConnect();
         EnsureSignIn();
+        EnsureQuickConnect();
 
         bool busy = _signIn.IsLoading || _autoConnect.IsLoading || !_autoConnectDone;
 
@@ -195,6 +196,20 @@ public sealed partial class ApertureApp
         }
 
         card.AddChild(Field("Server", "jellyfin.home", _address, v => { _address = v; }, "connect-address"));
+
+        // While a code is on screen the password fields would be a second, contradictory
+        // way in — the panel takes their place until the attempt is over.
+        if (_quickConnectActive)
+        {
+            card.AddChild(QuickConnectPanel());
+            if (_connectFailure is { } stopped) card.AddChild(FailureNote(stopped));
+            page.AddChild(card);
+            page.AddChild(Box.New().Height(Halide.S3));
+            page.AddChild(Text.New("The code is worth nothing on its own — approving it is what signs this window in.")
+                .FontSize(11.5f).TextColor(Halide.TextFaint));
+            return page;
+        }
+
         card.AddChild(Field("Username", "", _username, v => { _username = v; }, "connect-username"));
         card.AddChild(Field("Password", "", _password, v => { _password = v; }, "connect-password", masked: true));
 
@@ -202,6 +217,10 @@ public sealed partial class ApertureApp
             card.AddChild(FailureNote(failure));
 
         var actions = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+        var code = Ui.Button(ButtonVariant.Secondary, "Sign in with a code",
+            busy ? null : BeginQuickConnect, "connect-quickconnect");
+        code.IsEnabled = !busy;
+        actions.AddChild(code);
         actions.AddChild(Box.New().FlexGrow(1));
         var connect = Ui.Button(ButtonVariant.Primary, busy ? "Connecting…" : "Connect",
             busy ? null : StartSignIn, "connect-submit");
@@ -263,6 +282,7 @@ public sealed partial class ApertureApp
             ApertureFailureKind.Network => (Halide.StatusFail, "Is the server on, and is that the right address?"),
             ApertureFailureKind.Timeout => (Halide.StatusWarn, "It answered too slowly. Try again."),
             ApertureFailureKind.NotJellyfin => (Halide.StatusWarn, "Something answered, but it wasn't Jellyfin."),
+            ApertureFailureKind.Invalid => (Halide.StatusWarn, (string?)null),
             ApertureFailureKind.Server => (Halide.StatusFail, "The server itself had a problem."),
             _ => (Halide.StatusFail, (string?)null),
         };
