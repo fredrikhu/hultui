@@ -149,6 +149,7 @@ public sealed partial class ApertureApp
         // F still reach the app's own handler, because the overlay leaves them alone.
         _videoPlayer.FocusPicture();
         ForgetPlaybackEnding();
+        ForgetTrackSelection();
         _lastReportTicks = 0;
         Rerender();
     }
@@ -223,6 +224,7 @@ public sealed partial class ApertureApp
         if (_player is not { } player || _playback is not { } target || _library is not { } lib) return;
 
         ApplyResumeSeek(player);
+        PumpTrackPreference(player);
 
         // The file ran out: report it as a stop at the end (which is what marks it
         // watched), then ask what comes next.
@@ -307,6 +309,13 @@ public sealed partial class ApertureApp
             column.AddChild(card);
         }
 
+        if (_chaptersOpen && PlayingChapters.Count > 0)
+        {
+            var panel = BuildChapterPanel();
+            panel.Key = "chapters";
+            column.AddChild(panel);
+        }
+
         sheet.AddChild(column);
         sheet.On<KeyDownEvent>(e =>
         {
@@ -357,6 +366,10 @@ public sealed partial class ApertureApp
             if (sub.Length > 0) titles.AddChild(Ui.Line(sub, 11.5f, Halide.TextMuted));
         }
         strip.AddChild(titles);
+
+        if (PlayingChapters.Count > 0)
+            strip.AddChild(Ui.IconButton(Icons.Episodes, $"Chapters ({PlayingChapters.Count}) — C",
+                ToggleChapters, 15f, _chaptersOpen ? Halide.Accent : Halide.TextDim, "player-chapters"));
 
         // What the server is actually doing with the stream: a direct play and a transcode
         // feel identical until something stutters, and then it is the first question.

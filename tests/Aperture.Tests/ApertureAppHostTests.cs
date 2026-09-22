@@ -51,6 +51,15 @@ public class ApertureAppHostTests
             ],
         });
         library.Update(library.Item("m3")! with { IsFavorite = true });
+        library.Update(library.Item("m2")! with
+        {
+            Chapters =
+            [
+                new MediaChapter(TimeSpan.Zero, "Opening", null),
+                new MediaChapter(TimeSpan.FromMinutes(30), "The Ocean", null),
+                new MediaChapter(TimeSpan.FromMinutes(90), "Return", null),
+            ],
+        });
 
         // Enough episodes after e1 that auto-play can run past the pass-out threshold
         // and still have one left to offer.
@@ -532,6 +541,150 @@ public class ApertureAppHostTests
             PlayToTheEnd(session, app, backend, "resume-m2");
 
             Assert.Null(app.UpNextItem);
+        }, () => backend);
+    }
+
+    // ── Chapters ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void CListsTheChaptersAndClickingOneSeeksThere()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.C);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.True(app.ChaptersOpen);
+            Assert.True(Shows(session, "The Ocean"), session.Window.DumpAccessibilityTree());
+
+            session.Window.FindByAutomationId("chapter-2")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.False(app.ChaptersOpen, "picking a chapter left the list up");
+            Assert.Contains(backend.Calls, c => c.StartsWith("Seek(01:30:00", StringComparison.Ordinal));
+        }, () => backend);
+    }
+
+    [Fact]
+    public void PageDownStepsToTheNextChapterAndPageUpRestartsThisOne()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            // Resumes at 58 minutes, which is inside "The Ocean" (30–90).
+            session.Window.FindByAutomationId("resume-m2")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            backend.Calls.Clear();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.PageDown);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Contains(backend.Calls, c => c.StartsWith("Seek(01:30:00", StringComparison.Ordinal));
+
+            // Well inside a chapter, back restarts that chapter rather than leaving it.
+            app.Player!.Seek(TimeSpan.FromMinutes(95));
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            backend.Calls.Clear();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.PageUp);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Contains(backend.Calls, c => c.StartsWith("Seek(01:30:00", StringComparison.Ordinal));
+
+            // At a chapter's own start, back means the one before it.
+            backend.Calls.Clear();
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.PageUp);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Contains(backend.Calls, c => c.StartsWith("Seek(00:30:00", StringComparison.Ordinal));
+        }, () => backend);
+    }
+
+    [Fact]
+    public void AFileWithNoChaptersHasNoPanelAndNoButton()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-e1")!.Click();   // no chapters on e1
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            session.Window.PressKey(HultUI.Core.Events.KeyCode.C);
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.False(app.ChaptersOpen);
+            Assert.Null(session.Window.FindByAutomationId("player-chapters"));
+        }, () => backend);
+    }
+
+    // ── Track memory ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheAudioTrackYouPickIsTheOneTheNextEpisodeOpensWith()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        backend.AudioTracks.Add(new MediaTrack(1, "Japanese", "jpn"));
+        backend.AudioTracks.Add(new MediaTrack(2, "English", "eng"));
+
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-e1")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            // The file opens on its own default; the viewer switches to English, the way
+            // the overlay's audio menu does.
+            Assert.Equal(1, app.Player!.SelectedAudioTrack);
+            app.Player!.SelectAudioTrack(2);
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            // The next episode opens on English without being asked.
+            backend.Raise(new BackendEvent.EndReached());
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            session.Window.FindByAutomationId("up-next-play")!.Click();
+            for (int i = 0; i < 12; i++) session.PumpFrame();
+
+            Assert.Equal("e5", app.PlayingItem?.Id);
+            Assert.Equal(2, app.Player!.SelectedAudioTrack);
+            Assert.Equal("eng", app.Settings.Data.PreferredAudioLanguage);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void SubtitlesSwitchedOffStayOff()
+    {
+        var library = Library();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(24) };
+        backend.AudioTracks.Add(new MediaTrack(1, "English", "eng"));
+        backend.SubtitleTracks.Add(new MediaTrack(5, "English", "eng"));
+
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            session.Window.FindByAutomationId("resume-e1")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            app.Player!.SelectSubtitleTrack(5);       // on…
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            app.Player!.SelectSubtitleTrack(null);    // …and off again
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.False(app.Settings.Data.SubtitlesOn);
+
+            backend.Raise(new BackendEvent.EndReached());
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+            session.Window.FindByAutomationId("up-next-play")!.Click();
+            for (int i = 0; i < 12; i++) session.PumpFrame();
+
+            // A file whose subtitle track matches the remembered language must not turn
+            // them back on for someone who switched them off.
+            Assert.Null(app.Player!.SelectedSubtitleTrack);
         }, () => backend);
     }
 

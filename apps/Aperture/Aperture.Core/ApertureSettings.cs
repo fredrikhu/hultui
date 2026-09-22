@@ -42,6 +42,22 @@ public sealed class ApertureSettingsData
 
     public bool Muted { get; set; }
 
+    /// <summary>
+    /// The audio language last chosen by hand, as the file labelled it ("eng", "Japanese").
+    /// Applied to the next file that has a track matching it, which is what stops an
+    /// evening of episodes from resetting to the file's default every time.
+    /// </summary>
+    public string? PreferredAudioLanguage { get; set; }
+
+    /// <summary>The subtitle language last chosen, on the same terms.</summary>
+    public string? PreferredSubtitleLanguage { get; set; }
+
+    /// <summary>Whether subtitles were on when they were last touched. Separate from the
+    /// language because "off" is a choice a client must not quietly forget — a file whose
+    /// only subtitle track happens to match a remembered language should not turn them
+    /// back on for someone who switched them off.</summary>
+    public bool SubtitlesOn { get; set; }
+
     public void Normalize()
     {
         Servers ??= [];

@@ -144,6 +144,12 @@ public static class Ui
             ? $"{(int)span.TotalHours} h {span.Minutes} m"
             : $"{Math.Max(1, (int)span.TotalMinutes)} m";
 
+    /// <summary>A position on the clock: 1:04:12, or 4:12 under an hour. What a chapter
+    /// list shows, where the point is where it is rather than how long it lasts.</summary>
+    public static string Clock(TimeSpan at) =>
+        at.TotalHours >= 1 ? $"{(int)at.TotalHours}:{at.Minutes:00}:{at.Seconds:00}"
+                           : $"{at.Minutes}:{at.Seconds:00}";
+
     /// <summary>"38 m left" — what a half-watched card says instead of a percentage.</summary>
     public static string Remaining(TimeSpan total, TimeSpan position)
     {

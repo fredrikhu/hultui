@@ -2,6 +2,7 @@ using Aperture;
 using Aperture.Core;
 using HultUI.Core.Platform;
 using HultUI.Icons;
+using HultUI.Media;
 using Xunit;
 
 namespace Aperture.Tests;
@@ -249,6 +250,41 @@ public class ApertureUnitTests
 
         var partWatched = watched with { Played = false, ResumePosition = TimeSpan.FromMinutes(20) };
         Assert.Equal("Solaris, 1972, part-watched", ApertureApp.AccessibleNameFor(partWatched));
+    }
+
+    // ── Track matching ───────────────────────────────────────────────────
+
+    [Fact]
+    public void ATrackIsFoundByItsLanguageTag()
+    {
+        MediaTrack[] tracks =
+        [
+            new(1, "Japanese", "jpn"),
+            new(2, "English", "eng"),
+        ];
+
+        Assert.Equal(2, ApertureApp.Match(tracks, "eng")?.Id);
+        Assert.Equal(1, ApertureApp.Match(tracks, "jpn")?.Id);
+        Assert.Null(ApertureApp.Match(tracks, "fre"));
+    }
+
+    [Fact]
+    public void ATrackWithNoLanguageTagIsFoundByItsTitle()
+    {
+        // What a file with untagged tracks looks like — the title is all there is.
+        MediaTrack[] tracks = [new(1, "Commentary"), new(2, "English (SDH)")];
+
+        Assert.Equal(2, ApertureApp.Match(tracks, "English")?.Id);
+    }
+
+    [Fact]
+    public void NoPreferenceMatchesNothing()
+    {
+        MediaTrack[] tracks = [new(1, "English", "eng")];
+
+        Assert.Null(ApertureApp.Match(tracks, null));
+        Assert.Null(ApertureApp.Match(tracks, "   "));
+        Assert.Null(ApertureApp.Match([], "eng"));
     }
 
     // ── Failure copy ─────────────────────────────────────────────────────
