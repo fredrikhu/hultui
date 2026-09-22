@@ -65,6 +65,18 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
     private const int SW_MAXIMIZE = 3;
     private const int SW_RESTORE = 9;
     private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    // Windows 11 composition attributes. Both are what give a window its modern look —
+    // and both have to go while it is covering the screen: a rounded corner leaves the
+    // desktop showing through at every corner of the picture, and the 1px border draws a
+    // line down the edge of it. Unknown attributes are an error on Windows 10, which is
+    // the right outcome there: that Windows neither rounds nor borders.
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_DEFAULT = 0;
+    private const int DWMWCP_DONOTROUND = 1;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
+    private const int DWMWA_COLOR_DEFAULT = unchecked((int)0xFFFFFFFF);
     private const int HTCAPTION = 2;
     private const int HTMAXBUTTON = 9;
     private const int HTLEFT = 10;
@@ -214,7 +226,23 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
             // The window was maximized when full screen took over, so put that back too.
             if (_zoomedBeforeFullscreen) ShowWindow(_hwnd, SW_MAXIMIZE);
         }
+
+        SetCompositionChrome(fullscreen);
         ExtendFrame();
+    }
+
+    /// <summary>
+    /// The corner rounding and the hairline border DWM draws around a window. Both are
+    /// right for a window and wrong for a picture filling the screen — the corners show
+    /// the desktop through, and the border runs a line down the edge of the image.
+    /// </summary>
+    private void SetCompositionChrome(bool fullscreen)
+    {
+        int corner = fullscreen ? DWMWCP_DONOTROUND : DWMWCP_DEFAULT;
+        DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+
+        int border = fullscreen ? DWMWA_COLOR_NONE : DWMWA_COLOR_DEFAULT;
+        DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref border, sizeof(int));
     }
 
     private void ExtendFrame()
@@ -225,8 +253,12 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
         // the caption region — and Windows only honours HTMAXBUTTON for the Snap
         // Layouts flyout inside that region — so grow the margin by the clipped
         // frame. Re-applied on maximize/restore transitions (see WM_SIZE).
+        // Fullscreen wants no frame at all: the extension exists to give a windowed
+        // custom-chrome window its shadow and a caption band for the Snap Layouts flyout,
+        // and neither belongs over a picture that reaches the screen edges.
         int px = _captionHeightPx;
-        if (IsZoomed(_hwnd))
+        if (IsFullscreen) px = 0;
+        else if (IsZoomed(_hwnd))
             px += GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
         var margins = new MARGINS { CyTopHeight = px };
         DwmExtendFrameIntoClientArea(_hwnd, ref margins);
@@ -678,4 +710,7 @@ internal sealed unsafe class WindowsCustomFrame : IDisposable
 
     [DllImport("dwmapi")]
     private static extern int DwmExtendFrameIntoClientArea(IntPtr hWnd, ref MARGINS pMarInset);
+
+    [DllImport("dwmapi")]
+    private static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int size);
 }

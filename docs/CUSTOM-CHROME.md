@@ -170,6 +170,14 @@ proud of the monitor on each edge keeps switching instant; the task bar still st
 because the shell hides it for any foreground window that covers the display. Elsewhere
 (X11, Wayland, macOS) the compositor handles it and `SDL_SetWindowFullscreen` is used.
 
+Staying an ordinary window means keeping the two pieces of Windows 11 chrome that come
+with one, so both are turned off for the duration: `DWMWA_WINDOW_CORNER_PREFERENCE` to
+`DWMWCP_DONOTROUND`, or the desktop shows through all four corners of the picture, and
+`DWMWA_BORDER_COLOR` to `DWMWA_COLOR_NONE`, or a hairline runs down its edges. The frame
+extension (`DwmExtendFrameIntoClientArea`) goes to zero too — it exists to give a windowed
+custom-chrome window its shadow and a caption band for Snap Layouts, and neither belongs
+over a full-screen picture. All three are restored on the way out.
+
 ---
 
 ## Window Style Query
