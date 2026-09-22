@@ -2,6 +2,7 @@
 #:project ../../../apps/Junction/Junction.csproj
 #:project ../../../apps/VesperCommander/VesperCommander.csproj
 #:project ../../../apps/Meridian/Meridian/Meridian.csproj
+#:project ../../../apps/Aperture/Aperture/Aperture.csproj
 #:project ../../../samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj
 #:project ../../../samples/HultUI.Samples.VideoPlayer/HultUI.Samples.VideoPlayer.csproj
 #:project ../../../samples/HultUI.Samples.ProceduralVideo/HultUI.Samples.ProceduralVideo.csproj
@@ -33,6 +34,7 @@ float scale = 1f;
 bool fluentDark = true;
 int fluentAccent = 0;
 string? mediaPath = null;
+string jellyfinServer = "", jellyfinKeyFile = "", jellyfinUser = "";
 bool gitlab = false;
 string theme = "";
 var steps = new List<string>();
@@ -49,6 +51,11 @@ for (int i = 0; i < args.Length; i++)
         case "--dark": fluentDark = bool.Parse(args[++i]); break;
         case "--accent": fluentAccent = int.Parse(args[++i]); break;
         case "--media": mediaPath = args[++i]; break;
+        // Aperture: which Jellyfin to browse, and the API key to browse it with. Without
+        // them it mounts a fixture library instead, so the shell still renders offline.
+        case "--server": jellyfinServer = args[++i]; break;
+        case "--api-key-file": jellyfinKeyFile = args[++i]; break;
+        case "--jellyfin-user": jellyfinUser = args[++i]; break;
         case "--size":
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
@@ -83,10 +90,11 @@ try
         "junction" => MountJunction(),
         "vesper" or "vespercommander" => MountVesper(),
         "meridian" => MountMeridian(),
+        "aperture" => MountAperture(),
         "fluent" => MountFluent(),
         "player" => MountPlayer(),
         "procedural" => MountProcedural(),
-        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | fluent | player | procedural)"),
+        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | aperture | fluent | player | procedural)"),
     };
     session.Application.SetRoot(root);
     session.PumpFrames(3);
@@ -167,6 +175,74 @@ Element MountMeridian()
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .Invoke(a, [dir]);
     return root;
+}
+
+// Aperture, the Jellyfin client. With --server (and --api-key-file) it browses a real
+// server through the API-key sign-in — the one path that needs no password typed into a
+// driver; without them it mounts a small fixture library, which renders every surface
+// except real artwork.
+Element MountAperture()
+{
+    Aperture.Core.IMediaLibrary library;
+    if (jellyfinServer.Length > 0)
+    {
+        var key = jellyfinKeyFile.Length > 0
+            ? File.ReadAllText(jellyfinKeyFile).Trim()
+            : Environment.GetEnvironmentVariable("APERTURE_API_KEY")?.Trim() ?? "";
+        var device = Aperture.Core.DeviceIdentity.New("aperture-driver");
+        var probe = Aperture.Core.JellyfinConnection.DiscoverAsync(jellyfinServer, device).GetAwaiter().GetResult();
+        if (!probe.Ok) throw new InvalidOperationException("--server: " + probe.Failure!.Message);
+        var session2 = Aperture.Core.JellyfinConnection
+            .SignInWithApiKeyAsync(probe.Value, key, jellyfinUser.Length > 0 ? jellyfinUser : null, device)
+            .GetAwaiter().GetResult();
+        if (!session2.Ok) throw new InvalidOperationException("--server: " + session2.Failure!.Message);
+        library = session2.Value;
+    }
+    else
+    {
+        library = DemoLibrary();
+    }
+
+    var settings = new Aperture.Core.ApertureSettings(new HultUI.Core.Platform.InMemoryCredentialStore(),
+        Path.Combine(scratchConfig, "aperture.json"));
+    Func<HultUI.Media.IMediaBackend>? backends =
+        HultUI.Media.Mpv.MpvBackend.IsAvailable ? () => new HultUI.Media.Mpv.MpvBackend() : null;
+    var a = new Aperture.ApertureApp(session.Application, session.Window.Window, settings, library, backends);
+    instance = a;
+    return a.Mount();
+}
+
+// Enough of a library to render every surface: a shelf, something half-watched, a series
+// with episodes under it.
+Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
+{
+    var fake = new Aperture.Core.Testing.FakeMediaLibrary()
+        .AddLibrary("movies", "Films", Aperture.Core.LibraryKind.Movies)
+        .AddLibrary("shows", "Series", Aperture.Core.LibraryKind.TvShows);
+    string[] titles = ["Stalker", "Solaris", "The Mirror", "Andrei Rublev", "Nostalghia", "The Sacrifice",
+                       "Ivan's Childhood", "Mirror of Days", "Northern Light", "The Long Take"];
+    for (int i = 0; i < titles.Length; i++)
+        fake.AddMovie("m" + i, titles[i], "movies", 1962 + i * 3, 96 + i * 7,
+            resume: i == 1 ? TimeSpan.FromMinutes(58) : null, played: i == 2);
+    fake.AddItem(new Aperture.Core.MediaItem
+    {
+        Id = "s1", Name = "The Long Way Home", Kind = Aperture.Core.MediaKind.Series,
+        ProductionYear = 2019, ChildCount = 8, UnplayedItemCount = 5,
+        Overview = "A fixture series, for looking at the shelf.",
+    }, "shows");
+    for (int e = 1; e <= 8; e++)
+        fake.AddItem(new Aperture.Core.MediaItem
+        {
+            Id = "e" + e, Name = "Episode " + e, Kind = Aperture.Core.MediaKind.Episode,
+            SeriesId = "s1", SeriesName = "The Long Way Home", ParentIndexNumber = 1, IndexNumber = e,
+            RunTime = TimeSpan.FromMinutes(42), Played = e <= 3,
+            ResumePosition = e == 4 ? TimeSpan.FromMinutes(12) : null,
+            Overview = "What happens in episode " + e + ".",
+        }, "s1");
+    fake.ResumeIds.Add("m1");
+    fake.ResumeIds.Add("e4");
+    fake.NextUpIds.Add("e5");
+    return fake;
 }
 
 // The Fluent sample. `--dark false` opens it in light mode, and `--accent <0-5>` picks one of

@@ -46,6 +46,64 @@ public class VirtualListAccessibilityTests
     }
 
     [Fact]
+    public void CompositeRows_PublishTheirOwnControlsInsteadOfOneNodePerRow()
+    {
+        // A wrap grid driven through the list: one item is a row of buttons, and each
+        // button has to reach assistive tech with its own name and automation id.
+        var list = VirtualListElement<int>.New();
+        list.Box.Width = 200;
+        list.Box.Height = 100;
+        list.ItemHeight = 20f;
+        list.RowsAreComposite = true;
+        list.Items = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        list.ItemTemplate = row =>
+        {
+            var line = BoxElement.New();
+            line.Flex.Direction = FlexDirection.Row;
+            for (int card = 0; card < 2; card++)
+            {
+                var button = BoxElement.New();
+                button.Role = AccessibilityRole.Button;
+                button.AccessibleName = $"card {row}.{card}";
+                button.AutomationId = $"card-{row}-{card}";
+                line.AddChild(button);
+            }
+            return line;
+        };
+
+        var tree = BuildLaidOut2(list);
+        var names = Walk(tree).Where(n => n.Role == AccessibilityRole.Button).Select(n => n.Name).ToList();
+
+        Assert.Contains("card 0.0", names);
+        Assert.Contains("card 0.1", names);
+        // And nothing is published as a bare list item named after the whole row.
+        Assert.DoesNotContain(Walk(tree), n => n.Role == AccessibilityRole.ListItem);
+    }
+
+    [Fact]
+    public void CompositeRowsOff_KeepsTheOneNodePerItemModel()
+    {
+        var tree = BuildLaidOut(MakeList(10));
+        Assert.Equal(10, tree.Children.Count);
+        Assert.All(tree.Children, c => Assert.Equal(AccessibilityRole.ListItem, c.Role));
+    }
+
+    private AccessibilityNode BuildLaidOut2(VirtualListElement<int> list)
+    {
+        _layout.PerformLayout(list, 200, 100);
+        list.UpdateContentSize();
+        return AccessibilityTreeBuilder.Build(list);
+    }
+
+    private static IEnumerable<AccessibilityNode> Walk(AccessibilityNode node)
+    {
+        yield return node;
+        foreach (var child in node.Children)
+            foreach (var descendant in Walk(child))
+                yield return descendant;
+    }
+
+    [Fact]
     public void VirtualList_ItemLabel_UsesAccessibleLabel()
     {
         var list = MakeList(10);

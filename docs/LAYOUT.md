@@ -405,6 +405,21 @@ var list = ScrollViewElement.New()
     );
 ```
 
+**Never `FlexGrow` the content inside one.** The scroll view measures its child against
+an unbounded height — that is what makes scrolling possible — and a growing child resolves
+that unbounded space to a number near `float.MaxValue`. The child then reports an
+astronomical height, the scroll view collapses to its content's *minimum*, and everything
+laid out beside it shrinks with it. The symptom is the confusing part: the page still
+paints, and the accessibility tree still reports sensible boxes for the widgets inside,
+but clicks land on whatever is behind the region because the ancestor's box is a few
+hundred points tall. Give the content `FlexGrow(1)` on the *scroll view* and nothing on
+what it holds:
+
+```csharp
+var scroll = ScrollView.Vertical().FlexGrow(1);      // the viewport grows
+scroll.AddChild(Flex.Column(gap: 24).Padding(24));   // the content does not
+```
+
 Configure scrollbar appearance:
 
 ```csharp

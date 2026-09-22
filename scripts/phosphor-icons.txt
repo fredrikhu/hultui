@@ -134,3 +134,30 @@ plugs-connected
 shield-check
 terminal-window
 code
+
+# Aperture (the Jellyfin client): navigation, library kinds, and the bits of a media
+# browser the VideoPlayer overlay does not draw itself.
+house
+film-slate
+film-strip
+television
+monitor-play
+heart
+heart-fill
+star-fill
+dots-three
+list
+spinner-gap
+subtitles
+speaker-high
+speaker-simple-x
+corners-out
+skip-back
+skip-forward
+sign-in
+user
+calendar-blank
+timer
+sliders
+shuffle
+repeat

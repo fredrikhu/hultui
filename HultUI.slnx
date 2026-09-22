@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/apps/">
+    <Project Path="apps/Aperture/Aperture/Aperture.csproj" />
+    <Project Path="apps/Aperture/Aperture.Core/Aperture.Core.csproj" />
     <Project Path="apps/Junction/Junction.csproj" />
     <Project Path="apps/Meridian/Meridian.Cli/Meridian.Cli.csproj" />
     <Project Path="apps/Meridian/Meridian.Core/Meridian.Core.csproj" />
@@ -53,6 +55,7 @@
     <Project Path="src/HultUI.Media.Mpv/HultUI.Media.Mpv.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Aperture.Tests/Aperture.Tests.csproj" />
     <Project Path="tests/HultUI.Core.Tests/HultUI.Core.Tests.csproj" />
     <Project Path="tests/HultUI.Themes.Tests/HultUI.Themes.Tests.csproj" />
     <Project Path="tests/HultUI.Syntax.Tests/HultUI.Syntax.Tests.csproj" />

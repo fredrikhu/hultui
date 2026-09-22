@@ -206,12 +206,16 @@ the published site. Nothing is deployed anywhere yet -- see
 
 Full applications built on HultUI, each with its own installer workflow and test project.
 They are the framework's real proving ground -- the samples show one feature at a time,
-these two carry a whole product's worth of them.
+these carry a whole product's worth of them.
 
 - [`Junction`](apps/Junction/) -- git client: history graph, staging, diffs, conflicts,
   rebase, multi-repo workspaces ([tests](tests/Junction.Tests/))
 - [`VesperCommander`](apps/VesperCommander/) -- dual-pane file manager: archives, sync,
   multi-rename, find ([tests](tests/VesperCommander.Tests/))
+- [`Meridian`](apps/Meridian/) -- HTTP/API client over folders of plain text files:
+  requests, collection runner, OpenAPI discovery ([tests](tests/Meridian.Tests/))
+- [`Aperture`](apps/Aperture/) -- Jellyfin client: poster shelves over a real media server,
+  with the framework's video player behind Play ([tests](tests/Aperture.Tests/))
 
 ## Samples
 

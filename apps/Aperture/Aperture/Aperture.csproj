@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe = Windows GUI subsystem: no console window when the app launches
+         (identical to Exe on Linux/macOS). -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Aperture</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- Embedded in the exe: Explorer, shortcuts and the taskbar read this. The runtime
+         window icon (Linux WMs, alt-tab) is set from the PNG beside it in Program.cs.
+         Both are generated — see scripts/generate-aperture-icon.py. -->
+    <ApplicationIcon>Assets/aperture.ico</ApplicationIcon>
+    <!-- PublishAot is deliberately NOT set yet: the Kiota-generated SDK compiles clean
+         through ILC here, but nothing has run as a native binary end-to-end. The AOT
+         publish is its own step — see IMPLEMENTATION-PLAN.md. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aperture.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Assets/*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aperture.Core\Aperture.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.Themes\HultUI.Themes.csproj" />
+    <!-- The picture and the transport overlay, and the libmpv backend behind them. -->
+    <ProjectReference Include="..\..\..\src\HultUI.Media\HultUI.Media.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.Media.Mpv\HultUI.Media.Mpv.csproj" />
+    <ProjectReference Include="..\..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

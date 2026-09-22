@@ -120,6 +120,10 @@ public static class AccessibilityTreeBuilder
     private static bool TryBuildVirtualItems(Element element, AccessibilityNode node, float scrollX, float scrollY, Rect clip)
     {
         if (element is not IAccessibleItemSource source) return false;
+        // A container whose rows are composite (a grid row of cards) publishes nothing of
+        // its own: its realized rows carry the real controls, and one node per row would
+        // bury them.
+        if (!source.PublishesItemNodes) return false;
         if (source.ItemCount <= MaxEagerVirtualItems)
             // Small enough: materialize every item as a child node (fast, and
             // supports hit-testing directly off the snapshot tree).

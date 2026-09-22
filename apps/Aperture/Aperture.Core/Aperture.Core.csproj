@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Aperture.Core</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aperture" />
+    <InternalsVisibleTo Include="Aperture.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The official Kiota-generated client. Kiota 1.20.1 (what the SDK asks for) carries
+         GHSA-7j59-v9qr-6fq9, so every Kiota package is pinned forward to 1.22.2 — same
+         major, binary-compatible with the generated code. -->
+    <PackageReference Include="Jellyfin.Sdk" Version="2025.10.21" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.22.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ICredentialStore only: the access token belongs in the OS credential store,
+         not in the settings file. No UI types are referenced from here. -->
+    <ProjectReference Include="..\..\..\src\HultUI.Core\HultUI.Core.csproj" />
+  </ItemGroup>
+
+</Project>

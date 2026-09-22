@@ -1,6 +1,6 @@
 ---
 name: run-hultui-app
-description: Run, drive, and screenshot the HultUI desktop apps — Junction, Vesper Commander, Meridian — and the Fluent sample. Use when asked to run one of them, look at a UI change, take a screenshot, check how something renders, or interact with the app rather than its tests.
+description: Run, drive, and screenshot the HultUI desktop apps — Junction, Vesper Commander, Meridian, Aperture — and the Fluent sample. Use when asked to run one of them, look at a UI change, take a screenshot, check how something renders, or interact with the app rather than its tests.
 ---
 
 Renders a HultUI app off-screen and writes PNGs of what it drew, via
@@ -49,7 +49,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 
 | Option | Meaning |
 |---|---|
-| `--app junction \| vesper \| meridian \| fluent \| player \| procedural` | Which app to mount. Default `junction`. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample; `player` is `samples/HultUI.Samples.VideoPlayer` (libmpv; give it `--media <file>`); `procedural` is `samples/HultUI.Samples.ProceduralVideo`, frames from an algorithm. Both get frames from a worker thread in real time, so `settle` between shots, and `HULTUI_MEDIA_NOHIDE=1` keeps the bar from fading. |
+| `--app junction \| vesper \| meridian \| aperture \| fluent \| player \| procedural` | Which app to mount. Default `junction`. `aperture` is the Jellyfin client — with `--server` it browses a real one, without it a fixture library. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample; `player` is `samples/HultUI.Samples.VideoPlayer` (libmpv; give it `--media <file>`); `procedural` is `samples/HultUI.Samples.ProceduralVideo`, frames from an algorithm. Both get frames from a worker thread in real time, so `settle` between shots, and `HULTUI_MEDIA_NOHIDE=1` keeps the bar from fading. |
 | `--repo <path>` | Junction: the repository to open. Defaults to the git root of the working directory. |
 | `--gitlab` | Junction: borrow the signed-in GitLab accounts from the user's real settings (tokens stay in the OS credential store), so the merge-request panel, pipeline glyphs and marks render against the real instance. |
 | `--theme <id>` | Junction: open in a colour scheme from `ThemeCatalog` (`dracula`, `gruvbox-dark`, `solarized-light`, ...). Default `nocturne`. |
@@ -58,6 +58,9 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 | `--size 1400x900` | Window size in layout units. |
 | `--dark true\|false` | Fluent sample only: which mode to open in. Default dark. |
 | `--accent 0-5` | Fluent sample only: which Windows accent preset. 0 blue, 1 purple, 2 teal, 3 green, 4 orange, 5 red. |
+| `--server <url>` | Aperture: the Jellyfin to browse, e.g. `http://jellyfin.home:8096`. Without it the app mounts a fixture library — every surface renders, but the artwork is placeholders. |
+| `--api-key-file <path>` / `APERTURE_API_KEY` | Aperture: an API key from the server's Dashboard → API Keys, which is how the driver signs in without a password. An API key browses; it does not carry watch state, so playback reports are accepted and not recorded. |
+| `--jellyfin-user <name-or-id>` | Aperture: which user to browse as, when the server has more than one. |
 | `--media <file>` | Player sample only: the file to open. `HULTUI_MPV_PATH` must point at a `libmpv-2.dll`; frames arrive on the software path from a worker thread, so `settle` before a shot. |
 
 ### Steps

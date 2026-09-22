@@ -990,6 +990,7 @@ var list = VirtualListElement<FileEntry>.New()
 | `.SelectedIndex(i)`, `.CanSelectMultiple()`, `.OnSelectionChanged(h)` | `SelectedIndex`, `CanSelectMultiple`, `SelectedIndices` | built-in selection, keyboard included |
 | `.OnActivateItem(h)` | `OnItemActivate` | called when assistive technology invokes or selects a row through the accessibility bridge; pointer and keyboard activation are the row template's own `OnClick` / `On<KeyDownEvent>` handlers |
 | `.KeyboardScroll(bool)` | `KeyboardScrollEnabled` | arrows / PageUp / PageDown / Home / End |
+| — | `RowsAreComposite` | one item is a row of controls (a wrap grid), so the realized rows answer to assistive tech rather than one node per item — see **A row that is not one thing** below |
 | — | `InvalidateHeights()`, `InvalidateRows()` | after a change the list cannot see |
 
 **How rows live.** The visible window plus a row or two of overscan is rebuilt on every
@@ -1013,6 +1014,14 @@ honoured, not clamped back to 0.
 
 **Accessibility.** The list is announced as a `List`; `AccessibleItemLabel` names each
 row without realizing it, so a reader can walk 20,000 items that were never built.
+
+**A row that is not one thing.** Drive a wrap grid through the list — one item per *row*
+of cards — and that model inverts: the list would publish one node per row, named after
+all the cards in it, and every card's own name, role and automation id would vanish from
+the tree. `RowsAreComposite = true` says the rows carry real controls, so the builder
+walks the realized rows instead of synthesizing item nodes. The trade is that off-screen
+rows are not in the tree; they enter it as they realize, the way a scroll view's content
+does. Aperture's poster grid is the case this exists for.
 
 ---
 

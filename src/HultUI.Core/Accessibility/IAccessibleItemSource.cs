@@ -36,6 +36,20 @@ public interface IAccessibleItemSource
     /// <summary>Total number of items — the virtual count, not the realized count.</summary>
     int ItemCount { get; }
 
+    /// <summary>
+    /// Whether each item should be published as one <see cref="AccessibilityRole.ListItem"/>
+    /// node named by <see cref="GetItemLabel"/>. True for an ordinary list, where a row is
+    /// one thing with one name and one action.
+    ///
+    /// <para>False when a row is <i>composite</i> — a grid row holding several cards, each
+    /// its own button. Publishing one node per row would then hide every control inside it
+    /// from assistive tech and from automation, so the builder walks the realized rows
+    /// instead and the container's own children answer for themselves. The cost is that
+    /// off-screen items are not in the tree: a container that turns this off is saying its
+    /// rows are made of real controls, and unrealized controls cannot be offered.</para>
+    /// </summary>
+    bool PublishesItemNodes => true;
+
     /// <summary>Fixed height of each item in layout units, used to compute item positions.</summary>
     float ItemHeight { get; }
 

@@ -34,6 +34,22 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     public Func<T, string?>? AccessibleLabel { get; set; }
 
     /// <summary>
+    /// Set when one item is a <i>row of controls</i> rather than one thing — a wrap grid
+    /// driven through this list, where each row holds several cards and every card is its
+    /// own button.
+    ///
+    /// <para>Off (the default), the list publishes one <c>ListItem</c> per item, named by
+    /// <see cref="AccessibleLabel"/>, including the items it has not realized — which is
+    /// right for a list and wrong for a grid, where it would replace a row's buttons with
+    /// a single node named after all of them. On, the accessibility tree walks the
+    /// realized rows instead, so each card appears with its own name, role and automation
+    /// id, exactly as it would outside a list. The trade is that off-screen rows are not
+    /// in the tree; they enter it as they realize, the same way a scroll view's content
+    /// does.</para>
+    /// </summary>
+    public bool RowsAreComposite { get; set; }
+
+    /// <summary>
     /// Optional handler run when assistive tech activates an item (its primary
     /// action, as a click would do). Lets a screen-reader user act on any item,
     /// including off-screen ones the list hasn't realized. Wire it to the same
@@ -74,6 +90,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
     //    virtualization hasn't materialized as elements. ──
     int IAccessibleItemSource.ItemCount => _items.Count;
     float IAccessibleItemSource.ItemHeight => _itemHeight;
+    bool IAccessibleItemSource.PublishesItemNodes => !RowsAreComposite;
     int IAccessibleItemSource.SelectedIndex => SelectedIndex;
     bool IAccessibleItemSource.CanSelectMultiple => CanSelectMultiple;
 
@@ -575,6 +592,7 @@ public sealed class VirtualListElement<T> : ScrollViewElement, IAccessibleItemSo
             SelectedIndex = vl.SelectedIndex;
             OnItemActivate = vl.OnItemActivate;
             AccessibleLabel = vl.AccessibleLabel;
+            RowsAreComposite = vl.RowsAreComposite;
             CanSelectMultiple = vl.CanSelectMultiple;
             OnSelectionChanged = vl.OnSelectionChanged;
             // Handlers aren't copied on patch, but this flag gates the mounted
