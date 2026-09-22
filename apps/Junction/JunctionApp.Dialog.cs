@@ -4,6 +4,7 @@ using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
+using Junction.Git;
 using Junction.Theme;
 
 namespace Junction;
@@ -211,17 +212,32 @@ public partial class JunctionApp
     private void DoCreateBranch(string name, string? startPoint, bool checkout)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.CreateBranch(name, startPoint);
-        if (!res.Success) { Flash(FirstLine(res.Stderr, "Create branch failed")); return; }
-        RememberBranchRoot(name);
-        if (checkout)
-        {
-            var co = repo.Checkout(name);
-            if (!co.Success) { Flash(FirstLine(co.Stderr, $"Created {name}, checkout failed")); RefreshAll(); return; }
-        }
-        Flash($"Created {name}");
-        RefreshAll();
+        RunGitCommand(
+            () =>
+            {
+                var created = repo.CreateBranch(name, startPoint);
+                return created.Success && checkout
+                    ? new CreateBranchOutcome(created, repo.Checkout(name))
+                    : new CreateBranchOutcome(created, null);
+            },
+            o =>
+            {
+                if (!o.Created.Success) { Flash(FirstLine(o.Created.Stderr, "Create branch failed")); return; }
+                RememberBranchRoot(name);
+                if (o.CheckedOut is { Success: false } co)
+                {
+                    Flash(FirstLine(co.Stderr, $"Created {name}, checkout failed"));
+                    RefreshAll();
+                    return;
+                }
+                Flash($"Created {name}");
+                RefreshAll();
+            });
     }
+
+    /// <summary>The create, and the checkout that may have followed it — null when the
+    /// create failed or the caller did not ask for one.</summary>
+    private readonly record struct CreateBranchOutcome(GitResult Created, GitResult? CheckedOut);
 
     /// <summary>Records the created branch's root so the next prompt opens on it. Recorded
     /// only after git accepted the name, so a rejected one cannot poison the seed.</summary>
@@ -250,9 +266,11 @@ public partial class JunctionApp
         (name, _) =>
         {
             if (ActiveRepo is not { } repo) return;
-            var res = repo.CreateTag(name, commit);
-            Flash(res.Success ? $"Tagged {name}" : FirstLine(res.Stderr, "Create tag failed"));
-            RefreshAll();
+            RunGitCommand(() => repo.CreateTag(name, commit), res =>
+            {
+                Flash(res.Success ? $"Tagged {name}" : FirstLine(res.Stderr, "Create tag failed"));
+                RefreshAll();
+            });
         },
         Validate: n => string.IsNullOrWhiteSpace(n) ? "Enter a tag name" : null));
 
@@ -264,9 +282,11 @@ public partial class JunctionApp
         (newName, _) =>
         {
             if (ActiveRepo is not { } repo) return;
-            var res = repo.RenameBranch(oldName, newName);
-            Flash(res.Success ? $"Renamed to {newName}" : FirstLine(res.Stderr, "Rename failed"));
-            RefreshAll();
+            RunGitCommand(() => repo.RenameBranch(oldName, newName), res =>
+            {
+                Flash(res.Success ? $"Renamed to {newName}" : FirstLine(res.Stderr, "Rename failed"));
+                RefreshAll();
+            });
         },
         Validate: BranchName.Validate), initial: oldName);
 
@@ -278,9 +298,11 @@ public partial class JunctionApp
         (upstream, _) =>
         {
             if (ActiveRepo is not { } repo) return;
-            var res = repo.SetUpstream(branch, upstream);
-            Flash(res.Success ? $"Upstream set to {upstream}" : FirstLine(res.Stderr, "Set upstream failed"));
-            RefreshAll();
+            RunGitCommand(() => repo.SetUpstream(branch, upstream), res =>
+            {
+                Flash(res.Success ? $"Upstream set to {upstream}" : FirstLine(res.Stderr, "Set upstream failed"));
+                RefreshAll();
+            });
         },
         Validate: u => string.IsNullOrWhiteSpace(u) ? "Enter an upstream ref" : null));
 }

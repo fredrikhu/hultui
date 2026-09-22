@@ -302,8 +302,10 @@ public partial class JunctionApp
     private void CheckoutBranch(string name)
     {
         if (ActiveRepo is not { } repo) return;
-        var result = repo.Checkout(name);
-        Flash(result.Success ? $"Checked out {BranchName.Parse(name).Title}" : FirstLine(result.Stderr, "Checkout failed"));
-        RefreshAll();
+        RunGitCommand(() => repo.Checkout(name), result =>
+        {
+            Flash(result.Success ? $"Checked out {BranchName.Parse(name).Title}" : FirstLine(result.Stderr, "Checkout failed"));
+            RefreshAll();
+        });
     }
 }

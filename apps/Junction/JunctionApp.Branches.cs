@@ -787,17 +787,19 @@ public partial class JunctionApp
     {
         if (ActiveRepo is not { } repo) return;
         // Non-force delete: git refuses to drop an unmerged branch, which keeps this safe.
-        var res = repo.DeleteBranch(b.Name, force);
-        if (res.Success)
+        RunGitCommand(() => repo.DeleteBranch(b.Name, force), res =>
         {
-            IncludeSet(_activeRepoPath).Remove(b.Name);
-            Flash($"Deleted {b.Name}");
-        }
-        else
-        {
-            Flash(FirstLine(res.Stderr, "Delete failed (branch not fully merged?)"));
-        }
-        RefreshAll();
+            if (res.Success)
+            {
+                IncludeSet(_activeRepoPath).Remove(b.Name);
+                Flash($"Deleted {b.Name}");
+            }
+            else
+            {
+                Flash(FirstLine(res.Stderr, "Delete failed (branch not fully merged?)"));
+            }
+            RefreshAll();
+        });
     }
 
     private static (string Remote, string RemoteBranch) UpstreamOf(GitBranch b)

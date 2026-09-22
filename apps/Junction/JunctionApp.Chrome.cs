@@ -227,7 +227,18 @@ public partial class JunctionApp
         RemoteOp op = RemoteOp.None)
     {
         bool busy = op != RemoteOp.None && _remoteOp == op;
+        // One remote command at a time, so while any of them is in flight every entry point
+        // refuses (see RemoteOpRunning) — including the two buttons that are not the one
+        // running. They have to *look* refused as well: they kept their pointer and their
+        // hover tint and then swallowed the click, which reads as a dropped press rather
+        // than as a busy app.
+        bool blocked = op != RemoteOp.None && RemoteOpRunning;
         var fg = primary ? Nocturne.Accent : Nocturne.Text;
+        // The running one already says so, in motion and in the present tense; its idle
+        // siblings have only the tooltip to explain why they will not answer.
+        var tooltip = busy ? RemoteOpLabel(op)
+            : blocked ? $"{label} — {RemoteOpLabel(_remoteOp)}"
+            : label;
 
         if (!compact)
         {
@@ -238,16 +249,30 @@ public partial class JunctionApp
                 ? Ui.PrimaryButton(busy ? RemoteOpLabel(op) : label, null, onClick)
                 : Ui.SecondaryButton(busy ? RemoteOpLabel(op) : label, null, onClick);
             full.InsertChild(0, RemoteOpIcon(glyph, 14f, fg, op));
+            full.Tooltip(tooltip);
+            if (blocked) full.Enabled(false);
             return full;
         }
+
+        // Compact is a plain box rather than a ButtonElement, so there is no Enabled(false)
+        // to lean on here: the refused build simply leaves out the pointer, the hover tint
+        // and the handler, and dims what remains. The one that is running keeps full-strength
+        // ink — dimming the thing you just pressed would read as the press having failed.
+        var ink = blocked && !busy ? Nocturne.Alpha(fg, 0.38) : fg;
+        var edge = primary ? Nocturne.Accent : Nocturne.Divider;
+        if (blocked && !busy) edge = Nocturne.Alpha(edge, 0.38);
 
         var b = Flex.Row(gap: 5).Height(34).MinWidth(34)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
             .Padding(new Thickness(0, 9, 0, 9))
             .CornerRadius(Nocturne.RadiusMd)
-            .BorderColor(primary ? Nocturne.Accent : Nocturne.Divider).BorderWidth(1f)
-            .Cursor(CursorType.Pointer).Tooltip(busy ? RemoteOpLabel(op) : label);
-        b.AddChild(RemoteOpIcon(glyph, 15f, fg, op));
+            .BorderColor(edge).BorderWidth(1f)
+            .Tooltip(tooltip);
+        b.AddChild(RemoteOpIcon(glyph, 15f, ink, op));
+        if (blocked)
+            return b;
+
+        b.Cursor(CursorType.Pointer);
         b.OnClick(_ => onClick());
         return b.HoverBg(Nocturne.Alpha(fg, primary ? 0.12 : 0.07), Color.Transparent);
     }

@@ -397,11 +397,13 @@ public partial class JunctionApp
     private void CheckoutTag(GitTag t)
     {
         if (ActiveRepo is not { } repo) return;
-        var result = repo.Checkout(t.Name);
-        Flash(result.Success
-            ? $"Checked out {t.Name} — HEAD is detached"
-            : FirstLine(result.Stderr, "Checkout failed"));
-        RefreshAll();
+        RunGitCommand(() => repo.Checkout(t.Name), result =>
+        {
+            Flash(result.Success
+                ? $"Checked out {t.Name} — HEAD is detached"
+                : FirstLine(result.Stderr, "Checkout failed"));
+            RefreshAll();
+        });
     }
 
     private async void PushTag(GitTag t)
@@ -422,11 +424,13 @@ public partial class JunctionApp
     private void DeleteTagAction(GitTag t)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.DeleteTag(t.Name);
-        Flash(res.Success
-            ? $"Deleted {t.Name} (was at {ShortHash(t.Hash)})"
-            : FirstLine(res.Stderr, "Delete failed"));
-        RefreshAll();
+        RunGitCommand(() => repo.DeleteTag(t.Name), res =>
+        {
+            Flash(res.Success
+                ? $"Deleted {t.Name} (was at {ShortHash(t.Hash)})"
+                : FirstLine(res.Stderr, "Delete failed"));
+            RefreshAll();
+        });
     }
 
     private async void DeleteRemoteTag(GitTag t, string remote)
@@ -490,8 +494,10 @@ public partial class JunctionApp
     private void DoCreateTag(string name, string? commit, bool annotated)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.CreateTag(name, commit, annotated ? name : null);
-        Flash(res.Success ? $"Created {name}" : FirstLine(res.Stderr, "Create tag failed"));
-        RefreshAll();
+        RunGitCommand(() => repo.CreateTag(name, commit, annotated ? name : null), res =>
+        {
+            Flash(res.Success ? $"Created {name}" : FirstLine(res.Stderr, "Create tag failed"));
+            RefreshAll();
+        });
     }
 }

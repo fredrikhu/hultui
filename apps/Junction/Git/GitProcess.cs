@@ -54,6 +54,15 @@ public static class GitProcess
         return psi;
     }
 
+    /// <summary>How long one async git invocation may run before it is killed. Git has no
+    /// network timeout of its own, so a command against a remote that has gone away — a
+    /// dropped VPN, a laptop that changed networks mid-fetch — waits forever. Forever was
+    /// not confined to that one command either: callers hold their "a remote command is
+    /// running" flag until this returns, so a single hung fetch refused every later fetch,
+    /// pull and push for the rest of the session. Generous enough that a first fetch of a
+    /// large repository over a slow link still finishes inside it.</summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
+
     public static Task<GitResult> RunAsync(string workingDirectory, params string[] args)
         => RunAsync(workingDirectory, null, args);
 
@@ -63,10 +72,42 @@ public static class GitProcess
     /// the terminal. The handler receives the prompt text and should return the
     /// passphrase, or null to cancel.
     /// </summary>
-    public static async Task<GitResult> RunAsync(
+    public static Task<GitResult> RunAsync(
         string workingDirectory,
         Func<string, Task<string?>>? askPassHandler,
         params string[] args)
+        => RunAsync(workingDirectory, askPassHandler, DefaultTimeout, CancellationToken.None, args);
+
+    /// <summary>
+    /// As <see cref="RunAsync(string, Func{string, Task{string?}}?, string[])"/>, with an
+    /// explicit budget and cancellation.
+    ///
+    /// <para>The body runs on the thread pool rather than on the caller's thread. An async
+    /// method runs synchronously until its first yielding await, and the first one here is a
+    /// read of the child's output — so <see cref="Process.Start(ProcessStartInfo)"/> used to
+    /// run on whichever thread called in, which from a toolbar handler is the UI thread.
+    /// Starting a process is not free under the load this app makes for itself: the
+    /// background sweep keeps git running across every open repository, each fetch fans out
+    /// into more of them, and the virus scanner meets every new git.exe. Measured between
+    /// 30 ms and 620 ms — a frame the window could not paint and a stretch where hover went
+    /// dead, all of it *before* the spinner that was meant to say "working" appeared.</para>
+    /// </summary>
+    public static Task<GitResult> RunAsync(
+        string workingDirectory,
+        Func<string, Task<string?>>? askPassHandler,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        string[] args)
+        => Task.Run(
+            () => RunCoreAsync(workingDirectory, askPassHandler, timeout, cancellationToken, args),
+            CancellationToken.None);
+
+    private static async Task<GitResult> RunCoreAsync(
+        string workingDirectory,
+        Func<string, Task<string?>>? askPassHandler,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        string[] args)
     {
         var psi = StartInfo(workingDirectory, args);
         psi.RedirectStandardOutput = true;
@@ -90,11 +131,49 @@ public static class GitProcess
         if (bridge != null && askPassHandler != null)
             _ = bridge.MonitorAsync(process, askPassHandler);
 
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (timeout > TimeSpan.Zero)
+            cts.CancelAfter(timeout);
+
+        try
+        {
+            // Exit first, then the pipes. Waiting on the readers first — as this used to —
+            // makes the budget unenforceable: a git that hangs never closes stdout, so the
+            // read never completes and there is nothing left to time out. Both readers are
+            // already in flight, so the pipes keep draining and a chatty command still
+            // cannot fill a buffer and deadlock.
+            await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The whole tree: fetch and push spawn ssh, and killing git alone leaves the
+            // child holding the pipes open, so the reads below would never return.
+            try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            try { await process.WaitForExitAsync().ConfigureAwait(false); } catch { /* ditto */ }
+
+            var partial = (await Drain(stderrTask).ConfigureAwait(false)).Trim();
+            var why = cancellationToken.IsCancellationRequested
+                ? "was cancelled"
+                : $"timed out after {timeout.TotalMinutes:N0} min";
+            return new GitResult(-1, "",
+                $"git {string.Join(' ', args)} {why} and was stopped."
+                + (partial.Length > 0 ? $"\n{partial}" : ""));
+        }
+
         var stdout = await stdoutTask.ConfigureAwait(false);
         var stderr = await stderrTask.ConfigureAwait(false);
-        await process.WaitForExitAsync().ConfigureAwait(false);
 
         return new GitResult(process.ExitCode, stdout, stderr);
+    }
+
+    /// <summary>Whatever a reader managed to collect, for the message a killed command
+    /// leaves behind. Bounded, because this runs on the failure path and must not become a
+    /// second place to hang: the pipe should close with the process, but the reason we are
+    /// here at all is that something about this command did not behave.</summary>
+    private static async Task<string> Drain(Task<string> reader)
+    {
+        try { return await reader.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+        catch { return ""; }
     }
 
     public static GitResult Run(string workingDirectory, params string[] args)

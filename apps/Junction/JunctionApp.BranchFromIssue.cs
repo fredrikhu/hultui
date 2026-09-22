@@ -1,5 +1,6 @@
 using System.Text;
 using HultUI.Core.Elements;
+using Junction.Git;
 using Junction.GitLab;
 
 namespace Junction;
@@ -69,22 +70,52 @@ public partial class JunctionApp
         var issue = IssuesFor(_activeRepoPath).Value.FirstOrDefault(i => i.Iid == iid);
         if (issue is null) { Flash($"Issue #{iid} is not among the loaded issues"); return; }
         var name = BranchNameForIssue(issue.Iid, issue.Title);
-        if (repo.LocalBranchExists(name))
-        {
-            var co = repo.Checkout(name);
-            Flash(co.Success ? $"Checked out {name}, which already existed" : FirstLine(co.Stderr, "Checkout failed"));
-            RefreshAll();
-            return;
-        }
+
+        // Read the loaders here, on the UI thread that owns them; the background half below
+        // must touch nothing but git.
         var defaultBranch = ProjectFor(_activeRepoPath).Value?.Project.DefaultBranch ?? "main";
         var remoteRef = $"{HostingRemoteName(_activeRepoPath)}/{defaultBranch}";
-        var start = repo.GetCommit(remoteRef) is not null ? remoteRef : defaultBranch;
-        var res = repo.CreateBranch(name, start);
-        if (!res.Success) { Flash(FirstLine(res.Stderr, "Create branch failed")); return; }
-        var checkout = repo.Checkout(name);
-        Flash(checkout.Success ? $"Created {name} from {start}" : FirstLine(checkout.Stderr, $"Created {name}, checkout failed"));
-        RefreshAll();
+
+        // Four git commands at worst, one after another. Run inline they were four process
+        // launches deep in a click handler, and the window painted nothing until the last
+        // one came back.
+        RunGitCommand(
+            () =>
+            {
+                if (repo.LocalBranchExists(name))
+                    return new BranchFromIssueOutcome(Existed: true, Created: false, "", repo.Checkout(name));
+
+                var start = repo.GetCommit(remoteRef) is not null ? remoteRef : defaultBranch;
+                var created = repo.CreateBranch(name, start);
+                return created.Success
+                    ? new BranchFromIssueOutcome(false, Created: true, start, repo.Checkout(name))
+                    : new BranchFromIssueOutcome(false, Created: false, start, created);
+            },
+            o =>
+            {
+                if (o.Existed)
+                    Flash(o.Result.Success
+                        ? $"Checked out {name}, which already existed"
+                        : FirstLine(o.Result.Stderr, "Checkout failed"));
+                else if (!o.Created)
+                {
+                    // Nothing changed, so nothing to reload — as before.
+                    Flash(FirstLine(o.Result.Stderr, "Create branch failed"));
+                    return;
+                }
+                else
+                    Flash(o.Result.Success
+                        ? $"Created {name} from {o.Start}"
+                        : FirstLine(o.Result.Stderr, $"Created {name}, checkout failed"));
+                RefreshAll();
+            });
     }
+
+    /// <summary>Which of the three paths through <see cref="CreateBranchFromIssue"/>'s git
+    /// work was taken, and how it ended — so the main thread can report it without asking
+    /// git anything further.</summary>
+    private readonly record struct BranchFromIssueOutcome(
+        bool Existed, bool Created, string Start, GitResult Result);
 
     /// <summary>GitLab's default branch-name template, <c>%{id}-%{title}</c>: the title
     /// lowercased, runs of anything but letters and digits as one dash, trimmed, cut to

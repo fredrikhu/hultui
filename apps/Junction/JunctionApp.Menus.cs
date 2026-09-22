@@ -189,23 +189,36 @@ public partial class JunctionApp
     private void DoCheckoutDetached(string hash)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.CheckoutDetached(hash);
-        Flash(res.Success ? $"Checked out {Short(hash)} (detached)" : FirstLine(res.Stderr, "Checkout failed"));
-        RefreshAll();
+        RunGitCommand(() => repo.CheckoutDetached(hash), res =>
+        {
+            Flash(res.Success ? $"Checked out {Short(hash)} (detached)" : FirstLine(res.Stderr, "Checkout failed"));
+            RefreshAll();
+        });
     }
 
     private void DoCherryPick(IReadOnlyList<string> hashesOldestFirst)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.CherryPick([.. hashesOldestFirst]);
-        if (res.Success)
-            Flash(hashesOldestFirst.Count > 1
-                ? $"Cherry-picked {hashesOldestFirst.Count} commits"
-                : $"Cherry-picked {Short(hashesOldestFirst[0])}");
-        else if (!StoppedOnConflict(repo, "Cherry-pick"))
-            Flash(FirstLine(res.Stderr, "Cherry-pick failed"));
-        RefreshAll();
+        string[] hashes = [.. hashesOldestFirst];
+        RunGitCommand(() => WithSequencerState(repo, repo.CherryPick(hashes)), r =>
+        {
+            if (r.Result.Success)
+                Flash(hashes.Length > 1
+                    ? $"Cherry-picked {hashes.Length} commits"
+                    : $"Cherry-picked {Short(hashes[0])}");
+            else if (!ReportSequencerStop(r.Sequencer, "Cherry-pick"))
+                Flash(FirstLine(r.Result.Stderr, "Cherry-pick failed"));
+            RefreshAll();
+        });
     }
+
+    /// <summary>A command's result together with the sequencer state it left behind, read on
+    /// the same background thread that ran the command — because deciding what to say about
+    /// a failure needs that answer, and asking git for it is another process.</summary>
+    private readonly record struct SequencerOutcome(GitResult Result, SequencerOp Sequencer);
+
+    private static SequencerOutcome WithSequencerState(GitRepository repo, GitResult result)
+        => new(result, result.Success ? SequencerOp.None : repo.GetSequencerOp());
 
     /// <summary>
     /// When a sequencer command exits non-zero because it stopped on a conflict rather
@@ -213,16 +226,23 @@ public partial class JunctionApp
     ///
     /// <para>Both cases are a non-zero exit, and telling them apart from stderr is a
     /// losing game across git versions — so ask the repository what state it is in
-    /// instead. Returns true when it was a stop, meaning the caller should not also
-    /// report a failure.</para>
+    /// instead. That question is a git call of its own, so it is asked off the UI thread
+    /// alongside the command (see <see cref="WithSequencerState"/>) and this half only
+    /// reports what was found. Returns true when it was a stop, meaning the caller should
+    /// not also report a failure.</para>
     /// </summary>
-    private bool StoppedOnConflict(GitRepository repo, string what)
+    private bool ReportSequencerStop(SequencerOp op, string what)
     {
-        if (repo.GetSequencerOp() == SequencerOp.None) return false;
+        if (op == SequencerOp.None) return false;
         Flash($"{what} stopped on conflicts — resolve them below");
         SetView(JunctionView.Changes);
         return true;
     }
+
+    /// <summary>The asking form, for callers that are already off the UI thread when they
+    /// need the answer — the remote commands, which have just awaited git.</summary>
+    private bool StoppedOnConflict(GitRepository repo, string what)
+        => ReportSequencerStop(repo.GetSequencerOp(), what);
 
     // ── Patch export ─────────────────────────────────────────────────────
 
@@ -323,49 +343,57 @@ public partial class JunctionApp
     private void DoRebase(string onto)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.Rebase(onto);
-        if (res.Success)
-            Flash($"Rebased onto {Short(onto)}");
-        else if (!StoppedOnConflict(repo, "Rebase"))
-            Flash(FirstLine(res.Stderr, "Rebase failed"));
-        RefreshAll();
+        RunGitCommand(() => WithSequencerState(repo, repo.Rebase(onto)), r =>
+        {
+            if (r.Result.Success)
+                Flash($"Rebased onto {Short(onto)}");
+            else if (!ReportSequencerStop(r.Sequencer, "Rebase"))
+                Flash(FirstLine(r.Result.Stderr, "Rebase failed"));
+            RefreshAll();
+        });
     }
 
     private void DoRevert(string hash)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.Revert(hash);
-        if (res.Success)
-            Flash($"Reverted {Short(hash)}");
-        else if (!StoppedOnConflict(repo, "Revert"))
-            Flash(FirstLine(res.Stderr, "Revert failed"));
-        RefreshAll();
+        RunGitCommand(() => WithSequencerState(repo, repo.Revert(hash)), r =>
+        {
+            if (r.Result.Success)
+                Flash($"Reverted {Short(hash)}");
+            else if (!ReportSequencerStop(r.Sequencer, "Revert"))
+                Flash(FirstLine(r.Result.Stderr, "Revert failed"));
+            RefreshAll();
+        });
     }
 
     private void DoReset(string hash, ResetMode mode)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.Reset(hash, mode);
-        Flash(res.Success ? $"Reset {mode.ToString().ToLowerInvariant()} to {Short(hash)}"
-                          : FirstLine(res.Stderr, "Reset failed"));
-        RefreshAll();
+        RunGitCommand(() => repo.Reset(hash, mode), res =>
+        {
+            Flash(res.Success ? $"Reset {mode.ToString().ToLowerInvariant()} to {Short(hash)}"
+                              : FirstLine(res.Stderr, "Reset failed"));
+            RefreshAll();
+        });
     }
 
     private void DoMerge(string branch)
     {
         if (ActiveRepo is not { } repo) return;
-        var res = repo.Merge(branch);
-        if (res.Success)
-            Flash($"Merged {branch}");
-        else if (repo.GetSequencerOp() != SequencerOp.None)
+        RunGitCommand(() => WithSequencerState(repo, repo.Merge(branch)), r =>
         {
-            // Conflicts — drop the user into the Changes view to resolve them.
-            Flash($"Merge conflicts in {branch} — resolve below");
-            SetView(JunctionView.Changes);
-        }
-        else
-            Flash(FirstLine(res.Stderr, "Merge failed"));
-        RefreshAll();
+            if (r.Result.Success)
+                Flash($"Merged {branch}");
+            else if (r.Sequencer != SequencerOp.None)
+            {
+                // Conflicts — drop the user into the Changes view to resolve them.
+                Flash($"Merge conflicts in {branch} — resolve below");
+                SetView(JunctionView.Changes);
+            }
+            else
+                Flash(FirstLine(r.Result.Stderr, "Merge failed"));
+            RefreshAll();
+        });
     }
 
     private static string Short(string hash) => hash.Length > 7 ? hash[..7] : hash;

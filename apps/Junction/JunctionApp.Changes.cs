@@ -1275,6 +1275,47 @@ public partial class JunctionApp
         });
     }
 
+    /// <summary>
+    /// Runs a git command off the UI thread and applies its result on the main thread once
+    /// it has finished. <paramref name="command"/> must do all of the talking to git —
+    /// including any follow-up query the result needs, such as asking what state the
+    /// sequencer is in — and <paramref name="apply"/> must do none of it.
+    ///
+    /// <para>These all used to run inline in the click handler that started them. One git
+    /// command costs a few hundred milliseconds here and several of them chain, so the
+    /// window stopped painting — no hover, no motion, nothing — until the last one returned.
+    /// Only the result touches the UI, so only the result needs the UI thread.</para>
+    ///
+    /// <para>Joins <see cref="_stagingChain"/> rather than running free: every one of these
+    /// takes git's index lock, and two racing for it makes one fail for a reason the user
+    /// did nothing to cause. Staging is optimistic on top of that, so a checkout fired
+    /// straight after a stage has to see the index the list is already showing.</para>
+    /// </summary>
+    private void RunGitCommand<T>(Func<T> command, Action<T> apply)
+        => _stagingChain = RunGitCommandAsync(command, apply);
+
+    private async Task RunGitCommandAsync<T>(Func<T> command, Action<T> apply)
+    {
+        // Read before the first await, so this is the chain as it stood when the click
+        // happened rather than the one this call is about to become.
+        var previous = _stagingChain;
+        try { await previous.ConfigureAwait(false); }
+        catch { /* the earlier command reported its own failure */ }
+
+        T result;
+        try { result = await Task.Run(command).ConfigureAwait(false); }
+        catch (Exception ex)
+        {
+            // Git throwing rather than failing is the unexpected case — a missing binary, a
+            // path that vanished. Say so instead of leaving the click looking ignored.
+            var message = ex.Message;
+            Application.InvokeOnMainThread(() => Flash(FirstLine(message, "Git command failed")));
+            return;
+        }
+
+        Application.InvokeOnMainThread(() => apply(result));
+    }
+
     private async void DoCommit()
     {
         // Staging is optimistic: the rows move before git has been asked. A commit pressed
@@ -1307,28 +1348,41 @@ public partial class JunctionApp
         if (!string.IsNullOrWhiteSpace(_commitDescription))
             message += "\n\n" + _commitDescription.Trim();
 
-        if (stageEverything && !repo.StageAll())
-        {
-            Flash("Stage failed");
-            return;
-        }
-
         bool sign = _settings.Git.SignCommits;
         bool amend = _amendCommit;
-        var result = amend ? repo.CommitAmend(message, sign) : repo.Commit(message, sign);
-        if (result.Success)
-        {
-            _commitSummary = "";
-            _commitDescription = "";
-            // The next commit is a new one unless it is asked for again — see _amendCommit.
-            _amendCommit = false;
-            _amendPrefill = null;
-            Flash((amend ? "Amended" : "Committed") + (sign ? " (signed)" : ""));
-            RefreshAll();
-        }
-        else
-        {
-            Flash(FirstLine(result.Stderr, amend ? "Amend failed" : "Commit failed"));
-        }
+        bool stageAll = stageEverything;
+
+        // The await above does not get this off the UI thread: awaiting an already-completed
+        // task continues synchronously, and the chain is complete whenever nothing was staged
+        // in the last moment — which is most of the time. So the commit itself has to be
+        // handed off explicitly. It is the slowest of these commands, too: hooks run inside
+        // it, and a signed commit waits on gpg.
+        RunGitCommand(
+            () => stageAll && !repo.StageAll()
+                ? new CommitOutcome(Staged: false, null)
+                : new CommitOutcome(true, amend ? repo.CommitAmend(message, sign) : repo.Commit(message, sign)),
+            o =>
+            {
+                if (!o.Staged) { Flash("Stage failed"); return; }
+                var result = o.Result!;
+                if (result.Success)
+                {
+                    _commitSummary = "";
+                    _commitDescription = "";
+                    // The next commit is a new one unless it is asked for again — see _amendCommit.
+                    _amendCommit = false;
+                    _amendPrefill = null;
+                    Flash((amend ? "Amended" : "Committed") + (sign ? " (signed)" : ""));
+                    RefreshAll();
+                }
+                else
+                {
+                    Flash(FirstLine(result.Stderr, amend ? "Amend failed" : "Commit failed"));
+                }
+            });
     }
+
+    /// <summary>Whether the implicit "stage everything first" step got through, and the
+    /// commit that followed it — null when it did not.</summary>
+    private readonly record struct CommitOutcome(bool Staged, GitResult? Result);
 }

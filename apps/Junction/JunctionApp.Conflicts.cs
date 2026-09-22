@@ -605,14 +605,17 @@ public partial class JunctionApp
     private void StageResolved(string path)
     {
         if (ActiveRepo is not { } repo) return;
-        if (!repo.Stage(path)) { Flash("Could not stage " + System.IO.Path.GetFileName(path)); return; }
-        _conflictChoices.Clear();
-        _conflictManual.Clear();
-        _conflictEditing = null;
-        // Keep the file selected as a normal staged change so its merged diff shows.
-        RetargetChangeSelection([path], ChangeSection.Staged);
-        Flash($"Resolved {System.IO.Path.GetFileName(path)}");
-        RefreshAll();
+        RunGitCommand(() => repo.Stage(path), staged =>
+        {
+            if (!staged) { Flash("Could not stage " + System.IO.Path.GetFileName(path)); return; }
+            _conflictChoices.Clear();
+            _conflictManual.Clear();
+            _conflictEditing = null;
+            // Keep the file selected as a normal staged change so its merged diff shows.
+            RetargetChangeSelection([path], ChangeSection.Staged);
+            Flash($"Resolved {System.IO.Path.GetFileName(path)}");
+            RefreshAll();
+        });
     }
 
     // ── Actions ──────────────────────────────────────────────────────────
