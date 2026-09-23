@@ -2355,7 +2355,14 @@ public partial class CommanderApp : Component, IDisposable
         // rather than climbing above it.
         if (ExitResults(side)) { MarkDirty(); return; }
         var dir = Dir(side);
-        // Already at a drive / UNC root → stay put. (Trimming the trailing separator off
+        // A share root's parent is its server — "\\server\share" is a path root, so the test
+        // below would stop there and leave the share with no way out but the go-to prompt.
+        if (PathProbe.UncParentOf(dir) is { } host)
+        {
+            NavigateTo(side, host, ShareNameOf(dir));
+            return;
+        }
+        // Already at a drive / server root → stay put. (Trimming the trailing separator off
         // "C:\" leaves "C:", which Directory.GetParent resolves relative to the process's
         // working directory — i.e. it would jump to the parent of the launch folder.)
         if (PathEquals(dir, System.IO.Path.GetPathRoot(dir) ?? dir)) return;
@@ -2364,6 +2371,16 @@ public partial class CommanderApp : Component, IDisposable
         if (parent == null) return;
         var leaving = new DirectoryInfo(dir).Name;
         NavigateTo(side, parent.FullName, leaving);
+    }
+
+    /// <summary>The share's own name out of "\\server\share", so climbing to the server lands
+    /// the cursor on the share just left — what every other ascent does. <c>DirectoryInfo.Name</c>
+    /// answers "\\server\share" for one of these, which would match nothing in the listing.</summary>
+    private static string ShareNameOf(string shareRoot)
+    {
+        var trimmed = shareRoot.Replace('/', '\\').TrimEnd('\\');
+        int slash = trimmed.LastIndexOf('\\');
+        return slash > 1 ? trimmed[(slash + 1)..] : trimmed;
     }
 
     /// <summary>Ctrl+R. A folder is re-read by bumping the pane's generation; a fed-in result

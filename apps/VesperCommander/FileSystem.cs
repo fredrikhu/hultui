@@ -113,6 +113,11 @@ public static class FileSystem
     {
         if (ct.IsCancellationRequested) return DirListing.Loading;
 
+        // A bare "\\server" is not a directory — the share below it is the first thing that is —
+        // so it is listed through the network provider rather than read off a disk.
+        if (PathProbe.ServerRootOf(path) is { } server)
+            return ListShares(server, showHidden, sort, descending, ct);
+
         // A path that descends into an archive lists through the VFS instead of disk.
         if (ArchivePath.TryParse(path) is { } ap)
             return ListArchive(ap.ArchiveFile, ap.Internal, sort, dirsFirst, descending, sevenZip, password);
@@ -168,9 +173,12 @@ public static class FileSystem
         var cmp = Comparator(sort, descending);
 
         var result = new List<FileEntry>(dirs.Count + files.Count + 1);
-        var parent = Directory.GetParent(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        // A share root's parent is its server, which Directory.GetParent has no answer for —
+        // it stops at "\\server\share" and reports null, leaving the share with no way out.
+        var parent = PathProbe.UncParentOf(trimmed) ?? Directory.GetParent(trimmed)?.FullName;
         if (parent != null)
-            result.Add(new FileEntry("..", parent.FullName, IsDir: true, 0, DateTime.Now, IsParent: true));
+            result.Add(new FileEntry("..", parent, IsDir: true, 0, DateTime.Now, IsParent: true));
 
         if (dirsFirst)
         {
@@ -237,6 +245,43 @@ public static class FileSystem
         // Descending reverses within each group; ".." still leads and dirs-before-files holds.
         if (descending) { var asc = cmp; cmp = (a, b) => asc(b, a); }
         return cmp;
+    }
+
+    /// <summary>The shares <paramref name="server"/> offers, as a folder listing. No ".." — a
+    /// server is the top of its tree. Hidden (<c>$</c>-suffixed) shares follow the same toggle
+    /// as hidden files; the network provider rarely offers them at all.
+    ///
+    /// <para>The host is dialled first, so a server that is not there costs the probe's budget
+    /// rather than the operating system's patience — the enumeration is a network call with no
+    /// timeout of ours, exactly the shape this whole seam exists to keep bounded.</para></summary>
+    private static DirListing ListShares(string server, bool showHidden, SortMode sort,
+        bool descending, CancellationToken ct)
+    {
+        if (!PathProbe.ReachableAsync($@"\\{server}", PathProbe.ReachBudget, ct)
+                .GetAwaiter().GetResult())
+            return new(PaneState.Offline, []);
+        if (ct.IsCancellationRequested) return DirListing.Loading;
+
+        var listing = NetworkShares.List(server, ct);
+        if (ct.IsCancellationRequested) return DirListing.Loading;
+
+        var state = listing.Status switch
+        {
+            ShareListStatus.Ok => PaneState.Ok,
+            ShareListStatus.Empty => PaneState.Empty,
+            ShareListStatus.Denied => PaneState.Denied,
+            _ => PaneState.Offline,
+        };
+        if (state is not (PaneState.Ok or PaneState.Empty)) return new(state, []);
+
+        var entries = new List<FileEntry>(listing.Shares.Count);
+        foreach (var name in listing.Shares)
+        {
+            if (!showHidden && name.EndsWith('$')) continue;
+            entries.Add(new FileEntry(name, $@"\\{server}\{name}", IsDir: true, 0, DateTime.Now));
+        }
+        entries.Sort(Comparator(sort, descending));
+        return new(entries.Count == 0 ? PaneState.Empty : PaneState.Ok, entries);
     }
 
     /// <summary>List one level inside an archive through the VFS, sorted like a folder.

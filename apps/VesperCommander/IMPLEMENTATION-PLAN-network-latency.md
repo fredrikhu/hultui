@@ -7,7 +7,9 @@ Prerequisite for UNC support, but not specific to it: every fix here also covers
 > gained an enumeration seam so the between-entries check is testable (P3/P4), and the
 > connecting threshold is measured on the application clock rather than the wall (P3).
 > `FileSystem.FreeLabel` remains a UI-thread network call on a **mapped** network drive — see
-> Deferred.
+> Deferred. Browsing a bare `\\server` followed as a fifth slice, on the same rule: the host is
+> dialled before the enumeration, so an absent server costs the probe's budget rather than the
+> operating system's patience.
 
 ## The measurements (this machine, 2026-09-22)
 
@@ -95,7 +97,7 @@ Four phases, one commit each. **P1 + P2 alone fix the reported freeze** and are 
 
 **Decided:** only a connect *timeout* short-circuits reachability (P1); session restore stops filtering rather than learning to probe (P2); a cancelled listing returns a sentinel rather than throwing (P3).
 
-**Deferred (not in this batch):** browsing `\\server` to enumerate its shares (needs `WNetEnumResource`); `WNetAddConnection2` credential prompts; the drive-picker and breadcrumb work for letterless roots; the `longPathAware` manifest; throttling `ThumbnailCache` concurrency on a remote pane. These are the rest of UNC support and none of them block this one.
+**Deferred (not in this batch):** `WNetAddConnection2` credential prompts; the drive-picker and breadcrumb work for letterless roots; the `longPathAware` manifest; throttling `ThumbnailCache` concurrency on a remote pane. These are the rest of UNC support and none of them block this one.
 
 **Deferred, and the one thing here that is still a UI-thread network call:**
 `FileSystem.FreeLabel` (`FileSystem.cs:413`), which `BuildFooter` asks on every build for both

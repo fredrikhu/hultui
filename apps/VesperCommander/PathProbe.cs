@@ -78,6 +78,32 @@ public static class PathProbe
         return host.Length == 0 ? null : host;
     }
 
+    /// <summary>The server name when <paramref name="path"/> is a bare <c>\\server</c> and
+    /// nothing under it, else null. This is the one UNC shape the filesystem API cannot answer
+    /// for — a server is not a directory, the share is — so it is listed through
+    /// <see cref="NetworkShares"/> instead of read.</summary>
+    public static string? ServerRootOf(string? path)
+    {
+        if (HostOf(path) is not { } host) return null;
+        var p = path!.Replace('/', '\\');
+        if (p.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) p = @"\\" + p[8..];
+        // Nothing but the host: "\\server", or "\\server\" with the separator and no share.
+        return p.TrimEnd('\\').Length == host.Length + 2 ? host : null;
+    }
+
+    /// <summary>The parent of a UNC path that <see cref="Directory.GetParent"/> has no answer
+    /// for: a share root's parent is its server. Null for anything else, including a server
+    /// root, which is the top of the tree.</summary>
+    public static string? UncParentOf(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || ServerRootOf(path) != null) return null;
+        if (HostOf(path) is not { } host) return null;
+        var p = path.Replace('/', '\\').TrimEnd('\\');
+        // Only a share root climbs to the server; deeper paths have a real parent directory.
+        int afterHost = 2 + host.Length;
+        return p.Length > afterHost && p.IndexOf('\\', afterHost + 1) < 0 ? @"\\" + host : null;
+    }
+
     // Drive letter → "is a mapped network drive". Rebuilt on a TTL so a drive mapped while
     // the app is running is picked up, and cached because IsRemote is asked per navigation.
     private static readonly object DriveLock = new();
@@ -195,6 +221,11 @@ public static class PathProbe
     {
         if (IsRemote(path) && !await ReachableAsync(path, ReachBudget, ct).ConfigureAwait(false))
             return PathKind.Unreachable;
+
+        // A reachable server browses like a folder even though no filesystem call agrees:
+        // Directory.Exists(@"\\server") is false because a server is not a directory. Asking
+        // the disk here would report Missing and refuse a path that is perfectly good.
+        if (ServerRootOf(path) != null) return PathKind.Directory;
 
         // Not cancellable, and deliberately not handed `ct`: a token there would only stop it
         // from starting. Once running it owns its thread until the OS answers.
