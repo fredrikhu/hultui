@@ -215,7 +215,10 @@ public partial class CommanderApp
         // filter that hides everything shows a "no matches" hint instead of a bare ".." row.
         bool noMatches = _search.Length > 0 && active && !list.Any(e => !e.IsParent);
         pane.AddChild(state != PaneState.Ok
-            ? (ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
+            // While connecting, the held archive status belongs to the folder being left —
+            // showing its error over the wait would be a message about somewhere else.
+            ? (state != PaneState.Connecting
+                    && ArchiveStatusOf(side) is { } arcStatus && arcStatus is not ArchiveStatus.Empty
                 ? BuildArchiveError(side, arcStatus)
                 : BuildStateBlock(side, state))
             : noMatches
@@ -902,6 +905,19 @@ public partial class CommanderApp
                 line.AddChild(Text.New("is not available").FontSize(12f).TextColor(Nocturne.Neutral400));
                 block.AddChild(line);
                 block.AddChild(GhostButton("Reconnect", () => RetryPane(side)));
+                break;
+
+            case PaneState.Connecting:
+                block.AddChild(Spinner.New(20f));
+                var waiting = Flex.Row(gap: 5).AlignItems(AlignItems.Center);
+                waiting.AddChild(Text.New("Connecting to").FontSize(12f).TextColor(Nocturne.Neutral400));
+                waiting.AddChild(Ui.Mono((System.IO.Path.GetPathRoot(Dir(side)) ?? Dir(side))
+                    .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar),
+                    12f, Nocturne.Neutral300));
+                block.AddChild(waiting);
+                // Nothing to go back to on a cold start — the listing resolves to Offline on
+                // its own, and a button that cannot act is worse than no button.
+                block.AddChild(GhostButton("Cancel", () => CancelPaneLoad(side), CanCancelPaneLoad(side)));
                 break;
 
             case PaneState.Denied:
