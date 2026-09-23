@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -31,7 +31,9 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         _items = items;
         _theme = theme;
         _closeMenu = closeMenu;
-        _hasIcons = items.Any(i => i.Glyph is not null || i.Icon is not null);
+        // A choice reserves the icon column whether or not it is the one in force, so
+        // turning one on does not shift every label sideways.
+        _hasIcons = items.Any(i => i.Glyph is not null || i.Icon is not null || i.IsChecked is not null);
 
         OnOwn<PointerMoveEvent>(OnPointerMove);
         OnOwn<PointerDownEvent>(OnPointerDown);
@@ -95,6 +97,12 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
         // The shortcut is part of what the item is — "Copy, Ctrl C" is how a reader
         // announces it everywhere else.
         return string.IsNullOrEmpty(menuItem.ShortcutHint) ? menuItem.Label : $"{menuItem.Label}, {menuItem.ShortcutHint}";
+    }
+
+    bool? Accessibility.IAccessibleItemSource.ItemIsToggled(int index)
+    {
+        int item = ItemIndex(index);
+        return item < 0 ? null : _items[item].IsChecked;
     }
 
     void Accessibility.IAccessibleItemSource.ActivateItem(int index)
@@ -346,8 +354,11 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
 
             var labelStyle = item.IsDisabled ? disabledStyle : item.IsDanger ? dangerStyle : itemStyle;
 
-            // Leading glyph (fixed icon column, so labels stay aligned).
-            if (item.Glyph is not null || item.Icon is not null)
+            // Leading glyph (fixed icon column, so labels stay aligned). The check mark
+            // for the choice in force lives in the same column, so a menu never mixes an
+            // icon with a mark on one row.
+            var glyph = item.Glyph ?? (item.IsChecked == true ? _theme.CheckGlyph : null);
+            if (glyph is not null || item.Icon is not null)
             {
                 var glyphRect = new Rect(
                     box.X + _theme.ItemPadding.Left,
@@ -358,8 +369,8 @@ internal sealed class ContextMenuElement : Element, Accessibility.IAccessibleIte
                 // label resolved to, so disabled and danger items stay consistent.
                 if (item.Icon?.Invoke(labelStyle.TextColor) is { } icon)
                     ctx.DrawImage(icon, glyphRect, ImageFit.Contain);
-                else if (item.Glyph is not null)
-                    ctx.DrawText(item.Glyph, glyphRect, labelStyle, TextOverflow.Clip, 1);
+                else if (glyph is not null)
+                    ctx.DrawText(glyph, glyphRect, labelStyle, TextOverflow.Clip, 1);
             }
 
             // Label

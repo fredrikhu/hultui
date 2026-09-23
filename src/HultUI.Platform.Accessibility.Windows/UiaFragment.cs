@@ -1,4 +1,4 @@
-using System.Runtime.Versioning;
+﻿using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
@@ -91,7 +91,10 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
                 => new UiaInvokeProvider(_bridge, ElementId),
             AccessibilityRole.ListItem when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),
-            (AccessibilityRole.Checkbox or AccessibilityRole.Switch) when patternId == UiaInterop.UIA_TogglePatternId
+            // Any node carrying a toggle state offers the pattern, whatever its role — a
+            // menu item marking the current choice is a ListItem with a state, not a
+            // checkbox, and a client that asks by pattern would otherwise be told no.
+            _ when patternId == UiaInterop.UIA_TogglePatternId && _isToggled is not null
                 => new UiaToggleProvider(_bridge, ElementId),
             AccessibilityRole.RadioButton when patternId == UiaInterop.UIA_SelectionItemPatternId
                 => new UiaSelectionItemProvider(_bridge, ElementId),

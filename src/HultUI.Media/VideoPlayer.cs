@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Animation;
 using HultUI.Core.Builders;
 using HultUI.Core.Components;
@@ -342,7 +342,8 @@ public sealed class VideoPlayer : Component
             items.Add(TextButton(theme, RateLabel(player.Rate), "Playback speed", "video-rate",
                 () => Rates.Select(r => new ContextMenuItem
                 {
-                    Label = (Math.Abs(r - player.Rate) < 0.001 ? "• " : "   ") + RateLabel(r),
+                    Label = RateLabel(r),
+                    IsChecked = Math.Abs(r - player.Rate) < 0.001,
                     Action = () => player.Rate = r,
                 }).ToArray()));
         }
@@ -374,7 +375,8 @@ public sealed class VideoPlayer : Component
 
     private static ContextMenuItem TrackItem(string title, int? id, int? selected, Action<int?> select) => new()
     {
-        Label = (id == selected ? "• " : "   ") + title,
+        Label = title,
+        IsChecked = id == selected,
         Action = () => select(id),
     };
 

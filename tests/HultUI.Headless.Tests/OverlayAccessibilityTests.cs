@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
@@ -82,6 +82,58 @@ public class OverlayAccessibilityTests
         session.PumpFrame();
 
         Assert.True(ran, "the point the snapshot reported did not hit the item");
+    }
+
+    [Fact]
+    public void TheCurrentChoiceIsReportedAsCheckedAndTogglingItChoosesIt()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        string picked = "";
+        var target = Box.New().Width(120).Height(40).AccessibleName("Target")
+            .ContextMenu(() => [
+                new ContextMenuItem { Label = "Grid", IsChecked = true, Action = () => picked = "Grid" },
+                new ContextMenuItem { Label = "List", IsChecked = false, Action = () => picked = "List" },
+            ]);
+        session.Window.SetRoot(Box.New().FlexGrow(1).Children(target));
+        session.PumpFrame();
+        session.Window.Window.OpenContextMenu(target, new Point(200, 150));
+        session.PumpFrame();
+
+        var items = Walk(session.Window.AccessibilityTree).Where(n => n.Name is "Grid" or "List").ToList();
+        Assert.Equal(2, items.Count);
+        Assert.True(items[0].IsToggled);
+        Assert.False(items[1].IsToggled);
+
+        // What a screen reader does with the Toggle pattern: the id of a drawn menu item
+        // carries its menu, and toggling a choice is choosing it.
+        var router = new AccessibilityActionRouter(session.Window.Window);
+        session.Window.Window.SetActionRouter(router);
+        router.ToggleElement(items[1].ElementId);
+        session.PumpFrame();
+
+        Assert.Equal("List", picked);
+    }
+
+    [Fact]
+    public void AnActionAimedAtAMenuItemReachesIt()
+    {
+        using var session = HeadlessSession.Create(600, 400);
+        bool ran = false;
+        var target = Box.New().Width(120).Height(40).AccessibleName("Target")
+            .ContextMenu(() => [new ContextMenuItem { Label = "Play", Action = () => ran = true }]);
+        session.Window.SetRoot(Box.New().FlexGrow(1).Children(target));
+        session.PumpFrame();
+        session.Window.Window.OpenContextMenu(target, new Point(200, 150));
+        session.PumpFrame();
+
+        // An overlay is not in the root tree, so looking an id up there alone made every
+        // action on an open menu or dialog a silent no-op.
+        var router = new AccessibilityActionRouter(session.Window.Window);
+        session.Window.Window.SetActionRouter(router);
+        router.InvokeElement(Walk(session.Window.AccessibilityTree).First(n => n.Name == "Play").ElementId);
+        session.PumpFrame();
+
+        Assert.True(ran, "the menu item was invoked and nothing happened");
     }
 
     [Fact]

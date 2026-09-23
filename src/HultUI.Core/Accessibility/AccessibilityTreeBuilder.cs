@@ -177,7 +177,7 @@ public static class AccessibilityTreeBuilder
                 isFocusable: false,
                 isFocused: false,
                 isEnabled: true,
-                isToggled: null,
+                isToggled: source.ItemIsToggled(i),
                 value: null)
             {
                 IsOffscreen = !RectsIntersect(clip, rect),

@@ -14,6 +14,19 @@ public sealed class ContextMenuItem
     public string? Glyph { get; init; }
 
     /// <summary>
+    /// Whether this item is <i>a choice</i>, and whether it is the one in force: true
+    /// draws the theme's check mark in the icon column, false leaves the column empty,
+    /// and <c>null</c> — the default — means the item is not a choice at all. An item that
+    /// can be off reserves the column while it is off, so turning it on moves nothing.
+    ///
+    /// <para>This is how a current choice is marked, rather than by writing a bullet into
+    /// <see cref="Label"/>: assistive tech is told the item is checked, where a label
+    /// beginning "• " is simply read out as punctuation — and the spaces its unchecked
+    /// siblings need in order to line up are read out with them.</para>
+    /// </summary>
+    public bool? IsChecked { get; init; }
+
+    /// <summary>
     /// Optional leading icon as artwork, taking precedence over <see cref="Glyph"/>.
     /// Reserves the same icon column.
     ///

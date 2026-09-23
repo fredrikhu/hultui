@@ -1,4 +1,4 @@
-using System.Runtime.Versioning;
+﻿using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -57,12 +57,24 @@ internal sealed class UiaHostBridge : IUiaHostBridge, IDisposable
         _ => null,
     };
 
-    public bool? GetToggleState(ElementId id) => GetElementOrNull(id) switch
+    public bool? GetToggleState(ElementId id)
     {
-        CheckboxElement cb => cb.IsChecked,
-        RadioButtonElement rb => rb.IsChecked,
-        _ => null,
-    };
+        // A virtualized item is not an element: its id carries the list it belongs to and
+        // its index, and the list answers for it — which is how a menu reports which of
+        // its choices is the one in force.
+        if (VirtualItemId.TryDecode(id, out var listId, out int index))
+        {
+            try { return GetElementOrNull(listId) is IAccessibleItemSource s ? s.ItemIsToggled(index) : null; }
+            catch { return null; }
+        }
+
+        return GetElementOrNull(id) switch
+        {
+            CheckboxElement cb => cb.IsChecked,
+            RadioButtonElement rb => rb.IsChecked,
+            _ => null,
+        };
+    }
 
     public int GetItemCount(ElementId listId)
     {

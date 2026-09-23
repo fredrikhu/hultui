@@ -62,6 +62,34 @@ public class ContextMenuAccessibilityTests
     }
 
     [Fact]
+    public void TheChoiceInForceIsCheckedRatherThanMarkedInItsName()
+    {
+        var tree = BuildLaidOut(Menu(
+            new ContextMenuItem { Label = "Grid", IsChecked = true },
+            new ContextMenuItem { Label = "List", IsChecked = false }));
+
+        // The mark is a state, not punctuation in front of the label: a reader says
+        // "Grid, on" rather than "bullet Grid", and "List" is not three spaces long.
+        Assert.Equal("Grid", tree.Children[0].Name);
+        Assert.Equal("List", tree.Children[1].Name);
+        Assert.True(tree.Children[0].IsToggled);
+        Assert.False(tree.Children[1].IsToggled);
+    }
+
+    [Fact]
+    public void AnOrdinaryItemHasNoToggleStateAtAll()
+    {
+        var tree = BuildLaidOut(Menu(
+            new ContextMenuItem { Label = "Play" },
+            new ContextMenuItem { Label = "Subtitles on", IsChecked = false }));
+
+        // Null is "this is not a thing that can be on", which is different from "off" —
+        // the bridge maps the two to different UIA answers.
+        Assert.Null(tree.Children[0].IsToggled);
+        Assert.False(tree.Children[1].IsToggled);
+    }
+
+    [Fact]
     public void ADisabledItemDoesNothingWhenInvoked()
     {
         bool ran = false;

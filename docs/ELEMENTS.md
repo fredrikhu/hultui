@@ -1018,7 +1018,15 @@ row without realizing it, so a reader can walk 20,000 items that were never buil
 **Items that are drawn, not built.** `IAccessibleItemSource` is not only for lists that
 virtualize: a container that paints its own rows — the context menu does — implements it so
 those rows reach assistive tech at all. `ItemBounds(i)` places them when they are not a
-uniform height (a menu with separators in it).
+uniform height (a menu with separators in it), and `ItemIsToggled(i)` says which of them is
+the choice in force.
+
+**Marking the current choice.** Set `ContextMenuItem.IsChecked` rather than writing a mark
+into `Label`. `true` draws the theme's `CheckGlyph` in the icon column, `false` reserves the
+column while the item is off (so turning it on shifts nothing), and `null` — the default —
+means the item is not a choice. A label that begins `"• "` is read out as punctuation, and
+the spaces its unchecked siblings need in order to line up are read out with them; a checked
+state is announced as a state and exposed through UIA's Toggle pattern and AT-SPI's `checked`.
 
 **A row that is not one thing.** Drive a wrap grid through the list — one item per *row*
 of cards — and that model inverts: the list would publish one node per row, named after

@@ -507,9 +507,18 @@ public sealed class Window : IOverlayHost, IDisposable
     /// route UIA actions back to the originating element. Returns null if
     /// the element has been removed.
     /// </summary>
+    /// <summary>
+    /// The element with this id, anywhere in the window — including inside an open
+    /// overlay. Accessibility actions arrive as an id and nothing else, and what assistive
+    /// tech acts on is usually whatever just opened over the window: a menu item, a field
+    /// in a dialog. Searching the root alone made every one of those a silent no-op.
+    /// </summary>
     internal Element? FindElement(ElementId id)
     {
-        return _root is null ? null : FindInTree(_root, id);
+        if (_root is not null && FindInTree(_root, id) is { } found) return found;
+        for (int i = 0; i < _overlays.Count; i++)
+            if (FindInTree(_overlays[i].Content, id) is { } inOverlay) return inOverlay;
+        return null;
     }
 
     private static Element? FindInTree(Element e, ElementId id)

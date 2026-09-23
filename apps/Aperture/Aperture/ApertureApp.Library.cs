@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -192,18 +192,21 @@ public sealed partial class ApertureApp
         [
             new ContextMenuItem
             {
-                Label = (data.Layout == LibraryLayout.Grid ? "• " : "   ") + "Grid",
+                Label = "Grid",
+                IsChecked = data.Layout == LibraryLayout.Grid,
                 Action = () => SetLayout(LibraryLayout.Grid),
             },
             new ContextMenuItem
             {
-                Label = (data.Layout == LibraryLayout.List ? "• " : "   ") + "List",
+                Label = "List",
+                IsChecked = data.Layout == LibraryLayout.List,
                 Action = () => SetLayout(LibraryLayout.List),
             },
             ContextMenuItem.Separator(),
             new ContextMenuItem
             {
-                Label = (data.ShowCardTitles ? "• " : "   ") + "Titles under posters",
+                Label = "Titles under posters",
+                IsChecked = data.ShowCardTitles,
                 Action = () => { data.ShowCardTitles = !data.ShowCardTitles; _settings.Save(); Rerender(); },
             },
         ];
@@ -221,14 +224,15 @@ public sealed partial class ApertureApp
     {
         var items = new List<ContextMenuItem>
         {
-            new() { Label = (GridGenre is null ? "• " : "   ") + "Any genre", Action = () => SetGridGenre(null) },
+            new() { Label = "Any genre", IsChecked = GridGenre is null, Action = () => SetGridGenre(null) },
         };
         foreach (var genre in Genres)
         {
             var g = genre;
             items.Add(new ContextMenuItem
             {
-                Label = (GridGenre?.Id == g.Id ? "• " : "   ") + g.Name,
+                Label = g.Name,
+                IsChecked = GridGenre?.Id == g.Id,
                 Action = () => SetGridGenre(g),
             });
         }

@@ -63,6 +63,14 @@ public interface IAccessibleItemSource
     (float Top, float Height)? ItemBounds(int index) => null;
 
     /// <summary>
+    /// Whether the item at <paramref name="index"/> is a choice that is on or off, or
+    /// <c>null</c> (the default) when the item has no such state. A menu of choices
+    /// answers here rather than marking the chosen one inside its label, where the mark
+    /// would be read out as punctuation.
+    /// </summary>
+    bool? ItemIsToggled(int index) => null;
+
+    /// <summary>
     /// Index of the currently selected item, or -1 if none. Exposed so assistive
     /// tech can report and move to the selection (UIA SelectionItem). Single-select.
     /// </summary>

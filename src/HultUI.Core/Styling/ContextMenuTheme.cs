@@ -23,6 +23,11 @@ public sealed class ContextMenuTheme : IThemeExtension<ContextMenuTheme>
     public float ShortcutGap { get; init; } = 24f;
     public float IconGap { get; init; } = 9f;
 
+    /// <summary>The mark drawn in the icon column for the item in force
+    /// (<see cref="Elements.ContextMenuItem.IsChecked"/>). Text, so an app with an icon
+    /// font can hand over a real tick instead.</summary>
+    public string CheckGlyph { get; init; } = "•";
+
     /// <summary>
     /// The built-in defaults are literal rather than derived from the palette: they are the
     /// values these controls already shipped with, and deriving them here would repaint

@@ -278,7 +278,8 @@ public sealed partial class ApertureApp
             var choice = kbps;
             items.Add(new ContextMenuItem
             {
-                Label = (current == choice ? "• " : "   ") + label,
+                Label = label,
+                IsChecked = current == choice,
                 Action = () => SetMaxStreamingKbps(choice),
             });
         }

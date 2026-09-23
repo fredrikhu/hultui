@@ -289,7 +289,12 @@ providers), a UIA `ItemContainer` on virtualized lists.
   the contract virtualized lists use), because it draws them rather than building an element
   each; separators are left out, and an entry's shortcut is part of its name. Tooltips stay
   out on purpose: they belong to the element they describe, and a sibling node would be read
-  twice.
+  twice. **Extended 2026-09-23:** an entry that marks the current choice sets
+  `ContextMenuItem.IsChecked`, which the menu reports through `IAccessibleItemSource.ItemIsToggled`
+  — so the mark is a state rather than a bullet inside the name. Any node with a toggle state
+  now offers UIA's Toggle pattern whatever its role, and `Window.FindElement` searches open
+  overlays, without which every accessibility action aimed at a menu or dialog was a silent
+  no-op.
 - `IRawElementProviderAdviseEvents` event filtering (minor perf opt).
 - List/ListItem AT-SPI role codes (Linux bridge currently maps them to Panel).
 

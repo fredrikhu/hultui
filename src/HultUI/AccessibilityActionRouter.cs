@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
@@ -65,6 +65,14 @@ internal sealed class AccessibilityActionRouter : IAccessibilityActionHost, IAcc
 
     public void ToggleElement(ElementId id) => _pendingActions.Enqueue(() =>
     {
+        // Toggling a virtualized item is its activation: a menu choice is turned on by
+        // being chosen, and the menu owns what that means.
+        if (VirtualItemId.TryDecode(id, out var listId, out var index))
+        {
+            if (FindElement(listId) is IAccessibleItemSource source)
+                source.ActivateItem(index);
+            return;
+        }
         if (FindElement(id) is CheckboxElement cb)
         {
             cb.IsChecked = !cb.IsChecked;
