@@ -131,4 +131,26 @@ public class SyntaxHighlightingTests
         // mis-colour more than it coloured, so they are deliberately left alone.
         Assert.False(Highlights(fileName, "key = \"value\"\n[section]\n"), fileName);
     }
+
+    [Theory]
+    [InlineData("csharp", "var x = \"s\"; // c")]   // a grammar's id
+    [InlineData("C#", "var x = \"s\"; // c")]       // one of its aliases
+    [InlineData("cs", "var x = \"s\"; // c")]       // its extension, as a fence often spells it
+    [InlineData("bash", "echo \"hi\" # c")]
+    [InlineData("yml", "key: \"value\" # c")]
+    [InlineData("json", "{ \"a\": 1 }")]
+    public void AMarkdownFenceNamesItsLanguage(string language, string code)
+    {
+        Assert.NotEmpty(SyntaxHighlighter.SpansForLanguage(language, code));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("nosuchlanguage")]
+    [InlineData("../cs")]
+    [InlineData("a.cs")]
+    public void AFenceWithNoKnownLanguageStaysPlain(string language)
+    {
+        Assert.Empty(SyntaxHighlighter.SpansForLanguage(language, "var x = \"s\"; // c"));
+    }
 }

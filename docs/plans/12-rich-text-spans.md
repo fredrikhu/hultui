@@ -142,6 +142,12 @@ Open follow-ups:
   runs (code, Latin UI text) are exact.
 - **Styled single-line fast path**: styled text always takes the width-keyed
   cache; the width-independent shape cache is plain-text only for now.
+- **Hit-testing ignores metric spans** (found 2026-09-23, Junction's markdown — the
+  first consumer of stage 2). `TextElement.Render` caches its lines with
+  `LayoutTextLines(Content, style, …)`, which takes no spans, and `PositionFromPoint`
+  measures prefixes in the element style. On a paragraph with bold ahead of a link,
+  a click maps a few pixels off, and where bold moved a wrap, onto the wrong line.
+  Selection on styled text has the same skew.
 
 ## Non-goals
 

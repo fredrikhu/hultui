@@ -1,3 +1,4 @@
+using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Styling;
 
@@ -48,11 +49,16 @@ public static class TextMeasure
     /// rather than an estimate. Returns <see cref="Size.Zero"/> when no context is installed
     /// or the width is unusable; treat that as "unknown" and fall back.
     /// </para>
+    /// <para>
+    /// Pass the label's <paramref name="spans"/> when it has bold, italic or resized ranges:
+    /// they shape wider or taller and so wrap differently. Paint-only spans change nothing.
+    /// </para>
     /// </summary>
-    public static Size MeasureWrapped(string text, ResolvedInheritedStyle style, float maxWidth)
+    public static Size MeasureWrapped(string text, ResolvedInheritedStyle style, float maxWidth,
+        IReadOnlyList<TextSpan>? spans = null)
     {
         if (Context is null || maxWidth <= 0) return Size.Zero;
-        return Context.MeasureText(text ?? "", style, maxWidth, null);
+        return Context.MeasureText(text ?? "", style, maxWidth, null, TextOverflow.Clip, spans);
     }
 
     /// <summary>

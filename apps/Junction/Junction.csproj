@@ -36,6 +36,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Merge request descriptions and review notes: CommonMark plus the GitLab
+         extensions (task lists, strikethrough, autolinks). See Markdown.cs. -->
+    <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
 </Project>

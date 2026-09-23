@@ -549,7 +549,7 @@ public partial class JunctionApp
     /// border and padding.</summary>
     private float CardTextWidth => Math.Max(40f, _diffBodyWidth - CardMarginLeft - CardMarginRight - 2 * CardBorder - 2 * CardPadX);
 
-    private static ResolvedInheritedStyle NoteStyle => TextMeasure.StyleFor(NoteFontSize);
+    private static MdLook NoteLook => new(NoteFontSize, Nocturne.On(0.84));
 
     private bool ThreadExpanded(ReviewSession rv, ThreadView t) =>
         rv.ExpandAll || rv.Expanded.Contains(t.Id) || t.Id == rv.FocusThread;
@@ -579,22 +579,9 @@ public partial class JunctionApp
         return CardMarginTop + 2 * CardBorder + 2 * CardPadY + inner + CardMarginBottom;
     }
 
-    /// <summary>A note body is drawn one source line per label, blank lines as a space, so
-    /// its height is the sum of those labels' wrapped heights.</summary>
-    private static float NoteBodyHeight(string body, float width)
-    {
-        var style = NoteStyle;
-        float h = 0;
-        foreach (var line in NoteLines(body))
-            h += TextMeasure.MeasureWrapped(line, style, width).Height;
-        return h;
-    }
-
-    private static IEnumerable<string> NoteLines(string body)
-    {
-        foreach (var raw in body.Replace("\r\n", "\n").Split('\n'))
-            yield return raw.Length == 0 ? " " : raw;
-    }
+    /// <summary>A note body is drawn as markdown, so its height is the markdown's.</summary>
+    private static float NoteBodyHeight(string body, float width) =>
+        MarkdownHeight(MarkdownReader.Read(body), NoteLook, width);
 
     private float ReviewRowHeight(DiffRow r, float textWidth) => r.Type switch
     {
@@ -776,10 +763,7 @@ public partial class JunctionApp
                 nh.AddChild(Text.New(n.Pending ? "not published yet" : RelativeTime(n.When)).FontSize(11f)
                     .TextColor(n.Pending ? Nocturne.Accent300 : Nocturne.On(0.45)));
                 note.AddChild(nh);
-                var body = Flex.Column(gap: 0);
-                foreach (var line in NoteLines(n.Body))
-                    body.AddChild(Text.New(line).FontSize(NoteFontSize).TextColor(Nocturne.On(0.84)));
-                note.AddChild(body);
+                note.AddChild(MarkdownView(MarkdownReader.Read(n.Body), NoteLook));
                 notes.AddChild(note);
             }
             card.AddChild(notes);

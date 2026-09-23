@@ -79,8 +79,14 @@ public class MergeRequestsPanelTests
             session.PumpUntil(() => TreeHas(session, "1 of 2"), TimeSpan.FromSeconds(15));
             session.PumpUntil(() => TreeHas(session, "Refunds should not count voided tenders."), TimeSpan.FromSeconds(15));
             Assert.True(TreeHas(session, "src/api/Orders.cs · lines 23–25"));
-            Assert.True(TreeHas(session, "• per-tender rows"));                          // description bullet
-            Assert.True(TreeHas(session, "Closes #1042"));
+            Assert.NotNull(Label(session, "•"));                                          // description bullet
+            Assert.NotNull(Label(session, "per-tender rows"));                            // …with its text beside it
+            // The backticks became a code span on the words they held.
+            var code = Label(session, "Refunds() counts them")!;
+            Assert.Contains(code.Spans!, s => s.Start == 0 && s.Length == "Refunds()".Length && s.Background.A > 0);
+            // #1042 links to the issue, as it would in a commit message.
+            var closes = Label(session, "Closes #1042")!;
+            Assert.Equal("https://gitlab.com/acme/core-api/-/issues/1042", Assert.Single(closes.Links!).Target);
             Assert.NotNull(Named(session, "Checkout locally"));
 
             session.Window.PressKey(KeyCode.Escape);
@@ -177,6 +183,12 @@ public class MergeRequestsPanelTests
     private static bool TreeHas(HeadlessSession session, string text) =>
         Root(session) is { } root &&
         LayoutProbe.Descendants<TextElement>(root, t => t.Content.Contains(text, StringComparison.Ordinal)).Count > 0;
+
+    /// <summary>The label showing exactly <paramref name="text"/>.</summary>
+    private static TextElement? Label(HeadlessSession session, string text) =>
+        Root(session) is { } root
+            ? LayoutProbe.Descendants<TextElement>(root, t => t.Content == text).FirstOrDefault()
+            : null;
 
     private static Element? ById(HeadlessSession session, string id) =>
         Root(session) is { } root

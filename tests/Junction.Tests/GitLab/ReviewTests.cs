@@ -135,6 +135,52 @@ public class ReviewTests
         });
     }
 
+    /// <summary>A note written in markdown — a heading, a paragraph long and bold enough that
+    /// its weight changes its height, nested and task lists, a quote and a fenced block — is
+    /// measured the way it is drawn, so its card still fits the row it was given. Measured
+    /// without its spans the same card comes out ~4px taller than its row.</summary>
+    [Fact]
+    public void AMarkdownNoteIsMeasuredTheWayItIsDrawn()
+    {
+        var bold = string.Join(" ", Enumerable.Repeat("**a refund that splits across tenders must skip the voided ones**", 120));
+        var note = string.Join("\n", [
+            "## Voided tenders",
+            "",
+            bold + " and _then_ `Refunds()` counts what is left.",
+            "",
+            "- one item",
+            "- two",
+            "  1. nested",
+            "- [x] checked",
+            "",
+            "> quoted reply",
+            "",
+            "```csharp",
+            "var refunds = tenders.Where(t => !t.Voided);",
+            "```",
+        ]);
+        var handler = Routes().Map(Discussions, _ => FakeGitLabHandler.Json(FakeGitLabHandler.Recording("discussions")
+            .Replace("\"Refunds should not count voided tenders.\"", System.Text.Json.JsonSerializer.Serialize(note))));
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+            AssertCardFitsItsRow(session);
+
+            session.Window.Click(ById(session, "review-thread")!);
+            session.PumpUntil(() => TreeHas(session, "Good catch, fixed in the next push."), TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            Assert.True(TreeHas(session, "var refunds = tenders"));    // the fence's code…
+            Assert.False(TreeHas(session, "```"));                      // …without the fence
+            Assert.False(TreeHas(session, "## "));
+            var paragraph = LayoutProbe.Descendants<TextElement>(Root(session)!, t => t.Content.StartsWith("a refund that splits")).Single();
+            Assert.Contains(paragraph.Spans!, s => s.Weight == HultUI.Core.Styling.FontWeight.SemiBold);
+            Assert.True(LayoutProbe.Painted(paragraph).Height > 40f, "the bold paragraph wraps");
+            AssertCardFitsItsRow(session);
+        }, handler);
+    }
+
     private static void AssertCardFitsItsRow(HeadlessSession session)
     {
         var outer = ById(session, "review-thread")!;
