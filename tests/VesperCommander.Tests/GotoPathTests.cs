@@ -139,8 +139,9 @@ public class GotoPathTests
         Assert.Equal(fx.Sub, fx.Dir('L'));
     }
 
-    /// <summary>Temp tree (root/sub/file.txt) + a hosted CommanderApp pinned at root.</summary>
-    private sealed class Fixture : System.IDisposable
+    /// <summary>Temp tree (root/sub/file.txt) + a hosted CommanderApp pinned at root.
+    /// Shared with <see cref="GotoRemoteTests"/>, which drives the same prompt at a share.</summary>
+    internal sealed class Fixture : System.IDisposable
     {
         public readonly string Root, Sub, FileInSub;
         public readonly HeadlessSession Session;
@@ -174,6 +175,11 @@ public class GotoPathTests
 
         public bool PromptOpen => Field("_namePrompt") != null;
         public string? PromptError => (string?)Field("_namePromptError");
+
+        /// <summary>The in-flight remote-path probe, or null when nothing is being resolved
+        /// off-thread. Non-null is exactly the prompt's busy state.</summary>
+        public System.Threading.CancellationTokenSource? Probe =>
+            (System.Threading.CancellationTokenSource?)Field("_gotoProbe");
 
         public string Dir(char side)
             => (string)typeof(CommanderApp).GetMethod("Dir", BindingFlags.NonPublic | BindingFlags.Instance)!

@@ -25,7 +25,13 @@ internal static class VesperProgram
             return Elevation.RunWorker(args[1]);
 
         // The folder this launch wants to open: a directory argument, else the working directory.
-        var startPath = args.Length > 0 && Directory.Exists(args[0]) ? args[0] : Directory.GetCurrentDirectory();
+        // A remote argument is taken without checking — Directory.Exists on an unreachable host
+        // costs up to 21 seconds, and nothing is on screen yet to say why. The pane resolves it
+        // and shows its own offline state. A local argument is checked as before: microseconds,
+        // and it keeps "a file path falls back to the working directory" working.
+        var startPath = args.Length > 0 && (PathProbe.IsRemote(args[0]) || Directory.Exists(args[0]))
+            ? args[0]
+            : Directory.GetCurrentDirectory();
 
         // Single-instance (Windows): the owning instance holds a named mutex and runs an IPC server;
         // a second launch hands its folder to the running window (which opens it as a tab) and exits.

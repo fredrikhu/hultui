@@ -457,8 +457,8 @@ public partial class CommanderApp : Component, IDisposable
         {
             // Pair each dir with its saved view mode before filtering, so a dropped
             // (no-longer-existing) folder doesn't misalign the remaining view indices.
-            var left = s.Left.Select((d, i) => (d, v: ViewAt(s.LeftViews, i))).Where(x => Directory.Exists(x.d)).ToList();
-            var right = s.Right.Select((d, i) => (d, v: ViewAt(s.RightViews, i))).Where(x => Directory.Exists(x.d)).ToList();
+            var left = s.Left.Select((d, i) => (d, v: ViewAt(s.LeftViews, i))).Where(x => Restorable(x.d)).ToList();
+            var right = s.Right.Select((d, i) => (d, v: ViewAt(s.RightViews, i))).Where(x => Restorable(x.d)).ToList();
             if (left.Count > 0 && right.Count > 0)
             {
                 foreach (var (d, v) in left) _tabsL.Add(SeededTab(d, v));
@@ -478,6 +478,14 @@ public partial class CommanderApp : Component, IDisposable
         // Global keys land on the host when nothing is focused.
         Mount().On<KeyDownEvent>(HandleKeyDown);
     }
+
+    /// <summary>Whether a saved tab is worth reopening. A local folder is checked as it always
+    /// was — the question costs microseconds, and a folder that has gone away should not come
+    /// back as a tab. A remote one is taken on trust: asking cost up to 21 seconds per tab,
+    /// serially, on the UI thread before the window existed, and a share that is merely
+    /// unreachable right now is exactly the tab you want back. It opens offline, with a
+    /// Reconnect button.</summary>
+    private static bool Restorable(string dir) => PathProbe.IsRemote(dir) || Directory.Exists(dir);
 
     // ── Per-side accessors (delegate to the pane's active tab) ───────────
     private List<PaneTab> Tabs(char side) => side == 'L' ? _tabsL : _tabsR;
@@ -514,7 +522,9 @@ public partial class CommanderApp : Component, IDisposable
     /// IPC). Called on the UI thread.</summary>
     public void OpenPathAsTab(string path)
     {
-        if (!Directory.Exists(path)) return;
+        // A remote path is taken on trust — this runs on the UI thread, and the second launch
+        // that sent it has already decided it wants that folder. The pane reports for itself.
+        if (!PathProbe.IsRemote(path) && !Directory.Exists(path)) return;
         NewTab(_active, path);
         _window.Raise();
         MarkDirty();
@@ -537,8 +547,90 @@ public partial class CommanderApp : Component, IDisposable
         // holds anything and Empty once a refresh has taken the last row away.
         if (ActiveTab(side).Results is { } v)
             return v.Entries.Count == 0 ? PaneState.Empty : PaneState.Ok;
+        if (IsConnecting(side)) return PaneState.Connecting;
         return Loader(side).Value.State;
     }
+
+    // ── Waiting on a folder ──────────────────────────────────────────────
+    // The pane keeps showing the last folder it read while a new one loads (stale-while-
+    // loading), which is right for a local read that lands in a frame or two and wrong for a
+    // share that may never answer — the rows belong to somewhere else entirely, and they are
+    // operable. These three track what is on screen versus what is being waited for.
+    private readonly string?[] _shownDir = new string?[2];    // folder the current rows came from
+    private readonly string?[] _loadingKey = new string?[2];  // loader key currently being timed
+    private readonly long[] _loadStarted = new long[2];       // platform timestamp that key began
+
+    /// <summary>How long a folder may take before the pane says it is still connecting. A local
+    /// read is orders of magnitude inside this, so the state belongs to slow things only.
+    /// Settable so a test need not spend it.</summary>
+    internal int ConnectingDelayMs = 350;
+
+    /// <summary>True while a pane is waiting on a folder it is not already showing, and has
+    /// been for long enough to be worth saying so. A refresh of the folder on screen keeps its
+    /// rows and never shows this — there is nothing to wait for that is not already there.
+    ///
+    /// <para>Measured on the application's clock, not the wall's: under a headless session that
+    /// advances only when a frame is pumped, so the threshold is a number of frames rather than
+    /// a race with whatever else the machine is doing. Timing it with
+    /// <c>Environment.TickCount64</c> made four unrelated pane tests pass on their own and fail
+    /// in a full run.</para></summary>
+    private bool IsConnecting(char side)
+    {
+        int i = side == 'L' ? 0 : 1;
+        if (!Loader(side).IsLoading) return false;
+        if (PathEquals(_shownDir[i], Dir(side))) return false;
+        return _app.Time.GetElapsedTime(_loadStarted[i]).TotalMilliseconds >= ConnectingDelayMs;
+    }
+
+    // One per side, cancelled when the pane stops wanting the listing it started.
+    private readonly CancellationTokenSource?[] _loadCts = new CancellationTokenSource?[2];
+
+    /// <summary>The token for the load identified by <paramref name="key"/>, cancelling
+    /// whatever the pane was reading before it. The old source is dropped rather than disposed:
+    /// its producer may still be inside the syscall and will read the token on the way out.</summary>
+    private CancellationToken LoadToken(char side, string key)
+    {
+        int i = side == 'L' ? 0 : 1;
+        if (_loadingKey[i] != key || _loadCts[i] is null)
+        {
+            _loadCts[i]?.Cancel();
+            _loadCts[i] = new CancellationTokenSource();
+            _loadingKey[i] = key;
+            _loadStarted[i] = _app.Time.GetTimestamp();
+            NudgeWhenConnectingIsDue(side);
+        }
+        return _loadCts[i]!.Token;
+    }
+
+    /// <summary>Repaint once the connecting threshold has passed, if the folder is still out.
+    /// An app waiting on one produces no rebuilds of its own, so without this the state would
+    /// appear only the next time something else happened to redraw — the class of bug where a
+    /// pane sits on stale content until you touch it. The still-loading test keeps a navigation
+    /// that landed at once from costing a rebuild a third of a second later, which every
+    /// navigation otherwise would.</summary>
+    private void NudgeWhenConnectingIsDue(char side)
+    {
+        if (ConnectingDelayMs <= 0) return;   // already due; the build in progress will show it
+        _ = Task.Delay(ConnectingDelayMs + 20).ContinueWith(_ =>
+            HultUI.Application.InvokeOnMainThread(() => { if (Loader(side).IsLoading) MarkDirty(); }));
+    }
+
+    /// <summary>The Cancel in the connecting block: stop waiting and go back to the folder the
+    /// pane was showing. Only offered when there is one — on a cold start there is nowhere to
+    /// return to, and the listing resolves to Offline on its own soon enough.</summary>
+    private void CancelPaneLoad(char side)
+    {
+        int i = side == 'L' ? 0 : 1;
+        var back = _shownDir[i];
+        _loadCts[i]?.Cancel();
+        _loadCts[i] = null;
+        _loadingKey[i] = null;
+        if (back != null && !PathEquals(back, Dir(side))) NavigateTo(side, back, recordHistory: false);
+        else MarkDirty();
+    }
+
+    /// <summary>Whether <see cref="CancelPaneLoad"/> has anywhere to go.</summary>
+    private bool CanCancelPaneLoad(char side) => _shownDir[side == 'L' ? 0 : 1] != null;
 
     /// <summary>The current (possibly stale-while-loading) listing for a side,
     /// kicking off / refreshing the off-thread load as a side effect of Build().</summary>
@@ -551,11 +643,14 @@ public partial class CommanderApp : Component, IDisposable
         var loader = Loader(side);
         var dir = Dir(side);
         var sort = SortOf(side); var desc = SortDescOf(side);   // per-tab; captured for the worker
-        loader.Load($"{dir}#{Gen(side)}",
-            () => FileSystem.List(dir, _settings.ShowHidden, sort, _settings.DirsFirst, desc, _sevenZip, PasswordFor(dir)),
+        var key = $"{dir}#{Gen(side)}";
+        var ct = LoadToken(side, key);
+        loader.Load(key,
+            () => FileSystem.List(dir, _settings.ShowHidden, sort, _settings.DirsFirst, desc, _sevenZip, PasswordFor(dir), ct),
             onLoaded: _ =>
         {
             if (side == 'L') _loadedL = true; else _loadedR = true;
+            _shownDir[side == 'L' ? 0 : 1] = dir;   // these rows belong to this folder now
             var listed = loader.Value.Entries;
             // If we ascended, land the cursor on the folder we came out of.
             var want = _pendingFocusChild[side == 'L' ? 0 : 1];
@@ -853,7 +948,12 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>Resolve <paramref name="raw"/> and navigate <paramref name="side"/> to it.
     /// Relative paths (incl. "..") resolve against the pane's folder; "~" and %VAR% expand;
     /// a file target lands on the file in its parent; an archive target browses inside.
-    /// Returns an error string (dialog stays open) or null on success.</summary>
+    /// Returns an error string (dialog stays open) or null on success.
+    ///
+    /// <para>A <i>remote</i> target is resolved off the UI thread instead (see
+    /// <see cref="StartRemoteGoto"/>) and this returns null with the prompt left open: asking
+    /// the filesystem about an unreachable host costs up to 21 seconds, and this runs from a
+    /// key press. A local path answers in microseconds and keeps the straight line.</para></summary>
     private string? GotoPath(char side, string raw)
     {
         var input = raw.Trim().Trim('"');
@@ -862,29 +962,104 @@ public partial class CommanderApp : Component, IDisposable
         string? resolved = ResolveTypedPath(side, input, out var resolveError);
         if (resolved == null) return resolveError;
 
-        if (Directory.Exists(resolved))
+        if (PathProbe.IsRemote(resolved))
         {
-            NavigateTo(side, resolved);
-            return null;
+            StartRemoteGoto(side, resolved);
+            return null;   // CommitNamePrompt sees the probe and holds the dialog open
         }
-        if (File.Exists(resolved))
-        {
-            if (ArchiveVfs.IsArchiveFile(resolved)) { NavigateTo(side, resolved); return null; }
-            // A plain file: land in its folder with the cursor on it.
-            var parent = System.IO.Path.GetDirectoryName(resolved);
-            if (parent == null) return $"Not a folder: {resolved}";
-            NavigateTo(side, parent, focusChildName: System.IO.Path.GetFileName(resolved));
-            return null;
-        }
-        // Inside an archive the member dirs aren't on disk — navigate if the archive file
-        // itself exists and let the listing surface any bad member path.
-        if (ArchivePath.TryParse(resolved) is { } ap && File.Exists(ap.ArchiveFile))
-        {
-            NavigateTo(side, resolved);
-            return null;
-        }
-        return $"Path not found: {resolved}";
+        return LandOn(side, resolved, PathProbe.LocalKind(resolved), () => ArchiveTargetExists(resolved));
     }
+
+    /// <summary>How long a typed path gets to answer before the prompt offers to go anyway.
+    /// Settable so a test need not wait it out.</summary>
+    internal TimeSpan GotoProbeBudget = TimeSpan.FromSeconds(10);
+
+    // Non-null while a typed remote path is being resolved: the prompt's busy state, and the
+    // guard that keeps a second Enter from starting a second probe. Owned by the UI thread.
+    private CancellationTokenSource? _gotoProbe;
+
+    /// <summary>Resolve a remote target off the UI thread, then land on it. The prompt (or,
+    /// from the command line, the notice line) reports whatever comes back.</summary>
+    private void StartRemoteGoto(char side, string resolved)
+    {
+        var cts = new CancellationTokenSource();
+        _gotoProbe = cts;
+        _namePromptError = null;
+        MarkDirty();
+        _ = ProbeAndLand(side, resolved, cts);
+    }
+
+    private async Task ProbeAndLand(char side, string resolved, CancellationTokenSource cts)
+    {
+        PathKind kind;
+        bool archive = false;
+        try
+        {
+            kind = await PathProbe.KindAsync(resolved, GotoProbeBudget, cts.Token).ConfigureAwait(false);
+            // The archive fallback stats the archive file, which is on the same share — off
+            // the UI thread with the rest of it rather than on the way back.
+            if (kind == PathKind.Missing)
+                archive = await Task.Run(() => ArchiveTargetExists(resolved), cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { cts.Dispose(); return; }   // Esc — the close already tidied up
+        catch { kind = PathKind.Missing; }
+
+        HultUI.Application.InvokeOnMainThread(() =>
+        {
+            bool mine = ReferenceEquals(_gotoProbe, cts);
+            cts.Dispose();
+            if (!mine) return;          // cancelled, or superseded by a newer probe
+            _gotoProbe = null;
+
+            var err = LandOn(side, resolved, kind, () => archive);
+            if (err != null)
+            {
+                // From the command line there is no dialog to hold the message.
+                if (_namePrompt != null) _namePromptError = err; else _notice = err;
+            }
+            else if (_namePrompt != null) _namePrompt = null;
+            MarkDirty();
+        });
+    }
+
+    /// <summary>Act on what a typed path turned out to be. <paramref name="archiveTarget"/> is
+    /// deferred because answering it stats the disk, and only the not-found branch asks.</summary>
+    private string? LandOn(char side, string resolved, PathKind kind, Func<bool> archiveTarget)
+    {
+        switch (kind)
+        {
+            case PathKind.Directory:
+                NavigateTo(side, resolved);
+                return null;
+
+            case PathKind.File:
+                if (ArchiveVfs.IsArchiveFile(resolved)) { NavigateTo(side, resolved); return null; }
+                // A plain file: land in its folder with the cursor on it.
+                var parent = System.IO.Path.GetDirectoryName(resolved);
+                if (parent == null) return $"Not a folder: {resolved}";
+                NavigateTo(side, parent, focusChildName: System.IO.Path.GetFileName(resolved));
+                return null;
+
+            case PathKind.Unreachable:
+            case PathKind.TimedOut:
+                // The host never answered, so whether the folder is there is still unknown —
+                // and a modal dialog is the worst place to wait to find out. Go, and let the
+                // pane say "not available" with the Reconnect button already under the cursor.
+                NavigateTo(side, resolved);
+                return null;
+
+            default:
+                // Inside an archive the member dirs aren't on disk — navigate if the archive
+                // file itself exists and let the listing surface any bad member path.
+                if (archiveTarget()) { NavigateTo(side, resolved); return null; }
+                return $"Path not found: {resolved}";
+        }
+    }
+
+    /// <summary>True when the path descends into an archive file that is really there. Stats
+    /// the disk — on a remote path, call it off the UI thread.</summary>
+    private static bool ArchiveTargetExists(string resolved) =>
+        ArchivePath.TryParse(resolved) is { } ap && File.Exists(ap.ArchiveFile);
 
     /// <summary>Turn a path the user typed into an absolute one, without asking whether it
     /// exists. "~" and %VAR% expand, a relative path (incl. "..") resolves against
@@ -2180,7 +2355,14 @@ public partial class CommanderApp : Component, IDisposable
         // rather than climbing above it.
         if (ExitResults(side)) { MarkDirty(); return; }
         var dir = Dir(side);
-        // Already at a drive / UNC root → stay put. (Trimming the trailing separator off
+        // A share root's parent is its server — "\\server\share" is a path root, so the test
+        // below would stop there and leave the share with no way out but the go-to prompt.
+        if (PathProbe.UncParentOf(dir) is { } host)
+        {
+            NavigateTo(side, host, ShareNameOf(dir));
+            return;
+        }
+        // Already at a drive / server root → stay put. (Trimming the trailing separator off
         // "C:\" leaves "C:", which Directory.GetParent resolves relative to the process's
         // working directory — i.e. it would jump to the parent of the launch folder.)
         if (PathEquals(dir, System.IO.Path.GetPathRoot(dir) ?? dir)) return;
@@ -2189,6 +2371,16 @@ public partial class CommanderApp : Component, IDisposable
         if (parent == null) return;
         var leaving = new DirectoryInfo(dir).Name;
         NavigateTo(side, parent.FullName, leaving);
+    }
+
+    /// <summary>The share's own name out of "\\server\share", so climbing to the server lands
+    /// the cursor on the share just left — what every other ascent does. <c>DirectoryInfo.Name</c>
+    /// answers "\\server\share" for one of these, which would match nothing in the listing.</summary>
+    private static string ShareNameOf(string shareRoot)
+    {
+        var trimmed = shareRoot.Replace('/', '\\').TrimEnd('\\');
+        int slash = trimmed.LastIndexOf('\\');
+        return slash > 1 ? trimmed[(slash + 1)..] : trimmed;
     }
 
     /// <summary>Ctrl+R. A folder is re-read by bumping the pane's generation; a fed-in result
@@ -2330,13 +2522,26 @@ public partial class CommanderApp : Component, IDisposable
     private void CommitNamePrompt()
     {
         if (_namePrompt is not { } spec) return;
+        if (_gotoProbe != null) return;              // a probe is already out — one Enter is enough
         var err = spec.Commit(_namePromptValue);
+        // Commit may have started an off-thread probe (a remote path). Then there is no answer
+        // yet: hold the dialog open in its busy state and let the probe close it.
+        if (_gotoProbe != null) { MarkDirty(); return; }
         if (err != null) { _namePromptError = FileOps.Clean(err); MarkDirty(); return; }
         _namePrompt = null;
         MarkDirty();
     }
 
-    private void CloseNamePrompt() { _namePrompt = null; MarkDirty(); }
+    private void CloseNamePrompt()
+    {
+        // Esc during a probe abandons it: the continuation finds the field cleared and drops
+        // its result rather than navigating a dialog the user has already dismissed.
+        var probe = _gotoProbe;
+        _gotoProbe = null;
+        probe?.Cancel();
+        _namePrompt = null;
+        MarkDirty();
+    }
 
     /// <summary>Dismiss the confirm dialog — the Cancel button and Escape are the same answer,
     /// and a spec that cares about being answered "no" hears it here.</summary>
@@ -2446,6 +2651,12 @@ public partial class CommanderApp : Component, IDisposable
         (_loadedL, _loadedR) = (_loadedR, _loadedL);
         (_forceStateL, _forceStateR) = (_forceStateR, _forceStateL);
         (_pendingFocusChild[0], _pendingFocusChild[1]) = (_pendingFocusChild[1], _pendingFocusChild[0]);
+        // What each side is showing and what it is still waiting for travel with the listing
+        // above — otherwise a pane that swapped in mid-load would time the other side's wait.
+        (_shownDir[0], _shownDir[1]) = (_shownDir[1], _shownDir[0]);
+        (_loadingKey[0], _loadingKey[1]) = (_loadingKey[1], _loadingKey[0]);
+        (_loadStarted[0], _loadStarted[1]) = (_loadStarted[1], _loadStarted[0]);
+        (_loadCts[0], _loadCts[1]) = (_loadCts[1], _loadCts[0]);
         RequestScroll('L'); RequestScroll('R');
         MarkDirty();
     }
@@ -2742,13 +2953,14 @@ public partial class CommanderApp : Component, IDisposable
         // empty/offline/denied view; K clears back to the real state. Checked before
         // Ctrl+D so Shift disambiguates it from the bookmark manager.
         if (ctrl && e.Modifiers.HasFlag(KeyModifiers.Shift)
-            && e.Key is KeyCode.E or KeyCode.O or KeyCode.D or KeyCode.K)
+            && e.Key is KeyCode.E or KeyCode.O or KeyCode.D or KeyCode.N or KeyCode.K)
         {
             PaneState? s = e.Key switch
             {
                 KeyCode.E => PaneState.Empty,
                 KeyCode.O => PaneState.Offline,
                 KeyCode.D => PaneState.Denied,
+                KeyCode.N => PaneState.Connecting,   // needs no server to look at
                 _ => null,
             };
             if (_active == 'L') _forceStateL = s; else _forceStateR = s;

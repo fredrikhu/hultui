@@ -37,6 +37,20 @@ public sealed class Application : IDisposable
     internal IWindowingPlatform Platform => _platform;
 
     /// <summary>
+    /// The clock this application runs on: the system clock behind a real window, and the
+    /// manually advanced one under a headless session, where it moves only when a frame is
+    /// pumped.
+    ///
+    /// <para>Anything whose behavior depends on elapsed time should read it here rather than
+    /// from <see cref="DateTime"/> or <c>Environment.TickCount64</c>. A wall clock makes such
+    /// code untestable in the specific way that hurts: it passes alone and fails in a full run,
+    /// because the only thing that changed was how busy the machine was. The pointer's
+    /// double-click window has always been measured this way (see <c>PointerState</c>); this
+    /// makes the same clock available to applications.</para>
+    /// </summary>
+    public TimeProvider Time => _platform.TimeProvider;
+
+    /// <summary>
     /// The most recently created Application instance. Used by hot reload to find the running app.
     /// </summary>
     internal static Application? Current => _current;

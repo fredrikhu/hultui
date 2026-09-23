@@ -17,8 +17,10 @@ public sealed record FileEntry(
 public sealed record DriveEntry(
     string Root, string Label, long Free, long Total, string Format, bool Ready);
 
-/// <summary>The state a pane's listing is in — drives the empty/offline/denied views.</summary>
-public enum PaneState { Ok, Empty, Offline, Denied }
+/// <summary>The state a pane's listing is in — drives the empty/offline/denied/connecting views.
+/// <see cref="Connecting"/> is the only one that is not a property of the folder: it says the
+/// pane is still waiting to hear about one, which on a share can take a while.</summary>
+public enum PaneState { Ok, Empty, Offline, Denied, Connecting }
 
 /// <summary>A directory listing plus the state it resolved to. <see cref="Archive"/> is
 /// set (to a non-Ok status) when a browsed archive couldn't be read — encrypted, corrupt,
@@ -71,6 +73,12 @@ public static class FileSystem
         _ => "Local disk",
     };
 
+    /// <summary>Supplies the entries a walk iterates, in place of reading the real folder.
+    /// The between-entries cancellation check below only means anything partway through a long
+    /// walk, and a test cannot cancel at a moment it has no way to observe — a sequence it
+    /// yields itself is that moment. Null in every shipped path.</summary>
+    internal static Func<string, IEnumerable<FileSystemInfo>>? EnumerateOverride;
+
     /// <summary>Human byte size (no "free" suffix) — for drive totals.</summary>
     public static string ByteLabel(long b)
     {
@@ -90,10 +98,26 @@ public static class FileSystem
     /// so the caller can render the empty / offline / denied views from real signals
     /// (an empty listing, an unready volume, or an access error) — no throwing.
     /// </summary>
+    /// <param name="ct">Abandons a walk that is no longer wanted. A cancelled listing comes
+    /// back as <see cref="DirListing.Loading"/> rather than throwing: <c>AsyncLoader</c> treats
+    /// a throwing producer as a failure and retries it three times with backoff, so every
+    /// navigation away from a slow folder would relaunch the read it just abandoned. The
+    /// sentinel is never shown — the loader's generation check drops a superseded result.
+    /// <para>This bounds a <i>long</i> walk, not a dead host: the enumeration syscall itself
+    /// is not cancellable, so a folder that never answers keeps its thread until the operating
+    /// system gives up. Reaching a host that is not there is <see cref="PathProbe"/>'s job.</para>
+    /// </param>
     public static DirListing List(string path, bool showHidden = false,
         SortMode sort = SortMode.Name, bool dirsFirst = true, bool descending = false,
-        bool sevenZip = false, string? password = null)
+        bool sevenZip = false, string? password = null, CancellationToken ct = default)
     {
+        if (ct.IsCancellationRequested) return DirListing.Loading;
+
+        // A bare "\\server" is not a directory — the share below it is the first thing that is —
+        // so it is listed through the network provider rather than read off a disk.
+        if (PathProbe.ServerRootOf(path) is { } server)
+            return ListShares(server, showHidden, sort, descending, ct);
+
         // A path that descends into an archive lists through the VFS instead of disk.
         if (ArchivePath.TryParse(path) is { } ap)
             return ListArchive(ap.ArchiveFile, ap.Internal, sort, dirsFirst, descending, sevenZip, password);
@@ -103,17 +127,23 @@ public static class FileSystem
 
         try
         {
-            // Unready volume (unmounted / disconnected) ⇒ offline.
+            // Unready volume (unmounted / disconnected) ⇒ offline. Skipped for anything over
+            // the network: IsReady on a mapped drive whose server has gone away is a second
+            // full network wait, ahead of an enumeration that is about to fail the same way.
             var root = Path.GetPathRoot(path);
-            if (!string.IsNullOrEmpty(root))
+            if (!string.IsNullOrEmpty(root) && !PathProbe.IsRemote(path))
             {
                 try { if (!new DriveInfo(root).IsReady) return new(PaneState.Offline, []); }
-                catch { /* UNC / non-drive root — fall through to enumeration */ }
+                catch { /* non-drive root — fall through to enumeration */ }
             }
 
             var dir = new DirectoryInfo(path);
-            foreach (var info in dir.EnumerateFileSystemInfos())
+            foreach (var info in EnumerateOverride?.Invoke(path) ?? dir.EnumerateFileSystemInfos())
             {
+                // Between entries, the way FindEngine.Walk and SyncEngine do it — a big
+                // folder on a slow link stops as soon as nobody is waiting for it.
+                if (ct.IsCancellationRequested) return DirListing.Loading;
+
                 FileAttributes attr;
                 try { attr = info.Attributes; }
                 catch { continue; }   // races / permission on the entry itself — skip it
@@ -143,9 +173,12 @@ public static class FileSystem
         var cmp = Comparator(sort, descending);
 
         var result = new List<FileEntry>(dirs.Count + files.Count + 1);
-        var parent = Directory.GetParent(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        // A share root's parent is its server, which Directory.GetParent has no answer for —
+        // it stops at "\\server\share" and reports null, leaving the share with no way out.
+        var parent = PathProbe.UncParentOf(trimmed) ?? Directory.GetParent(trimmed)?.FullName;
         if (parent != null)
-            result.Add(new FileEntry("..", parent.FullName, IsDir: true, 0, DateTime.Now, IsParent: true));
+            result.Add(new FileEntry("..", parent, IsDir: true, 0, DateTime.Now, IsParent: true));
 
         if (dirsFirst)
         {
@@ -212,6 +245,43 @@ public static class FileSystem
         // Descending reverses within each group; ".." still leads and dirs-before-files holds.
         if (descending) { var asc = cmp; cmp = (a, b) => asc(b, a); }
         return cmp;
+    }
+
+    /// <summary>The shares <paramref name="server"/> offers, as a folder listing. No ".." — a
+    /// server is the top of its tree. Hidden (<c>$</c>-suffixed) shares follow the same toggle
+    /// as hidden files; the network provider rarely offers them at all.
+    ///
+    /// <para>The host is dialled first, so a server that is not there costs the probe's budget
+    /// rather than the operating system's patience — the enumeration is a network call with no
+    /// timeout of ours, exactly the shape this whole seam exists to keep bounded.</para></summary>
+    private static DirListing ListShares(string server, bool showHidden, SortMode sort,
+        bool descending, CancellationToken ct)
+    {
+        if (!PathProbe.ReachableAsync($@"\\{server}", PathProbe.ReachBudget, ct)
+                .GetAwaiter().GetResult())
+            return new(PaneState.Offline, []);
+        if (ct.IsCancellationRequested) return DirListing.Loading;
+
+        var listing = NetworkShares.List(server, ct);
+        if (ct.IsCancellationRequested) return DirListing.Loading;
+
+        var state = listing.Status switch
+        {
+            ShareListStatus.Ok => PaneState.Ok,
+            ShareListStatus.Empty => PaneState.Empty,
+            ShareListStatus.Denied => PaneState.Denied,
+            _ => PaneState.Offline,
+        };
+        if (state is not (PaneState.Ok or PaneState.Empty)) return new(state, []);
+
+        var entries = new List<FileEntry>(listing.Shares.Count);
+        foreach (var name in listing.Shares)
+        {
+            if (!showHidden && name.EndsWith('$')) continue;
+            entries.Add(new FileEntry(name, $@"\\{server}\{name}", IsDir: true, 0, DateTime.Now));
+        }
+        entries.Sort(Comparator(sort, descending));
+        return new(entries.Count == 0 ? PaneState.Empty : PaneState.Ok, entries);
     }
 
     /// <summary>List one level inside an archive through the VFS, sorted like a folder.

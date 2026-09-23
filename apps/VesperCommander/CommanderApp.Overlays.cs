@@ -279,9 +279,19 @@ public partial class CommanderApp
                 .Margin(new Thickness(0, 16, 14, 0)));
 
         var footer = DialogFooter();
+        // While a typed remote path is being resolved the dialog stays up and says so: the
+        // confirm button goes inert behind a spinner, and Cancel (or Esc) abandons the probe.
+        bool busy = _gotoProbe != null;
+        if (busy)
+        {
+            footer.AddChild(Spinner.New(12f));
+            footer.AddChild(Ui.Mono("Checking…", 11f, Nocturne.On(0.45)));
+        }
         footer.AddChild(Box.New().FlexGrow(1));
         footer.AddChild(SecondaryButton("Cancel", CloseNamePrompt));
-        footer.AddChild(PrimaryButton(spec.ConfirmLabel, CommitNamePrompt));
+        footer.AddChild(busy
+            ? Ui.PrimaryButton(spec.ConfirmLabel, null, () => { }, enabled: false)
+            : PrimaryButton(spec.ConfirmLabel, CommitNamePrompt));
         card.AddChild(footer);
 
         return Backdrop(card, topAligned: false);
