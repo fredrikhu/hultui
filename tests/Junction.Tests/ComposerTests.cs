@@ -61,7 +61,7 @@ public class ComposerTests
 
             Compose(app, "everything at once");
             Invoke(app, "DoCommit");
-            session.PumpFrames(3);
+            Committed(session, app);
 
             Assert.Equal("everything at once", HeadSubject(repo));
             // Both files landed, and nothing is left behind in the worktree.
@@ -136,7 +136,7 @@ public class ComposerTests
             Assert.Equal("via the keyboard", Get<string>(app, "_commitSummary"));
 
             session.Window.PressKey(KeyCode.Enter, KeyModifiers.Ctrl);
-            session.PumpFrames(4);
+            Committed(session, app);
 
             Assert.Equal("via the keyboard", HeadSubject(repo));
         });
@@ -250,7 +250,9 @@ public class ComposerTests
             Set(app, "_amendCommit", true);
             Compose(app, "amended once");
             Invoke(app, "DoCommit");
-            session.PumpFrames(3);
+            // Waits on the summary clearing, which the same continuation does one line earlier —
+            // so a version that finished the commit and forgot the flag still fails here.
+            Committed(session, app);
 
             Assert.False(Get<bool>(app, "_amendCommit"));
         });
@@ -266,6 +268,25 @@ public class ComposerTests
         Invoke(app, "RefreshAll");
         session.PumpFrames(6);
     }
+
+    /// <summary>
+    /// Waits for a commit to finish.
+    ///
+    /// <para>Since git left the UI thread the command runs on the pool and its result lands on
+    /// the main thread once the subprocess returns. Pumping a fixed three frames does not wait
+    /// for that — <c>PumpFrame</c> advances virtual time, not the clock the subprocess runs on —
+    /// so the three tests that did it failed every time rather than intermittently.
+    /// <c>PumpUntil</c> is the session's one deliberate real-time escape, and a git subprocess
+    /// posting back through <c>InvokeOnMainThread</c> is exactly the boundary it exists for.</para>
+    ///
+    /// <para>The signal is the summary field emptying, not the commit appearing in git. Those
+    /// are different moments: git has the commit as soon as the pooled command returns, while the
+    /// field is cleared by the continuation on the UI thread. Waiting on the earlier one would
+    /// let a test assert against state the app had not caught up with yet — which is the same
+    /// race in a new place.</para>
+    /// </summary>
+    private static void Committed(HeadlessSession session, JunctionApp app) =>
+        session.PumpUntil(() => Get<string>(app, "_commitSummary").Length == 0);
 
     private static void Hosted(Action<TempRepo, HeadlessSession, JunctionApp> body)
     {
