@@ -457,8 +457,8 @@ public partial class CommanderApp : Component, IDisposable
         {
             // Pair each dir with its saved view mode before filtering, so a dropped
             // (no-longer-existing) folder doesn't misalign the remaining view indices.
-            var left = s.Left.Select((d, i) => (d, v: ViewAt(s.LeftViews, i))).Where(x => Directory.Exists(x.d)).ToList();
-            var right = s.Right.Select((d, i) => (d, v: ViewAt(s.RightViews, i))).Where(x => Directory.Exists(x.d)).ToList();
+            var left = s.Left.Select((d, i) => (d, v: ViewAt(s.LeftViews, i))).Where(x => Restorable(x.d)).ToList();
+            var right = s.Right.Select((d, i) => (d, v: ViewAt(s.RightViews, i))).Where(x => Restorable(x.d)).ToList();
             if (left.Count > 0 && right.Count > 0)
             {
                 foreach (var (d, v) in left) _tabsL.Add(SeededTab(d, v));
@@ -478,6 +478,14 @@ public partial class CommanderApp : Component, IDisposable
         // Global keys land on the host when nothing is focused.
         Mount().On<KeyDownEvent>(HandleKeyDown);
     }
+
+    /// <summary>Whether a saved tab is worth reopening. A local folder is checked as it always
+    /// was — the question costs microseconds, and a folder that has gone away should not come
+    /// back as a tab. A remote one is taken on trust: asking cost up to 21 seconds per tab,
+    /// serially, on the UI thread before the window existed, and a share that is merely
+    /// unreachable right now is exactly the tab you want back. It opens offline, with a
+    /// Reconnect button.</summary>
+    private static bool Restorable(string dir) => PathProbe.IsRemote(dir) || Directory.Exists(dir);
 
     // ── Per-side accessors (delegate to the pane's active tab) ───────────
     private List<PaneTab> Tabs(char side) => side == 'L' ? _tabsL : _tabsR;
@@ -514,7 +522,9 @@ public partial class CommanderApp : Component, IDisposable
     /// IPC). Called on the UI thread.</summary>
     public void OpenPathAsTab(string path)
     {
-        if (!Directory.Exists(path)) return;
+        // A remote path is taken on trust — this runs on the UI thread, and the second launch
+        // that sent it has already decided it wants that folder. The pane reports for itself.
+        if (!PathProbe.IsRemote(path) && !Directory.Exists(path)) return;
         NewTab(_active, path);
         _window.Raise();
         MarkDirty();
@@ -853,7 +863,12 @@ public partial class CommanderApp : Component, IDisposable
     /// <summary>Resolve <paramref name="raw"/> and navigate <paramref name="side"/> to it.
     /// Relative paths (incl. "..") resolve against the pane's folder; "~" and %VAR% expand;
     /// a file target lands on the file in its parent; an archive target browses inside.
-    /// Returns an error string (dialog stays open) or null on success.</summary>
+    /// Returns an error string (dialog stays open) or null on success.
+    ///
+    /// <para>A <i>remote</i> target is resolved off the UI thread instead (see
+    /// <see cref="StartRemoteGoto"/>) and this returns null with the prompt left open: asking
+    /// the filesystem about an unreachable host costs up to 21 seconds, and this runs from a
+    /// key press. A local path answers in microseconds and keeps the straight line.</para></summary>
     private string? GotoPath(char side, string raw)
     {
         var input = raw.Trim().Trim('"');
@@ -862,29 +877,104 @@ public partial class CommanderApp : Component, IDisposable
         string? resolved = ResolveTypedPath(side, input, out var resolveError);
         if (resolved == null) return resolveError;
 
-        if (Directory.Exists(resolved))
+        if (PathProbe.IsRemote(resolved))
         {
-            NavigateTo(side, resolved);
-            return null;
+            StartRemoteGoto(side, resolved);
+            return null;   // CommitNamePrompt sees the probe and holds the dialog open
         }
-        if (File.Exists(resolved))
-        {
-            if (ArchiveVfs.IsArchiveFile(resolved)) { NavigateTo(side, resolved); return null; }
-            // A plain file: land in its folder with the cursor on it.
-            var parent = System.IO.Path.GetDirectoryName(resolved);
-            if (parent == null) return $"Not a folder: {resolved}";
-            NavigateTo(side, parent, focusChildName: System.IO.Path.GetFileName(resolved));
-            return null;
-        }
-        // Inside an archive the member dirs aren't on disk — navigate if the archive file
-        // itself exists and let the listing surface any bad member path.
-        if (ArchivePath.TryParse(resolved) is { } ap && File.Exists(ap.ArchiveFile))
-        {
-            NavigateTo(side, resolved);
-            return null;
-        }
-        return $"Path not found: {resolved}";
+        return LandOn(side, resolved, PathProbe.LocalKind(resolved), () => ArchiveTargetExists(resolved));
     }
+
+    /// <summary>How long a typed path gets to answer before the prompt offers to go anyway.
+    /// Settable so a test need not wait it out.</summary>
+    internal TimeSpan GotoProbeBudget = TimeSpan.FromSeconds(10);
+
+    // Non-null while a typed remote path is being resolved: the prompt's busy state, and the
+    // guard that keeps a second Enter from starting a second probe. Owned by the UI thread.
+    private CancellationTokenSource? _gotoProbe;
+
+    /// <summary>Resolve a remote target off the UI thread, then land on it. The prompt (or,
+    /// from the command line, the notice line) reports whatever comes back.</summary>
+    private void StartRemoteGoto(char side, string resolved)
+    {
+        var cts = new CancellationTokenSource();
+        _gotoProbe = cts;
+        _namePromptError = null;
+        MarkDirty();
+        _ = ProbeAndLand(side, resolved, cts);
+    }
+
+    private async Task ProbeAndLand(char side, string resolved, CancellationTokenSource cts)
+    {
+        PathKind kind;
+        bool archive = false;
+        try
+        {
+            kind = await PathProbe.KindAsync(resolved, GotoProbeBudget, cts.Token).ConfigureAwait(false);
+            // The archive fallback stats the archive file, which is on the same share — off
+            // the UI thread with the rest of it rather than on the way back.
+            if (kind == PathKind.Missing)
+                archive = await Task.Run(() => ArchiveTargetExists(resolved), cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { cts.Dispose(); return; }   // Esc — the close already tidied up
+        catch { kind = PathKind.Missing; }
+
+        HultUI.Application.InvokeOnMainThread(() =>
+        {
+            bool mine = ReferenceEquals(_gotoProbe, cts);
+            cts.Dispose();
+            if (!mine) return;          // cancelled, or superseded by a newer probe
+            _gotoProbe = null;
+
+            var err = LandOn(side, resolved, kind, () => archive);
+            if (err != null)
+            {
+                // From the command line there is no dialog to hold the message.
+                if (_namePrompt != null) _namePromptError = err; else _notice = err;
+            }
+            else if (_namePrompt != null) _namePrompt = null;
+            MarkDirty();
+        });
+    }
+
+    /// <summary>Act on what a typed path turned out to be. <paramref name="archiveTarget"/> is
+    /// deferred because answering it stats the disk, and only the not-found branch asks.</summary>
+    private string? LandOn(char side, string resolved, PathKind kind, Func<bool> archiveTarget)
+    {
+        switch (kind)
+        {
+            case PathKind.Directory:
+                NavigateTo(side, resolved);
+                return null;
+
+            case PathKind.File:
+                if (ArchiveVfs.IsArchiveFile(resolved)) { NavigateTo(side, resolved); return null; }
+                // A plain file: land in its folder with the cursor on it.
+                var parent = System.IO.Path.GetDirectoryName(resolved);
+                if (parent == null) return $"Not a folder: {resolved}";
+                NavigateTo(side, parent, focusChildName: System.IO.Path.GetFileName(resolved));
+                return null;
+
+            case PathKind.Unreachable:
+            case PathKind.TimedOut:
+                // The host never answered, so whether the folder is there is still unknown —
+                // and a modal dialog is the worst place to wait to find out. Go, and let the
+                // pane say "not available" with the Reconnect button already under the cursor.
+                NavigateTo(side, resolved);
+                return null;
+
+            default:
+                // Inside an archive the member dirs aren't on disk — navigate if the archive
+                // file itself exists and let the listing surface any bad member path.
+                if (archiveTarget()) { NavigateTo(side, resolved); return null; }
+                return $"Path not found: {resolved}";
+        }
+    }
+
+    /// <summary>True when the path descends into an archive file that is really there. Stats
+    /// the disk — on a remote path, call it off the UI thread.</summary>
+    private static bool ArchiveTargetExists(string resolved) =>
+        ArchivePath.TryParse(resolved) is { } ap && File.Exists(ap.ArchiveFile);
 
     /// <summary>Turn a path the user typed into an absolute one, without asking whether it
     /// exists. "~" and %VAR% expand, a relative path (incl. "..") resolves against
@@ -2330,13 +2420,26 @@ public partial class CommanderApp : Component, IDisposable
     private void CommitNamePrompt()
     {
         if (_namePrompt is not { } spec) return;
+        if (_gotoProbe != null) return;              // a probe is already out — one Enter is enough
         var err = spec.Commit(_namePromptValue);
+        // Commit may have started an off-thread probe (a remote path). Then there is no answer
+        // yet: hold the dialog open in its busy state and let the probe close it.
+        if (_gotoProbe != null) { MarkDirty(); return; }
         if (err != null) { _namePromptError = FileOps.Clean(err); MarkDirty(); return; }
         _namePrompt = null;
         MarkDirty();
     }
 
-    private void CloseNamePrompt() { _namePrompt = null; MarkDirty(); }
+    private void CloseNamePrompt()
+    {
+        // Esc during a probe abandons it: the continuation finds the field cleared and drops
+        // its result rather than navigating a dialog the user has already dismissed.
+        var probe = _gotoProbe;
+        _gotoProbe = null;
+        probe?.Cancel();
+        _namePrompt = null;
+        MarkDirty();
+    }
 
     /// <summary>Dismiss the confirm dialog — the Cancel button and Escape are the same answer,
     /// and a spec that cares about being answered "no" hears it here.</summary>
