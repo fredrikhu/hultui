@@ -43,6 +43,15 @@ backend does not echo — `Rate`, `Volume`, `Muted` — and `Position` on a `See
 moves at once so a scrubber lands where it was dropped. Every setter and command must be
 called on the UI thread.
 
+**Naming a track.** A backend builds `MediaTrack.Title` through
+`MediaTrack.Describe(title, language, id)`: the language name leads and the file's own
+title follows — "English · Stereo", "Japanese · Stereo". Either half alone is enough,
+and a file that says nothing leaves "Track 3". Do not name a track by its embedded title
+alone: a dubbed release is routinely muxed with the same title on every audio track, so
+the menu ends up offering the same word twice and the one field that tells them apart is
+the one that got dropped. `MediaTrack.LanguageName` maps the ISO 639 code, including the
+639-2/B forms Matroska tends to carry (`ger`, `fre`) which the runtime does not know.
+
 `MediaSource.FromFile(path)`, `FromUri(Uri)`, `FromUri(string)`, `FromStream(stream,
 displayName)`. The string form keeps its `Url` verbatim even when .NET cannot parse it
 (mpv's `av://lavfi:testsrc` is one), so a backend gets what you typed. The mpv backend

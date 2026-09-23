@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using HultUI.Core.Rendering;
@@ -334,7 +334,9 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             if (type is not ("audio" or "sub")) continue;
             int id = (int)(GetInt64(_mpv, prefix + "id") ?? 0);
             string? lang = GetString(_mpv, prefix + "lang");
-            string title = GetString(_mpv, prefix + "title") ?? lang ?? $"Track {id}";
+            // Both halves, not whichever exists: a release with an English and a Japanese
+            // track both titled "Stereo" is otherwise a menu of two identical entries.
+            string title = MediaTrack.Describe(GetString(_mpv, prefix + "title"), lang, id);
             (type == "audio" ? audio : subtitles).Add(new MediaTrack(id, title, lang));
         }
         Raise(new BackendEvent.TracksChanged(audio, subtitles, ReadSelected("aid"), ReadSelected("sid")));
