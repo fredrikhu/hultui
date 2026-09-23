@@ -100,6 +100,83 @@ public class MergeRequestsPanelTests
         });
     }
 
+    /// <summary>
+    /// A description with a table, a closed section, a pasted screenshot, a picture from
+    /// elsewhere and two mentions. The screenshot comes through the uploads API with the
+    /// token; the other picture comes with no token at all; the section opens on its summary;
+    /// the reader's own mention stands out.
+    /// </summary>
+    [Fact]
+    public void TheDescriptionDrawsTablesSectionsPicturesAndMentions()
+    {
+        const string md = "Hi @dosei and @mkline, see dana@example.com.\n\n"
+            + "| Tender | Amount |\n|--------|-------:|\n| card | 12.50 |\n\n"
+            + "<details><summary>Logs</summary>\n\nhidden body\n\n</details>\n\n"
+            + "![shot](/uploads/0a1b2c3d/shot.png){width=300}\n\n"
+            + "![logo](https://images.example/img/logo.png)\n\n"
+            + "![panorama](https://images.example/img/big.png)";
+        var handler = Routes(null)
+            .Map(MrList, _ => FakeGitLabHandler.Json(FakeGitLabHandler.Recording("merge_requests_page1")
+                .Replace(RecordedDescription, System.Text.Json.JsonSerializer.Serialize(md))))
+            .Map($"GET {Api}/projects/7781/uploads/0a1b2c3d/shot.png", _ => FakeGitLabHandler.Bytes(FakeGitLabHandler.Png(600, 300)))
+            .Map("GET /img/logo.png", _ => FakeGitLabHandler.Bytes(FakeGitLabHandler.Png(120, 60)))
+            .Map("GET /img/big.png", _ => FakeGitLabHandler.Bytes(FakeGitLabHandler.Png(4096, 1024)));
+        Hosted((_, session, app) =>
+        {
+            app.OpenMergeRequests(JunctionApp.MrFilter.AllOpen);
+            session.PumpUntil(() => TreeHas(session, "!412"), TimeSpan.FromSeconds(15));
+            session.Window.PressKey(KeyCode.Enter);
+            session.PumpUntil(() => TreeHas(session, "Tender"), TimeSpan.FromSeconds(15));
+            session.PumpUntil(() => Pictures(session).Count == 3, TimeSpan.FromSeconds(15));
+            session.PumpFrames(2);
+
+            // The table's cells, header and body.
+            Assert.NotNull(Label(session, "Tender"));
+            Assert.NotNull(Label(session, "12.50"));
+
+            // Both pictures, at the size asked for and at their own.
+            var sizes = Pictures(session).Select(p => (LayoutProbe.Painted(p).Width, LayoutProbe.Painted(p).Height)).ToList();
+            Assert.Contains((300f, 150f), sizes);
+            Assert.Contains((120f, 60f), sizes);
+            // A picture far larger than any panel is kept at 2048 on its long side, and drawn
+            // as wide as the panel lets it be.
+            var big = Pictures(session).Single(p => p.AccessibleName == "panorama");
+            Assert.Equal(new HultUI.Core.Primitives.Size(2048, 512), big.Source!.IntrinsicSize);
+            Assert.True(LayoutProbe.Painted(big).Width < 800f);
+
+            // The token went to GitLab's API for the upload, and nowhere else.
+            var upload = handler.Seen.Single(s => s.Request.RequestUri!.AbsolutePath.EndsWith("/uploads/0a1b2c3d/shot.png")).Request;
+            Assert.Equal("gitlab.com", upload.RequestUri!.Host);
+            Assert.True(upload.Headers.Contains("PRIVATE-TOKEN"));
+            var logo = handler.Seen.Single(s => s.Request.RequestUri!.AbsolutePath == "/img/logo.png").Request;
+            Assert.Equal("images.example", logo.RequestUri!.Host);
+            Assert.False(logo.Headers.Contains("PRIVATE-TOKEN"));
+            Assert.Null(logo.Headers.Authorization);
+
+            // Mentions link to their people; mine stands out; an address is not a mention.
+            var hi = Root(session) is { } root
+                ? LayoutProbe.Descendants<TextElement>(root, t => t.Content.StartsWith("Hi @dosei")).Single()
+                : throw new Xunit.Sdk.XunitException("no root");
+            Assert.Equal(new[] { "https://gitlab.com/dosei", "https://gitlab.com/mkline" }, hi.Links!.Select(l => l.Target));
+            var mine = hi.Spans!.Single(s => s.Start == 3);
+            var theirs = hi.Spans!.Single(s => s.Start == hi.Content.IndexOf("@mkline", StringComparison.Ordinal));
+            Assert.NotEqual(mine.Background, theirs.Background);
+
+            // The section is closed until its summary is clicked.
+            Assert.False(TreeHas(session, "hidden body"));
+            session.Window.Click(Named(session, "Show Logs"));
+            session.PumpFrames(2);
+            Assert.True(TreeHas(session, "hidden body"));
+            Assert.NotNull(Named(session, "Hide Logs"));
+        }, handler);
+
+        static List<ImageElement> Pictures(HeadlessSession session) =>
+            Root(session) is { } root ? LayoutProbe.Descendants<ImageElement>(root, i => i.AutomationId == "md-image") : [];
+    }
+
+    private const string RecordedDescription =
+        "\"Splits a refund across the original tenders.\\n\\n- per-tender rows\\n- `Refunds()` counts them\\n\\nCloses #1042\"";
+
     [Fact]
     public void AFailedRefreshKeepsTheRowsAndSaysHowOld()
     {

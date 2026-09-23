@@ -496,6 +496,9 @@ public partial class JunctionApp
             else if (r.Type == DiffRowType.Composer)
                 signature.Add(rv.Composer?.Failure is null ? 1 : 2);
         }
+        // A picture that arrived or a section that opened changes a card's height with none
+        // of the above changing.
+        signature.Add(_mdLayoutGen);
         rv.RowsSignature = signature.ToHashCode();
 
         // A thread asked for (n / p, a discussion row) is brought on screen once it has a row.
@@ -580,7 +583,7 @@ public partial class JunctionApp
     }
 
     /// <summary>A note body is drawn as markdown, so its height is the markdown's.</summary>
-    private static float NoteBodyHeight(string body, float width) =>
+    private float NoteBodyHeight(string body, float width) =>
         MarkdownHeight(MarkdownReader.Read(body), NoteLook, width);
 
     private float ReviewRowHeight(DiffRow r, float textWidth) => r.Type switch

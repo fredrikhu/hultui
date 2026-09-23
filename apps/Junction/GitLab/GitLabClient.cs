@@ -73,6 +73,11 @@ public sealed class GitLabClient : IDisposable
     public const int DefaultMaxPages = 10;
 
     private readonly HttpClient _http;
+    // Downloads: no automatic redirects and no token on the client, so the token is added
+    // per hop and only to this host. See GetBytesAsync.
+    private readonly HttpClient _raw;
+    private readonly string? _token;
+    private readonly GitLabTokenKind _kind;
     private readonly string _apiBase;
 
     /// <summary>Host name (no scheme, no port) — what accounts and the UI key on.</summary>
@@ -98,6 +103,13 @@ public sealed class GitLabClient : IDisposable
             if (kind == GitLabTokenKind.Pat) _http.DefaultRequestHeaders.Add("PRIVATE-TOKEN", token);
             else _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
+        _token = token;
+        _kind = kind;
+        _raw = handler is null
+            ? new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
+            : new HttpClient(handler, disposeHandler: false);
+        _raw.Timeout = _http.Timeout;
+        _raw.DefaultRequestHeaders.UserAgent.ParseAdd("Junction/1.0 (+https://github.com/fredrikhu/hului-revamped)");
     }
 
     /// <summary>
@@ -389,6 +401,97 @@ public sealed class GitLabClient : IDisposable
         }
     }
 
+    // ── Uploads ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>The largest upload read into memory — a screenshot is a few hundred KB; this
+    /// is for the one that is a 40 MB video someone pasted.</summary>
+    public const long MaxUploadBytes = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// A file pasted into a description or a note — what markdown links as
+    /// <c>/uploads/&lt;secret&gt;/&lt;file&gt;</c>. GitLab 17.4 and later serve these to the API with
+    /// any role from Guest up; the web URL wants a browser session instead, so for a private
+    /// project this is the only way in with a token. An older instance answers 404.
+    /// <paramref name="filename"/> is taken as it appears in the URL, already escaped.
+    /// </summary>
+    public Task<GitLabResult<byte[]>> GetUploadAsync(long projectId, string secret, string filename, CancellationToken ct = default) =>
+        GetBytesAsync($"projects/{projectId}/uploads/{Uri.EscapeDataString(secret)}/{filename}", MaxUploadBytes, ct);
+
+    /// <summary>
+    /// A file's bytes. Redirects are followed here, not by the handler: an instance with
+    /// object storage answers a download with a 302 to the bucket, and an automatic redirect
+    /// carries every header but <c>Authorization</c> along — <c>PRIVATE-TOKEN</c> included — to
+    /// a host that has no business seeing it. So the token rides only on a hop to this
+    /// instance's own origin.
+    /// </summary>
+    private async Task<GitLabResult<byte[]>> GetBytesAsync(string path, long maxBytes, CancellationToken ct)
+    {
+        var origin = new Uri(_apiBase);
+        var uri = new Uri(_apiBase + "/" + path);
+        HttpResponseMessage? response = null;
+        try
+        {
+            for (int hop = 0; ; hop++)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+                if (!string.IsNullOrEmpty(_token) && Uri.Compare(uri, origin, UriComponents.SchemeAndServer,
+                        UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    if (_kind == GitLabTokenKind.Pat) request.Headers.Add("PRIVATE-TOKEN", _token);
+                    else request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+                }
+                response = await _raw.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+                if ((int)response.StatusCode is < 300 or >= 400 || response.Headers.Location is not { } location) break;
+                var next = location.IsAbsoluteUri ? location : new Uri(uri, location);
+                response.Dispose();
+                response = null;
+                if (hop >= 4 || next.Scheme is not ("https" or "http"))
+                    return GitLabResult<byte[]>.Fail(new GitLabFailure(GitLabFailureKind.Invalid, "The download redirected too far"));
+                uri = next;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            response?.Dispose();
+            return GitLabResult<byte[]>.Fail(Classify(ex));
+        }
+        using (response)
+        {
+            if (!response!.IsSuccessStatusCode)
+                return GitLabResult<byte[]>.Fail(await FailureFromAsync(response, ct).ConfigureAwait(false));
+            if (response.Content.Headers.ContentLength > maxBytes)
+                return GitLabResult<byte[]>.Fail(new GitLabFailure(GitLabFailureKind.Invalid, "The file is too large to show"));
+            try
+            {
+                var bytes = await ReadCappedAsync(response.Content, maxBytes, ct).ConfigureAwait(false);
+                return bytes is null
+                    ? GitLabResult<byte[]>.Fail(new GitLabFailure(GitLabFailureKind.Invalid, "The file is too large to show"))
+                    : GitLabResult<byte[]>.Success(bytes);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return GitLabResult<byte[]>.Fail(Classify(ex));
+            }
+        }
+    }
+
+    /// <summary>The body, or null once it passes <paramref name="maxBytes"/> — a missing or
+    /// wrong Content-Length does not get to decide how much is read.</summary>
+    internal static async Task<byte[]?> ReadCappedAsync(HttpContent content, long maxBytes, CancellationToken ct)
+    {
+        await using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > maxBytes) return null;
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
+    }
+
     // ── Pipelines ────────────────────────────────────────────────────────────────────
 
     public Task<GitLabResult<List<GlPipeline>>> ListPipelinesAsync(long projectId, string? @ref = null, string? sha = null,
@@ -578,7 +681,11 @@ public sealed class GitLabClient : IDisposable
         { } other => other.GetRawText(),
     };
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        _raw.Dispose();
+    }
 
     /// <summary>Builds <c>?a=1&amp;b=2</c>, skipping nulls, escaping values.</summary>
     internal sealed class Query

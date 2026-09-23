@@ -181,6 +181,64 @@ public class ReviewTests
         }, handler);
     }
 
+    /// <summary>
+    /// A card whose height changes after it was measured: its picture arrives a frame after
+    /// the card opens, and its section opens on a click. Each time the row is measured again,
+    /// so the card fits it throughout. Without the layout generation in the row signature the
+    /// picture lands in a row still sized for its "loading" line.
+    /// </summary>
+    [Fact]
+    public void ACardFitsItsRowAsItsPictureArrivesAndItsSectionOpens()
+    {
+        var note = string.Join("\n", [
+            "Before and after:",
+            "",
+            "![shot](/uploads/0a1b2c3d/shot.png)",
+            "",
+            "| Tender | Note |",
+            "|--------|------|",
+            "| card | " + string.Join(" ", Enumerable.Repeat("a cell long enough to wrap inside its share of the card", 6)) + " |",
+            "",
+            "<details><summary>Logs</summary>",
+            "",
+            "hidden line one",
+            "",
+            "hidden line two",
+            "",
+            "</details>",
+        ]);
+        var handler = Routes()
+            .Map(Discussions, _ => FakeGitLabHandler.Json(FakeGitLabHandler.Recording("discussions")
+                .Replace("\"Refunds should not count voided tenders.\"", System.Text.Json.JsonSerializer.Serialize(note))))
+            .Map($"GET {Api}/projects/7781/uploads/0a1b2c3d/shot.png", _ => FakeGitLabHandler.Bytes(FakeGitLabHandler.Png(800, 400)));
+        Hosted((repo, _, session, app) =>
+        {
+            app.StartReview(repo.Path, 412);
+            session.PumpUntil(() => ById(session, "review-thread") is not null, TimeSpan.FromSeconds(20));
+            session.PumpFrames(2);
+            session.Window.Click(ById(session, "review-thread")!);
+            session.PumpUntil(() => ById(session, "md-image") is not null, TimeSpan.FromSeconds(10));
+            session.PumpFrames(2);
+            // Wider than the card's text column, so scaled down to it with its ratio kept.
+            var picture = LayoutProbe.Painted(ById(session, "md-image")!);
+            Assert.True(picture.Width < 800f, $"picture {picture.Width} wide");
+            Assert.Equal(MathF.Floor(picture.Width / 2), picture.Height);
+            AssertCardFitsItsRow(session);
+
+            Assert.False(TreeHas(session, "hidden line one"));
+            // The picture pushed the section's summary below the window: scroll to it.
+            for (int i = 0; i < 20 && LayoutProbe.Painted(ById(session, "md-details")!).Bottom > 860; i++)
+            {
+                session.Window.Wheel(900, 500, 0, -3);
+                session.PumpFrames(2);
+            }
+            session.Window.Click(ById(session, "md-details")!);
+            session.PumpFrames(2);
+            Assert.True(TreeHas(session, "hidden line two"));
+            AssertCardFitsItsRow(session);
+        }, handler);
+    }
+
     private static void AssertCardFitsItsRow(HeadlessSession session)
     {
         var outer = ById(session, "review-thread")!;

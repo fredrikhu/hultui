@@ -30,6 +30,31 @@ public class ImageElementTests
         Assert.Equal(150, size.Height);
     }
 
+    [Theory]
+    [InlineData(800, 400, null, 500f, null, 500, 250)]     // too wide: scaled to the width offered
+    [InlineData(300, 150, null, 500f, null, 300, 150)]     // narrower: never scaled up
+    [InlineData(800, 400, 600f, 1000f, null, 600, 300)]    // asks for 600: gets 600, aspect kept
+    [InlineData(800, 400, 600f, 450f, null, 450, 225)]     // asks for 600, offered 450
+    [InlineData(400, 1600, null, 500f, 480f, 120, 480)]    // too tall: narrows to keep the ratio
+    [InlineData(801, 401, null, 500f, null, 500, 250)]     // whole pixels, rounded down
+    public void ScaledSize_FitsTheWidthAndHeightKeepingTheRatio(
+        float iw, float ih, float? natural, float available, float? maxHeight, float w, float h)
+    {
+        var size = ImageElement.ScaledSize(new Size(iw, ih), natural, available, maxHeight);
+        Assert.Equal((w, h), (size.Width, size.Height));
+    }
+
+    [Fact]
+    public void MeasureContent_ScalesDownToTheWidthOffered_WhenAskedTo()
+    {
+        var img = ImageElement.New(new StubImageSource(new Size(800, 400)));
+        Assert.Equal(new Size(800, 400), img.MeasureContent(500, 500, new StubMeasureContext()));   // opt-in only
+
+        img.ScaleDownToFit = true;
+        img.MaxImageHeight = 200;
+        Assert.Equal(new Size(400, 200), img.MeasureContent(500, 500, new StubMeasureContext()));
+    }
+
     [Fact]
     public void MeasureContent_ReturnsZero_WhenNoSource()
     {
@@ -51,6 +76,22 @@ public class ImageElementTests
 
         Assert.Equal(0, size.Width);
         Assert.Equal(0, size.Height);
+    }
+
+    [Fact]
+    public void PatchFrom_CopiesTheScalingProperties()
+    {
+        var existing = ImageElement.New(new StubImageSource(new Size(100, 50)));
+        var incoming = ImageElement.New(new StubImageSource(new Size(100, 50)));
+        incoming.ScaleDownToFit = true;
+        incoming.NaturalWidth = 60;
+        incoming.MaxImageHeight = 40;
+
+        existing.PatchFrom(incoming);
+
+        Assert.True(existing.ScaleDownToFit);
+        Assert.Equal(60f, existing.NaturalWidth);
+        Assert.Equal(40f, existing.MaxImageHeight);
     }
 
     [Fact]

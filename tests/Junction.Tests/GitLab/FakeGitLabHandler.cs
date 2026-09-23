@@ -52,6 +52,24 @@ internal sealed class FakeGitLabHandler : HttpMessageHandler
         return res;
     }
 
+    public static HttpResponseMessage Bytes(byte[] data, string mediaType = "image/png")
+    {
+        var content = new ByteArrayContent(data);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+    }
+
+    /// <summary>A PNG of the given size, one flat colour — a screenshot as far as a decoder
+    /// can tell.</summary>
+    public static byte[] Png(int width, int height)
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        bitmap.Erase(new SkiaSharp.SKColor(0x40, 0x80, 0xC0));
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
     public static HttpResponseMessage Html(string html, int status = 200) => new((HttpStatusCode)status)
     {
         Content = new StringContent(html, Encoding.UTF8, "text/html"),

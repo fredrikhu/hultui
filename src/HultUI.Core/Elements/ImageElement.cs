@@ -28,6 +28,61 @@ public class ImageElement : Element
         set { if (_fit == value) return; _fit = value; MarkPaintDirty(); }
     }
 
+    // ──── Scaling to fit (opt-in) ────
+
+    private bool _scaleDownToFit;
+    private float? _naturalWidth, _maxImageHeight;
+
+    /// <summary>
+    /// When true the image lays out at its natural size scaled down — never up, and keeping
+    /// its aspect ratio — so it fits the width it is offered and <see cref="MaxImageHeight"/>.
+    /// CSS's <c>max-width: 100%; height: auto</c>: an image in flowing content (a document, a
+    /// comment) that should not overflow a narrow column or stretch in a wide one. Give it
+    /// <c>AlignSelf(FlexStart)</c> in a column, or the column stretches its box.
+    /// See <see cref="ScaledSize"/> for the arithmetic, public so a caller that sizes rows
+    /// before they are built can reach the same answer.
+    /// </summary>
+    public bool ScaleDownToFit
+    {
+        get => _scaleDownToFit;
+        set { if (_scaleDownToFit == value) return; _scaleDownToFit = value; MarkLayoutDirty(); }
+    }
+
+    /// <summary>The width the image asks for before scaling, in layout units — what
+    /// <c>width="600"</c> says on an HTML image. Null means its intrinsic width. Only read
+    /// under <see cref="ScaleDownToFit"/>.</summary>
+    public float? NaturalWidth
+    {
+        get => _naturalWidth;
+        set { if (_naturalWidth == value) return; _naturalWidth = value; MarkLayoutDirty(); }
+    }
+
+    /// <summary>The tallest the image lays out under <see cref="ScaleDownToFit"/>; a taller
+    /// one scales down further, narrowing with it. Null is no limit.</summary>
+    public float? MaxImageHeight
+    {
+        get => _maxImageHeight;
+        set { if (_maxImageHeight == value) return; _maxImageHeight = value; MarkLayoutDirty(); }
+    }
+
+    /// <summary>
+    /// The size <see cref="ScaleDownToFit"/> lays an image of <paramref name="intrinsic"/> size
+    /// out at: <paramref name="naturalWidth"/> (or the intrinsic width) with the height that
+    /// keeps the aspect ratio, then scaled down uniformly until it fits
+    /// <paramref name="availableWidth"/> and <paramref name="maxHeight"/>. Whole pixels, so a
+    /// row sized from this and the element drawn from it agree exactly.
+    /// </summary>
+    public static Size ScaledSize(Size intrinsic, float? naturalWidth, float availableWidth, float? maxHeight)
+    {
+        if (intrinsic.Width <= 0 || intrinsic.Height <= 0) return Size.Zero;
+        float w = naturalWidth is > 0 ? naturalWidth.Value : intrinsic.Width;
+        float h = w * intrinsic.Height / intrinsic.Width;
+        float scale = 1f;
+        if (float.IsFinite(availableWidth) && availableWidth >= 0 && w > availableWidth) scale = availableWidth / w;
+        if (maxHeight is > 0 && h * scale > maxHeight.Value) scale = maxHeight.Value / h;
+        return new Size(MathF.Floor(w * scale), MathF.Floor(h * scale));
+    }
+
     public static ImageElement New(IImageSource? source = null, [OriginFile] string? file = null, [OriginLine] int line = 0) =>
         new ImageElement { Source = source }.WithOrigin(file, line);
 
@@ -36,7 +91,9 @@ public class ImageElement : Element
         if (Source is null || !Source.IsLoaded)
             return Size.Zero;
 
-        return Source.IntrinsicSize;
+        return _scaleDownToFit
+            ? ScaledSize(Source.IntrinsicSize, _naturalWidth, availableWidth, _maxImageHeight)
+            : Source.IntrinsicSize;
     }
 
     public override void Render(IRenderContext ctx)
@@ -53,6 +110,9 @@ public class ImageElement : Element
         {
             Source = img.Source;
             Fit = img.Fit;
+            ScaleDownToFit = img.ScaleDownToFit;
+            NaturalWidth = img.NaturalWidth;
+            MaxImageHeight = img.MaxImageHeight;
         }
     }
 }

@@ -106,6 +106,11 @@ public sealed class GitLabAccounts
 
     public bool HasAccount(string host) => For(host) is not null;
 
+    /// <summary>The HTTP handler requests to <paramref name="host"/> go through — null for the
+    /// default. For the calls that carry no token (an image a note links to), so they travel
+    /// the same way as the ones that do.</summary>
+    public HttpMessageHandler? HandlerFor(string host) => _handlerFor(host.ToLowerInvariant());
+
     /// <summary>Whether the token for <paramref name="host"/> is in the OS store, as opposed
     /// to only in this process's memory.</summary>
     public bool StoredInKeyring(string host) => _store.Read(Service(host), TokenAccount) is not null;
