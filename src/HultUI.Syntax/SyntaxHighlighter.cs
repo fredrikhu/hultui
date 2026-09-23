@@ -177,6 +177,44 @@ public static class SyntaxHighlighter
         return flat;
     }
 
+    private static readonly Dictionary<string, string?> ExtensionByLanguage = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <see cref="SpansForText"/> for text whose language is named rather than implied by a
+    /// file — a markdown fence's info string. The name is tried as a grammar's id, then as
+    /// one of its aliases, then as an extension, so <c>csharp</c>, <c>C#</c> and <c>cs</c> all
+    /// find C#, and <c>bash</c> finds the shell grammar. Empty when nothing matches.
+    /// </summary>
+    public static IReadOnlyList<TextSpan> SpansForLanguage(string language, string text) =>
+        ExtensionForLanguage(language) is { } ext ? SpansForText("code" + ext, text) : Array.Empty<TextSpan>();
+
+    private static string? ExtensionForLanguage(string language)
+    {
+        language = language.Trim();
+        if (language.Length == 0 || language.IndexOfAny(['/', '\\', '.']) >= 0) return null;
+        lock (Gate)
+        {
+            if (ExtensionByLanguage.TryGetValue(language, out var known)) return known;
+            EnsureRegistry();
+            string? ext = null;
+            foreach (var lang in _options!.GetAvailableLanguages())
+            {
+                if (lang.Extensions is not { Count: > 0 } extensions) continue;
+                if (string.Equals(lang.Id, language, StringComparison.OrdinalIgnoreCase)
+                    || lang.Aliases?.Exists(a => string.Equals(a, language, StringComparison.OrdinalIgnoreCase)) == true)
+                {
+                    ext = extensions[0];
+                    break;
+                }
+            }
+            // Not a language's name, but maybe its extension spelled without the dot.
+            if (ext is null && ResolveExtension("code." + language) is { } byExt && _options.GetScopeByExtension(byExt) != null)
+                ext = "." + language;
+            ExtensionByLanguage[language] = ext;
+            return ext;
+        }
+    }
+
     // ── Registry / grammar resolution (all under Gate) ───────────────────
 
     private static ThemeName _themeName = ThemeName.DarkPlus;

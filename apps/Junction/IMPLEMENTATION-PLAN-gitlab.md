@@ -31,6 +31,7 @@ Everything asked for is designed, all four open questions are answered, and the 
 
 1. The review diff is **unified only** in the prototype (split view is on a board). Ship unified first; split follows once thread cards work as variable-height rows in the virtualised list.
 2. The MR detail renders the description as "plain paragraphs, `- ` bullets, blank lines as gaps, backticks stripped". Junction has no markdown renderer; that minimum is a 40-line function, not a dependency. Do not pull one in.
+   **Superseded (2026-09-23):** the minimum left headings, emphasis, links, code fences and template comments showing raw, and review notes had none of it. Descriptions and notes now go through Markdig (`Markdown.cs` reads, `JunctionApp.Markdown.cs` draws and measures): CommonMark plus strikethrough, task lists and bare URLs. Tables, images, `<details>`, emoji and `@mentions` are not drawn yet; inline code keeps the body face until a span can change family.
 
 ## 1. Reuse before writing
 

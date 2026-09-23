@@ -664,26 +664,14 @@ public partial class JunctionApp
         return grid;
     }
 
-    /// <summary>The description with the one markdown reading the design allows: paragraphs,
-    /// <c>- </c> bullets, blank lines as gaps, backticks stripped. Nothing else.</summary>
-    private static Element MrDescription(string? description)
+    /// <summary>The description, drawn as markdown — see <c>JunctionApp.Markdown</c>. One
+    /// that is empty, or only a template's comments, says so.</summary>
+    private Element MrDescription(string? description)
     {
-        var col = Flex.Column(gap: 0);
-        if (string.IsNullOrWhiteSpace(description))
-        {
-            col.AddChild(Text.New("No description.").FontSize(12.5f).TextColor(Nocturne.On(0.45)));
-            return col;
-        }
-        foreach (var raw in description.Replace("\r\n", "\n").Split('\n'))
-        {
-            var line = raw.Replace("`", "");
-            if (line.Trim().Length == 0) { col.AddChild(Box.New().Height(8)); continue; }
-            bool bullet = line.StartsWith("- ", StringComparison.Ordinal) || line.StartsWith("* ", StringComparison.Ordinal);
-            var text = Text.New(bullet ? "• " + line[2..] : line).FontSize(12.5f).TextColor(Nocturne.On(0.84));
-            if (bullet) text.Padding(new Thickness(0, 0, 0, 10));
-            col.AddChild(text);
-        }
-        return col;
+        var doc = MarkdownReader.Read(description);
+        return doc.IsEmpty
+            ? Text.New("No description.").FontSize(12.5f).TextColor(Nocturne.On(0.45))
+            : MarkdownView(doc, new MdLook(12.5f, Nocturne.On(0.84)));
     }
 
     private Element MrChanges(string path, long iid, GlMergeRequest mr, IReadOnlyList<GlDiscussion> discussions)
@@ -762,12 +750,7 @@ public partial class JunctionApp
         return col;
     }
 
-    private static string FirstTextLine(string body)
-    {
-        foreach (var line in body.Replace("\r\n", "\n").Split('\n'))
-            if (line.Trim().Length > 0) return line.Replace("`", "").Trim();
-        return "";
-    }
+    private static string FirstTextLine(string body) => MarkdownReader.FirstLine(body);
 
     private Hosted<IReadOnlyList<GlDiff>> MrDiffsFor(string path, long iid)
     {
