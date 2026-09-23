@@ -29,6 +29,53 @@ public class GitLabClientTests
         Assert.Equal(expected, GitLabClient.NormalizeApiBase(given));
     }
 
+    /// <summary>An instance on object storage answers an upload with a 302 to the bucket. The
+    /// token goes to GitLab and not one hop further — an automatic redirect would have carried
+    /// <c>PRIVATE-TOKEN</c> along, since only <c>Authorization</c> is dropped across hosts.</summary>
+    [Theory]
+    [InlineData(GitLabTokenKind.Pat)]
+    [InlineData(GitLabTokenKind.OAuth)]
+    public async Task AnUploadFollowsItsRedirectWithoutTheToken(GitLabTokenKind kind)
+    {
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
+        var handler = new FakeGitLabHandler()
+            .Map($"GET {Api}/projects/7781/uploads/0a1b2c/shot.png", _ =>
+            {
+                var moved = new HttpResponseMessage(System.Net.HttpStatusCode.Found);
+                moved.Headers.Location = new Uri("https://bucket.storage.test/uploads/shot.png?sig=abc");
+                return moved;
+            })
+            .Map("GET /uploads/shot.png?sig=abc", _ => new HttpResponseMessage { Content = new ByteArrayContent(png) });
+        using var client = Client(handler, kind: kind);
+
+        var file = await client.GetUploadAsync(7781, "0a1b2c", "shot.png");
+
+        Assert.True(file.Ok, file.Failure?.Message);
+        Assert.Equal(png, file.Value);
+        var (toGitLab, toBucket) = (handler.Seen[0].Request, handler.Seen[1].Request);
+        Assert.Equal("gitlab.com", toGitLab.RequestUri!.Host);
+        Assert.True(toGitLab.Headers.Contains("PRIVATE-TOKEN") || toGitLab.Headers.Authorization is not null);
+        Assert.Equal("bucket.storage.test", toBucket.RequestUri!.Host);
+        Assert.False(toBucket.Headers.Contains("PRIVATE-TOKEN"));
+        Assert.Null(toBucket.Headers.Authorization);
+    }
+
+    [Fact]
+    public async Task AnUploadLargerThanTheCapIsRefusedUnread()
+    {
+        var handler = new FakeGitLabHandler().Map($"GET {Api}/projects/1/uploads/ab/big.png", _ =>
+        {
+            var content = new ByteArrayContent([1]);
+            content.Headers.ContentLength = GitLabClient.MaxUploadBytes + 1;
+            return new HttpResponseMessage { Content = content };
+        });
+        using var client = Client(handler);
+
+        var file = await client.GetUploadAsync(1, "ab", "big.png");
+
+        Assert.False(file.Ok);
+    }
+
     [Fact]
     public async Task APatRidesInThePrivateTokenHeader()
     {

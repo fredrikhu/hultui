@@ -32,6 +32,7 @@ Everything asked for is designed, all four open questions are answered, and the 
 1. The review diff is **unified only** in the prototype (split view is on a board). Ship unified first; split follows once thread cards work as variable-height rows in the virtualised list.
 2. The MR detail renders the description as "plain paragraphs, `- ` bullets, blank lines as gaps, backticks stripped". Junction has no markdown renderer; that minimum is a 40-line function, not a dependency. Do not pull one in.
    **Superseded (2026-09-23):** the minimum left headings, emphasis, links, code fences and template comments showing raw, and review notes had none of it. Descriptions and notes now go through Markdig (`Markdown.cs` reads, `JunctionApp.Markdown.cs` draws and measures): CommonMark plus strikethrough, task lists and bare URLs. Tables, images, `<details>`, emoji and `@mentions` are not drawn yet; inline code keeps the body face until a span can change family.
+   **Then (same day):** pipe tables, `<details>` sections that open on their summary, `:emoji:` shortcodes, `@mentions` (the reader's own set apart), and pictures — `![]()` and `<img>`, scaled down to fit, loaded in the background. A project upload comes through `GET /projects/:id/uploads/:secret/:filename` (GitLab 17.4+) with the token, following any redirect by hand so the token never leaves the instance; anything else is a plain GET with no token. Before 17.4 a private project's uploads show as links. Still not drawn: math, Mermaid, arbitrary HTML, video.
 
 ## 1. Reuse before writing
 
