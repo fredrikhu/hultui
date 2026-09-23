@@ -185,6 +185,81 @@ public class ServerBrowseTests : IDisposable
         Assert.Equal("docs", fx.PendingFocusChild('L'));
     }
 
+    // ── The trail ────────────────────────────────────────────────────────
+
+    /// <summary>The leading crumb is the <i>server</i>, with the share as a step of its own.
+    /// <c>Path.GetPathRoot</c> answers "\\server\share" because that is the volume, and the trail
+    /// used to take it at its word — so the share was welded into the root and could not be
+    /// clicked, even from a folder inside it.</summary>
+    [Fact]
+    public void TheTrailRootsAtTheServerWithTheShareAsItsOwnCrumb()
+    {
+        using var fx = new Fixture();
+        fx.Go(@"\\server\share\src\core");
+
+        Assert.Equal([@"\\server", "share", "src", "core"], fx.Crumbs());
+    }
+
+    [Fact]
+    public void AShareRootShowsServerThenShare()
+    {
+        using var fx = new Fixture();
+        fx.Go(@"\\server\share");
+
+        Assert.Equal([@"\\server", "share"], fx.Crumbs());
+    }
+
+    [Fact]
+    public void AServerIsTheWholeTrail()
+    {
+        using var fx = new Fixture();
+        fx.Go(@"\\server");
+
+        Assert.Equal([@"\\server"], fx.Crumbs());
+    }
+
+    /// <summary>A local path is untouched: its leading crumb is still the volume, because for a
+    /// drive letter the volume and the place are the same thing.</summary>
+    [Fact]
+    public void ALocalTrailStillRootsAtItsDrive()
+    {
+        using var fx = new Fixture();
+        fx.Go(@"C:\Windows\System32");
+
+        Assert.Equal([@"C:", "Windows", "System32"], fx.Crumbs());
+    }
+
+    /// <summary>Which share you are on is not a folder among folders. A trail too long to fit
+    /// drops middle folders behind an ellipsis, and the share has to survive that — otherwise
+    /// every deep path reads "\\server / … / core" and the share is gone.</summary>
+    [Fact]
+    public void TheShareSurvivesTruncationOfADeepTrail()
+    {
+        using var fx = new Fixture(width: 900);
+        fx.Go(@"\\server\share\a-rather-long-folder-name\another-long-one\and-a-third\and-fourth\leaf");
+
+        var crumbs = fx.Crumbs();
+        Assert.Contains("…", crumbs);                 // it did truncate…
+        Assert.Equal(@"\\server", crumbs[0]);         // …and kept both pinned crumbs
+        Assert.Equal("share", crumbs[1]);
+        Assert.Equal("leaf", crumbs[^1]);
+    }
+
+    /// <summary>Clicking the server crumb goes there. It cannot open the drive picker the way a
+    /// drive letter does — that list is built from mounted volumes and never holds a server.</summary>
+    [Fact]
+    public void ClickingTheServerCrumbNavigatesRatherThanOpeningThePicker()
+    {
+        Shares(ShareListStatus.Ok, "share");
+        using var fx = new Fixture();
+        fx.Go(@"\\server\share\src");
+
+        fx.ClickCrumb(@"\\server");
+
+        Assert.Equal(@"\\server", fx.Dir('L'));
+        Assert.Null(fx.DrivePicker);
+    }
+
     private static void Shares(ShareListStatus status, params string[] names)
         => NetworkShares.EnumerateOverride = _ => new(status, names);
 
@@ -195,11 +270,11 @@ public class ServerBrowseTests : IDisposable
         private readonly HeadlessSession _session;
         private readonly CommanderApp _app;
 
-        public Fixture()
+        public Fixture(int width = 1240)
         {
             _root = Path.Combine(Path.GetTempPath(), "vesper-srv-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_root);
-            _session = HeadlessSession.Create(1240, 820);
+            _session = HeadlessSession.Create(width, 820);
             _app = new CommanderApp(_session.Application, _session.Window.Window, _root);
             _session.Application.SetRoot(_app.Mount());
             Invoke("NavigateTo", 'L', _root, null, false);
@@ -208,6 +283,38 @@ public class ServerBrowseTests : IDisposable
         }
 
         public string Dir(char side) => (string)Method("Dir").Invoke(_app, [side])!;
+
+        public char? DrivePicker => (char?)typeof(CommanderApp)
+            .GetField("_drivePicker", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(_app);
+
+        /// <summary>Put the left pane somewhere without reading it — the trail is drawn from the
+        /// path, and an empty listing keeps a made-up server off the network.</summary>
+        public void Go(string dir)
+        {
+            FileSystem.EnumerateOverride = _ => [];
+            Invoke("NavigateTo", 'L', dir, null, false);
+            _session.PumpFrame();
+        }
+
+        /// <summary>The trail's crumbs, left to right, as rendered — read off the accessibility
+        /// tree, so the assertion is about what a reader is actually told.</summary>
+        public string[] Crumbs()
+        {
+            var strip = _session.Window.FindByAutomationId("crumb-strip-L");
+            Assert.NotNull(strip);
+            return [.. strip!.Node.Children
+                .Where(c => c.Role == HultUI.Core.Accessibility.AccessibilityRole.Button)
+                .Select(c => c.Name ?? "")];
+        }
+
+        public void ClickCrumb(string label)
+        {
+            var crumb = _session.Window.Find(n => n.Name == label
+                && n.Role == HultUI.Core.Accessibility.AccessibilityRole.Button);
+            Assert.NotNull(crumb);
+            crumb!.Click();
+            _session.PumpFrame();
+        }
 
         public string? PendingFocusChild(char side)
             => ((string?[])typeof(CommanderApp)

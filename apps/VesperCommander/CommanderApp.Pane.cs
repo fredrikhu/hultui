@@ -489,12 +489,13 @@ public partial class CommanderApp
         // so a click that landed on a crumb still just navigates.
         row.OnClick(e => { if (ReferenceEquals(e.Target, e.CurrentTarget)) OpenGotoPrompt(side); });
 
-        // Drive segment: monospace accent crumb → jumps the pane to the volume root.
-        // Trim the trailing separator so the first "/" divider isn't doubled ("C:\ /").
-        string root = System.IO.Path.GetPathRoot(dir) ?? dir;
+        // Leading segment: monospace accent crumb. Trim the trailing separator so the first
+        // "/" divider isn't doubled ("C:\ /").
+        string root = CrumbRoot(dir);
+        bool server = PathProbe.HostOf(dir) != null;
         string driveLabel = root.TrimEnd(System.IO.Path.DirectorySeparatorChar,
             System.IO.Path.AltDirectorySeparatorChar);
-        row.AddChild(DriveCrumb(side, driveLabel, root, active));
+        row.AddChild(DriveCrumb(side, driveLabel, root, active, server));
 
         var rest = dir.Length > root.Length ? dir[root.Length..] : "";
         var segs = rest.Split(
@@ -513,13 +514,21 @@ public partial class CommanderApp
             for (int i = 0; i < segs.Length; i++)
                 if (PathEquals(prefixes[i], ap.ArchiveFile)) { archIdx = i; break; }
 
-        // Left-truncate by WHOLE folders: keep the drive + as many trailing segments
-        // as fit, and if any leading ones are dropped show a single "…" after the
-        // drive → "C: / … / folder 3 / folder 4". The leaf is always kept.
+        // On a share, the first segment is the share itself, and it is pinned: which share you
+        // are on is not a folder among folders, and truncating it away would leave the trail
+        // reading "\\server / … / src" on every deep path — the same reason the archive crumb
+        // is pinned. -1 when there is no share, which is every local path.
+        int pin = server && segs.Length > 0 ? 0 : -1;
+
+        // Left-truncate by WHOLE folders: keep the leading crumbs + as many trailing segments
+        // as fit, and if any in between are dropped show a single "…" → "C: / … / folder 3 /
+        // folder 4". The leaf is always kept.
         float budget = BreadcrumbBudget() - EstTextWidth(driveLabel, mono: true) - EstSepWidth();
+        if (pin >= 0) budget -= EstSepWidth() + EstTextWidth(segs[pin], mono: false);
+        int first = pin + 1;                  // lowest segment truncation may drop
         int start = segs.Length;              // first kept segment index
         float used = 0;
-        for (int i = segs.Length - 1; i >= 0; i--)
+        for (int i = segs.Length - 1; i >= first; i--)
         {
             float w = EstSepWidth() + EstTextWidth(segs[i], mono: false);
             if (i < segs.Length - 1 && used + w > budget) break;   // always keep the leaf
@@ -527,14 +536,19 @@ public partial class CommanderApp
             start = i;
         }
         // Never truncate past the archive crumb (design §A: drive + archive are pinned).
-        if (archIdx >= 0) start = Math.Min(start, archIdx);
-        bool truncated = start > 0;
+        if (archIdx >= first) start = Math.Min(start, archIdx);
+        bool truncated = start > first;
         if (truncated) budget -= EstSepWidth() + EstTextWidth("…", mono: false);
         // Dropping the ellipsis's width may push the last kept segment over; trim one more.
         // (Skipped inside an archive so the pinned archive crumb is never trimmed.)
         while (truncated && archIdx < 0 && start < segs.Length - 1 && used > budget)
             used -= EstSepWidth() + EstTextWidth(segs[start++], mono: false);
 
+        if (pin >= 0)
+        {
+            row.AddChild(Sep());
+            row.AddChild(Crumb(side, segs[pin], prefixes[pin], leaf: segs.Length == 1));
+        }
         if (truncated)
         {
             row.AddChild(Sep());
@@ -558,13 +572,37 @@ public partial class CommanderApp
     private static Element Sep() =>
         Text.New("/").FlexShrink(0).FontSize(11.5f).TextColor(Nocturne.Neutral600);
 
-    private BoxElement DriveCrumb(char side, string label, string root, bool active)
+    /// <summary>The trail's leading crumb. A drive letter opens the picker — switching volumes
+    /// is what you want from it, and the root is one Backspace away. A server navigates instead:
+    /// the picker is built from mounted volumes and never lists one, so opening it there would
+    /// be a dead end, while the server is now a place of its own with its shares in it.</summary>
+    private BoxElement DriveCrumb(char side, string label, string root, bool active, bool server)
     {
         var d = Box.New().FlexShrink(0)
             .Padding(new Thickness(1, 5, 1, 5)).CornerRadius(4f).Cursor(CursorType.Pointer)
+            .Tooltip(server ? $"Go to {label}" : "Select drive (Alt+F1)")
             .Children(Ui.Mono(label, 11.5f, active ? Nocturne.Accent300 : Nocturne.On(0.55)));
-        d.OnClick(_ => { _active = side; OpenDrivePicker(side); });
+        d.OnClick(_ =>
+        {
+            _active = side;
+            if (server) NavigateTo(side, root); else OpenDrivePicker(side);
+        });
         return d.HoverBg(Nocturne.Neutral900, Color.Transparent);
+    }
+
+    /// <summary>What the trail is rooted at, which is not always the volume. For a drive that is
+    /// the path root; for a share it is the <i>server</i>. <c>Path.GetPathRoot</c> answers
+    /// "\\server\share" there because that is the volume — free space and same-volume moves both
+    /// key on it — but the trail is about navigation, and now that a server browses its own
+    /// shares the share is a step in the path rather than part of its root.</summary>
+    private static string CrumbRoot(string dir)
+    {
+        if (PathProbe.HostOf(dir) is { } host)
+        {
+            var serverRoot = @"\\" + host;
+            if (dir.StartsWith(serverRoot, StringComparison.OrdinalIgnoreCase)) return serverRoot;
+        }
+        return System.IO.Path.GetPathRoot(dir) ?? dir;
     }
 
     private static readonly Color ArchiveAmber = Color.FromHex("#d9a06b");
