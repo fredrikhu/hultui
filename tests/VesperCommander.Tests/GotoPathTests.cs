@@ -31,6 +31,32 @@ public class GotoPathTests
     }
 
     [Fact]
+    public void CtrlG_OpensOnPaneFolder_Selected()
+    {
+        using var fx = new Fixture();
+        fx.OpenPrompt();
+
+        var input = fx.PromptInput;
+        Assert.Equal(fx.Root, input.Text);
+        Assert.Same(input, fx.Session.Window.Window.FocusedElement);
+        Assert.Equal(0, input.SelectionStart);
+        Assert.Equal(fx.Root.Length, input.SelectionEnd);
+    }
+
+    [Fact]
+    public void CtrlG_EndThenType_AppendsToPaneFolder()
+    {
+        using var fx = new Fixture();
+        fx.OpenPrompt();
+        fx.Session.Window.KeyDown(KeyCode.End);
+        fx.Session.Window.TypeText(Path.DirectorySeparatorChar + "sub");
+        fx.Session.Window.KeyDown(KeyCode.Enter);
+        fx.Session.PumpFrame();
+
+        Assert.Equal(fx.Sub, fx.Dir('L'));
+    }
+
+    [Fact]
     public void CtrlG_RelativePath_ResolvesAgainstPaneDir()
     {
         using var fx = new Fixture();
@@ -175,6 +201,8 @@ public class GotoPathTests
 
         public bool PromptOpen => Field("_namePrompt") != null;
         public string? PromptError => (string?)Field("_namePromptError");
+        public TextInputElement PromptInput =>
+            ((HultUI.Core.Reactivity.Ref<TextInputElement>)Field("_namePromptRef")!).Current!;
 
         /// <summary>The in-flight remote-path probe, or null when nothing is being resolved
         /// off-thread. Non-null is exactly the prompt's busy state.</summary>

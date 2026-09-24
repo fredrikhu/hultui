@@ -135,9 +135,10 @@ public partial class CommanderApp : Component, IDisposable
 
     // Name prompt (F7 new folder, Shift+F6 rename): a titled dialog over a focused
     // text field. Commit returns an error string (kept inline, dialog stays open) or
-    // null (success, dialog closes). Reused for both flows.
+    // null (success, dialog closes). Reused for both flows. SelectAll opens with the
+    // seeded value selected, so typing replaces it and End or an arrow key edits it.
     private sealed record NamePromptSpec(string Title, string Subtitle, string ConfirmLabel, Func<string, string?> Commit,
-        string Placeholder = "Name");
+        string Placeholder = "Name", bool SelectAll = false);
     private NamePromptSpec? _namePrompt;
     private string _namePromptValue = "";
     private string? _namePromptError;
@@ -826,7 +827,12 @@ public partial class CommanderApp : Component, IDisposable
         if (_pendingScrollL) { _pendingScrollL = false; ScrollCursorIntoView('L'); }
         if (_pendingScrollR) { _pendingScrollR = false; ScrollCursorIntoView('R'); }
         if (_pendingPaletteFocus) { _pendingPaletteFocus = false; _paletteRef.Current?.Focus(); }
-        if (_pendingNamePromptFocus) { _pendingNamePromptFocus = false; _namePromptRef.Current?.Focus(); }
+        if (_pendingNamePromptFocus)
+        {
+            _pendingNamePromptFocus = false;
+            _namePromptRef.Current?.Focus();
+            if (_namePrompt is { SelectAll: true }) _namePromptRef.Current?.SelectAll();
+        }
         if (_pendingFindFocus) { _pendingFindFocus = false; _findPatternRef.Current?.Focus(); }
         if (_pendingCmdFocus) { _pendingCmdFocus = false; _cmdRef.Current?.Focus(); }
         if (_pendingPackFocus) { _pendingPackFocus = false; _packNameRef.Current?.Focus(); }
@@ -933,14 +939,15 @@ public partial class CommanderApp : Component, IDisposable
         NavigateTo(side, target, recordHistory: false);
     }
 
-    /// <summary>Ctrl+G — prompt for a path (relative or absolute) and jump the pane there.</summary>
+    /// <summary>Ctrl+G — prompt for a path (relative or absolute) and jump the pane there.
+    /// Opens on the pane's own folder, selected: typing replaces it, End appends to it.</summary>
     private void OpenGotoPrompt(char side)
     {
         _active = side;
-        _namePromptValue = "";
+        _namePromptValue = Dir(side);
         _namePromptError = null;
         _namePrompt = new NamePromptSpec("Go to path", Dir(side), "Go",
-            path => GotoPath(side, path), Placeholder: "Absolute, or relative to this folder");
+            path => GotoPath(side, path), Placeholder: "Absolute, or relative to this folder", SelectAll: true);
         _pendingNamePromptFocus = true;
         MarkDirty();
     }
