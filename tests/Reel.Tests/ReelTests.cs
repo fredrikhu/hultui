@@ -1,4 +1,5 @@
 using System.Reflection;
+using HultUI.Core.Events;
 using HultUI.Core.Builders;
 using HultUI.Core.Platform;
 using HultUI.Headless;
@@ -349,5 +350,168 @@ public class ReelTests : IDisposable
 
         Assert.Equal(1, app.Player!.SelectedAudioTrack);          // nothing else to play
         Assert.Equal("eng", app.Settings.Data.PreferredAudioLanguage);
+    }
+
+    // ── Chapters ─────────────────────────────────────────────────────────
+
+    private static void Chapters(FakeMediaBackend backend, params int[] startMinutes)
+    {
+        for (int i = 0; i < startMinutes.Length; i++)
+            backend.Chapters.Add(new MediaChapterMark(TimeSpan.FromMinutes(startMinutes[i]),
+                i == 0 ? "Opening" : null));
+    }
+
+    /// <summary>
+    /// The Page keys walk chapters inside a chaptered file. Before this they walked files,
+    /// which on a ripped disc meant there was no way to reach a mark at all.
+    /// </summary>
+    [Fact]
+    public void ThePageKeysStepChaptersInsideAChapteredFile()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(first);
+        session.PumpFrames(4);
+
+        session.Window.PressKey(KeyCode.PageDown);
+        session.PumpFrames(2);
+        Assert.Equal(TimeSpan.FromMinutes(10), app.Player!.Position);
+
+        session.Window.PressKey(KeyCode.PageDown);
+        session.PumpFrames(2);
+        Assert.Equal(TimeSpan.FromMinutes(20), app.Player!.Position);
+    }
+
+    /// <summary>Back from inside a chapter restarts it; back again leaves it. The rule every
+    /// CD player has followed since 1982, and the reason two presses reach the one before.</summary>
+    [Fact]
+    public void BackRestartsTheChapterBeforeItLeavesIt()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(first);
+        session.PumpFrames(4);
+        app.Player!.Seek(TimeSpan.FromMinutes(12));       // a minute or two into chapter two
+        session.PumpFrames(2);
+
+        session.Window.PressKey(KeyCode.PageUp);
+        session.PumpFrames(2);
+        Assert.Equal(TimeSpan.FromMinutes(10), app.Player!.Position);
+
+        session.Window.PressKey(KeyCode.PageUp);
+        session.PumpFrames(2);
+        Assert.Equal(TimeSpan.Zero, app.Player!.Position);
+    }
+
+    /// <summary>A file with no marks is the common case, and the Page keys have to go on
+    /// meaning what they meant before: the next file.</summary>
+    [Fact]
+    public void WithoutChaptersThePageKeysStillWalkTheFolder()
+    {
+        var first = File_("Show - 01.mkv");
+        File_("Show - 02.mkv");
+
+        var (session, app, _) = Host();
+        using var _s = session;
+        app.Open(first);
+        session.PumpFrames(4);
+
+        session.Window.PressKey(KeyCode.PageDown);
+        session.PumpFrames(4);
+        Assert.EndsWith("Show - 02.mkv", app.CurrentFile);
+    }
+
+    /// <summary>Past the last chapter, the Page key rolls on to the next file rather than
+    /// doing nothing — one key for the whole evening.</summary>
+    [Fact]
+    public void PastTheLastChapterThePageKeyGoesToTheNextFile()
+    {
+        var first = File_("Show - 01.mkv");
+        File_("Show - 02.mkv");
+
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10);
+
+        app.Open(first);
+        session.PumpFrames(4);
+        app.Player!.Seek(TimeSpan.FromMinutes(15));       // inside the last chapter
+        session.PumpFrames(2);
+
+        session.Window.PressKey(KeyCode.PageDown);
+        session.PumpFrames(4);
+        Assert.EndsWith("Show - 02.mkv", app.CurrentFile);
+    }
+
+    /// <summary>C opens the list, and a mark the container did not name is still called
+    /// something. Escape closes it before it does anything else.</summary>
+    [Fact]
+    public void TheChapterPanelNamesEveryMarkAndClosesOnEscape()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(first);
+        session.PumpFrames(4);
+
+        session.Window.PressKey(KeyCode.C);
+        session.PumpFrames(2);
+        Assert.True(app.ChaptersOpen);
+
+        var tree = session.Window.DumpAccessibilityTree();
+        Assert.Contains("Opening", tree, StringComparison.Ordinal);
+        Assert.Contains("Chapter 2", tree, StringComparison.Ordinal);   // unnamed in the file
+        Assert.Contains("Chapter 3", tree, StringComparison.Ordinal);
+
+        session.Window.PressKey(KeyCode.Escape);
+        session.PumpFrames(2);
+        Assert.False(app.ChaptersOpen);
+    }
+
+    /// <summary>Clicking a row seeks there and puts the panel away.</summary>
+    [Fact]
+    public void ClickingAChapterSeeksToItAndClosesThePanel()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, backend) = Host();
+        using var _s = session;
+        Chapters(backend, 0, 10, 20);
+
+        app.Open(first);
+        session.PumpFrames(4);
+        app.ToggleChapters();
+        session.PumpFrames(2);
+
+        session.Window.FindByAutomationId("chapter-2")!.Click();
+        session.PumpFrames(2);
+
+        Assert.Equal(TimeSpan.FromMinutes(20), app.Player!.Position);
+        Assert.False(app.ChaptersOpen);
+    }
+
+    /// <summary>A file with no chapters has no panel to open, so C is not a key that does
+    /// nothing visible — it is a key the app leaves alone.</summary>
+    [Fact]
+    public void WithoutChaptersThereIsNoPanel()
+    {
+        var first = File_("Film.mkv");
+        var (session, app, _) = Host();
+        using var _s = session;
+
+        app.Open(first);
+        session.PumpFrames(4);
+        app.ToggleChapters();
+        session.PumpFrames(2);
+
+        Assert.False(app.ChaptersOpen);
+        Assert.Null(session.Window.FindByAutomationId("chapters"));
     }
 }

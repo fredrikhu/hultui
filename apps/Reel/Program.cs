@@ -46,7 +46,7 @@ internal static class ReelProgram
         }
 
         using var app = new Application("Reel", 1280, 760);
-        app.Theme = Theme.Dark;
+        app.Theme = Emulsion.ToHultTheme();
 
 #if !DEBUG
         app.DevToolsHotkeysEnabled = Environment.GetEnvironmentVariable("HULTUI_DEVTOOLS") == "1";

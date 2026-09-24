@@ -122,6 +122,7 @@ public sealed partial class ReelApp : Component, IDisposable
         _resumeTo = resume ? _settings.ResumeFor(full) ?? TimeSpan.Zero : TimeSpan.Zero;
         _resumeApplied = _resumeTo <= TimeSpan.Zero;
         _chapterCount = -1;
+        _chaptersOpen = false;
         Tracks.Forget();
 
         OpenStream(full);
@@ -271,11 +272,30 @@ public sealed partial class ReelApp : Component, IDisposable
                 OpenDialog();
                 e.Handled = true;
                 break;
-            case KeyCode.PageDown or KeyCode.N:
+            // The Page keys walk chapters inside a chaptered file and roll on to the next
+            // file at either end — so one key does the whole evening, and a file with no
+            // marks behaves exactly as it did before. N and P are always the file, for
+            // when the film is one long chapter and you want the next episode anyway.
+            case KeyCode.PageDown:
+                if (StepChapter(1) || Step(1)) e.Handled = true;
+                break;
+            case KeyCode.PageUp:
+                if (StepChapter(-1) || Step(-1)) e.Handled = true;
+                break;
+            case KeyCode.N:
                 if (Step(1)) e.Handled = true;
                 break;
-            case KeyCode.PageUp or KeyCode.P:
+            case KeyCode.P:
                 if (Step(-1)) e.Handled = true;
+                break;
+            case KeyCode.C:
+                ToggleChapters();
+                e.Handled = Chapters.Count > 0;
+                break;
+            // One Escape, one thing: the panel first, then full screen.
+            case KeyCode.Escape when _chaptersOpen:
+                CloseChapters();
+                e.Handled = true;
                 break;
             case KeyCode.Escape when _window.IsFullscreen:
                 ToggleFullscreen();
@@ -292,7 +312,7 @@ public sealed partial class ReelApp : Component, IDisposable
         Pump();
 
         var root = Flex.Column(gap: 0).FlexGrow(1)
-            .Background(Color.Black)
+            .Background(Emulsion.Bg)
             .AutomationId("reel")
             .OnDragOver(e => e.Accepted = e.DragData.HasFiles)
             .OnDrop(e =>
@@ -306,6 +326,9 @@ public sealed partial class ReelApp : Component, IDisposable
             root.AddChild(video.Mount().FlexGrow(1));
         else
             root.AddChild(EmptyState());
+
+        // Absolutely positioned over the picture, so opening it does not resize the video.
+        if (_chaptersOpen && Chapters.Count > 0) root.AddChild(BuildChapterPanel());
 
         return root;
     }
@@ -323,15 +346,16 @@ public sealed partial class ReelApp : Component, IDisposable
             .AutomationId("reel-empty");
 
         bool broken = _backends is null;
-        column.AddChild(Phosphor.Draw(broken ? "warning" : "film-slate", 40f, new Color(120, 120, 130)));
+        column.AddChild(Phosphor.Draw(broken ? "warning" : "film-slate", 40f,
+            broken ? Emulsion.Warning : Emulsion.TextMuted));
 
         column.AddChild(Text.New(broken ? "No libmpv found" : _error ?? "Nothing open")
-            .FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(new Color(226, 232, 240)));
+            .FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Emulsion.Text));
 
         column.AddChild(Text.New(broken
                 ? "Reel plays through libmpv. Put it beside the app, or point HULTUI_MPV_PATH at it."
                 : "Open a file with Ctrl+O, or drop one on the window.")
-            .FontSize(13f).TextColor(new Color(148, 163, 184)));
+            .FontSize(13f).TextColor(Emulsion.TextDim));
 
         if (!broken)
         {

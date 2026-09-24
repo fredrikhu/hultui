@@ -56,7 +56,10 @@ they share it as a library rather than as a fork.
   different encode is a different film. Under 30 seconds counts as not started; inside the
   last 20 counts as finished — the point is cleared rather than resuming in the credits.
 - **Chapters from the container.** mpv reports the file's own marks, and they cut the
-  scrubber into one piece per chapter.
+  scrubber into one piece per chapter. **C** lists them; Page Down / Page Up step between
+  them, and roll on to the next file past either end, so one key covers a whole evening
+  whether or not the file has marks. Back from inside a chapter restarts it before it leaves
+  it — press twice to reach the one before, as a CD player does.
 - **Remembers the audio and subtitle language you chose**, by language rather than track
   number, and applies it to the next file that has one — the same rule Aperture follows, and
   the same code. Switching off subtitles counts as a choice too. What the player applies
@@ -94,7 +97,8 @@ installer. The keys, if you want to look:
 
 ## Not yet
 - **Scrubber previews.** Aperture gets stills from the server; a local file has none, so
-  this would mean generating them from a second mpv instance.
+  this would mean generating them from a second mpv instance. Chapter rows have no stills
+  beside them for the same reason.
 - **Subtitles beyond what mpv loads by itself**, a playlist you can see, and *per-file*
   track memory — the languages are remembered globally, not per title.
 
