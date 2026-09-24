@@ -1,4 +1,4 @@
-using Aperture;
+﻿using Aperture;
 using Aperture.Core;
 using HultUI.Core.Platform;
 using HultUI.Icons;
@@ -303,6 +303,64 @@ public class ApertureUnitTests
                           or ApertureFailureKind.Invalid))
                 Assert.NotEqual("raw message", message);
         }
+    }
+
+    // ── Trickplay arithmetic ─────────────────────────────────────────────
+
+    /// <summary>320x180 stills, ten to a sheet (5 across, 2 down), one every 10 seconds.</summary>
+    private static TrickplayInfo Sheet(int count = 100) =>
+        new(320, 180, TileWidth: 5, TileHeight: 2, ThumbnailCount: count, Interval: TimeSpan.FromSeconds(10));
+
+    [Fact]
+    public void APositionFindsItsStillInItsSheet()
+    {
+        var sheet = Sheet();
+
+        // The first still of the first sheet.
+        Assert.Equal((0, 0, 0), sheet.Locate(TimeSpan.Zero));
+        // 35 s is the fourth still: still sheet 0, fourth column.
+        Assert.Equal((0, 3 * 320, 0), sheet.Locate(TimeSpan.FromSeconds(35)));
+        // The sixth still wraps onto the second row of the same sheet.
+        Assert.Equal((0, 0, 180), sheet.Locate(TimeSpan.FromSeconds(50)));
+        // The eleventh starts the second sheet.
+        Assert.Equal((1, 0, 0), sheet.Locate(TimeSpan.FromSeconds(100)));
+    }
+
+    [Fact]
+    public void ThereIsNoStillPastTheLastOne()
+    {
+        var sheet = Sheet(count: 12);      // two minutes of stills
+
+        Assert.NotNull(sheet.Locate(TimeSpan.FromSeconds(110)));
+        Assert.Null(sheet.Locate(TimeSpan.FromSeconds(120)));
+        Assert.Null(sheet.Locate(TimeSpan.FromMinutes(30)));
+    }
+
+    [Fact]
+    public void TheTimeShownIsTheStillsOwn()
+    {
+        var sheet = Sheet();
+
+        // A still every ten seconds cannot honestly be labelled 4:57.
+        Assert.Equal(TimeSpan.FromSeconds(290), sheet.Snap(TimeSpan.FromSeconds(297)));
+        Assert.Equal(TimeSpan.Zero, sheet.Snap(TimeSpan.FromSeconds(9)));
+    }
+
+    [Fact]
+    public void TheCheapestSheetThatIsStillBigEnoughIsChosen()
+    {
+        List<TrickplayInfo> options =
+        [
+            Sheet() with { Width = 160 },
+            Sheet() with { Width = 320 },
+            Sheet() with { Width = 640 },
+        ];
+
+        Assert.Equal(320, ApertureApp.BestTrickplay(options, 300f)?.Width);
+        Assert.Equal(640, ApertureApp.BestTrickplay(options, 500f)?.Width);
+        // Nothing is wide enough: the widest there is beats scaling up a small one.
+        Assert.Equal(640, ApertureApp.BestTrickplay(options, 900f)?.Width);
+        Assert.Null(ApertureApp.BestTrickplay([], 300f));
     }
 
     private static void TryDeleteDirectory(string path)

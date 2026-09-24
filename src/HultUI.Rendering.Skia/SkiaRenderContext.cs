@@ -1,4 +1,4 @@
-using HultUI.Core.Layout;
+﻿using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -706,6 +706,24 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         // aliased, and geometry thinner than a destination pixel (Phosphor's `minus`
         // bar is 6% of its box) could land between samples and vanish outright.
         Canvas.DrawImage(image, srcRect, ToSkRect(drawRect), DownscaleSampling, _pooledPaint);
+    }
+
+    /// <summary>
+    /// One rectangle of the image, in its own pixels, stretched over the destination —
+    /// how a frame is taken out of a sprite sheet. A GPU or pixel-stream source has no
+    /// sheet to cut from, so it draws whole.
+    /// </summary>
+    public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect)
+    {
+        if (source is not SkiaImageSource skiaSource || skiaSource.Image is not { } image)
+        {
+            DrawImage(source, destRect, ImageFit.Fill);
+            return;
+        }
+
+        _pooledPaint.Reset();
+        _pooledPaint.IsAntialias = true;
+        Canvas.DrawImage(image, ToSkRect(sourceRect), ToSkRect(destRect), DownscaleSampling, _pooledPaint);
     }
 
     /// <summary>

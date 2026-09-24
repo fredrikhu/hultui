@@ -1021,6 +1021,17 @@ those rows reach assistive tech at all. `ItemBounds(i)` places them when they ar
 uniform height (a menu with separators in it), and `ItemIsToggled(i)` says which of them is
 the choice in force.
 
+**Part of an image.** `ImageElement.SourceRect` draws one rectangle of the source — in the
+image's own pixels — over the whole element, which is how a frame is taken from a sprite
+sheet. It is also the element's intrinsic size, so a sheet of twenty frames measures as one
+frame. `IRenderContext.DrawImage(source, dest, sourceRect)` is the draw underneath; a
+context with no pixels to cut from falls back to drawing the whole image.
+
+**Pointing at a slider.** `SliderElement.OnHoverValue` reports the value under the pointer
+as it crosses the track, and null when it leaves — including while dragging, since the thumb
+is under the pointer either way. Hovering never changes the value; that still takes a press,
+a drag or a key. The video scrubber's preview is what this exists for.
+
 **Marking the current choice.** Set `ContextMenuItem.IsChecked` rather than writing a mark
 into `Label`. `true` draws the theme's `CheckGlyph` in the icon column, `false` reserves the
 column while the item is off (so turning it on shifts nothing), and `null` — the default —

@@ -31,7 +31,8 @@ public sealed class JellyfinLibrary : IMediaLibrary
 
     private static readonly ItemFields[] DetailFields =
         [ItemFields.PrimaryImageAspectRatio, ItemFields.Overview, ItemFields.Genres, ItemFields.Studios,
-         ItemFields.People, ItemFields.MediaSources, ItemFields.Taglines];
+         ItemFields.People, ItemFields.MediaSources, ItemFields.Taglines, ItemFields.Chapters,
+         ItemFields.Trickplay];
 
     private static readonly ImageType[] ListImages = [ImageType.Primary, ImageType.Backdrop, ImageType.Thumb];
 
@@ -285,6 +286,33 @@ public sealed class JellyfinLibrary : IMediaLibrary
         return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
     }
 
+    /// <summary>
+    /// One sheet of scrubber stills. The token rides in the query because the picture is
+    /// fetched by the same cache that fetches posters, which speaks URLs and not headers.
+    /// </summary>
+    public Uri? TrickplayTileUrl(string itemId, int width, int tileIndex)
+    {
+        if (string.IsNullOrEmpty(itemId) || width <= 0 || tileIndex < 0) return null;
+        var url = $"{Server.Address}/Videos/{Uri.EscapeDataString(itemId)}/Trickplay/{width}/{tileIndex}.jpg"
+                + $"?api_key={Uri.EscapeDataString(User.AccessToken)}";
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
+    }
+
+    /// <summary>
+    /// A chapter's own still. Addressed by the chapter's index rather than by a tag — the
+    /// tag only says <i>whether</i> there is one — so the index must be the position in
+    /// the item's own chapter list.
+    /// </summary>
+    public Uri? ChapterImageUrl(string itemId, int chapterIndex, string? tag, int? maxWidth = null, int? maxHeight = null)
+    {
+        if (string.IsNullOrEmpty(itemId) || chapterIndex < 0 || string.IsNullOrEmpty(tag)) return null;
+        var url = $"{Server.Address}/Items/{Uri.EscapeDataString(itemId)}/Images/Chapter/{chapterIndex}"
+                + $"?quality=90&tag={Uri.EscapeDataString(tag)}";
+        if (maxWidth is { } w) url += $"&fillWidth={w}";
+        if (maxHeight is { } h) url += $"&fillHeight={h}";
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
+    }
+
     public async Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
         int? maxBitrateBps = null, CancellationToken ct = default)
     {
@@ -485,6 +513,7 @@ public sealed class JellyfinLibrary : IMediaLibrary
         ChildCount = dto.ChildCount ?? dto.RecursiveItemCount,
         People = MapPeople(dto.People),
         Chapters = MapChapters(dto.Chapters),
+        Trickplay = MapTrickplay(dto.Trickplay),
         Played = dto.UserData?.Played ?? false,
         ResumePosition = dto.UserData?.PlaybackPositionTicks is { } pos and > 0 ? new TimeSpan(pos) : null,
         PlayedPercentage = dto.UserData?.PlayedPercentage,
@@ -519,6 +548,47 @@ public sealed class JellyfinLibrary : IMediaLibrary
     /// a mark without a position, and the unnamed ones some encoders write every ten
     /// minutes. A chapter list of "Chapter 1 … Chapter 24" is worse than none.
     /// </summary>
+    /// <summary>
+    /// The trickplay bag: media source id to width to the sheet's shape, and Kiota models
+    /// both levels as free-form objects, so both arrive as <c>AdditionalData</c> holding
+    /// <see cref="System.Text.Json.JsonElement"/>s. Every media source of an item has the
+    /// same stills, so they are flattened to one list, widest first — the player picks the
+    /// width it wants to draw at.
+    /// </summary>
+    private static IReadOnlyList<TrickplayInfo> MapTrickplay(BaseItemDto_Trickplay? trickplay)
+    {
+        if (trickplay?.AdditionalData is not { Count: > 0 } sources) return [];
+        var found = new List<TrickplayInfo>();
+
+        foreach (var source in sources.Values)
+        {
+            if (source is not System.Text.Json.JsonElement bySize
+                || bySize.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+
+            foreach (var size in bySize.EnumerateObject())
+            {
+                if (size.Value.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                int width = Int(size.Value, "Width");
+                int height = Int(size.Value, "Height");
+                if (width <= 0 || height <= 0) continue;
+                int interval = Int(size.Value, "Interval");
+                var info = new TrickplayInfo(
+                    width, height,
+                    Math.Max(1, Int(size.Value, "TileWidth")),
+                    Math.Max(1, Int(size.Value, "TileHeight")),
+                    Int(size.Value, "ThumbnailCount"),
+                    TimeSpan.FromMilliseconds(interval > 0 ? interval : 10_000));
+                if (!found.Any(f => f.Width == info.Width)) found.Add(info);
+            }
+        }
+
+        return found.OrderByDescending(f => f.Width).ToList();
+    }
+
+    private static int Int(System.Text.Json.JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number
+            && v.TryGetInt32(out int i) ? i : 0;
+
     private static IReadOnlyList<MediaChapter> MapChapters(List<ChapterInfo>? chapters) =>
         chapters is null ? [] : chapters
             .Where(c => c.StartPositionTicks is >= 0)

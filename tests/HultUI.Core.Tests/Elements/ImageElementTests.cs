@@ -1,4 +1,4 @@
-using HultUI.Core.Elements;
+﻿using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
@@ -129,6 +129,77 @@ public class ImageElementTests
 
         Assert.Equal(120, img.Layout.Width);
         Assert.Equal(80, img.Layout.Height);
+    }
+
+    [Fact]
+    public void ACroppedImageMeasuresAsTheCropAndDrawsThatRectangle()
+    {
+        // A sprite sheet: twenty 320x180 frames in one image. The element is one frame.
+        var sheet = new StubImageSource(new Size(1600, 720));
+        var img = ImageElement.New(sheet);
+        img.SourceRect = new Rect(320, 180, 320, 180);
+
+        var container = BoxElement.New();
+        container.Flex.AlignItems = AlignItems.FlexStart;
+        container.AddChild(img);
+        new LayoutEngine(new StubMeasureContext()).PerformLayout(container, 500, 500);
+
+        Assert.Equal(320, img.Layout.Width);
+        Assert.Equal(180, img.Layout.Height);
+
+        var ctx = new CropRecordingContext();
+        img.Render(ctx);
+
+        Assert.Equal(new Rect(320, 180, 320, 180), ctx.LastSource);
+        Assert.Equal(img.Layout.AbsoluteContentBox, ctx.LastDest);
+    }
+
+    [Fact]
+    public void WithoutACropTheWholeImageIsDrawnUnderItsFit()
+    {
+        var img = ImageElement.New(new StubImageSource(new Size(100, 50)));
+        img.Fit = ImageFit.Cover;
+
+        var ctx = new CropRecordingContext();
+        img.Render(ctx);
+
+        Assert.Null(ctx.LastSource);
+        Assert.Equal(ImageFit.Cover, ctx.LastFit);
+    }
+
+    /// <summary>Records which of the two image draws an element asked for.</summary>
+    private sealed class CropRecordingContext : IRenderContext
+    {
+        public Rect? LastSource { get; private set; }
+        public Rect LastDest { get; private set; }
+        public ImageFit? LastFit { get; private set; }
+
+        public void DrawImage(IImageSource source, Rect destRect, ImageFit fit)
+        {
+            LastDest = destRect;
+            LastFit = fit;
+        }
+
+        public void DrawImage(IImageSource source, Rect destRect, Rect sourceRect)
+        {
+            LastDest = destRect;
+            LastSource = sourceRect;
+        }
+
+        public void DrawRect(Rect rect, Color fill) { }
+        public void DrawRoundedRect(Rect rect, CornerRadius radius, Color fill, Color stroke, Thickness strokeWidth) { }
+        public void DrawText(string text, Rect bounds, Core.Styling.ResolvedInheritedStyle style, TextOverflow overflow, int? maxLines) { }
+        public void DrawLine(Point from, Point to, Color color, float strokeWidth) { }
+        public Size MeasureText(string text, Core.Styling.ResolvedInheritedStyle style) => Size.Zero;
+        public IReadOnlyList<TextLineBox> LayoutTextLines(string text, Core.Styling.ResolvedInheritedStyle style, float maxWidth, int? maxLines) => [];
+        public void PushClip(Rect clipRect) { }
+        public void PushRoundedClip(Rect clipRect, CornerRadius radius) { }
+        public void PushTranslate(float x, float y) { }
+        public void PushOpacity(float opacity) { }
+        public void Pop() { }
+        public ICanvasDrawingContext CreateCanvasContext(Rect bounds) => throw new NotSupportedException();
+        public void BeginFrame(float width, float height, float scaleFactor, Color? clearColor = null) { }
+        public void EndFrame() { }
     }
 
     private sealed class StubImageSource(Size intrinsicSize, bool isLoaded = true) : IImageSource

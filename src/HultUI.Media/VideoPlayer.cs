@@ -44,6 +44,11 @@ public sealed class VideoPlayer : Component
     private readonly Signal<float> _barOpacity = new(1f);
     private readonly Signal<bool> _fullscreen = new(false);
     private readonly Signal<VideoPlayerTheme> _theme = new(VideoPlayerTheme.CreateDefault(Theme.Light));
+    /// <summary>Where the pointer is on the scrubber, in seconds, while it is over it.</summary>
+    private readonly Signal<double?> _previewAt = new(null);
+    /// <summary>The scrubber itself, so the preview can be placed over the point being
+    /// hovered rather than over the middle of the bar.</summary>
+    private readonly Ref<SliderElement> _scrubber = new();
     private TweenHandle _hideTimer;
     private TweenHandle _fade;
     private Effect? _playingWatch;
@@ -64,6 +69,20 @@ public sealed class VideoPlayer : Component
     public TimeSpan JumpStep { get => _jumpStep.Value; set => _jumpStep.Value = value; }
     /// <summary>How long the bar takes to fade out once the pointer has been still.</summary>
     public TimeSpan FadeDuration { get; set; } = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>
+    /// Asked for a still to show while the scrubber is hovered or dragged, at the position
+    /// under the pointer. Null — the default, or a null answer — means no preview: the
+    /// player shows the time alone, which is what it always did.
+    ///
+    /// <para>Called during a build, so it must be cheap and must not block. An app backed
+    /// by a server answers from a cache and starts the fetch on a miss, so the picture
+    /// appears a frame or two later rather than holding the frame.</para>
+    /// </summary>
+    public Func<TimeSpan, VideoPreviewFrame?>? PreviewFrame { get; set; }
+
+    /// <summary>How wide the preview still is drawn. Its height follows the frame.</summary>
+    public float PreviewWidth { get; set; } = 176f;
 
     /// <summary>The user asked for full screen (the F key or the button). The app decides what that means.</summary>
     public event Action? FullscreenRequested;
@@ -245,8 +264,67 @@ public sealed class VideoPlayer : Component
         root.Children(
             Video.New(player).Width(Dimension.Percent(100)).Height(Dimension.Percent(100)),
             Notice(theme, player),
-            Bar(theme, player, playing, opacity));
+            Bar(theme, player, playing, opacity),
+            Preview(theme, controls));
         return root;
+    }
+
+    /// <summary>
+    /// The still for the point being hovered on the scrubber, floating just above the bar
+    /// and centred on that point. Empty when nothing is hovered, when the bar is hidden,
+    /// or when the app has no frame for that second yet — a preview that popped up blank
+    /// while its tile downloaded would flicker on every pass along the track.
+    /// </summary>
+    private Element Preview(VideoPlayerTheme theme, bool controls)
+    {
+        var host = Box.New().AutomationId("video-preview");
+        host.Position.Type = PositionType.Absolute;
+        host.Position.Left = Dimension.Px(0);
+        host.Position.Bottom = Dimension.Px(theme.BarHeight + 8f);
+        host.IsHitTestVisible = false;
+
+        if (!controls || _previewAt.Value is not { } seconds || PreviewFrame is null) return host;
+        var at = TimeSpan.FromSeconds(seconds);
+        if (PreviewFrame(at) is not { } frame || !frame.Image.IsLoaded) return host;
+
+        var size = frame.Source is { } crop ? new Size(crop.Width, crop.Height) : frame.Image.IntrinsicSize;
+        float width = PreviewWidth;
+        float height = size.Width > 0 ? width * size.Height / size.Width : width * 9f / 16f;
+
+        var picture = HultUI.Core.Builders.Image.New(frame.Image).Width(width).Height(height);
+        picture.SourceRect = frame.Source;
+
+        var card = Flex.Column(gap: 2)
+            .Padding(4f).CornerRadius(6f).Background(theme.Scrim)
+            .AlignItems(AlignItems.Center)
+            // A group with a name, not a bare box: a reader scrubbing by keyboard is told
+            // the preview is there, and the time inside it is the one node worth reading.
+            .AccessibleRole(AccessibilityRole.Group)
+            .AccessibleName("Preview")
+            .AutomationId("video-preview-card");
+        card.AddChild(picture);
+        card.AddChild(Text.New(FormatTime(frame.Time ?? at, frame.Time ?? at))
+            .FontSize(theme.FontSize).TextColor(theme.Foreground));
+
+        // Centred on the hovered point, kept inside the picture: a preview half off the
+        // left edge is the one place a scrubber preview is always looked at (the start).
+        float track = _scrubber.Current?.Layout.AbsoluteContentBox.Width ?? 0f;
+        float trackLeft = _scrubber.Current?.Layout.AbsoluteContentBox.X ?? 0f;
+        float rootLeft = _root.Current?.Layout.AbsoluteContentBox.X ?? 0f;
+        float rootWidth = _root.Current?.Layout.AbsoluteContentBox.Width ?? 0f;
+        var slider = _scrubber.Current;
+        double span = slider is null ? 0 : slider.Maximum - slider.Minimum;
+        double t = span > 0 && slider is not null ? (seconds - slider.Minimum) / span : 0;
+        float centre = trackLeft - rootLeft + (float)(t * track);
+        float cardWidth = width + 8f;
+        float left = centre - cardWidth / 2f;
+        if (rootWidth > cardWidth) left = Math.Clamp(left, 4f, rootWidth - cardWidth - 4f);
+
+        card.Position.Type = PositionType.Absolute;
+        card.Position.Left = Dimension.Px(MathF.Max(0f, left));
+        card.Position.Bottom = Dimension.Px(0);
+        host.AddChild(card);
+        return host;
     }
 
     /// <summary>Buffering or failure, over the picture.</summary>
@@ -313,7 +391,9 @@ public sealed class VideoPlayer : Component
                 .FlexGrow(1)
                 .AccessibleName("Seek").AutomationId("video-seek")
                 .OnValueChanged(seconds => player.Seek(TimeSpan.FromSeconds(seconds)));
+            scrubber.OnHoverValue = at => _previewAt.Value = at;
             scrubber.Step = 0.5;
+            scrubber.WithRef(_scrubber);
             items.Add(scrubber);
             items.Add(Text.New(FormatTime(total, duration)).TextColor(theme.MutedForeground).AutomationId("video-duration"));
         }

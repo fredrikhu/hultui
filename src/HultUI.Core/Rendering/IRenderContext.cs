@@ -43,6 +43,19 @@ public interface IRenderContext
         => DrawText(text, bounds, style, overflow, maxLines);
 
     void DrawImage(IImageSource source, Rect destRect, ImageFit fit);
+
+    /// <summary>
+    /// Draws one rectangle of <paramref name="source"/> — in the image's own pixels —
+    /// stretched to fill <paramref name="destRect"/>. What a sprite sheet needs: a video
+    /// scrubber's preview thumbnails arrive as a grid of frames in one JPEG, and cutting
+    /// one out of it here costs nothing, where cropping a bitmap per frame would allocate
+    /// one image per hovered second.
+    ///
+    /// <para>The default falls back to drawing the whole image, for a context with no
+    /// notion of pixels to cut from (a recorder, a measurer).</para>
+    /// </summary>
+    void DrawImage(IImageSource source, Rect destRect, Rect sourceRect)
+        => DrawImage(source, destRect, ImageFit.Fill);
     void DrawLine(Point from, Point to, Color color, float strokeWidth);
 
     /// <summary>

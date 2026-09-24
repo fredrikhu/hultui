@@ -45,9 +45,10 @@ features down and one of ours up.
 Framework changes that fell out: a rounded box clips its children round, and
 `VideoPlayer.FocusPicture()` hands the picture the keyboard when it opens.
 
-**What the server does not have yet**, which is why they are not here: trickplay images
-are not generated (no scrubber previews), `/MediaSegments` answers empty (no skip intro),
-and there are no collections or playlists to browse.
+**What the server did not have yet** when this slice was written: trickplay images and
+chapter images were not generated, `/MediaSegments` answers empty (no skip intro), and
+there are no collections or playlists to browse. The first two were switched on later and
+are now drawn — see slice 4.
 
 ## Slice 3 — the second tier (**done**)
 
@@ -70,7 +71,19 @@ not inside a single long call. A producer that blocks for minutes cannot draw th
 code it is waiting for — and under the headless session, where producers run inline
 at the top of a frame, it freezes the whole pump.
 
-## Slice 4 — the next obvious things
+## Slice 4 — what the server generates (**done**)
+
+| | |
+|---|---|
+| Scrubber stills | trickplay sheets, cut per position; the still's own time under it |
+| Chapter pictures | the frame each mark starts on, beside its name in the list |
+
+Framework changes that fell out: `IRenderContext.DrawImage(source, dest, sourceRect)` and
+`ImageElement.SourceRect` (a sprite sheet is drawn, not cropped), `SliderElement.OnHoverValue`
+(pointing at a track is not setting it), and `VideoPlayer.PreviewFrame`, which is how an app
+answers for a position without the player knowing where stills come from.
+
+## Slice 5 — the next obvious things
 
 - **Season and episode pages beyond one level.** A season page lists episodes;
   a series with many seasons pages them.
@@ -79,7 +92,7 @@ at the top of a frame, it freezes the whole pump.
 - **Search that searches as you type**, debounced, over `SearchTerm` — currently
   every keystroke past two letters starts a query.
 
-## Slice 5 — what would make it a daily driver
+## Slice 6 — what would make it a daily driver
 
 - **Native AOT publish.** `IsAotCompatible` is on and ILC compiles the Kiota SDK
   without a trim warning, but nothing has run as a native binary; `PublishAot`

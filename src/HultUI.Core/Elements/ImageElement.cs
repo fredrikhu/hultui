@@ -1,4 +1,4 @@
-using HultUI.Core.Layout;
+﻿using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 
@@ -91,16 +91,36 @@ public class ImageElement : Element
         if (Source is null || !Source.IsLoaded)
             return Size.Zero;
 
+        // A sheet measured whole would size the element to twenty frames.
+        if (_sourceRect is { } crop)
+            return _scaleDownToFit
+                ? ScaledSize(new Size(crop.Width, crop.Height), _naturalWidth, availableWidth, _maxImageHeight)
+                : new Size(crop.Width, crop.Height);
+
         return _scaleDownToFit
             ? ScaledSize(Source.IntrinsicSize, _naturalWidth, availableWidth, _maxImageHeight)
             : Source.IntrinsicSize;
     }
 
+    /// <summary>
+    /// One rectangle of the source, in the image's own pixels, drawn over the whole
+    /// element — a frame cut from a sprite sheet. Null (the default) draws the image
+    /// itself under <see cref="Fit"/>. When set it is also the intrinsic size, so a sheet
+    /// of 20 frames measures as one frame rather than as the sheet.
+    /// </summary>
+    public Rect? SourceRect
+    {
+        get => _sourceRect;
+        set { if (_sourceRect != value) { _sourceRect = value; MarkLayoutDirty(); } }
+    }
+    private Rect? _sourceRect;
+
     public override void Render(IRenderContext ctx)
     {
         if (Source is null || !Source.IsLoaded) return;
 
-        ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
+        if (_sourceRect is { } crop) ctx.DrawImage(Source, Layout.AbsoluteContentBox, crop);
+        else ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }
 
     internal override void PatchFrom(Element source)
@@ -110,6 +130,7 @@ public class ImageElement : Element
         {
             Source = img.Source;
             Fit = img.Fit;
+            SourceRect = img.SourceRect;
             ScaleDownToFit = img.ScaleDownToFit;
             NaturalWidth = img.NaturalWidth;
             MaxImageHeight = img.MaxImageHeight;

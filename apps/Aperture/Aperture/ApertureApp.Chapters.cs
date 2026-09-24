@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Builders;
@@ -101,6 +101,39 @@ public sealed partial class ApertureApp
         CloseChapters();
     }
 
+    /// <summary>How wide a chapter's still is drawn in the list. 16:9, so the row is
+    /// 45 points tall — a thumbnail, not a contact sheet.</summary>
+    private const float ChapterThumbWidth = 80f;
+
+    /// <summary>
+    /// The still beside a chapter, or null when the server has not extracted one. Nothing
+    /// is drawn in its place: a column of grey boxes beside the marks of a file that never
+    /// got images is worse than a plain list, which is what this was before.
+    /// </summary>
+    private Element? ChapterImage(int index, MediaChapter chapter)
+    {
+        if (_library is not { } lib || _playingItem is not { } item) return null;
+        if (lib.ChapterImageUrl(item.Id, index, chapter.ImageTag, (int)(ChapterThumbWidth * 2)) is not { } url)
+            return null;
+
+        var (image, status) = _posters.Get(url);
+        if (status != PosterCache.Status.Ready || image is not { IsLoaded: true }) return null;
+
+        var box = Box.New()
+            .Width(ChapterThumbWidth).Height(ChapterThumbWidth * 9f / 16f).FlexShrink(0)
+            .CornerRadius(Halide.Radius1)
+            .Background(Halide.Raised)
+            .AccessibleRole(AccessibilityRole.Image)
+            .AccessibleName($"{chapter.Name}, at {Ui.Clock(chapter.Start)}")
+            .AutomationId($"chapter-{index}-still");
+        box.Box.OverflowX = Overflow.Hidden;
+        box.Box.OverflowY = Overflow.Hidden;
+        var picture = Image.New(image);
+        picture.Fit = ImageFit.Cover;
+        box.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
+        return box;
+    }
+
     // ── The panel ────────────────────────────────────────────────────────
 
     /// <summary>
@@ -153,9 +186,14 @@ public sealed partial class ApertureApp
                 .AutomationId($"chapter-{index}");
             if (here) row.Background(Halide.Tint(Halide.Accent));
 
-            row.AddChild(Ui.Mono(Ui.Clock(chapter.Start), 11.5f, here ? Halide.Accent300 : Halide.TextFaint)
-                .FlexShrink(0));
-            row.AddChild(Ui.Line(chapter.Name, 12.5f, here ? Halide.Text : Halide.TextDim).FlexGrow(1));
+            // The picture the server extracted for the mark, when it has one. A chapter
+            // named "Chapter 4" says nothing; the frame it starts on says what it is.
+            if (ChapterImage(index, chapter) is { } still) row.AddChild(still);
+
+            var text = Flex.Column(gap: 1).FlexGrow(1).FlexShrink(1);
+            text.AddChild(Ui.Line(chapter.Name, 12.5f, here ? Halide.Text : Halide.TextDim));
+            text.AddChild(Ui.Mono(Ui.Clock(chapter.Start), 11f, here ? Halide.Accent300 : Halide.TextFaint));
+            row.AddChild(text);
             row.OnClick(_ => SeekToChapter(index));
             if (!here) row.HoverBg(Halide.Raised);
             list.AddChild(row);

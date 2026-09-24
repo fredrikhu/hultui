@@ -1,4 +1,4 @@
-namespace Aperture.Core;
+﻿namespace Aperture.Core;
 
 /// <summary>
 /// Everything Aperture's views ask of a server, in the app's own vocabulary. One
@@ -60,6 +60,17 @@ public interface IMediaLibrary : IDisposable
     /// <summary>Where an image lives, for the poster cache to fetch. Never null-checked by
     /// the caller: an item with no tag simply gets no URL.</summary>
     Uri? ImageUrl(string itemId, ImageKind kind, string? tag, int? maxWidth = null, int? maxHeight = null);
+
+    /// <summary>
+    /// One sheet of scrubber stills for an item, at one of the widths
+    /// <see cref="MediaItem.Trickplay"/> offers, or null when the server has none.
+    /// </summary>
+    Uri? TrickplayTileUrl(string itemId, int width, int tileIndex) => null;
+
+    /// <summary>A chapter's own still, by its index in the item's chapter list. Null when
+    /// the chapter has no image tag — the server extracts them on a schedule, so a fresh
+    /// library has chapters long before it has pictures of them.</summary>
+    Uri? ChapterImageUrl(string itemId, int chapterIndex, string? tag, int? maxWidth = null, int? maxHeight = null) => null;
 
     /// <summary>
     /// Opens a playback session: asks the server how this item can be played, and comes

@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using Xunit;
 
@@ -35,6 +35,29 @@ public class SliderElementTests
 
         Assert.Equal(75, s.Value);
         Assert.Equal(75, changed);
+    }
+
+    [Fact]
+    public void HoveringReportsTheValueUnderThePointerWithoutChangingIt()
+    {
+        var s = SliderElement.New(0, 0, 100);
+        s.Step = 0;                                   // read the track, not a snapped value
+        s.ThumbRadius = 0;                            // the whole width is track
+        new HultUI.Core.Layout.LayoutEngine(new StubMeasureContext()).PerformLayout(s, 200, 20);
+
+        var seen = new List<double?>();
+        s.OnHoverValue = v => seen.Add(v);
+
+        // LocalPosition is derived from the target's content box, so the window position
+        // is what an event carries.
+        HultUI.Core.Events.EventDispatcher.DispatchDirect(
+            new HultUI.Core.Events.PointerMoveEvent { Position = new HultUI.Core.Primitives.Point(100, 10) }, s);
+        HultUI.Core.Events.EventDispatcher.DispatchDirect(
+            new HultUI.Core.Events.PointerLeaveEvent { Position = new HultUI.Core.Primitives.Point(0, 0) }, s);
+
+        Assert.Equal([50d, null], seen);
+        // Pointing is not setting: the value only moves on a press or a drag.
+        Assert.Equal(0, s.Value);
     }
 
     [Fact]

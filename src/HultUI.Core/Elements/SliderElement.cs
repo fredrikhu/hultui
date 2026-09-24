@@ -1,4 +1,4 @@
-using HultUI.Core.Accessibility;
+﻿using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
@@ -47,6 +47,14 @@ public class SliderElement : Element, IRangeValueElement
 
     public Action<double>? OnChanged { get; set; }
 
+    /// <summary>
+    /// The value under the pointer as it moves across the track, and null when it leaves.
+    /// Hovering is not changing: a video scrubber previews the frame you are pointing at
+    /// before you commit to seeking there, and a volume slider could show the level the
+    /// same way.
+    /// </summary>
+    public Action<double?>? OnHoverValue { get; set; }
+
     public float TrackHeight { get; set; } = 4f;
     public float ThumbRadius { get; set; } = 8f;
 
@@ -64,7 +72,15 @@ public class SliderElement : Element, IRangeValueElement
             Focus();
             ApplyUserValue(ValueFromLocalX(e.LocalPosition.X));
         });
-        OnOwn<PointerMoveEvent>(e => { if (_dragging) ApplyUserValue(ValueFromLocalX(e.LocalPosition.X)); });
+        OnOwn<PointerMoveEvent>(e =>
+        {
+            double at = ValueFromLocalX(e.LocalPosition.X);
+            if (_dragging) ApplyUserValue(at);
+            // Reported while dragging too: the thumb is under the pointer either way, and
+            // a preview that vanished the moment you pressed would be the wrong way round.
+            OnHoverValue?.Invoke(at);
+        });
+        OnOwn<PointerLeaveEvent>(_ => OnHoverValue?.Invoke(null));
         OnOwn<PointerUpEvent>(_ => _dragging = false);
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
@@ -169,6 +185,7 @@ public class SliderElement : Element, IRangeValueElement
             TrackHeight = s.TrackHeight;
             ThumbRadius = s.ThumbRadius;
             OnChanged = s.OnChanged;
+            OnHoverValue = s.OnHoverValue;
             Value = s._value;
         }
     }

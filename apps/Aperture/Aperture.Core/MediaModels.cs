@@ -1,4 +1,4 @@
-namespace Aperture.Core;
+﻿namespace Aperture.Core;
 
 /// <summary>What a server said about itself before anyone signed in.</summary>
 /// <param name="Address">The base address that answered, normalized — scheme, host, port,
@@ -80,6 +80,10 @@ public sealed record MediaItem
     /// <summary>The item's own chapter marks, when the file carries them.</summary>
     public IReadOnlyList<MediaChapter> Chapters { get; init; } = [];
 
+    /// <summary>The scrubber stills the server has for this item, widest first, or empty
+    /// when it has generated none (the default until the trickplay task has run).</summary>
+    public IReadOnlyList<TrickplayInfo> Trickplay { get; init; } = [];
+
     // Per-user state.
     public bool Played { get; init; }
     public TimeSpan? ResumePosition { get; init; }
@@ -112,6 +116,41 @@ public sealed record MediaGenre(string Id, string Name);
 
 /// <summary>One chapter mark: where it starts and what it is called.</summary>
 public sealed record MediaChapter(TimeSpan Start, string Name, string? ImageTag);
+
+/// <summary>
+/// What the server generated for scrubbing: a grid of small stills, one every
+/// <see cref="Interval"/>, packed <see cref="TileWidth"/>×<see cref="TileHeight"/> to a
+/// sheet. A position is a thumbnail index (position / interval), the sheet holding it is
+/// index / (TileWidth·TileHeight), and where it sits in that sheet is the remainder — see
+/// <see cref="Locate"/>, which is the whole of the arithmetic.
+/// </summary>
+public sealed record TrickplayInfo(
+    int Width, int Height, int TileWidth, int TileHeight, int ThumbnailCount, TimeSpan Interval)
+{
+    /// <summary>Stills per sheet.</summary>
+    public int PerTile => Math.Max(1, TileWidth * TileHeight);
+
+    /// <summary>
+    /// Which sheet holds the still for <paramref name="position"/>, and where in it, in
+    /// the sheet's own pixels. Null when the media has no still that far in — a position
+    /// past the last thumbnail, which happens at the very end of a file.
+    /// </summary>
+    public (int Tile, int X, int Y)? Locate(TimeSpan position)
+    {
+        if (Interval <= TimeSpan.Zero || Width <= 0 || Height <= 0) return null;
+        int index = (int)(position.TotalMilliseconds / Interval.TotalMilliseconds);
+        if (index < 0 || (ThumbnailCount > 0 && index >= ThumbnailCount)) return null;
+        int within = index % PerTile;
+        return (index / PerTile, within % TileWidth * Width, within / TileWidth * Height);
+    }
+
+    /// <summary>The position the still at <paramref name="position"/> actually stands for
+    /// — rounded down to the interval the sheet was made at.</summary>
+    public TimeSpan Snap(TimeSpan position) =>
+        Interval <= TimeSpan.Zero ? position
+            : TimeSpan.FromMilliseconds(Math.Floor(position.TotalMilliseconds / Interval.TotalMilliseconds)
+                                        * Interval.TotalMilliseconds);
+}
 
 /// <summary>How a library view is sorted. The server's own names, kept out of the views.</summary>
 public enum ItemSort { Name, DateAdded, PremiereDate, CommunityRating, Runtime, Random }

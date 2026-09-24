@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI;
 using HultUI.Core.Accessibility;
@@ -71,15 +71,6 @@ public sealed partial class ApertureApp
     internal PlaybackTarget? Playback => _playback;
     internal MediaItem? PlayingItem => _playingItem;
 
-    /// <summary>
-    /// Plays an item from a position. Asks the server how it can be played first: that
-    /// call is what produces the play-session id, and it is also where a server decides
-    /// to transcode — both of which the UI then shows.
-    /// </summary>
-    /// <param name="countsAsDeliberate">A person pressed play, so the pass-out counter
-    /// starts over. False when the countdown started it.</param>
-    /// <param name="keepQueue">The queue is driving this. Anything else ends it: a queue
-    /// that survived someone picking a different film would follow them around.</param>
     /// <summary>The ceiling to ask the server for, in bits per second, or null for the
     /// file as it is. Kept in kilobits where a person reads it and converted here.</summary>
     internal int? MaxStreamingBitrateBps =>
@@ -104,6 +95,15 @@ public sealed partial class ApertureApp
         Rerender();
     }
 
+    /// <summary>
+    /// Plays an item from a position. Asks the server how it can be played first: that
+    /// call is what produces the play-session id, and it is also where a server decides
+    /// to transcode — both of which the UI then shows.
+    /// </summary>
+    /// <param name="countsAsDeliberate">A person pressed play, so the pass-out counter
+    /// starts over. False when the countdown started it.</param>
+    /// <param name="keepQueue">The queue is driving this. Anything else ends it: a queue
+    /// that survived someone picking a different film would follow them around.</param>
     internal void Play(MediaItem item, TimeSpan from, bool countsAsDeliberate = true, bool keepQueue = false)
     {
         if (_library is not { } lib) return;
@@ -149,6 +149,9 @@ public sealed partial class ApertureApp
 
             _playback = target.Value;
             OpenStream(target.Value);
+            // The stills and the chapter marks live on the full item, which a shelf card
+            // is not — fetch it behind the picture.
+            EnsurePlayingDetail(lib, item);
             if (target.Value.Transcoding)
                 Flash($"{lib.Server.Name} is transcoding this one", ToastSeverity.Warning);
         });
@@ -161,7 +164,12 @@ public sealed partial class ApertureApp
         _player.Volume = _settings.Data.Volume;
         _player.Muted = _settings.Data.Muted;
 
-        _videoPlayer = new VideoPlayer(_player) { JumpStep = TimeSpan.FromSeconds(10) };
+        _videoPlayer = new VideoPlayer(_player)
+        {
+            JumpStep = TimeSpan.FromSeconds(10),
+            PreviewWidth = PreviewWidth,
+            PreviewFrame = TrickplayFrame,
+        };
         _videoPlayer.FullscreenRequested += ToggleFullscreen;
         // The headless driver pumps frames far faster than wall time, so the transport bar
         // would hide before any shot of it playing.

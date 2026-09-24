@@ -43,6 +43,18 @@ backend does not echo — `Rate`, `Volume`, `Muted` — and `Position` on a `See
 moves at once so a scrubber lands where it was dropped. Every setter and command must be
 called on the UI thread.
 
+**Scrubber previews.** `VideoPlayer.PreviewFrame` is a `Func<TimeSpan, VideoPreviewFrame?>`
+the app supplies; the player asks it for the position under the pointer while the scrubber
+is hovered or dragged and floats the still above the bar, with the frame's own time under
+it. A `VideoPreviewFrame` carries an `IImageSource`, an optional `Source` rectangle and an
+optional `Time`. The rectangle is what makes a server's thumbnails usable: they arrive as
+sprite sheets — a grid of small frames in one JPEG — and `ImageElement.SourceRect` draws one
+cell of it without cropping a bitmap per hovered second. The `Time` is the still's own
+position, rounded to whatever interval the sheet was made at, because a still every ten
+seconds cannot honestly be labelled 4:57. Answer from a cache and start the fetch on a
+miss: the provider is called during a build, so it must not block, and returning null
+simply means no preview this frame.
+
 **Naming a track.** A backend builds `MediaTrack.Title` through
 `MediaTrack.Describe(title, language, id)`: the language name leads and the file's own
 title follows — "English · Stereo", "Japanese · Stereo". Either half alone is enough,

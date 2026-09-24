@@ -97,7 +97,7 @@ public class ApertureAppHostTests
     /// <summary>Hosts the app over a fixture. The poster cache is given an HttpClient that
     /// answers nothing, so no test ever reaches the network for artwork.</summary>
     private static void Host(FakeMediaLibrary library, Action<HeadlessSession, ApertureApp> body,
-        Func<IMediaBackend>? backends = null)
+        Func<IMediaBackend>? backends = null, HttpMessageHandler? artwork = null)
     {
         using var session = HeadlessSession.Create(1440, 900);
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
@@ -106,7 +106,7 @@ public class ApertureAppHostTests
         {
             var settings = new ApertureSettings(new InMemoryCredentialStore(), settingsPath);
             app = new ApertureApp(session.Application, session.Window.Window, settings, library,
-                backends, posterHttp: new HttpClient(new NoArtworkHandler()));
+                backends, posterHttp: new HttpClient(artwork ?? new NoArtworkHandler()));
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
             body(session, app);
@@ -123,6 +123,32 @@ public class ApertureAppHostTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+    }
+
+    /// <summary>
+    /// Answers every artwork request with a real PNG of the asked-for shape, so the poster
+    /// cache has something to decode. Trickplay sheets have to be genuine pictures: the
+    /// preview crops a rectangle out of one, and a cache that failed to decode would make
+    /// the whole feature look absent rather than broken.
+    /// </summary>
+    private sealed class PngArtworkHandler(int width = 1600, int height = 360) : HttpMessageHandler
+    {
+        public List<string> Requested { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            lock (Requested) Requested.Add(request.RequestUri!.PathAndQuery);
+            using var bitmap = new SkiaSharp.SKBitmap(width, height);
+            using var canvas = new SkiaSharp.SKCanvas(bitmap);
+            canvas.Clear(new SkiaSharp.SKColor(40, 60, 90));
+            using var data = SkiaSharp.SKImage.FromBitmap(bitmap).Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(data.ToArray()),
+            };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            return Task.FromResult(response);
+        }
     }
 
     private static bool Shows(HeadlessSession session, string text) =>
@@ -1289,6 +1315,108 @@ public class ApertureAppHostTests
             Assert.True(Shows(session, "Sign in to your Jellyfin server."),
                 session.Window.DumpAccessibilityTree());
         });
+    }
+
+    // ── Scrubber stills and chapter pictures ─────────────────────────────
+
+    /// <summary>A film with chapter images and one set of trickplay sheets.</summary>
+    private static FakeMediaLibrary WithStills()
+    {
+        var library = Library();
+        library.Update(library.Item("m1")! with
+        {
+            RunTime = TimeSpan.FromMinutes(162),
+            Chapters =
+            [
+                new MediaChapter(TimeSpan.Zero, "The Zone", "chap-0"),
+                new MediaChapter(TimeSpan.FromMinutes(40), "The Room", "chap-1"),
+            ],
+            // 320x180 stills, ten to a sheet, one every ten seconds.
+            Trickplay = [new TrickplayInfo(320, 180, 5, 2, 972, TimeSpan.FromSeconds(10))],
+        });
+        return library;
+    }
+
+    [Fact]
+    public void TheStillForAPositionIsCutFromTheSheetThatHoldsIt()
+    {
+        var library = WithStills();
+        var artwork = new PngArtworkHandler();
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            // The first ask starts the download and says nothing; the sheet lands a frame
+            // or two later, exactly as a poster does.
+            session.PumpUntil(() => app.TrickplayFrame(TimeSpan.FromMinutes(2)) is not null,
+                TimeSpan.FromSeconds(5));
+
+            var frame = app.TrickplayFrame(TimeSpan.FromMinutes(2))!.Value;
+            // Two minutes in is the 13th still: sheet 1, third across, first row.
+            Assert.Equal(new HultUI.Core.Primitives.Rect(2 * 320, 0, 320, 180), frame.Source);
+            Assert.Equal(TimeSpan.FromMinutes(2), frame.Time);
+            Assert.Contains(artwork.Requested, r => r.Contains("/Trickplay/320/1.jpg", StringComparison.Ordinal));
+
+            // Past the end of the stills there is nothing to show rather than a wrong frame.
+            Assert.Null(app.TrickplayFrame(TimeSpan.FromHours(4)));
+        }, () => backend, artwork);
+    }
+
+    [Fact]
+    public void AChapterShowsThePictureTheServerExtractedForIt()
+    {
+        var artwork = new PngArtworkHandler(320, 180);
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(WithStills(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Stalker");
+            session.Window.FindByAutomationId("card-m1")!.Click();
+            PumpUntilShown(session, "Stalker is a fixture.");
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            app.ToggleChapters();
+            session.PumpUntil(() => session.Window.FindByAutomationId("chapter-0-still") is not null,
+                TimeSpan.FromSeconds(5));
+
+            Assert.NotNull(session.Window.FindByAutomationId("chapter-1-still"));
+            Assert.Contains(artwork.Requested, r => r.Contains("/Images/Chapter/1", StringComparison.Ordinal));
+            // The picture is named for what it is, so a reader is not told "image".
+            Assert.True(Shows(session, "The Room, at"), session.Window.DumpAccessibilityTree());
+        }, () => backend, artwork);
+    }
+
+    [Fact]
+    public void AFilmWithNoStillsShowsChaptersAsTheyAlwaysWere()
+    {
+        var backend = new FakeMediaBackend { Duration = TimeSpan.FromMinutes(167) };
+        // m2 has chapters but no image tags, and no trickplay at all.
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            session.Window.FindByAutomationId("rail-films")!.Click();
+            PumpUntilShown(session, "Solaris");
+            session.Window.FindByAutomationId("card-m2")!.Click();
+            PumpUntilShown(session, "Solaris is a fixture.");
+            session.Window.FindByAutomationId("detail-play")!.Click();
+            for (int i = 0; i < 10; i++) session.PumpFrame();
+
+            app.ToggleChapters();
+            for (int i = 0; i < 6; i++) session.PumpFrame();
+
+            Assert.True(Shows(session, "The Ocean"), session.Window.DumpAccessibilityTree());
+            Assert.Null(session.Window.FindByAutomationId("chapter-0-still"));
+            Assert.Null(app.TrickplayFrame(TimeSpan.FromMinutes(2)));
+        }, () => backend);
     }
 
     // ── Streaming quality ────────────────────────────────────────────────

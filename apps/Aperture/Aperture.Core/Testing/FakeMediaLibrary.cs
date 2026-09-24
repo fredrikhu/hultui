@@ -195,6 +195,13 @@ public sealed class FakeMediaLibrary : IMediaLibrary
     public Uri? ImageUrl(string itemId, ImageKind kind, string? tag, int? maxWidth = null, int? maxHeight = null) =>
         tag is null ? null : new Uri($"{Server.Address}/Items/{itemId}/Images/{kind}?tag={tag}");
 
+    public Uri? TrickplayTileUrl(string itemId, int width, int tileIndex) =>
+        width <= 0 || tileIndex < 0 ? null
+            : new Uri($"{Server.Address}/Videos/{itemId}/Trickplay/{width}/{tileIndex}.jpg");
+
+    public Uri? ChapterImageUrl(string itemId, int chapterIndex, string? tag, int? maxWidth = null, int? maxHeight = null) =>
+        tag is null ? null : new Uri($"{Server.Address}/Items/{itemId}/Images/Chapter/{chapterIndex}?tag={tag}");
+
     public Task<ApertureResult<PlaybackTarget>> StartPlaybackAsync(string itemId, TimeSpan startPosition,
         int? maxBitrateBps = null, CancellationToken ct = default)
     {
