@@ -178,6 +178,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     private WindowsCustomFrame? _customFrame;
 
+    /// <summary>Fullscreen for a window that kept its OS title bar — the same windowed
+    /// fullscreen the custom frame does, for apps that did not ask for custom chrome.</summary>
+    private WindowsPlainFullscreen? _plainFullscreen;
+
     /// <summary>
     /// True when this window uses the native Windows custom frame (borderless on
     /// Windows) rather than SDL's borderless + hit-test path. In that mode Windows
@@ -321,6 +325,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // satisfies the platform-compatibility analyzer at the call site.
         if (useWindowsNativeFrame && OperatingSystem.IsWindows())
             _customFrame = WindowsCustomFrame.Install(this, GetWin32Hwnd());
+        else if (OperatingSystem.IsWindows())
+            _plainFullscreen = new WindowsPlainFullscreen(GetWin32Hwnd());
 
         // Give the platform backend a chance to settle the real pixel size
         // before the first frame on high-DPI displays.
@@ -490,6 +496,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public bool IsFullscreen =>
         _customFrame is { } frame ? frame.IsFullscreen
+        : _plainFullscreen is { } plain ? plain.IsFullscreen
         : _window != null && ((uint)SDL_GetWindowFlags(_window) & (uint)SDL_WindowFlags.SDL_WINDOW_FULLSCREEN) != 0;
 
     /// <summary>Which edges could be dragged before fullscreen took them away.</summary>
@@ -528,6 +535,19 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             if (fullscreen) _edgesBeforeFullscreen = ResizableEdges;
             ResizableEdges = fullscreen ? ResizeEdges.None : _edgesBeforeFullscreen;
             frame.SetFullscreen(fullscreen);
+            ResizePending = true;
+            return;
+        }
+
+        // The same treatment for a window that kept its title bar. Without this it fell
+        // through to SDL's fullscreen below, which is what black-flashed the display on
+        // every toggle and every alt-tab — the bug was never about custom chrome, only
+        // about which windows happened to have it.
+        if (OperatingSystem.IsWindows() && _plainFullscreen is { } plain)
+        {
+            if (fullscreen) _edgesBeforeFullscreen = ResizableEdges;
+            ResizableEdges = fullscreen ? ResizeEdges.None : _edgesBeforeFullscreen;
+            plain.SetFullscreen(fullscreen);
             ResizePending = true;
             return;
         }
