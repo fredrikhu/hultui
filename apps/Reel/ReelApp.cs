@@ -28,9 +28,16 @@ using Text = HultUI.Core.Builders.Text;
 /// </summary>
 public sealed class ReelApp : Component, IDisposable
 {
+    /// <summary>
+    /// The file-type dropdown. <see cref="FileDialogFilter"/> wants bare extensions —
+    /// <c>"mkv;mp4"</c>, not the <c>"*.mkv;*.mp4"</c> shape a Windows common dialog takes —
+    /// and a pattern SDL cannot parse fails the whole call, which arrives as a null file
+    /// list and reads to the caller exactly like a cancel. That is a dialog that never
+    /// appears and says nothing about why.
+    /// </summary>
     private static readonly FileDialogFilter[] Filters =
     [
-        new("Video files", string.Join(';', Playlist.Extensions.Select(e => "*" + e))),
+        new("Video files", string.Join(';', Playlist.Extensions.Select(e => e.TrimStart('.')))),
         new("All files", "*"),
     ];
 

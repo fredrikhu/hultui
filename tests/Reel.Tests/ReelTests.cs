@@ -1,4 +1,6 @@
+using System.Reflection;
 using HultUI.Core.Builders;
+using HultUI.Core.Platform;
 using HultUI.Headless;
 using HultUI.Media;
 using HultUI.Media.Testing;
@@ -232,5 +234,33 @@ public class ReelTests : IDisposable
         session.PumpFrames(2);
 
         Assert.Contains("No libmpv found", session.Window.DumpAccessibilityTree(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The open dialog's filters, against the format <see cref="FileDialogFilter"/> documents:
+    /// bare extensions separated by semicolons. Reel shipped with the Windows common-dialog
+    /// shape instead ("*.mkv;*.mp4"), and SDL answers a pattern it cannot parse with a null
+    /// file list — which the platform layer resolves to "no path chosen", the same as a
+    /// cancel. Ctrl+O did nothing, said nothing, and logged nothing.
+    /// </summary>
+    [Fact]
+    public void TheOpenDialogsFiltersAreBareExtensions()
+    {
+        var filters = (FileDialogFilter[])typeof(ReelApp)
+            .GetField("Filters", BindingFlags.NonPublic | BindingFlags.Static)!
+            .GetValue(null)!;
+
+        var videos = Assert.Single(filters, f => f.Label == "Video files");
+        var patterns = videos.Pattern.Split(';');
+
+        Assert.DoesNotContain(patterns, p => p.Contains('.') || p.Contains('*'));
+        // Every format the playlist walks is a format the dialog offers, or the two
+        // disagree about what Reel plays.
+        Assert.Equal(
+            Playlist.Extensions.Select(e => e.TrimStart('.')).Order(),
+            patterns.Order());
+
+        // "*" is the one pattern that is allowed to be a glob, and it means everything.
+        Assert.Equal("*", Assert.Single(filters, f => f.Label == "All files").Pattern);
     }
 }
