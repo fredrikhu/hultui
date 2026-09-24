@@ -318,34 +318,37 @@ public partial class JunctionApp
         "Creates a worktree in a new folder. By default it starts a new branch from the current HEAD; uncheck to check out HEAD detached.",
         "path/to/worktree",
         "Create",
-        (path, newBranch) =>
+        (_, _) => { },
+        Validate: ValidateNewWorktree,
+        CheckboxLabel: "Create a new branch",
+        FieldLabel: "Folder",
+        SecondFieldLabel: "Branch name",
+        SecondFieldPlaceholder: "feature/my-branch",
+        OnConfirmFields: (path, branch, newBranch) =>
         {
             if (ActiveRepo is not { } repo) return;
             var full = ResolveWorktreePath(path);
             var folder = System.IO.Path.GetFileName(full);
             var res = newBranch
-                ? repo.AddWorktree(full, committish: null, newBranch: folder)
+                ? repo.AddWorktree(full, committish: null, newBranch: branch)
                 : repo.AddWorktree(full, committish: "HEAD");
+            if (res.Success && newBranch) RememberBranchRoot(branch);
             Flash(res.Success ? $"Created worktree {folder}" : FirstLine(res.Stderr, "Create worktree failed"));
             RefreshAll();
-        },
-        Validate: ValidateNewWorktree,
-        CheckboxLabel: "Create a new branch (named after the folder)"),
-        initial: SuggestWorktreePath("wt"));
+        }),
+        initial: SuggestWorktreePath("wt"),
+        initial2: _settings.LastBranchRoot);
 
-    /// <summary>The folder has to be a path, and — while the checkbox is on — also has to
-    /// work as a branch name, because that is what <c>worktree add -b</c> receives. Checked
-    /// here so the prompt stays open with a sentence naming the offending character,
-    /// instead of closing and letting git answer "not a valid branch name". Reads the live
-    /// checkbox, so clearing it lifts the branch rule.</summary>
+    /// <summary>The folder has to be a path, and — while the checkbox is on — the branch
+    /// field has to hold a valid branch name, because that is what <c>worktree add -b</c>
+    /// receives. Checked here so the prompt stays open with a sentence naming the offending
+    /// character, instead of closing and letting git answer "not a valid branch name".
+    /// Reads the live checkbox, so clearing it lifts the branch rule.</summary>
     private string? ValidateNewWorktree(string path)
     {
         if (NonEmptyPath(path) is { } bad) return bad;
         if (!_dialogChecked) return null;
-        var folder = System.IO.Path.GetFileName(ResolveWorktreePath(path));
-        return BranchName.Validate(folder) is { } err
-            ? $"{err} — the new branch takes the folder's name"
-            : null;
+        return BranchName.Validate(_dialogValue2.Trim());
     }
 
     /// <summary>Branch context-menu entry: check out an existing branch in a new

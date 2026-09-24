@@ -25,6 +25,12 @@ public partial class JunctionApp
     /// <param name="SecondCheckboxLabel">A second, independent checkbox — the merge confirm's
     /// squash and delete-source pair. Its state reaches <see cref="OnConfirm2"/>, which is
     /// called instead of <see cref="OnConfirm"/> when set.</param>
+    /// <param name="SecondFieldPlaceholder">A second text field, drawn under the checkbox and
+    /// only while it is ticked — the new worktree's branch name, which belongs to the "new
+    /// branch" choice. Its value is in <c>_dialogValue2</c> for the validator and reaches
+    /// <see cref="OnConfirmFields"/>, which is called instead of <see cref="OnConfirm"/>.
+    /// With it, both fields carry a caption (<see cref="FieldLabel"/>,
+    /// <see cref="SecondFieldLabel"/>) so the card says which is which.</param>
     private sealed record DialogSpec(
         string Title,
         string? Body,
@@ -38,14 +44,20 @@ public partial class JunctionApp
         string? CheckboxDisabledReason = null,
         string? SecondCheckboxLabel = null,
         bool SecondCheckboxInitial = false,
-        Action<string, bool, bool>? OnConfirm2 = null);
+        Action<string, bool, bool>? OnConfirm2 = null,
+        string? FieldLabel = null,
+        string? SecondFieldLabel = null,
+        string? SecondFieldPlaceholder = null,
+        Action<string, string, bool>? OnConfirmFields = null);
 
     private bool _dialogChecked2;
+    private string _dialogValue2 = "";
 
-    private void OpenDialog(DialogSpec spec, string initial = "")
+    private void OpenDialog(DialogSpec spec, string initial = "", string initial2 = "")
     {
         _dialog = spec;
         _dialogValue = initial;
+        _dialogValue2 = initial2;
         _dialogChecked = spec.CheckboxDisabledReason is null && spec.CheckboxInitial;
         _dialogChecked2 = spec.SecondCheckboxInitial;
         // Only ask for focus when there is a field to give it to: _dialogRef still
@@ -65,6 +77,7 @@ public partial class JunctionApp
     {
         _dialog = null;
         _dialogValue = "";
+        _dialogValue2 = "";
         MarkDirty();
     }
 
@@ -75,10 +88,13 @@ public partial class JunctionApp
         if (spec.Validate?.Invoke(value) is { } error) { Flash(error); return; }
         var onConfirm = spec.OnConfirm;
         var onConfirm2 = spec.OnConfirm2;
+        var onConfirmFields = spec.OnConfirmFields;
+        var value2 = _dialogValue2.Trim();
         var checkbox = _dialogChecked;
         var checkbox2 = _dialogChecked2;
         CloseDialog();
-        if (onConfirm2 != null) onConfirm2(value, checkbox, checkbox2);
+        if (onConfirmFields != null) onConfirmFields(value, value2, checkbox);
+        else if (onConfirm2 != null) onConfirm2(value, checkbox, checkbox2);
         else onConfirm(value, checkbox);
     }
 
@@ -129,6 +145,7 @@ public partial class JunctionApp
         // A confirm-only prompt (no placeholder) has no field at all.
         if (spec.Placeholder is { } placeholder)
         {
+            if (spec.FieldLabel is { } fieldLabel) card.AddChild(FieldCaption(fieldLabel, "dialog-input-label"));
             var input = TextInput.New(_dialogValue).Style(Ui.Field(sidePadding: 12f));
             input.PlaceholderText(placeholder)
                 .OnTextChanged(v => { _dialogValue = v; MarkDirty(); })
@@ -176,6 +193,21 @@ public partial class JunctionApp
                 card.AddChild(check);
             }
         }
+
+        // The field that belongs to the checkbox: there while it is ticked, gone when not.
+        if (spec.SecondFieldPlaceholder is { } placeholder2 && _dialogChecked)
+        {
+            if (spec.SecondFieldLabel is { } label2) card.AddChild(FieldCaption(label2, "dialog-input-2-label"));
+            var input2 = TextInput.New(_dialogValue2).Style(Ui.Field(sidePadding: 12f));
+            input2.PlaceholderText(placeholder2)
+                .OnTextChanged(v => { _dialogValue2 = v; MarkDirty(); })
+                .Height(Dimension.Px(38)).FlexShrink(0)
+                .TextColor(Nocturne.Text);
+            input2.On<KeyDownEvent>(DialogKey);
+            input2.Key = "dialog-input-2";
+            input2.AutomationId = "dialog-input-2";
+            card.AddChild(input2);
+        }
         if (spec.SecondCheckboxLabel is { } secondLabel)
         {
             var check2 = Checkbox.New(_dialogChecked2, secondLabel)
@@ -196,6 +228,15 @@ public partial class JunctionApp
 
         backdrop.AddChild(card);
         return backdrop;
+    }
+
+    /// <summary>A small caption over a dialog field, keyed like the rest of the card.</summary>
+    private static Element FieldCaption(string label, string key)
+    {
+        var caption = Text.New(label).FontSize(12f).FontWeight(FontWeight.Medium).TextColor(Nocturne.On(0.7))
+            .Margin(new Thickness(0, 0, -8, 0));
+        caption.Key = key;
+        return caption;
     }
 
     // ── Prompts ──────────────────────────────────────────────────────────
