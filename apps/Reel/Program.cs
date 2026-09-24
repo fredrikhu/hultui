@@ -54,6 +54,7 @@ internal static class ReelProgram
 
         var window = app.PrimaryWindow;
         window.SetMinimumSize(480, 320);
+        window.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "reel.png"));
 
         // No decoder is a broken install, not a reason to refuse to start: the window says
         // what is missing and where it looks.

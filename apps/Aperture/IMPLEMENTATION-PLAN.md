@@ -94,9 +94,13 @@ answers for a position without the player knowing where stills come from.
 
 ## Slice 6 — what would make it a daily driver
 
-- **Native AOT publish.** `IsAotCompatible` is on and ILC compiles the Kiota SDK
-  without a trim warning, but nothing has run as a native binary; `PublishAot`
-  stays off until it has.
+- ~~**Native AOT publish.**~~ **Done 2026-09-24.** `PublishAot` is on, and there is an
+  installer (`apps/Aperture/Installer/aperture.iss`, tagged `aperture-v*`). ILC does
+  emit one trim warning — `Microsoft.Kiota.Serialization.Json` produced trim warnings
+  (IL2104) — so the native binary was proven rather than assumed: `Aperture --probe
+  <address> --api-key-file <path>` runs discovery, an API-key sign-in, the library
+  list and a full item read (chapters, trickplay, image tags: the untyped payloads)
+  and prints what came back. Against the real server, as a native binary, it does.
 - **Multiple servers.** The settings file already holds a list and the credential
   store is keyed by server id; the UI assumes one.
 - **Offline shelf.** Artwork is cached in memory only, so a server that goes away

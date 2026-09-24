@@ -14,9 +14,11 @@
          window icon (Linux WMs, alt-tab) is set from the PNG beside it in Program.cs.
          Both are generated — see scripts/generate-aperture-icon.py. -->
     <ApplicationIcon>Assets/aperture.ico</ApplicationIcon>
-    <!-- PublishAot is deliberately NOT set yet: the Kiota-generated SDK compiles clean
-         through ILC here, but nothing has run as a native binary end-to-end. The AOT
-         publish is its own step — see IMPLEMENTATION-PLAN.md. -->
+    <!-- Native AOT. The Kiota-generated SDK is the part that had to be proven rather
+         than assumed: it compiles through ILC with no trim warnings, and the app's probe
+         flag runs the whole serialization path (discovery, sign-in, an item query) as a
+         native binary, which is what that flag is for. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

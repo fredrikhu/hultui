@@ -8,11 +8,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Reel</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
     <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- The icon Explorer and the taskbar read, embedded in the exe; the runtime window
+         icon is the PNG beside it. Both are generated — scripts/generate-reel-icon.py. -->
+    <ApplicationIcon>Assets/reel.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Reel.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Assets/*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

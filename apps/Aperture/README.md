@@ -95,10 +95,46 @@ progress every ten seconds and on every pause, stopped — which is what drives
 on every other device. Resume seeks client-side once the backend has loaded: the
 stream URL always starts at the first byte.
 
+## Installing it
+
+Tagging `aperture-v<x.y.z>` builds a Windows installer and publishes it as a release
+(`.github/workflows/aperture-installer.yml`). It packages the **Native AOT** publish —
+one executable, no runtime to install — with the trimmed LGPL libmpv beside it, so
+playback works out of the box rather than after a hunt for a decoder. Per-user by
+default, so no UAC prompt for an unsigned installer.
+
+Locally, the same thing:
+
+```bash
+dotnet publish apps/Aperture/Aperture -c Release -r win-x64
+```
+
+```bash
+"%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 apps\Aperture\Installer\aperture.iss
+```
+
+(Copy `libmpv-2.dll` and a `LICENCE-mpv.txt` into the publish folder first — CI pulls
+both from the `mpv-natives-ci` release.)
+
 ## Running it
 
 ```bash
 dotnet run --project apps/Aperture/Aperture
+```
+
+**Diagnosing a server without a window**, which is also the smoke test for the native
+build — everything it does goes through Kiota and System.Text.Json, the parts AOT could
+break:
+
+```bash
+dotnet run --project apps/Aperture/Aperture -- --probe jellyfin.home --api-key-file ~/jf.key
+```
+
+```
+jellyfin 12.1.0 at http://jellyfin.home:8096
+signed in as fredrik
+2 libraries: Movies, Shows
+read "Guardian Fitz": 9 chapters, 1 trickplay widths, artwork tag True
 ```
 
 Without a libmpv the app still runs — browsing, artwork, everything but the

@@ -13,6 +13,28 @@ Reel plays through **libmpv**. Without one it starts anyway and says where it lo
 `src/HultUI.Media.Mpv/README.md`); everything else in the window is honest about that
 rather than refusing to open.
 
+## Installing it
+
+Tagging `reel-v<x.y.z>` builds a Windows installer and publishes it as a release
+(`.github/workflows/reel-installer.yml`): the **Native AOT** publish — one executable,
+no runtime to install — with the trimmed LGPL libmpv beside it, so a fresh machine
+plays video without hunting for a decoder. Per-user by default, and the wizard offers
+to register the file types (the same `--register` as below; Windows still asks before
+anything becomes the default). Uninstalling unregisters them again.
+
+Locally:
+
+```bash
+dotnet publish apps/Reel -c Release -r win-x64
+```
+
+```bash
+"%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 apps\Reel\Installer\reel.iss
+```
+
+(Copy `libmpv-2.dll` and a `LICENCE-mpv.txt` into the publish folder first — CI pulls
+both from the `mpv-natives-ci` release.)
+
 ## Why it is not part of Aperture
 
 Aperture's shell is a server: a rail of libraries, home rows, search, and playback sessions

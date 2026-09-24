@@ -1,0 +1,121 @@
+# Builds the Reel Windows installer.
+#
+# Runs on release tags only. Pushing a tag like `reel-v1.2.0` builds the installer
+# and publishes a GitHub Release with it attached.
+#
+# Runs on self-hosted runners (see docs/SELF-HOSTED-RUNNERS.md), so the machines have
+# to be awake for a queued job to start. Use `workflow_dispatch` for an off-tag build
+# — it still produces a CI-versioned installer as an artifact, without publishing a
+# release.
+
+name: Reel installer
+
+on:
+  push:
+    tags: ['reel-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reel-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The trimmed LGPL libmpv the player decodes with. A rolling prerelease; pin it to
+  # an `mpv-natives-v*` tag when one is cut.
+  MPV_TAG: mpv-natives-ci
+
+jobs:
+  test:
+    runs-on: [self-hosted, windows, x64]
+    steps:
+      - uses: actions/checkout@v5
+
+      # No actions/setup-dotnet: the SDK is provisioned on the runner itself.
+
+      - name: Build app (Release)
+        run: dotnet build apps/Reel/Reel.csproj -c Release
+
+      - name: Run tests
+        run: dotnet test tests/Reel.Tests/Reel.Tests.csproj -c Release
+
+      # Reel is a shell around HultUI.Media: the picture, the transport bar and the
+      # decoder are all the framework's, so a regression there breaks the player even
+      # when Reel's own tests pass. These gate the release on what it actually draws
+      # and decodes through.
+      - name: Run framework render and media tests (headless)
+        run: |
+          dotnet test tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj -c Release
+          dotnet test tests/HultUI.Media.Tests/HultUI.Media.Tests.csproj -c Release
+
+  installer:
+    needs: test
+    runs-on: [self-hosted, windows, x64]
+    permissions:
+      contents: write # for the release step on tag builds
+    steps:
+      - uses: actions/checkout@v5
+
+      # Tag reel-v1.2.0 -> 1.2.0; other builds get a CI prerelease version.
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/reel-v*') {
+            $version = $env:GITHUB_REF_NAME.Substring('reel-v'.Length)
+          } else {
+            $version = "0.1.0-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer version: $version"
+
+      # Native AOT publish (PublishAot is set in the csproj); the runner image
+      # includes the required MSVC toolchain.
+      - name: Publish Reel (win-x64, AOT)
+        run: dotnet publish apps/Reel/Reel.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }}
+
+      # libmpv is not a NuGet dependency: the trimmed LGPL build lives as an asset of
+      # the natives release. It goes into the publish folder so the installer picks it
+      # up like any other native library, with its licence report beside it — shipping
+      # it is what brings the LGPL obligations, and the report is how they are met.
+      - name: Fetch libmpv
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          publish=apps/Reel/bin/Release/net10.0/win-x64/publish
+          bash native/mpv/release-transport.sh download "$MPV_TAG" libmpv-2.dll "$publish/libmpv-2.dll"
+          bash native/mpv/release-transport.sh download "$MPV_TAG" LICENCE-REPORT-win-x64.txt "$publish/LICENCE-mpv.txt"
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" apps\Reel\Installer\reel.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # A convenience copy: the release step attaches the installer from the workspace,
+      # so a failed upload (the account's artifact quota) must not stop it.
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: Reel-Setup-${{ steps.version.outputs.version }}
+          path: apps/Reel/Installer/Output/*.exe
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/reel-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem apps\Reel\Installer\Output\*.exe | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $exe.FullName `
+            --title "Reel ${{ steps.version.outputs.version }}" `
+            --generate-notes
