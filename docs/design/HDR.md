@@ -88,9 +88,16 @@ image, exported, imported into a GL context, cleared from GL and read back throu
 with the colour intact — and then mpv decoding into the same FBO, which read back as real
 video rather than the clear colour. On an RTX 4080 on Windows.
 
-*Not* proven: AMD, Intel, or any Linux driver, where the handle is an fd and Mesa's support
-varies. The spike runs there unchanged and has simply not been run. Phase 1 should not be
-considered safe on those platforms until it has.
+Since confirmed on **Linux** too, on the same card: the `fd` export imports into GL and the
+colour survives the round trip, so the bridge this whole route rests on is cross-platform in
+fact and not just on paper.
+
+Open on Linux: what mpv draws into the shared image came back flat white with a real BT.709
+file. The sharing plainly worked — the clear colour was gone — so this is about colour
+handling, not interop. `target-colorspace-hint` is the suspect and is now opt-in; see the
+spike's README.
+
+*Not* proven anywhere: AMD and Intel, and Mesa rather than NVIDIA's own driver.
 
 **1 — `SkiaVulkanRenderSurface`.** A fourth `IRenderSurface` — the interface is four
 members and there are already three implementations, so this is the least novel part.

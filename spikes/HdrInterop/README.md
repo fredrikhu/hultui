@@ -1,6 +1,8 @@
 # HDR interop spike — phase 0
 
-**Result: it works.** On Windows, NVIDIA RTX 4080, driver as of 2026-09-25.
+**Result: the sharing works on both platforms.** NVIDIA RTX 4080, Windows and Linux,
+2026-09-25. What mpv then draws into the shared image is confirmed on Windows and still
+open on Linux — see *Where it stands* below.
 
 This is phase 0 of [`docs/design/HDR.md`](../../docs/design/HDR.md): the one experiment
 that decides whether HDR is reachable on Windows *and* Linux at all.
@@ -63,12 +65,46 @@ dotnet run --project spikes/HdrInterop -- "D:\films\Stalker.mkv"
 
 Step 4 is the interop; step 5 is mpv using it without complaint or a GL error.
 
+## Where it stands
+
+| | Windows | Linux |
+|---|---|---|
+| Export / import (steps 1–4) | pass | pass (`fd` 93) |
+| Same GPU, UUIDs match | yes | yes |
+| mpv into the shared image (step 5) | pass — real range | **flat white**, `min 0.996 max 1` |
+
+Steps 1–4 are the experiment. They pass on both, which is the result phase 1 needed.
+
+Step 5 on Linux wrote *something* — the clear colour was gone — but every pixel came back
+at 1.0. Two things differ from the Windows run at once, so neither is yet the cause: the
+platform, and the file. Windows used this spike's synthetic BGRA clip, which carries no
+colour metadata at all; Linux used a real 1080p H.264 MKV, which is tagged BT.709.
+
+The prime suspect is `target-colorspace-hint`, which the spike used to set unconditionally.
+It tells mpv to render for the target's colour space — and the API user is then expected to
+say what that space is, through the render params, which this spike does not. An unstated,
+very bright target is exactly what would clip SDR content to white. **It is now off unless
+you pass `--hint`**, so the two can be compared. On Windows with the untagged raw clip it
+makes no difference either way, which is consistent with the suspicion rather than proof of
+it — untagged content gives mpv nothing to convert.
+
+To settle it, on the Linux machine with the same file:
+
+```bash
+dotnet run --project spikes/HdrInterop -- "/path/to/file.mkv"          # hint off
+dotnet run --project spikes/HdrInterop -- "/path/to/file.mkv" --hint   # hint on
+```
+
+Each run now prints five sampled pixels and writes the readback to
+`/tmp/hdr-interop-readback.ppm`, which any image viewer opens. Looking at the frame settles
+in a second what the statistics argue about — and a frame that is genuinely white (a title
+card, a flash) looks like one.
+
 ## What this does **not** prove
 
-**One GPU, one driver, one platform.** AMD and Intel on Windows are untested, and so is
-every Linux driver — where the export is an fd rather than a handle and Mesa's
-`GL_EXT_memory_object_fd` support varies by driver. The spike runs on Linux unchanged; it
-has simply not been run there.
+**One GPU, two platforms.** AMD and Intel are untested on both, and Linux has only been
+run on NVIDIA's proprietary driver — Mesa's `GL_EXT_memory_object_fd` support varies, and
+that is where an fd export is most likely to behave differently.
 
 Nor does it say anything about performance, about HDR itself (the image is `RGBA16F` but
 nothing here presents it), or about what happens when the image is resized under a live

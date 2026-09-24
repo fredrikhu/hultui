@@ -12,7 +12,8 @@ namespace HdrInterop;
 /// </summary>
 internal static unsafe class MpvIntoFbo
 {
-    public static (bool Ok, string Message) Render(string path, uint fbo, int width, int height)
+    public static (bool Ok, string Message) Render(string path, uint fbo, int width, int height,
+        bool colorspaceHint)
     {
         if (!MpvNative.IsAvailable) return (false, "no libmpv found");
 
@@ -27,9 +28,14 @@ internal static unsafe class MpvIntoFbo
             mpv_set_option_string(mpv, "osc", "no");
             mpv_set_option_string(mpv, "input-default-bindings", "no");
             mpv_set_option_string(mpv, "pause", "yes");
-            // The point of the exercise: ask for linear, high-precision output rather than
-            // the tone-mapped 8-bit the SDR path would produce.
-            mpv_set_option_string(mpv, "target-colorspace-hint", "yes");
+
+            // Off by default, and that is a finding rather than a preference. Asking for it
+            // tells mpv to render for the target's colour space — but the API user is then
+            // expected to say what that space is, through the render params, and this spike
+            // says nothing. A 1080p SDR file came back clipped to white with it on, which is
+            // what an unstated very-bright target would do. Phase 4 is where it belongs,
+            // once there is a real swapchain with a real colour space to hint at.
+            if (colorspaceHint) mpv_set_option_string(mpv, "target-colorspace-hint", "yes");
 
             // A .rawvideo file is the spike's own synthetic clip: this build of libmpv is
             // trimmed and has no lavfi, so there is no generated source to ask for, and a

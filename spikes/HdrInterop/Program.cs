@@ -30,7 +30,7 @@ internal static class Program
 
         try
         {
-            return Run(args.FirstOrDefault(a => !a.StartsWith('-')));
+            return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"));
         }
         catch (Exception ex)
         {
@@ -40,7 +40,7 @@ internal static class Program
         }
     }
 
-    private static unsafe int Run(string? mediaFile)
+    private static unsafe int Run(string? mediaFile, bool colorspaceHint)
     {
         // ── 1. Vulkan: the device, and an image whose memory can leave it ────
         using var vk = VulkanImage.Create(Width, Height);
@@ -158,7 +158,8 @@ internal static class Program
         }
 
         Console.WriteLine($"\n[5] mpv → the shared image : {Path.GetFileName(mediaFile)}");
-        var result = MpvIntoFbo.Render(mediaFile, fbo, Width, Height);
+        Console.WriteLine($"    target-colorspace-hint   : {(colorspaceHint ? "yes (--hint)" : "no")}");
+        var result = MpvIntoFbo.Render(mediaFile, fbo, Width, Height, colorspaceHint);
         if (!result.Ok)
         {
             Console.WriteLine($"    mpv failed: {result.Message}");
@@ -168,16 +169,60 @@ internal static class Program
         pixels = vk.ReadBack();
         var (min, max, mean) = Stats(pixels);
         Console.WriteLine($"    read back                : min {min:0.###}, max {max:0.###}, mean {mean:0.###}");
+        Console.WriteLine($"    corners + centre         : {Sample(pixels)}");
 
-        // The clear colour is gone and something with range took its place.
-        bool looksLikeVideo = max > min + 0.02f && !(Near(mean, (R + G + B) / 3f) && max - min < 0.6f);
-        Console.WriteLine(looksLikeVideo
-            ? "\nVERDICT: mpv decoded into a Vulkan image through GL. The route works."
-            : "\nVERDICT: interop works, but mpv did not visibly write to the shared image.");
-        return looksLikeVideo ? 0 : 6;
+        var dump = Path.Combine(Path.GetTempPath(), "hdr-interop-readback.ppm");
+        WritePpm(dump, pixels);
+        Console.WriteLine($"    written for looking at   : {dump}");
+
+        // Three outcomes worth telling apart, because they mean different things.
+        bool untouched = Near(min, Math.Min(R, Math.Min(G, B))) && Near(max, Math.Max(R, Math.Max(G, B)));
+        bool uniform = max - min < 0.02f;
+
+        if (untouched)
+        {
+            Console.WriteLine("\nVERDICT: mpv rendered somewhere else — the clear colour is still there.");
+            return 6;
+        }
+        if (uniform)
+        {
+            Console.WriteLine($"\nVERDICT: mpv wrote to the shared image, but every pixel is {mean:0.###}.");
+            Console.WriteLine("The sharing works; what landed is flat. If this was with --hint, try");
+            Console.WriteLine("without it — an unstated target colour space clips SDR content to white.");
+            return 7;
+        }
+        Console.WriteLine("\nVERDICT: mpv decoded into a Vulkan image through GL. The route works.");
+        return 0;
     }
 
     private static bool Near(float a, float b) => Math.Abs(a - b) < 0.02f;
+
+    /// <summary>Five pixels, so a flat result can be told from one that merely averages flat.</summary>
+    private static string Sample(Half[] pixels)
+    {
+        (int X, int Y)[] spots =
+            [(0, 0), (Width - 1, 0), (Width / 2, Height / 2), (0, Height - 1), (Width - 1, Height - 1)];
+        return string.Join("  ", spots.Select(s =>
+        {
+            int i = (s.Y * Width + s.X) * 4;
+            return $"({(float)pixels[i]:0.##},{(float)pixels[i + 1]:0.##},{(float)pixels[i + 2]:0.##})";
+        }));
+    }
+
+    /// <summary>The readback as a P6 PPM — every image viewer opens one, and looking at the
+    /// frame settles in a second what statistics argue about.</summary>
+    private static void WritePpm(string path, Half[] pixels)
+    {
+        var body = new byte[Width * Height * 3];
+        for (int p = 0, o = 0; p < pixels.Length; p += 4)
+            for (int c = 0; c < 3; c++)
+                body[o++] = (byte)Math.Clamp((float)pixels[p + c] * 255f, 0f, 255f);
+
+        using var file = File.Create(path);
+        char nl = '\n';
+        file.Write(System.Text.Encoding.ASCII.GetBytes($"P6{nl}{Width} {Height}{nl}255{nl}"));
+        file.Write(body);
+    }
 
     private static (float Min, float Max, float Mean) Stats(Half[] pixels)
     {
