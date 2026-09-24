@@ -66,7 +66,7 @@ public class NumericUpDownElement : Element, IRangeValueElement
     // ── Model ────────────────────────────────────────────────────────────
 
     /// <summary>The value, clamped to the range and snapped to <see cref="Step"/> from
-    /// <see cref="Minimum"/>. Setting it from code does not raise <see cref="OnValueChanged"/>.</summary>
+    /// <see cref="Minimum"/>. Setting it from code does not raise <see cref="OnChanged"/>.</summary>
     public double Value
     {
         get => _value;
