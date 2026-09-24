@@ -1,0 +1,88 @@
+using HultUI;
+using HultUI.Core.Rendering;
+using HultUI.Media;
+using HultUI.Media.Mpv;
+using HultUI.Rendering.Skia;
+using SkiaSharp;
+
+namespace Reel;
+
+/// <summary>
+/// The still under the pointer on the scrubber.
+///
+/// <para>Aperture asks the server, which rendered a sprite sheet when the film was added.
+/// Nothing has done that for a file on disk, so Reel makes its own: a second, silent mpv
+/// seeks through the file in the background and the frames are kept until another file is
+/// opened. The scrubber shows whatever has arrived, so the stills fill in over the first
+/// minute or two rather than all at once.</para>
+///
+/// <para>The policy — how many, how far apart, which one to show for a position — is
+/// <see cref="ScrubPreviewCache"/>'s in the media layer, and could serve any player. What
+/// is here is the two things it cannot know: where frames come from, and how to turn a PNG
+/// into something this renderer can draw.</para>
+/// </summary>
+public sealed partial class ReelApp
+{
+    private ScrubPreviewCache? _previews;
+
+    /// <summary>How wide a still is drawn. The media layer's default; named here because
+    /// the decode width is chosen to match it.</summary>
+    private const float PreviewWidth = 176f;
+
+    /// <summary>
+    /// Starts making stills for the open file, if a decoder is available at all. Called once
+    /// the duration is known — which is what says how far apart they should be.
+    /// </summary>
+    private void StartPreviews(string path, TimeSpan duration)
+    {
+        if (_videoPlayer is not { } video) return;
+
+        if (_previews is null)
+        {
+            if (!MpvFrameSource.IsAvailable) return;
+            _previews = new ScrubPreviewCache(
+                new MpvFrameSource(),
+                DecodeStill,
+                // The worker has no business touching the window, and a still landing is
+                // exactly the kind of thing that should not repaint from a background thread.
+                onFrame: () => Application.InvokeOnMainThread(Rerender));
+
+            video.PreviewWidth = PreviewWidth;
+            video.PreviewFrame = position => _previews?.Frame(position);
+        }
+
+        _previews.Start(path, duration);
+    }
+
+    /// <summary>
+    /// A PNG from mpv to something drawable, scaled on the way in. mpv hands back the video
+    /// at its own size, and keeping 120 frames of 4K would be gigabytes for a picture drawn
+    /// 176 points wide — so the resize happens once, here, rather than on every paint.
+    /// </summary>
+    private static IImageSource? DecodeStill(byte[] bytes)
+    {
+        using var decoded = SKBitmap.Decode(bytes);
+        if (decoded is null) return null;
+
+        // Twice the drawn width, so it stays sharp on a 2x display and on the larger card a
+        // future layout might use.
+        const int target = (int)(PreviewWidth * 2);
+        if (decoded.Width <= target) return new SkiaImageSource(decoded.Copy(SKColorType.Bgra8888));
+
+        int height = Math.Max(1, (int)Math.Round(decoded.Height * (target / (double)decoded.Width)));
+        var scaled = decoded.Resize(new SKImageInfo(target, height, SKColorType.Bgra8888),
+            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+        return scaled is null ? null : new SkiaImageSource(scaled);
+    }
+
+    private void StopPreviews()
+    {
+        _previews?.Stop();
+    }
+
+    private void DisposePreviews()
+    {
+        _previews?.Dispose();
+        _previews = null;
+    }
+}

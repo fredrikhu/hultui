@@ -60,6 +60,11 @@ they share it as a library rather than as a fork.
   them, and roll on to the next file past either end, so one key covers a whole evening
   whether or not the file has marks. Back from inside a chapter restarts it before it leaves
   it — press twice to reach the one before, as a CD player does.
+- **Stills on the scrubber.** A second, silent mpv walks the file in the background and the
+  frames fill in as they are made — up to 120 of them, spread across the film, so a three-hour
+  epic gets one every ninety seconds rather than none after the fortieth minute. Nothing is
+  decoded on the way to the screen: hovering reads what is already there, or shows the nearest
+  still that is.
 - **Remembers the audio and subtitle language you chose**, by language rather than track
   number, and applies it to the next file that has one — the same rule Aperture follows, and
   the same code. Switching off subtitles counts as a choice too. What the player applies
@@ -96,11 +101,9 @@ installer. The keys, if you want to look:
 | `Software\RegisteredApplications\Reel` | what puts Reel on that page at all |
 
 ## Not yet
-- **Scrubber previews.** Aperture gets stills from the server; a local file has none, so
-  this would mean generating them from a second mpv instance. Chapter rows have no stills
-  beside them for the same reason.
-- **Subtitles beyond what mpv loads by itself**, a playlist you can see, and *per-file*
-  track memory — the languages are remembered globally, not per title.
+- **Subtitles beyond what mpv loads by itself**, and a playlist you can see.
+- **Stills beside the chapter rows.** The scrubber has them now; the chapter list does not.
+- ***Per-file* track memory** — the languages are remembered globally, not per title.
 
 ## Tests
 

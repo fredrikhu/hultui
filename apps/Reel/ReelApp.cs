@@ -64,6 +64,9 @@ public sealed partial class ReelApp : Component, IDisposable
 
     private long _lastSaveTicks;
     private int _chapterCount = -1;
+
+    /// <summary>Whether the still run for the open file has been started.</summary>
+    private bool _previewsStarted;
     private string? _error;
     private bool _opening;
 
@@ -123,6 +126,8 @@ public sealed partial class ReelApp : Component, IDisposable
         _resumeApplied = _resumeTo <= TimeSpan.Zero;
         _chapterCount = -1;
         _chaptersOpen = false;
+        _previewsStarted = false;
+        StopPreviews();
         Tracks.Forget();
 
         OpenStream(full);
@@ -221,6 +226,15 @@ public sealed partial class ReelApp : Component, IDisposable
         {
             player.Seek(_resumeTo);
             _resumeApplied = true;
+        }
+
+        // How long the file is is what says how far apart the stills go, and it arrives with
+        // the file rather than with the request to open it.
+        if (!_previewsStarted && CurrentFile is { } open
+            && player.Duration is { } total && total > TimeSpan.Zero)
+        {
+            _previewsStarted = true;
+            StartPreviews(open, total);
         }
 
         Tracks.Pump(player);
@@ -422,6 +436,9 @@ public sealed partial class ReelApp : Component, IDisposable
     {
         SaveResumePoint();
         _settings.Save();
+        // Before the player: the still source owns a second mpv handle and a temporary
+        // folder, and both outlive the window otherwise.
+        DisposePreviews();
         _player?.Dispose();
         _player = null;
     }
