@@ -1,0 +1,3 @@
+# The spikes are throwaway; their build output is not worth carrying.
+*/bin/
+*/obj/

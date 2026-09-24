@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Phase 0 of docs/design/HDR.md, and deliberately not in HultUI.slnx: it is a
+       throwaway that answers one question, and nothing in CI should build it or carry
+       its Vulkan dependency. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>HdrInterop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Vortice.Vulkan" Version="*" />
+    <PackageReference Include="ppy.SDL3-CS" Version="2026.320.0" />
+  </ItemGroup>
+
+</Project>

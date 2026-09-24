@@ -1,6 +1,7 @@
 # HDR output
 
-**Status:** design, nothing built. **Date:** 2026-09-25.
+**Status:** phase 0 done and it passed — see `spikes/HdrInterop`. Nothing else built.
+**Date:** 2026-09-25.
 
 The goal is HDR video in Reel and Aperture, on Windows *and* Linux, with the transport
 bar and every other piece of UI composited over it correctly. This is the design that
@@ -82,10 +83,14 @@ compiler. That is a much smaller concession than it first looked.
 
 ## Phases
 
-**0 — The interop spike.** A throwaway program: Vulkan image, exported, imported into a
-GL context, mpv told to render a file into it, read back and check the pixels. No Skia,
-no element tree, no HultUI. It answers the only question that can kill the plan, on an
-NVIDIA card and whatever else is to hand. *Nothing else starts until this passes.*
+**0 — The interop spike. DONE, and it works.** `spikes/HdrInterop`: a Vulkan `RGBA16F`
+image, exported, imported into a GL context, cleared from GL and read back through Vulkan
+with the colour intact — and then mpv decoding into the same FBO, which read back as real
+video rather than the clear colour. On an RTX 4080 on Windows.
+
+*Not* proven: AMD, Intel, or any Linux driver, where the handle is an fd and Mesa's support
+varies. The spike runs there unchanged and has simply not been run. Phase 1 should not be
+considered safe on those platforms until it has.
 
 **1 — `SkiaVulkanRenderSurface`.** A fourth `IRenderSurface` — the interface is four
 members and there are already three implementations, so this is the least novel part.
