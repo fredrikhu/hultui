@@ -1,4 +1,4 @@
-using Aperture.Core;
+﻿using Aperture.Core;
 using Aperture.Theme;
 using HultUI;
 using HultUI.Core.Accessibility;
@@ -78,8 +78,11 @@ public sealed partial class ApertureApp : Component, IDisposable
         if (library is not null)
         {
             // Handed a signed-in library (tests, the screenshot driver, an API-key run):
-            // skip the connect screen entirely.
+            // skip the connect screen entirely. The poster cache still needs the session's
+            // header — scrubber tiles are behind it — and this path does not go through
+            // Adopt, which is where a normal sign-in sets it.
             _library = library;
+            _posters.Authorization = _settings.Device.AuthorizationHeader(library.User.AccessToken);
             _stage = ApertureStage.Browsing;
         }
         else

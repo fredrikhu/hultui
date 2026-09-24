@@ -363,6 +363,55 @@ public class ApertureUnitTests
         Assert.Null(ApertureApp.BestTrickplay([], 300f));
     }
 
+    /// <summary>
+    /// The shape the SDK actually delivers. Kiota models a free-form object as an
+    /// <c>UntypedObject</c>, not a <c>JsonElement</c>: reading it as the latter compiles,
+    /// runs, and silently yields nothing — which looks exactly like a server that has
+    /// generated no stills, and cost an afternoon to tell apart from one.
+    /// </summary>
+    [Fact]
+    public void TheTrickplayBagIsReadAsKiotaDeliversIt()
+    {
+        static Microsoft.Kiota.Abstractions.Serialization.UntypedObject Sheet(int width) =>
+            new(new Dictionary<string, Microsoft.Kiota.Abstractions.Serialization.UntypedNode>
+            {
+                ["Width"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedInteger(width),
+                ["Height"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedInteger(180),
+                ["TileWidth"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedInteger(10),
+                ["TileHeight"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedInteger(10),
+                ["ThumbnailCount"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedInteger(142),
+                ["Interval"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedInteger(10_000),
+            });
+
+        var bag = new Jellyfin.Sdk.Generated.Models.BaseItemDto_Trickplay
+        {
+            AdditionalData = new Dictionary<string, object>
+            {
+                ["media-source-1"] = new Microsoft.Kiota.Abstractions.Serialization.UntypedObject(
+                    new Dictionary<string, Microsoft.Kiota.Abstractions.Serialization.UntypedNode>
+                    {
+                        ["320"] = Sheet(320),
+                        ["640"] = Sheet(640),
+                    }),
+            },
+        };
+
+        var read = JellyfinLibrary.MapTrickplay(bag);
+
+        // Widest first, one entry per width, and the interval read as milliseconds.
+        Assert.Equal([640, 320], read.Select(t => t.Width));
+        Assert.Equal(TimeSpan.FromSeconds(10), read[0].Interval);
+        Assert.Equal(142, read[0].ThumbnailCount);
+        Assert.Equal(100, read[0].PerTile);
+    }
+
+    [Fact]
+    public void ASeverWithNoStillsMapsToNothingRatherThanThrowing()
+    {
+        Assert.Empty(JellyfinLibrary.MapTrickplay(null));
+        Assert.Empty(JellyfinLibrary.MapTrickplay(new Jellyfin.Sdk.Generated.Models.BaseItemDto_Trickplay()));
+    }
+
     private static void TryDeleteDirectory(string path)
     {
         try { Directory.Delete(path, recursive: true); } catch (IOException) { }

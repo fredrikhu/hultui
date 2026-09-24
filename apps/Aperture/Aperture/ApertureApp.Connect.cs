@@ -128,6 +128,8 @@ public sealed partial class ApertureApp
     {
         _library?.Dispose();
         _library = library;
+        // Scrubber tiles are behind the session; artwork is not. One header covers both.
+        _posters.Authorization = _settings.Device.AuthorizationHeader(library.User.AccessToken);
         _stage = ApertureStage.Browsing;
         _connectFailure = null;
         _dataGeneration++;
@@ -149,6 +151,7 @@ public sealed partial class ApertureApp
         var serverId = _library?.Server.Id;
         _library?.Dispose();
         _library = null;
+        _posters.Authorization = null;
         _stage = ApertureStage.Connect;
         _autoConnectDone = true;      // do not immediately resume the token we just left
         _signInAttempt = 0;

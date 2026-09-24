@@ -1,4 +1,4 @@
-using HultUI.Core.Builders;
+﻿using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Core.Rendering;
 using HultUI.Headless;
@@ -76,6 +76,24 @@ public class VideoPreviewTests
         // The label reads the frame's own time, not the pointer's: a still every ten
         // seconds cannot honestly claim 4:57.
         Assert.True(Shows(f.Session, "3:00"), f.Session.Window.DumpAccessibilityTree());
+    }
+
+    [Fact]
+    public void ThePreviewSitsOverThePointItIsPreviewing()
+    {
+        using var f = new Fixture(new VideoPreviewFrame(new StubImage(new Size(320, 180))));
+
+        f.HoverScrubber(0.25);
+        f.Session.PumpFrames(2);          // the geometry comes from the laid-out frame
+
+        var card = f.Card!.Element.Layout.AbsoluteBorderBox;
+        var track = f.Session.Window.FindByAutomationId("video-seek")!.Element.Layout.AbsoluteContentBox;
+        float wanted = track.X + track.Width * 0.25f;
+
+        // Centred on the hovered point. The refs a build registers point at the elements
+        // it just made, whose layout has not run — reading the track from those put this
+        // card in the corner, which is what this pins.
+        Assert.InRange(card.X + card.Width / 2f, wanted - 30f, wanted + 30f);
     }
 
     [Fact]

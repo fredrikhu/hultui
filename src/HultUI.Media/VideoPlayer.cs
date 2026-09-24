@@ -241,6 +241,12 @@ public sealed class VideoPlayer : Component
         bool controls = _controlsVisible.Value || !playing;
         float opacity = controls ? (playing ? _barOpacity.Value : 1f) : 0f;
 
+        // Read before building: WithRef points a ref at the element just created, whose
+        // layout has not been computed yet, so the scrubber's geometry has to be taken
+        // from the frame that has actually been laid out — this one's predecessor.
+        var trackBox = _scrubber.Current?.Layout.AbsoluteContentBox;
+        var rootBox = _root.Current?.Layout.AbsoluteContentBox;
+
         var root = new VideoPlayerRootElement(this)
             .Width(Dimension.Percent(100)).Height(Dimension.Percent(100))
             .Background(theme.Backdrop)
@@ -265,7 +271,7 @@ public sealed class VideoPlayer : Component
             Video.New(player).Width(Dimension.Percent(100)).Height(Dimension.Percent(100)),
             Notice(theme, player),
             Bar(theme, player, playing, opacity),
-            Preview(theme, controls));
+            Preview(theme, controls, trackBox, rootBox, player.Duration));
         return root;
     }
 
@@ -275,9 +281,13 @@ public sealed class VideoPlayer : Component
     /// or when the app has no frame for that second yet — a preview that popped up blank
     /// while its tile downloaded would flicker on every pass along the track.
     /// </summary>
-    private Element Preview(VideoPlayerTheme theme, bool controls)
+    private Element Preview(VideoPlayerTheme theme, bool controls, Rect? trackBox, Rect? rootBox,
+        TimeSpan? duration)
     {
-        var host = Box.New().AutomationId("video-preview");
+        // Full width: the card is placed inside it by its own Left, and a host with no
+        // width would offer its children none — the label then wraps one character per
+        // line and the card cannot be positioned along the track.
+        var host = Box.New().Width(Dimension.Percent(100)).AutomationId("video-preview");
         host.Position.Type = PositionType.Absolute;
         host.Position.Left = Dimension.Px(0);
         host.Position.Bottom = Dimension.Px(theme.BarHeight + 8f);
@@ -295,6 +305,7 @@ public sealed class VideoPlayer : Component
         picture.SourceRect = frame.Source;
 
         var card = Flex.Column(gap: 2)
+            .Width(width + 8f)
             .Padding(4f).CornerRadius(6f).Background(theme.Scrim)
             .AlignItems(AlignItems.Center)
             // A group with a name, not a bare box: a reader scrubbing by keyboard is told
@@ -304,19 +315,20 @@ public sealed class VideoPlayer : Component
             .AutomationId("video-preview-card");
         card.AddChild(picture);
         card.AddChild(Text.New(FormatTime(frame.Time ?? at, frame.Time ?? at))
-            .FontSize(theme.FontSize).TextColor(theme.Foreground));
+            .FontSize(theme.FontSize).TextColor(theme.Foreground).MaxLines(1));
 
         // Centred on the hovered point, kept inside the picture: a preview half off the
         // left edge is the one place a scrubber preview is always looked at (the start).
-        float track = _scrubber.Current?.Layout.AbsoluteContentBox.Width ?? 0f;
-        float trackLeft = _scrubber.Current?.Layout.AbsoluteContentBox.X ?? 0f;
-        float rootLeft = _root.Current?.Layout.AbsoluteContentBox.X ?? 0f;
-        float rootWidth = _root.Current?.Layout.AbsoluteContentBox.Width ?? 0f;
-        var slider = _scrubber.Current;
-        double span = slider is null ? 0 : slider.Maximum - slider.Minimum;
-        double t = span > 0 && slider is not null ? (seconds - slider.Minimum) / span : 0;
-        float centre = trackLeft - rootLeft + (float)(t * track);
+        float track = trackBox?.Width ?? 0f;
+        float rootWidth = rootBox?.Width ?? 0f;
+        double total = duration?.TotalSeconds ?? 0;
+        double t = total > 0 ? Math.Clamp(seconds / total, 0, 1) : 0;
         float cardWidth = width + 8f;
+        // Before the first frame has laid the track out there is nothing to follow, so the
+        // card starts in the middle rather than in the corner.
+        float centre = track > 0
+            ? (trackBox!.Value.X - (rootBox?.X ?? 0f)) + (float)(t * track)
+            : rootWidth / 2f;
         float left = centre - cardWidth / 2f;
         if (rootWidth > cardWidth) left = Math.Clamp(left, 4f, rootWidth - cardWidth - 4f);
 

@@ -1,4 +1,4 @@
-using HultUI.Core.Rendering;
+﻿using HultUI.Core.Rendering;
 using HultUI.Rendering.Skia;
 using SkiaSharp;
 
@@ -59,6 +59,15 @@ public sealed class PosterCache : IDisposable
     /// <summary>How many downloads are running — the "loading artwork" hint in a footer.</summary>
     public int PendingCount { get { lock (_lock) return _inFlight.Count; } }
 
+    /// <summary>
+    /// The <c>Authorization</c> header to send, set once a session is open and cleared
+    /// when it closes. Artwork itself needs none — Jellyfin serves images anonymously —
+    /// but scrubber tiles are behind the session, and this server rejects the token as a
+    /// query parameter, which is the better practice anyway: a token in a URL ends up in
+    /// logs, caches and referrers.
+    /// </summary>
+    public string? Authorization { get; set; }
+
     /// <summary>The picture for a URL, or (null, Pending) while it is fetched. Null URL —
     /// an item the server has no artwork for — is <see cref="Status.Failed"/> at once, so
     /// the tile draws its placeholder on the first frame rather than shimmering forever.</summary>
@@ -105,7 +114,10 @@ public sealed class PosterCache : IDisposable
     {
         try
         {
-            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (Authorization is { Length: > 0 } auth)
+                request.Headers.TryAddWithoutValidation("Authorization", auth);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
                 .ConfigureAwait(false);
             // A 404 here is ordinary: the server reported a tag for an image it no longer
             // has. The tile shows its placeholder, and nothing is logged at the user.

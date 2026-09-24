@@ -64,6 +64,12 @@ which is where a server decides to transcode, and hands the resulting URL to
 such in the title strip, because the two feel identical until something stutters
 and then it is the first question.
 
+**Artwork is anonymous, scrubber sheets are not.** Jellyfin serves `/Items/{id}/Images/...`
+without authentication, which is why the poster cache is a plain HTTP fetch; a trickplay
+sheet is behind the session and this server answers `?api_key=` with **401**, so the cache
+carries the session's `Authorization` header instead. Putting a token in a URL was the wrong
+instinct anyway — URLs end up in logs and caches.
+
 **Scrubbing shows a still.** Where the server has generated trickplay images, pointing at
 the scrubber shows the frame for that position. Jellyfin packs them as sprite sheets — one
 JPEG holding a grid of stills, one every ten seconds — so scrubbing a two-hour film costs a

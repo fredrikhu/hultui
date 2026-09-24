@@ -287,14 +287,14 @@ public sealed class JellyfinLibrary : IMediaLibrary
     }
 
     /// <summary>
-    /// One sheet of scrubber stills. The token rides in the query because the picture is
-    /// fetched by the same cache that fetches posters, which speaks URLs and not headers.
+    /// One sheet of scrubber stills. Unlike artwork, this is behind the session: the
+    /// caller must send the <c>Authorization</c> header, because the server refuses the
+    /// token as a query parameter — <c>?api_key=</c> comes back 401.
     /// </summary>
     public Uri? TrickplayTileUrl(string itemId, int width, int tileIndex)
     {
         if (string.IsNullOrEmpty(itemId) || width <= 0 || tileIndex < 0) return null;
-        var url = $"{Server.Address}/Videos/{Uri.EscapeDataString(itemId)}/Trickplay/{width}/{tileIndex}.jpg"
-                + $"?api_key={Uri.EscapeDataString(User.AccessToken)}";
+        var url = $"{Server.Address}/Videos/{Uri.EscapeDataString(itemId)}/Trickplay/{width}/{tileIndex}.jpg";
         return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
     }
 
@@ -549,34 +549,35 @@ public sealed class JellyfinLibrary : IMediaLibrary
     /// minutes. A chapter list of "Chapter 1 … Chapter 24" is worse than none.
     /// </summary>
     /// <summary>
-    /// The trickplay bag: media source id to width to the sheet's shape, and Kiota models
-    /// both levels as free-form objects, so both arrive as <c>AdditionalData</c> holding
-    /// <see cref="System.Text.Json.JsonElement"/>s. Every media source of an item has the
-    /// same stills, so they are flattened to one list, widest first — the player picks the
-    /// width it wants to draw at.
+    /// The trickplay bag: media source id to width to the sheet's shape. Kiota models
+    /// both levels as free-form objects, and hands them over as <c>UntypedObject</c>s
+    /// rather than as JSON elements — reading them as <c>JsonElement</c> silently yields
+    /// nothing, which looks exactly like a server that has generated no stills.
+    ///
+    /// <para>Every media source of an item has the same stills, so they are flattened to
+    /// one list, widest first; the player picks the width it wants to draw at.</para>
     /// </summary>
-    private static IReadOnlyList<TrickplayInfo> MapTrickplay(BaseItemDto_Trickplay? trickplay)
+    internal static IReadOnlyList<TrickplayInfo> MapTrickplay(BaseItemDto_Trickplay? trickplay)
     {
         if (trickplay?.AdditionalData is not { Count: > 0 } sources) return [];
         var found = new List<TrickplayInfo>();
 
         foreach (var source in sources.Values)
         {
-            if (source is not System.Text.Json.JsonElement bySize
-                || bySize.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+            if (Fields(source) is not { } bySize) continue;
 
-            foreach (var size in bySize.EnumerateObject())
+            foreach (var size in bySize.Values)
             {
-                if (size.Value.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
-                int width = Int(size.Value, "Width");
-                int height = Int(size.Value, "Height");
+                if (Fields(size) is not { } sheet) continue;
+                int width = Int(sheet, "Width");
+                int height = Int(sheet, "Height");
                 if (width <= 0 || height <= 0) continue;
-                int interval = Int(size.Value, "Interval");
+                int interval = Int(sheet, "Interval");
                 var info = new TrickplayInfo(
                     width, height,
-                    Math.Max(1, Int(size.Value, "TileWidth")),
-                    Math.Max(1, Int(size.Value, "TileHeight")),
-                    Int(size.Value, "ThumbnailCount"),
+                    Math.Max(1, Int(sheet, "TileWidth")),
+                    Math.Max(1, Int(sheet, "TileHeight")),
+                    Int(sheet, "ThumbnailCount"),
                     TimeSpan.FromMilliseconds(interval > 0 ? interval : 10_000));
                 if (!found.Any(f => f.Width == info.Width)) found.Add(info);
             }
@@ -585,9 +586,43 @@ public sealed class JellyfinLibrary : IMediaLibrary
         return found.OrderByDescending(f => f.Width).ToList();
     }
 
-    private static int Int(System.Text.Json.JsonElement obj, string name) =>
-        obj.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number
-            && v.TryGetInt32(out int i) ? i : 0;
+    /// <summary>The properties of a free-form object, whichever way the serializer
+    /// modelled it: Kiota's own node tree, or a raw JSON element.</summary>
+    private static Dictionary<string, object?>? Fields(object? value)
+    {
+        switch (value)
+        {
+            case Microsoft.Kiota.Abstractions.Serialization.UntypedObject obj:
+                return obj.GetValue().ToDictionary(p => p.Key, p => (object?)p.Value, StringComparer.OrdinalIgnoreCase);
+            case System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Object:
+                return json.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value, StringComparer.OrdinalIgnoreCase);
+            case IDictionary<string, object?> map:
+                return new Dictionary<string, object?>(map, StringComparer.OrdinalIgnoreCase);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>A whole number out of a free-form field, or 0 when it is missing or is
+    /// not a number.</summary>
+    private static int Int(Dictionary<string, object?> fields, string name)
+    {
+        if (!fields.TryGetValue(name, out var value)) return 0;
+        return value switch
+        {
+            Microsoft.Kiota.Abstractions.Serialization.UntypedInteger i => i.GetValue(),
+            Microsoft.Kiota.Abstractions.Serialization.UntypedLong l => (int)l.GetValue(),
+            Microsoft.Kiota.Abstractions.Serialization.UntypedDouble d => (int)d.GetValue(),
+            Microsoft.Kiota.Abstractions.Serialization.UntypedFloat f => (int)f.GetValue(),
+            Microsoft.Kiota.Abstractions.Serialization.UntypedDecimal m => (int)m.GetValue(),
+            Microsoft.Kiota.Abstractions.Serialization.UntypedString s when int.TryParse(s.GetValue(), out int parsed) => parsed,
+            System.Text.Json.JsonElement json when json.ValueKind == System.Text.Json.JsonValueKind.Number
+                && json.TryGetInt32(out int fromJson) => fromJson,
+            int plain => plain,
+            long big => (int)big,
+            _ => 0,
+        };
+    }
 
     private static IReadOnlyList<MediaChapter> MapChapters(List<ChapterInfo>? chapters) =>
         chapters is null ? [] : chapters

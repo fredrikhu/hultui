@@ -1021,6 +1021,14 @@ those rows reach assistive tech at all. `ItemBounds(i)` places them when they ar
 uniform height (a menu with separators in it), and `ItemIsToggled(i)` says which of them is
 the choice in force.
 
+**A ref points at the element you just built.** `WithRef` sets `Current` immediately, and
+reconciliation repoints it at the live element afterwards — so inside one `Build()`, a ref
+registered earlier in that same build refers to an element whose layout has not run, and
+reading `.Layout` from it gives zeros. Read a ref's geometry **before** building the new
+tree (the top of `Build()`), where it still points at the frame that was laid out. The video
+scrubber's preview learned this the hard way: it was positioned in the corner every time,
+because the track it measured was the track it had just created.
+
 **Part of an image.** `ImageElement.SourceRect` draws one rectangle of the source — in the
 image's own pixels — over the whole element, which is how a frame is taken from a sprite
 sheet. It is also the element's intrinsic size, so a sheet of twenty frames measures as one

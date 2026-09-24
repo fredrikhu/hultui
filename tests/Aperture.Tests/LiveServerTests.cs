@@ -143,6 +143,44 @@ public class LiveServerTests
     }
 
     [LiveServerFact]
+    public async Task AScrubberSheetNeedsTheHeaderAndNotATokenInTheUrl()
+    {
+        using var library = await LiveServer.ConnectAsync(Ct);
+        var page = await library.GetItemsAsync(new ItemQuery
+        {
+            Kinds = [MediaKind.Movie, MediaKind.Episode],
+            Limit = 60,
+        }, Ct);
+        Assert.True(page.Ok, page.Failure?.Message);
+
+        MediaItem? withStills = null;
+        foreach (var item in page.Value.Items)
+        {
+            var full = await library.GetItemAsync(item.Id, Ct);
+            if (full.Ok && full.Value.Trickplay.Count > 0) { withStills = full.Value; break; }
+        }
+        if (Absent(withStills is null, "No item has trickplay images yet.")) return;
+
+        var info = withStills!.Trickplay[0];
+        Assert.True(info.Width > 0 && info.TileWidth > 0 && info.Interval > TimeSpan.Zero,
+            "the trickplay bag mapped to an unusable sheet — Kiota hands these over as UntypedObject");
+
+        var url = library.TrickplayTileUrl(withStills.Id, info.Width, 0);
+        Assert.NotNull(url);
+        // The token belongs in the header. This endpoint is behind the session and refuses
+        // ?api_key=, unlike the image endpoints, which are anonymous.
+        Assert.DoesNotContain("api_key", url!.Query, StringComparison.OrdinalIgnoreCase);
+
+        using var http = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("Authorization",
+            DeviceIdentity.New("aperture-tests").AuthorizationHeader(library.User.AccessToken));
+        using var response = await http.SendAsync(request, Ct);
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode} for the sheet");
+        Assert.StartsWith("image/", response.Content.Headers.ContentType?.MediaType ?? "");
+    }
+
+    [LiveServerFact]
     public async Task ProgressReportsMoveTheResumePointAndPutItBack()
     {
         using var library = await LiveServer.ConnectAsync(Ct);
