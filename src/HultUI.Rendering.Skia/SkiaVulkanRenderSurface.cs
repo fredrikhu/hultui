@@ -1,0 +1,198 @@
+using HultUI.Core.Rendering;
+using SkiaSharp;
+
+namespace HultUI.Rendering.Skia;
+
+/// <summary>
+/// Skia drawing through Vulkan, for a window whose swapchain the platform layer owns.
+///
+/// <para>Phase 1 of <c>docs/design/HDR.md</c>. It exists because HDR needs an HDR-capable
+/// swapchain and OpenGL on Windows cannot ask for one; Vulkan can, on Windows and Linux
+/// both. This phase is deliberately <b>SDR and sRGB</b> — the aim is output indistinguishable
+/// from <see cref="SkiaGLRenderSurface"/>, so that everything after it is a change of colour
+/// handling rather than a change of renderer.</para>
+///
+/// <para><b>How it differs from the GL surface.</b> A GL frame has no beginning: Skia draws
+/// into framebuffer 0 whenever it likes and the platform swaps buffers afterwards. A Vulkan
+/// frame has to acquire an image from the swapchain first, and that image is one of several
+/// that rotate. So the surface is not one <see cref="SKSurface"/> but a small cache of them,
+/// one per swapchain image, rebuilt whenever the swapchain is.</para>
+///
+/// <para>This assembly knows nothing about Vulkan beyond what SkiaSharp needs, which is
+/// handles and integers. <see cref="IVulkanSurfaceHost"/> is the whole of the contract.</para>
+/// </summary>
+public sealed class SkiaVulkanRenderSurface : IRenderSurface
+{
+    private readonly IVulkanSurfaceHost _host;
+    private readonly GRVkBackendContext _backend;
+    private readonly GRContext _grContext;
+    private readonly SkiaRenderContext _renderContext = new();
+    private readonly SkiaTextServices _text;
+
+    /// <summary>One wrapped surface per swapchain image. Rebuilding these per frame would
+    /// mean Skia re-validating a render target several hundred times a second for images
+    /// that have not changed.</summary>
+    private readonly Dictionary<int, (GRBackendRenderTarget Target, SKSurface Surface)> _perImage = [];
+
+    private int _width;
+    private int _height;
+    private float _scaleFactor = 1f;
+    private bool _frameOpen;
+
+    public IRenderContext RenderContext => _renderContext;
+    public IMeasureContext MeasureContext => _text.MeasureContext;
+
+    /// <param name="host">The window's Vulkan device and swapchain.</param>
+    /// <param name="text">A text pipeline to adopt rather than build. Nothing in it touches
+    /// the GPU, so a caller that warmed one on another thread can hand it over — the same
+    /// arrangement <see cref="SkiaGLRenderSurface"/> has.</param>
+    public SkiaVulkanRenderSurface(IVulkanSurfaceHost host, SkiaTextServices? text = null)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        _host = host;
+
+        _backend = new GRVkBackendContext
+        {
+            VkInstance = host.Instance,
+            VkPhysicalDevice = host.PhysicalDevice,
+            VkDevice = host.Device,
+            VkQueue = host.GraphicsQueue,
+            GraphicsQueueIndex = host.GraphicsQueueFamily,
+            MaxAPIVersion = host.ApiVersion,
+            GetProcedureAddress = host.GetProcedureAddress,
+        };
+
+        _grContext = GRContext.CreateVulkan(_backend)
+            ?? throw new InvalidOperationException("Failed to create a Skia Vulkan context");
+
+        _text = text ?? new SkiaTextServices();
+        _renderContext.SetPipeline(_text.Pipeline);
+    }
+
+    /// <summary>
+    /// A new size means a new swapchain, and a new swapchain means every wrapped surface
+    /// names an image that no longer exists. They go first, deliberately: destroying a
+    /// swapchain while Skia still holds render targets over its images is a use-after-free
+    /// that the validation layers catch and a release build does not.
+    /// </summary>
+    public void Resize(int widthPx, int heightPx, float scaleFactor)
+    {
+        if (widthPx == _width && heightPx == _height && Math.Abs(scaleFactor - _scaleFactor) < 0.001f)
+            return;
+
+        _width = widthPx;
+        _height = heightPx;
+        _scaleFactor = scaleFactor;
+
+        DropWrappedSurfaces();
+        if (widthPx > 0 && heightPx > 0) _host.RecreateSwapchain(widthPx, heightPx);
+    }
+
+    /// <summary>
+    /// Takes the next swapchain image and points the render context at it. Returns false
+    /// when there is nothing to draw into — a resize in flight, or a minimised window — and
+    /// the caller skips the frame rather than treating it as a failure.
+    /// </summary>
+    public bool BeginFrame()
+    {
+        if (_frameOpen) return true;
+        if (_host.AcquireNextImage() is not { } frame) return false;
+
+        var surface = SurfaceFor(frame);
+        if (surface is null) return false;
+
+        _renderContext.SetCanvas(surface.Canvas);
+        _frameOpen = true;
+        return true;
+    }
+
+    /// <summary>
+    /// Flushes Skia's work, submits it, and hands the image to the presentation engine.
+    ///
+    /// <para>The submit is not optional here, and that is the part that differs from GL. A
+    /// flush only records; presenting an image whose drawing has not been submitted shows
+    /// the frame before last, intermittently, in a way that looks like a tearing bug.</para>
+    /// </summary>
+    public void Present()
+    {
+        if (!_frameOpen) return;
+
+        _grContext.Flush();
+        _grContext.Submit();
+        _host.PresentAcquiredImage();
+        _frameOpen = false;
+    }
+
+    private SKSurface? SurfaceFor(in VulkanFrameTarget frame)
+    {
+        if (_perImage.TryGetValue(frame.Index, out var existing)) return existing.Surface;
+
+        var imageInfo = new GRVkImageInfo
+        {
+            Image = frame.Image,
+            // A swapchain image's memory belongs to the presentation engine, so there is no
+            // allocation to describe — this is the documented shape for wrapping one.
+            Alloc = new GRVkAlloc { Memory = 0, Offset = 0, Size = 0, Flags = 0 },
+            ImageTiling = VkImageTilingOptimal,
+            ImageLayout = frame.Layout,
+            Format = frame.Format,
+            ImageUsageFlags = VkImageUsageColorAttachment | VkImageUsageTransferDst,
+            SampleCount = 1,
+            LevelCount = 1,
+            CurrentQueueFamily = _host.GraphicsQueueFamily,
+            SharingMode = VkSharingModeExclusive,
+        };
+
+        var target = new GRBackendRenderTarget(frame.WidthPx, frame.HeightPx, imageInfo);
+        if (!target.IsValid)
+        {
+            target.Dispose();
+            return null;
+        }
+
+        // Rgba8888 and no colour space: phase 1 is SDR, and matching the GL surface exactly
+        // is the point. Phase 2 is where this becomes RgbaF16 with one attached.
+        var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888);
+        if (surface is null)
+        {
+            target.Dispose();
+            return null;
+        }
+
+        _perImage[frame.Index] = (target, surface);
+        return surface;
+    }
+
+    private void DropWrappedSurfaces()
+    {
+        if (_perImage.Count == 0) return;
+
+        // Everything Skia has in flight against these images has to have finished before
+        // their swapchain is destroyed.
+        _grContext.Flush();
+        _grContext.Submit(synchronous: true);
+
+        foreach (var (target, surface) in _perImage.Values)
+        {
+            surface.Dispose();
+            target.Dispose();
+        }
+        _perImage.Clear();
+        _frameOpen = false;
+    }
+
+    public void Dispose()
+    {
+        DropWrappedSurfaces();
+        _renderContext.Dispose();
+        _grContext.Dispose();
+        _backend.Dispose();
+    }
+
+    // The handful of Vulkan enum values this file needs, as literals rather than as a
+    // dependency on a Vulkan binding — see the note on IVulkanSurfaceHost.
+    private const uint VkImageTilingOptimal = 0;
+    private const uint VkSharingModeExclusive = 0;
+    private const uint VkImageUsageTransferDst = 0x00000002;
+    private const uint VkImageUsageColorAttachment = 0x00000010;
+}
