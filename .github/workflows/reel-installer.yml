@@ -81,13 +81,26 @@ jobs:
       # up like any other native library, with its licence report beside it — shipping
       # it is what brings the LGPL obligations, and the report is how they are met.
       - name: Fetch libmpv
-        shell: bash
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          publish=apps/Reel/bin/Release/net10.0/win-x64/publish
-          bash native/mpv/release-transport.sh download "$MPV_TAG" libmpv-2.dll "$publish/libmpv-2.dll"
-          bash native/mpv/release-transport.sh download "$MPV_TAG" LICENCE-REPORT-win-x64.txt "$publish/LICENCE-mpv.txt"
+          $publish = "apps/Reel/bin/Release/net10.0/win-x64/publish"
+          # No bash on these runners: the transport is called as the Python it always was.
+          # "python3" on the PATH here can be the Store's stub, which does nothing and exits.
+          $py = $null
+          foreach ($candidate in 'python3', 'python') {
+            if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+              & $candidate -c 'pass' *> $null
+              if ($LASTEXITCODE -eq 0) { $py = $candidate; break }
+            }
+          }
+          if (-not $py) { throw 'no working python found' }
+
+          & $py native/mpv/release_transport.py download $env:MPV_TAG libmpv-2.dll "$publish/libmpv-2.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py native/mpv/release_transport.py download $env:MPV_TAG LICENCE-REPORT-win-x64.txt "$publish/LICENCE-mpv.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Compile installer
         shell: pwsh
