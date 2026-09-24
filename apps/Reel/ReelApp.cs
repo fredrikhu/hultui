@@ -333,8 +333,55 @@ public sealed class ReelApp : Component, IDisposable
                 .AutomationId("reel-open");
             open.AccessibleName = "Open a video";
             column.AddChild(open);
+            if (DefaultPlayerOffer() is { } offer) column.AddChild(offer);
         }
         return column;
+    }
+
+    /// <summary>
+    /// The line under the Open button on Windows: register the associations, then send the
+    /// user to the page where the choice is actually made. Windows has not let an
+    /// application appoint itself the default since 8, so this asks rather than does — and
+    /// says so, because a button that looked like it had failed would be worse.
+    /// </summary>
+    private Element? DefaultPlayerOffer()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+
+        var column = Flex.Column(gap: 6).AlignItems(AlignItems.Center);
+        column.AddChild(Box.New().Height(10f));
+
+        if (_associationsAsked)
+        {
+            column.AddChild(Text.New("Reel is registered — pick it under Video player in Settings.")
+                .FontSize(12f).TextColor(new Color(148, 163, 184)));
+            return column;
+        }
+
+        var button = Button.New("Make Reel the default…", ButtonVariant.Secondary)
+            .Width(220f)
+            .OnClick(_ => RegisterAsPlayer())
+            .AutomationId("reel-register");
+        button.AccessibleName = "Register Reel as a video player";
+        column.AddChild(button);
+        column.AddChild(Text.New(FileAssociations.IsRegistered()
+                ? "Registered. Windows asks you to confirm the change itself."
+                : "Windows asks you to confirm the change itself.")
+            .FontSize(11.5f).TextColor(new Color(120, 130, 145)));
+        return column;
+    }
+
+    private bool _associationsAsked;
+
+    /// <summary>Registers the file types and opens the Settings page. Both halves are
+    /// needed: the registration is what puts Reel on that page at all.</summary>
+    internal void RegisterAsPlayer()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        FileAssociations.Register();
+        FileAssociations.OpenDefaultAppsSettings();
+        _associationsAsked = true;
+        Rerender();
     }
 
     public void Dispose()

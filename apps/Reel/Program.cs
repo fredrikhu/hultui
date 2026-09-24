@@ -1,4 +1,4 @@
-using HultUI;
+﻿using HultUI;
 using HultUI.Core.Styling;
 using HultUI.Media;
 using HultUI.Media.Mpv;
@@ -15,6 +15,17 @@ internal static class ReelProgram
     [STAThread]
     private static void Main(string[] args)
     {
+        // Registration runs without a window: an installer, a script, or a person who
+        // would rather not hunt for a button can do it and be told what happened.
+        if (OperatingSystem.IsWindows() && args.Any(a => a is "--register" or "--unregister"))
+        {
+            bool register = args.Contains("--register");
+            bool ok = register ? FileAssociations.Register() : FileAssociations.Unregister();
+            if (register && ok && !args.Contains("--quiet")) FileAssociations.OpenDefaultAppsSettings();
+            Environment.ExitCode = ok ? 0 : 1;
+            return;
+        }
+
         var file = args.FirstOrDefault(a => !a.StartsWith('-'));
         var settings = new ReelSettings();
 

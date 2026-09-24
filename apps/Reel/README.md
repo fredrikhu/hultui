@@ -39,11 +39,34 @@ they share it as a library rather than as a fork.
   pipe instead of opening another one — Vesper's arrangement, and the reason "set as
   default and select a season" does not produce twelve windows.
 
-## Not yet
+## Being the default player (Windows)
 
-- **Shell integration**: registering the file associations, and an "Open with" entry.
-  Windows 11 will not let an application make itself the default — you register, then
-  confirm once in Settings — so this is a per-user registration plus a link to that page.
+```bash
+dotnet run --project apps/Reel -- --register
+```
+
+or press **Make Reel the default…** in the empty window. Both do the same two things:
+write the registration, then open the Settings page where the choice is made.
+
+**An application cannot make itself the default, and this one does not pretend to.**
+Windows 8 ended that, and 10 and 11 enforce it with a signed `UserChoice` hash only the
+shell can write — anything that forges it is malware by Microsoft's own definition, and the
+shell undoes it. What an app may do is *register*: a ProgID, the command to open a file
+with, an icon, and the extensions it handles, so Reel appears under "Open with" and as a
+choice in Settings → Default apps. The last word is yours.
+
+Everything is written under `HKEY_CURRENT_USER` — no administrator, nothing machine-wide —
+and `--unregister` removes all of it. `--register --quiet` skips opening Settings, for an
+installer. The keys, if you want to look:
+
+| Key | What it does |
+|---|---|
+| `Software\Classes\Reel.Video\shell\open\command` | how to open a file (exe and `%1` both quoted) |
+| `Software\Classes\<ext>\OpenWithProgids\Reel.Video` | offers Reel without touching whatever owns the extension |
+| `Software\Reel\Capabilities\FileAssociations` | what Settings reads to list the types |
+| `Software\RegisteredApplications\Reel` | what puts Reel on that page at all |
+
+## Not yet
 - **Scrubber previews.** Aperture gets stills from the server; a local file has none, so
   this would mean generating them from a second mpv instance.
 - **Subtitles beyond what mpv loads by itself**, a playlist you can see, and per-file track
