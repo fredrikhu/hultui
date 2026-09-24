@@ -77,16 +77,19 @@ internal static unsafe class MpvIntoFbo
                 };
                 int flipY = 1;
 
-                // A couple of passes: the first can land before the decoder has produced
-                // anything, and an empty frame would read back as the clear colour.
+                // Allocated once, outside the loop: a stackalloc inside one is not freed per
+                // iteration, so thirty passes would be thirty allocations living to the end
+                // of the method. Harmless at this size and wrong at any other (CA2014).
+                var parameters = stackalloc mpv_render_param[3];
+                parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_OPENGL_FBO, data = &target };
+                parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_FLIP_Y, data = &flipY };
+                parameters[2] = default;
+
+                // A few passes: the first can land before the decoder has produced anything,
+                // and an empty frame would read back as the clear colour.
                 for (int attempt = 0; attempt < 30; attempt++)
                 {
                     mpv_render_context_update(render);
-
-                    var parameters = stackalloc mpv_render_param[3];
-                    parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_OPENGL_FBO, data = &target };
-                    parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_FLIP_Y, data = &flipY };
-                    parameters[2] = default;
 
                     int error = mpv_render_context_render(render, parameters);
                     if (error < 0) return (false, $"mpv_render_context_render: {error}");

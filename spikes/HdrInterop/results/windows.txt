@@ -1,0 +1,59 @@
+❯ dotnet run --project spikes/HdrInterop -- "D:\Downloads\Hells.Paradise.S01E05.The.Samurai.and.the.Woman.1080p.CR.WEB-DL.AAC2.0.H.264-KQRM.mkv"
+── HDR interop spike ─────────────────────────────────
+platform: Windows
+
+[1] Vulkan device      : NVIDIA GeForce RTX 4080
+    device UUID        : E6077EC07962BD31E7737C2CB4B4DA34
+    image              : 256x144 RGBA16F, 524288 bytes
+
+[2] GL renderer        : NVIDIA GeForce RTX 4080/PCIe/SSE2
+    GL_EXT_memory_object      : yes
+    …_win32 / …_fd            : yes
+    GL device UUID            : E6077EC07962BD31E7737C2CB4B4DA34
+    same GPU as Vulkan        : yes
+
+[3] exported Win32 handle : 0x614
+    imported into GL          : ok
+    texture + FBO over it     : ok
+
+[4] GL cleared to          : 0,25, 0,5, 0,75
+    Vulkan read back         : 0,25, 0,5, 0,75
+    → the two APIs share one image.
+
+[5] mpv → the shared image : Hells.Paradise.S01E05.The.Samurai.and.the.Woman.1080p.CR.WEB-DL.AAC2.0.H.264-KQRM.mkv
+    target-colorspace-hint   : no
+    read back                : min 0, max 1, mean 0,133
+    corners + centre         : (0,07,0,11,0,13)  (0,13,0,17,0,19)  (0,06,0,09,0,13)  (0,02,0,02,0,02)  (0,07,0,07,0,09)
+    written for looking at   : C:\Users\fredr\AppData\Local\Temp\hdr-interop-readback.ppm
+
+VERDICT: mpv decoded into a Vulkan image through GL. The route works.
+
+❯ dotnet run --project spikes/HdrInterop -- "D:\Downloads\Hells.Paradise.S01E05.The.Samurai.and.the.Woman.1080p.CR.WEB-DL.AAC2.0.H.264-KQRM.mkv" --hint
+── HDR interop spike ─────────────────────────────────
+platform: Windows
+
+[1] Vulkan device      : NVIDIA GeForce RTX 4080
+    device UUID        : E6077EC07962BD31E7737C2CB4B4DA34
+    image              : 256x144 RGBA16F, 524288 bytes
+
+[2] GL renderer        : NVIDIA GeForce RTX 4080/PCIe/SSE2
+    GL_EXT_memory_object      : yes
+    …_win32 / …_fd            : yes
+    GL device UUID            : E6077EC07962BD31E7737C2CB4B4DA34
+    same GPU as Vulkan        : yes
+
+[3] exported Win32 handle : 0x610
+    imported into GL          : ok
+    texture + FBO over it     : ok
+
+[4] GL cleared to          : 0,25, 0,5, 0,75
+    Vulkan read back         : 0,25, 0,5, 0,75
+    → the two APIs share one image.
+
+[5] mpv → the shared image : Hells.Paradise.S01E05.The.Samurai.and.the.Woman.1080p.CR.WEB-DL.AAC2.0.H.264-KQRM.mkv
+    target-colorspace-hint   : yes (--hint)
+    read back                : min 0, max 1, mean 0,133
+    corners + centre         : (0,07,0,11,0,13)  (0,13,0,17,0,19)  (0,06,0,09,0,13)  (0,02,0,02,0,02)  (0,07,0,07,0,09)
+    written for looking at   : C:\Users\fredr\AppData\Local\Temp\hdr-interop-readback.ppm
+
+VERDICT: mpv decoded into a Vulkan image through GL. The route works.

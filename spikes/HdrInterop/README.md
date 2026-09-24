@@ -1,8 +1,7 @@
 # HDR interop spike — phase 0
 
-**Result: the sharing works on both platforms.** NVIDIA RTX 4080, Windows and Linux,
-2026-09-25. What mpv then draws into the shared image is confirmed on Windows and still
-open on Linux — see *Where it stands* below.
+**Result: it works, on both platforms, end to end.** NVIDIA RTX 4080, Windows and Linux,
+2026-09-25.
 
 This is phase 0 of [`docs/design/HDR.md`](../../docs/design/HDR.md): the one experiment
 that decides whether HDR is reachable on Windows *and* Linux at all.
@@ -67,38 +66,33 @@ Step 4 is the interop; step 5 is mpv using it without complaint or a GL error.
 
 ## Where it stands
 
+Four runs — two platforms × hint on and off — on the same 1080p H.264 file:
+
 | | Windows | Linux |
 |---|---|---|
-| Export / import (steps 1–4) | pass | pass (`fd` 93) |
-| Same GPU, UUIDs match | yes | yes |
-| mpv into the shared image (step 5) | pass — real range | **flat white**, `min 0.996 max 1` |
+| Export / import (steps 1–4) | pass | pass (`fd`) |
+| mpv into the shared image | `min 0 max 1 mean 0.133` | `min 0 max 1 mean 0.133` |
+| With `--hint` | identical | identical |
 
-Steps 1–4 are the experiment. They pass on both, which is the result phase 1 needed.
+The sampled pixels agree to two decimals across every run:
+`(0.07,0.11,0.13) (0.13,0.17,0.19) (0.06,0.09,0.13) (0.02,0.02,0.02) (0.07,0.07,0.09)`.
 
-Step 5 on Linux wrote *something* — the clear colour was gone — but every pixel came back
-at 1.0. Two things differ from the Windows run at once, so neither is yet the cause: the
-platform, and the file. Windows used this spike's synthetic BGRA clip, which carries no
-colour metadata at all; Linux used a real 1080p H.264 MKV, which is tagged BT.709.
+**Windows and Linux produce the same numbers**, which is a stronger result than either run
+alone: the same frame decoded through the same path lands identically whether the memory
+crossed as a Win32 handle or an fd. The raw output is in `results/`.
 
-The prime suspect is `target-colorspace-hint`, which the spike used to set unconditionally.
-It tells mpv to render for the target's colour space — and the API user is then expected to
-say what that space is, through the render params, which this spike does not. An unstated,
-very bright target is exactly what would clip SDR content to white. **It is now off unless
-you pass `--hint`**, so the two can be compared. On Windows with the untagged raw clip it
-makes no difference either way, which is consistent with the suspicion rather than proof of
-it — untagged content gives mpv nothing to convert.
+### The earlier white frame was a white frame
 
-To settle it, on the Linux machine with the same file:
+An earlier Linux run came back `min 0.996 max 1` and I guessed at
+`target-colorspace-hint` clipping SDR content. **That was wrong.** The file simply opened on
+a white frame. With a different file the same command gives a normal dark scene, and
+`--hint` changes nothing at all — the numbers are identical with and without it, on both
+platforms.
 
-```bash
-dotnet run --project spikes/HdrInterop -- "/path/to/file.mkv"          # hint off
-dotnet run --project spikes/HdrInterop -- "/path/to/file.mkv" --hint   # hint on
-```
-
-Each run now prints five sampled pixels and writes the readback to
-`/tmp/hdr-interop-readback.ppm`, which any image viewer opens. Looking at the frame settles
-in a second what the statistics argue about — and a frame that is genuinely white (a title
-card, a flash) looks like one.
+That is worth knowing rather than just correcting: with no render params describing the
+target, the hint is a **no-op**, not a hazard. It only starts doing anything in phase 4,
+when there is a real swapchain with a real colour space to hint at. It stays behind
+`--hint` so that phase can turn it on deliberately.
 
 ## What this does **not** prove
 

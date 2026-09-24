@@ -88,16 +88,17 @@ image, exported, imported into a GL context, cleared from GL and read back throu
 with the colour intact — and then mpv decoding into the same FBO, which read back as real
 video rather than the clear colour. On an RTX 4080 on Windows.
 
-Since confirmed on **Linux** too, on the same card: the `fd` export imports into GL and the
-colour survives the round trip, so the bridge this whole route rests on is cross-platform in
-fact and not just on paper.
+Confirmed on **Linux** as well, on the same card: the `fd` export imports into GL, the
+colour survives the round trip, and mpv decodes into the shared image. Windows and Linux
+return the same pixel values for the same frame, to two decimals — so the bridge this whole
+route rests on is cross-platform in fact, not on paper.
 
-Open on Linux: what mpv draws into the shared image came back flat white with a real BT.709
-file. The sharing plainly worked — the clear colour was gone — so this is about colour
-handling, not interop. `target-colorspace-hint` is the suspect and is now opt-in; see the
-spike's README.
+`target-colorspace-hint` turns out to be a no-op without render params describing the
+target, so it belongs in phase 4 and is opt-in in the spike until then.
 
-*Not* proven anywhere: AMD and Intel, and Mesa rather than NVIDIA's own driver.
+*Not* proven anywhere: AMD and Intel, and Mesa rather than NVIDIA's own driver. Those are
+where an `fd` export is most likely to behave differently, and phase 1 should be treated as
+unproven on them.
 
 **1 — `SkiaVulkanRenderSurface`.** A fourth `IRenderSurface` — the interface is four
 members and there are already three implementations, so this is the least novel part.
