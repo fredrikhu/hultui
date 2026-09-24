@@ -21,7 +21,8 @@ public class PackOverlayTests
 
         t.CommitPack("a0.txt", "a1.txt");
 
-        // Set before the worker starts, so this is a fact about the commit and not a race.
+        // Nothing has pumped since the keystroke, so the pack cannot have finished and put
+        // these back — the overlay is being read while the op is live, by construction.
         Assert.True(t.ProgressOpen, "the pack ran with no overlay to report into");
         Assert.True(t.OpIsPack, "the progress overlay is showing a copy, not a pack");
         t.WaitForNotice();
@@ -149,7 +150,15 @@ public class PackOverlayTests
             Assert.True(PackDialogOpen, "Alt+F5 did not open the Pack dialog");
             _t.SetField("_packEachOwn", eachOwn);
             _t.SetField("_packName", "bundle.zip");
-            _t.Press(KeyCode.Enter);
+
+            // Enter is dispatched without pumping a frame after it, and that is what lets
+            // these tests look at the op they just started. Input is delivered synchronously,
+            // so the op is built and its worker is running by the time this returns — while
+            // FinishPack, which clears the op and closes the overlay, is marshalled to the UI
+            // thread and cannot run until something pumps. Press pumps that frame, and a
+            // handful of small files zip faster than one frame takes: that is the race this
+            // avoids, and it showed up as "no pack is running" on a loaded runner.
+            _t.Session.Window.PressKey(KeyCode.Enter);
         }
 
         /// <summary>Wait until the pack has finished at least <paramref name="count"/> entries,
