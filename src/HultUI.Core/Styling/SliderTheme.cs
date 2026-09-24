@@ -1,4 +1,4 @@
-using HultUI.Core.Primitives;
+﻿using HultUI.Core.Primitives;
 
 namespace HultUI.Core.Styling;
 
@@ -20,6 +20,13 @@ public sealed class SliderTheme : IThemeExtension<SliderTheme>
 
     /// <summary>The filled part, left of the thumb. Falls back to <see cref="Theme.Primary"/>.</summary>
     public Color? FillColor { get; init; }
+
+    /// <summary>
+    /// The track up to the pointer, when the slider draws one
+    /// (<see cref="Elements.SliderElement.ShowHoverFill"/>). Falls back to the fill colour
+    /// at just under half opacity.
+    /// </summary>
+    public Color? HoverFillColor { get; init; }
 
     /// <summary>The thumb's fill. Falls back to white, which is what it has always been.</summary>
     public Color? ThumbColor { get; init; }

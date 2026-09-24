@@ -108,6 +108,24 @@ public class VideoPreviewTests
     }
 
     [Fact]
+    public void ChapterMarksCutTheScrubberIntoChapters()
+    {
+        using var f = new Fixture(frame: null);
+        var seek = () => (HultUI.Core.Elements.SliderElement)f.Session.Window
+            .FindByAutomationId("video-seek")!.Element;
+
+        // Nothing handed over: one continuous track, as a scrubber has always been.
+        Assert.Null(seek().Segments);
+
+        f.VideoPlayer.ChapterMarks = [TimeSpan.Zero, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(7)];
+        f.Session.PumpFrames(2);
+
+        Assert.Equal([0d, 120d, 420d], seek().Segments);
+        // The track fills to the pointer on a scrubber, which an ordinary slider does not.
+        Assert.True(seek().ShowHoverFill);
+    }
+
+    [Fact]
     public void LeavingTheTrackTakesThePreviewWithIt()
     {
         using var f = new Fixture(new VideoPreviewFrame(new StubImage(new Size(320, 180))));

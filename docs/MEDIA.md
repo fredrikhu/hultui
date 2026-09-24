@@ -55,6 +55,11 @@ seconds cannot honestly be labelled 4:57. Answer from a cache and start the fetc
 miss: the provider is called during a build, so it must not block, and returning null
 simply means no preview this frame.
 
+**Chapters on the scrubber.** `VideoPlayer.ChapterMarks` is the list of positions where
+chapters start; the player cuts the scrubber into one piece per chapter and leaves it alone
+when the list is empty. It knows nothing else about chapters — the app hands over the marks
+it has, and converts them once per change rather than once per frame.
+
 **Naming a track.** A backend builds `MediaTrack.Title` through
 `MediaTrack.Describe(title, language, id)`: the language name leads and the file's own
 title follows — "English · Stereo", "Japanese · Stereo". Either half alone is enough,

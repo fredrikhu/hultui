@@ -1035,6 +1035,15 @@ sheet. It is also the element's intrinsic size, so a sheet of twenty frames meas
 frame. `IRenderContext.DrawImage(source, dest, sourceRect)` is the draw underneath; a
 context with no pixels to cut from falls back to drawing the whole image.
 
+**A slider cut into pieces.** `SliderElement.Segments` takes values inside the range where
+the track is split, with `SegmentGap` between the pieces — a video scrubber divided by its
+chapter marks, so a chapter is something you can see and aim at. Marks outside the range and
+duplicates are ignored, and no marks is the single continuous track it has always been.
+`ShowHoverFill` paints the track up to the pointer in `SliderTheme.HoverFillColor` (the fill
+colour at just under half opacity by default), which is how a scrubber says "release here and
+this is where you land". It is off by default: on an ordinary slider a second fill reads as a
+second value.
+
 **Pointing at a slider.** `SliderElement.OnHoverValue` reports the value under the pointer
 as it crosses the track, and null when it leaves — including while dragging, since the thumb
 is under the pointer either way. Hovering never changes the value; that still takes a press,

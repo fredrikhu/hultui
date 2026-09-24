@@ -70,6 +70,9 @@ sheet is behind the session and this server answers `?api_key=` with **401**, so
 carries the session's `Authorization` header instead. Putting a token in a URL was the wrong
 instinct anyway — URLs end up in logs and caches.
 
+**The scrubber is cut into chapters** when the file has marks, and fills to the pointer as
+it crosses, so where you would land reads differently from where you are.
+
 **Scrubbing shows a still.** Where the server has generated trickplay images, pointing at
 the scrubber shows the frame for that position. Jellyfin packs them as sprite sheets — one
 JPEG holding a grid of stills, one every ten seconds — so scrubbing a two-hour film costs a

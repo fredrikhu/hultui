@@ -329,6 +329,11 @@ public sealed partial class ApertureApp
         }
         else
         {
+            // The marks arrive with the full item, a moment after playback starts, so this
+            // is set per build rather than once when the stream opens.
+            if (_videoPlayer.ChapterMarks.Count != PlayingChapters.Count)
+                _videoPlayer.ChapterMarks = [.. PlayingChapters.Select(c => c.Start)];
+
             var picture = _videoPlayer.Mount().FlexGrow(1);
             picture.Key = "picture";
             column.AddChild(picture);

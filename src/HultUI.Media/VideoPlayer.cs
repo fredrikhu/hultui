@@ -84,6 +84,28 @@ public sealed class VideoPlayer : Component
     /// <summary>How wide the preview still is drawn. Its height follows the frame.</summary>
     public float PreviewWidth { get; set; } = 176f;
 
+    /// <summary>
+    /// Where the chapters start, which cuts the scrubber into one piece per chapter. Empty
+    /// — the default — leaves it one continuous track. The player does not know what a
+    /// chapter is beyond this: the app hands over the marks it has.
+    /// </summary>
+    public IReadOnlyList<TimeSpan> ChapterMarks
+    {
+        get => _chapterMarks;
+        set
+        {
+            _chapterMarks = value ?? [];
+            // Converted once per change rather than once per frame: the player rebuilds on
+            // every position tick, and this list only moves when the film does.
+            _chapterSeconds = _chapterMarks.Count > 0
+                ? _chapterMarks.Select(c => c.TotalSeconds).ToArray()
+                : [];
+            MarkDirty();
+        }
+    }
+    private IReadOnlyList<TimeSpan> _chapterMarks = [];
+    private double[] _chapterSeconds = [];
+
     /// <summary>The user asked for full screen (the F key or the button). The app decides what that means.</summary>
     public event Action? FullscreenRequested;
 
@@ -405,6 +427,10 @@ public sealed class VideoPlayer : Component
                 .OnValueChanged(seconds => player.Seek(TimeSpan.FromSeconds(seconds)));
             scrubber.OnHoverValue = at => _previewAt.Value = at;
             scrubber.Step = 0.5;
+            // Pointing at a scrubber is asking "what is there" — so the track fills to the
+            // pointer, and the chapters cut it into the pieces being aimed at.
+            scrubber.ShowHoverFill = true;
+            if (_chapterSeconds.Length > 0) scrubber.Segments = _chapterSeconds;
             scrubber.WithRef(_scrubber);
             items.Add(scrubber);
             items.Add(Text.New(FormatTime(total, duration)).TextColor(theme.MutedForeground).AutomationId("video-duration"));

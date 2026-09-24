@@ -27,6 +27,7 @@ public class SliderElement : Element, IRangeValueElement
     private Color _thumbBorderColor = new(66, 135, 245);
     private float _thumbBorderWidth = 2f;
     private Color _focusRingColor = new(66, 135, 245);
+    private Color _hoverFillColor = new(66, 135, 245, 120);
 
     public double Minimum { get => _min; set { _min = value; Value = _value; } }
     public double Maximum { get => _max; set { _max = value; Value = _value; } }
@@ -55,6 +56,32 @@ public class SliderElement : Element, IRangeValueElement
     /// </summary>
     public Action<double?>? OnHoverValue { get; set; }
 
+    /// <summary>
+    /// Values inside the range where the track is cut into pieces, with
+    /// <see cref="SegmentGap"/> between them — a video scrubber divided by its chapter
+    /// marks. Null or empty is one continuous track, which is what a slider has always
+    /// been. Values outside the range, and duplicates, are ignored.
+    /// </summary>
+    public IReadOnlyList<double>? Segments
+    {
+        get => _segments;
+        set { _segments = value; MarkPaintDirty(); }
+    }
+    private IReadOnlyList<double>? _segments;
+
+    /// <summary>The gap drawn between segments.</summary>
+    public float SegmentGap { get; set; } = 2f;
+
+    /// <summary>
+    /// Whether the track fills to the pointer as it crosses, in a paler colour than the
+    /// played part — how a video scrubber says "release here and this is where you land".
+    /// Off by default: on an ordinary slider it would read as a second value.
+    /// </summary>
+    public bool ShowHoverFill { get; set; }
+
+    /// <summary>Where the pointer is, while it is over the track.</summary>
+    private double? _hoverValue;
+
     public float TrackHeight { get; set; } = 4f;
     public float ThumbRadius { get; set; } = 8f;
 
@@ -76,11 +103,12 @@ public class SliderElement : Element, IRangeValueElement
         {
             double at = ValueFromLocalX(e.LocalPosition.X);
             if (_dragging) ApplyUserValue(at);
+            SetHover(at);
             // Reported while dragging too: the thumb is under the pointer either way, and
             // a preview that vanished the moment you pressed would be the wrong way round.
             OnHoverValue?.Invoke(at);
         });
-        OnOwn<PointerLeaveEvent>(_ => OnHoverValue?.Invoke(null));
+        OnOwn<PointerLeaveEvent>(_ => { SetHover(null); OnHoverValue?.Invoke(null); });
         OnOwn<PointerUpEvent>(_ => _dragging = false);
         OnOwn<FocusEvent>(_ => { _focused = true; MarkPaintDirty(); });
         OnOwn<BlurEvent>(_ => { _focused = false; MarkPaintDirty(); });
@@ -110,6 +138,16 @@ public class SliderElement : Element, IRangeValueElement
         _thumbColor = st.ThumbColor ?? Color.White;
         _thumbBorderColor = st.ThumbBorderColor ?? _fillColor;
         _thumbBorderWidth = st.ThumbBorderWidth;
+        // Paler than the played part by default, so "where you would land" never reads as
+        // "where you are".
+        _hoverFillColor = st.HoverFillColor ?? new Color(_fillColor.R, _fillColor.G, _fillColor.B, 120);
+    }
+
+    private void SetHover(double? at)
+    {
+        if (_hoverValue == at) return;
+        _hoverValue = at;
+        if (ShowHoverFill) MarkPaintDirty();
     }
 
     private double Clamp(double v)
@@ -147,11 +185,33 @@ public class SliderElement : Element, IRangeValueElement
         double range = _max - _min;
         float t = range > 0 ? (float)((_value - _min) / range) : 0f;
 
-        var trackRect = new Rect(trackLeft, cy - TrackHeight / 2, trackWidth, TrackHeight);
-        ctx.DrawRoundedRect(trackRect, new CornerRadius(TrackHeight / 2), _trackColor, Color.Transparent, default);
+        float hoverT = ShowHoverFill && _hoverValue is { } hover && range > 0
+            ? (float)Math.Clamp((hover - _min) / range, 0, 1)
+            : 0f;
 
-        var fillRect = new Rect(trackLeft, cy - TrackHeight / 2, trackWidth * t, TrackHeight);
-        ctx.DrawRoundedRect(fillRect, new CornerRadius(TrackHeight / 2), _fillColor, Color.Transparent, default);
+        // One piece per segment, so a chapter is a thing you can see and aim at. Each is
+        // drawn as its own little track, filled by however much of it is behind the thumb
+        // (and, while pointed at, by however much is behind the pointer).
+        float top = cy - TrackHeight / 2;
+        var radius = new CornerRadius(TrackHeight / 2);
+        foreach (var (from, to) in Pieces())
+        {
+            float x = trackLeft + trackWidth * from;
+            float width = trackWidth * (to - from);
+            if (width <= 0) continue;
+
+            ctx.DrawRoundedRect(new Rect(x, top, width, TrackHeight), radius, _trackColor, Color.Transparent, default);
+
+            float hoverPart = Math.Clamp((hoverT - from) / (to - from), 0f, 1f);
+            if (hoverPart > 0)
+                ctx.DrawRoundedRect(new Rect(x, top, width * hoverPart, TrackHeight), radius,
+                    _hoverFillColor, Color.Transparent, default);
+
+            float playedPart = Math.Clamp((t - from) / (to - from), 0f, 1f);
+            if (playedPart > 0)
+                ctx.DrawRoundedRect(new Rect(x, top, width * playedPart, TrackHeight), radius,
+                    _fillColor, Color.Transparent, default);
+        }
 
         float thumbX = trackLeft + trackWidth * t;
         var thumbRect = new Rect(thumbX - ThumbRadius, cy - ThumbRadius, ThumbRadius * 2, ThumbRadius * 2);
@@ -163,6 +223,37 @@ public class SliderElement : Element, IRangeValueElement
             var ring = new Rect(thumbX - ThumbRadius - o, cy - ThumbRadius - o, (ThumbRadius + o) * 2, (ThumbRadius + o) * 2);
             ctx.DrawRoundedRect(ring, new CornerRadius(ThumbRadius + o), Color.Transparent, _focusRingColor, new Thickness(2f));
         }
+    }
+
+    /// <summary>
+    /// The track as fractions of its width: one piece per segment with the gap taken out
+    /// of each piece's right-hand end, or a single piece when nothing divides it.
+    /// </summary>
+    private IEnumerable<(float From, float To)> Pieces()
+    {
+        double range = _max - _min;
+        float trackWidth = Layout.AbsoluteContentBox.Width - 2 * ThumbRadius;
+        if (range <= 0 || trackWidth <= 0 || _segments is not { Count: > 0 })
+        {
+            yield return (0f, 1f);
+            yield break;
+        }
+
+        float gap = trackWidth > 0 ? Math.Min(SegmentGap / trackWidth, 0.02f) : 0f;
+        var cuts = _segments
+            .Where(v => v > _min && v < _max)
+            .Select(v => (float)((v - _min) / range))
+            .Distinct()
+            .Order()
+            .ToList();
+
+        float start = 0f;
+        foreach (var cut in cuts)
+        {
+            if (cut - start > gap) yield return (start, cut - gap);
+            start = cut;
+        }
+        if (start < 1f) yield return (start, 1f);
     }
 
     // ── IRangeValueElement ──
@@ -186,6 +277,9 @@ public class SliderElement : Element, IRangeValueElement
             ThumbRadius = s.ThumbRadius;
             OnChanged = s.OnChanged;
             OnHoverValue = s.OnHoverValue;
+            Segments = s.Segments;
+            SegmentGap = s.SegmentGap;
+            ShowHoverFill = s.ShowHoverFill;
             Value = s._value;
         }
     }
