@@ -1,4 +1,5 @@
-❯ dotnet run --project spikes/HdrInterop -- "/run/media/fredrik/New Volume/Downloads/[HorribleSubs].Black.Clover.-.127.[1080p]/[HorribleSubs] Black Clover - 127 [1080p].mkv"
+❯ dotnet run --project spikes/HdrInterop -- "/run/media/fredrik/New Volume/Downloads/Hells.Paradise.S01E05.The.Samurai.and.the.Woman.1080p.CR.WEB-DL.AAC2.0.H.264-KQRM.mkv"
+/home/fredrik/source/csharp/HultUI-revamped/spikes/HdrInterop/MpvIntoFbo.cs(86,38): warning CA2014: Potential stack overflow. Move the stackalloc out of the loop. (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca2014)
 ── HDR interop spike ─────────────────────────────────
 platform: Linux/other
 
@@ -20,7 +21,11 @@ platform: Linux/other
     Vulkan read back         : 0.25, 0.5, 0.75
     → the two APIs share one image.
 
-[5] mpv → the shared image : [HorribleSubs] Black Clover - 127 [1080p].mkv
-    read back                : min 0.996, max 1, mean 1
+[5] mpv → the shared image : Hells.Paradise.S01E05.The.Samurai.and.the.Woman.1080p.CR.WEB-DL.AAC2.0.H.264-KQRM.mkv
+    target-colorspace-hint   : no
+    read back                : min 0, max 1, mean 0.133
+    corners + centre         : (0.07,0.11,0.13)  (0.13,0.17,0.19)  (0.06,0.09,0.13)  (0.02,0.02,0.02)  (0.07,0.07,0.09)
+    written for looking at   : /tmp/hdr-interop-readback.ppm
 
-VERDICT: interop works, but mpv did not visibly write to the shared image.
+VERDICT: mpv decoded into a Vulkan image through GL. The route works.
+
