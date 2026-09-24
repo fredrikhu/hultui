@@ -15,6 +15,25 @@ internal static class ReelProgram
     [STAThread]
     private static void Main(string[] args)
     {
+        // The GL driver load is the single largest piece of a cold start — ~150 ms that SDL
+        // does lazily inside the first window — and most of it cannot be moved at all, for
+        // the reason docs/NATIVE-AOT.md gives: no window can exist until it finishes. What
+        // the preload does move is the part that overlaps the app's own pre-window work and
+        // the text pipeline's warm-up. Measured on this app, Release JIT, five runs each
+        // way: first frame at 502 ms without and 473 ms with, and no run overlapped.
+        //
+        // The framework keeps this opt-in because loading the driver off the main thread is
+        // outside SDL's documented threading contract — validated on Windows/WGL, not on
+        // X11 or Wayland. Reel is a Windows app with an installer and file associations, so
+        // it opts in on Windows on its own behalf, and only where that validation holds. An
+        // explicit setting either way is the user's and is left alone.
+        if (OperatingSystem.IsWindows() &&
+            Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") is null)
+        {
+            Environment.SetEnvironmentVariable("HULTUI_GL_PRELOAD", "1");
+        }
+        Application.BeginGraphicsPreload();
+
         // Registration runs without a window: an installer, a script, or a person who
         // would rather not hunt for a button can do it and be told what happened.
         if (OperatingSystem.IsWindows() && args.Any(a => a is "--register" or "--unregister"))
