@@ -55,6 +55,10 @@ internal static unsafe class VkCmd
 
     private static delegate* unmanaged<VkDevice, byte*, nint> _getDeviceProcAddr;
 
+    /// <summary>For anything that resolves its own entry points — Skia does.</summary>
+    public static nint GetDeviceProcAddr(VkDevice device, byte* name) =>
+        _getDeviceProcAddr is null ? 0 : _getDeviceProcAddr(device, name);
+
     public static void LoadInstance(VkInstance instance)
     {
         EnumeratePhysicalDevices = (delegate* unmanaged<VkInstance, uint*, VkPhysicalDevice*, VkResult>)I(instance, "vkEnumeratePhysicalDevices");

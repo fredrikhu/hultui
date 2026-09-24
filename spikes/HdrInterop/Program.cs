@@ -30,7 +30,7 @@ internal static class Program
 
         try
         {
-            return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"));
+            return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"), args.Contains("--skia"));
         }
         catch (Exception ex)
         {
@@ -40,7 +40,7 @@ internal static class Program
         }
     }
 
-    private static unsafe int Run(string? mediaFile, bool colorspaceHint)
+    private static unsafe int Run(string? mediaFile, bool colorspaceHint, bool skia)
     {
         // ── 1. Vulkan: the device, and an image whose memory can leave it ────
         using var vk = VulkanImage.Create(Width, Height);
@@ -149,6 +149,36 @@ internal static class Program
             return 4;
         }
         Console.WriteLine("    → the two APIs share one image.");
+
+        // ── 4b. Skia, into the same image, through its Vulkan backend ────────
+        if (skia)
+        {
+            Console.WriteLine();
+            Console.WriteLine("[4b] Skia → the shared image");
+            var drawn = SkiaOnVulkan.Draw(vk);
+            if (!drawn.Ok)
+            {
+                Console.WriteLine($"    failed: {drawn.Message}");
+                return 8;
+            }
+
+            pixels = vk.ReadBack();
+            var stats = Stats(pixels);
+            Console.WriteLine($"    read back                : min {stats.Min:0.###}, max {stats.Max:0.###}, mean {stats.Mean:0.###}");
+            Console.WriteLine($"    corners + centre         : {Sample(pixels)}");
+            var skiaDump = Path.Combine(Path.GetTempPath(), "hdr-skia-readback.ppm");
+            WritePpm(skiaDump, pixels);
+            Console.WriteLine($"    written for looking at   : {skiaDump}");
+
+            // The disc is in the middle and the ground is dark: a centre brighter than the
+            // corners is the drawing having happened, not a clear.
+            int c = ((Height / 2) * Width + Width / 2) * 4;
+            bool discDrawn = (float)pixels[c] > 0.3f && (float)pixels[c + 2] < (float)pixels[c];
+            Console.WriteLine(discDrawn
+                ? "    → Skia drew into the Vulkan image."
+                : "    → Skia reported success but the centre is not the disc.");
+            if (!discDrawn) return 9;
+        }
 
         // ── 5. And now the one that matters: mpv decoding into it ────────────
         if (mediaFile is null)

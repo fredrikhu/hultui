@@ -15,6 +15,8 @@
   <ItemGroup>
     <PackageReference Include="Vortice.Vulkan" Version="*" />
     <PackageReference Include="ppy.SDL3-CS" Version="2026.320.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.2" />
   </ItemGroup>
 
 </Project>
