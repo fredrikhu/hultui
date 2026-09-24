@@ -1,6 +1,6 @@
 ---
 name: run-hultui-app
-description: Run, drive, and screenshot the HultUI desktop apps — Junction, Vesper Commander, Meridian, Aperture — and the Fluent sample. Use when asked to run one of them, look at a UI change, take a screenshot, check how something renders, or interact with the app rather than its tests.
+description: Run, drive, and screenshot the HultUI desktop apps — Junction, Vesper Commander, Meridian, Aperture, Reel — and the Fluent sample. Use when asked to run one of them, look at a UI change, take a screenshot, check how something renders, or interact with the app rather than its tests.
 ---
 
 Renders a HultUI app off-screen and writes PNGs of what it drew, via
@@ -49,7 +49,7 @@ dotnet run .claude/skills/run-hultui-app/driver.cs -- --app junction --repo /tmp
 
 | Option | Meaning |
 |---|---|
-| `--app junction \| vesper \| meridian \| aperture \| fluent \| player \| procedural` | Which app to mount. Default `junction`. `aperture` is the Jellyfin client — with `--server` it browses a real one, without it a fixture library. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample; `player` is `samples/HultUI.Samples.VideoPlayer` (libmpv; give it `--media <file>`); `procedural` is `samples/HultUI.Samples.ProceduralVideo`, frames from an algorithm. Both get frames from a worker thread in real time, so `settle` between shots, and `HULTUI_MEDIA_NOHIDE=1` keeps the bar from fading. |
+| `--app junction \| vesper \| meridian \| aperture \| reel \| fluent \| player \| procedural` | Which app to mount. Default `junction`. `aperture` is the Jellyfin client — with `--server` it browses a real one, without it a fixture library. `reel` is the local player; `--media <file>` opens one at once, and without it the window shows its invitation. `fluent` is `samples/HultUI.Samples.Fluent`, the WinUI-look sample; `player` is `samples/HultUI.Samples.VideoPlayer` (libmpv; give it `--media <file>`); `procedural` is `samples/HultUI.Samples.ProceduralVideo`, frames from an algorithm. Both get frames from a worker thread in real time, so `settle` between shots, and `HULTUI_MEDIA_NOHIDE=1` keeps the bar from fading. |
 | `--repo <path>` | Junction: the repository to open. Defaults to the git root of the working directory. |
 | `--gitlab` | Junction: borrow the signed-in GitLab accounts from the user's real settings (tokens stay in the OS credential store), so the merge-request panel, pipeline glyphs and marks render against the real instance. |
 | `--theme <id>` | Junction: open in a colour scheme from `ThemeCatalog` (`dracula`, `gruvbox-dark`, `solarized-light`, ...). Default `nocturne`. |

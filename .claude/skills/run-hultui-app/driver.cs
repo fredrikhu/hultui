@@ -1,8 +1,9 @@
-#:project ../../../src/HultUI.Headless/HultUI.Headless.csproj
+﻿#:project ../../../src/HultUI.Headless/HultUI.Headless.csproj
 #:project ../../../apps/Junction/Junction.csproj
 #:project ../../../apps/VesperCommander/VesperCommander.csproj
 #:project ../../../apps/Meridian/Meridian/Meridian.csproj
 #:project ../../../apps/Aperture/Aperture/Aperture.csproj
+#:project ../../../apps/Reel/Reel.csproj
 #:project ../../../samples/HultUI.Samples.Fluent/HultUI.Samples.Fluent.csproj
 #:project ../../../samples/HultUI.Samples.VideoPlayer/HultUI.Samples.VideoPlayer.csproj
 #:project ../../../samples/HultUI.Samples.ProceduralVideo/HultUI.Samples.ProceduralVideo.csproj
@@ -91,10 +92,11 @@ try
         "vesper" or "vespercommander" => MountVesper(),
         "meridian" => MountMeridian(),
         "aperture" => MountAperture(),
+        "reel" => MountReel(),
         "fluent" => MountFluent(),
         "player" => MountPlayer(),
         "procedural" => MountProcedural(),
-        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | aperture | fluent | player | procedural)"),
+        _ => throw new ArgumentException($"unknown --app '{app}' (junction | vesper | meridian | aperture | reel | fluent | player | procedural)"),
     };
     session.Application.SetRoot(root);
     session.PumpFrames(3);
@@ -267,6 +269,21 @@ Element MountPlayer()
         mediaPath is null ? null : Path.GetFullPath(mediaPath));
     instance = a;
     return a.Mount();
+}
+
+Element MountReel()
+{
+    // The local player. --media <file> opens one at once; without it the window shows its
+    // invitation. libmpv must be findable (HULTUI_MPV_PATH), or it says so instead.
+    session.Application.Theme = HultUI.Core.Styling.Theme.Dark;
+    Func<HultUI.Media.IMediaBackend>? backends = HultUI.Media.Mpv.MpvBackend.IsAvailable
+        ? () => new HultUI.Media.Mpv.MpvBackend() : null;
+    var settings = new Reel.ReelSettings(Path.Combine(scratchConfig, "reel.json"));
+    var a = new Reel.ReelApp(session.Application, session.Window.Window, settings, backends);
+    instance = a;
+    var root = a.Mount();
+    if (mediaPath is not null) a.Open(Path.GetFullPath(mediaPath));
+    return root;
 }
 
 Element MountProcedural()

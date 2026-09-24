@@ -1,4 +1,4 @@
-namespace HultUI.Media;
+﻿namespace HultUI.Media;
 
 /// <summary>
 /// What a backend tells the player. Raised on whatever thread the backend runs on;
@@ -28,6 +28,12 @@ public abstract record BackendEvent
     public sealed record TracksChanged(
         IReadOnlyList<MediaTrack> Audio, IReadOnlyList<MediaTrack> Subtitles,
         int? SelectedAudio, int? SelectedSubtitle) : BackendEvent;
+
+    /// <summary>
+    /// The chapter marks the media carries, in order, or empty for a file with none.
+    /// Raised with the tracks when a file loads.
+    /// </summary>
+    public sealed record ChaptersChanged(IReadOnlyList<MediaChapterMark> Chapters) : BackendEvent;
 
     /// <summary>Buffering progress as a fraction, or null once playback has what it needs.</summary>
     public sealed record BufferingChanged(float? Fraction) : BackendEvent;

@@ -1,4 +1,4 @@
-using HultUI.Core.Primitives;
+﻿using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
 using HultUI.Core.Rendering;
 using HultUI.Core.Threading;
@@ -40,6 +40,7 @@ public sealed class MediaPlayer : IDisposable
     private readonly Signal<float> _volume = new(1f);
     private readonly Signal<bool> _muted = new(false);
     private readonly Signal<Size> _videoSize = new(Size.Zero);
+    private readonly Signal<IReadOnlyList<MediaChapterMark>> _chapters = new([]);
     private readonly Signal<IReadOnlyList<MediaTrack>> _audioTracks = new([]);
     private readonly Signal<IReadOnlyList<MediaTrack>> _subtitleTracks = new([]);
     private readonly Signal<int?> _selectedAudioTrack = new(null);
@@ -82,6 +83,9 @@ public sealed class MediaPlayer : IDisposable
     public TimeSpan? Duration => _duration.Value;
     /// <summary>The display size of the video (sample aspect applied); zero until known.</summary>
     public Size VideoSize => _videoSize.Value;
+    /// <summary>The chapter marks the open media carries, in order; empty for a file with
+    /// none (reactive read).</summary>
+    public IReadOnlyList<MediaChapterMark> Chapters => _chapters.Value;
     public IReadOnlyList<MediaTrack> AudioTracks => _audioTracks.Value;
     public IReadOnlyList<MediaTrack> SubtitleTracks => _subtitleTracks.Value;
     public int? SelectedAudioTrack => _selectedAudioTrack.Value;
@@ -288,6 +292,9 @@ public sealed class MediaPlayer : IDisposable
                     break;
                 case BackendEvent.VideoGeometry g:
                     _videoSize.Value = new Size((float)Math.Round(g.Width * g.SampleAspect), g.Height);
+                    break;
+                case BackendEvent.ChaptersChanged c:
+                    _chapters.Value = c.Chapters;
                     break;
                 case BackendEvent.TracksChanged t:
                     _audioTracks.Value = t.Audio;

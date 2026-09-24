@@ -1,4 +1,4 @@
-using HultUI.Core.Rendering;
+﻿using HultUI.Core.Rendering;
 
 namespace HultUI.Media.Testing;
 
@@ -31,6 +31,9 @@ public sealed class FakeMediaBackend : IMediaBackend
     public int VideoHeight { get; set; } = 180;
     public double SampleAspect { get; set; } = 1.0;
     public double FrameRate { get; set; } = 25;
+    /// <summary>The marks a test wants the "file" to carry; raised with the tracks on open.</summary>
+    public List<MediaChapterMark> Chapters { get; } = [];
+
     public List<MediaTrack> AudioTracks { get; } = [];
     public List<MediaTrack> SubtitleTracks { get; } = [];
     /// <summary>Makes the next <see cref="Open"/> fail with this message, then clears itself.</summary>
@@ -200,8 +203,11 @@ public sealed class FakeMediaBackend : IMediaBackend
         Raise(new BackendEvent.StateChanged(state));
     }
 
-    private void RaiseTracks() =>
+    private void RaiseTracks()
+    {
         Raise(new BackendEvent.TracksChanged(AudioTracks.ToArray(), SubtitleTracks.ToArray(), SelectedAudio, SelectedSubtitle));
+        Raise(new BackendEvent.ChaptersChanged(Chapters.ToArray()));
+    }
 
     private TimeSpan Clamp(TimeSpan position)
     {

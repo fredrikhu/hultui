@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe: no console window behind the picture when Explorer launches it. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Reel</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <OptimizationPreference>Speed</OptimizationPreference>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Reel.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Icons\HultUI.Icons.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Themes\HultUI.Themes.csproj" />
+    <!-- The picture, the transport overlay, and the libmpv backend behind them: Reel is
+         the shell around HultUI.Media, not a second implementation of it. -->
+    <ProjectReference Include="..\..\src\HultUI.Media\HultUI.Media.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.Media.Mpv\HultUI.Media.Mpv.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.SourceGenerators\HultUI.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

@@ -233,6 +233,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
                 Raise(new BackendEvent.DurationChanged(ReadDuration()));
                 RaiseGeometry();
                 RaiseTracks();
+                RaiseChapters();
                 _loaded = true;
                 _eof = false;
                 Raise(new BackendEvent.StateChanged(_paused ? PlaybackState.Paused : PlaybackState.Playing));
@@ -320,6 +321,30 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     {
         if (_width > 0 && _height > 0)
             Raise(new BackendEvent.VideoGeometry(_width, _height, _sampleAspect));
+    }
+
+    /// <summary>
+    /// The file's own chapter marks. mpv exposes them as a list property, the same shape
+    /// as the track list; a container with none simply reports a count of zero.
+    /// </summary>
+    private void RaiseChapters()
+    {
+        long count = GetInt64(_mpv, "chapter-list/count") ?? 0;
+        if (count <= 0)
+        {
+            Raise(new BackendEvent.ChaptersChanged([]));
+            return;
+        }
+
+        var chapters = new List<MediaChapterMark>((int)count);
+        for (int i = 0; i < count; i++)
+        {
+            string prefix = $"chapter-list/{i}/";
+            double start = GetDouble(_mpv, prefix + "time") ?? 0;
+            if (start < 0) continue;
+            chapters.Add(new MediaChapterMark(TimeSpan.FromSeconds(start), GetString(_mpv, prefix + "title")));
+        }
+        Raise(new BackendEvent.ChaptersChanged(chapters));
     }
 
     private void RaiseTracks()

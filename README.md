@@ -216,6 +216,8 @@ these carry a whole product's worth of them.
   requests, collection runner, OpenAPI discovery ([tests](tests/Meridian.Tests/))
 - [`Aperture`](apps/Aperture/) -- Jellyfin client: poster shelves over a real media server,
   with the framework's video player behind Play ([tests](tests/Aperture.Tests/))
+- [`Reel`](apps/Reel/) -- local video player: a file, its folder as the running order, and
+  where you stopped; the same video overlay as Aperture ([tests](tests/Reel.Tests/))
 
 ## Samples
 
