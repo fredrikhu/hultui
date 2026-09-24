@@ -26,7 +26,7 @@ using Text = HultUI.Core.Builders.Text;
 /// you stopped, and stays out of the way — which is the whole difference from Aperture,
 /// where playback is a sheet over a library.</para>
 /// </summary>
-public sealed class ReelApp : Component, IDisposable
+public sealed partial class ReelApp : Component, IDisposable
 {
     /// <summary>
     /// The file-type dropdown. <see cref="FileDialogFilter"/> wants bare extensions —
@@ -122,6 +122,7 @@ public sealed class ReelApp : Component, IDisposable
         _resumeTo = resume ? _settings.ResumeFor(full) ?? TimeSpan.Zero : TimeSpan.Zero;
         _resumeApplied = _resumeTo <= TimeSpan.Zero;
         _chapterCount = -1;
+        Tracks.Forget();
 
         OpenStream(full);
         _window.Title = WindowTitle();
@@ -220,6 +221,8 @@ public sealed class ReelApp : Component, IDisposable
             player.Seek(_resumeTo);
             _resumeApplied = true;
         }
+
+        Tracks.Pump(player);
 
         // The marks arrive with the file, a moment after it opens.
         var chapters = player.Chapters;

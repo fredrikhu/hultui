@@ -29,6 +29,10 @@ public sealed class ReelSettingsData
     public string? PreferredAudioLanguage { get; set; }
     public string? PreferredSubtitleLanguage { get; set; }
 
+    /// <summary>Whether subtitles are wanted at all. Turning them off is a preference like
+    /// any other — a viewer who closed them means it for the next file too.</summary>
+    public bool SubtitlesOn { get; set; } = true;
+
     public List<ResumePoint> Resume { get; set; } = [];
 
     /// <summary>Whether a second launch hands its file to the running window.</summary>

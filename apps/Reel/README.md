@@ -57,6 +57,10 @@ they share it as a library rather than as a fork.
   last 20 counts as finished — the point is cleared rather than resuming in the credits.
 - **Chapters from the container.** mpv reports the file's own marks, and they cut the
   scrubber into one piece per chapter.
+- **Remembers the audio and subtitle language you chose**, by language rather than track
+  number, and applies it to the next file that has one — the same rule Aperture follows, and
+  the same code. Switching off subtitles counts as a choice too. What the player applies
+  never overwrites the preference; only you do.
 - **Single instance.** A second launch hands its file to the running window over a named
   pipe instead of opening another one — Vesper's arrangement, and the reason "set as
   default and select a season" does not produce twelve windows.
@@ -91,8 +95,8 @@ installer. The keys, if you want to look:
 ## Not yet
 - **Scrubber previews.** Aperture gets stills from the server; a local file has none, so
   this would mean generating them from a second mpv instance.
-- **Subtitles beyond what mpv loads by itself**, a playlist you can see, and per-file track
-  memory (the languages are remembered globally, as in Aperture).
+- **Subtitles beyond what mpv loads by itself**, a playlist you can see, and *per-file*
+  track memory — the languages are remembered globally, not per title.
 
 ## Tests
 

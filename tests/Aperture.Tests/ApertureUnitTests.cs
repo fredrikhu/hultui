@@ -263,9 +263,9 @@ public class ApertureUnitTests
             new(2, "English", "eng"),
         ];
 
-        Assert.Equal(2, ApertureApp.Match(tracks, "eng")?.Id);
-        Assert.Equal(1, ApertureApp.Match(tracks, "jpn")?.Id);
-        Assert.Null(ApertureApp.Match(tracks, "fre"));
+        Assert.Equal(2, TrackPreference.Match(tracks, "eng")?.Id);
+        Assert.Equal(1, TrackPreference.Match(tracks, "jpn")?.Id);
+        Assert.Null(TrackPreference.Match(tracks, "fre"));
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class ApertureUnitTests
         // What a file with untagged tracks looks like — the title is all there is.
         MediaTrack[] tracks = [new(1, "Commentary"), new(2, "English (SDH)")];
 
-        Assert.Equal(2, ApertureApp.Match(tracks, "English")?.Id);
+        Assert.Equal(2, TrackPreference.Match(tracks, "English")?.Id);
     }
 
     [Fact]
@@ -282,9 +282,9 @@ public class ApertureUnitTests
     {
         MediaTrack[] tracks = [new(1, "English", "eng")];
 
-        Assert.Null(ApertureApp.Match(tracks, null));
-        Assert.Null(ApertureApp.Match(tracks, "   "));
-        Assert.Null(ApertureApp.Match([], "eng"));
+        Assert.Null(TrackPreference.Match(tracks, null));
+        Assert.Null(TrackPreference.Match(tracks, "   "));
+        Assert.Null(TrackPreference.Match([], "eng"));
     }
 
     // ── Failure copy ─────────────────────────────────────────────────────

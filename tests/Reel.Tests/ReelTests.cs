@@ -263,4 +263,91 @@ public class ReelTests : IDisposable
         // "*" is the one pattern that is allowed to be a glob, and it means everything.
         Assert.Equal("*", Assert.Single(filters, f => f.Label == "All files").Pattern);
     }
+
+    // ── Track memory ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The point of remembering by language: episode two of a dual-audio release opens on
+    /// the dub the viewer chose during episode one, without being asked again.
+    /// </summary>
+    [Fact]
+    public void TheAudioTrackYouPickIsTheOneTheNextFileOpensWith()
+    {
+        var first = File_("Show - 01.mkv");
+        File_("Show - 02.mkv");
+
+        var (session, app, backend) = Host();
+        using var _s = session;
+        backend.AudioTracks.Add(new MediaTrack(1, "Japanese", "jpn"));
+        backend.AudioTracks.Add(new MediaTrack(2, "English", "eng"));
+
+        app.Open(first);
+        session.PumpFrames(4);
+
+        // The file opens on its own default; the viewer switches, as the overlay's audio
+        // menu does — straight to the player.
+        Assert.Equal(1, app.Player!.SelectedAudioTrack);
+        app.Player!.SelectAudioTrack(2);
+        session.PumpFrames(4);
+
+        Assert.True(app.Step(1));
+        session.PumpFrames(4);
+
+        Assert.EndsWith("Show - 02.mkv", app.CurrentFile);
+        Assert.Equal(2, app.Player!.SelectedAudioTrack);
+        Assert.Equal("eng", app.Settings.Data.PreferredAudioLanguage);
+    }
+
+    /// <summary>Turning subtitles off is a preference too, and the one most easily undone by
+    /// a player that re-reads the file's default every time.</summary>
+    [Fact]
+    public void SubtitlesSwitchedOffStayOff()
+    {
+        var first = File_("Show - 01.mkv");
+        File_("Show - 02.mkv");
+
+        var (session, app, backend) = Host();
+        using var _s = session;
+        backend.AudioTracks.Add(new MediaTrack(1, "English", "eng"));
+        backend.SubtitleTracks.Add(new MediaTrack(5, "English", "eng"));
+
+        app.Open(first);
+        session.PumpFrames(4);
+
+        app.Player!.SelectSubtitleTrack(5);        // on…
+        session.PumpFrames(4);
+        app.Player!.SelectSubtitleTrack(null);     // …and off again
+        session.PumpFrames(4);
+
+        Assert.False(app.Settings.Data.SubtitlesOn);
+        Assert.Equal("eng", app.Settings.Data.PreferredSubtitleLanguage);
+
+        Assert.True(app.Step(1));
+        session.PumpFrames(4);
+        Assert.Null(app.Player!.SelectedSubtitleTrack);
+    }
+
+    /// <summary>
+    /// The remembering is one-way. A file with no track in the preferred language must not
+    /// quietly rewrite the preference to whatever it happened to open with, or one
+    /// Japanese-only extra would undo an evening of English.
+    /// </summary>
+    [Fact]
+    public void AFileWithoutThePreferredLanguageDoesNotOverwriteIt()
+    {
+        var only = File_("Extra.mkv");
+
+        var settings = new ReelSettings(Path.Combine(_folder, "settings.json"));
+        settings.Data.PreferredAudioLanguage = "eng";
+
+        var (session, app, backend) = Host(settings);
+        using var _s = session;
+        backend.AudioTracks.Add(new MediaTrack(1, "Japanese", "jpn"));
+
+        app.Open(only);
+        session.PumpFrames(6);
+
+        Assert.Equal(1, app.Player!.SelectedAudioTrack);          // nothing else to play
+        Assert.Equal("eng", app.Settings.Data.PreferredAudioLanguage);
+    }
 }
