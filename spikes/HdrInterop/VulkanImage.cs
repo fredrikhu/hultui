@@ -333,6 +333,30 @@ internal sealed unsafe class VulkanImage : IDisposable
         return pixels;
     }
 
+    /// <summary>
+    /// The least Vulkan can do and still have observed the image: a layout barrier submitted
+    /// and waited for. Stands in for the renderer reading what GL just drew.
+    /// </summary>
+    public void TouchFromVulkan()
+    {
+        var cmd = BeginCommands();
+        var barrier = new VkImageMemoryBarrier
+        {
+            sType = VkStructureType.ImageMemoryBarrier,
+            srcAccessMask = VkAccessFlags.None,
+            dstAccessMask = VkAccessFlags.ShaderRead,
+            oldLayout = VkImageLayout.General,
+            newLayout = VkImageLayout.ShaderReadOnlyOptimal,
+            srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
+            dstQueueFamilyIndex = QueueFamily,
+            image = Image,
+            subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
+        };
+        VkCmd.CmdPipelineBarrier(cmd, VkPipelineStageFlags.TopOfPipe, VkPipelineStageFlags.FragmentShader,
+            VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
+        EndCommands(cmd);
+    }
+
     private VkCommandBuffer BeginCommands()
     {
         var info = new VkCommandBufferAllocateInfo

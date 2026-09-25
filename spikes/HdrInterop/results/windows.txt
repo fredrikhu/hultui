@@ -57,3 +57,27 @@ platform: Windows
     written for looking at   : C:\Users\fredr\AppData\Local\Temp\hdr-interop-readback.ppm
 
 VERDICT: mpv decoded into a Vulkan image through GL. The route works.
+
+═══════════════════════════════════════════════════════
+--syncbench, 2026-09-25, RTX 4080, driver as installed
+═══════════════════════════════════════════════════════
+
+  GL renderer: NVIDIA GeForce RTX 4080/PCIe/SSE2
+
+  1080p  gl draw 0,00 ms   + glFinish 0,02 ms   + vulkan wait 0,25 ms   = 0,27 ms/frame
+         synchronisation alone: 0,27 ms/frame   (7 ms per second at 24 fps, 16 at 60)
+
+  4K     gl draw 0,00 ms   + glFinish 0,04 ms   + vulkan wait 0,25 ms   = 0,29 ms/frame
+         synchronisation alone: 0,29 ms/frame   (7 ms per second at 24 fps, 17 at 60)
+
+The software path it would replace costs about 175 ms of CPU per second at 1080p
+(1.75 CPU-seconds per ten, measured on the video sample).
+
+Reading it: the cost is flat across resolutions — 0,25 ms at 1080p and 0,25 ms at 4K —
+so it is not the image being waited on, it is the fixed price of submitting a command
+buffer and waiting for the queue to go idle. That is the crudest possible ordering, and
+a renderer that already submits work each frame pays most of that price anyway.
+
+Verdict: the naive sync costs about 4 % of a 24 fps frame budget and replaces a copy
+costing 175 ms/s. External semaphores would remove the stall, but they are an
+optimisation, not a precondition — phase 4 can be built without them.

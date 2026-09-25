@@ -263,6 +263,27 @@ Two things moved to make room for the second implementation. `GpuFrame` carries
 `WrapTexture` — it holds an `ISkiaExternalSurface` and calls `WrapFrame`, since a method
 named for a GL texture is one a Vulkan surface could never satisfy.
 
+**What the ordering costs, measured.** The one thing that could have made this arrangement
+worse than the copy it removes is synchronisation: GL and Vulkan write and read one image,
+and something has to order them. The spike's `--syncbench` measures the crudest ordering
+there is — `glFinish` on the GL side, a barrier submit and `vkQueueWaitIdle` on the Vulkan
+side — as a stand-in for mpv rendering and Skia reading:
+
+| | GL draw | + `glFinish` | + Vulkan wait | total |
+|---|---|---|---|---|
+| 1080p | 0.00 ms | 0.02 ms | 0.25 ms | **0.27 ms/frame** |
+| 4K | 0.00 ms | 0.04 ms | 0.25 ms | **0.29 ms/frame** |
+
+The cost is flat across resolutions, which says what it is: not the image being waited on,
+but the fixed price of submitting a command buffer and waiting for the queue to drain — and
+a renderer that already submits work every frame pays most of that regardless. At 24 fps it
+is **7 ms of the 1000 ms in a second**, against the 175 ms/s the software copy costs at
+1080p. Even at 60 fps it is 16 ms/s.
+
+So external semaphores (`VK_KHR_external_semaphore` with `GL_EXT_semaphore`) would remove
+the stall, but they are an optimisation rather than a precondition. Phase 4 can be built
+with the blunt ordering and tightened later if a profile ever asks for it.
+
 ### Why not just build libmpv with Vulkan?
 
 The obvious question, and the answer is not a build flag. mpv v0.41.0's `render.h` defines

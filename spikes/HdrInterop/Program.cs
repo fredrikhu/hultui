@@ -32,6 +32,7 @@ internal static class Program
         {
             if (args.Contains("--bisect")) return Bisect.Run();
             if (args.Contains("--text")) return TextColorTest.Run();
+            if (args.Contains("--syncbench")) return SyncBench.Run();
             return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"), args.Contains("--skia"));
         }
         catch (Exception ex)
