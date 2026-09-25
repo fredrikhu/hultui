@@ -296,9 +296,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
-            // FIFO is the only mode every implementation must support, and it is vsync —
-            // which is what the frame pacing in this framework already assumes.
-            presentMode = VkPresentModeKHR.Fifo,
+            presentMode = ChoosePresentMode(),
             clipped = true,
             oldSwapchain = old,
         };
@@ -319,6 +317,45 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _heightPx = (int)extent.height;
         StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length}");
         ResetCapture();
+    }
+
+    /// <summary>
+    /// How frames reach the screen, and deliberately not vsync.
+    ///
+    /// <para>The GL path sets <c>SDL_GL_SetSwapInterval(0)</c> and lets the framework decide
+    /// when to draw: <c>Application</c> waits out the display interval itself, except when
+    /// something asks to be unpaced — <c>FramePacing.Unlimited</c>, or the DevTools
+    /// continuous-redraw mode. FIFO is vsync in the presentation engine, so it overrides
+    /// that decision from underneath and pins the loop to the refresh rate however fast the
+    /// framework wanted to go. Continuous redraw read exactly 120 on a 120 Hz display.</para>
+    ///
+    /// <para>IMMEDIATE is the equivalent of swap interval 0 and may tear; MAILBOX is the
+    /// tear-free fallback, which still lets the renderer run ahead and simply drops frames
+    /// nobody sees. FIFO is the last resort and the only mode an implementation must
+    /// support.</para>
+    /// </summary>
+    private VkPresentModeKHR ChoosePresentMode()
+    {
+        uint count = 0;
+        if (GetSurfacePresentModes(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
+            return VkPresentModeKHR.Fifo;
+
+        var modes = stackalloc VkPresentModeKHR[(int)count];
+        if (GetSurfacePresentModes(_physicalDevice, _surface, &count, modes) != VkResult.Success)
+            return VkPresentModeKHR.Fifo;
+
+        bool immediate = false, mailbox = false;
+        for (uint i = 0; i < count; i++)
+        {
+            if (modes[i] == VkPresentModeKHR.Immediate) immediate = true;
+            if (modes[i] == VkPresentModeKHR.Mailbox) mailbox = true;
+        }
+
+        var chosen = immediate ? VkPresentModeKHR.Immediate
+            : mailbox ? VkPresentModeKHR.Mailbox
+            : VkPresentModeKHR.Fifo;
+        StartupTrace.Mark($"vulkan present mode {chosen}");
+        return chosen;
     }
 
     /// <summary>
