@@ -166,7 +166,7 @@ internal static unsafe class ChurnBench
     /// handing back the same handle every time — which would also look like no leak.</summary>
     private static string SampleHandles(VulkanImage vk, int n, bool fresh)
     {
-        if (!OperatingSystem.IsWindows()) return "(fd path)";
+        if (!OperatingSystem.IsWindows()) return SampleFds(vk, n, fresh);
         var seen = new List<string>(n);
         for (int i = 0; i < n; i++)
         {
@@ -177,6 +177,57 @@ internal static unsafe class ChurnBench
         }
         return string.Join(" ", seen);
     }
+
+    /// <summary>
+    /// The descriptor side of the same question. An fd's <i>number</i> cannot answer it — close
+    /// one and the next export reuses the number whatever the driver did — so every fd is held
+    /// open until all are taken. Five different numbers held at once means five descriptors,
+    /// each one owed a close or an import — unlike Windows, where one allocation gave one
+    /// handle however often it was asked.
+    ///
+    /// <para>The device:inode is printed but cannot tell allocations apart on NVIDIA: every
+    /// opaque fd it exports is an open of <c>/dev/nvidiactl</c>, so all of them — fresh
+    /// allocations included — share one inode. Which allocation an fd names is driver state
+    /// the kernel does not show.</para>
+    /// </summary>
+    private static string SampleFds(VulkanImage vk, int n, bool fresh)
+    {
+        var fds = new List<int>(n);
+        var seen = new List<string>(n);
+        try
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (fresh) vk.RecreateImage();
+                int fd = vk.ExportFd();
+                fds.Add(fd);
+                string target = "?";
+                try { target = File.ResolveLinkTarget($"/proc/self/fd/{fd}", false)?.ToString() ?? "?"; } catch (IOException) { }
+                seen.Add($"fd{fd}={DevIno(fd)}");
+                if (i == 0) seen.Insert(0, $"[{target}]");
+            }
+        }
+        finally
+        {
+            foreach (int fd in fds) close(fd);
+        }
+        return string.Join(" ", seen);
+    }
+
+    /// <summary>"dev:ino" from fstat. x86-64 glibc layout only — st_dev then st_ino, both
+    /// 64-bit, at the start of a 144-byte struct — which is the only Linux this spike runs on.</summary>
+    private static unsafe string DevIno(int fd)
+    {
+        if (RuntimeInformation.ProcessArchitecture != Architecture.X64) return "(not x64)";
+        var buf = stackalloc ulong[18];
+        return fstat(fd, buf) == 0 ? $"{buf[0]:x}:{buf[1]}" : $"(fstat errno {Marshal.GetLastPInvokeError()})";
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern unsafe int fstat(int fd, ulong* buf);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int close(int fd);
 
     [DllImport("kernel32", SetLastError = true)]
     private static extern bool CloseHandle(nint handle);

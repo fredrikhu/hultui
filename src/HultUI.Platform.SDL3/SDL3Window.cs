@@ -1157,12 +1157,21 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         SDL_Quit();
     }
 
+    /// <remarks>
+    /// EGL names go to SDL's EGL resolver, which answers NULL when the context is not EGL.
+    /// Skia asks this same callback for <c>eglQueryString</c> and <c>eglGetCurrentDisplay</c>,
+    /// and under GLX (X11) libglvnd's glXGetProcAddress returns a dispatch stub for any name
+    /// at all — so Skia called a stub, got a garbage "extension string" back and crashed in
+    /// GrGLExtensions::init on every X11 GL launch. NULL is what tells it there is no EGL.
+    /// </remarks>
     private static IntPtr GetGLProcAddress(string name)
     {
         var nameBytes = MarshalUtf8(name);
         fixed (byte* namePtr = nameBytes)
         {
-            return SDL_GL_GetProcAddress(namePtr);
+            return name.StartsWith("egl", StringComparison.Ordinal)
+                ? SDL_EGL_GetProcAddress(namePtr)
+                : SDL_GL_GetProcAddress(namePtr);
         }
     }
 
