@@ -220,9 +220,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         DisplayIsHdr = isHdr;
         SdrWhiteScale = sdrWhiteScale;
 
-        if (WantsWideColor == wasWide) return;
-        StartupTrace.Mark($"vulkan display changed: hdr={isHdr}, rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}");
-        RecreateSwapchain(_widthPx, _heightPx);
+        bool rebuilding = WantsWideColor != wasWide;
+        StartupTrace.Mark($"vulkan display changed: hdr={isHdr} whiteScale={sdrWhiteScale:0.##} " +
+            (rebuilding ? $"rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}" : "format unchanged"));
+        if (rebuilding) RecreateSwapchain(_widthPx, _heightPx);
     }
 
     private void PickPhysicalDevice()

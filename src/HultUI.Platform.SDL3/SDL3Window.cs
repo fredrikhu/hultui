@@ -756,7 +756,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// The number an scRGB surface has to scale by, since scRGB's own 1.0 is 80.
     /// </summary>
     public float SdrWhiteLevelNits => OperatingSystem.IsWindows()
-        ? WindowsSdrWhiteLevel.Query()
+        ? WindowsSdrWhiteLevel.Query(GetWin32Hwnd())
         : WindowsSdrWhiteLevel.ScRgbReferenceNits;
 
     /// <summary>

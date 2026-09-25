@@ -195,8 +195,22 @@ colour is wanted at startup — an instance cannot gain an extension later and a
 dragged onto an HDR display at any time.
 
 `SDL_EVENT_WINDOW_DISPLAY_CHANGED` re-asks, and rebuilds the swapchain only when the answer
-changes. Dragging a window between two HDR monitors correctly rebuilds nothing; the SDR case
-needs a machine with one of each and has not been run.
+changes. **Tested both ways** on a machine with one HDR monitor and one SDR one:
+
+```
+display changed: hdr=False whiteScale=1  format unchanged      (SDR monitor, 80 nits)
+display changed: hdr=True  whiteScale=3  rebuilding for scRGB  (HDR monitor, 240 nits)
+display changed: hdr=False whiteScale=1  rebuilding for sRGB   (back again)
+```
+
+SDL emits several of those events per move; the guard means one rebuild each way and the
+rest say so.
+
+**The white level is per monitor**, which only shows on a mixed setup: the query follows the
+window's display through `MonitorFromWindow` and matches the GDI device name against the
+display configuration's source name. Asking whichever active path answered first — which is
+what it did before there was a mixed setup to try — is answering about the wrong screen half
+the time.
 
 **HDR metadata is deliberately not sent.** `VK_EXT_hdr_metadata` is present on this device,
 but `VkHdrMetadataEXT` wants the display's maximum and minimum luminance and the content's

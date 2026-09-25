@@ -32,22 +32,38 @@ internal static class WindowsSdrWhiteLevel
     // is a plausible-looking number and the one value that makes the caller do nothing.
     private const int DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL = 11;
     private const int ERROR_SUCCESS = 0;
+    private const int DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1;
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
 
     /// <summary>
-    /// The SDR white level of the display showing the given point, in nits. Falls back to
+    /// The SDR white level of the display showing that window, in nits. Falls back to
     /// <see cref="ScRgbReferenceNits"/>, which makes the caller's scale exactly 1.
     /// </summary>
-    public static float Query()
+    /// <param name="hwnd">The window whose monitor to ask about. Zero asks about whichever
+    /// active path answers first, which is only right when every display agrees.</param>
+    public static float Query(nint hwnd = 0)
     {
         try
         {
-            return QueryCore();
+            return QueryCore(MonitorDeviceName(hwnd));
         }
         catch (DllNotFoundException) { return ScRgbReferenceNits; }
         catch (EntryPointNotFoundException) { return ScRgbReferenceNits; }
     }
 
-    private static float QueryCore()
+    /// <summary>The GDI device name of the monitor a window is on, e.g. <c>\.\DISPLAY1</c>,
+    /// or null when there is no window to ask about.</summary>
+    private static string? MonitorDeviceName(nint hwnd)
+    {
+        if (hwnd == 0) return null;
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor == 0) return null;
+
+        var info = new MONITORINFOEXW { cbSize = (uint)Marshal.SizeOf<MONITORINFOEXW>() };
+        return GetMonitorInfoW(monitor, ref info) ? info.szDevice : null;
+    }
+
+    private static float QueryCore(string? deviceName)
     {
         uint pathCount = 0, modeCount = 0;
         int sizes = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out pathCount, out modeCount);
@@ -67,12 +83,14 @@ internal static class WindowsSdrWhiteLevel
             return ScRgbReferenceNits;
         }
 
-        // The first active path with a level above the reference. Multi-monitor deserves
-        // better — the level is per display and a window can be on either — but that needs
-        // the window's monitor, which is the caller's to know, and every path answering the
-        // same number is the common case.
+        // The path driving this window's monitor, matched by GDI device name. The level is
+        // per display and genuinely differs — one monitor in HDR mode at 240 nits beside one
+        // in SDR reporting 80 — so answering from whichever path comes first is answering
+        // about the wrong screen half the time.
         for (uint i = 0; i < pathCount; i++)
         {
+            if (deviceName is not null && !PathDrives(paths[i], deviceName)) continue;
+
             var request = new DISPLAYCONFIG_SDR_WHITE_LEVEL
             {
                 header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
@@ -94,8 +112,42 @@ internal static class WindowsSdrWhiteLevel
         return ScRgbReferenceNits;
     }
 
+    /// <summary>Whether a path's source is the given GDI device.</summary>
+    private static bool PathDrives(DISPLAYCONFIG_PATH_INFO path, string deviceName)
+    {
+        var request = new DISPLAYCONFIG_SOURCE_DEVICE_NAME
+        {
+            header = new DISPLAYCONFIG_DEVICE_INFO_HEADER
+            {
+                type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                size = (uint)Marshal.SizeOf<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
+                adapterId = path.sourceInfo.adapterId,
+                id = path.sourceInfo.id,
+            },
+        };
+        return DisplayConfigGetSourceName(ref request) == ERROR_SUCCESS
+            && string.Equals(request.viewGdiDeviceName, deviceName, StringComparison.OrdinalIgnoreCase);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct LUID { public uint LowPart; public int HighPart; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DISPLAYCONFIG_SOURCE_DEVICE_NAME
+    {
+        public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string viewGdiDeviceName;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MONITORINFOEXW
+    {
+        public uint cbSize;
+        public int left, top, right, bottom;
+        public int workLeft, workTop, workRight, workBottom;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct DISPLAYCONFIG_DEVICE_INFO_HEADER
@@ -161,4 +213,14 @@ internal static class WindowsSdrWhiteLevel
 
     [DllImport("user32.dll")]
     private static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SDR_WHITE_LEVEL request);
+
+    [DllImport("user32.dll", EntryPoint = "DisplayConfigGetDeviceInfo")]
+    private static extern int DisplayConfigGetSourceName(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME request);
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfoW(nint monitor, ref MONITORINFOEXW info);
 }
