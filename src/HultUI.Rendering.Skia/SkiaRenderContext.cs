@@ -45,7 +45,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     // it null and IGpuImageSources then fall back to their pixel path. Wrapped
     // textures are kept per source and rebuilt only when the frame's texture, size or
     // orientation changes — a wrapper is a view, so its content follows the texture.
-    private SkiaGLRenderSurface? _glSurface;
+    private ISkiaExternalSurface? _glSurface;
     private readonly Dictionary<IGpuImageSource, (GpuFrame Frame, SKImage Image)> _wrappedTextures = new();
 
     internal SKPaint PooledPaint => _pooledPaint;
@@ -65,7 +65,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     private float _scale = 1f;
 
     internal void SetCanvas(SKCanvas canvas) => _canvas = canvas;
-    internal void SetGLSurface(SkiaGLRenderSurface surface) => _glSurface = surface;
+    internal void SetGLSurface(ISkiaExternalSurface surface) => _glSurface = surface;
     internal void SetPipeline(TextPipeline pipeline) => _pipeline = pipeline;
     internal SKCanvas Canvas => _canvas ?? throw new InvalidOperationException("No canvas set. Call BeginFrame first.");
 
@@ -750,7 +750,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         0, 0, 0, 0, 1,
     ]);
 
-    private void DrawGpuFrame(IGpuImageSource source, SkiaGLRenderSurface gl, Rect destRect, ImageFit fit)
+    private void DrawGpuFrame(IGpuImageSource source, ISkiaExternalSurface gl, Rect destRect, ImageFit fit)
     {
         if (!source.TryRenderFrame(gl, out var frame))
             return;
@@ -758,7 +758,7 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (!_wrappedTextures.TryGetValue(source, out var wrapped) || wrapped.Frame != frame)
         {
             wrapped.Image?.Dispose();
-            var image = gl.WrapTexture(frame);
+            var image = gl.WrapFrame(frame);
             if (image is null)
             {
                 _wrappedTextures.Remove(source);

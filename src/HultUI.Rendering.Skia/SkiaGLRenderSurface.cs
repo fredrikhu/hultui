@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HultUI.Rendering.Skia;
 
-public sealed class SkiaGLRenderSurface : IRenderSurface, IExternalGLSurface
+public sealed class SkiaGLRenderSurface : IRenderSurface, ISkiaExternalSurface
 {
     private readonly GRGlInterface _glInterface;
     private readonly GRContext _grContext;
@@ -67,6 +67,8 @@ public sealed class SkiaGLRenderSurface : IRenderSurface, IExternalGLSurface
     /// image reads the texture as it is when the frame flushes. The caller owns the
     /// returned image's lifetime; the texture stays the source's.
     /// </summary>
+    SKImage? ISkiaExternalSurface.WrapFrame(in GpuFrame frame) => WrapTexture(frame);
+
     internal SKImage? WrapTexture(in GpuFrame frame)
     {
         const uint GL_TEXTURE_2D = 0x0DE1;

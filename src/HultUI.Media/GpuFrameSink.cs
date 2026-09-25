@@ -65,17 +65,51 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             return false;
 
         bool drew = false;
+        uint framebuffer = 0, texture = 0, format = GpuFrame.Rgba8;
+        bool rendererOwned = false;
+
         surface.RunExternalGL(() =>
         {
             _gl ??= new GLFunctions(surface.GetProcAddress);
-            EnsureTarget(width, height);
-            drew = _renderer.Render(surface.GetProcAddress, _framebuffer, width, height);
-        });
-        // A renderer with nothing new keeps the last frame: the texture still holds it.
-        if (!drew && _texture == 0) return false;
 
-        frame = new GpuFrame(_texture, width, height, _renderer.RendersBottomUp);
+            // The renderer first: one that cannot composite a plain GL texture lends its own
+            // target, and rendering into that is what keeps the frame on the GPU.
+            if (surface.TryAcquireFrameTarget(width, height, out var lent))
+            {
+                rendererOwned = true;
+                framebuffer = lent.Framebuffer;
+                texture = lent.TextureId;
+                format = lent.InternalFormat;
+                ReleaseTarget();
+            }
+            else
+            {
+                EnsureTarget(width, height);
+                framebuffer = _framebuffer;
+                texture = _texture;
+            }
+
+            drew = _renderer.Render(surface.GetProcAddress, framebuffer, width, height);
+        });
+
+        // A renderer with nothing new keeps the last frame: the target still holds it.
+        if (!drew && !rendererOwned && _texture == 0) return false;
+        if (framebuffer == 0 && texture == 0) return false;
+
+        frame = new GpuFrame(texture, width, height, _renderer.RendersBottomUp, format, rendererOwned);
         return true;
+    }
+
+    /// <summary>Drops the sink's own texture and framebuffer, for when the renderer started
+    /// lending one — a surface can begin doing so at any time, and keeping both would leak
+    /// the one nobody draws.</summary>
+    private void ReleaseTarget()
+    {
+        if (_texture == 0 || _gl is not { } gl) return;
+        gl.DeleteFramebuffers(1, ref _framebuffer);
+        gl.DeleteTextures(1, ref _texture);
+        _texture = _framebuffer = 0;
+        _width = _height = 0;
     }
 
     private void EnsureTarget(int width, int height)

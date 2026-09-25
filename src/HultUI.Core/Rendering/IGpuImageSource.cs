@@ -22,7 +22,44 @@ public interface IExternalGLSurface : IRenderSurface
     /// its own framebuffer and textures and need not restore anything.
     /// </summary>
     void RunExternalGL(Action draw);
+
+    /// <summary>
+    /// Offers a render target of this size for the source to draw into, so that the
+    /// renderer owns it rather than the source.
+    ///
+    /// <para>False — the default, and what a GL surface says — means the source makes its
+    /// own texture and framebuffer, which is what it has always done and what the whole
+    /// arrangement was built around: a GL renderer can composite a GL texture directly, so
+    /// there is nothing to gain by owning it.</para>
+    ///
+    /// <para>A renderer that <b>cannot</b> composite a plain GL texture has to say true. A
+    /// Vulkan one is the case in point: it draws Vulkan images, so the framebuffer it hands
+    /// back is one imported over an image of its own, and the source rendering into it puts
+    /// the pixels somewhere the renderer can already use. Without this the source's texture
+    /// would have to be read back through main memory, which is what the software path does
+    /// today and costs twice the CPU at 1080p.</para>
+    ///
+    /// <para>Called inside <see cref="RunExternalGL"/>, where a GL context is current. The
+    /// target belongs to the renderer and stays valid until the next call with a different
+    /// size, or until the surface is disposed.</para>
+    /// </summary>
+    bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
+    {
+        target = default;
+        return false;
+    }
 }
+
+/// <summary>
+/// A render target the renderer owns and lends to a source for one frame — see
+/// <see cref="IExternalGLSurface.TryAcquireFrameTarget"/>.
+/// </summary>
+/// <param name="Framebuffer">The GL framebuffer name to render into.</param>
+/// <param name="TextureId">Its colour attachment, for a source that wants to bind it.</param>
+/// <param name="InternalFormat">The GL internal format it was created with — not always
+/// <c>GL_RGBA8</c>, since a renderer wanting more than eight bits is half the reason for
+/// this to exist.</param>
+public readonly record struct GpuFrameTarget(uint Framebuffer, uint TextureId, uint InternalFormat);
 
 /// <summary>
 /// A GL texture the renderer composites, as an <see cref="IGpuImageSource"/> describes
@@ -36,8 +73,13 @@ public interface IExternalGLSurface : IRenderSurface
 /// source rendered into through a framebuffer; false for one uploaded top-down.</param>
 /// <param name="InternalFormat">The GL internal format; <c>GL_RGBA8</c> (0x8058) unless
 /// the source says otherwise.</param>
+/// <param name="RendererOwned">True when the texture came from
+/// <see cref="IExternalGLSurface.TryAcquireFrameTarget"/> rather than from the source. The
+/// renderer then composites whatever it lent out and ignores <paramref name="TextureId"/>,
+/// which on a Vulkan surface names nothing it can draw.</param>
 public readonly record struct GpuFrame(
-    uint TextureId, int Width, int Height, bool BottomLeftOrigin, uint InternalFormat = GpuFrame.Rgba8)
+    uint TextureId, int Width, int Height, bool BottomLeftOrigin, uint InternalFormat = GpuFrame.Rgba8,
+    bool RendererOwned = false)
 {
     /// <summary><c>GL_RGBA8</c>.</summary>
     public const uint Rgba8 = 0x8058;
