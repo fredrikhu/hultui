@@ -81,3 +81,38 @@ a renderer that already submits work each frame pays most of that price anyway.
 Verdict: the naive sync costs about 4 % of a 24 fps frame budget and replaces a copy
 costing 175 ms/s. External semaphores would remove the stall, but they are an
 optimisation, not a precondition — phase 4 can be built without them.
+
+
+═══════════════════════════════════════════════════════
+--churn, 2026-09-25, RTX 4080, Windows
+does one export/import cycle leak a handle?
+═══════════════════════════════════════════════════════
+
+  five exports, one allocation:  0x76C 0x76C 0x76C 0x76C 0x76C
+  five exports, fresh allocations: 0x77C 0x788 0x768 0x77C 0x788
+
+  1000 cycles, released properly
+    handles 494 -> 495   (delta +1)
+    0,125 ms a cycle
+
+  200 exports deliberately dropped (the control: handle never closed)
+    handles 496 -> 696   (delta +200)
+
+  The control climbed, so this measurement can see a leak.
+  VERDICT: 1000 released cycles cost no handles. The cycle does not leak.
+
+Two things had to be got right before the number meant anything, and the first
+version of this test got both wrong.
+
+  1. The allocation has to be recreated each cycle. NVIDIA returns the SAME
+     Win32 handle for repeated exports of one VkDeviceMemory (0x76C above), so a
+     test that exports one allocation a thousand times cannot leak and cannot
+     fail. The renderer frees and reallocates on a video size change, which is
+     what produces the distinct handles in the second row.
+
+  2. Process.HandleCount is not the number. It comes through a performance
+     counter that does not move per handle, and read a flat 492 while 200
+     handles were being leaked. GetProcessHandleCount is exact.
+
+Both faults produced a clean-looking pass. The control is what caught them: a
+flat line means nothing unless the same measurement can be made to rise.

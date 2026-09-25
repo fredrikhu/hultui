@@ -44,6 +44,9 @@ internal static unsafe class Gl
     private static delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void> _importMemoryFd;
     private static delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void> _textureStorageMem2D;
     private static delegate* unmanaged[Cdecl]<uint, int, uint*, void> _createTextures;
+    private static delegate* unmanaged[Cdecl]<int, uint*, void> _deleteTextures;
+    private static delegate* unmanaged[Cdecl]<int, uint*, void> _deleteFramebuffers;
+    private static delegate* unmanaged[Cdecl]<int, uint*, void> _deleteMemoryObjects;
     private static delegate* unmanaged[Cdecl]<uint, uint, int, void> _textureParameteri;
 
     private static delegate* unmanaged[Cdecl]<int, uint*, void> _createFramebuffers;
@@ -69,6 +72,9 @@ internal static unsafe class Gl
         _importMemoryFd = (delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void>)Proc("glImportMemoryFdEXT", optional: true);
         _textureStorageMem2D = (delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void>)Proc("glTextureStorageMem2DEXT", optional: true);
         _createTextures = (delegate* unmanaged[Cdecl]<uint, int, uint*, void>)Proc("glCreateTextures");
+        _deleteTextures = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteTextures");
+        _deleteFramebuffers = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteFramebuffers");
+        _deleteMemoryObjects = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteMemoryObjectsEXT", optional: true);
         _textureParameteri = (delegate* unmanaged[Cdecl]<uint, uint, int, void>)Proc("glTextureParameteri");
 
         _createFramebuffers = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glCreateFramebuffers");
@@ -170,6 +176,23 @@ internal static unsafe class Gl
     }
 
     public static void Viewport(int w, int h) => _viewport(0, 0, w, h);
+
+    /// <summary>The three deletes the churn test needs, so that a cycle of import and
+    /// release can be repeated without the objects themselves being what grows.</summary>
+    public static void DeleteTexture(uint texture)
+    {
+        if (texture != 0) _deleteTextures(1, &texture);
+    }
+
+    public static void DeleteFramebuffer(uint fbo)
+    {
+        if (fbo != 0) _deleteFramebuffers(1, &fbo);
+    }
+
+    public static void DeleteMemoryObject(uint memory)
+    {
+        if (memory != 0 && _deleteMemoryObjects is not null) _deleteMemoryObjects(1, &memory);
+    }
 
     public static void Finish() => _finish();
 

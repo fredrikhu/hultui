@@ -61,8 +61,9 @@ internal static unsafe class SyncBench
         return 0;
     }
 
-    /// <summary>A hidden GL window, purely so Gl.Load has something to resolve against.</summary>
-    private static bool MakeGlContext(out string renderer)
+    /// <summary>A hidden GL window, purely so Gl.Load has something to resolve against.
+    /// Shared with <see cref="ChurnBench"/>, which needs the same thing for the same reason.</summary>
+    internal static bool MakeGlContext(out string renderer)
     {
         renderer = "";
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))

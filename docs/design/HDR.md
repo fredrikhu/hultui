@@ -350,10 +350,26 @@ swapchain recreations — in particular nothing about the `FinishExternalFrame` 
 transfer or its `GENERAL` layout, which was the part of phase 4 that is convention rather than
 certainty. Details in `docs/design/HDR-LINUX-BRIEF.md`.
 
-**Still unproven:** the per-import fd leak, because the shared image is sized to the video and
-is created once — window resizes do not re-export it, so `glImportMemoryFdEXT` ran a single time
-and a leak per import could not have shown. It needs a clip whose resolution changes mid-stream.
-Also untested: Mesa, a hybrid GPU, and the interaction with the scRGB offscreen.
+**The export cycle does not leak, on Windows.** `spikes/HdrInterop --churn` runs a thousand
+export-import-release cycles and counts the process's handles: no change, against a control of
+200 deliberately dropped handles that raises it by 200. The control is the point — the first two
+versions of that test both reported a clean pass while being incapable of failing. One exported
+the same allocation every time, and **NVIDIA hands back the identical Win32 handle for repeated
+exports of one `VkDeviceMemory`**, so nothing could accumulate; the other read
+`Process.HandleCount`, which comes through a performance counter that does not move per handle
+and showed a flat line while 200 handles leaked. The renderer reallocates on a size change, so
+the honest cycle reallocates too.
+
+The same command runs on Linux and answers the fd half, with a control of its own: there, a
+descriptor is consumed by the import, so the control exports one and never imports it.
+
+**The scRGB path carries video correctly.** With the display in HDR, the frame goes through the
+interop into the shared image, is drawn into the linear F16 offscreen as sRGB, and is multiplied
+by the white scale on the way to the swapchain — and the captured result is identical to the
+8-bit run to within 1 LSB (255,169,166 over 0,0,145 in both). That was the last combination
+listed as untested on either platform.
+
+**Still untested:** Mesa and a hybrid GPU, neither of which exists on the machines to hand.
 
 ### Why not just build libmpv with Vulkan?
 

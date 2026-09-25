@@ -147,14 +147,41 @@ an app that renders only when dirty. Nothing to run. If you want to confirm the 
 describes, launch Minimal with `HULTUI_VULKAN_CAPTURE=/tmp/idle.ppm`, touch nothing for ten
 seconds, and confirm no file appears — then hover the button and confirm one does.
 
-## Still open: the fd-per-import leak
+## The fd-per-import leak — now one command
 
-The brief's fd check could not have found a leak. The shared image is sized to the **video**, not
-the window, so 159 window resizes re-exported nothing — `glImportMemoryFdEXT` ran exactly once.
+**Windows has answered its half.** `--churn` does a thousand export-import-release cycles and
+counts handles: no growth, against a control of 200 dropped handles that grows by exactly 200.
+Run the same thing for the descriptor side:
 
-**A resolution change is what re-exports it**, and there is an easy way to cause one: open a
-second file of a different size in the same window. `LendInteropImage` sees a different size,
-calls `DestroyInteropImage`, and creates and imports a fresh one.
+```bash
+dotnet run --project spikes/HdrInterop -- --churn
+```
+
+**Pass:** `VERDICT: 1000 released cycles cost no handles`, *and* the line above it saying the
+control climbed. **If the control did not climb, the run says nothing** — the tool prints that in
+those words rather than reporting a pass, because two earlier versions of this test reported
+clean while being unable to fail.
+
+On Linux the control exports a descriptor and never imports it, since `glImportMemoryFdEXT`
+consumes the one it is given and there is nothing to withhold from it. A rise in the released
+batch would mean the import is *not* consuming the descriptor on this driver, which is the thing
+worth knowing.
+
+One Windows finding that may or may not hold there: **NVIDIA returns the same Win32 handle for
+repeated exports of one `VkDeviceMemory`**. The test therefore reallocates each cycle, as the
+renderer does on a size change. If Mesa or NVIDIA-Linux hands back a fresh fd per export of one
+allocation, that difference is worth recording.
+
+## Also still open, and not solved by the above
+
+The `--churn` run above tests the API sequence, not the renderer's own lifecycle. Exercising
+`DestroyInteropImage` + `CreateSharedImage` through the app needs a **resolution change**, which
+means a second file of a different size in the same window — `LendInteropImage` sees the new size
+and rebuilds. Reel plays the folder, so a directory of clips whose sizes alternate will do it,
+provided the files carry an extension Reel accepts (`.mkv`, `.mp4`, …; a `.y4m` is ignored by the
+playlist and you get one clip and no transitions). Tried on Windows: it advanced once and then
+stopped, so the app-level version of this remains unproven on both platforms and the `--churn`
+result is what stands.
 
 Make two clips of different sizes (the brief has the generator; run it twice with different `w`
 and `h` — say 320x180 and 1280x720), then open them alternately in the running player through

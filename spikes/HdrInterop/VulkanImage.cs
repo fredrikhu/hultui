@@ -232,6 +232,24 @@ internal sealed unsafe class VulkanImage : IDisposable
         Check(VkCmd.BindImageMemory(Device, Image, Memory, 0), "vkBindImageMemory");
     }
 
+    /// <summary>
+    /// Throws the image and its allocation away and makes a fresh pair — what the renderer
+    /// does when the video's coded size changes.
+    ///
+    /// <para>Recreating the allocation is the only honest way to test the export cycle.
+    /// Exporting the <i>same</i> <c>VkDeviceMemory</c> repeatedly is not: NVIDIA on Windows
+    /// hands back the identical handle every time, so nothing accumulates whether it is
+    /// closed or not, and a leak test built on that cannot fail.</para>
+    /// </summary>
+    public void RecreateImage()
+    {
+        if (!Image.IsNull) VkCmd.DestroyImage(Device, Image, 0);
+        if (!Memory.IsNull) VkCmd.FreeMemory(Device, Memory, 0);
+        Image = VkImage.Null;
+        Memory = VkDeviceMemory.Null;
+        CreateExportableImage();
+    }
+
     /// <summary>The OS handle for the image's memory, for the other API to import.</summary>
     public nint ExportWin32Handle()
     {
