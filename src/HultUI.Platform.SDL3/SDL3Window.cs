@@ -479,8 +479,18 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         return !quit;
     }
 
+    /// <summary>
+    /// Makes this window's GL context current, for an app driving more than one window.
+    ///
+    /// <para>Nothing to do on the Vulkan path — there is no context, and a Vulkan device is
+    /// not bound to a thread the way a GL context is. The guard is not tidiness: SDL takes
+    /// the null context straight into the backend, and on Wayland that is a segfault inside
+    /// <c>Wayland_GLES_MakeCurrent</c> rather than an error return. Windows happens to
+    /// tolerate it, which is how this shipped for a day without anyone noticing.</para>
+    /// </summary>
     public void MakeCurrent()
     {
+        if (_glContext == null) return;
         SDL_GL_MakeCurrent(_window, _glContext);
     }
 
@@ -931,6 +941,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     {
         if (_preloadStarted) return;
         if (Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") != "1") return;
+        // Nothing to warm: a Vulkan window never loads the GL driver, so preloading it
+        // would be pure cost — and Reel turns the preload on by itself on Windows.
+        if (UseVulkan) return;
         _preloadStarted = true;
 
         EnsureSDLInitialized();

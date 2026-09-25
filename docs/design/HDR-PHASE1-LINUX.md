@@ -6,6 +6,28 @@ phase 0 spike proved the memory sharing there; the renderer itself has not been 
 
 This is the list, cheapest first. Run it from a checkout of `main`.
 
+## Results so far (2026-09-25, RTX 4080, Fedora 44, Wayland, Mesa 26.2.2)
+
+**Step 1 passed, identically to Windows** — the same eight `ok` and the same two expected
+failures. So `VK_IMAGE_USAGE_TRANSFER_SRC_BIT` is Skia's requirement rather than anything
+specific to a driver or a platform, which is worth knowing: the error message in
+`SdlVulkanHost` can be stated as fact.
+
+**Step 2 segfaulted**, and the core dump named it in two frames:
+
+```
+#0  Wayland_GLES_MakeCurrent (libSDL3.so)
+#1  SDL_GL_MakeCurrent_REAL  (libSDL3.so)
+```
+
+`SDL3Window.MakeCurrent()` called `SDL_GL_MakeCurrent` unconditionally, and on a Vulkan
+window there is no GL context to make current. SDL takes the null straight into the
+backend; Wayland dereferences it, Windows happens to tolerate it. Fixed — the method
+returns early when there is no context, and `BeginPreload` no longer warms a GL driver a
+Vulkan window will never use.
+
+**Steps 2 to 4 are still to run.**
+
 ## 1. The bisect — no window, a minute, proves Skia on your driver
 
 ```bash
