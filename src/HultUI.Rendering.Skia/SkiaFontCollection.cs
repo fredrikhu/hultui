@@ -8,7 +8,14 @@ public sealed class SkiaFontCollection : IFontCollection
 {
     private readonly SKFontManager _fontManager = SKFontManager.Default;
     private readonly Dictionary<FontKey, SkiaResolvedFont> _fontCache = new();
-    private readonly Dictionary<int, SkiaResolvedFont?> _fallbackCache = new();
+    private readonly Dictionary<FallbackKey, SkiaResolvedFont?> _fallbackCache = new();
+
+    // One wrapper per fallback typeface, not per codepoint. FontItemizer splits runs on
+    // font identity, so a wrapper per character made every fallback letter its own run —
+    // Hebrew shaped a letter at a time on any system whose primary font lacks it, which
+    // would also break Arabic joining. Skia returns the same SKTypeface instance for the
+    // same face, so reference identity is the right key.
+    private readonly Dictionary<SKTypeface, SkiaResolvedFont> _fallbackFonts = new(ReferenceEqualityComparer.Instance);
 
     public IResolvedFont Resolve(string familyName, FontWeight weight, FontSlant slant)
     {
@@ -26,18 +33,22 @@ public sealed class SkiaFontCollection : IFontCollection
 
     public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant)
     {
-        if (_fallbackCache.TryGetValue(codepoint, out var cached))
+        var key = new FallbackKey(codepoint, weight, slant);
+        if (_fallbackCache.TryGetValue(key, out var cached))
             return cached;
 
-        var typeface = _fontManager.MatchCharacter(codepoint);
-        if (typeface is null)
+        // With the style, so bold text falls back to a bold face rather than a regular one.
+        using var style = new SKFontStyle(ToSkWeight(weight), SKFontStyleWidth.Normal, ToSkSlant(slant));
+        var typeface = _fontManager.MatchCharacter(null, style, null, codepoint);
+
+        SkiaResolvedFont? resolved = null;
+        if (typeface is not null && !_fallbackFonts.TryGetValue(typeface, out resolved))
         {
-            _fallbackCache[codepoint] = null;
-            return null;
+            resolved = new SkiaResolvedFont(typeface);
+            _fallbackFonts[typeface] = resolved;
         }
 
-        var resolved = new SkiaResolvedFont(typeface);
-        _fallbackCache[codepoint] = resolved;
+        _fallbackCache[key] = resolved;
         return resolved;
     }
 
@@ -62,6 +73,7 @@ public sealed class SkiaFontCollection : IFontCollection
     };
 
     private readonly record struct FontKey(string Family, FontWeight Weight, FontSlant Slant);
+    private readonly record struct FallbackKey(int Codepoint, FontWeight Weight, FontSlant Slant);
 }
 
 internal sealed class SkiaResolvedFont : IResolvedFont

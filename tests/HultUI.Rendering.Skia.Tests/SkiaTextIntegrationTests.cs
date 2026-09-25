@@ -194,4 +194,20 @@ public class SkiaTextIntegrationTests
         var font = fonts.MatchCharacter('A', FontWeight.Regular, FontSlant.Normal);
         Assert.NotNull(font);
     }
+
+    [Fact]
+    public void FontCollection_MatchCharacter_SameFace_IsTheSameFont()
+    {
+        // FontItemizer splits runs on font identity. A wrapper per codepoint made every
+        // fallback letter its own run — only visible where the primary font lacks the
+        // script (Linux: Hebrew), so the bidi tests alone pass on Windows without this.
+        var fonts = new SkiaFontCollection();
+        var alef = fonts.MatchCharacter(0x5D0, FontWeight.Regular, FontSlant.Normal);
+        var bet = fonts.MatchCharacter(0x5D1, FontWeight.Regular, FontSlant.Normal);
+
+        Assert.NotNull(alef);
+        Assert.NotNull(bet);
+        Assert.Equal(alef.NativeHandle, bet.NativeHandle);
+        Assert.Same(alef, bet);
+    }
 }
