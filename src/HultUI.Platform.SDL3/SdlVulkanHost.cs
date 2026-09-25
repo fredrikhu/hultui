@@ -237,11 +237,17 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// </summary>
     public void DisplayChanged(bool isHdr, float sdrWhiteScale)
     {
-        bool wasWide = _format == VkFormat.R16G16B16A16Sfloat;
         DisplayIsHdr = isHdr;
         SdrWhiteScale = sdrWhiteScale;
 
-        bool rebuilding = WantsWideColor != wasWide;
+        // Against what the choice would actually produce, not against what was wanted.
+        //
+        // Comparing WantsWideColor with "is the format wide" says rebuild for ever on a
+        // surface that has no wide format to give: X11 offers only SRGB_NONLINEAR, so with
+        // HULTUI_VULKAN_F16=1 every display event decided it was still owed scRGB and rebuilt
+        // the same 8-bit swapchain — three times at start-up, and resetting the capture
+        // counter each time. Asking the surface costs one query and is the honest question.
+        bool rebuilding = !_swapchain.IsNull && ChooseFormat(out _, trace: false) != _format;
         StartupTrace.Mark($"vulkan display changed: hdr={isHdr} whiteScale={sdrWhiteScale:0.##} " +
             (rebuilding ? $"rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}" : "format unchanged"));
         if (rebuilding) RecreateSwapchain(_widthPx, _heightPx);
@@ -533,7 +539,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// different answer from the one the GL surface gives, and telling the two apart is the
     /// whole test for this phase. Phase 3 is where this function learns about HDR.
     /// </summary>
-    private VkFormat ChooseFormat(out VkColorSpaceKHR colorSpace)
+    /// <param name="trace">False when the answer is only being compared against the current
+    /// format rather than acted on, so that asking does not log. Every display event asks.</param>
+    private VkFormat ChooseFormat(out VkColorSpaceKHR colorSpace, bool trace = true)
     {
         colorSpace = VkColorSpaceKHR.SrgbNonLinear;
 
@@ -557,7 +565,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
                 colorSpace = formats[i].colorSpace;
                 return formats[i].format;
             }
-            StartupTrace.Mark("vulkan wide colour asked for, surface has none");
+            if (trace) StartupTrace.Mark("vulkan wide colour asked for, surface has none");
         }
 
         for (uint i = 0; i < count; i++)

@@ -349,3 +349,37 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
   and so wants the same 2.5375.
 - The full solution build fails on the two WinForms projects (`NETSDK1100`), which is expected
   on Linux. Everything this brief needs builds cleanly on its own.
+
+## Acted on (2026-09-25, from Windows — none of it re-run on Linux yet)
+
+Four findings above are now fixed in code. **All four need a Linux run to confirm**, because
+none of them can be verified on Windows: three are Wayland- or X11-only paths and the fourth is
+a comment.
+
+1. **The dim scRGB window.** `SDL3Window.WhiteScale()` returns **2.5375** when the video driver
+   is `wayland`, rather than going through `SdrWhiteLevelNits`, which is a Windows query that
+   answers 80 everywhere else. `HULTUI_VULKAN_WHITE_SCALE` still overrides.
+   **To confirm:** the F16 window should now match the GL window side by side with nothing
+   forced, on both monitors. If it does not, the remaining suspect is whether the NVIDIA WSI
+   really presents `ExtendedSrgbLinearEXT` as Windows-scRGB.
+2. **The X11 rebuild loop.** `SdlVulkanHost.DisplayChanged` now compares the format
+   `ChooseFormat` would actually produce against `_format`, instead of comparing what was wanted
+   against what was obtained — which could never agree on a surface with no wide format. The
+   probe does not log, so the "wide colour asked for, surface has none" line no longer repeats.
+   **To confirm:** `SDL_VIDEODRIVER=x11 HULTUI_VULKAN_F16=1` should log `format unchanged` and
+   build the swapchain once. Verified on Windows only in the negative sense: the trace there
+   still says `format unchanged` three times with scRGB correctly in use.
+3. **The mixed-scale Wayland shrink.** The `scaleOnlyChange` branch of `SDL3Window.UpdateSize`
+   no longer runs on Wayland at all, where window coordinates are logical and the compositor
+   already preserves the logical size. **This affects the GL path too**, so it is the one change
+   here that a normal Linux app would notice.
+   **To confirm:** a scripted launch on the mixed-scale desktop should keep 500x300 rather than
+   shrinking to 333x200, on both renderers, and moving a window between the 1.0 and 1.5 outputs
+   by hand should still look right.
+4. **The capture-default claim.** `SdlVulkanHost.Capture.cs` no longer says the default frame is
+   reachable in an app that renders only when dirty; it now says an idle window may stop one
+   frame short and that touching the window is what produces it.
+
+Not acted on: the Vulkan Video validation errors, which are ffmpeg's `hwdec=auto-copy` choosing
+the Vulkan H.264 decoder rather than anything here. Whether `auto-copy` should prefer NVDEC or
+VA-API on this hardware is a real question and a separate one.

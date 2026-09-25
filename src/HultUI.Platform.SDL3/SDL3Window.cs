@@ -754,6 +754,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <summary>
     /// What Windows is currently drawing SDR white at, in nits, or scRGB's 80 elsewhere.
     /// The number an scRGB surface has to scale by, since scRGB's own 1.0 is 80.
+    ///
+    /// <para>Elsewhere is not the whole answer: on Wayland the scale is a protocol constant
+    /// rather than a property of the display, so <see cref="WhiteScale"/> does not go through
+    /// this. See <see cref="WaylandScRgbReferenceWhite"/>.</para>
     /// </summary>
     public float SdrWhiteLevelNits => OperatingSystem.IsWindows()
         ? WindowsSdrWhiteLevel.Query(GetWin32Hwnd())
@@ -769,11 +773,46 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         host.DisplayChanged(IsHdrDisplay, WhiteScale());
     }
 
-    private float WhiteScale() =>
-        float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
-            System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f
-            ? forced
-            : SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
+    /// <summary>
+    /// Where SDR white sits on the scRGB scale under a Wayland compositor: 203 nits over
+    /// scRGB's own 80, which is 2.5375.
+    ///
+    /// <para><b>A protocol constant, not a per-display query</b> — which is what makes this
+    /// different from Windows. <c>color-management-v1</c> defines Windows-scRGB (what a
+    /// compositor takes <c>VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT</c> to be) as 1.0 = 80
+    /// cd/m², and says that where a reference white must be assumed it should be 2.5375,
+    /// the BT.2408 reference of 203 cd/m². The compositor then maps that onto whatever its
+    /// output is actually driving SDR white at. So the number does not change with the
+    /// monitor, and asking the monitor is the wrong move.</para>
+    ///
+    /// <para>Measured by eye against the GL window on KDE/KWin with two HDR monitors at 408
+    /// and 455 nits: 1 and 2.0 are visibly dim, 5.1 (408/80) is too bright, and 2.54 matches
+    /// on both. A scale proportional to the monitor's brightness would have had to differ
+    /// between those two and did not — see <c>docs/design/HDR-LINUX-BRIEF.md</c>.</para>
+    ///
+    /// <para><b>SDL's own <c>SDR_white_level</c> is the wrong number here</b> and reads 1.0 on
+    /// Wayland, following the EGL convention where 1.0 already <i>is</i> reference white.
+    /// Feeding that in reproduces the dim picture exactly.</para>
+    /// </summary>
+    private const float WaylandScRgbReferenceWhite = 2.5375f;
+
+    /// <summary>
+    /// What to multiply linear output by so 1.0 lands on the display's SDR white. Only ever
+    /// applied to an scRGB swapchain — the Vulkan surface ignores it for an sRGB one, where
+    /// the colour space already says what white is.
+    /// </summary>
+    private float WhiteScale()
+    {
+        if (float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
+                System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f)
+            return forced;
+
+        if (!OperatingSystem.IsWindows()
+            && string.Equals(SDL_GetCurrentVideoDriver(), "wayland", StringComparison.Ordinal))
+            return WaylandScRgbReferenceWhite;
+
+        return SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
+    }
 
     public string? DescribeGraphics()
     {
@@ -957,8 +996,22 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // resized the window for the new scale, the DIP size is preserved and
         // there's nothing to do. Skipped while maximized (the OS owns the size)
         // and on the first sync (PixelWidth == 0, handled by the constructor).
+        // Never on Wayland, where the compositor owns this and we make it worse.
+        //
+        // A window on a mixed-scale desktop arrives as two events, not one: SDL creates it
+        // believing the scale of one output, the compositor places it on another, and the
+        // pixel size changes first with the scale following in a second event. That second
+        // event looks exactly like a pure DPI change, so this branch "preserved" a DIP size
+        // that was already wrong — derived from the new pixels over the stale scale — and
+        // shrank a 500x300 window to 333x200. Six launches out of six on KDE with outputs at
+        // 1.0 and 1.5. It is not a Vulkan or an HDR problem: GL did the same.
+        //
+        // Wayland window coordinates are logical already, so the compositor preserves the
+        // logical size across an output change without being asked. There is nothing here
+        // for this branch to fix and one thing for it to break.
         bool scaleOnlyChange = pw == PixelWidth && ph == PixelHeight
-            && displayScale != _osDisplayScale && PixelWidth > 0 && !IsMaximized;
+            && displayScale != _osDisplayScale && PixelWidth > 0 && !IsMaximized
+            && !string.Equals(SDL_GetCurrentVideoDriver(), "wayland", StringComparison.Ordinal);
         float prevLayoutW = LayoutWidth;
         float prevLayoutH = LayoutHeight;
 

@@ -220,8 +220,31 @@ as well. Sending invented numbers is worse than sending none — a display may t
 them — and for an scRGB swapchain Windows composites from the display's own profile anyway.
 It belongs with HDR10, where the numbers are load-bearing.
 
-Still true, and still untested: on Linux this needs the Wayland colour-management protocol,
-and X11 simply cannot.
+**Linux, now run.** X11 indeed cannot: it offers only `SRGB_NONLINEAR` and reports no HDR,
+correctly. Wayland does the whole thing — 28 surface formats including
+`R16G16B16A16Sfloat/ExtendedSrgbLinearEXT`, SDL reports HDR when the monitors are in HDR mode,
+and phase 3 picks scRGB by itself with nothing forced.
+
+**But the white level is a different quantity there, and the window came out dim.** On Windows
+SDR white is a property of the display, queried per monitor. On Wayland it is a **protocol
+constant**: `color-management-v1` defines Windows-scRGB — which is what a compositor takes
+`VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` to be — as 1.0 = 80 cd/m², and says that where a
+reference white must be assumed it is **2.5375**, the BT.2408 reference of 203 cd/m². The
+compositor maps that onto whatever its output drives SDR white at, so the number does not move
+with the monitor and asking the monitor is the wrong move.
+
+That matches what was found by eye before the protocol was read: on KWin with two HDR monitors
+at 408 and 455 nits, 1 and 2.0 are visibly dim, 5.1 (408/80) too bright, and 2.54 matches the GL
+window on **both** — which a scale proportional to the monitor's brightness could not have done.
+
+Two traps worth stating. **SDL's own `SDR_white_level` is the wrong number for this path**: it
+reads 1.0 on Wayland, following the EGL convention where 1.0 already *is* reference white, and
+feeding it in reproduces the dim picture exactly. And **no capture can show this** — the F16 and
+8-bit captures agree within 1 LSB, because the image is right and only the scale is wrong. Only
+the screen shows it.
+
+`SDL3Window.WhiteScale` now returns 2.5375 on Wayland. Mesa's WSI was not tested and may not
+present scRGB as Windows-scRGB at all.
 
 **4 — HDR video through the seam.**
 
@@ -303,18 +326,34 @@ its pixel path: the slower route that worked before, rather than a renderer comp
 it cannot read. And `HULTUI_VULKAN_INTEROP=0` refuses it outright, for a machine where it is
 available and still wrong.
 
-**The CPU saving is not yet measured cleanly.** The design's figure — 1.75 CPU-seconds against
-3.50 per ten wall seconds — came from a real 1080p file, and the copy this removes is exactly
-that gap. Measured here against `HULTUI_VULKAN_INTEROP=0` on a synthetic uncompressed clip, the
-interop runs sit in a tight band (39–101 ms of CPU per second) and the software runs swing
-between 43 and 276, so the interop is plainly the cheaper and steadier of the two but no ratio
-can honestly be read off it: an uncompressed 1080p clip is 75 MB/s of disk reads, which is
-larger than the copy being measured. Re-measure on a compressed file before quoting a number.
+**The CPU saving, measured on Linux.** It could not be measured on Windows — an uncompressed
+1080p test clip is about 75 MB/s of disk reads, larger than the copy being measured, and the
+readings swung between 39 and 276 ms of CPU per second. On a compressed 1080p24 x264 clip, in a
+release build, over a 10-second window after five seconds of warm-up, two rounds agreeing to 1%:
 
-**Untested:** Linux, where the handle is a file descriptor rather than a Win32 handle and
-`glImportMemoryFdEXT` consumes it instead of leaving it to be closed; and the interaction with
-the scRGB offscreen, where the video image is declared sRGB and Skia converts it into linear
-light.
+| Path | CPU |
+|---|---|
+| Vulkan, interop | **135 ms/s** |
+| Vulkan, `HULTUI_VULKAN_INTEROP=0` | **810 ms/s** |
+| OpenGL renderer | 122–127 ms/s |
+
+So the interop removes about **675 ms of CPU per second** and puts the Vulkan renderer level
+with GL, which is what the phase was for. Why the software path costs 810 ms/s there against the
+~175 estimated on Windows is unexplained; the two Linux figures come from identical mpv settings,
+so the comparison between them holds whatever that turns out to be.
+
+**Linux works, on the NVIDIA proprietary driver.** Wayland and X11 both, the frame the right way
+up with the right colours, no fallback to the software path, and the fd half of the handle
+question behaves. Synchronisation is *cheaper* there: 0.16 ms a frame at both 1080p and 4K
+against Windows' 0.27 on the same card. Validation printed nothing about this code across 159
+swapchain recreations — in particular nothing about the `FinishExternalFrame` queue-family
+transfer or its `GENERAL` layout, which was the part of phase 4 that is convention rather than
+certainty. Details in `docs/design/HDR-LINUX-BRIEF.md`.
+
+**Still unproven:** the per-import fd leak, because the shared image is sized to the video and
+is created once — window resizes do not re-export it, so `glImportMemoryFdEXT` ran a single time
+and a leak per import could not have shown. It needs a clip whose resolution changes mid-stream.
+Also untested: Mesa, a hybrid GPU, and the interaction with the scRGB offscreen.
 
 ### Why not just build libmpv with Vulkan?
 

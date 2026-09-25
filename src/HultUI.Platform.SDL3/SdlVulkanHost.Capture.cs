@@ -30,10 +30,16 @@ internal sealed unsafe partial class SdlVulkanHost
     /// black, which is exactly what the layout-caching bug did, and a capture of frame 1 saw
     /// none of it. The default is therefore the <b>first frame that reuses an image</b>,
     /// which is one past the swapchain's count: the earliest frame at which stale state can
-    /// show, and still reachable in an app that renders only when dirty.</para>
+    /// show.</para>
+    ///
+    /// <para><b>It is not, however, always reached by an app that renders only when dirty.</b>
+    /// An idle window on KDE/Wayland presented three frames and stopped, one short of the
+    /// default on a three-image swapchain; hovering a button was enough to produce the fourth.
+    /// So a capture that never appears may mean an idle window rather than a renderer that
+    /// drew nothing — touch the window before concluding anything.</para>
     ///
     /// <para><c>HULTUI_VULKAN_CAPTURE_FRAME</c> overrides it; a bigger number needs an app
-    /// that keeps drawing.</para>
+    /// that keeps drawing, and a smaller one gives up the reuse this default exists for.</para>
     /// </summary>
     private static readonly int CaptureFrameOverride =
         int.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE_FRAME"), out var n) && n > 0
