@@ -103,6 +103,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private nint _features2;
     public nint PhysicalDeviceFeatures2 => _features2;
 
+    /// <summary>Set by the window, which is the thing that knows which display it is on.</summary>
+    public float SdrWhiteScale { get; set; } = 1f;
+
     public nint GetProcedureAddress(string name, nint instance, nint device) =>
         Resolve(name, instance, device);
 

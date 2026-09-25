@@ -67,6 +67,18 @@ public interface IVulkanSurfaceHost
     /// </summary>
     nint PhysicalDeviceFeatures2 { get; }
 
+    /// <summary>
+    /// What to multiply linear output by so that 1.0 lands on the display's SDR white.
+    ///
+    /// <para>1 for an ordinary sRGB swapchain, where the colour space already says what
+    /// white is. For scRGB it is the display's SDR white level over scRGB's own reference of
+    /// 80 nits — because scRGB fixes 1.0 at 80 and Windows composites SDR content at
+    /// whatever its brightness slider says, commonly 240. Writing a correct 1.0 into that
+    /// surface produces a window three times too dim beside every other window, and no
+    /// capture shows it: the swapchain image is right and the compositor is obeying it.</para>
+    /// </summary>
+    float SdrWhiteScale { get; }
+
     /// <summary>Resolves a Vulkan entry point by name. <paramref name="device"/> is zero for
     /// instance-level commands, which is the convention Skia's own resolver uses.</summary>
     nint GetProcedureAddress(string name, nint instance, nint device);

@@ -134,6 +134,19 @@ never answer "is HDR on". SDL asks the compositor, which is the only thing that 
 `SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN`, surfaced as `IPlatformWindow.IsHdrDisplay` and
 printed by `DescribeGraphics` on both backends.
 
+**scRGB is 80 nits, and Windows is not** (2026-09-25, found by photographing two windows
+side by side rather than by any capture). `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` fixes
+1.0 at 80 nits; Windows composites SDR content at its "SDR content brightness" level, which
+on this machine reads **240 nits** through `DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL`.
+So a correct linear 1.0 lands three times too dim beside every other window, and the
+swapchain image is right the whole time — the capture cannot see it and neither can a
+screenshot, because the compositor is doing exactly what it was told.
+
+The scale goes into the destination colour space rather than into a second pass: dividing
+sRGB's primaries by 3 makes Skia emit 3× for the same colour, as part of the conversion it
+is already doing. **It reaches fills and not glyphs**, which is the open problem — see the
+note on `ColorSpaceFor`.
+
 **3 — The HDR swapchain.** `VK_EXT_swapchain_colorspace`, scRGB FP16, HDR metadata, and
 the detection for when the display and compositor actually support it (on Linux that means
 the Wayland colour-management protocol, and X11 simply cannot). Falls back to SDR

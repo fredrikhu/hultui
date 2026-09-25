@@ -130,7 +130,7 @@ internal sealed unsafe partial class SdlVulkanHost
 
         void* mapped;
         Check(MapMemory(_device, memory, 0, bytes, 0, &mapped), "vkMapMemory");
-        WritePpm(path, (byte*)mapped, width, height, _format);
+        WritePpm(path, (byte*)mapped, width, height, _format, SdrWhiteScale);
         UnmapMemory(_device, memory);
 
         DestroyBuffer(_device, buffer, 0);
@@ -164,16 +164,21 @@ internal sealed unsafe partial class SdlVulkanHost
     /// show a washed-out image that says nothing about whether the renderer is right. Encoded,
     /// it should be indistinguishable from the 8-bit path — which is the test.</para>
     /// </summary>
-    private static void WritePpm(string path, byte* pixels, int width, int height, VkFormat format)
+    private static void WritePpm(string path, byte* pixels, int width, int height, VkFormat format,
+        float whiteScale)
     {
         var body = new byte[width * height * 3];
 
         if (format == VkFormat.R16G16B16A16Sfloat)
         {
+            // Divided by the same scale the renderer multiplied by, so the file shows what
+            // the display shows rather than numbers three times too large.
             var halves = (Half*)pixels;
+            float inverse = whiteScale > 0f ? 1f / whiteScale : 1f;
             for (int i = 0, o = 0; i < width * height; i++)
                 for (int c = 0; c < 3; c++)
-                    body[o++] = (byte)Math.Clamp(SrgbEncode((float)halves[i * 4 + c]) * 255f + 0.5f, 0f, 255f);
+                    body[o++] = (byte)Math.Clamp(
+                        SrgbEncode((float)halves[i * 4 + c] * inverse) * 255f + 0.5f, 0f, 255f);
         }
         else
         {

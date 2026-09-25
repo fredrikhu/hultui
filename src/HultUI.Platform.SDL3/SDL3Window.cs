@@ -311,6 +311,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         {
             UpdateSize();
             _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight);
+            // Only meaningful for an scRGB surface; the host ignores it otherwise.
+            _vulkanHost.SdrWhiteScale = SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
             StartupTrace.Mark("vulkan device");
             _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, TakePreloadedText());
             StartupTrace.Mark("skia surface");
@@ -741,6 +743,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
     }
 
+    /// <summary>
+    /// What Windows is currently drawing SDR white at, in nits, or scRGB's 80 elsewhere.
+    /// The number an scRGB surface has to scale by, since scRGB's own 1.0 is 80.
+    /// </summary>
+    public float SdrWhiteLevelNits => OperatingSystem.IsWindows()
+        ? WindowsSdrWhiteLevel.Query()
+        : WindowsSdrWhiteLevel.ScRgbReferenceNits;
+
     public string? DescribeGraphics()
     {
         if (_window == null) return null;
@@ -753,7 +763,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             SDL_GetWindowSize(_window, &vw, &vh);
             return $"video={SDL_GetCurrentVideoDriver() ?? "?"} "
                 + vulkan.Describe(PixelWidth, PixelHeight, DisplayScale, RefreshRate)
-                + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} window={vw}x{vh}";
+                + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} sdrWhite={SdrWhiteLevelNits:0}nits window={vw}x{vh}";
         }
 
         if (_glContext == null) return null;
@@ -792,7 +802,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             + $" swapInterval={(haveInterval ? swapInterval.ToString() : "?")} samples={samples}"
             + $" drawable={PixelWidth}x{PixelHeight}px window={ww}x{wh}"
             + $" density={PixelDensity} scale={DisplayScale} refresh={RefreshRate}Hz"
-            + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")}");
+            + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} sdrWhite={SdrWhiteLevelNits:0}nits");
     }
 
     private static string Utf8OrFallback(byte* s)

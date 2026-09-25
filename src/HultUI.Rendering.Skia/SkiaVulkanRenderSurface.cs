@@ -177,7 +177,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         // returns null — which looks exactly like a driver refusing the render target, and
         // is not that. Most Windows surfaces offer BGRA first.
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
-            ColorTypeFor(frame.Format), ColorSpaceFor(frame.ColorSpace));
+            ColorTypeFor(frame.Format), ColorSpaceFor(frame.ColorSpace, _host.SdrWhiteScale));
         if (surface is null)
         {
             target.Dispose();
@@ -209,13 +209,32 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     /// <para>A null here is not "no colour management": it is Skia's legacy path, where
     /// blending happens in whatever space the bytes are already in.</para>
     /// </summary>
-    private static SKColorSpace ColorSpaceFor(uint colorSpace) => colorSpace switch
+    /// <summary>
+    /// <b>Known gap.</b> The scale below reaches fills and reaches them exactly — flat
+    /// regions match the 8-bit path byte for byte — but it does not reach glyphs. Text drawn
+    /// white comes back at a third of the brightness of a white rectangle beside it, which
+    /// is the scale factor, so the glyph colour is being written without the destination
+    /// conversion rather than being wrong by some amount. Grayscale antialiasing
+    /// (<c>SKPixelGeometry.Unknown</c>) was tried and changes nothing, so it is not the LCD
+    /// text path. Until it is understood, scRGB is a worse-looking choice than plain sRGB,
+    /// not a better one — which is why HULTUI_VULKAN_F16 stays off.
+    /// </summary>
+    private static SKColorSpace ColorSpaceFor(uint colorSpace, float whiteScale)
     {
-        // scRGB: linear light, 1.0 is SDR white, and values may exceed it. The pairing the
-        // surface offers with RGBA16F, and what phase 3 presents HDR through.
-        VkColorSpaceExtendedSrgbLinear => SKColorSpace.CreateSrgbLinear(),
-        _ => SKColorSpace.CreateSrgb(),
-    };
+        // An ordinary sRGB swapchain: the colour space already says what white is.
+        if (colorSpace != VkColorSpaceExtendedSrgbLinear) return SKColorSpace.CreateSrgb();
+
+        // scRGB: linear light, and 1.0 is 80 nits by definition rather than "white".
+        if (whiteScale <= 1.0001f) return SKColorSpace.CreateSrgbLinear();
+
+        // Scaling the primaries down by k makes Skia emit k times the value for the same
+        // colour, which is what puts white on the display's actual SDR white instead of on
+        // scRGB's 80-nit reference. Done in the colour space rather than as a second pass
+        // over the frame: it is the same conversion Skia is already performing.
+        var matrix = SKColorSpaceXyz.Srgb.Values;
+        for (int i = 0; i < matrix.Length; i++) matrix[i] /= whiteScale;
+        return SKColorSpace.CreateRgb(SKColorSpaceTransferFn.Linear, new SKColorSpaceXyz(matrix));
+    }
 
     /// <summary>
     /// The Skia colour type for a <c>VkFormat</c>.
