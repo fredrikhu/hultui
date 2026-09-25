@@ -356,6 +356,10 @@ Four findings above are now fixed in code. **All four need a Linux run to confir
 none of them can be verified on Windows: three are Wayland- or X11-only paths and the fourth is
 a comment.
 
+**`docs/design/HDR-LINUX-VERIFY.md` is the protocol for checking them** — what passes, what a
+false pass looks like, and the regression each fix could have introduced. The summaries below
+say what changed; that file says what to run.
+
 1. **The dim scRGB window.** `SDL3Window.WhiteScale()` returns **2.5375** when the video driver
    is `wayland`, rather than going through `SdrWhiteLevelNits`, which is a Windows query that
    answers 80 everywhere else. `HULTUI_VULKAN_WHITE_SCALE` still overrides.
