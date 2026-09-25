@@ -38,6 +38,8 @@ internal static unsafe class VulkanCommands
     public static delegate* unmanaged<VkDevice, uint, VkFence*, uint, ulong, VkResult> WaitForFences;
     public static delegate* unmanaged<VkDevice, uint, VkFence*, VkResult> ResetFences;
     public static delegate* unmanaged<VkDevice, VkFence, nint, void> DestroyFence;
+    public static delegate* unmanaged<VkDevice, VkSemaphoreCreateInfo*, nint, VkSemaphore*, VkResult> CreateSemaphore;
+    public static delegate* unmanaged<VkDevice, VkSemaphore, nint, void> DestroySemaphore;
     public static delegate* unmanaged<VkDevice, VkCommandPoolCreateInfo*, nint, VkCommandPool*, VkResult> CreateCommandPool;
     public static delegate* unmanaged<VkDevice, VkCommandBufferAllocateInfo*, VkCommandBuffer*, VkResult> AllocateCommandBuffers;
     public static delegate* unmanaged<VkCommandBuffer, VkCommandBufferBeginInfo*, VkResult> BeginCommandBuffer;
@@ -94,6 +96,8 @@ internal static unsafe class VulkanCommands
         WaitForFences = (delegate* unmanaged<VkDevice, uint, VkFence*, uint, ulong, VkResult>)D(device, "vkWaitForFences");
         ResetFences = (delegate* unmanaged<VkDevice, uint, VkFence*, VkResult>)D(device, "vkResetFences");
         DestroyFence = (delegate* unmanaged<VkDevice, VkFence, nint, void>)D(device, "vkDestroyFence");
+        CreateSemaphore = (delegate* unmanaged<VkDevice, VkSemaphoreCreateInfo*, nint, VkSemaphore*, VkResult>)D(device, "vkCreateSemaphore");
+        DestroySemaphore = (delegate* unmanaged<VkDevice, VkSemaphore, nint, void>)D(device, "vkDestroySemaphore");
         CreateCommandPool = (delegate* unmanaged<VkDevice, VkCommandPoolCreateInfo*, nint, VkCommandPool*, VkResult>)D(device, "vkCreateCommandPool");
         AllocateCommandBuffers = (delegate* unmanaged<VkDevice, VkCommandBufferAllocateInfo*, VkCommandBuffer*, VkResult>)D(device, "vkAllocateCommandBuffers");
         BeginCommandBuffer = (delegate* unmanaged<VkCommandBuffer, VkCommandBufferBeginInfo*, VkResult>)D(device, "vkBeginCommandBuffer");

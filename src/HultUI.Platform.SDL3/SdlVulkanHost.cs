@@ -57,6 +57,17 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     private VkSwapchainKHR _swapchain;
     private VkImage[] _images = [];
+
+    /// <summary>Signalled when this image's frame has finished drawing; the present waits on
+    /// it. One per image rather than one shared, because the previous frame's signal must not
+    /// still be pending when the next frame wants to signal it — and re-acquiring an image is
+    /// the point at which the presentation engine says its last use is done.</summary>
+    private VkSemaphore[] _renderFinished = [];
+
+    /// <summary>The layout-transition command buffer for each image, recorded fresh each
+    /// frame. Kept rather than allocated and freed per frame: freeing a command buffer that
+    /// may still be executing is undefined, and without the queue drain it often is.</summary>
+    private VkCommandBuffer[] _presentCmd = [];
     private VkFormat _format = VkFormat.B8G8R8A8Unorm;
     private VkCommandPool _pool;
     private VkFence _acquireFence;
@@ -313,10 +324,60 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             Check(GetSwapchainImages(_device, _swapchain, &got, p), "vkGetSwapchainImagesKHR");
         _images = images;
 
+        CreatePerImageObjects();
+
         _widthPx = (int)extent.width;
         _heightPx = (int)extent.height;
         StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length}");
         ResetCapture();
+    }
+
+    /// <summary>
+    /// One semaphore and one command buffer per swapchain image, replacing the set the last
+    /// swapchain had. Both are indexed by image, so an image that is still being presented
+    /// never has its own reused underneath it.
+    /// </summary>
+    private void CreatePerImageObjects()
+    {
+        DestroyPerImageObjects();
+
+        int count = _images.Length;
+        _renderFinished = new VkSemaphore[count];
+        _presentCmd = new VkCommandBuffer[count];
+
+        var semaphoreInfo = new VkSemaphoreCreateInfo();
+        var allocate = new VkCommandBufferAllocateInfo
+        {
+            commandPool = _pool,
+            level = VkCommandBufferLevel.Primary,
+            commandBufferCount = 1,
+        };
+
+        for (int i = 0; i < count; i++)
+        {
+            VkSemaphore semaphore;
+            Check(CreateSemaphore(_device, &semaphoreInfo, 0, &semaphore), "vkCreateSemaphore");
+            _renderFinished[i] = semaphore;
+
+            VkCommandBuffer cmd;
+            Check(AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
+            _presentCmd[i] = cmd;
+        }
+    }
+
+    private void DestroyPerImageObjects()
+    {
+        // The caller has already waited the device idle; nothing here is in flight.
+        foreach (var semaphore in _renderFinished)
+            if (!semaphore.IsNull) DestroySemaphore(_device, semaphore, 0);
+        _renderFinished = [];
+
+        for (int i = 0; i < _presentCmd.Length; i++)
+        {
+            var cmd = _presentCmd[i];
+            if (!cmd.IsNull) FreeCommandBuffers(_device, _pool, 1, &cmd);
+        }
+        _presentCmd = [];
     }
 
     /// <summary>
@@ -430,21 +491,28 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         if (!_haveAcquired || _swapchain.IsNull) return;
 
-        // Skia has flushed and submitted by now, but nothing says its work has finished, and
-        // nothing can wait on it — so the queue is drained before the image is handed over.
-        Check(QueueWaitIdle(_queue), "vkQueueWaitIdle");
-
-        // While the image still holds this frame and is still a colour attachment.
+        // The capture reads the image on the CPU, so it is the one thing here that still has
+        // to wait for the GPU. Diagnostic only, and off unless asked for.
         CaptureIfAsked(_images[_acquiredIndex]);
 
         // Skia leaves the image as a colour attachment; the presentation engine requires
         // PRESENT_SRC_KHR, and there is no binding call to ask Skia for the transition.
-        TransitionToPresent(_images[_acquiredIndex]);
+        //
+        // No queue drain before this any more. The barrier's source stage is
+        // COLOR_ATTACHMENT_OUTPUT, which is an execution dependency against everything Skia
+        // submitted earlier on the same queue — ordering that Vulkan already guarantees and
+        // that vkQueueWaitIdle was paying for twice.
+        var done = TransitionToPresent(_images[_acquiredIndex], _acquiredIndex);
 
         uint index = _acquiredIndex;
         var swapchain = _swapchain;
         var present = new VkPresentInfoKHR
         {
+            // …and this is what replaces the drain: presentation waits for that submit to
+            // signal rather than for the whole queue to fall idle. Without a wait semaphore
+            // a present is not ordered against prior queue work at all.
+            waitSemaphoreCount = 1,
+            pWaitSemaphores = &done,
             swapchainCount = 1,
             pSwapchains = &swapchain,
             pImageIndices = &index,
@@ -456,17 +524,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             RecreateSwapchain(_widthPx, _heightPx);
     }
 
-    private void TransitionToPresent(VkImage image)
+    /// <summary>Records and submits the transition to PRESENT_SRC_KHR, returning the
+    /// semaphore it signals when that work is done.</summary>
+    private VkSemaphore TransitionToPresent(VkImage image, uint imageIndex)
     {
-        var allocate = new VkCommandBufferAllocateInfo
-        {
-            commandPool = _pool,
-            level = VkCommandBufferLevel.Primary,
-            commandBufferCount = 1,
-        };
-        VkCommandBuffer cmd;
-        Check(AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
-
+        var cmd = _presentCmd[imageIndex];
         var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
         Check(BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
 
@@ -487,10 +549,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         Check(EndCommandBuffer(cmd), "vkEndCommandBuffer");
 
-        var submit = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &cmd };
+        var signal = _renderFinished[imageIndex];
+        var submit = new VkSubmitInfo
+        {
+            commandBufferCount = 1,
+            pCommandBuffers = &cmd,
+            signalSemaphoreCount = 1,
+            pSignalSemaphores = &signal,
+        };
         Check(QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
-        Check(QueueWaitIdle(_queue), "vkQueueWaitIdle");
-        FreeCommandBuffers(_device, _pool, 1, &cmd);
+        return signal;
     }
 
     public void RecreateSwapchain(int widthPx, int heightPx)
@@ -509,6 +577,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (!_device.IsNull)
         {
             DeviceWaitIdle(_device);
+            DestroyPerImageObjects();
             if (!_acquireFence.IsNull) DestroyFence(_device, _acquireFence, 0);
             if (!_pool.IsNull) DestroyCommandPool(_device, _pool, 0);
             if (!_swapchain.IsNull) DestroySwapchain(_device, _swapchain, 0);
