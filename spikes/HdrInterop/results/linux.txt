@@ -58,3 +58,54 @@ platform: Linux/other
     written for looking at   : /tmp/hdr-interop-readback.ppm
 
 VERDICT: mpv decoded into a Vulkan image through GL. The route works.
+
+── 2026-09-25, phase 4 re-check on Linux ─────────────────────────────
+Driver: NVIDIA proprietary 615.71.09 (RTX 4080), Vulkan 1.4.351. Fedora 44, KDE Plasma,
+Wayland session. (Mesa 26.2.2 is installed but only as llvmpipe; it drives nothing here.)
+Both monitors in HDR mode. The spike needs no window, so the display server does not enter.
+
+❯ dotnet run --project spikes/HdrInterop
+[1] Vulkan device      : NVIDIA GeForce RTX 4080
+    device UUID        : E6077EC07962BD31E7737C2CB4B4DA34
+    image              : 256x144 RGBA16F, 524288 bytes
+[2] GL renderer        : NVIDIA GeForce RTX 4080/PCIe/SSE2
+    GL_EXT_memory_object      : yes
+    …_win32 / …_fd            : yes
+    GL device UUID            : E6077EC07962BD31E7737C2CB4B4DA34
+    same GPU as Vulkan        : yes
+[3] exported fd           : 92
+    imported into GL          : ok
+    texture + FBO over it     : ok
+[4] GL cleared to          : 0.25, 0.5, 0.75
+    Vulkan read back         : 0.25, 0.5, 0.75
+    → the two APIs share one image.
+VERDICT: interop works.
+
+❯ dotnet run --project spikes/HdrInterop -- --syncbench
+── what one interop frame costs ──
+  GL renderer: NVIDIA GeForce RTX 4080/PCIe/SSE2
+  1080p  gl draw 0.00 ms   + glFinish 0.01 ms   + vulkan wait 0.14 ms   = 0.16 ms/frame
+         synchronisation alone: 0.16 ms/frame   (4 ms per second at 24 fps, 9 at 60)
+  4K     gl draw 0.00 ms   + glFinish 0.01 ms   + vulkan wait 0.14 ms   = 0.16 ms/frame
+         synchronisation alone: 0.16 ms/frame   (4 ms per second at 24 fps, 9 at 60)
+
+Verdict: 0.16 ms a frame, flat across resolutions, and lower than Windows' 0.27 on the
+same card. The blunt sync is as good enough here as it was there; external semaphores
+remain an optimisation, not a precondition.
+
+── CPU of the real sample, interop on vs off ─────────────────────────
+Clip: ffmpeg testsrc2 1920x1080@24, 30 s, libx264 veryfast (/tmp/test1080.mp4), so disk
+reads no longer swamp the copy being measured. Release build of the VideoPlayer sample,
+Wayland, run directly (not through dotnet run). utime+stime from /proc/<pid>/stat over a
+fixed 10 s window after 5 s of warm-up; two alternating rounds.
+
+  vulkan, interop on                 : 135, 135 ms CPU per second  (interop image 1920x1080 RGBA16F)
+  vulkan, HULTUI_VULKAN_INTEROP=0    : 810, 811 ms CPU per second  (software path)
+  GL renderer, for reference         : 127, 122 ms CPU per second
+
+Verdict: the interop saves ~675 ms of CPU a second at 1080p24 — six times less — and puts
+the Vulkan path level with GL. The readings are stable to 1 %, unlike Windows' 39–276
+swing, so the number is usable. Not explained: why the software path costs 810 here
+against Windows' ~175 estimate; both runs here use the same mpv decode settings, so the
+comparison between them holds regardless. fd count was flat across each window (255→255
+on, 204→204 off), but the window was not resized, so this is not the resize-leak check.

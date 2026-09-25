@@ -29,7 +29,56 @@ backend; Wayland dereferences it, Windows happens to tolerate it. Fixed — the 
 returns early when there is no context, and `BeginPreload` no longer warms a GL driver a
 Vulkan window will never use.
 
-**Steps 2 to 4 are still to run.**
+**Correction to the heading:** the Vulkan driver on that machine is the **NVIDIA proprietary
+driver 615.71.09**. Mesa 26.2.2 is installed but provides only llvmpipe; it drove none of
+these runs.
+
+### Steps 2 to 4 (2026-09-25, same machine, KDE Plasma 6, both monitors HDR)
+
+**Step 2 passed.** White window, indigo button, black text, via both the frame-3 capture and
+the default capture; the startup trace has `vulkan swapchain 750x450 x3`. Channel values match
+the 8-bit path within 1 LSB (button `79,71,229` against `79,70,229`).
+
+One thing the brief did not predict: **the default capture never fired on an idle Minimal
+window.** It waits for frame `images + 1` (4 on this 3-image swapchain), and a window that is
+left alone presents only 3 frames here. Hovering the button was enough to get frame 4. So the
+claim in `SdlVulkanHost.Capture.cs` that the default is "still reachable in an app that
+renders only when dirty" needs an input event to be true on Wayland.
+
+**Step 3 passed on both display servers.** `SDL_VIDEODRIVER=x11` gives a 4-image
+`B8G8R8A8Unorm` swapchain and the same picture. Whether the `currentExtent == 0xFFFFFFFF`
+branch ran on Wayland was not traced directly; the swapchain matched the drawable size
+through every rebuild below, which is what that branch has to get right.
+
+**Step 4 passed.** Minimal under `VK_LOADER_LAYERS_ENABLE=*validation*`, window dragged by
+hand: **412 swapchain recreations, zero validation messages**, and the capture taken after
+the last resize (1010x350) shows the right UI with the click count it had reached. The layer
+was confirmed loaded into both the instance and device chains (`VK_LOADER_DEBUG=layer`),
+and the app installs no debug messenger, so the layer's default of printing errors and
+warnings to stdout was in force. The zero is real.
+
+### A bug found along the way: Wayland shrinks the window on a mixed-scale desktop
+
+Not Vulkan's and not HDR's: GL does the same. On this desktop DP-2 (primary) is at scale 1.0
+and DP-3 at 1.5. SDL creates the window believing the scale is 1.5, KWin places it on the
+1.0 output, and SDL reports that as two separate events:
+
+```
+UpdateSize px=750x450 density=1.5 displayScale=1.5   (creation)
+UpdateSize px=500x300 density=1   displayScale=1.5   (pixels change, scale not yet)
+UpdateSize px=500x300 density=1   displayScale=1     (scale-only change → resize)
+UpdateSize px=333x200 density=1   displayScale=1
+```
+
+The second event leaves a 333-DIP layout (500 px ÷ a stale 1.5). The third looks like a
+pure DPI change to the `scaleOnlyChange` branch of `SDL3Window.UpdateSize`, which "preserves"
+that already-wrong 333-DIP size by calling `SDL_SetWindowSize`. A 500x300 window ends up as
+333x200. It happened on every scripted launch (6/6); in the one interactive run the window
+kept 750x450, presumably because KWin put it on the 1.5 output that time, which fits the
+explanation. A frame-3 capture races the shrink,
+which is why an early capture came out at 333x200 and looked like an F16 bug. On Wayland,
+window coordinates are already logical, so the compositor owns DIP preservation, and that
+branch probably should not run there at all.
 
 **A second bug, found on Windows by looking at the window** (2026-09-25): the renderer drew
 the first three frames and every frame afterwards black, which no capture of frame 1 could

@@ -222,3 +222,82 @@ Commit the results into the repo rather than pasting them, so they survive:
 A step that fails is as useful as one that passes, provided the trace says how far it got. What
 is not useful is a green result inferred from something that could not have shown a failure —
 if a check was skipped, say it was skipped.
+
+## Results (2026-09-25)
+
+**Machine:** RTX 4080 on the **NVIDIA proprietary driver 615.71.09**, Vulkan 1.4.351, Fedora 44,
+KDE Plasma (KWin) Wayland. There are two monitors, both in HDR mode: DP-2 is primary at scale
+1.0 with SDR white at 408 nits, and DP-3 is at scale 1.5 with SDR white at 455 nits
+(`kscreen-doctor -o`). No Mesa hardware driver was involved (Mesa here is llvmpipe only), and
+there is no second GPU, so the hybrid-GPU and Mesa-versus-NVIDIA questions were **not tested**.
+The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
+
+### Phases 2 and 3 — works end to end on Wayland, and **the picture is dim**
+
+- **Wayland offers wide colour.** The surface lists 28 formats, including
+  `R16G16B16A16Sfloat/ExtendedSrgbLinearEXT`, `A2B10G10R10UnormPack32/Hdr10St2084EXT`,
+  `DisplayP3LinearEXT` and `Bt2020LinearEXT`. That list is the same with HDR on or off.
+- **SDL reports HDR on Wayland.** With the monitors in HDR mode, `SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN`
+  is true, so `hdrDisplay=on`, and **phase 3 picks scRGB by itself** with no `HULTUI_VULKAN_F16`
+  (`vulkan swapchain 750x450 x3 R16G16B16A16Sfloat/ExtendedSrgbLinearEXT`). With HDR off it
+  reports `hdrDisplay=off` and picks `B8G8R8A8Unorm`, which is correct.
+- **`sdrWhite=80nits`, `whiteScale=1`, as the brief predicted**, so the offscreen pass is skipped.
+- **The F16 window is visibly dimmer than the GL window** (compared side by side on the same
+  monitor, by eye). **This is the finding the brief asked for.** The capture is *not* dim: F16
+  and 8-bit captures agree within 1 LSB. So the image is right and the scale is wrong. KWin
+  composites SDR white at 408/455 nits, and we send scRGB 1.0 = 80 nits, which is ~5× below it
+  if KWin reads scRGB at its spec value. Linux needs its own equivalent of
+  `WindowsSdrWhiteLevel`. The number to feed it is the compositor's SDR white, which KWin knows
+  per output. SDL 3 has `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT` / `HDR_HEADROOM` for this, which
+  the binding here does not expose. **Not yet tried:** `HULTUI_VULKAN_WHITE_SCALE=5.1` (408/80)
+  to confirm the scale closes the gap. That run would also be the first on Linux to exercise
+  phase 2's offscreen pass.
+- **X11 cannot, and says so.** `SDL_VIDEODRIVER=x11` lists only `B8G8R8A8Unorm/SrgbNonLinear`
+  and `B8G8R8A8Srgb/SrgbNonLinear`, and reports `hdrDisplay=off`, correctly.
+- **Small bug: X11 plus `HULTUI_VULKAN_F16=1` rebuilds the swapchain for nothing.** Each
+  display event logs `rebuilding for scRGB` and builds the same `B8G8R8A8Unorm` swapchain again
+  (3 times at startup). `SdlVulkanHost.DisplayChanged` compares what is *wanted*
+  (`WantsWideColor`) with what was *obtained* (`_format`), and when the surface cannot give F16
+  the two never match. It also resets the capture counter each time. Harmless to the picture,
+  but it should compare against what the format choice would produce.
+
+### Phase 4 — works on this driver, both display servers
+
+- **Spike:** `VERDICT: interop works.` Same UUID on both APIs, fd exported and imported, and
+  0.25/0.5/0.75 read back exactly. See `spikes/HdrInterop/results/linux.txt`.
+- **Syncbench: 0.16 ms a frame, at both 1080p and 4K**, lower than Windows' 0.27 on the same
+  card. The blunt synchronisation is good enough here too.
+- **The sample runs on the interop** on Wayland and on X11: `vulkan interop ready on NVIDIA
+  GeForce RTX 4080/PCIe/SSE2` and `vulkan interop image 320x180 RGBA16F (655360 bytes)`, with no
+  fallback to the software path. The frame-60 capture of the split clip is **the right way up
+  with the right colours**: bright pink-red top (`255,169,166`), dark blue bottom (`0,0,145`).
+  So `BottomLeftOrigin` and the colour type are right for this driver.
+- **CPU, finally measurable:** a compressed 1080p24 x264 clip, release build, a 10 s window
+  after 5 s of warm-up, and two rounds that agree to 1%. **135 ms/s with the interop, 810 ms/s
+  with `HULTUI_VULKAN_INTEROP=0`, and 122–127 ms/s on the GL renderer.** The interop removes
+  ~675 ms of CPU a second, puts Vulkan level with GL, and justifies the phase. Why the software
+  path costs 810 here against the ~175 estimated on Windows is not explained. The two Linux runs
+  use identical mpv settings, so the comparison between them holds.
+- **fd ownership:** the player under validation, window dragged by hand, gave **159 swapchain
+  recreations with fds flat at 255** (one sample at 256). **Caveat:** the interop image is sized
+  to the *video* (1920x1080) and was created once. Window resizes do not re-export it, so
+  `glImportMemoryFdEXT` ran once and a per-import leak would **not** have shown. That needs a
+  clip whose resolution changes mid-stream.
+- **Validation:** **nothing from HultUI**. In particular there is nothing about the
+  `FinishExternalFrame` queue-family transfer or its `GENERAL` layout, on the y4m clip or through
+  the 159 resizes. The H.264 run did print 60 errors, 20 each (the layer's repeat cap) of
+  `VUID-VkImageCreateInfo-pNext-06811`, `VUID-VkVideoBeginCodingInfoKHR-pPictureResource-07240`
+  and `VUID-vkCmdDecodeVideoKHR-pDecodeInfo-07142`. All three are Vulkan *Video* decode, which
+  is mpv/ffmpeg's `hwdec=auto-copy` choosing the Vulkan H.264 decoder in the same process, not
+  our code. Worth knowing if validation is ever made part of a test, and worth asking whether
+  `auto-copy` should prefer NVDEC or VA-API here.
+- **Wayland vs X11:** both work. The hidden SDL GL window next to a Vulkan window gave KWin no
+  trouble in either mode.
+
+### Not run, or not proven
+
+- **Mesa**, a **hybrid GPU**: no such hardware here.
+- **The fd-per-import leak check**: see the caveat above.
+- **Whether a white scale fixes the dimness**: one run with `HULTUI_VULKAN_WHITE_SCALE`.
+- The full solution build fails on the two WinForms projects (`NETSDK1100`), which is expected
+  on Linux. Everything this brief needs builds cleanly on its own.
