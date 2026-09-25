@@ -284,6 +284,38 @@ So external semaphores (`VK_KHR_external_semaphore` with `GL_EXT_semaphore`) wou
 the stall, but they are an optimisation rather than a precondition. Phase 4 can be built
 with the blunt ordering and tightened later if a profile ever asks for it.
 
+**Built, and working on Windows.** `SdlVulkanHost.Interop` makes the hidden GL context,
+creates an exportable `RGBA16F` image, imports it into GL as a texture with a framebuffer over
+it, and hands the Vulkan handle back to `SkiaVulkanRenderSurface` to draw. mpv is told the
+framebuffer's internal format, so `internal_format` on `mpv_opengl_fbo` is no longer 0 and the
+decoder stops assuming eight bits inside a target that holds sixteen.
+
+Evidence, on an RTX 4080: `vulkan interop ready on NVIDIA GeForce RTX 4080/PCIe/SSE2` followed
+by `vulkan interop image 320x180 RGBA16F`, and a captured swapchain frame that holds the clip
+the right way up with the right colours. The capture is the only honest evidence there is —
+the headless driver renders through `SkiaRasterRenderSurface` and never touches this backend.
+
+**Three things make a failure harmless rather than fatal.** The GL context is not created until
+the first frame that draws a video, so a window that never shows one pays none of the 130 ms it
+costs. Every step that can fail — a missing extension, a GL context on the other GPU, an import
+the driver refuses — answers by leaving `SupportsExternalGL` false, which sends the source down
+its pixel path: the slower route that worked before, rather than a renderer compositing an image
+it cannot read. And `HULTUI_VULKAN_INTEROP=0` refuses it outright, for a machine where it is
+available and still wrong.
+
+**The CPU saving is not yet measured cleanly.** The design's figure — 1.75 CPU-seconds against
+3.50 per ten wall seconds — came from a real 1080p file, and the copy this removes is exactly
+that gap. Measured here against `HULTUI_VULKAN_INTEROP=0` on a synthetic uncompressed clip, the
+interop runs sit in a tight band (39–101 ms of CPU per second) and the software runs swing
+between 43 and 276, so the interop is plainly the cheaper and steadier of the two but no ratio
+can honestly be read off it: an uncompressed 1080p clip is 75 MB/s of disk reads, which is
+larger than the copy being measured. Re-measure on a compressed file before quoting a number.
+
+**Untested:** Linux, where the handle is a file descriptor rather than a Win32 handle and
+`glImportMemoryFdEXT` consumes it instead of leaving it to be closed; and the interaction with
+the scRGB offscreen, where the video image is declared sRGB and Skia converts it into linear
+light.
+
 ### Why not just build libmpv with Vulkan?
 
 The obvious question, and the answer is not a build flag. mpv v0.41.0's `render.h` defines

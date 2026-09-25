@@ -675,7 +675,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
     {
         // On a GL surface a GPU source is always drawn as one — no frame yet means
         // nothing this frame, not its pixel path. Elsewhere it is whatever else it is.
-        if (source is IGpuImageSource gpuSource && _glSurface is { } gl)
+        //
+        // A Vulkan surface is an external surface only when its driver will share an image
+        // with a GL context, so it is asked rather than assumed: if it will not, the source
+        // falls through to its pixel path below, which is what every non-GL surface does and
+        // what a video did on this renderer before phase 4.
+        if (source is IGpuImageSource gpuSource && _glSurface is { } gl && gl.SupportsExternalGL)
         {
             DrawGpuFrame(gpuSource, gl, destRect, fit);
             return;
@@ -755,7 +760,12 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
         if (!source.TryRenderFrame(gl, out var frame))
             return;
 
-        if (!_wrappedTextures.TryGetValue(source, out var wrapped) || wrapped.Frame != frame)
+        // A renderer-owned frame is re-wrapped every time, never cached. The wrapper holds
+        // the image's layout, and Skia moves that layout as it draws — the same lesson the
+        // swapchain render target taught, where caching one drew three good frames and then
+        // black for ever. A source-owned GL texture has no layout and caches fine.
+        bool haveWrapper = _wrappedTextures.TryGetValue(source, out var wrapped);
+        if (frame.RendererOwned || !haveWrapper || wrapped.Frame != frame)
         {
             wrapped.Image?.Dispose();
             var image = gl.WrapFrame(frame);

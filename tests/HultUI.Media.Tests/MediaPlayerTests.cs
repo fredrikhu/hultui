@@ -128,7 +128,8 @@ public class MediaPlayerTests
         public void PrepareGL(Func<string, nint> getProcAddress) { }
         public bool TryGetFrameSize(out int width, out int height) { width = height = 0; return false; }
         public bool RendersBottomUp => false;
-        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height) => false;
+        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
+            uint internalFormat) => false;
         public void ReleaseGL() { }
     }
 

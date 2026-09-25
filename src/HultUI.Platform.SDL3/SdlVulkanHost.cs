@@ -115,6 +115,27 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public string[] EnabledInstanceExtensions { get; private set; } = [];
     public string[] EnabledDeviceExtensions { get; private set; } = ["VK_KHR_swapchain"];
 
+    /// <summary>
+    /// What a device needs before an image of its can be handed to OpenGL — phase 4.
+    ///
+    /// <para>Asked for whenever the driver has them, not when a video is opened: a device
+    /// cannot gain an extension afterwards, and whether this window will ever play one is
+    /// not knowable at start-up. Unused, they cost nothing. The platform half differs
+    /// because the handle does: Windows shares an <c>HANDLE</c> and Linux a file
+    /// descriptor.</para>
+    ///
+    /// <para>Dedicated allocation is not formally required and is asked for anyway — every
+    /// vendor's documentation wants it here, and the drivers that misbehave without it do so
+    /// silently.</para>
+    /// </summary>
+    private static string[] InteropDeviceExtensions => OperatingSystem.IsWindows()
+        ? ["VK_KHR_external_memory", "VK_KHR_external_memory_win32", "VK_KHR_dedicated_allocation"]
+        : ["VK_KHR_external_memory", "VK_KHR_external_memory_fd", "VK_KHR_dedicated_allocation"];
+
+    /// <summary>Whether every one of those was actually enabled. False means no interop, and
+    /// a video on this window goes the software route instead.</summary>
+    private bool _interopExtensionsEnabled;
+
     /// <summary>Kept alive for the renderer's lifetime — Skia holds the pointer.</summary>
     private nint _features2;
     public nint PhysicalDeviceFeatures2 => _features2;
@@ -292,7 +313,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             pQueuePriorities = &priority,
         };
 
-        using var extensions = new VkStringArray(["VK_KHR_swapchain"]);
+        // Everything the driver will give us, so that a video can later share an image with
+        // GL without the device having to be rebuilt — which it cannot be.
+        var wanted = new List<string> { "VK_KHR_swapchain" };
+        var missing = InteropDeviceExtensions.Where(name => !HasDeviceExtension(name)).ToArray();
+        _interopExtensionsEnabled = missing.Length == 0;
+        if (_interopExtensionsEnabled) wanted.AddRange(InteropDeviceExtensions);
+        else StartupTrace.Mark($"vulkan interop unavailable: no {string.Join(", ", missing)}");
+        EnabledDeviceExtensions = [.. wanted];
+
+        using var extensions = new VkStringArray(EnabledDeviceExtensions);
         var deviceInfo = new VkDeviceCreateInfo
         {
             queueCreateInfoCount = 1,
@@ -670,6 +700,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (!_device.IsNull)
         {
             DeviceWaitIdle(_device);
+            // Before the pool and the device: the shared image is bound to both, and the GL
+            // context that also names it outlives neither.
+            DisposeInterop();
             DestroyPerImageObjects();
             if (!_acquireFence.IsNull) DestroyFence(_device, _acquireFence, 0);
             if (!_pool.IsNull) DestroyCommandPool(_device, _pool, 0);

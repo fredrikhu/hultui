@@ -24,6 +24,23 @@ public interface IExternalGLSurface : IRenderSurface
     void RunExternalGL(Action draw);
 
     /// <summary>
+    /// Whether foreign GL code can actually run here, asked before anything is drawn.
+    ///
+    /// <para>True for a GL surface, which is one by construction. A Vulkan surface is an
+    /// external surface only if it can make a GL context beside its device and share an
+    /// image with it, and that is a property of the driver rather than of the renderer —
+    /// a second GPU, or a missing external-memory extension, and it cannot.</para>
+    ///
+    /// <para>False means the producer is drawn by whatever else it is, which for a video
+    /// is its pixel path: slower, and working. The alternative is a renderer that composites
+    /// a GL texture it has no way to read, which draws nothing at all.</para>
+    ///
+    /// <para>Reading this may do one-off setup and take a driver load's worth of time. It is
+    /// read on the render thread, on the first frame that has a GPU source to draw.</para>
+    /// </summary>
+    bool SupportsExternalGL => true;
+
+    /// <summary>
     /// Offers a render target of this size for the source to draw into, so that the
     /// renderer owns it rather than the source.
     ///

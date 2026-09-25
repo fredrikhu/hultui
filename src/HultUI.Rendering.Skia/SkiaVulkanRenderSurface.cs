@@ -21,7 +21,7 @@ namespace HultUI.Rendering.Skia;
 /// <para>This assembly knows nothing about Vulkan beyond what SkiaSharp needs, which is
 /// handles and integers. <see cref="IVulkanSurfaceHost"/> is the whole of the contract.</para>
 /// </summary>
-public sealed class SkiaVulkanRenderSurface : IRenderSurface
+public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurface
 {
     private readonly IVulkanSurfaceHost _host;
     private readonly GRVkExtensions _extensions;
@@ -96,6 +96,111 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
 
         _text = text ?? new SkiaTextServices();
         _renderContext.SetPipeline(_text.Pipeline);
+
+        // Offered unconditionally; whether it is taken up is decided per frame by
+        // SupportsExternalGL, which is the only thing that knows whether this host can
+        // actually share an image with a GL context.
+        _renderContext.SetGLSurface(this);
+    }
+
+    // ──── Foreign GL inside the frame: phase 4 of docs/design/HDR.md ────
+
+    private IVulkanInteropHost? Interop => _host as IVulkanInteropHost;
+
+    /// <summary>The image lent out this frame, so that <see cref="WrapFrame"/> knows what it
+    /// is wrapping — the <see cref="GpuFrame"/> itself carries GL names, which name nothing
+    /// a Vulkan renderer can draw.</summary>
+    private VulkanInteropImage? _lent;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The first read does the work: a hidden GL context, a check that it landed on the same
+    /// GPU, a check that the driver will import external memory. False leaves the producer to
+    /// its pixel path, which is what a video did on this renderer before phase 4 — slower,
+    /// and working.
+    /// </remarks>
+    public bool SupportsExternalGL => Interop?.TryEnableInterop() ?? false;
+
+    /// <inheritdoc />
+    public Func<string, nint> GetProcAddress =>
+        Interop?.GlGetProcAddress ?? (_ => 0);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Unlike the GL surface there is no Skia state to protect here: Skia is drawing with
+    /// Vulkan and shares nothing with this context. What does need care is <i>order</i> —
+    /// Skia reads the image later in the frame, when the canvas flushes, so GL has to be
+    /// finished with it by then. That is what <c>FinishExternalFrame</c> is, and it runs even
+    /// if the draw threw, because an unordered image is worse than a missed frame.
+    /// </remarks>
+    public void RunExternalGL(Action draw)
+    {
+        ArgumentNullException.ThrowIfNull(draw);
+        if (Interop is not { } interop) return;
+        try
+        {
+            interop.RunOnGLContext(draw);
+        }
+        finally
+        {
+            interop.FinishExternalFrame();
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
+    {
+        target = default;
+        if (Interop?.LendInteropImage(width, height) is not { } image) return false;
+
+        _lent = image;
+        target = new GpuFrameTarget(image.GlFramebuffer, image.GlTexture, image.GlInternalFormat);
+        return true;
+    }
+
+    /// <summary>
+    /// The lent image as something the canvas can draw.
+    ///
+    /// <para>The layout declared here is the one the host's barrier left it in, and it is
+    /// declared afresh every frame — the render context never caches a renderer-owned
+    /// wrapper, for the same reason this class never caches a render target: Skia tracks
+    /// layout inside the wrapper and moves it as it draws, so a reused one describes an image
+    /// that no longer exists in that state.</para>
+    ///
+    /// <para>The colour space is sRGB rather than the swapchain's. mpv writes ordinary
+    /// sRGB-encoded values into the half-float target; saying so is what lets Skia convert
+    /// them when the frame is being drawn into a linear offscreen, instead of treating
+    /// encoded values as linear light and showing a washed-out picture.</para>
+    /// </summary>
+    SKImage? ISkiaExternalSurface.WrapFrame(in GpuFrame frame)
+    {
+        if (!frame.RendererOwned) return null;
+        if (_lent is not { } image) return null;
+
+        var info = new GRVkImageInfo
+        {
+            Image = image.Image,
+            Alloc = new GRVkAlloc { Memory = image.Memory, Offset = 0, Size = image.MemorySize, Flags = 0 },
+            ImageTiling = VkImageTilingOptimal,
+            ImageLayout = image.Layout,
+            Format = image.Format,
+            ImageUsageFlags = image.Usage,
+            SampleCount = 1,
+            LevelCount = 1,
+            CurrentQueueFamily = _host.GraphicsQueueFamily,
+            SharingMode = VkSharingModeExclusive,
+        };
+
+        var texture = new GRBackendTexture(frame.Width, frame.Height, info);
+        if (!texture.IsValid)
+        {
+            texture.Dispose();
+            return null;
+        }
+
+        return SKImage.FromTexture(_grContext, texture,
+            frame.BottomLeftOrigin ? GRSurfaceOrigin.BottomLeft : GRSurfaceOrigin.TopLeft,
+            SKColorType.RgbaF16, SKAlphaType.Premul, SKColorSpace.CreateSrgb());
     }
 
     /// <summary>

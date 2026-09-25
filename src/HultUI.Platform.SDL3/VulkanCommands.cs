@@ -27,6 +27,7 @@ internal static unsafe class VulkanCommands
     public static delegate* unmanaged<VkInstance, nint, void> DestroyInstance;
     public static delegate* unmanaged<VkPhysicalDevice, byte*, uint*, VkExtensionProperties*, VkResult> EnumerateDeviceExtensionProperties;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void> GetPhysicalDeviceFeatures2;
+    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void> GetPhysicalDeviceProperties2;
 
     // ── device ───────────────────────────────────────────────────────────
     public static delegate* unmanaged<VkDevice, uint, uint, VkQueue*, void> GetDeviceQueue;
@@ -64,6 +65,16 @@ internal static unsafe class VulkanCommands
     public static delegate* unmanaged<VkDevice, VkDeviceMemory, nint, void> FreeMemory;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void> GetMemoryProperties;
 
+    // Phase 4: an image of our own to share with GL, and the handle that shares it. The
+    // export commands come from an extension that may not be there, so they are resolved
+    // optionally and are null when the device went without it.
+    public static delegate* unmanaged<VkDevice, VkImageCreateInfo*, nint, VkImage*, VkResult> CreateImage;
+    public static delegate* unmanaged<VkDevice, VkImage, VkMemoryRequirements*, void> GetImageMemoryRequirements;
+    public static delegate* unmanaged<VkDevice, VkImage, VkDeviceMemory, ulong, VkResult> BindImageMemory;
+    public static delegate* unmanaged<VkDevice, VkImage, nint, void> DestroyImage;
+    public static delegate* unmanaged<VkDevice, VkMemoryGetWin32HandleInfoKHR*, nint*, VkResult> GetMemoryWin32Handle;
+    public static delegate* unmanaged<VkDevice, VkMemoryGetFdInfoKHR*, int*, VkResult> GetMemoryFd;
+
     private static VkInstance _instance;
     private static delegate* unmanaged<VkDevice, byte*, nint> _getDeviceProcAddr;
 
@@ -83,6 +94,7 @@ internal static unsafe class VulkanCommands
         EnumerateDeviceExtensionProperties = (delegate* unmanaged<VkPhysicalDevice, byte*, uint*, VkExtensionProperties*, VkResult>)I("vkEnumerateDeviceExtensionProperties");
         GetMemoryProperties = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void>)I("vkGetPhysicalDeviceMemoryProperties");
         GetPhysicalDeviceFeatures2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void>)I("vkGetPhysicalDeviceFeatures2");
+        GetPhysicalDeviceProperties2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void>)I("vkGetPhysicalDeviceProperties2");
         _getDeviceProcAddr = (delegate* unmanaged<VkDevice, byte*, nint>)I("vkGetDeviceProcAddr");
     }
 
@@ -120,6 +132,12 @@ internal static unsafe class VulkanCommands
         UnmapMemory = (delegate* unmanaged<VkDevice, VkDeviceMemory, void>)D(device, "vkUnmapMemory");
         DestroyBuffer = (delegate* unmanaged<VkDevice, VkBuffer, nint, void>)D(device, "vkDestroyBuffer");
         FreeMemory = (delegate* unmanaged<VkDevice, VkDeviceMemory, nint, void>)D(device, "vkFreeMemory");
+        CreateImage = (delegate* unmanaged<VkDevice, VkImageCreateInfo*, nint, VkImage*, VkResult>)D(device, "vkCreateImage");
+        GetImageMemoryRequirements = (delegate* unmanaged<VkDevice, VkImage, VkMemoryRequirements*, void>)D(device, "vkGetImageMemoryRequirements");
+        BindImageMemory = (delegate* unmanaged<VkDevice, VkImage, VkDeviceMemory, ulong, VkResult>)D(device, "vkBindImageMemory");
+        DestroyImage = (delegate* unmanaged<VkDevice, VkImage, nint, void>)D(device, "vkDestroyImage");
+        GetMemoryWin32Handle = (delegate* unmanaged<VkDevice, VkMemoryGetWin32HandleInfoKHR*, nint*, VkResult>)Optional(device, "vkGetMemoryWin32HandleKHR");
+        GetMemoryFd = (delegate* unmanaged<VkDevice, VkMemoryGetFdInfoKHR*, int*, VkResult>)Optional(device, "vkGetMemoryFdKHR");
     }
 
     /// <summary>Resolves by name, for anything that loads its own entry points — Skia does,
@@ -144,6 +162,14 @@ internal static unsafe class VulkanCommands
         nint address = (nint)vkGetInstanceProcAddr(_instance, bytes).Value;
         if (address == 0) throw new InvalidOperationException($"Vulkan instance command missing: {name}");
         return address;
+    }
+
+    /// <summary>Like <see cref="D"/> but returns zero rather than throwing, for a command
+    /// that belongs to an extension the device may not have enabled.</summary>
+    private static nint Optional(VkDevice device, string name)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
+        fixed (byte* p = bytes) return _getDeviceProcAddr(device, p);
     }
 
     private static nint D(VkDevice device, string name)

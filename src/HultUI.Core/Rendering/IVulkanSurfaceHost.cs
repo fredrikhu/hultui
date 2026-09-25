@@ -102,3 +102,84 @@ public interface IVulkanSurfaceHost
     /// </summary>
     void RecreateSwapchain(int widthPx, int heightPx);
 }
+
+/// <summary>
+/// A Vulkan image that an OpenGL context can render into, described from both sides.
+///
+/// <para>One allocation, two names for it. The Vulkan half is what Skia needs to draw the
+/// result; the GL half is what a decoder needs to render into it. Nothing is copied between
+/// them — that is the whole point, and phase 0 of <c>docs/design/HDR.md</c> is the proof
+/// that drivers allow it.</para>
+/// </summary>
+/// <param name="Image">The <c>VkImage</c> handle.</param>
+/// <param name="Memory">Its <c>VkDeviceMemory</c>. A swapchain image has none to describe;
+/// this one is an ordinary allocation and Skia wants to know about it.</param>
+/// <param name="MemorySize">The allocation's size in bytes, as Vulkan reported it — GL is
+/// told the same number on import and a mismatch fails there rather than here.</param>
+/// <param name="Format">Its <c>VkFormat</c>.</param>
+/// <param name="Usage">The <c>VkImageUsageFlags</c> it was created with.</param>
+/// <param name="Layout">The <c>VkImageLayout</c> it is in when the renderer gets it back —
+/// what <see cref="IVulkanInteropHost.FinishExternalFrame"/> leaves it in.</param>
+/// <param name="WidthPx">Width in device pixels.</param>
+/// <param name="HeightPx">Height in device pixels.</param>
+/// <param name="GlFramebuffer">A GL framebuffer whose colour attachment is this image.</param>
+/// <param name="GlTexture">That attachment, as a GL texture name.</param>
+/// <param name="GlInternalFormat">The GL internal format it was imported as — the number a
+/// producer has to be told so it stops assuming eight bits.</param>
+public readonly record struct VulkanInteropImage(
+    ulong Image, ulong Memory, ulong MemorySize, uint Format, uint Usage, uint Layout,
+    int WidthPx, int HeightPx, uint GlFramebuffer, uint GlTexture, uint GlInternalFormat);
+
+/// <summary>
+/// The half of a Vulkan host that lets OpenGL code draw inside the frame — phase 4 of
+/// <c>docs/design/HDR.md</c>.
+///
+/// <para>It is separate from <see cref="IVulkanSurfaceHost"/> because it is optional in a way
+/// the swapchain is not. A host that cannot do it still renders; a video on such a host goes
+/// the software route it goes today, which works and costs twice the CPU. Nothing here is on
+/// the path of a window that never shows video.</para>
+///
+/// <para><b>Why a Vulkan renderer needs this at all.</b> mpv renders with OpenGL and nothing
+/// else — its render API defines exactly two types, <c>opengl</c> and <c>sw</c>. A Vulkan
+/// window has no GL context, so one is made beside it, and the two APIs are given one image
+/// to share rather than a copy each.</para>
+/// </summary>
+public interface IVulkanInteropHost
+{
+    /// <summary>
+    /// Whether GL code can run against this host, doing whatever one-off setup that needs —
+    /// creating the hidden context, checking it landed on the same GPU as the Vulkan device,
+    /// checking the driver offers the external-memory extensions.
+    ///
+    /// <para>Deliberately not done at start-up. Loading a GL driver costs around 130 ms (see
+    /// <c>docs/design/STARTUP.md</c>) and most windows never show a video; this runs on the
+    /// first frame that actually wants it. Asked more than once, it answers from cache.</para>
+    /// </summary>
+    bool TryEnableInterop();
+
+    /// <summary>Resolves GL entry points in the hidden context.</summary>
+    Func<string, nint> GlGetProcAddress { get; }
+
+    /// <summary>Runs <paramref name="draw"/> with the hidden GL context current.</summary>
+    void RunOnGLContext(Action draw);
+
+    /// <summary>
+    /// An image of this size for GL to render into, creating or resizing one as needed, or
+    /// null when interop is unavailable. The host owns it; it stays valid until the next
+    /// call with a different size or until the host is disposed.
+    /// </summary>
+    VulkanInteropImage? LendInteropImage(int widthPx, int heightPx);
+
+    /// <summary>
+    /// Orders what GL just wrote before what Vulkan is about to read, and hands the image
+    /// back to the Vulkan queue. No-op when nothing is lent.
+    ///
+    /// <para><b>This stalls, on purpose.</b> <c>glFinish</c> and a queue wait are the blunt
+    /// instrument; <c>VK_KHR_external_semaphore</c> with <c>GL_EXT_semaphore</c> is the sharp
+    /// one. The blunt one was measured first — 0.27 ms a frame at 1080p and 0.29 at 4K, flat
+    /// across resolutions because it is the price of a submit rather than of the image — which
+    /// is 7 ms of every second at 24 fps against the 175 ms the copy it replaces costs. So
+    /// semaphores are an optimisation here and not a precondition.</para>
+    /// </summary>
+    void FinishExternalFrame();
+}

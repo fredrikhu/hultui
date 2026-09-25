@@ -55,11 +55,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             Decide(VideoSinkMode.Gpu);
             // The renderer sets up inside the frame, before there is anything to draw:
             // that is what lets a decoder create its GL context ahead of loading.
-            surface.RunExternalGL(() =>
-            {
-                _gl ??= new GLFunctions(surface.GetProcAddress);
-                _renderer.PrepareGL(surface.GetProcAddress);
-            });
+            surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
         }
         if (!_renderer.TryGetFrameSize(out int width, out int height) || width <= 0 || height <= 0)
             return false;
@@ -70,10 +66,13 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
 
         surface.RunExternalGL(() =>
         {
-            _gl ??= new GLFunctions(surface.GetProcAddress);
-
             // The renderer first: one that cannot composite a plain GL texture lends its own
             // target, and rendering into that is what keeps the frame on the GPU.
+            //
+            // The sink's own GL entry points are resolved only on the branch that uses them.
+            // A renderer that lends a target needs none of them — and on a Vulkan surface
+            // there is no guarantee the nine functions a texture needs are even reachable
+            // through its resolver.
             if (surface.TryAcquireFrameTarget(width, height, out var lent))
             {
                 rendererOwned = true;
@@ -84,12 +83,13 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             }
             else
             {
+                _gl ??= new GLFunctions(surface.GetProcAddress);
                 EnsureTarget(width, height);
                 framebuffer = _framebuffer;
                 texture = _texture;
             }
 
-            drew = _renderer.Render(surface.GetProcAddress, framebuffer, width, height);
+            drew = _renderer.Render(surface.GetProcAddress, framebuffer, width, height, format);
         });
 
         // A renderer with nothing new keeps the last frame: the target still holds it.

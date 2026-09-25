@@ -64,7 +64,8 @@ public sealed class GpuFrameSinkGLTests
         public bool TryGetFrameSize(out int width, out int height) { width = 320; height = 180; return true; }
         public bool RendersBottomUp => true;
 
-        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height)
+        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
+            uint internalFormat)
         {
             GL ??= new GL(getProcAddress);
             GL.BindFramebuffer(0x8D40, framebuffer);

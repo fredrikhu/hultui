@@ -413,7 +413,8 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         LoadPending();
     }
 
-    public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height)
+    public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
+        uint internalFormat)
     {
         if (_render == 0)
             CreateGLContext(getProcAddress);
@@ -422,7 +423,16 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn)
             return false;   // nothing new; the texture still holds the last frame
 
-        var fbo = new mpv_opengl_fbo { fbo = (int)framebuffer, w = width, h = height, internal_format = 0 };
+        // Zero means "whatever the FBO already has", which is right for the sink's own
+        // RGBA8 texture and wrong for a renderer-lent half-float one: told nothing, mpv
+        // assumes eight bits and dithers to them inside a target that holds sixteen.
+        var fbo = new mpv_opengl_fbo
+        {
+            fbo = (int)framebuffer,
+            w = width,
+            h = height,
+            internal_format = (int)internalFormat,
+        };
         int flip = 0;
         // By default mpv hands a frame over early and then sleeps inside this call
         // until the frame's display time — on the UI thread, inside the frame, so the
