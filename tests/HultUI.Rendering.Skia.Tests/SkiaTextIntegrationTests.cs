@@ -304,8 +304,16 @@ public class SkiaTextIntegrationTests
         // The font collection keys fallback by language, but the pipeline caches whole
         // layouts by text — so without more, text laid out before a language switch kept
         // the old culture's glyphs.
+        //
+        // 東 (U+6771), deliberately, and not the simplified 东 (U+4E1C). A character has to
+        // exist in both cultures' fonts for the choice between them to mean anything, and a
+        // simplified-only one does not: Windows ships no Japanese face covering U+4E1C, so
+        // ja-JP and zh-TW both land on Microsoft JhengHei UI and the assertion fails on a
+        // machine where the feature is working perfectly. Noto Sans CJK JP covers the whole
+        // Unihan repertoire, which is why the simplified form passed on Linux. With 東 this
+        // reads Yu Gothic UI against Microsoft JhengHei UI on Windows.
         var pipeline = CreatePipeline();
-        string Face() => ((SkiaSharp.SKTypeface)pipeline.Layout("东京", DefaultStyle, 10_000, null)
+        string Face() => ((SkiaSharp.SKTypeface)pipeline.Layout("東京", DefaultStyle, 10_000, null)
             .Lines[0].Runs[0].Font.NativeHandle).FamilyName;
 
         var saved = System.Globalization.CultureInfo.CurrentUICulture;
