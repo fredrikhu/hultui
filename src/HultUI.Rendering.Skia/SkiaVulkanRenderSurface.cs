@@ -45,6 +45,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     private GRBackendRenderTarget? _target;
     private SKSurface? _surface;
 
+    /// <summary>
+    /// Where the frame is drawn when the swapchain needs values past 1 — see
+    /// <see cref="ColorSpaceFor"/>. Plain 0..1 linear sRGB, so a glyph and a fill agree,
+    /// and multiplied once on the way to the swapchain.
+    /// </summary>
+    private SKSurface? _offscreen;
+    private SKPaint? _blit;
+    private int _offscreenWidth, _offscreenHeight;
+
     private int _width;
     private int _height;
     private float _scaleFactor = 1f;
@@ -121,7 +130,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         var surface = SurfaceFor(frame);
         if (surface is null) return false;
 
-        _renderContext.SetCanvas(surface.Canvas);
+        _renderContext.SetCanvas((OffscreenFor(frame) ?? surface).Canvas);
         _frameOpen = true;
         return true;
     }
@@ -136,6 +145,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     public void Present()
     {
         if (!_frameOpen) return;
+
+        // The frame was drawn at 0..1; this is where it gets the display's SDR white level,
+        // once, as an image rather than as a property of every paint.
+        if (_offscreen is { } offscreen && _surface is { } swapchainSurface)
+        {
+            offscreen.Flush();
+            using var image = offscreen.Snapshot();
+            swapchainSurface.Canvas.DrawImage(image, 0, 0, _blit);
+        }
 
         _grContext.Flush();
         _grContext.Submit();
@@ -187,6 +205,53 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         _target = target;
         _surface = surface;
         return surface;
+    }
+
+    /// <summary>
+    /// The offscreen to draw into this frame, or null when the swapchain can be drawn on
+    /// directly. Needed only when white has to exceed 1, which is scRGB's case and not an
+    /// ordinary sRGB swapchain's.
+    /// </summary>
+    private SKSurface? OffscreenFor(in VulkanFrameTarget frame)
+    {
+        if (frame.ColorSpace != VkColorSpaceExtendedSrgbLinear || _host.SdrWhiteScale <= 1.0001f)
+        {
+            ReleaseOffscreen();
+            return null;
+        }
+
+        if (_offscreen is not null && _offscreenWidth == frame.WidthPx && _offscreenHeight == frame.HeightPx)
+            return _offscreen;
+
+        ReleaseOffscreen();
+
+        var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
+            SKAlphaType.Premul, SKColorSpace.CreateSrgbLinear());
+        _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
+        if (_offscreen is null) return null;
+
+        _offscreenWidth = frame.WidthPx;
+        _offscreenHeight = frame.HeightPx;
+
+        // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
+        // whole thing being worked around. Src rather than SrcOver — the offscreen is the
+        // entire frame and there is nothing underneath worth blending with.
+        using var effect = SKRuntimeEffect.CreateColorFilter(
+            "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
+        if (effect is null) { ReleaseOffscreen(); return null; }
+
+        var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = _host.SdrWhiteScale };
+        _blit = new SKPaint { ColorFilter = effect.ToColorFilter(uniforms), BlendMode = SKBlendMode.Src };
+        return _offscreen;
+    }
+
+    private void ReleaseOffscreen()
+    {
+        _offscreen?.Dispose();
+        _blit?.Dispose();
+        _offscreen = null;
+        _blit = null;
+        _offscreenWidth = _offscreenHeight = 0;
     }
 
     private void ReleaseFrameSurface()
@@ -255,6 +320,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         _grContext.Submit(synchronous: true);
 
         ReleaseFrameSurface();
+        ReleaseOffscreen();
         _frameOpen = false;
     }
 

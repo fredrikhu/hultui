@@ -160,8 +160,32 @@ like a fill. The clamp is specific to exceeding 1 on the glyph path.
 So the scale stops being a property of the drawing and becomes a property of the finished
 picture: render the frame into an offscreen surface at 0..1, where a glyph and a fill agree
 because neither is being asked for anything unusual, then multiply once while blitting to
-the swapchain. Proven in the spike; not yet in the renderer, which is why the F16 path is
-uniformly dim rather than unevenly bright and why the flag stays off.
+the swapchain. **Built**, and white text now matches white fills exactly — nought
+mis-scaled white pixels against the 8-bit reference, where before there were 511.
+
+**The clamp is at 1, and only upward.** Scaling *down* works per paint for both fills and
+glyphs (0.251 and 0.251 through either a colour matrix or an SkSL filter). That matters for
+the choice below, because HDR10 scales down where scRGB scales up.
+
+### scRGB or HDR10, measured
+
+| | unpaced fps |
+|---|---|
+| 8-bit sRGB, straight to the swapchain | ~7500 (drifts 7100–9200 between runs) |
+| F16 scRGB, straight to the swapchain | ~4110 |
+| F16 scRGB, offscreen and blit | ~3950 |
+
+**The extra pass costs about 4%.** The 2× is the 64-bit render target, not the blit — which
+was the thing worth knowing, because it was the blit that looked like the reason to prefer
+HDR10.
+
+So **scRGB stays**. HDR10 would halve the bandwidth, being 32 bits a pixel like the 8-bit
+path, and its downward scale needs no offscreen. Against that: PQ encodes *absolute*
+luminance and Skia's colour management is relative, so sRGB white would land at 10,000 nits
+and putting it back at 240 means a linear scale applied before a non-linear encode — which
+is not what a colour filter does, and not something the colour space can express either.
+That is a new investigation with its own unknowns, in exchange for bandwidth that is not
+currently the constraint. Worth revisiting if it ever is.
 
 **3 — The HDR swapchain.** `VK_EXT_swapchain_colorspace`, scRGB FP16, HDR metadata, and
 the detection for when the display and compositor actually support it (on Linux that means

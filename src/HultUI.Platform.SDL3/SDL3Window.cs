@@ -312,7 +312,14 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             UpdateSize();
             _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight);
             // Only meaningful for an scRGB surface; the host ignores it otherwise.
-            _vulkanHost.SdrWhiteScale = SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
+            // HULTUI_VULKAN_WHITE_SCALE overrides what the display reports — for a machine
+            // whose white level cannot be queried, and for telling the cost of the extra
+            // pass from the cost of the half-float target, since 1 turns the pass off.
+            _vulkanHost.SdrWhiteScale =
+                float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
+                    System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f
+                    ? forced
+                    : SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
             StartupTrace.Mark("vulkan device");
             _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, TakePreloadedText());
             StartupTrace.Mark("skia surface");
