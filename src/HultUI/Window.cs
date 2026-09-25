@@ -789,6 +789,11 @@ public sealed class Window : IOverlayHost, IDisposable
         // span includes BeginFrame's full-surface clear: that clear is part of
         // producing this frame's pixels, not a separate phase, so folding it in
         // keeps the ledger honest without inventing a row for it.
+        // A backend that has to acquire a target before it can be drawn on says so here.
+        // Skipping is normal — a resize in flight, or a window with no area — and the next
+        // frame will find one.
+        if (!PlatformWindow.Surface.BeginFrame()) return;
+
         var ctx = PlatformWindow.Surface.RenderContext;
         _perf.BeginRender();
         using (_tracer.Begin("Phase", "Render"))

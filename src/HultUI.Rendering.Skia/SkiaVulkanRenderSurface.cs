@@ -1,3 +1,4 @@
+using HultUI.Core.DevTools;
 using HultUI.Core.Rendering;
 using SkiaSharp;
 
@@ -24,6 +25,7 @@ namespace HultUI.Rendering.Skia;
 public sealed class SkiaVulkanRenderSurface : IRenderSurface
 {
     private readonly IVulkanSurfaceHost _host;
+    private readonly GRVkExtensions _extensions;
     private readonly GRVkBackendContext _backend;
     private readonly GRContext _grContext;
     private readonly SkiaRenderContext _renderContext = new();
@@ -51,6 +53,13 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
 
+        // Skia has to be told what is enabled before it will validate anything against the
+        // device. Leaving this null lets the context be created and then makes every surface
+        // over a perfectly ordinary BGRA swapchain image come back null.
+        _extensions = GRVkExtensions.Create(host.GetProcedureAddress,
+            host.Instance, host.PhysicalDevice,
+            host.EnabledInstanceExtensions, host.EnabledDeviceExtensions);
+
         _backend = new GRVkBackendContext
         {
             VkInstance = host.Instance,
@@ -60,6 +69,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
             GraphicsQueueIndex = host.GraphicsQueueFamily,
             MaxAPIVersion = host.ApiVersion,
             GetProcedureAddress = host.GetProcedureAddress,
+            Extensions = _extensions,
+            VkPhysicalDeviceFeatures2 = host.PhysicalDeviceFeatures2,
         };
 
         _grContext = GRContext.CreateVulkan(_backend)
@@ -96,10 +107,19 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     public bool BeginFrame()
     {
         if (_frameOpen) return true;
-        if (_host.AcquireNextImage() is not { } frame) return false;
+        if (_host.AcquireNextImage() is not { } frame)
+        {
+            StartupTrace.Mark("vulkan acquire returned nothing");
+            return false;
+        }
 
         var surface = SurfaceFor(frame);
-        if (surface is null) return false;
+        if (surface is null)
+        {
+            StartupTrace.Mark($"vulkan no surface for image {frame.Index} fmt {frame.Format}");
+            return false;
+        }
+        StartupTrace.Mark($"vulkan frame {frame.Index} {frame.WidthPx}x{frame.HeightPx}");
 
         _renderContext.SetCanvas(surface.Canvas);
         _frameOpen = true;
@@ -119,6 +139,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
 
         _grContext.Flush();
         _grContext.Submit();
+        StartupTrace.Mark("vulkan present");
         _host.PresentAcquiredImage();
         _frameOpen = false;
     }
@@ -136,7 +157,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
             ImageTiling = VkImageTilingOptimal,
             ImageLayout = frame.Layout,
             Format = frame.Format,
-            ImageUsageFlags = VkImageUsageColorAttachment | VkImageUsageTransferDst,
+            ImageUsageFlags = frame.Usage,
             SampleCount = 1,
             LevelCount = 1,
             CurrentQueueFamily = _host.GraphicsQueueFamily,
@@ -146,15 +167,18 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         var target = new GRBackendRenderTarget(frame.WidthPx, frame.HeightPx, imageInfo);
         if (!target.IsValid)
         {
+            StartupTrace.Mark("vulkan render target invalid");
             target.Dispose();
             return null;
         }
 
-        // Rgba8888 and no colour space: phase 1 is SDR, and matching the GL surface exactly
-        // is the point. Phase 2 is where this becomes RgbaF16 with one attached.
-        var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888);
+        // The colour type has to match the swapchain's format or SKSurface.Create quietly
+        // returns null — which looks exactly like a driver refusing the render target, and
+        // is not that. Most Windows surfaces offer BGRA first.
+        var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft, ColorTypeFor(frame.Format));
         if (surface is null)
         {
+            StartupTrace.Mark($"vulkan SKSurface.Create null (ct {ColorTypeFor(frame.Format)})");
             target.Dispose();
             return null;
         }
@@ -162,6 +186,20 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         _perImage[frame.Index] = (target, surface);
         return surface;
     }
+
+    /// <summary>
+    /// The Skia colour type for a <c>VkFormat</c>. No colour space either way: phase 1 is
+    /// SDR and matching the GL surface exactly is the point — phase 2 is where this grows an
+    /// F16 case and an <see cref="SKColorSpace"/> with it.
+    /// </summary>
+    private static SKColorType ColorTypeFor(uint format) => format switch
+    {
+        VkFormatR8G8B8A8Unorm or VkFormatR8G8B8A8Srgb => SKColorType.Rgba8888,
+        VkFormatB8G8R8A8Unorm or VkFormatB8G8R8A8Srgb => SKColorType.Bgra8888,
+        VkFormatR16G16B16A16Sfloat => SKColorType.RgbaF16,
+        VkFormatA2B10G10R10UnormPack32 => SKColorType.Rgba1010102,
+        _ => SKColorType.Bgra8888,
+    };
 
     private void DropWrappedSurfaces()
     {
@@ -187,6 +225,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         _renderContext.Dispose();
         _grContext.Dispose();
         _backend.Dispose();
+        _extensions.Dispose();
     }
 
     // The handful of Vulkan enum values this file needs, as literals rather than as a
@@ -195,4 +234,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     private const uint VkSharingModeExclusive = 0;
     private const uint VkImageUsageTransferDst = 0x00000002;
     private const uint VkImageUsageColorAttachment = 0x00000010;
+    private const uint VkFormatR8G8B8A8Unorm = 37;
+    private const uint VkFormatR8G8B8A8Srgb = 43;
+    private const uint VkFormatB8G8R8A8Unorm = 44;
+    private const uint VkFormatB8G8R8A8Srgb = 50;
+    private const uint VkFormatA2B10G10R10UnormPack32 = 64;
+    private const uint VkFormatR16G16B16A16Sfloat = 97;
 }

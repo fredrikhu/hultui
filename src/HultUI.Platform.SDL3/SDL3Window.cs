@@ -39,6 +39,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     internal SDL_Window* NativeWindow => _window;
     private SDL_GLContextState* _glContext;
     private SkiaGLRenderSurface? _surface;
+
+    /// <summary>The Vulkan path, when HULTUI_RENDERER=vulkan selected it. Exactly one of
+    /// this and <see cref="_surface"/> is ever non-null. Phase 1 of docs/design/HDR.md.</summary>
+    private SkiaVulkanRenderSurface? _vulkanSurface;
+    private SdlVulkanHost? _vulkanHost;
+
+    /// <summary>Whether this process was asked for the Vulkan renderer. Read once: a window
+    /// that changed backend halfway through would have nothing to draw into.</summary>
+    internal static readonly bool UseVulkan =
+        Environment.GetEnvironmentVariable("HULTUI_RENDERER") is "vulkan";
     private bool _disposed;
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
@@ -150,7 +160,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     public float InputScale => PixelDensity / DisplayScale;
 
-    public IRenderSurface Surface => _surface ?? throw new InvalidOperationException("Window not initialized");
+    public IRenderSurface Surface =>
+        (IRenderSurface?)_surface ?? _vulkanSurface
+        ?? throw new InvalidOperationException("Window not initialized");
     public bool IsOpen { get; private set; }
 
     public EventTranslator EventTranslator { get; } = new();
@@ -256,7 +268,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // the OS would composite that garbage (a black/white flash), made worse on
         // Windows by the custom frame's SWP_FRAMECHANGED repaint below. The app
         // loop calls Show() right after the first frame is presented instead.
-        var flags = SDL_WindowFlags.SDL_WINDOW_OPENGL
+        var flags = (UseVulkan ? SDL_WindowFlags.SDL_WINDOW_VULKAN : SDL_WindowFlags.SDL_WINDOW_OPENGL)
             | SDL_WindowFlags.SDL_WINDOW_RESIZABLE
             | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY
             | SDL_WindowFlags.SDL_WINDOW_HIDDEN;
@@ -286,20 +298,31 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         _title = title;
 
-        _glContext = SDL_GL_CreateContext(_window);
-        if (_glContext == null)
-            throw new InvalidOperationException($"SDL_GL_CreateContext failed: {GetError()}");
+        if (UseVulkan)
+        {
+            UpdateSize();
+            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight);
+            StartupTrace.Mark("vulkan device");
+            _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, TakePreloadedText());
+            StartupTrace.Mark("skia surface");
+        }
+        else
+        {
+            _glContext = SDL_GL_CreateContext(_window);
+            if (_glContext == null)
+                throw new InvalidOperationException($"SDL_GL_CreateContext failed: {GetError()}");
 
-        SDL_GL_MakeCurrent(_window, _glContext);
-        // Disable driver-level vsync — on Wayland the compositor handles
-        // vsync, and swap interval 1 can block during interactive resize.
-        SDL_GL_SetSwapInterval(0);
-        StartupTrace.Mark("gl context");
+            SDL_GL_MakeCurrent(_window, _glContext);
+            // Disable driver-level vsync — on Wayland the compositor handles
+            // vsync, and swap interval 1 can block during interactive resize.
+            SDL_GL_SetSwapInterval(0);
+            StartupTrace.Mark("gl context");
 
-        // Create SkiaSharp surface with SDL3 GL proc resolver, adopting the preloaded
-        // text pipeline when there is one (null → the surface builds its own).
-        _surface = new SkiaGLRenderSurface(GetGLProcAddress, TakePreloadedText());
-        StartupTrace.Mark("skia surface");
+            // Create SkiaSharp surface with SDL3 GL proc resolver, adopting the preloaded
+            // text pipeline when there is one (null → the surface builds its own).
+            _surface = new SkiaGLRenderSurface(GetGLProcAddress, TakePreloadedText());
+            StartupTrace.Mark("skia surface");
+        }
 
         // Text input is enabled on focus (see StartTextInput) — leaving it
         // always on would make the Win32 IMM/TSF consume dead keys and
@@ -665,6 +688,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     public void SwapBuffers()
     {
+        // Vulkan has already presented inside Surface.Present(): the swapchain image is
+        // handed to the presentation engine there, because that is where the frame's work
+        // is known to be finished. There is nothing left to swap.
+        if (_vulkanSurface is not null) return;
         SDL_GL_SwapWindow(_window);
     }
 
@@ -1069,6 +1096,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _gcHandle.Free();
 
         _surface?.Dispose();
+        // Surface before host: the surface holds render targets over the swapchain's images.
+        _vulkanSurface?.Dispose();
+        _vulkanHost?.Dispose();
         _surface = null;
 
         foreach (var cursor in _cursorCache.Values)
