@@ -31,6 +31,7 @@ internal static class Program
         try
         {
             if (args.Contains("--bisect")) return Bisect.Run();
+            if (args.Contains("--text")) return TextColorTest.Run();
             return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"), args.Contains("--skia"));
         }
         catch (Exception ex)

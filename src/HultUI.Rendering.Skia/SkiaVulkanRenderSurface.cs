@@ -177,7 +177,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         // returns null — which looks exactly like a driver refusing the render target, and
         // is not that. Most Windows surfaces offer BGRA first.
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
-            ColorTypeFor(frame.Format), ColorSpaceFor(frame.ColorSpace, _host.SdrWhiteScale));
+            ColorTypeFor(frame.Format), ColorSpaceFor(frame.ColorSpace));
         if (surface is null)
         {
             target.Dispose();
@@ -210,31 +210,28 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     /// blending happens in whatever space the bytes are already in.</para>
     /// </summary>
     /// <summary>
-    /// <b>Known gap.</b> The scale below reaches fills and reaches them exactly — flat
-    /// regions match the 8-bit path byte for byte — but it does not reach glyphs. Text drawn
-    /// white comes back at a third of the brightness of a white rectangle beside it, which
-    /// is the scale factor, so the glyph colour is being written without the destination
-    /// conversion rather than being wrong by some amount. Grayscale antialiasing
-    /// (<c>SKPixelGeometry.Unknown</c>) was tried and changes nothing, so it is not the LCD
-    /// text path. Until it is understood, scRGB is a worse-looking choice than plain sRGB,
-    /// not a better one — which is why HULTUI_VULKAN_F16 stays off.
+    /// The colour space of the swapchain, told to Skia so that it converts rather than
+    /// assumes — phase 2 of <c>docs/design/HDR.md</c>.
+    ///
+    /// <para><b>The SDR white scale is deliberately not here.</b> scRGB fixes 1.0 at 80 nits
+    /// while Windows draws SDR white at whatever its brightness slider says, so an scRGB
+    /// surface has to emit more than 1 for white — and the obvious place to put that factor,
+    /// the destination colour space, does not work. Dividing the primaries by k makes fills
+    /// come out at k and leaves glyphs at 1: <c>spikes/HdrInterop --text</c> shows it, and
+    /// also shows that Skia converts text and fills identically for a real colour space
+    /// (sRGB red into linear Display P3 lands at 0.823 for both). <b>No paint can put a
+    /// glyph past 1</b> — not a scaled colour space, not a colour matrix, not an SkSL colour
+    /// filter. The scale has to stop being a property of the drawing and become a property
+    /// of the finished image: draw at 0..1 offscreen, multiply once on the way to the
+    /// swapchain. That is built and proven in the spike and not yet here, which is why
+    /// HULTUI_VULKAN_F16 stays off and why the F16 path is uniformly dim rather than
+    /// unevenly bright.</para>
     /// </summary>
-    private static SKColorSpace ColorSpaceFor(uint colorSpace, float whiteScale)
+    private static SKColorSpace ColorSpaceFor(uint colorSpace) => colorSpace switch
     {
-        // An ordinary sRGB swapchain: the colour space already says what white is.
-        if (colorSpace != VkColorSpaceExtendedSrgbLinear) return SKColorSpace.CreateSrgb();
-
-        // scRGB: linear light, and 1.0 is 80 nits by definition rather than "white".
-        if (whiteScale <= 1.0001f) return SKColorSpace.CreateSrgbLinear();
-
-        // Scaling the primaries down by k makes Skia emit k times the value for the same
-        // colour, which is what puts white on the display's actual SDR white instead of on
-        // scRGB's 80-nit reference. Done in the colour space rather than as a second pass
-        // over the frame: it is the same conversion Skia is already performing.
-        var matrix = SKColorSpaceXyz.Srgb.Values;
-        for (int i = 0; i < matrix.Length; i++) matrix[i] /= whiteScale;
-        return SKColorSpace.CreateRgb(SKColorSpaceTransferFn.Linear, new SKColorSpaceXyz(matrix));
-    }
+        VkColorSpaceExtendedSrgbLinear => SKColorSpace.CreateSrgbLinear(),
+        _ => SKColorSpace.CreateSrgb(),
+    };
 
     /// <summary>
     /// The Skia colour type for a <c>VkFormat</c>.

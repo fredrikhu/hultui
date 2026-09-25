@@ -142,10 +142,26 @@ So a correct linear 1.0 lands three times too dim beside every other window, and
 swapchain image is right the whole time — the capture cannot see it and neither can a
 screenshot, because the compositor is doing exactly what it was told.
 
-The scale goes into the destination colour space rather than into a second pass: dividing
-sRGB's primaries by 3 makes Skia emit 3× for the same colour, as part of the conversion it
-is already doing. **It reaches fills and not glyphs**, which is the open problem — see the
-note on `ColorSpaceFor`.
+**Where that factor can live, investigated** (`spikes/HdrInterop --text`):
+
+| how | fill | glyph |
+|---|---|---|
+| destination primaries divided by 3 | 3 | 1 |
+| `SKColorFilter.CreateColorMatrix` ×3 | 1 (clamped) | 1 |
+| `paint.ColorF` = 3 | 12.8 (through the transfer fn) | 1 |
+| SkSL colour filter ×3 | 3 | 1 |
+| **drawn 0..1 offscreen, image scaled once on the way out** | **3** | **3** |
+
+**No paint can put a glyph past 1.** Not a bent colour space, not a colour matrix, not a
+shader. And it is not that text escapes colour management — sRGB red into a linear Display
+P3 destination lands at 0.823 for a fill and 0.824 for a glyph, so text is converted exactly
+like a fill. The clamp is specific to exceeding 1 on the glyph path.
+
+So the scale stops being a property of the drawing and becomes a property of the finished
+picture: render the frame into an offscreen surface at 0..1, where a glyph and a fill agree
+because neither is being asked for anything unusual, then multiply once while blitting to
+the swapchain. Proven in the spike; not yet in the renderer, which is why the F16 path is
+uniformly dim rather than unevenly bright and why the flag stays off.
 
 **3 — The HDR swapchain.** `VK_EXT_swapchain_colorspace`, scRGB FP16, HDR metadata, and
 the detection for when the display and compositor actually support it (on Linux that means
