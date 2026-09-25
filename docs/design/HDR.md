@@ -127,6 +127,13 @@ this is where the UI either keeps looking right or goes subtly wrong everywhere 
 gradients, the shadow and tint work in every app. Expect this phase to be about the apps,
 not the renderer.
 
+**Detection, found while starting phase 3:** a Vulkan surface lists every format and colour
+space the *driver* supports, not what the *display* is doing. The list is byte-for-byte the
+same with the monitor in HDR mode and out of it — checked, not assumed — so enumeration can
+never answer "is HDR on". SDL asks the compositor, which is the only thing that knows:
+`SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN`, surfaced as `IPlatformWindow.IsHdrDisplay` and
+printed by `DescribeGraphics` on both backends.
+
 **3 — The HDR swapchain.** `VK_EXT_swapchain_colorspace`, scRGB FP16, HDR metadata, and
 the detection for when the display and compositor actually support it (on Linux that means
 the Wayland colour-management protocol, and X11 simply cannot). Falls back to SDR

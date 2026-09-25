@@ -720,6 +720,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// swap interval, default-framebuffer MSAA samples, and the drawable
     /// geometry. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
     /// </summary>
+    /// <summary>
+    /// Whether the display this window is on is <i>currently</i> in HDR mode.
+    ///
+    /// <para>Not the same question as "can the surface do HDR". A Vulkan surface lists every
+    /// format and colour space the driver supports whatever the monitor is set to — the list
+    /// is identical with HDR on and off, which was checked rather than assumed — so
+    /// enumeration cannot answer this and phase 3 of docs/design/HDR.md needs an answer. SDL
+    /// asks the compositor, which is the only thing that knows.</para>
+    /// </summary>
+    public bool IsHdrDisplay
+    {
+        get
+        {
+            if (_window == null) return false;
+            var display = SDL_GetDisplayForWindow(_window);
+            if ((uint)display == 0) return false;
+            var properties = SDL_GetDisplayProperties(display);
+            return SDL_GetBooleanProperty(properties, SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN, false);
+        }
+    }
+
     public string? DescribeGraphics()
     {
         if (_window == null) return null;
@@ -732,7 +753,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             SDL_GetWindowSize(_window, &vw, &vh);
             return $"video={SDL_GetCurrentVideoDriver() ?? "?"} "
                 + vulkan.Describe(PixelWidth, PixelHeight, DisplayScale, RefreshRate)
-                + $" window={vw}x{vh}";
+                + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")} window={vw}x{vh}";
         }
 
         if (_glContext == null) return null;
@@ -770,7 +791,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             $"video={driver} renderer=\"{renderer}\" vendor=\"{vendor}\" gl=\"{version}\""
             + $" swapInterval={(haveInterval ? swapInterval.ToString() : "?")} samples={samples}"
             + $" drawable={PixelWidth}x{PixelHeight}px window={ww}x{wh}"
-            + $" density={PixelDensity} scale={DisplayScale} refresh={RefreshRate}Hz");
+            + $" density={PixelDensity} scale={DisplayScale} refresh={RefreshRate}Hz"
+            + $" hdrDisplay={(IsHdrDisplay ? "on" : "off")}");
     }
 
     private static string Utf8OrFallback(byte* s)
