@@ -107,7 +107,11 @@ remains the default.
 
 One trap worth carrying forward: **Skia refuses a render target without
 `VK_IMAGE_USAGE_TRANSFER_SRC_BIT`** and says nothing — `SKSurface.Create` simply returns
-null. The bisect in `spikes/HdrInterop` pins it. Untested on Linux.
+null. The bisect in `spikes/HdrInterop` pins it.
+
+**Untested on Linux, and untested under resize anywhere.** The commands for both are in
+[HDR-PHASE1-LINUX.md](HDR-PHASE1-LINUX.md), which is the next thing to do — phase 2 changes
+colour handling and wants a known-good renderer underneath it.
 
 The original plan for this phase read:
 
