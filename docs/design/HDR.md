@@ -464,37 +464,37 @@ has to be drawn as *linear* rather than sRGB-encoded, which is a different `SKCo
 wrap in `WrapFrame`. Neither is large; both are untested against real HDR content, which neither
 machine has.
 
-**Built, and off by default, because it does not yet work.** The seam is in place and every
-part of it can be seen working except the last: `GpuFrameTarget` carries `WantsLinearLight` and
-`PeakNits` down to the producer, `GpuFrame` carries `ReferenceWhiteNits` back up,
-`MpvBackend` sets `target-prim`/`target-trc`/`target-peak` and reports libplacebo's 203, and
-`WrapFrame` declares the image linear and scales it into the canvas. `HULTUI_VIDEO_HDR=1` turns
-it on.
+**Built and working, opt-in through `HULTUI_VIDEO_HDR=1`.** The seam carries
+`WantsLinearLight` and `PeakNits` down to the producer and `ReferenceWhiteNits` back up;
+`MpvBackend` sets `target-prim`/`target-trc`/`target-peak` and reports libplacebo's 203;
+`WrapFrame` declares the image linear and scales it into the canvas.
 
-**What is proven, on a real HDR10 film** (2001, PQ/BT.2020, mastering peak 1000.6 nits): the
-spike renders it into the shared image through the same options and reads back a peak of
-**2.9082**, against **1.0000** with the options absent. The ordering does not matter — set before
-`mpv_initialize`, set after it, or set after playback has started, all three give 2.9082. Nor do
-the app's other options: `hwdec=auto-copy`, `keep-open`, `video-timing-offset=0` change nothing.
+**Measured end to end on a real HDR10 film** (2001, PQ/BT.2020, mastering peak 1000.6 nits),
+at two points in the pipeline in the same run:
 
-**What is not working:** in the app, with the flag on, mpv accepts every option (`rc=0`) and the
-surface lends a linear target, and still nothing above white reaches the swapchain. The picture
-is instead visibly *too bright*, which is what declaring an encoded frame linear would do.
+| | shared image | swapchain |
+|---|---|---|
+| `HULTUI_VIDEO_HDR=0` | max **1.000**, none above 1 | max **3.000** (= SDR white), none above |
+| `HULTUI_VIDEO_HDR=1` | max **4.766**, 1.2M samples above 1 | max **7.180**, 257k samples above SDR white |
 
-**The measurement that would settle it has not been taken.** The spike reads the shared image;
-the app reads the swapchain, after Skia has composited. Those are different questions and the
-difference is exactly where the loss is. An attempt to read the shared image back inside the app
-returned a uniform 0.000 for an image that plainly had a picture in it — a broken diagnostic, not
-a result, and it was removed rather than left to be believed. The reason is almost certainly that
-the readback declares a layout Skia has since moved the image out of, which is this backend's
-oldest trap.
+4.926 appeared in another sample, which is 1000/203 exactly: the mastering peak, arriving
+intact. And the 0..1 offscreen does **not** clamp — 7.18 passed through it — so the worry that
+phase 2's design would block this was unfounded.
 
-**So do it from the GL side instead.** `glReadPixels` on the interop framebuffer, inside
-`RunExternalGL` immediately after mpv renders, needs no Vulkan layout at all and answers the only
-question that matters: whether mpv wrote range into that image in the app, as it demonstrably
-does in the spike. Everything after that is Skia's compositing, and there the suspects are the
-premultiplied wrap (already tried: `SKAlphaType.Opaque` changed nothing) and the 0..1 offscreen
-that phase 2 built on the assumption nothing exceeds white.
+**Two false conclusions on the way there, both from the same mistake.** 2001 opens on a
+three-minute black overture, and several measurements were taken at frame 60, about 2.5 seconds
+in. A black frame reports a maximum of 0.000 or 1.000 and reads exactly like a producer that
+tone-mapped everything away, so the pipeline was twice declared broken when it was working and
+the film was simply black. The sample now takes `--start=<seconds>`, and the probe takes six
+spaced samples rather than one, because one landed on black again even after the seek.
+
+**The measurement that settled it** was reading the shared image back **through GL**, inside
+`RunExternalGL` right after mpv renders (`HULTUI_VIDEO_HDR_PROBE=<n>`). The equivalent read
+through Vulkan needs the image's layout, which Skia owns and moves; guessing it returned a
+uniform 0.000 from an image that plainly had a picture in it. GL has no layouts.
+
+**Still to decide, and still to check elsewhere.** Whether this should be the default rather
+than a flag; the luminance question below; and Linux, where none of it has run.
 
 **And then the original question.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay draws needs

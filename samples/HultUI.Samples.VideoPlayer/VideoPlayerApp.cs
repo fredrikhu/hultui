@@ -55,6 +55,9 @@ public sealed class VideoPlayerApp : IDisposable
         _player = new MediaPlayer(backends());
         _videoPlayer = new HultUI.Media.VideoPlayer(_player);
         _videoPlayer.FullscreenRequested += ToggleFullscreen;
+        // Every decoded frame is a chance to find out the duration is known, which is the
+        // first moment a start position can actually be honoured.
+        _player.FrameArrived += SeekWhenLoaded;
         // The headless driver pumps frames far faster than wall time, so the bar would
         // hide before any shot of it playing; HULTUI_MEDIA_NOHIDE=1 keeps it on screen.
         if (Environment.GetEnvironmentVariable("HULTUI_MEDIA_NOHIDE") is "1")
@@ -129,8 +132,23 @@ public sealed class VideoPlayerApp : IDisposable
         _window.Title = $"{Path.GetFileName(path)} - HultUI Video Player";
         _player.Open(MediaSource.FromFile(path), autoPlay: true);
 
-        if (_startSeconds > 0 && path == _initialFile)
-            _player.Seek(TimeSpan.FromSeconds(_startSeconds), precise: false);
+        // Not here. Open is asynchronous — the backend has not loaded the file yet, so a seek
+        // issued now is dropped and the film plays from the beginning instead, silently. That
+        // cost two runs' worth of measurements that looked like a black picture and were.
+        if (_startSeconds > 0 && path == _initialFile) _pendingSeek = true;
+    }
+
+    private bool _pendingSeek;
+
+    /// <summary>Takes the start position once there is media to seek in.</summary>
+    private void SeekWhenLoaded()
+    {
+        if (!_pendingSeek || _player is null) return;
+        if (_player.Duration is not { } duration || duration <= TimeSpan.Zero) return;
+
+        _pendingSeek = false;
+        _player.Seek(TimeSpan.FromSeconds(Math.Min(_startSeconds, duration.TotalSeconds - 1)),
+            precise: false);
     }
 
     private async Task OpenFromDialogAsync()

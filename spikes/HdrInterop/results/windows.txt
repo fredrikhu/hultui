@@ -210,3 +210,47 @@ which is exactly the scale SDL3Window.WhiteScale already returns on Wayland.
 On Windows the UI's scale comes from the display's own SDR white instead (240
 nits here, so 3.0), so UI white and video reference white would sit 240/203 =
 18% apart. That gap is the actual subject of phase 5, and it now has a number.
+
+
+═══════════════════════════════════════════════════════
+Phase 5 end to end, 2026-09-26, RTX 4080, Windows
+2001 (PQ/BT.2020, mastering peak 1000.6 nits), at 20:00
+═══════════════════════════════════════════════════════
+
+Two points in the pipeline, same run. The shared image is read through GL inside
+RunExternalGL, right after mpv renders; the swapchain is read at capture time,
+after Skia has composited.
+
+  HULTUI_VIDEO_HDR=0   shared image max 1,000  ( 0 above 1)
+                       swapchain    max 3,000  ( 0 above SDR white of 3,00)
+
+  HULTUI_VIDEO_HDR=1   shared image max 4,926  ( 537856 above 1)
+                       swapchain    max 12,281 ( 586929 above SDR white)
+
+4,926 is 1000/203 exactly: the film's mastering peak, arriving intact, measured
+against libplacebo's reference white. And 12,281 in scRGB is 12,281 x 80 = 982
+nits on screen for a 1000-nit highlight — right to within the frame-to-frame
+variation of where the peak falls.
+
+The 0..1 offscreen does NOT clamp. That was the main worry going in, since phase
+2 built it on the assumption nothing exceeds white, and 12,281 passed through it.
+
+Three false conclusions on the way here, all the same mistake in different
+clothes, all worth more than the result:
+
+  1. "The swapchain clamps HDR."  Measured at frame 60, which is 2,5 s into a
+     film that opens on a three-minute black overture. A black frame reports a
+     maximum of 0,000 or 1,000 and reads exactly like a producer that tone-mapped
+     everything away.
+
+  2. "The producer tone-maps it away."  One probe sample, which landed on black
+     again even after seeking. The probe now takes six spaced samples.
+
+  3. "Seeking fixed it."  --start seeked immediately after Open, which is before
+     the backend has loaded anything, so the seek was silently dropped and the
+     film played from the beginning. It now waits for a known duration.
+
+Every one of those produced a confident number from a frame with nothing in it.
+The lesson is not "check the timestamp" — it is that a measurement which cannot
+distinguish "nothing was drawn" from "nothing bright was drawn" is not a
+measurement, and both readings here look identical.

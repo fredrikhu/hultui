@@ -376,6 +376,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         _interopDirty = false;
 
         _gl!.Finish();
+        ProbeRangeOnce();
 
         var cmd = BeginOneShot();
         // GENERAL, from VK_QUEUE_FAMILY_EXTERNAL: with no shared semaphore to carry a layout,
@@ -453,6 +454,40 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         _glContext = null;
         _glWindow = null;
         _gl = null;
+    }
+
+    /// <summary>
+    /// <c>HULTUI_VIDEO_HDR_PROBE=&lt;n&gt;</c> reads the shared image back through GL on the
+    /// nth frame and says what the producer actually wrote into it.
+    ///
+    /// <para>One frame, once, because the read is the whole image — 53 MB at 4K — and stalls.
+    /// It exists because the two numbers this pipeline reports are answers to different
+    /// questions: the swapchain report is taken after Skia has composited, and a missing range
+    /// there could be the producer never making one or the renderer losing it.</para>
+    /// </summary>
+    private static readonly int ProbeFrame =
+        int.TryParse(Environment.GetEnvironmentVariable("HULTUI_VIDEO_HDR_PROBE"), out int n) && n > 0
+            ? n : 0;
+
+    private int _probeFrames;
+    private int _probesTaken;
+    private const int Probes = 6;
+
+    /// <summary>
+    /// Several samples, spaced out, because one is not evidence. A single read landed on a
+    /// black frame and reported 0.000, which reads exactly like a producer writing nothing —
+    /// and a film has plenty of black frames to land on.
+    /// </summary>
+    private void ProbeRangeOnce()
+    {
+        if (ProbeFrame == 0 || _probesTaken >= Probes || _glFramebuffer == 0) return;
+        if (++_probeFrames < ProbeFrame) return;
+        _probeFrames = 0;
+        _probesTaken++;
+
+        var (max, over1) = _gl!.ReadRange(_glFramebuffer, _interopWidth, _interopHeight);
+        Console.Error.WriteLine($"[interop] sample {_probesTaken}/{Probes} of the shared image " +
+            $"({_interopWidth}x{_interopHeight}): max {max:0.000}, {over1} above 1.0");
     }
 
     [DllImport("kernel32", SetLastError = true)]

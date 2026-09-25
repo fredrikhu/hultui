@@ -33,6 +33,10 @@ internal sealed unsafe class InteropGl
     private const uint OptimalTiling = 0x9584;
     private const uint DeviceUuidExt = 0x9597;
 
+    private const uint ReadFramebuffer = 0x8CA8;
+    private const uint Rgba = 0x1908;
+    private const uint HalfFloat = 0x140B;
+
     private readonly delegate* unmanaged[Cdecl]<uint, byte*> _getString;
     private readonly delegate* unmanaged[Cdecl]<uint, uint, byte*> _getStringi;
     private readonly delegate* unmanaged[Cdecl]<uint, int*, void> _getIntegerv;
@@ -53,6 +57,8 @@ internal sealed unsafe class InteropGl
     private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _deleteFramebuffers;
     private readonly delegate* unmanaged[Cdecl]<uint, uint, uint, int, void> _namedFramebufferTexture;
     private readonly delegate* unmanaged[Cdecl]<uint, uint, uint> _checkNamedFramebufferStatus;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, void> _bindFramebuffer;
+    private readonly delegate* unmanaged[Cdecl]<int, int, int, int, uint, uint, void*, void> _readPixels;
 
     public InteropGl()
     {
@@ -76,6 +82,8 @@ internal sealed unsafe class InteropGl
         _deleteFramebuffers = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteFramebuffers");
         _namedFramebufferTexture = (delegate* unmanaged[Cdecl]<uint, uint, uint, int, void>)Proc("glNamedFramebufferTexture");
         _checkNamedFramebufferStatus = (delegate* unmanaged[Cdecl]<uint, uint, uint>)Proc("glCheckNamedFramebufferStatus");
+        _bindFramebuffer = (delegate* unmanaged[Cdecl]<uint, uint, void>)Proc("glBindFramebuffer");
+        _readPixels = (delegate* unmanaged[Cdecl]<int, int, int, int, uint, uint, void*, void>)Proc("glReadPixels");
     }
 
     private static nint Proc(string name)
@@ -194,6 +202,40 @@ internal sealed unsafe class InteropGl
 
     public bool FramebufferComplete(uint fbo) =>
         _checkNamedFramebufferStatus(fbo, Framebuffer) == FramebufferComplete2;
+
+    /// <summary>
+    /// The brightest thing in the framebuffer, read from the GL side.
+    ///
+    /// <para>Deliberately GL and not Vulkan. The same question asked through Vulkan needs the
+    /// image's current layout, which Skia owns and moves, and an attempt to guess it read a
+    /// uniform zero out of an image that plainly had a picture in it. GL has no layouts: it
+    /// reads what the framebuffer holds.</para>
+    ///
+    /// <para>This is what mpv wrote, before the renderer has touched it — which is the only
+    /// measurement that separates "the producer never made HDR" from "the compositor lost
+    /// it".</para>
+    /// </summary>
+    public (float Max, long Over1) ReadRange(uint fbo, int width, int height)
+    {
+        if (_readPixels is null || _bindFramebuffer is null) return (0f, 0);
+
+        var pixels = new Half[(long)width * height * 4];
+        _bindFramebuffer(ReadFramebuffer, fbo);
+        fixed (Half* p = pixels) _readPixels(0, 0, width, height, Rgba, HalfFloat, p);
+        _bindFramebuffer(ReadFramebuffer, 0);
+
+        float max = 0f;
+        long over1 = 0;
+        for (long i = 0; i < pixels.LongLength; i += 4)
+            for (int c = 0; c < 3; c++)
+            {
+                float v = (float)pixels[i + c];
+                if (float.IsNaN(v)) continue;
+                if (v > max) max = v;
+                if (v > 1.0001f) over1++;
+            }
+        return (max, over1);
+    }
 
     public void Finish() => _finish();
 

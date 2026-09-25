@@ -505,7 +505,15 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             int b = mpv_set_property_string(_mpv, "target-trc", "linear");
             int c = mpv_set_property_string(_mpv, "target-peak",
                 peak.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
-            Console.Error.WriteLine($"[mpv] linear target: prim={a} trc={b} peak={peak:0} rc={c}");
+            // Read them back rather than trusting the return code: a property that reports
+            // success and then reads as something else is the difference between "mpv ignored
+            // us" and "mpv agreed and something later undid it".
+            Console.Error.WriteLine($"[mpv] linear target set: prim={a} trc={b} peak={c}; " +
+                $"reads back prim={Read("target-prim")} trc={Read("target-trc")} " +
+                $"peak={Read("target-peak")} tone-mapping={Read("tone-mapping")} " +
+                $"inverse={Read("inverse-tone-mapping")} target-contrast={Read("target-contrast")}");
+
+            string Read(string name) => GetString(_mpv, name) ?? "(unset)";
         }
         else
         {
