@@ -87,6 +87,19 @@ internal static unsafe partial class MpvNative
     [LibraryImport(Library)] public static partial int mpv_render_context_render(nint context, mpv_render_param* parameters);
     [LibraryImport(Library)] public static partial void mpv_render_context_free(nint context);
 
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial nint mpv_get_property_string(nint handle, string name);
+    [LibraryImport(Library)] public static partial void mpv_free(nint data);
+
+    /// <summary>A property as a string, or null. mpv owns the buffer until mpv_free.</summary>
+    public static string? Property(nint handle, string name)
+    {
+        nint p = mpv_get_property_string(handle, name);
+        if (p == 0) return null;
+        try { return Marshal.PtrToStringUTF8(p); }
+        finally { mpv_free(p); }
+    }
+
     /// <summary>A command as mpv takes it: a null-terminated array of UTF-8 strings.</summary>
     public static int Command(nint handle, params string[] args)
     {
