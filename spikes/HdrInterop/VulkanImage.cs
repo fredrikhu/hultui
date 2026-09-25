@@ -26,9 +26,25 @@ internal sealed unsafe class VulkanImage : IDisposable
 
     private VkCommandPool _pool;
 
-    public static VulkanImage Create(int width, int height)
+    /// <summary>The format the image is made with. RGBA16F is what phase 0 used; the
+    /// bisect needs BGRA8 as well, because that is what a swapchain hands out.</summary>
+    public VkFormat Format { get; private set; } = VkFormat.R16G16B16A16Sfloat;
+
+    /// <summary>The extensions this instance and device were actually created with, for
+    /// anything that has to tell Skia.</summary>
+    public string[] InstanceExtensions { get; private set; } = [];
+    public string[] DeviceExtensions { get; private set; } = [];
+
+    /// <summary>What the image is created with, and what Skia is told it has. The renderer's
+    /// swapchain uses COLOR_ATTACHMENT | TRANSFER_DST | SAMPLED; this spike's own image has
+    /// TRANSFER_SRC as well, because it reads itself back.</summary>
+    public uint Usage { get; private set; } = 0x01 | 0x02 | 0x04 | 0x10;
+
+    public static VulkanImage Create(int width, int height, VkFormat? format = null, uint? usage = null)
     {
         var vk = new VulkanImage { Width = width, Height = height };
+        if (usage is { } u) vk.Usage = u;
+        if (format is { } f) vk.Format = f;
         vk.Init();
         vk.CreateExportableImage();
         return vk;
@@ -49,6 +65,7 @@ internal sealed unsafe class VulkanImage : IDisposable
             "VK_KHR_external_memory_capabilities",
             "VK_KHR_get_physical_device_properties2",
         };
+        InstanceExtensions = instanceExtensions;
 
         using var instExt = new VkStringArray(instanceExtensions);
         var instanceInfo = new VkInstanceCreateInfo
@@ -110,6 +127,7 @@ internal sealed unsafe class VulkanImage : IDisposable
             ? new[] { "VK_KHR_external_memory", "VK_KHR_external_memory_win32", "VK_KHR_dedicated_allocation" }
             : new[] { "VK_KHR_external_memory", "VK_KHR_external_memory_fd", "VK_KHR_dedicated_allocation" };
 
+        DeviceExtensions = deviceExtensions;
         using var devExt = new VkStringArray(deviceExtensions);
         var deviceInfo = new VkDeviceCreateInfo
         {
@@ -172,14 +190,13 @@ internal sealed unsafe class VulkanImage : IDisposable
         {
             pNext = &externalInfo,
             imageType = VkImageType.Image2D,
-            format = VkFormat.R16G16B16A16Sfloat,
+            format = Format,
             extent = new VkExtent3D(Width, Height, 1),
             mipLevels = 1,
             arrayLayers = 1,
             samples = VkSampleCountFlags.Count1,
             tiling = VkImageTiling.Optimal,
-            usage = VkImageUsageFlags.ColorAttachment | VkImageUsageFlags.Sampled
-                  | VkImageUsageFlags.TransferSrc | VkImageUsageFlags.TransferDst,
+            usage = (VkImageUsageFlags)Usage,
             sharingMode = VkSharingMode.Exclusive,
             initialLayout = VkImageLayout.Undefined,
         };
@@ -246,9 +263,11 @@ internal sealed unsafe class VulkanImage : IDisposable
     /// Copies the image back into host memory so the caller can look at what the other API
     /// wrote. Slow and entirely the point: this is the evidence.
     /// </summary>
+    public int BytesPerPixel => Format == VkFormat.R16G16B16A16Sfloat ? 8 : 4;
+
     public Half[] ReadBack()
     {
-        ulong bytes = (ulong)Width * (ulong)Height * 8;   // RGBA, 16 bits each
+        ulong bytes = (ulong)Width * (ulong)Height * (ulong)BytesPerPixel;
 
         var bufferInfo = new VkBufferCreateInfo
         {

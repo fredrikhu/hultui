@@ -100,6 +100,17 @@ target, so it belongs in phase 4 and is opt-in in the spike until then.
 where an `fd` export is most likely to behave differently, and phase 1 should be treated as
 unproven on them.
 
+**1 — `SkiaVulkanRenderSurface`. DONE on Windows.** An app runs on
+`HULTUI_RENDERER=vulkan` and draws correctly: the captured swapchain image is the Minimal
+sample, indigo button and antialiased text, 30 distinct colours. GL is untouched and
+remains the default.
+
+One trap worth carrying forward: **Skia refuses a render target without
+`VK_IMAGE_USAGE_TRANSFER_SRC_BIT`** and says nothing — `SKSurface.Create` simply returns
+null. The bisect in `spikes/HdrInterop` pins it. Untested on Linux.
+
+The original plan for this phase read:
+
 **1 — `SkiaVulkanRenderSurface`.** A fourth `IRenderSurface` — the interface is four
 members and there are already three implementations, so this is the least novel part.
 Vulkan instance, device, swapchain, `GRVkBackendContext`, wrapping swapchain images as

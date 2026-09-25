@@ -23,7 +23,17 @@ internal static unsafe class SkiaOnVulkan
     private const uint LayoutUndefined = 0;
     private const uint UsageColourSampledTransfer = 0x01 | 0x02 | 0x04 | 0x10;
 
-    public static (bool Ok, string Message) Draw(VulkanImage vk)
+    /// <param name="withExtensions">Tell Skia which extensions and device features are
+    /// enabled, as the real renderer does. Off is what phase 0 did.</param>
+    /// <param name="zeroAlloc">Describe the memory as a swapchain image does — all zeroes —
+    /// rather than pointing at the allocation we made.</param>
+    /// <param name="instanceExtensions">What to tell Skia the instance has, when that is
+    /// not what this spike's own instance has. The renderer's list comes from SDL and is
+    /// shorter, which is the thing being tested.</param>
+    public static (bool Ok, string Message) Draw(VulkanImage vk,
+        bool withExtensions = false, bool zeroAlloc = false,
+        string[]? instanceExtensions = null, string[]? deviceExtensions = null,
+        bool features2 = true)
     {
         // Skia asks for entry points by name and does not care where they come from, so the
         // resolver is the same two calls the rest of this spike uses.
@@ -41,6 +51,21 @@ internal static unsafe class SkiaOnVulkan
             return (nint)vkGetInstanceProcAddr(new VkInstance(instance), bytes).Value;
         };
 
+        GRVkExtensions? extensions = null;
+        nint featuresPtr = 0;
+        if (withExtensions)
+        {
+            extensions = GRVkExtensions.Create(resolve, vk.Instance.Handle, vk.PhysicalDevice.Handle,
+                instanceExtensions ?? vk.InstanceExtensions, deviceExtensions ?? vk.DeviceExtensions);
+            if (features2)
+            {
+                featuresPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(VkPhysicalDeviceFeatures2));
+                var f = (VkPhysicalDeviceFeatures2*)featuresPtr;
+                *f = new VkPhysicalDeviceFeatures2 { sType = VkStructureType.PhysicalDeviceFeatures2 };
+                VkCmd.GetPhysicalDeviceFeatures2(vk.PhysicalDevice, f);
+            }
+        }
+
         using var backend = new GRVkBackendContext
         {
             VkInstance = vk.Instance.Handle,
@@ -50,6 +75,8 @@ internal static unsafe class SkiaOnVulkan
             GraphicsQueueIndex = vk.QueueFamily,
             MaxAPIVersion = (uint)VkVersion.Version_1_2,
             GetProcedureAddress = resolve,
+            Extensions = extensions,
+            VkPhysicalDeviceFeatures2 = featuresPtr,
         };
 
         using var context = GRContext.CreateVulkan(backend);
@@ -58,13 +85,15 @@ internal static unsafe class SkiaOnVulkan
         var imageInfo = new GRVkImageInfo
         {
             Image = vk.Image.Handle,
-            Alloc = new GRVkAlloc { Memory = vk.Memory.Handle, Offset = 0, Size = vk.AllocationSize },
+            Alloc = zeroAlloc
+                ? new GRVkAlloc { Memory = 0, Offset = 0, Size = 0, Flags = 0 }
+                : new GRVkAlloc { Memory = vk.Memory.Handle, Offset = 0, Size = vk.AllocationSize },
             ImageTiling = TilingOptimal,
             // Undefined: Skia is free to transition from whatever GL left behind, and the
             // contents are about to be overwritten anyway.
             ImageLayout = LayoutUndefined,
-            Format = FormatRgba16F,
-            ImageUsageFlags = UsageColourSampledTransfer,
+            Format = (uint)vk.Format,
+            ImageUsageFlags = vk.Usage,
             SampleCount = 1,
             LevelCount = 1,
             CurrentQueueFamily = vk.QueueFamily,
@@ -74,8 +103,15 @@ internal static unsafe class SkiaOnVulkan
         using var target = new GRBackendRenderTarget(vk.Width, vk.Height, imageInfo);
         if (!target.IsValid) return (false, "the render target over the Vulkan image is not valid");
 
-        using var surface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.RgbaF16);
-        if (surface is null) return (false, "SKSurface.Create returned null");
+        var colorType = vk.Format switch
+        {
+            VkFormat.R16G16B16A16Sfloat => SKColorType.RgbaF16,
+            VkFormat.B8G8R8A8Unorm => SKColorType.Bgra8888,
+            VkFormat.R8G8B8A8Unorm => SKColorType.Rgba8888,
+            _ => SKColorType.Bgra8888,
+        };
+        using var surface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, colorType);
+        if (surface is null) return (false, $"SKSurface.Create returned null ({colorType})");
 
         // Something with obvious structure: a dark ground, a bright disc, and a band along
         // the bottom. Flat colour would not tell a real draw from a clear.
@@ -91,6 +127,8 @@ internal static unsafe class SkiaOnVulkan
         context.Flush();
         context.Submit(synchronous: true);
 
+        extensions?.Dispose();
+        if (featuresPtr != 0) System.Runtime.InteropServices.Marshal.FreeHGlobal(featuresPtr);
         return (true, "drew");
     }
 }

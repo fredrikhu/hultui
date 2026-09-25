@@ -94,6 +94,39 @@ target, the hint is a **no-op**, not a hazard. It only starts doing anything in 
 when there is a real swapchain with a real colour space to hint at. It stays behind
 `--hint` so that phase can turn it on deliberately.
 
+## The bisect, and what it caught
+
+`--bisect` answers a question the real renderer could not: phase 1's
+`SkiaVulkanRenderSurface` acquired a swapchain image, wrapped it in a
+`GRBackendRenderTarget` that validated, and then `SKSurface.Create` returned null saying
+nothing. This spike wrapped an image of its own and succeeded, so one row per difference:
+
+```
+RGBA16F, own alloc, no ext   (phase 0's known-good)   ok
+BGRA8,   own alloc, no ext   (format alone)           ok
+BGRA8,   zero alloc, no ext  (as a swapchain image)   ok
+BGRA8,   own alloc, with ext (as the renderer does)   ok
+BGRA8,   zero alloc, with ext (the failing case)      ok
+RGBA16F, zero alloc, no ext  (alloc alone)            ok
+BGRA8,   zero alloc, renderer's ext lists             ok
+BGRA8,   zero alloc, renderer's ext, no features2     ok
+BGRA8,   zero alloc, renderer's usage 0x16            FAILED
+BGRA8,   zero alloc, colour attachment only 0x10      FAILED
+```
+
+**Skia will not make a surface over a render target without
+`VK_IMAGE_USAGE_TRANSFER_SRC_BIT`.** Identical in every other respect, 0x17 succeeds and
+0x16 fails, and it fails silently — a null surface and no diagnostic.
+
+The swapchain had been created with `0x10 | 0x02 | 0x04`, under a comment calling `0x04`
+TRANSFER_SRC. It is SAMPLED. The one bit Skia requires was never there, and no amount of
+staring at the wrapping code would have found it, because the wrapping code was right.
+
+Four principled fixes were tried first and none was the cause — matching the colour type to
+the format, passing the real usage flags, `GRVkExtensions.Create`, and
+`VkPhysicalDeviceFeatures2`. All four were things that ought to have been there, which is
+why guessing felt productive and was not.
+
 ## What this does **not** prove
 
 **One GPU, two platforms.** AMD and Intel are untested on both, and Linux has only been

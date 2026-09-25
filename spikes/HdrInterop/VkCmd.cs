@@ -19,6 +19,7 @@ internal static unsafe class VkCmd
     public static delegate* unmanaged<VkInstance, uint*, VkPhysicalDevice*, VkResult> EnumeratePhysicalDevices;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties*, void> GetPhysicalDeviceProperties;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void> GetPhysicalDeviceProperties2;
+    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void> GetPhysicalDeviceFeatures2;
     public static delegate* unmanaged<VkPhysicalDevice, uint*, VkQueueFamilyProperties*, void> GetQueueFamilyProperties;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void> GetMemoryProperties;
     public static delegate* unmanaged<VkPhysicalDevice, VkDeviceCreateInfo*, nint, VkDevice*, VkResult> CreateDevice;
@@ -64,6 +65,7 @@ internal static unsafe class VkCmd
         EnumeratePhysicalDevices = (delegate* unmanaged<VkInstance, uint*, VkPhysicalDevice*, VkResult>)I(instance, "vkEnumeratePhysicalDevices");
         GetPhysicalDeviceProperties = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties*, void>)I(instance, "vkGetPhysicalDeviceProperties");
         GetPhysicalDeviceProperties2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void>)I(instance, "vkGetPhysicalDeviceProperties2");
+        GetPhysicalDeviceFeatures2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void>)I(instance, "vkGetPhysicalDeviceFeatures2");
         GetQueueFamilyProperties = (delegate* unmanaged<VkPhysicalDevice, uint*, VkQueueFamilyProperties*, void>)I(instance, "vkGetPhysicalDeviceQueueFamilyProperties");
         GetMemoryProperties = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void>)I(instance, "vkGetPhysicalDeviceMemoryProperties");
         CreateDevice = (delegate* unmanaged<VkPhysicalDevice, VkDeviceCreateInfo*, nint, VkDevice*, VkResult>)I(instance, "vkCreateDevice");

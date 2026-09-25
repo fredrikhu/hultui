@@ -29,9 +29,24 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 {
     private const ulong NoTimeout = ulong.MaxValue;
 
-    /// <summary>What the swapchain images are created with, and what Skia is told they have.
-    /// TransferDst is Skia's clear path; TransferSrc is only for HULTUI_VULKAN_CAPTURE.</summary>
-    private const uint SwapchainUsage = 0x10 | 0x02 | 0x04;
+    // VkImageUsageFlagBits, spelled out because getting these wrong is invisible: an
+    // earlier version had 0x04 commented as TRANSFER_SRC when it is SAMPLED, and the
+    // swapchain went without the one bit Skia actually requires.
+    private const uint UsageTransferSrc = 0x01;
+    private const uint UsageTransferDst = 0x02;
+    private const uint UsageSampled = 0x04;
+    private const uint UsageColorAttachment = 0x10;
+
+    /// <summary>
+    /// What the swapchain images are created with, and what Skia is told they have.
+    ///
+    /// <para><b>TRANSFER_SRC is not optional.</b> Skia refuses to make a surface over a
+    /// render target without it — <c>SKSurface.Create</c> returns null and says nothing —
+    /// and the bisect in spikes/HdrInterop proves it: identical in every other respect,
+    /// 0x17 succeeds and 0x16 fails. COLOR_ATTACHMENT alone fails too.</para>
+    /// </summary>
+    private const uint SwapchainUsage =
+        UsageColorAttachment | UsageTransferSrc | UsageTransferDst | UsageSampled;
 
     private VkInstance _instance;
     private VkSurfaceKHR _surface;
@@ -46,6 +61,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private VkCommandPool _pool;
     private VkFence _acquireFence;
 
+    private uint _usage;
     private uint _acquiredIndex;
     private bool _haveAcquired;
     private int _widthPx;
@@ -252,6 +268,15 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         _format = ChooseFormat(out var colorSpace);
 
+        // A surface that cannot offer these is one this renderer cannot draw on, and saying
+        // so here beats a null surface three call frames later.
+        uint usage = SwapchainUsage & (uint)capabilities.supportedUsageFlags;
+        if ((usage & (UsageColorAttachment | UsageTransferSrc)) != (UsageColorAttachment | UsageTransferSrc))
+            throw new InvalidOperationException(
+                $"this surface supports usage 0x{(uint)capabilities.supportedUsageFlags:X} — " +
+                "Skia needs at least COLOR_ATTACHMENT and TRANSFER_SRC");
+        _usage = usage;
+
         uint imageCount = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount)
             imageCount = capabilities.maxImageCount;
@@ -267,7 +292,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageArrayLayers = 1,
             // TransferDst as well as ColorAttachment: Skia wants it for the clear path, and
             // a swapchain image without it fails GRBackendRenderTarget validation.
-            imageUsage = (VkImageUsageFlags)SwapchainUsage,
+            imageUsage = (VkImageUsageFlags)_usage,
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
@@ -361,7 +386,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // Undefined every frame: the contents are about to be overwritten, and claiming the
         // present layout would have Skia skip a transition it still needs to make.
         Layout: 0,
-        _widthPx, _heightPx, (int)_acquiredIndex, SwapchainUsage);
+        _widthPx, _heightPx, (int)_acquiredIndex, _usage);
 
     public void PresentAcquiredImage()
     {

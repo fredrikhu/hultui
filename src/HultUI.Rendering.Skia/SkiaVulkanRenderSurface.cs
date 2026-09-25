@@ -1,4 +1,3 @@
-using HultUI.Core.DevTools;
 using HultUI.Core.Rendering;
 using SkiaSharp;
 
@@ -107,19 +106,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     public bool BeginFrame()
     {
         if (_frameOpen) return true;
-        if (_host.AcquireNextImage() is not { } frame)
-        {
-            StartupTrace.Mark("vulkan acquire returned nothing");
-            return false;
-        }
+        if (_host.AcquireNextImage() is not { } frame) return false;
 
         var surface = SurfaceFor(frame);
-        if (surface is null)
-        {
-            StartupTrace.Mark($"vulkan no surface for image {frame.Index} fmt {frame.Format}");
-            return false;
-        }
-        StartupTrace.Mark($"vulkan frame {frame.Index} {frame.WidthPx}x{frame.HeightPx}");
+        if (surface is null) return false;
 
         _renderContext.SetCanvas(surface.Canvas);
         _frameOpen = true;
@@ -139,7 +129,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
 
         _grContext.Flush();
         _grContext.Submit();
-        StartupTrace.Mark("vulkan present");
         _host.PresentAcquiredImage();
         _frameOpen = false;
     }
@@ -167,7 +156,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         var target = new GRBackendRenderTarget(frame.WidthPx, frame.HeightPx, imageInfo);
         if (!target.IsValid)
         {
-            StartupTrace.Mark("vulkan render target invalid");
             target.Dispose();
             return null;
         }
@@ -178,7 +166,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft, ColorTypeFor(frame.Format));
         if (surface is null)
         {
-            StartupTrace.Mark($"vulkan SKSurface.Create null (ct {ColorTypeFor(frame.Format)})");
             target.Dispose();
             return null;
         }
