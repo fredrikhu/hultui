@@ -37,9 +37,12 @@ public sealed class SkiaFontCollection : IFontCollection
         if (_fallbackCache.TryGetValue(key, out var cached))
             return cached;
 
-        // With the style, so bold text falls back to a bold face rather than a regular one.
+        // With the style, so bold text falls back to a bold face rather than a regular one,
+        // and with the script's language, so it falls back to a face made for the script
+        // rather than the first one that covers the codepoint (see ScriptLanguage).
         using var style = new SKFontStyle(ToSkWeight(weight), SKFontStyleWidth.Normal, ToSkSlant(slant));
-        var typeface = _fontManager.MatchCharacter(null, style, null, codepoint);
+        string? language = ScriptLanguage.ForCodepoint(codepoint);
+        var typeface = _fontManager.MatchCharacter(null, style, language is null ? null : [language], codepoint);
 
         SkiaResolvedFont? resolved = null;
         if (typeface is not null && !_fallbackFonts.TryGetValue(typeface, out resolved))

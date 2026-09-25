@@ -210,4 +210,20 @@ public class SkiaTextIntegrationTests
         Assert.Equal(alef.NativeHandle, bet.NativeHandle);
         Assert.Same(alef, bet);
     }
+
+    [Fact]
+    public void FontCollection_MatchCharacter_FallsBackToAFaceMadeForTheScript()
+    {
+        // Asked only "who has U+05D0", fontconfig answered Liberation Mono on Fedora, so
+        // Hebrew in a sans-serif UI came out monospaced beside an installed Noto Sans
+        // Hebrew. The script's language is the hint that fixes it. Like the bidi tests,
+        // this assumes the platform ships a proportional Hebrew face, which every desktop
+        // does.
+        var fonts = new SkiaFontCollection();
+        var alef = fonts.MatchCharacter(0x5D0, FontWeight.Regular, FontSlant.Normal);
+
+        Assert.NotNull(alef);
+        var typeface = (SkiaSharp.SKTypeface)alef.NativeHandle;
+        Assert.False(typeface.IsFixedPitch, $"Hebrew fell back to monospaced '{typeface.FamilyName}'");
+    }
 }
