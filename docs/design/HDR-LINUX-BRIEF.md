@@ -249,9 +249,28 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
   if KWin reads scRGB at its spec value. Linux needs its own equivalent of
   `WindowsSdrWhiteLevel`. The number to feed it is the compositor's SDR white, which KWin knows
   per output. SDL 3 has `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT` / `HDR_HEADROOM` for this, which
-  the binding here does not expose. **Not yet tried:** `HULTUI_VULKAN_WHITE_SCALE=5.1` (408/80)
-  to confirm the scale closes the gap. That run would also be the first on Linux to exercise
-  phase 2's offscreen pass.
+  the binding here does not expose.
+- **The white scale that matches GL is ~2.54, not 408/80.** Measured by eye with GL and
+  Vulkan side by side and `HULTUI_VULKAN_WHITE_SCALE` forced:
+
+  | whiteScale | DP-2 (408 nits SDR) | DP-3 (455 nits SDR) |
+  |---|---|---|
+  | 1 (the default here) | visibly dimmer | — |
+  | 2.0 | slightly dimmer | — |
+  | **2.54** (203/80) | **looks the same** | maybe ever so slightly dimmer |
+  | 5.1 (408/80) | brighter: button brighter, text thinner | — |
+
+  So KWin does not read scRGB 1.0 as 80 nits of *its* SDR white. It matches if SDR white sits at
+  **203 nits on the scRGB scale** (the BT.2408 reference white) and the compositor maps that
+  reference onto the output's SDR brightness. Under that model the right scale is 203/80
+  whatever the brightness setting. The DP-3 result can't separate that from a monitor-dependent
+  scale: 455/408 would need 2.83, only ~11% more light, which is about what "ever so slightly"
+  looks like. **The fix should read the value, not hard-code 2.54.** On Wayland that means
+  SDL's `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT` (fed from the colour-management protocol's
+  reference luminance), or the protocol directly, re-read when the window changes output.
+- **Phase 2's offscreen pass runs cleanly on Linux.** The `whiteScale=5.1` run went through it
+  under validation: zero messages, and the frame-4 capture is correct. (A PPM clips to 8 bits,
+  so the capture cannot show the scale itself. Only the screen can.)
 - **X11 cannot, and says so.** `SDL_VIDEODRIVER=x11` lists only `B8G8R8A8Unorm/SrgbNonLinear`
   and `B8G8R8A8Srgb/SrgbNonLinear`, and reports `hdrDisplay=off`, correctly.
 - **Small bug: X11 plus `HULTUI_VULKAN_F16=1` rebuilds the swapchain for nothing.** Each
@@ -298,6 +317,7 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
 
 - **Mesa**, a **hybrid GPU**: no such hardware here.
 - **The fd-per-import leak check**: see the caveat above.
-- **Whether a white scale fixes the dimness**: one run with `HULTUI_VULKAN_WHITE_SCALE`.
+- **What SDL itself reports as the SDR white level on Wayland.** It would settle the DP-3
+  question above and say whether SDL's property can simply replace `WindowsSdrWhiteLevel` here.
 - The full solution build fails on the two WinForms projects (`NETSDK1100`), which is expected
   on Linux. Everything this brief needs builds cleanly on its own.
