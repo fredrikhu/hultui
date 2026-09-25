@@ -73,10 +73,28 @@ public sealed class TextPipeline
     private string? _hanContext;
     private bool _hanContextKnown;
 
+    // The UI culture the text-keyed caches were filled under. Han without kana follows it
+    // (ScriptLanguage), and those caches key on the text alone, so a language switch at
+    // runtime would otherwise keep serving layouts in the old culture's glyphs. The word
+    // and digit caches key on the font instance and stay valid.
+    private System.Globalization.CultureInfo? _culture;
+
     private void BeginParagraph(string text)
     {
         _paragraph = text;
         _hanContextKnown = false;
+
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        if (!ReferenceEquals(culture, _culture))
+        {
+            if (_culture is not null)
+            {
+                _cache.Clear();
+                _shapeCache.Clear();
+                _minContentCache.Clear();
+            }
+            _culture = culture;
+        }
     }
 
     private List<FontRun> Itemize(string text, ResolvedInheritedStyle style)

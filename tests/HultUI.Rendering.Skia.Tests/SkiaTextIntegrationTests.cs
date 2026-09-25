@@ -297,4 +297,29 @@ public class SkiaTextIntegrationTests
             System.Globalization.CultureInfo.CurrentUICulture = saved;
         }
     }
+
+    [Fact]
+    public void AUiCultureChange_IsNotServedAnOldLayoutFromThePipelinesCaches()
+    {
+        // The font collection keys fallback by language, but the pipeline caches whole
+        // layouts by text — so without more, text laid out before a language switch kept
+        // the old culture's glyphs.
+        var pipeline = CreatePipeline();
+        string Face() => ((SkiaSharp.SKTypeface)pipeline.Layout("东京", DefaultStyle, 10_000, null)
+            .Lines[0].Runs[0].Font.NativeHandle).FamilyName;
+
+        var saved = System.Globalization.CultureInfo.CurrentUICulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = new("ja-JP");
+            string japanese = Face();
+            System.Globalization.CultureInfo.CurrentUICulture = new("zh-TW");
+            string traditional = Face();
+            Assert.NotEqual(japanese, traditional);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = saved;
+        }
+    }
 }

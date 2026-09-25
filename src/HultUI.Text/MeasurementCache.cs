@@ -73,5 +73,11 @@ internal sealed class LruCache<TKey, TValue> where TKey : notnull
         _map[key] = node;
     }
 
+    public void Clear()
+    {
+        _map.Clear();
+        _order.Clear();
+    }
+
     private readonly record struct CacheEntry(TKey Key, TValue Value);
 }
