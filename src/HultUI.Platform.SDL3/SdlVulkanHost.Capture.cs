@@ -73,7 +73,8 @@ internal sealed unsafe partial class SdlVulkanHost
     private void Capture(VkImage image, string path)
     {
         int width = _widthPx, height = _heightPx;
-        ulong bytes = (ulong)width * (ulong)height * 4;
+        int bytesPerPixel = BytesPerPixel(_format);
+        ulong bytes = (ulong)width * (ulong)height * (ulong)bytesPerPixel;
 
         var bufferInfo = new VkBufferCreateInfo
         {
@@ -151,24 +152,54 @@ internal sealed unsafe partial class SdlVulkanHost
             subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
         };
 
-    /// <summary>The swapchain is BGRA or RGBA depending on what the surface offered, and a
-    /// PPM is RGB — so the channel order is read off the format rather than assumed.</summary>
+    private static int BytesPerPixel(VkFormat format) =>
+        format == VkFormat.R16G16B16A16Sfloat ? 8 : 4;
+
+    /// <summary>
+    /// The swapchain as an 8-bit PPM, whatever it actually is.
+    ///
+    /// <para>Channel order comes off the format rather than being assumed, and a half-float
+    /// surface is <b>encoded back to sRGB on the way out</b>. That is the whole point of the
+    /// file: scRGB holds linear light, and writing those numbers straight into a PPM would
+    /// show a washed-out image that says nothing about whether the renderer is right. Encoded,
+    /// it should be indistinguishable from the 8-bit path — which is the test.</para>
+    /// </summary>
     private static void WritePpm(string path, byte* pixels, int width, int height, VkFormat format)
     {
-        bool bgra = format is VkFormat.B8G8R8A8Unorm or VkFormat.B8G8R8A8Srgb;
         var body = new byte[width * height * 3];
-        for (int i = 0, o = 0; i < width * height; i++)
+
+        if (format == VkFormat.R16G16B16A16Sfloat)
         {
-            byte a = pixels[i * 4], b = pixels[i * 4 + 1], c = pixels[i * 4 + 2];
-            body[o++] = bgra ? c : a;
-            body[o++] = b;
-            body[o++] = bgra ? a : c;
+            var halves = (Half*)pixels;
+            for (int i = 0, o = 0; i < width * height; i++)
+                for (int c = 0; c < 3; c++)
+                    body[o++] = (byte)Math.Clamp(SrgbEncode((float)halves[i * 4 + c]) * 255f + 0.5f, 0f, 255f);
+        }
+        else
+        {
+            bool bgra = format is VkFormat.B8G8R8A8Unorm or VkFormat.B8G8R8A8Srgb;
+            for (int i = 0, o = 0; i < width * height; i++)
+            {
+                byte a = pixels[i * 4], b = pixels[i * 4 + 1], c = pixels[i * 4 + 2];
+                body[o++] = bgra ? c : a;
+                body[o++] = b;
+                body[o++] = bgra ? a : c;
+            }
         }
 
         using var file = File.Create(path);
         char nl = '\n';
         file.Write(System.Text.Encoding.ASCII.GetBytes($"P6{nl}{width} {height}{nl}255{nl}"));
         file.Write(body);
+    }
+
+    /// <summary>Linear light to sRGB, the standard piecewise curve.</summary>
+    private static float SrgbEncode(float linear)
+    {
+        if (float.IsNaN(linear) || linear <= 0f) return 0f;
+        return linear <= 0.0031308f
+            ? linear * 12.92f
+            : 1.055f * MathF.Pow(linear, 1f / 2.4f) - 0.055f;
     }
 
     private VkCommandBuffer BeginOneShot()

@@ -14,8 +14,11 @@ namespace HultUI.Core.Rendering;
 /// <param name="Usage">The <c>VkImageUsageFlags</c> the swapchain was created with. Skia
 /// validates the render target against them, so guessing here fails in a way that looks
 /// like the driver refusing the image.</param>
+/// <param name="ColorSpace">The swapchain's <c>VkColorSpaceKHR</c>. What the renderer needs
+/// in order to convert into it rather than assume it matches.</param>
 public readonly record struct VulkanFrameTarget(
-    ulong Image, uint Format, uint Layout, int WidthPx, int HeightPx, int Index, uint Usage);
+    ulong Image, uint Format, uint Layout, int WidthPx, int HeightPx, int Index, uint Usage,
+    uint ColorSpace);
 
 /// <summary>
 /// What a Vulkan-backed window has to provide for Skia to draw on it.

@@ -176,7 +176,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
         // The colour type has to match the swapchain's format or SKSurface.Create quietly
         // returns null — which looks exactly like a driver refusing the render target, and
         // is not that. Most Windows surfaces offer BGRA first.
-        var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft, ColorTypeFor(frame.Format));
+        var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
+            ColorTypeFor(frame.Format), ColorSpaceFor(frame.ColorSpace));
         if (surface is null)
         {
             target.Dispose();
@@ -197,9 +198,27 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     }
 
     /// <summary>
-    /// The Skia colour type for a <c>VkFormat</c>. No colour space either way: phase 1 is
-    /// SDR and matching the GL surface exactly is the point — phase 2 is where this grows an
-    /// F16 case and an <see cref="SKColorSpace"/> with it.
+    /// The colour space of the swapchain, told to Skia so that it converts rather than
+    /// assumes — phase 2 of <c>docs/design/HDR.md</c>.
+    ///
+    /// <para>Untagged, Skia writes an <see cref="SKColor"/>'s bytes through untransformed,
+    /// which is right only because the destination happens to be sRGB too. Say so, and the
+    /// output is identical while every later step — a linear F16 surface, an HDR colour
+    /// space — becomes a conversion Skia performs instead of a mismatch nobody notices.</para>
+    ///
+    /// <para>A null here is not "no colour management": it is Skia's legacy path, where
+    /// blending happens in whatever space the bytes are already in.</para>
+    /// </summary>
+    private static SKColorSpace ColorSpaceFor(uint colorSpace) => colorSpace switch
+    {
+        // scRGB: linear light, 1.0 is SDR white, and values may exceed it. The pairing the
+        // surface offers with RGBA16F, and what phase 3 presents HDR through.
+        VkColorSpaceExtendedSrgbLinear => SKColorSpace.CreateSrgbLinear(),
+        _ => SKColorSpace.CreateSrgb(),
+    };
+
+    /// <summary>
+    /// The Skia colour type for a <c>VkFormat</c>.
     /// </summary>
     private static SKColorType ColorTypeFor(uint format) => format switch
     {
@@ -239,6 +258,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     private const uint VkImageUsageTransferDst = 0x00000002;
     private const uint VkImageUsageColorAttachment = 0x00000010;
     private const uint VkImageLayoutUndefined = 0;
+    private const uint VkColorSpaceExtendedSrgbLinear = 1000104002;
     private const uint VkFormatR8G8B8A8Unorm = 37;
     private const uint VkFormatR8G8B8A8Srgb = 43;
     private const uint VkFormatB8G8R8A8Unorm = 44;

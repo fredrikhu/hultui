@@ -29,6 +29,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 {
     private const ulong NoTimeout = ulong.MaxValue;
 
+    /// <summary>Whether to ask for the half-float linear surface — phase 2 of
+    /// docs/design/HDR.md. Off by default: the 8-bit sRGB path is what ships.</summary>
+    private static readonly bool WantsWideColor =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_F16") == "1";
+
     // VkImageUsageFlagBits, spelled out because getting these wrong is invisible: an
     // earlier version had 0x04 commented as TRANSFER_SRC when it is SAMPLED, and the
     // swapchain went without the one bit Skia actually requires.
@@ -69,6 +74,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// may still be executing is undefined, and without the queue drain it often is.</summary>
     private VkCommandBuffer[] _presentCmd = [];
     private VkFormat _format = VkFormat.B8G8R8A8Unorm;
+    private VkColorSpaceKHR _colorSpace = VkColorSpaceKHR.SrgbNonLinear;
+    private VkPresentModeKHR _presentMode = VkPresentModeKHR.Fifo;
     private VkCommandPool _pool;
     private VkFence _acquireFence;
 
@@ -121,6 +128,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         for (uint i = 0; i < extensionCount; i++)
             names[i] = Marshal.PtrToStringUTF8((nint)sdlExtensions[i]) ?? "";
 
+        // Without VK_EXT_swapchain_colorspace, SRGB_NONLINEAR is the only colour space a
+        // swapchain may legally use — drivers list the others regardless, which makes this
+        // easy to leave out and then work by accident on one machine.
+        if (WantsWideColor) names = [.. names, "VK_EXT_swapchain_colorspace"];
         EnabledInstanceExtensions = names;
 
         var appInfo = new VkApplicationInfo { apiVersion = VkVersion.Version_1_2 };
@@ -278,6 +289,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         }
 
         _format = ChooseFormat(out var colorSpace);
+        _colorSpace = colorSpace;
 
         // A surface that cannot offer these is one this renderer cannot draw on, and saying
         // so here beats a null surface three call frames later.
@@ -307,7 +319,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
-            presentMode = ChoosePresentMode(),
+            presentMode = _presentMode = ChoosePresentMode(),
             clipped = true,
             oldSwapchain = old,
         };
@@ -328,7 +340,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         _widthPx = (int)extent.width;
         _heightPx = (int)extent.height;
-        StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length}");
+        StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length} {_format}/{_colorSpace}");
         ResetCapture();
     }
 
@@ -437,6 +449,22 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         var formats = stackalloc VkSurfaceFormatKHR[(int)count];
         Check(GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
 
+        // Half-float, linear light, 1.0 being SDR white — scRGB. Every colour the framework
+        // has is 8-bit sRGB, so this is only correct because the renderer now tells Skia what
+        // the destination is and lets it convert; before phase 2 it would have washed the
+        // whole UI out. Opt-in while that claim is only proven on one machine.
+        if (WantsWideColor)
+        {
+            for (uint i = 0; i < count; i++)
+            {
+                if (formats[i].format != VkFormat.R16G16B16A16Sfloat) continue;
+                if (formats[i].colorSpace != VkColorSpaceKHR.ExtendedSrgbLinearEXT) continue;
+                colorSpace = formats[i].colorSpace;
+                return formats[i].format;
+            }
+            StartupTrace.Mark("vulkan wide colour asked for, surface has none");
+        }
+
         for (uint i = 0; i < count; i++)
         {
             if (formats[i].colorSpace != VkColorSpaceKHR.SrgbNonLinear) continue;
@@ -485,7 +513,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // Undefined every frame: the contents are about to be overwritten, and claiming the
         // present layout would have Skia skip a transition it still needs to make.
         Layout: 0,
-        _widthPx, _heightPx, (int)_acquiredIndex, _usage);
+        _widthPx, _heightPx, (int)_acquiredIndex, _usage, (uint)_colorSpace);
 
     public void PresentAcquiredImage()
     {

@@ -722,7 +722,20 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// </summary>
     public string? DescribeGraphics()
     {
-        if (_window == null || _glContext == null) return null;
+        if (_window == null) return null;
+
+        // The Vulkan window has no GL anything to describe, and everything below would
+        // either return "?" or, for MakeCurrent, take a null context into the backend.
+        if (_vulkanHost is { } vulkan)
+        {
+            int vw = 0, vh = 0;
+            SDL_GetWindowSize(_window, &vw, &vh);
+            return $"video={SDL_GetCurrentVideoDriver() ?? "?"} "
+                + vulkan.Describe(PixelWidth, PixelHeight, DisplayScale, RefreshRate)
+                + $" window={vw}x{vh}";
+        }
+
+        if (_glContext == null) return null;
         SDL_GL_MakeCurrent(_window, _glContext);
 
         // glGetString/glGetIntegerv via SDL's proc resolver — the binding has no
