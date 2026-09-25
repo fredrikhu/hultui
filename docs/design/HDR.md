@@ -223,15 +223,37 @@ It belongs with HDR10, where the numbers are load-bearing.
 Still true, and still untested: on Linux this needs the Wayland colour-management protocol,
 and X11 simply cannot.
 
-**4 — HDR video through the seam.** mpv renders into an `RGBA16F` FBO — the field is
-already there and currently passed as zero:
+**4 — HDR video through the seam.**
 
-```csharp
-var fbo = new mpv_opengl_fbo { fbo = (int)framebuffer, w = width, h = height, internal_format = 0 };
-```
+**The starting point is not what this plan assumed.** Video already plays on the Vulkan
+renderer, correctly, today — a 1080p file decodes and composites under the transport bar
+with nothing added. `GpuFrameSink` chooses its path by whichever the surface asks for first,
+and since `SkiaVulkanRenderSurface` is not an `IExternalGLSurface`, it falls through to the
+pixel path and mpv uses its own software renderer. Nothing is broken; it is simply going the
+long way round.
 
-With `target-colorspace-hint` mpv hands back linear HDR rather than tone-mapped SDR, and
-Skia composites the overlay over it in the same space.
+**What that costs, measured:** the same file, the same window, 10 seconds of wall clock —
+**1.75 CPU-seconds on GL and 3.50 on Vulkan.** Exactly twice, and at 1080p. A 4K frame is
+four times the pixels, so the gap widens with the content people actually want HDR for.
+
+So phase 4 is not "make video work on Vulkan", it is "stop routing it through main memory",
+and the prize is that doubled CPU plus the ability to carry more than 8 bits at all.
+
+The route is phase 0's bridge, in the real renderer:
+
+1. A GL context alongside the Vulkan device, on the same GPU — the window is created
+   `SDL_WINDOW_VULKAN` and has none, so this is a second, hidden one. The spike already
+   creates exactly this pair and checks the device UUIDs match.
+2. A Vulkan `RGBA16F` image, exported and imported into that GL context as a texture with an
+   FBO over it — `internal_format` on `mpv_opengl_fbo` stops being 0.
+3. mpv renders into it as it already does on GL, and Skia draws the Vulkan image directly.
+   No CPU copy anywhere.
+4. `target-colorspace-hint` then means something, because there is a target colour space to
+   hint at — it was proven a no-op without render params back in phase 0.
+
+The piece that needs designing rather than assembling is `GpuFrameSink`: it creates its own
+GL texture with `TexImage2D`, and interop needs it to adopt an imported one instead. That is
+the seam to change, and it is shared with the GL path, so it has to stay right for both.
 
 **5 — SDR UI over HDR video.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay
