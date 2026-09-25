@@ -32,11 +32,16 @@ internal sealed unsafe partial class SdlVulkanHost
     /// which is one past the swapchain's count: the earliest frame at which stale state can
     /// show.</para>
     ///
-    /// <para><b>It is not, however, always reached by an app that renders only when dirty.</b>
-    /// An idle window on KDE/Wayland presented three frames and stopped, one short of the
-    /// default on a three-image swapchain; hovering a button was enough to produce the fourth.
-    /// So a capture that never appears may mean an idle window rather than a renderer that
-    /// drew nothing — touch the window before concluding anything.</para>
+    /// <para><b>Whether an idle window reaches it is not predictable.</b> An app that renders
+    /// only when dirty presents as many frames per swapchain as events happen to dirty it,
+    /// and that depends on where the window lands, not on the renderer. On one KDE/Wayland
+    /// machine with a three-image swapchain, the same untouched window presented three frames
+    /// when it opened on the output it was created for (default missed), four on the last
+    /// swapchain when it opened on the other one (default reached), and one after being moved
+    /// between outputs. So a capture that never appears may mean an idle window rather than a
+    /// renderer that drew nothing, and one that does appear says nothing about whether an idle
+    /// window would have — touch the window (hovering a button is enough) before concluding
+    /// either way, or set the override below.</para>
     ///
     /// <para><c>HULTUI_VULKAN_CAPTURE_FRAME</c> overrides it; a bigger number needs an app
     /// that keeps drawing, and a smaller one gives up the reuse this default exists for.</para>

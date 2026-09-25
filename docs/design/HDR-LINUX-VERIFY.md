@@ -328,6 +328,13 @@ describe this run. The count probably depends on how many swapchains start-up bu
 here on Wayland: 750x450, 500x300, 500x300), so a number in that comment is likely to be wrong
 somewhere. The hover half was not run, because the file already appeared without it.
 
+**Comment fixed afterwards.** Re-bisected on the build with the one-swapchain-per-crossing fix.
+KWin was now opening the window on DP-3, the output it is created for, so there was a single
+750x450 swapchain: frame 3 captured, 4/5/6 not (2 runs each). The idle count on this one
+machine is therefore 3, 4, or 1 after a crossing, depending only on where the window lands.
+The comment now says that, gives those three measurements instead of one number, and says a
+capture that *does* appear proves nothing about idleness either.
+
 ### fd-per-import leak — pass, at both levels
 
 **`--churn`:**
