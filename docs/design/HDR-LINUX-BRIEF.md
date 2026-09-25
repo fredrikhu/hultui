@@ -253,21 +253,28 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
 - **The white scale that matches GL is ~2.54, not 408/80.** Measured by eye with GL and
   Vulkan side by side and `HULTUI_VULKAN_WHITE_SCALE` forced:
 
-  | whiteScale | DP-2 (408 nits SDR) | DP-3 (455 nits SDR) |
+  | whiteScale | Result | Monitor |
   |---|---|---|
-  | 1 (the default here) | visibly dimmer | — |
-  | 2.0 | slightly dimmer | — |
-  | **2.54** (203/80) | **looks the same** | maybe ever so slightly dimmer |
-  | 5.1 (408/80) | brighter: button brighter, text thinner | — |
+  | 1 (the default here) | visibly dimmer | not recorded |
+  | 2.0 | slightly dimmer | not recorded |
+  | **2.54** (203/80) | **looks the same** | **DP-3** (455 nits SDR, scale 1.5) |
+  | **2.54** (203/80) | maybe ever so slightly dimmer | **DP-2** (408 nits SDR, scale 1.0) |
+  | 5.1 (408/80) | brighter: button brighter, text thinner | not recorded |
+
+  (Monitor names come from `kscreen-doctor -o`. The person comparing had KDE's primary and
+  secondary swapped after an update, so only the 2.54 rows, which were re-mapped afterwards,
+  carry a monitor. The others were asked for on DP-2 but may have been on either.)
 
   So KWin does not read scRGB 1.0 as 80 nits of *its* SDR white. It matches if SDR white sits at
   **203 nits on the scRGB scale** (the BT.2408 reference white) and the compositor maps that
-  reference onto the output's SDR brightness. Under that model the right scale is 203/80
-  whatever the brightness setting. The DP-3 result can't separate that from a monitor-dependent
-  scale: 455/408 would need 2.83, only ~11% more light, which is about what "ever so slightly"
-  looks like. **The fix should read the value, not hard-code 2.54.** On Wayland that means
-  SDL's `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT` (fed from the colour-management protocol's
-  reference luminance), or the protocol directly, re-read when the window changes output.
+  reference onto each output's SDR brightness, which makes the right scale 203/80 on every
+  monitor. The two monitors lean that way. A scale proportional to the brightness setting
+  would match on DP-3 at 2.54 and need only 2.28 on DP-2, so the same window would look
+  slightly *brighter* there, and it looked, if anything, slightly dimmer. That is a by-eye
+  judgement on an ~11% difference, so it leans rather than settles. **The fix should read the
+  value, not hard-code 2.54.** On Wayland that means SDL's `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT`
+  (fed from the colour-management protocol's reference luminance), or the protocol directly,
+  re-read when the window changes output.
 - **Phase 2's offscreen pass runs cleanly on Linux.** The `whiteScale=5.1` run went through it
   under validation: zero messages, and the frame-4 capture is correct. (A PPM clips to 8 bits,
   so the capture cannot show the scale itself. Only the screen can.)
@@ -317,7 +324,7 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
 
 - **Mesa**, a **hybrid GPU**: no such hardware here.
 - **The fd-per-import leak check**: see the caveat above.
-- **What SDL itself reports as the SDR white level on Wayland.** It would settle the DP-3
-  question above and say whether SDL's property can simply replace `WindowsSdrWhiteLevel` here.
+- **What SDL itself reports as the SDR white level on Wayland.** It would settle the
+  per-monitor question above and say whether SDL's property can simply replace `WindowsSdrWhiteLevel` here.
 - The full solution build fails on the two WinForms projects (`NETSDK1100`), which is expected
   on Linux. Everything this brief needs builds cleanly on its own.
