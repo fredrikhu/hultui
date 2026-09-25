@@ -271,8 +271,7 @@ The route is phase 0's bridge, in the real renderer:
    FBO over it — `internal_format` on `mpv_opengl_fbo` stops being 0.
 3. mpv renders into it as it already does on GL, and Skia draws the Vulkan image directly.
    No CPU copy anywhere.
-4. `target-colorspace-hint` then means something, because there is a target colour space to
-   hint at — it was proven a no-op without render params back in phase 0.
+4. ~~`target-colorspace-hint` then means something.~~ **This step was wrong — see below.**
 
 **The seam is done** (`GpuFrameTarget`, `IExternalGLSurface.TryAcquireFrameTarget`,
 `ISkiaExternalSurface.WrapFrame`). Target ownership can now sit on either side: the source
@@ -370,6 +369,27 @@ by the white scale on the way to the swapchain — and the captured result is id
 listed as untested on either platform.
 
 **Still untested:** Mesa and a hybrid GPU, neither of which exists on the machines to hand.
+
+**Phase 4 delivers the bits and the copy, but not yet the range.** Step 4 of the plan above
+assumed `target-colorspace-hint` would start working once there was a real target colour space to
+hint at. There still is no way to say what that target is. `mpv_opengl_fbo` carries `fbo`, `w`,
+`h` and `internal_format` and nothing else, and no `MPV_RENDER_PARAM` describes a colour space —
+the whole list is API_TYPE, OPENGL_INIT_PARAMS, OPENGL_FBO, FLIP_Y, DEPTH, ICC_PROFILE,
+AMBIENT_LIGHT, WL_DISPLAY, ADVANCED_CONTROL, NEXT_FRAME_INFO, BLOCK_FOR_TARGET_TIME,
+SKIP_RENDERING, the DRM pair and the SW group. The phase 0 finding stands unchanged, and nothing
+about phase 4 altered it.
+
+What follows is that **mpv still believes it is drawing to an SDR sRGB target**, and tone-maps HDR
+content down before it ever reaches the half-float image. The interop removes the copy and carries
+sixteen bits of precision; it does not yet carry HDR range. Every frame checked so far has been
+SDR content, where this makes no difference and the numbers came out exact — which is precisely
+why it did not show up.
+
+The route is mpv's own options rather than a render param: `target-prim`, `target-trc` and
+`target-peak`, set to describe the swapchain when it is scRGB. That needs a seam, because
+`HultUI.Media` has no idea what colour space the renderer chose, and it needs HDR content to
+verify against, which neither machine has. **Untried.** It is the honest content of phase 5, and
+it is larger than it looks.
 
 ### Why not just build libmpv with Vulkan?
 
