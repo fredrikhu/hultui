@@ -30,10 +30,20 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     private readonly SkiaRenderContext _renderContext = new();
     private readonly SkiaTextServices _text;
 
-    /// <summary>One wrapped surface per swapchain image. Rebuilding these per frame would
-    /// mean Skia re-validating a render target several hundred times a second for images
-    /// that have not changed.</summary>
-    private readonly Dictionary<int, (GRBackendRenderTarget Target, SKSurface Surface)> _perImage = [];
+    /// <summary>
+    /// This frame's wrapped image, thrown away at the end of it.
+    ///
+    /// <para>Caching one per swapchain image is the obvious optimisation and it is wrong.
+    /// Skia tracks a render target's image layout inside the target, and this class
+    /// transitions the image to PRESENT_SRC_KHR behind Skia's back on the way to the screen
+    /// — SkiaSharp exposes no <c>setVkImageLayout</c> to tell it so. The next time that
+    /// image came round Skia would transition it from a layout it no longer had, which makes
+    /// the contents undefined: with three images, the first three frames drew and every
+    /// frame after was black. Building the target fresh each frame, declaring UNDEFINED,
+    /// costs a validation and is always right.</para>
+    /// </summary>
+    private GRBackendRenderTarget? _target;
+    private SKSurface? _surface;
 
     private int _width;
     private int _height;
@@ -135,7 +145,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
 
     private SKSurface? SurfaceFor(in VulkanFrameTarget frame)
     {
-        if (_perImage.TryGetValue(frame.Index, out var existing)) return existing.Surface;
+        ReleaseFrameSurface();
 
         var imageInfo = new GRVkImageInfo
         {
@@ -144,7 +154,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
             // allocation to describe — this is the documented shape for wrapping one.
             Alloc = new GRVkAlloc { Memory = 0, Offset = 0, Size = 0, Flags = 0 },
             ImageTiling = VkImageTilingOptimal,
-            ImageLayout = frame.Layout,
+            // Undefined, always: the whole frame is about to be overwritten, so discarding
+            // is free, and it is the one layout that is true whatever happened to the image
+            // between presents.
+            ImageLayout = VkImageLayoutUndefined,
             Format = frame.Format,
             ImageUsageFlags = frame.Usage,
             SampleCount = 1,
@@ -170,8 +183,17 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
             return null;
         }
 
-        _perImage[frame.Index] = (target, surface);
+        _target = target;
+        _surface = surface;
         return surface;
+    }
+
+    private void ReleaseFrameSurface()
+    {
+        _surface?.Dispose();
+        _target?.Dispose();
+        _surface = null;
+        _target = null;
     }
 
     /// <summary>
@@ -190,19 +212,14 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
 
     private void DropWrappedSurfaces()
     {
-        if (_perImage.Count == 0) return;
+        if (_surface is null && _target is null) return;
 
-        // Everything Skia has in flight against these images has to have finished before
-        // their swapchain is destroyed.
+        // Everything Skia has in flight against this image has to have finished before the
+        // swapchain that owns it is destroyed.
         _grContext.Flush();
         _grContext.Submit(synchronous: true);
 
-        foreach (var (target, surface) in _perImage.Values)
-        {
-            surface.Dispose();
-            target.Dispose();
-        }
-        _perImage.Clear();
+        ReleaseFrameSurface();
         _frameOpen = false;
     }
 
@@ -221,6 +238,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface
     private const uint VkSharingModeExclusive = 0;
     private const uint VkImageUsageTransferDst = 0x00000002;
     private const uint VkImageUsageColorAttachment = 0x00000010;
+    private const uint VkImageLayoutUndefined = 0;
     private const uint VkFormatR8G8B8A8Unorm = 37;
     private const uint VkFormatR8G8B8A8Srgb = 43;
     private const uint VkFormatB8G8R8A8Unorm = 44;

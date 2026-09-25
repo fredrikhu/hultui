@@ -28,6 +28,16 @@ Vulkan window will never use.
 
 **Steps 2 to 4 are still to run.**
 
+**A second bug, found on Windows by looking at the window** (2026-09-25): the renderer drew
+the first three frames and every frame afterwards black, which no capture of frame 1 could
+have seen. `SkiaVulkanRenderSurface` cached one wrapped surface per swapchain image; Skia
+tracks a render target's image layout inside the target, and this backend transitions the
+image to `PRESENT_SRC_KHR` on the way to the screen without a way to tell Skia so —
+SkiaSharp exposes no `setVkImageLayout`. On reuse, Skia transitioned from a layout the image
+no longer had, and the contents became undefined. Fixed by building the target fresh each
+frame declaring `UNDEFINED`, which is always true and costs one validation. The capture now
+defaults to the first *reused* frame for the same reason.
+
 ## 1. The bisect — no window, a minute, proves Skia on your driver
 
 ```bash

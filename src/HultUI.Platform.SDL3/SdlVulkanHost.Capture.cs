@@ -22,6 +22,26 @@ internal sealed unsafe partial class SdlVulkanHost
     private static readonly string? CapturePath =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE");
 
+    /// <summary>
+    /// Which presented frame to capture. Not the first, deliberately.
+    ///
+    /// <para>Not frame 1. While every swapchain image is still fresh, every belief about it
+    /// is true — a renderer can draw those frames perfectly and every frame afterwards
+    /// black, which is exactly what the layout-caching bug did, and a capture of frame 1 saw
+    /// none of it. The default is therefore the <b>first frame that reuses an image</b>,
+    /// which is one past the swapchain's count: the earliest frame at which stale state can
+    /// show, and still reachable in an app that renders only when dirty.</para>
+    ///
+    /// <para><c>HULTUI_VULKAN_CAPTURE_FRAME</c> overrides it; a bigger number needs an app
+    /// that keeps drawing.</para>
+    /// </summary>
+    private static readonly int CaptureFrameOverride =
+        int.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_CAPTURE_FRAME"), out var n) && n > 0
+            ? n : 0;
+
+    private int CaptureFrame => CaptureFrameOverride > 0 ? CaptureFrameOverride : _images.Length + 1;
+
+    private int _presentedFrames;
     private bool _captured;
 
     /// <summary>Called after Skia's work is done and before the present transition, when the
@@ -29,6 +49,7 @@ internal sealed unsafe partial class SdlVulkanHost
     private void CaptureIfAsked(VkImage image)
     {
         if (_captured || string.IsNullOrEmpty(CapturePath)) return;
+        if (++_presentedFrames < CaptureFrame) return;
         _captured = true;
         try { Capture(image, CapturePath); }
         catch (Exception ex) { Console.Error.WriteLine($"[vulkan] capture failed: {ex.Message}"); }
@@ -98,7 +119,7 @@ internal sealed unsafe partial class SdlVulkanHost
 
         DestroyBuffer(_device, buffer, 0);
         FreeMemory(_device, memory, 0);
-        Console.Error.WriteLine($"[vulkan] captured {width}x{height} to {path}");
+        Console.Error.WriteLine($"[vulkan] captured frame {_presentedFrames} ({width}x{height}) to {path}");
     }
 
     private static VkImageMemoryBarrier Barrier(VkImage image, VkImageLayout from, VkImageLayout to,
