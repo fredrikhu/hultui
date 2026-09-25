@@ -33,7 +33,11 @@ public sealed class SkiaFontCollection : IFontCollection
 
     public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant)
     {
-        var key = new FallbackKey(codepoint, weight, slant);
+        // The language is part of the key because it can change under a codepoint: Han
+        // follows the UI culture, and an app that switches language at runtime must not
+        // keep the first culture's glyphs.
+        string? language = ScriptLanguage.ForCodepoint(codepoint);
+        var key = new FallbackKey(codepoint, weight, slant, language);
         if (_fallbackCache.TryGetValue(key, out var cached))
             return cached;
 
@@ -41,7 +45,6 @@ public sealed class SkiaFontCollection : IFontCollection
         // and with the script's language, so it falls back to a face made for the script
         // rather than the first one that covers the codepoint (see ScriptLanguage).
         using var style = new SKFontStyle(ToSkWeight(weight), SKFontStyleWidth.Normal, ToSkSlant(slant));
-        string? language = ScriptLanguage.ForCodepoint(codepoint);
         var typeface = _fontManager.MatchCharacter(null, style, language is null ? null : [language], codepoint);
 
         SkiaResolvedFont? resolved = null;
@@ -76,7 +79,7 @@ public sealed class SkiaFontCollection : IFontCollection
     };
 
     private readonly record struct FontKey(string Family, FontWeight Weight, FontSlant Slant);
-    private readonly record struct FallbackKey(int Codepoint, FontWeight Weight, FontSlant Slant);
+    private readonly record struct FallbackKey(int Codepoint, FontWeight Weight, FontSlant Slant, string? Language);
 }
 
 internal sealed class SkiaResolvedFont : IResolvedFont

@@ -226,4 +226,51 @@ public class SkiaTextIntegrationTests
         var typeface = (SkiaSharp.SKTypeface)alef.NativeHandle;
         Assert.False(typeface.IsFixedPitch, $"Hebrew fell back to monospaced '{typeface.FamilyName}'");
     }
+
+    [Fact]
+    public void FontCollection_MatchCharacter_HanFollowsTheUiCulture()
+    {
+        // 說 is drawn differently in each of these, and only the reader's culture says which
+        // is right. Names differ per platform (Noto Sans CJK SC/TC/JP/KR, Microsoft YaHei/
+        // JhengHei, Yu Gothic, Malgun Gothic), so this asserts the behaviour: four cultures,
+        // four faces, and a non-CJK reader gets the Simplified one, CLDR's default.
+        string FaceFor(string culture)
+        {
+            var saved = System.Globalization.CultureInfo.CurrentUICulture;
+            try
+            {
+                System.Globalization.CultureInfo.CurrentUICulture = new(culture);
+                var font = new SkiaFontCollection().MatchCharacter(0x8AAA, FontWeight.Regular, FontSlant.Normal);
+                Assert.NotNull(font);
+                return ((SkiaSharp.SKTypeface)font.NativeHandle).FamilyName;
+            }
+            finally
+            {
+                System.Globalization.CultureInfo.CurrentUICulture = saved;
+            }
+        }
+
+        var faces = new[] { "zh-CN", "zh-TW", "ja-JP", "ko-KR" }.ToDictionary(c => c, FaceFor);
+        Assert.True(faces.Values.Distinct().Count() == 4, "faces: " + string.Join(", ", faces));
+        Assert.Equal(faces["zh-CN"], FaceFor("en-US"));
+    }
+
+    [Fact]
+    public void FontCollection_MatchCharacter_ACultureChangeIsNotServedFromTheCache()
+    {
+        var fonts = new SkiaFontCollection();
+        var saved = System.Globalization.CultureInfo.CurrentUICulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = new("ja-JP");
+            var japanese = fonts.MatchCharacter(0x8AAA, FontWeight.Regular, FontSlant.Normal);
+            System.Globalization.CultureInfo.CurrentUICulture = new("zh-TW");
+            var traditional = fonts.MatchCharacter(0x8AAA, FontWeight.Regular, FontSlant.Normal);
+            Assert.NotSame(japanese, traditional);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = saved;
+        }
+    }
 }
