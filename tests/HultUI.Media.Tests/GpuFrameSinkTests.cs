@@ -111,18 +111,60 @@ public class GpuFrameSinkTests
         Assert.Throws<InvalidOperationException>(() => sink.TryRenderFrame(surface, out _));
     }
 
+    /// <summary>
+    /// A renderer that can carry linear light is told so, and says what its 1.0 means — the
+    /// two halves of phase 5's seam. Without the first the producer tone-maps HDR away before
+    /// the renderer ever sees it; without the second the renderer cannot place the result at
+    /// any particular luminance.
+    /// </summary>
+    [Fact]
+    public void ALinearTarget_ReachesTheProducer_AndItsReferenceWhiteComesBack()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A,
+            linear: true, peakNits: 1000f);
+
+        Assert.True(sink.TryRenderFrame(surface, out var frame));
+
+        Assert.True(renderer.LastWantedLinear);
+        Assert.Equal(1000f, renderer.LastPeakNits);
+        Assert.Equal(203f, frame.ReferenceWhiteNits);
+        Assert.True(frame.IsLinearLight);
+    }
+
+    /// <summary>And an ordinary target still gets an ordinary encoded picture, which is what
+    /// every GL surface asks for and what a frame meant before any of this.</summary>
+    [Fact]
+    public void AnEncodedTarget_LeavesTheFrameEncoded()
+    {
+        var renderer = new CountingRenderer();
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x8058);
+
+        Assert.True(sink.TryRenderFrame(surface, out var frame));
+
+        Assert.False(renderer.LastWantedLinear);
+        Assert.Equal(0f, frame.ReferenceWhiteNits);
+        Assert.False(frame.IsLinearLight);
+    }
+
     /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
     private sealed class LendingSurface : IExternalGLSurface
     {
         private readonly uint _framebuffer, _texture, _internalFormat;
-        private readonly bool _lends;
+        private readonly bool _lends, _linear;
+        private readonly float _peakNits;
 
-        public LendingSurface(uint framebuffer, uint texture, uint internalFormat, bool lends = true)
+        public LendingSurface(uint framebuffer, uint texture, uint internalFormat, bool lends = true,
+            bool linear = false, float peakNits = 0f)
         {
             _framebuffer = framebuffer;
             _texture = texture;
             _internalFormat = internalFormat;
             _lends = lends;
+            _linear = linear;
+            _peakNits = peakNits;
         }
 
         public Func<string, nint> GetProcAddress => _ => 0;
@@ -130,7 +172,7 @@ public class GpuFrameSinkTests
 
         public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
         {
-            target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat);
+            target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat, _linear, _peakNits);
             return _lends;
         }
 
@@ -153,12 +195,16 @@ public class GpuFrameSinkTests
         public bool RendersBottomUp => false;
         public uint LastInternalFormat { get; private set; }
         public uint LastFramebuffer { get; private set; }
-        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
-            uint internalFormat)
+        public bool LastWantedLinear { get; private set; }
+        public float LastPeakNits { get; private set; }
+        public float ReferenceWhiteNits => LastWantedLinear ? 203f : 0f;
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height)
         {
             GLRenders++;
-            LastFramebuffer = framebuffer;
-            LastInternalFormat = internalFormat;
+            LastFramebuffer = target.Framebuffer;
+            LastInternalFormat = target.InternalFormat;
+            LastWantedLinear = target.WantsLinearLight;
+            LastPeakNits = target.PeakNits;
             return true;
         }
         public void ReleaseGL() { }

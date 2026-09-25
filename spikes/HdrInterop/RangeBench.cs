@@ -35,18 +35,28 @@ internal static unsafe class RangeBench
             return 1;
         }
 
-        var options = args
+        // "late.key=value" is applied after mpv_initialize and after the render context
+        // exists — where the real backend is forced to set it, and the only difference left
+        // between this spike and an app that gets no range out of the same options.
+        var all = args
             .Where(a => a.Contains('=') && !a.StartsWith('-'))
             .Select(a => a.Split('=', 2))
-            .Select(parts => (parts[0], parts[1]))
+            .Select(parts => (Key: parts[0], Value: parts[1]))
             .ToArray();
+        var options = all.Where(o => !o.Key.StartsWith("late.") && !o.Key.StartsWith("post.")).ToArray();
+        var lateOptions = all.Where(o => o.Key.StartsWith("late."))
+            .Select(o => (o.Key["late.".Length..], o.Value)).ToArray();
+        var postOptions = all.Where(o => o.Key.StartsWith("post."))
+            .Select(o => (o.Key["post.".Length..], o.Value)).ToArray();
 
         Console.WriteLine("── what range does mpv write into the shared image? ──");
         Console.WriteLine();
         Console.WriteLine($"  file   : {Path.GetFileName(file)}");
         Console.WriteLine(options.Length == 0
             ? "  options: (none — this is today's behaviour)"
-            : "  options: " + string.Join("  ", options.Select(o => $"{o.Item1}={o.Item2}")));
+            : "  options: " + string.Join("  ", options.Select(o => $"{o.Key}={o.Value}")));
+        if (lateOptions.Length > 0)
+            Console.WriteLine("  late   : " + string.Join("  ", lateOptions.Select(o => $"{o.Item1}={o.Item2}")));
         Console.WriteLine();
 
         if (!SyncBench.MakeGlContext(out string renderer)) return 1;
@@ -63,7 +73,9 @@ internal static unsafe class RangeBench
         Gl.ClearTo(-1f, -1f, -1f, 1f);
         Gl.Finish();
 
-        var result = MpvIntoFbo.Render(file, fbo, Width, Height, colorspaceHint: false, options);
+        var result = MpvIntoFbo.Render(file, fbo, Width, Height, colorspaceHint: false, options,
+            lateOptions.Length == 0 ? null : lateOptions,
+            postOptions.Length == 0 ? null : postOptions);
         if (!result.Ok) { Console.WriteLine($"  mpv failed: {result.Message}"); return 2; }
 
         var pixels = vk.ReadBack();

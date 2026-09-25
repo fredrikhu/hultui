@@ -79,6 +79,17 @@ public interface IVulkanSurfaceHost
     /// </summary>
     float SdrWhiteScale { get; }
 
+    /// <summary>
+    /// What this display can show at its brightest, in nits, or zero when nobody knows.
+    ///
+    /// <para>Zero is the honest answer today on both platforms: Windows reports an SDR white
+    /// level but no peak, and SDL's binding here exposes neither <c>SDR_WHITE_POINT</c> nor
+    /// <c>HDR_HEADROOM</c>. A producer told zero assumes a common mastering peak instead,
+    /// which is wrong on any particular monitor and cannot currently be made right.
+    /// <c>HULTUI_VULKAN_PEAK_NITS</c> overrides it for a machine whose peak is known.</para>
+    /// </summary>
+    float DisplayPeakNits => 0f;
+
     /// <summary>Resolves a Vulkan entry point by name. <paramref name="device"/> is zero for
     /// instance-level commands, which is the convention Skia's own resolver uses.</summary>
     nint GetProcedureAddress(string name, nint instance, nint device);

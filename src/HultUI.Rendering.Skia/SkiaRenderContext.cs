@@ -783,7 +783,11 @@ public sealed class SkiaRenderContext : IRenderContext, IDisposable
 
         _pooledPaint.Reset();
         _pooledPaint.IsAntialias = true;
+        // A frame of linear light arrives in the producer's luminance units, not the canvas's.
+        // The surface owns that conversion because only it knows what its own 1.0 is worth.
+        _pooledPaint.ColorFilter = gl.FrameColorFilter(frame);
         Canvas.DrawImage(wrapped.Image, srcRect, ToSkRect(drawRect), FrameSampling, _pooledPaint);
+        _pooledPaint.ColorFilter = null;
     }
 
     /// <summary>

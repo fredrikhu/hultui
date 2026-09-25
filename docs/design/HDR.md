@@ -464,6 +464,38 @@ has to be drawn as *linear* rather than sRGB-encoded, which is a different `SKCo
 wrap in `WrapFrame`. Neither is large; both are untested against real HDR content, which neither
 machine has.
 
+**Built, and off by default, because it does not yet work.** The seam is in place and every
+part of it can be seen working except the last: `GpuFrameTarget` carries `WantsLinearLight` and
+`PeakNits` down to the producer, `GpuFrame` carries `ReferenceWhiteNits` back up,
+`MpvBackend` sets `target-prim`/`target-trc`/`target-peak` and reports libplacebo's 203, and
+`WrapFrame` declares the image linear and scales it into the canvas. `HULTUI_VIDEO_HDR=1` turns
+it on.
+
+**What is proven, on a real HDR10 film** (2001, PQ/BT.2020, mastering peak 1000.6 nits): the
+spike renders it into the shared image through the same options and reads back a peak of
+**2.9082**, against **1.0000** with the options absent. The ordering does not matter — set before
+`mpv_initialize`, set after it, or set after playback has started, all three give 2.9082. Nor do
+the app's other options: `hwdec=auto-copy`, `keep-open`, `video-timing-offset=0` change nothing.
+
+**What is not working:** in the app, with the flag on, mpv accepts every option (`rc=0`) and the
+surface lends a linear target, and still nothing above white reaches the swapchain. The picture
+is instead visibly *too bright*, which is what declaring an encoded frame linear would do.
+
+**The measurement that would settle it has not been taken.** The spike reads the shared image;
+the app reads the swapchain, after Skia has composited. Those are different questions and the
+difference is exactly where the loss is. An attempt to read the shared image back inside the app
+returned a uniform 0.000 for an image that plainly had a picture in it — a broken diagnostic, not
+a result, and it was removed rather than left to be believed. The reason is almost certainly that
+the readback declares a layout Skia has since moved the image out of, which is this backend's
+oldest trap.
+
+**So do it from the GL side instead.** `glReadPixels` on the interop framebuffer, inside
+`RunExternalGL` immediately after mpv renders, needs no Vulkan layout at all and answers the only
+question that matters: whether mpv wrote range into that image in the app, as it demonstrably
+does in the spike. Everything after that is Skia's compositing, and there the suspects are the
+premultiplied wrap (already tried: `SKAlphaType.Opaque` changed nothing) and the 0..1 offscreen
+that phase 2 built on the assumption nothing exceeds white.
+
 **And then the original question.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay draws needs
 a deliberate luminance, and that is a design decision per app rather than a renderer setting. It

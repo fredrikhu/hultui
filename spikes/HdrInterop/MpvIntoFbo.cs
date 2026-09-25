@@ -13,7 +13,9 @@ namespace HdrInterop;
 internal static unsafe class MpvIntoFbo
 {
     public static (bool Ok, string Message) Render(string path, uint fbo, int width, int height,
-        bool colorspaceHint, IReadOnlyList<(string Key, string Value)>? options = null)
+        bool colorspaceHint, IReadOnlyList<(string Key, string Value)>? options = null,
+        IReadOnlyList<(string Key, string Value)>? lateOptions = null,
+        IReadOnlyList<(string Key, string Value)>? postOptions = null)
     {
         if (!MpvNative.IsAvailable) return (false, "no libmpv found");
 
@@ -64,6 +66,16 @@ internal static unsafe class MpvIntoFbo
 
             try
             {
+                // Set after initialize and after the render context exists, which is where
+                // the real backend has to set them: it cannot know the target's colour space
+                // until a renderer lends it one, long after the mpv instance was made.
+                if (lateOptions is not null)
+                    foreach (var (key, value) in lateOptions)
+                    {
+                        int rc = mpv_set_property_string(mpv, key, value);
+                        Console.WriteLine($"    late {key}={value} -> rc {rc}");
+                    }
+
                 if (Command(mpv, "loadfile", path) < 0) return (false, "loadfile failed");
                 if (!WaitFor(mpv, MPV_EVENT_FILE_LOADED, TimeSpan.FromSeconds(20)))
                     return (false, "the file never loaded");
@@ -91,6 +103,13 @@ internal static unsafe class MpvIntoFbo
                 parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_OPENGL_FBO, data = &target };
                 parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_FLIP_Y, data = &flipY };
                 parameters[2] = default;
+
+                // Applied once the file is loaded and playing, which is where the real
+                // backend sets them: it learns the target's colour space on the first frame
+                // it is asked to draw, and by then mpv has been decoding for a while.
+                if (postOptions is not null)
+                    foreach (var (key, value) in postOptions)
+                        Console.WriteLine($"    post {key}={value} -> rc {mpv_set_property_string(mpv, key, value)}");
 
                 // A few passes: the first can land before the decoder has produced anything,
                 // and an empty frame would read back as the clear colour.

@@ -23,4 +23,18 @@ internal interface ISkiaExternalSurface : IExternalGLSurface
     /// returned image and the storage stays the producer's.
     /// </summary>
     SKImage? WrapFrame(in GpuFrame frame);
+
+    /// <summary>
+    /// What the frame has to be multiplied by on the way into this surface's canvas, or null
+    /// when it can be drawn as it is.
+    ///
+    /// <para>A frame of linear light says how many nits its 1.0 stands for, and the canvas has
+    /// its own idea of what 1.0 means; the two rarely agree. A plain
+    /// <see cref="SKColorFilter.CreateColorMatrix"/> cannot do this, because it clamps at 1
+    /// and the values above 1 are the entire point of an HDR frame.</para>
+    ///
+    /// <para>Null from a GL surface, always: it composites an encoded picture into an encoded
+    /// target and there is nothing to convert.</para>
+    /// </summary>
+    SKColorFilter? FrameColorFilter(in GpuFrame frame) => null;
 }

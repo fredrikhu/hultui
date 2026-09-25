@@ -63,6 +63,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         bool drew = false;
         uint framebuffer = 0, texture = 0, format = GpuFrame.Rgba8;
         bool rendererOwned = false;
+        GpuFrameTarget lentTarget = default;
 
         surface.RunExternalGL(() =>
         {
@@ -76,6 +77,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             if (surface.TryAcquireFrameTarget(width, height, out var lent))
             {
                 rendererOwned = true;
+                lentTarget = lent;
                 framebuffer = lent.Framebuffer;
                 texture = lent.TextureId;
                 format = lent.InternalFormat;
@@ -87,16 +89,20 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
                 EnsureTarget(width, height);
                 framebuffer = _framebuffer;
                 texture = _texture;
+                // The sink's own texture is an ordinary 8-bit encoded one, and saying so
+                // explicitly keeps the renderer from being handed a default that claims more.
+                lentTarget = new GpuFrameTarget(framebuffer, texture, GpuFrame.Rgba8);
             }
 
-            drew = _renderer.Render(surface.GetProcAddress, framebuffer, width, height, format);
+            drew = _renderer.Render(surface.GetProcAddress, lentTarget, width, height);
         });
 
         // A renderer with nothing new keeps the last frame: the target still holds it.
         if (!drew && !rendererOwned && _texture == 0) return false;
         if (framebuffer == 0 && texture == 0) return false;
 
-        frame = new GpuFrame(texture, width, height, _renderer.RendersBottomUp, format, rendererOwned);
+        frame = new GpuFrame(texture, width, height, _renderer.RendersBottomUp, format, rendererOwned,
+            _renderer.ReferenceWhiteNits);
         return true;
     }
 

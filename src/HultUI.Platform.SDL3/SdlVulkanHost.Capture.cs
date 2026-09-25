@@ -142,6 +142,7 @@ internal sealed unsafe partial class SdlVulkanHost
         void* mapped;
         Check(MapMemory(_device, memory, 0, bytes, 0, &mapped), "vkMapMemory");
         WritePpm(path, (byte*)mapped, width, height, _format, SdrWhiteScale);
+        if (_format == VkFormat.R16G16B16A16Sfloat) ReportRange((Half*)mapped, width, height);
         UnmapMemory(_device, memory);
 
         DestroyBuffer(_device, buffer, 0);
@@ -207,6 +208,35 @@ internal sealed unsafe partial class SdlVulkanHost
         char nl = '\n';
         file.Write(System.Text.Encoding.ASCII.GetBytes($"P6{nl}{width} {height}{nl}255{nl}"));
         file.Write(body);
+    }
+
+    /// <summary>
+    /// The half-float swapchain's actual range, which the PPM beside it cannot show.
+    ///
+    /// <para>A PPM is eight bits and the writer divides by the white scale before encoding, so
+    /// everything above white lands on 255 and an HDR frame looks exactly like an SDR one.
+    /// That is the whole difficulty with this backend: the file is right, the screen is right,
+    /// and neither proves the other. The numbers do — a maximum above the white scale means
+    /// something brighter than SDR white reached the swapchain.</para>
+    /// </summary>
+    private void ReportRange(Half* pixels, int width, int height)
+    {
+        float min = float.MaxValue, max = float.MinValue;
+        int aboveWhite = 0;
+        for (int i = 0; i < width * height; i++)
+        {
+            for (int c = 0; c < 3; c++)
+            {
+                float v = (float)pixels[i * 4 + c];
+                if (float.IsNaN(v)) continue;
+                min = Math.Min(min, v);
+                max = Math.Max(max, v);
+                if (v > SdrWhiteScale * 1.001f) aboveWhite++;
+            }
+        }
+        Console.Error.WriteLine($"[vulkan] scRGB range: min {min:0.000} max {max:0.000} " +
+            $"(SDR white is {SdrWhiteScale:0.00}); {aboveWhite} channel samples above it" +
+            (aboveWhite > 0 ? " — HDR reached the swapchain" : ""));
     }
 
     /// <summary>Linear light to sRGB, the standard piecewise curve.</summary>

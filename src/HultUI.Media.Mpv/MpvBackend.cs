@@ -413,12 +413,13 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         LoadPending();
     }
 
-    public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
-        uint internalFormat)
+    public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height)
     {
         if (_render == 0)
             CreateGLContext(getProcAddress);
         if (_render == 0) return false;
+
+        ApplyTargetColour(target);
 
         if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn)
             return false;   // nothing new; the texture still holds the last frame
@@ -428,10 +429,10 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // assumes eight bits and dithers to them inside a target that holds sixteen.
         var fbo = new mpv_opengl_fbo
         {
-            fbo = (int)framebuffer,
+            fbo = (int)target.Framebuffer,
             w = width,
             h = height,
-            internal_format = (int)internalFormat,
+            internal_format = (int)target.InternalFormat,
         };
         int flip = 0;
         // By default mpv hands a frame over early and then sleeps inside this call
@@ -450,6 +451,69 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     }
 
     private bool _lastGLFrameDrawn;
+
+    /// <summary>
+    /// libplacebo's linear output puts 1.0 at the BT.2408 reference white of 203 nits.
+    ///
+    /// <para>Measured rather than assumed: <c>spikes/HdrInterop --range</c> reads back a peak
+    /// of exactly 1.0000 at <c>target-peak=203</c>, 2.0000 at 406 and 5.0000 at 1015. It is
+    /// also the number the Wayland colour-management protocol names as the reference white of
+    /// Windows-scRGB, which is why the two ends of this pipeline need no fudge between
+    /// them.</para>
+    /// </summary>
+    private const float LibplaceboReferenceWhiteNits = 203f;
+
+    /// <summary>What <c>target-peak</c> is told when the renderer does not know the display's
+    /// peak. A common mastering peak, and wrong on a given monitor in a way nothing here can
+    /// detect — neither platform exposes a peak query through this SDL binding.</summary>
+    private const float AssumedPeakNits = 1000f;
+
+    private bool _linearTarget;
+    private float _appliedPeak;
+
+    /// <inheritdoc />
+    public float ReferenceWhiteNits => _linearTarget ? LibplaceboReferenceWhiteNits : 0f;
+
+    /// <summary>
+    /// Tells mpv what it is drawing into, when that has changed.
+    ///
+    /// <para>There is no render parameter for this — <c>mpv_opengl_fbo</c> carries a
+    /// framebuffer, a size and an internal format, and no <c>MPV_RENDER_PARAM</c> names a
+    /// colour space, which is why <c>target-colorspace-hint</c> has never done anything
+    /// through this API. The options are the way in, and they do reach libplacebo: an encoded
+    /// mid-grey of 0.502 comes back at 0.192 under <c>target-trc=linear</c>, which is that
+    /// value decoded through gamma 2.4.</para>
+    ///
+    /// <para>Without <c>target-peak</c> nothing exceeds 1.0 however the transfer is set, so
+    /// this is the option that decides whether HDR content keeps its range or is tone-mapped
+    /// away before it reaches the target.</para>
+    /// </summary>
+    private void ApplyTargetColour(in GpuFrameTarget target)
+    {
+        float peak = target.PeakNits > 0f ? target.PeakNits : AssumedPeakNits;
+        if (target.WantsLinearLight == _linearTarget && (!_linearTarget || peak == _appliedPeak))
+            return;
+
+        _linearTarget = target.WantsLinearLight;
+        _appliedPeak = peak;
+
+        if (_linearTarget)
+        {
+            // scRGB's primaries are BT.709; the transfer is linear light; the peak is what
+            // the display can show, which decides where tone mapping lands.
+            int a = mpv_set_property_string(_mpv, "target-prim", "bt.709");
+            int b = mpv_set_property_string(_mpv, "target-trc", "linear");
+            int c = mpv_set_property_string(_mpv, "target-peak",
+                peak.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+            Console.Error.WriteLine($"[mpv] linear target: prim={a} trc={b} peak={peak:0} rc={c}");
+        }
+        else
+        {
+            mpv_set_property_string(_mpv, "target-prim", "auto");
+            mpv_set_property_string(_mpv, "target-trc", "auto");
+            mpv_set_property_string(_mpv, "target-peak", "auto");
+        }
+    }
 
     private void CreateGLContext(Func<string, nint> getProcAddress)
     {

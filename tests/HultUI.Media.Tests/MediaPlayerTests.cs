@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Headless;
 using HultUI.Media.Testing;
 using Xunit;
@@ -128,8 +129,8 @@ public class MediaPlayerTests
         public void PrepareGL(Func<string, nint> getProcAddress) { }
         public bool TryGetFrameSize(out int width, out int height) { width = height = 0; return false; }
         public bool RendersBottomUp => false;
-        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
-            uint internalFormat) => false;
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target,
+            int width, int height) => false;
         public void ReleaseGL() { }
     }
 

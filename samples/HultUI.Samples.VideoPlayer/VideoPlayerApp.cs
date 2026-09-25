@@ -33,6 +33,7 @@ public sealed class VideoPlayerApp : IDisposable
     private readonly MediaPlayer? _player;
     private readonly HultUI.Media.VideoPlayer? _videoPlayer;
     private readonly string? _initialFile;
+    private readonly double _startSeconds;
     private readonly TextElement _title = Text.New("No file open").FontSize(14f);
     private readonly TextElement _status = Text.New("").FontSize(12f);
     private readonly Color _muted = new(148, 163, 184);
@@ -40,8 +41,12 @@ public sealed class VideoPlayerApp : IDisposable
     /// <param name="backends">Makes the decoder backend; null when none is available, in
     /// which case the window explains instead of playing.</param>
     /// <param name="initialFile">A file to open as soon as the tree is mounted.</param>
-    public VideoPlayerApp(Application app, Window window, Func<IMediaBackend>? backends, string? initialFile = null)
+    /// <param name="startSeconds">Where to jump to once the initial file is open; 0 for the
+    /// beginning. Only for the initial file, and only for looking at something specific.</param>
+    public VideoPlayerApp(Application app, Window window, Func<IMediaBackend>? backends,
+        string? initialFile = null, double startSeconds = 0)
     {
+        _startSeconds = startSeconds;
         _app = app;
         _window = window;
         _initialFile = initialFile;
@@ -123,6 +128,9 @@ public sealed class VideoPlayerApp : IDisposable
         _status.Content = path;
         _window.Title = $"{Path.GetFileName(path)} - HultUI Video Player";
         _player.Open(MediaSource.FromFile(path), autoPlay: true);
+
+        if (_startSeconds > 0 && path == _initialFile)
+            _player.Seek(TimeSpan.FromSeconds(_startSeconds), precise: false);
     }
 
     private async Task OpenFromDialogAsync()

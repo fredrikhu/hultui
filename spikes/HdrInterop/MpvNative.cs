@@ -88,6 +88,8 @@ internal static unsafe partial class MpvNative
     [LibraryImport(Library)] public static partial void mpv_render_context_free(nint context);
 
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int mpv_set_property_string(nint handle, string name, string data);
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
     public static partial nint mpv_get_property_string(nint handle, string name);
     [LibraryImport(Library)] public static partial void mpv_free(nint data);
 

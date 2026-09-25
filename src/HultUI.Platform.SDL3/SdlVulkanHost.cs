@@ -143,6 +143,19 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <summary>Set by the window, which is the thing that knows which display it is on.</summary>
     public float SdrWhiteScale { get; set; } = 1f;
 
+    /// <summary>
+    /// The display's peak luminance, from <c>HULTUI_VULKAN_PEAK_NITS</c> or zero.
+    ///
+    /// <para>There is no query behind this. Windows gives an SDR white level and no peak, and
+    /// this SDL binding exposes no HDR headroom, so a number here can only come from the
+    /// person running it. Zero means "unknown" rather than "dark", and a producer told zero
+    /// assumes rather than believes.</para>
+    /// </summary>
+    public float DisplayPeakNits { get; } =
+        float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_PEAK_NITS"),
+            System.Globalization.CultureInfo.InvariantCulture, out float nits) && nits > 0f
+            ? nits : 0f;
+
     public nint GetProcedureAddress(string name, nint instance, nint device) =>
         Resolve(name, instance, device);
 
@@ -539,6 +552,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// different answer from the one the GL surface gives, and telling the two apart is the
     /// whole test for this phase. Phase 3 is where this function learns about HDR.
     /// </summary>
+    /// <param name="colorSpace">The colour space that goes with the chosen format.</param>
     /// <param name="trace">False when the answer is only being compared against the current
     /// format rather than acted on, so that asking does not log. Every display event asks.</param>
     private VkFormat ChooseFormat(out VkColorSpaceKHR colorSpace, bool trace = true)

@@ -98,15 +98,20 @@ public interface IGpuFrameRenderer
     /// there is nothing to draw, in which case the last frame stays on screen.
     /// </summary>
     /// <param name="getProcAddress">Resolver for GL entry points in the current context.</param>
-    /// <param name="framebuffer">The GL framebuffer to draw into.</param>
-    /// <param name="width">Its width in pixels.</param>
-    /// <param name="height">Its height in pixels.</param>
-    /// <param name="internalFormat">The GL internal format of the framebuffer's colour
-    /// attachment. <c>GL_RGBA8</c> for a target the sink made itself, and something wider
-    /// for one a renderer lent — a Vulkan surface lends <c>GL_RGBA16F</c>, and a producer
-    /// that is not told stays at eight bits in a target that could carry sixteen.</param>
-    bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
-        uint internalFormat);
+    /// <param name="target">The framebuffer and what the renderer wants in it: its internal
+    /// format, whether it will be composited as linear light, and the display's peak. A
+    /// producer that is not told any of this stays at eight encoded bits in a target that
+    /// could carry sixteen and a range above white.</param>
+    /// <param name="width">The target's width in pixels.</param>
+    /// <param name="height">The target's height in pixels.</param>
+    bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height);
+
+    /// <summary>
+    /// What the value 1.0 means in the frame just rendered, in nits, or zero for an ordinary
+    /// encoded picture. Read after <see cref="Render"/> and passed on in
+    /// <see cref="GpuFrame.ReferenceWhiteNits"/>.
+    /// </summary>
+    float ReferenceWhiteNits => 0f;
 
     /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.</summary>
     void ReleaseGL();

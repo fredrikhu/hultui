@@ -11,6 +11,12 @@ using var app = new Application("HultUI - Video Player", 1100, 700);
 app.Theme = Theme.Dark;
 
 Func<IMediaBackend>? backends = MpvBackend.IsAvailable ? () => new MpvBackend() : null;
-using var player = new VideoPlayerApp(app, app.PrimaryWindow, backends, args.Length > 0 ? args[0] : null);
+// --start=<seconds> jumps there once the file is open. For checking anything that depends on
+// what is actually on screen: a film's first minutes are often black, and a capture taken then
+// says nothing about the picture.
+double.TryParse(args.FirstOrDefault(a => a.StartsWith("--start="))?["--start=".Length..],
+    System.Globalization.CultureInfo.InvariantCulture, out double startSeconds);
+using var player = new VideoPlayerApp(app, app.PrimaryWindow, backends,
+    args.FirstOrDefault(a => !a.StartsWith('-')), startSeconds);
 app.SetRoot(player.Mount());
 app.Run();

@@ -58,6 +58,14 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private int _height;
     private bool _frameOpen;
 
+    /// <summary>The colour space of the image being drawn into this frame. What decides
+    /// whether a video may keep its range: only an scRGB target can carry values past 1.</summary>
+    private uint _frameColorSpace;
+
+    private bool? _tracedLinear;
+    private SKColorFilter? _frameScale;
+    private float _frameScaleFor;
+
     public IRenderContext RenderContext => _renderContext;
     public IMeasureContext MeasureContext => _text.MeasureContext;
 
@@ -153,7 +161,25 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         if (Interop?.LendInteropImage(width, height) is not { } image) return false;
 
         _lent = image;
-        target = new GpuFrameTarget(image.GlFramebuffer, image.GlTexture, image.GlInternalFormat);
+        // Linear light only where it can survive. An 8-bit sRGB swapchain has no room above
+        // white, and the offscreen that carries the extra range exists only for scRGB — ask a
+        // producer for HDR into an SDR target and it comes out clipped rather than bright.
+        // Off unless asked for. The plumbing is complete and the picture it produces is not
+        // yet right: mpv accepts the target options and the spike proves they make it write
+        // HDR range into this very image, but nothing above white has yet been seen reaching
+        // the swapchain in the app. Until that is understood, declaring a frame linear when
+        // it may still be encoded makes the picture wrong — brighter than it should be, which
+        // is what it looked like. See docs/design/HDR.md, phase 5.
+        bool linear = HdrVideoEnabled && _frameColorSpace == VkColorSpaceExtendedSrgbLinear;
+        if (linear != _tracedLinear)
+        {
+            _tracedLinear = linear;
+            Console.Error.WriteLine($"[vulkan] lending a {(linear ? "LINEAR" : "encoded")} target " +
+                $"(colorSpace={_frameColorSpace} offscreen={_offscreen is not null} peak={_host.DisplayPeakNits:0})");
+        }
+
+        target = new GpuFrameTarget(image.GlFramebuffer, image.GlTexture, image.GlInternalFormat,
+            WantsLinearLight: linear, PeakNits: linear ? _host.DisplayPeakNits : 0f);
         return true;
     }
 
@@ -197,9 +223,20 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             return null;
         }
 
+        // Linear when the producer says it wrote light rather than an encoded picture. Get
+        // this wrong and Skia applies a transfer that is not there: an HDR frame declared sRGB
+        // is decoded a second time and comes out crushed and dark.
+        var space = frame.IsLinearLight ? SKColorSpace.CreateSrgbLinear() : SKColorSpace.CreateSrgb();
+
+        // Opaque for linear light, and not as a detail. Premultiplied colour is defined only
+        // up to its alpha, so a premul image whose channels exceed 1 is describing something
+        // invalid and Skia is entitled to clamp it — which is exactly what an HDR highlight
+        // is. Video is opaque anyway, so saying so costs nothing and keeps the range.
+        var alpha = frame.IsLinearLight ? SKAlphaType.Opaque : SKAlphaType.Premul;
+
         return SKImage.FromTexture(_grContext, texture,
             frame.BottomLeftOrigin ? GRSurfaceOrigin.BottomLeft : GRSurfaceOrigin.TopLeft,
-            SKColorType.RgbaF16, SKAlphaType.Premul, SKColorSpace.CreateSrgb());
+            SKColorType.RgbaF16, alpha, space);
     }
 
     /// <summary>
@@ -238,6 +275,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         var surface = SurfaceFor(frame);
         if (surface is null) return false;
 
+        _frameColorSpace = frame.ColorSpace;
         _renderContext.SetCanvas((OffscreenFor(frame) ?? surface).Canvas);
         _frameOpen = true;
         return true;
@@ -316,6 +354,76 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     }
 
     /// <summary>
+    /// <c>HULTUI_VIDEO_HDR=1</c> turns on asking a video producer for linear light with its
+    /// range intact — phase 5, and unfinished.
+    ///
+    /// <para>Off by default because the result is not yet correct, not because it is risky to
+    /// try. Everything up to the shared image is proven: <c>spikes/HdrInterop --range</c> gets
+    /// a peak of 2.9 out of a real HDR10 film through the same options this sets, in every
+    /// ordering. What has not been seen is any value above white reaching the swapchain in the
+    /// app, and a frame declared linear while it is still encoded is drawn too bright.</para>
+    /// </summary>
+    private static readonly bool HdrVideoEnabled =
+        Environment.GetEnvironmentVariable("HULTUI_VIDEO_HDR") == "1";
+
+    /// <summary>
+    /// <c>HULTUI_VIDEO_WHITE</c>: where a video's reference white is put.
+    ///
+    /// <para><c>reference</c>, the default, puts it at the luminance it actually names — 203
+    /// nits — so the picture is absolutely correct and a 1000-nit highlight is 1000 nits.
+    /// The cost is that the UI around it is drawn at the display's SDR white, which on this
+    /// machine is 240, so a white transport bar sits 18% brighter than white in the film.</para>
+    ///
+    /// <para><c>ui</c> instead stretches the video so its white matches the interface's. The
+    /// two then agree, and every absolute luminance in the film is wrong by the same factor.
+    /// Which of those is better is a judgement about the app, not about the renderer, and the
+    /// only way to have that judgement is to look at both.</para>
+    /// </summary>
+    private static readonly bool MatchVideoWhiteToUi =
+        string.Equals(Environment.GetEnvironmentVariable("HULTUI_VIDEO_WHITE"), "ui",
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What a frame of linear light must be multiplied by to land in this canvas.
+    ///
+    /// <para>The canvas here is the 0..1 offscreen, whose 1.0 becomes
+    /// <see cref="IVulkanSurfaceHost.SdrWhiteScale"/> × 80 nits when it is blitted to the
+    /// scRGB swapchain. The frame's 1.0 is whatever the producer says. So the factor is the
+    /// ratio of the two, and on Wayland it comes out at exactly 1: the white scale there is
+    /// 203/80, and libplacebo's reference white is 203, which is the same number arrived at
+    /// from the colour-management protocol and from a readback.</para>
+    /// </summary>
+    SKColorFilter? ISkiaExternalSurface.FrameColorFilter(in GpuFrame frame)
+    {
+        if (!frame.IsLinearLight) return null;
+
+        float canvasWhiteNits = _host.SdrWhiteScale * ScRgbReferenceNits;
+        float scale = MatchVideoWhiteToUi || canvasWhiteNits <= 0f
+            ? 1f
+            : frame.ReferenceWhiteNits / canvasWhiteNits;
+
+        if (Math.Abs(scale - 1f) < 0.001f) return null;
+        if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f) return _frameScale;
+
+        _frameScale?.Dispose();
+        _frameScaleFor = scale;
+        // A shader, not a colour matrix: the matrix clamps at 1 and an HDR frame is made of
+        // the values above it. Alpha is left alone — the video is opaque and scaling it would
+        // make the frame translucent in exactly the bright places.
+        using var effect = SKRuntimeEffect.CreateColorFilter(
+            "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
+        if (effect is null) { _frameScale = null; return null; }
+
+        var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = scale };
+        _frameScale = effect.ToColorFilter(uniforms);
+        return _frameScale;
+    }
+
+    /// <summary>scRGB fixes 1.0 at 80 nits. Everything luminance-related here is relative to
+    /// that, which is why it is a named constant rather than an 80 in three expressions.</summary>
+    private const float ScRgbReferenceNits = 80f;
+
+    /// <summary>
     /// The offscreen to draw into this frame, or null when the swapchain can be drawn on
     /// directly. Needed only when white has to exceed 1, which is scRGB's case and not an
     /// ordinary sRGB swapchain's.
@@ -355,6 +463,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     private void ReleaseOffscreen()
     {
+        _frameScale?.Dispose();
+        _frameScale = null;
+        _frameScaleFor = 0f;
         _offscreen?.Dispose();
         _blit?.Dispose();
         _offscreen = null;

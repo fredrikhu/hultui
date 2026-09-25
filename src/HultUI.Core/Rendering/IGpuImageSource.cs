@@ -76,7 +76,19 @@ public interface IExternalGLSurface : IRenderSurface
 /// <param name="InternalFormat">The GL internal format it was created with — not always
 /// <c>GL_RGBA8</c>, since a renderer wanting more than eight bits is half the reason for
 /// this to exist.</param>
-public readonly record struct GpuFrameTarget(uint Framebuffer, uint TextureId, uint InternalFormat);
+/// <param name="WantsLinearLight">True when the renderer will composite this target as linear
+/// light rather than as an encoded SDR picture, and the source should render for that.
+///
+/// <para>The other half of the reason for sixteen bits. A target that only ever holds an
+/// encoded 0..1 picture has more precision and no more range, so HDR content is tone-mapped
+/// away before it arrives and the extra bits carry nothing. A producer told this can keep the
+/// range instead.</para></param>
+/// <param name="PeakNits">What the display can actually show at its brightest, for a producer
+/// that must tone-map to it. Zero when unknown, which means the producer should assume rather
+/// than believe.</param>
+public readonly record struct GpuFrameTarget(
+    uint Framebuffer, uint TextureId, uint InternalFormat,
+    bool WantsLinearLight = false, float PeakNits = 0f);
 
 /// <summary>
 /// A GL texture the renderer composites, as an <see cref="IGpuImageSource"/> describes
@@ -94,12 +106,24 @@ public readonly record struct GpuFrameTarget(uint Framebuffer, uint TextureId, u
 /// <see cref="IExternalGLSurface.TryAcquireFrameTarget"/> rather than from the source. The
 /// renderer then composites whatever it lent out and ignores <paramref name="TextureId"/>,
 /// which on a Vulkan surface names nothing it can draw.</param>
+/// <param name="ReferenceWhiteNits">Zero — the default — means the frame holds an ordinary
+/// encoded picture where 1.0 is white, which is what every source wrote before HDR. Anything
+/// else means the frame holds <b>linear light</b>, and says how many nits the value 1.0
+/// stands for, so the renderer can put it at the right luminance in its own space.
+///
+/// <para>The producer describes what it wrote rather than the renderer assuming: the number
+/// belongs to whatever rendered the frame. libplacebo, which is what mpv uses, normalises its
+/// linear output to the BT.2408 reference white of 203 nits — measured exactly, not read from
+/// a document, in <c>spikes/HdrInterop --range</c>.</para></param>
 public readonly record struct GpuFrame(
     uint TextureId, int Width, int Height, bool BottomLeftOrigin, uint InternalFormat = GpuFrame.Rgba8,
-    bool RendererOwned = false)
+    bool RendererOwned = false, float ReferenceWhiteNits = 0f)
 {
     /// <summary><c>GL_RGBA8</c>.</summary>
     public const uint Rgba8 = 0x8058;
+
+    /// <summary>Whether this frame holds linear light rather than an encoded picture.</summary>
+    public bool IsLinearLight => ReferenceWhiteNits > 0f;
 }
 
 /// <summary>

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
+using HultUI.Core.Rendering;
 using HultUI.Media;
 using HultUI.Media.Testing;
 using HultUI.Platform.SDL3;
@@ -64,11 +65,11 @@ public sealed class GpuFrameSinkGLTests
         public bool TryGetFrameSize(out int width, out int height) { width = 320; height = 180; return true; }
         public bool RendersBottomUp => true;
 
-        public bool Render(Func<string, nint> getProcAddress, uint framebuffer, int width, int height,
-            uint internalFormat)
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target,
+            int width, int height)
         {
             GL ??= new GL(getProcAddress);
-            GL.BindFramebuffer(0x8D40, framebuffer);
+            GL.BindFramebuffer(0x8D40, target.Framebuffer);
             GL.Viewport(0, 0, width, height);
             GL.ClearColor(0, 0.5f, 1, 1);
             GL.Clear(0x4000);
