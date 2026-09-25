@@ -91,17 +91,19 @@ colour line each time.
 swapchain now *never* rebuilds when it should, check the Wayland case below — that is the
 regression this fix could have introduced.
 
-**The regression check that matters more than the fix.** Dragging a window between an HDR and a
-non-HDR monitor must still change the format:
+**The regression this could have caused is already ruled out — on Windows.** Comparing against
+what `ChooseFormat` would produce could have stopped the rebuild happening at all, which reads as
+a fix for the X11 loop and is not one. With one monitor in SDR and one in HDR, a window moved
+between them four times gave exactly one rebuild per transition in both directions and
+`format unchanged` for every other display event; with a video playing across the same moves, the
+shared interop image was created once, survived three swapchain rebuilds, and the frame after two
+format switches was identical to the never-switched one. Details in
+`spikes/HdrInterop/results/windows.txt`.
 
-```bash
-HULTUI_RENDERER=vulkan HULTUI_STARTUP=1 dotnet run --project samples/HultUI.Samples.Minimal
-```
-
-Put one monitor in HDR mode and the other in SDR, then drag the window across. **Pass:** the trace
-shows `rebuilding for scRGB` one way and `rebuilding for sRGB` the other, and the window stays
-looking correct on both. This is phase 3's whole behaviour and the fix touches the code that
-decides it.
+So the Linux run only needs the X11 half above. If you want the monitor-move check anyway, the
+same recipe works — but **use a video, not Minimal**: the default capture frame is the first that
+reuses a swapchain image and an idle window never reaches it, so an idle window writes captures
+only from swapchains it has already left.
 
 ## Fix 3 — the mixed-scale Wayland shrink
 
