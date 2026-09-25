@@ -265,16 +265,37 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
   secondary swapped after an update, so only the 2.54 rows, which were re-mapped afterwards,
   carry a monitor. The others were asked for on DP-2 but may have been on either.)
 
-  So KWin does not read scRGB 1.0 as 80 nits of *its* SDR white. It matches if SDR white sits at
-  **203 nits on the scRGB scale** (the BT.2408 reference white) and the compositor maps that
-  reference onto each output's SDR brightness, which makes the right scale 203/80 on every
-  monitor. The two monitors lean that way. A scale proportional to the brightness setting
-  would match on DP-3 at 2.54 and need only 2.28 on DP-2, so the same window would look
-  slightly *brighter* there, and it looked, if anything, slightly dimmer. That is a by-eye
-  judgement on an ~11% difference, so it leans rather than settles. **The fix should read the
-  value, not hard-code 2.54.** On Wayland that means SDL's `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT`
-  (fed from the colour-management protocol's reference luminance), or the protocol directly,
-  re-read when the window changes output.
+  So KWin does not read scRGB 1.0 as 80 nits of *its* SDR white. The two monitors pointed to a
+  fixed scale: one proportional to the brightness setting would match on DP-3 at 2.54 and need
+  only 2.28 on DP-2, so the same window would look slightly *brighter* there, and it looked, if
+  anything, slightly dimmer.
+
+- **The Wayland colour-management protocol states the number: 2.5375.** From
+  `wp_color_manager_v1.create_windows_scrgb` in `color-management-v1.xml`:
+
+  > Nominal color value R=G=B=0.0 corresponds to BT.2100/PQ system 0 cd/m², and R=G=B=1.0
+  > corresponds to BT.2100/PQ system 80 cd/m². […] The reference white level of Windows-scRGB is
+  > unknown. If a reference white level must be assumed for compositor processing, it should be
+  > R=G=B=2.5375 corresponding to 203 cd/m² of Report ITU-R BT.2408-7. […] it seems probable that
+  > Windows implements both EGL_EXT_gl_colorspace_scrgb_linear and Vulkan
+  > VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT as Windows-scRGB.
+
+  The compositor maps an image's reference white onto each output's own SDR brightness. So on
+  Wayland, for an `ExtendedSrgbLinearEXT` swapchain, **SDR white belongs at 2.5375 (203/80) on
+  every monitor, whatever its brightness setting.** That is the value matched by eye, and it
+  explains the per-monitor result. It is a protocol constant, not a per-display query: the
+  fix for Linux is `whiteScale = 2.5375` when the video driver is Wayland and the swapchain is
+  scRGB, rather than a port of `WindowsSdrWhiteLevel`. (It assumes the Vulkan WSI tags the
+  surface as Windows-scRGB, which is what the NVIDIA driver's result here implies. Mesa's WSI
+  may differ and was not tested.)
+
+- **SDL's own white level is the wrong number for this path.** Read from the same bundled
+  `libSDL3.so` (SDL 3.5.0) on Wayland, on the MPG321UX with HDR on:
+  `SDL.window.SDR_white_level=1.0` and `SDL.window.HDR_headroom=1.0022`. The headroom is real
+  compositor data (456 nits peak over 455 nits SDR, as `kscreen-doctor` reports). But the white
+  level of 1.0 follows the *EGL* scRGB convention the spec contrasts with, where 1.0 is reference
+  white, and feeding it in reproduces the dim picture. Read on one monitor only. The probe is a
+  small ctypes script and was not committed.
 - **Phase 2's offscreen pass runs cleanly on Linux.** The `whiteScale=5.1` run went through it
   under validation: zero messages, and the frame-4 capture is correct. (A PPM clips to 8 bits,
   so the capture cannot show the scale itself. Only the screen can.)
@@ -324,7 +345,7 @@ The phase 1 steps 2–4 results are in `HDR-PHASE1-LINUX.md`.
 
 - **Mesa**, a **hybrid GPU**: no such hardware here.
 - **The fd-per-import leak check**: see the caveat above.
-- **What SDL itself reports as the SDR white level on Wayland.** It would settle the
-  per-monitor question above and say whether SDL's property can simply replace `WindowsSdrWhiteLevel` here.
+- **Mesa's Vulkan WSI**: whether it also presents `ExtendedSrgbLinearEXT` as Windows-scRGB,
+  and so wants the same 2.5375.
 - The full solution build fails on the two WinForms projects (`NETSDK1100`), which is expected
   on Linux. Everything this brief needs builds cleanly on its own.
