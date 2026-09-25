@@ -278,6 +278,15 @@ the output KWin says the window was on at that moment.
 - **Observation, not a failure:** every output crossing builds **two** swapchains of the same
   size ~2 ms apart. Suspected (not confirmed): `SkiaVulkanRenderSurface.Resize` rebuilds on a
   scale-only change, which a swapchain does not depend on.
+  **Confirmed and fixed afterwards.** A trace in `Resize` showed each crossing arriving as two
+  calls, new pixels at the old scale, then the same pixels at the new scale (e.g. `750x450
+  scale=1` then `750x450 scale=1.5`), and the second rebuilt. `Resize` now keys on pixels only;
+  the scale was not read anywhere else in the class. Result: one swapchain per crossing (4
+  crossings → 4 builds) and two at start-up instead of three. An idle window presents only one
+  frame on the post-crossing swapchain, so that frame was captured (`CAPTURE_FRAME=1`) in both
+  directions: content sits at the same layout units (35,40 → 320,109) on DP-2 at 500x300 and
+  on DP-3 at 750x450, and the DP-3 frame looks right. The new scale reaches the picture
+  without the rebuild.
 - **X11, where the branch still runs:** Vulkan 3/3 — KWin 500x300 logical on DP-2,
   `drawable=750x450px`. GL on X11 could not be checked before the fix below because it crashed
   at start-up; after it, 3/3 reach `first frame shown`, KWin 500x300 logical on DP-2.

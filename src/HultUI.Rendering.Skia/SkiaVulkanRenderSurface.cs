@@ -56,7 +56,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     private int _width;
     private int _height;
-    private float _scaleFactor = 1f;
     private bool _frameOpen;
 
     public IRenderContext RenderContext => _renderContext;
@@ -208,15 +207,19 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// names an image that no longer exists. They go first, deliberately: destroying a
     /// swapchain while Skia still holds render targets over its images is a use-after-free
     /// that the validation layers catch and a release build does not.
+    ///
+    /// <para>Only a new <i>pixel</i> size. The scale is not a property of the swapchain, and
+    /// on Wayland a move between outputs arrives as two calls — the new pixels at the old
+    /// scale, then the same pixels at the new one — so keying on the scale too built every
+    /// crossing's swapchain twice, a device-wide wait each time.</para>
     /// </summary>
     public void Resize(int widthPx, int heightPx, float scaleFactor)
     {
-        if (widthPx == _width && heightPx == _height && Math.Abs(scaleFactor - _scaleFactor) < 0.001f)
+        if (widthPx == _width && heightPx == _height)
             return;
 
         _width = widthPx;
         _height = heightPx;
-        _scaleFactor = scaleFactor;
 
         DropWrappedSurfaces();
         if (widthPx > 0 && heightPx > 0) _host.RecreateSwapchain(widthPx, heightPx);
