@@ -29,10 +29,26 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 {
     private const ulong NoTimeout = ulong.MaxValue;
 
-    /// <summary>Whether to ask for the half-float linear surface — phase 2 of
-    /// docs/design/HDR.md. Off by default: the 8-bit sRGB path is what ships.</summary>
-    private static readonly bool WantsWideColor =
-        Environment.GetEnvironmentVariable("HULTUI_VULKAN_F16") == "1";
+    /// <summary>
+    /// <c>HULTUI_VULKAN_F16</c> as an override rather than a switch: 1 forces the half-float
+    /// surface on, 0 forces it off, and unset leaves the decision to the display. Phase 3
+    /// makes the display the default answer; the override stays because a machine whose HDR
+    /// state is reported wrongly should still be drivable, and because forcing it on an SDR
+    /// display is how the conversion gets tested without changing monitor settings.
+    /// </summary>
+    private static readonly bool? WideColorOverride =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_F16") switch
+        {
+            "1" => true,
+            "0" => false,
+            _ => null,
+        };
+
+    /// <summary>Whether this window's display is in HDR mode. Set by the window, which is
+    /// the thing that can ask SDL, and refreshed when the window changes display.</summary>
+    public bool DisplayIsHdr { get; set; }
+
+    private bool WantsWideColor => WideColorOverride ?? DisplayIsHdr;
 
     // VkImageUsageFlagBits, spelled out because getting these wrong is invisible: an
     // earlier version had 0x04 commented as TRANSFER_SRC when it is SAMPLED, and the
@@ -109,9 +125,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public nint GetProcedureAddress(string name, nint instance, nint device) =>
         Resolve(name, instance, device);
 
-    public static SdlVulkanHost Create(SDL_Window* window, int widthPx, int heightPx)
+    public static SdlVulkanHost Create(SDL_Window* window, int widthPx, int heightPx, bool displayIsHdr)
     {
-        var host = new SdlVulkanHost();
+        var host = new SdlVulkanHost { DisplayIsHdr = displayIsHdr };
         host.Init(window, widthPx, heightPx);
         return host;
     }
@@ -134,7 +150,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // Without VK_EXT_swapchain_colorspace, SRGB_NONLINEAR is the only colour space a
         // swapchain may legally use — drivers list the others regardless, which makes this
         // easy to leave out and then work by accident on one machine.
-        if (WantsWideColor) names = [.. names, "VK_EXT_swapchain_colorspace"];
+        //
+        // Enabled whenever the loader has it, not only when wide colour is wanted now: an
+        // instance cannot gain an extension later, and the window may be dragged onto an HDR
+        // display at any point. An extension that goes unused costs nothing.
+        if (HasInstanceExtension("VK_EXT_swapchain_colorspace"))
+            names = [.. names, "VK_EXT_swapchain_colorspace"];
         EnabledInstanceExtensions = names;
 
         var appInfo = new VkApplicationInfo { apiVersion = VkVersion.Version_1_2 };
@@ -164,6 +185,46 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <summary>The first device with a queue that can both draw and present to this
     /// surface, preferring a discrete one. A queue that can do only one of the two is no
     /// use here and the separate-queue arrangement is not worth its complexity.</summary>
+    /// <summary>Whether the loader offers an instance extension, asked before the instance
+    /// exists — which is the only time it can be asked and the only time it matters.</summary>
+    private static bool HasInstanceExtension(string name)
+    {
+        uint count = 0;
+        if (vkEnumerateInstanceExtensionProperties((byte*)null, &count, null) != VkResult.Success || count == 0)
+            return false;
+
+        var properties = stackalloc VkExtensionProperties[(int)count];
+        if (vkEnumerateInstanceExtensionProperties((byte*)null, &count, properties) != VkResult.Success)
+            return false;
+
+        for (uint i = 0; i < count; i++)
+        {
+            var have = System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)properties[i].extensionName);
+            if (string.Equals(have, name, StringComparison.Ordinal)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Re-chooses the surface format for the display the window is on now, rebuilding the
+    /// swapchain only when the answer actually changed.
+    ///
+    /// <para>Dragging a window from an HDR monitor to an SDR one has to change the format,
+    /// not merely the scale: scRGB on an SDR display is a different picture, and an 8-bit
+    /// sRGB swapchain cannot carry HDR. The white level moves with it, because it is a
+    /// property of the display and not of the machine.</para>
+    /// </summary>
+    public void DisplayChanged(bool isHdr, float sdrWhiteScale)
+    {
+        bool wasWide = _format == VkFormat.R16G16B16A16Sfloat;
+        DisplayIsHdr = isHdr;
+        SdrWhiteScale = sdrWhiteScale;
+
+        if (WantsWideColor == wasWide) return;
+        StartupTrace.Mark($"vulkan display changed: hdr={isHdr}, rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}");
+        RecreateSwapchain(_widthPx, _heightPx);
+    }
+
     private void PickPhysicalDevice()
     {
         uint count = 0;

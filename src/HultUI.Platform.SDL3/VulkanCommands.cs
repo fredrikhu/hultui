@@ -25,6 +25,7 @@ internal static unsafe class VulkanCommands
     public static delegate* unmanaged<VkPhysicalDevice, VkDeviceCreateInfo*, nint, VkDevice*, VkResult> CreateDevice;
     public static delegate* unmanaged<VkInstance, VkSurfaceKHR, nint, void> DestroySurface;
     public static delegate* unmanaged<VkInstance, nint, void> DestroyInstance;
+    public static delegate* unmanaged<VkPhysicalDevice, byte*, uint*, VkExtensionProperties*, VkResult> EnumerateDeviceExtensionProperties;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void> GetPhysicalDeviceFeatures2;
 
     // ── device ───────────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ internal static unsafe class VulkanCommands
         CreateDevice = (delegate* unmanaged<VkPhysicalDevice, VkDeviceCreateInfo*, nint, VkDevice*, VkResult>)I("vkCreateDevice");
         DestroySurface = (delegate* unmanaged<VkInstance, VkSurfaceKHR, nint, void>)I("vkDestroySurfaceKHR");
         DestroyInstance = (delegate* unmanaged<VkInstance, nint, void>)I("vkDestroyInstance");
+        EnumerateDeviceExtensionProperties = (delegate* unmanaged<VkPhysicalDevice, byte*, uint*, VkExtensionProperties*, VkResult>)I("vkEnumerateDeviceExtensionProperties");
         GetMemoryProperties = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void>)I("vkGetPhysicalDeviceMemoryProperties");
         GetPhysicalDeviceFeatures2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void>)I("vkGetPhysicalDeviceFeatures2");
         _getDeviceProcAddr = (delegate* unmanaged<VkDevice, byte*, nint>)I("vkGetDeviceProcAddr");

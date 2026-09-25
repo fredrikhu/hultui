@@ -310,16 +310,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (UseVulkan)
         {
             UpdateSize();
-            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight);
+            // Asked before the device exists, because the answer decides the surface format.
+            bool hdr = IsHdrDisplay;
+            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight, hdr);
             // Only meaningful for an scRGB surface; the host ignores it otherwise.
-            // HULTUI_VULKAN_WHITE_SCALE overrides what the display reports — for a machine
-            // whose white level cannot be queried, and for telling the cost of the extra
-            // pass from the cost of the half-float target, since 1 turns the pass off.
-            _vulkanHost.SdrWhiteScale =
-                float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
-                    System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f
-                    ? forced
-                    : SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
+            _vulkanHost.SdrWhiteScale = WhiteScale();
             StartupTrace.Mark("vulkan device");
             _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, TakePreloadedText());
             StartupTrace.Mark("skia surface");
@@ -474,6 +469,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                    // A different monitor can mean a different HDR state and a different SDR
+                    // white level, and both decide what the swapchain should be.
+                    if (_registry.TryGetValue(evt.window.windowID, out var movedWin))
+                        movedWin.RefreshDisplayColor();
+                    goto case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN;
+
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
                     // After startup, monitor moves, or the modal resize loop,
@@ -757,6 +758,22 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public float SdrWhiteLevelNits => OperatingSystem.IsWindows()
         ? WindowsSdrWhiteLevel.Query()
         : WindowsSdrWhiteLevel.ScRgbReferenceNits;
+
+    /// <summary>
+    /// Re-asks the display what it is, and hands the answer to the Vulkan host. Called when
+    /// the window changes monitor; a no-op on the GL path, which has no format to change.
+    /// </summary>
+    internal void RefreshDisplayColor()
+    {
+        if (_vulkanHost is not { } host) return;
+        host.DisplayChanged(IsHdrDisplay, WhiteScale());
+    }
+
+    private float WhiteScale() =>
+        float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
+            System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f
+            ? forced
+            : SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
 
     public string? DescribeGraphics()
     {

@@ -187,10 +187,27 @@ is not what a colour filter does, and not something the colour space can express
 That is a new investigation with its own unknowns, in exchange for bandwidth that is not
 currently the constraint. Worth revisiting if it ever is.
 
-**3 — The HDR swapchain.** `VK_EXT_swapchain_colorspace`, scRGB FP16, HDR metadata, and
-the detection for when the display and compositor actually support it (on Linux that means
-the Wayland colour-management protocol, and X11 simply cannot). Falls back to SDR
-everywhere else, which will be most places for a while.
+**3 — The HDR swapchain. Built on Windows.** The format now follows the display rather than
+an environment variable: `IsHdrDisplay` decides, `HULTUI_VULKAN_F16` overrides it either way
+(1 forces scRGB on, 0 forces it off), and the SDR white level comes from the display too.
+`VK_EXT_swapchain_colorspace` is enabled whenever the loader has it, not only when wide
+colour is wanted at startup — an instance cannot gain an extension later and a window can be
+dragged onto an HDR display at any time.
+
+`SDL_EVENT_WINDOW_DISPLAY_CHANGED` re-asks, and rebuilds the swapchain only when the answer
+changes. Dragging a window between two HDR monitors correctly rebuilds nothing; the SDR case
+needs a machine with one of each and has not been run.
+
+**HDR metadata is deliberately not sent.** `VK_EXT_hdr_metadata` is present on this device,
+but `VkHdrMetadataEXT` wants the display's maximum and minimum luminance and the content's
+light levels. SDL's binding here has neither `SDR_WHITE_POINT` nor `HDR_HEADROOM`; the white
+point came from the Windows display configuration API and maximum luminance would need DXGI
+as well. Sending invented numbers is worse than sending none — a display may tone map to
+them — and for an scRGB swapchain Windows composites from the display's own profile anyway.
+It belongs with HDR10, where the numbers are load-bearing.
+
+Still true, and still untested: on Linux this needs the Wayland colour-management protocol,
+and X11 simply cannot.
 
 **4 — HDR video through the seam.** mpv renders into an `RGBA16F` FBO — the field is
 already there and currently passed as zero:
