@@ -34,6 +34,7 @@ internal static class Program
             if (args.Contains("--text")) return TextColorTest.Run();
             if (args.Contains("--syncbench")) return SyncBench.Run();
             if (args.Contains("--churn")) return ChurnBench.Run();
+            if (args.Contains("--range")) return RangeBench.Run(args);
             return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"), args.Contains("--skia"));
         }
         catch (Exception ex)

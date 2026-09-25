@@ -13,7 +13,7 @@ namespace HdrInterop;
 internal static unsafe class MpvIntoFbo
 {
     public static (bool Ok, string Message) Render(string path, uint fbo, int width, int height,
-        bool colorspaceHint)
+        bool colorspaceHint, IReadOnlyList<(string Key, string Value)>? options = null)
     {
         if (!MpvNative.IsAvailable) return (false, "no libmpv found");
 
@@ -49,6 +49,13 @@ internal static unsafe class MpvIntoFbo
                 mpv_set_option_string(mpv, "demuxer-rawvideo-mp-format", "bgra");
                 mpv_set_option_string(mpv, "demuxer-rawvideo-fps", "25");
             }
+
+            // Whatever the caller wants to try, applied before initialize so that the
+            // renderer is built with them. This is how the target-* options get tested
+            // without a rebuild per combination.
+            if (options is not null)
+                foreach (var (key, value) in options)
+                    mpv_set_option_string(mpv, key, value);
 
             if (mpv_initialize(mpv) < 0) return (false, "mpv_initialize failed");
 

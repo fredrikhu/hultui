@@ -386,10 +386,8 @@ SDR content, where this makes no difference and the numbers came out exact — w
 why it did not show up.
 
 The route is mpv's own options rather than a render param: `target-prim`, `target-trc` and
-`target-peak`, set to describe the swapchain when it is scRGB. That needs a seam, because
-`HultUI.Media` has no idea what colour space the renderer chose, and it needs HDR content to
-verify against, which neither machine has. **Untried.** It is the honest content of phase 5, and
-it is larger than it looks.
+`target-peak`, set to describe the swapchain when it is scRGB. **Tried, and it works** — see
+below.
 
 ### Why not just build libmpv with Vulkan?
 
@@ -428,7 +426,52 @@ What is left is the implementation behind it, and the hard part is not the seam:
   Until that is measured, it is not certain the 1.75 CPU-seconds saved are not partly spent
   again on stalls.
 
-**5 — SDR UI over HDR video.** A white transport bar at scRGB 1.0 next to a 1000-nit
+**5 — HDR range, then SDR UI over it.**
+
+**The enabling question is answered.** `spikes/HdrInterop --range` renders a clip into the
+shared image and reports what came back. Three findings, in order:
+
+`target-trc` **does reach libplacebo through the OpenGL render API.** A mid-grey that arrives
+encoded at 0.5020 comes back at 0.1921 with `target-trc=linear`, which is that value decoded
+through gamma 2.4. The options are not ignored just because no render param carries them.
+
+**SDR content cannot show range, whatever the target says.** Every combination above left the
+maximum at exactly 1.0, because an SDR source has nothing brighter than reference white. Telling
+the clip it is PQ BT.2020 on the way in (`vf=format=gamma=pq:primaries=bt.2020`) gives it
+something to carry, and then `target-peak` opens the range: the maximum goes to 4.9258.
+
+**`target-peak` sets the range, and the normalisation is exact:**
+
+| `target-peak` | maximum written |
+|---|---|
+| 203 | 1.0000 |
+| 406 | 2.0000 |
+| 1015 | 5.0000 |
+
+So **libplacebo's linear output puts 1.0 at 203 nits** — the BT.2408 reference white, to four
+decimals. That is the same 203 the Wayland colour-management protocol names as the reference
+white of Windows-scRGB, which is where the 2.5375 in `SDL3Window.WhiteScale` comes from. The two
+ends of this pipeline already agree on the constant, and the conversion is therefore
+
+> mpv linear (1.0 = 203 nits) → scRGB (1.0 = 80 nits) is a multiply by **2.5375**
+
+which is exactly the scale the Wayland path already applies to the whole frame.
+
+**What that leaves to build.** A seam, because `HultUI.Media` has no idea what colour space the
+renderer chose: the renderer knows it lent an scRGB target and what the display's peak is, and
+the backend needs both to set `target-trc`, `target-prim` and `target-peak`. Then the video image
+has to be drawn as *linear* rather than sRGB-encoded, which is a different `SKColorSpace` on the
+wrap in `WrapFrame`. Neither is large; both are untested against real HDR content, which neither
+machine has.
+
+**And then the original question.** A white transport bar at scRGB 1.0 next to a 1000-nit
+highlight looks grey; at the highlight's level it is blinding. Everything the overlay draws needs
+a deliberate luminance, and that is a design decision per app rather than a renderer setting. It
+now has a number attached: on Windows the UI's scale comes from the display's own SDR white (240
+nits here, so 3.0) while video reference white wants 2.5375, so UI white and video white sit
+**18% apart** unless one of them is made to yield.
+
+**Superseded text:** **5 — SDR UI over HDR video.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay
 draws needs a deliberate luminance, and that is a design decision per app rather than a
 renderer setting.

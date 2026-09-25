@@ -160,3 +160,53 @@ A note for anyone repeating this: the default capture frame is the first that
 reuses a swapchain image, and an IDLE window never reaches it. A Minimal window
 moved between monitors wrote captures only from early swapchains. A video renders
 continuously and does reach it.
+
+
+═══════════════════════════════════════════════════════
+--range, 2026-09-25, RTX 4080, Windows
+can mpv be made to write HDR range into the shared image?
+═══════════════════════════════════════════════════════
+
+Three-band clip (limited-range 235 / 126 / 16), rendered into the shared RGBA16F
+image, read back. y=90 is the mid-grey band, which is the row that tells an
+encoded picture from a linear one; 235 and 16 are limited-range white and black
+and come out 1.0 and 0.0 either way.
+
+  options                                    mid-grey    max     over 1.0
+  (none — today)                             0,5020      1,0000  none
+  target-trc=linear                          0,1921      1,0000  none
+    + target-prim=bt.709                     0,1921      1,0000  none
+    + target-peak=1000                       0,1921      1,0000  none
+
+So target-trc DOES reach libplacebo through the render API: 0,5020 encoded
+becomes 0,1921, which is that value decoded through gamma 2.4. The options are
+not ignored. But SDR content has nothing above reference white, so no target
+configuration can make it exceed 1.0 — that was the wrong clip to ask with.
+
+Claiming the same clip is PQ BT.2020 on the way in gives it something to carry:
+
+  vf=format=gamma=pq:primaries=bt.2020                   max 1,0000  none
+    + target-trc=linear                                  max 1,0000  none
+    + target-peak=1000 tone-mapping=clip                 max 4,9258  ALL
+
+  → HDR range does come through the OpenGL render API into the shared image.
+
+target-peak is the gate, and the number it produces is exact:
+
+  target-peak=203   ->  max 1,0000
+  target-peak=406   ->  max 2,0000
+  target-peak=1015  ->  max 5,0000
+
+**libplacebo's linear output is normalised so that 1.0 is 203 nits** — the
+BT.2408 reference white, to four decimal places, not an approximation.
+
+That is the same 203 the Wayland colour-management protocol names as the
+reference white of Windows-scRGB, which is why the white scale there is 2.5375 =
+203/80. Both ends of this pipeline already agree on the number:
+
+  mpv linear (1.0 = 203 nits)  ->  scRGB (1.0 = 80 nits)   is  x 2.5375
+
+which is exactly the scale SDL3Window.WhiteScale already returns on Wayland.
+On Windows the UI's scale comes from the display's own SDR white instead (240
+nits here, so 3.0), so UI white and video reference white would sit 240/203 =
+18% apart. That gap is the actual subject of phase 5, and it now has a number.
