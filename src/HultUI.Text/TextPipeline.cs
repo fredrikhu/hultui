@@ -59,6 +59,36 @@ public sealed class TextPipeline
         _shaper = shaper;
     }
 
+    // ── The paragraph's CJK context ──
+    //
+    // What the whole text says its Han characters are (kana → ja, Hangul → ko), for font
+    // fallback. It has to be the whole text, not what Itemize is handed: wrapping itemizes
+    // line-break segments to measure them — in CJK often a single ideograph with no kana in
+    // sight — and a segment must be measured in the face its finished line is drawn in.
+    // The public entry points record the paragraph, and the scan runs only when a cache miss
+    // actually itemizes, at most once per call. Every cache stays correct without a key
+    // change: the text-keyed ones because the context is a function of the text, the word
+    // and digit ones because they key on the font instance, which carries the choice.
+    private string _paragraph = "";
+    private string? _hanContext;
+    private bool _hanContextKnown;
+
+    private void BeginParagraph(string text)
+    {
+        _paragraph = text;
+        _hanContextKnown = false;
+    }
+
+    private List<FontRun> Itemize(string text, ResolvedInheritedStyle style)
+    {
+        if (!_hanContextKnown)
+        {
+            _hanContext = ScriptLanguage.CjkContextOf(_paragraph);
+            _hanContextKnown = true;
+        }
+        return FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant, _hanContext);
+    }
+
     // ── Metric-affecting spans (stage 2 of docs/plans/12-rich-text-spans.md) ──
     //
     // A span carrying Weight/Slant/FontSize changes shaping, so the layout must see
@@ -98,6 +128,7 @@ public sealed class TextPipeline
     public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
         TextOverflow overflow, IReadOnlyList<Core.Rendering.TextSpan>? spans)
     {
+        BeginParagraph(text);
         if (!AnyMetricAffecting(spans))
             return Layout(text, style, maxWidth, maxLines, overflow);
         if (string.IsNullOrEmpty(text))
@@ -120,6 +151,7 @@ public sealed class TextPipeline
     public TextLayout Layout(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines,
         TextOverflow overflow = TextOverflow.Clip)
     {
+        BeginParagraph(text);
         if (string.IsNullOrEmpty(text))
             return TextLayout.Empty;
 
@@ -271,7 +303,7 @@ public sealed class TextPipeline
     // layout that any sufficiently wide measurement will reuse.
     private ShapedText ComputeShaping(string text, ResolvedInheritedStyle style)
     {
-        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
+        var fontRuns = Itemize(text, style);
         if (fontRuns.Count == 0)
             return new ShapedText(0, HasNewline: false, TextLayout.Empty);
 
@@ -294,7 +326,7 @@ public sealed class TextPipeline
     // reuse the cached single-line shaping.
     private TextLayout ComputeWrapped(string text, ResolvedInheritedStyle style, float maxWidth, int? maxLines)
     {
-        var fontRuns = FontItemizer.Itemize(text, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
+        var fontRuns = Itemize(text, style);
         if (fontRuns.Count == 0)
             return TextLayout.Empty;
 
@@ -371,7 +403,7 @@ public sealed class TextPipeline
         {
             int b = NextStyleBoundary(spans, i, to);
             var eff = EffectiveStyleAt(style, spans, i);
-            foreach (var fr in FontItemizer.Itemize(text[i..b], _fonts, eff.FontFamily, eff.FontWeight, eff.FontSlant))
+            foreach (var fr in Itemize(text[i..b], eff))
             {
                 var shaped = ShapeWithSpacing(fr.Text, fr.Font, eff.FontSize, eff.LetterSpacing);
                 shaped.OffsetX = width;
@@ -389,8 +421,7 @@ public sealed class TextPipeline
         // The ellipsis is the element's own text, not the span's: a truncation mark
         // rendered bold because the last word happened to be bold reads as content.
         if (appendEllipsis)
-            foreach (var fr in FontItemizer.Itemize(EllipsisString, _fonts,
-                style.FontFamily, style.FontWeight, style.FontSlant))
+            foreach (var fr in Itemize(EllipsisString, style))
             {
                 var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing);
                 shaped.OffsetX = width;
@@ -619,8 +650,7 @@ public sealed class TextPipeline
         if (to <= from) return 0;
         float width = 0;
         foreach (var (s, e, level) in SegmentsIn(levels, from, to))
-            foreach (var fr in FontItemizer.Itemize(text[s..e], _fonts,
-                style.FontFamily, style.FontWeight, style.FontSlant))
+            foreach (var fr in Itemize(text[s..e], style))
                 width += ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing,
                     rtl: (level & 1) == 1).Width;
         return width;
@@ -649,8 +679,7 @@ public sealed class TextPipeline
             var (segStart, segEnd, level) = segments[s];
             levels[s] = level;
             var runs = new List<ShapedRun>();
-            foreach (var fr in FontItemizer.Itemize(text[segStart..segEnd], _fonts,
-                style.FontFamily, style.FontWeight, style.FontSlant))
+            foreach (var fr in Itemize(text[segStart..segEnd], style))
             {
                 var shaped = ShapeWithSpacing(fr.Text, fr.Font, style.FontSize, style.LetterSpacing,
                     rtl: (level & 1) == 1);
@@ -859,6 +888,7 @@ public sealed class TextPipeline
     public float MinContentWidth(string text, ResolvedInheritedStyle style,
         IReadOnlyList<Core.Rendering.TextSpan>? spans = null)
     {
+        BeginParagraph(text);
         if (string.IsNullOrEmpty(text)) return 0f;
 
         bool styled = AnyMetricAffecting(spans);
@@ -976,7 +1006,7 @@ public sealed class TextPipeline
         if (s.Length == 0)
             return 0;
 
-        var runs = FontItemizer.Itemize(s, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
+        var runs = Itemize(s, style);
         float width = 0;
         foreach (var run in runs)
             width += ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing).Width;
@@ -1206,7 +1236,7 @@ public sealed class TextPipeline
             }
 
             // Measure segment
-            var segRuns = FontItemizer.Itemize(segment, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
+            var segRuns = Itemize(segment, style);
             float segWidth = 0;
             foreach (var run in segRuns)
                 segWidth += ShapeWithSpacing(run.Text, run.Font, style.FontSize, style.LetterSpacing).Width;
@@ -1269,7 +1299,7 @@ public sealed class TextPipeline
     {
         // Trim trailing whitespace for width calculation but keep for shaping
         var trimmed = lineText.TrimEnd();
-        var fontRuns = FontItemizer.Itemize(trimmed, _fonts, style.FontFamily, style.FontWeight, style.FontSlant);
+        var fontRuns = Itemize(trimmed, style);
 
         var runs = new List<ShapedRun>();
         float width = 0;

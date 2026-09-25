@@ -32,11 +32,14 @@ public sealed class SkiaFontCollection : IFontCollection
     }
 
     public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant)
+        => MatchCharacter(codepoint, weight, slant, hanContext: null);
+
+    public IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant, string? hanContext)
     {
         // The language is part of the key because it can change under a codepoint: Han
-        // follows the UI culture, and an app that switches language at runtime must not
-        // keep the first culture's glyphs.
-        string? language = ScriptLanguage.ForCodepoint(codepoint);
+        // follows the paragraph (kana beside it) or else the UI culture, and the same
+        // ideograph must not keep the first answer's glyphs.
+        string? language = ScriptLanguage.ForCodepoint(codepoint, hanContext);
         var key = new FallbackKey(codepoint, weight, slant, language);
         if (_fallbackCache.TryGetValue(key, out var cached))
             return cached;

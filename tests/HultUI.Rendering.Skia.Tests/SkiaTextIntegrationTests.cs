@@ -273,4 +273,28 @@ public class SkiaTextIntegrationTests
             System.Globalization.CultureInfo.CurrentUICulture = saved;
         }
     }
+
+    [Theory]
+    [InlineData(10_000f)]   // one line
+    [InlineData(40f)]       // wrapped between ideographs
+    public void AJapaneseSentence_ReadWithAnEnglishUi_IsOneFace(float maxWidth)
+    {
+        // Kanji alone would follow the culture to Simplified Chinese while the kana went
+        // to the Japanese face: two fonts in one sentence. The kana settle the paragraph.
+        var saved = System.Globalization.CultureInfo.CurrentUICulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = new("en-US");
+            var layout = CreatePipeline().Layout("東京に行きます", DefaultStyle, maxWidth, null);
+
+            var faces = layout.Lines.SelectMany(l => l.Runs)
+                .Select(r => ((SkiaSharp.SKTypeface)r.Font.NativeHandle).FamilyName)
+                .Distinct().ToList();
+            Assert.True(faces.Count == 1, "faces: " + string.Join(", ", faces));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = saved;
+        }
+    }
 }

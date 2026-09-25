@@ -11,6 +11,15 @@ public interface IFontCollection
     /// Returns null if no font can render this codepoint.
     /// </summary>
     IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant);
+
+    /// <summary>
+    /// <see cref="MatchCharacter(int, FontWeight, FontSlant)"/>, told what the surrounding
+    /// paragraph says its Han characters are (<see cref="ScriptLanguage.CjkContextOf"/>):
+    /// the same ideograph needs a Japanese face beside kana and a Chinese one without.
+    /// Collections that cannot choose by language ignore it, which is the default.
+    /// </summary>
+    IResolvedFont? MatchCharacter(int codepoint, FontWeight weight, FontSlant slant, string? hanContext)
+        => MatchCharacter(codepoint, weight, slant);
 }
 
 public interface IResolvedFont : IDisposable

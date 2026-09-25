@@ -9,7 +9,7 @@ namespace HultUI.Text;
 internal static class FontItemizer
 {
     public static List<FontRun> Itemize(string text, IFontCollection fonts,
-        string familyName, FontWeight weight, FontSlant slant)
+        string familyName, FontWeight weight, FontSlant slant, string? hanContext = null)
     {
         var runs = new List<FontRun>();
         if (string.IsNullOrEmpty(text))
@@ -46,7 +46,7 @@ internal static class FontItemizer
             }
             else
             {
-                resolvedFont = fonts.MatchCharacter(codepoint, weight, slant) ?? primaryFont;
+                resolvedFont = fonts.MatchCharacter(codepoint, weight, slant, hanContext) ?? primaryFont;
             }
 
             // If font changed, emit the current run and start a new one

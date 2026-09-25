@@ -48,11 +48,15 @@ public static class ScriptLanguage
     /// only the reader can say which is right. So Han follows
     /// <see cref="CultureInfo.CurrentUICulture"/> — see <see cref="HanLanguage"/>.</para>
     /// </summary>
-    public static string? ForCodepoint(int codepoint) => ForCodepoint(codepoint, CultureInfo.CurrentUICulture);
+    /// <param name="hanContext">The language the surrounding text settles for Han, from
+    /// <see cref="CjkContextOf"/>. It wins over the culture: kanji in a sentence with kana are
+    /// Japanese whoever reads them.</param>
+    public static string? ForCodepoint(int codepoint, string? hanContext = null)
+        => ForCodepoint(codepoint, CultureInfo.CurrentUICulture, hanContext);
 
-    /// <inheritdoc cref="ForCodepoint(int)"/>
-    /// <param name="culture">Whose reading conventions decide Han.</param>
-    public static string? ForCodepoint(int codepoint, CultureInfo culture)
+    /// <inheritdoc cref="ForCodepoint(int, string?)"/>
+    /// <param name="culture">Whose reading conventions decide Han when the text does not.</param>
+    public static string? ForCodepoint(int codepoint, CultureInfo culture, string? hanContext = null)
     {
         if (_unavailable) return null;
         try
@@ -63,6 +67,7 @@ public static class ScriptLanguage
             if (status > 0 || script is < 0 or Common or Inherited or Unknown) return null;
             if (script == Han)
             {
+                if (hanContext is not null) return hanContext;
                 if (_han is { } h && ReferenceEquals(h.Culture, culture)) return h.Tag;
                 string tag = HanLanguage(culture);
                 _han = (culture, tag);
@@ -75,6 +80,38 @@ public static class ScriptLanguage
             _unavailable = true;
             return null;
         }
+    }
+
+    /// <summary>
+    /// What a paragraph's own text says its Han characters are: <c>ja</c> when it contains
+    /// kana, <c>ko</c> when it contains Hangul, and null when it has neither — or both, which
+    /// is no answer — leaving it to the culture.
+    ///
+    /// <para>Per paragraph, not per character or per segment, deliberately. Kana are the only
+    /// thing that tells Japanese kanji from Chinese hanzi, and they are rarely adjacent to
+    /// every kanji; and the pipeline itemizes line-break segments (often one ideograph each)
+    /// to measure them, which must pick the same face the finished line is drawn in. So the
+    /// whole paragraph decides once. A paragraph of kanji alone ("東京都") says nothing, and
+    /// the culture still decides it.</para>
+    /// </summary>
+    public static string? CjkContextOf(ReadOnlySpan<char> text)
+    {
+        bool kana = false, hangul = false;
+        foreach (char c in text)
+        {
+            if (c < '\u1100') continue;   // below every range: Latin text pays one compare a char
+            if (c is >= '\u3040' and <= '\u30FF'      // Hiragana, Katakana
+                  or >= '\u31F0' and <= '\u31FF'      // Katakana phonetic extensions
+                  or >= '\uFF66' and <= '\uFF9F')     // halfwidth Katakana
+                kana = true;
+            else if (c is >= '\u1100' and <= '\u11FF' // Hangul Jamo
+                  or >= '\u3130' and <= '\u318F'      // compatibility Jamo
+                  or >= '\uA960' and <= '\uA97F'      // Jamo extended-A
+                  or >= '\uAC00' and <= '\uD7FF'      // syllables, Jamo extended-B
+                  or >= '\uFFA0' and <= '\uFFDC')     // halfwidth Hangul
+                hangul = true;
+        }
+        return kana == hangul ? null : kana ? "ja" : "ko";
     }
 
     private static unsafe string? LikelyLanguage(int script)
