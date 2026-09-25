@@ -6,6 +6,9 @@ phase 0 spike proved the memory sharing there; the renderer itself has not been 
 
 This is the list, cheapest first. Run it from a checkout of `main`.
 
+**Phases 2 to 4 have their own brief:** `docs/design/HDR-LINUX-BRIEF.md`. Finish steps 2 to 4
+here first — none of that is meaningful until the renderer can draw a window at all.
+
 ## Results so far (2026-09-25, RTX 4080, Fedora 44, Wayland, Mesa 26.2.2)
 
 **Step 1 passed, identically to Windows** — the same eight `ok` and the same two expected
