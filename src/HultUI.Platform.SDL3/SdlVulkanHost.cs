@@ -318,6 +318,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _widthPx = (int)extent.width;
         _heightPx = (int)extent.height;
         StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length}");
+        ResetCapture();
     }
 
     /// <summary>

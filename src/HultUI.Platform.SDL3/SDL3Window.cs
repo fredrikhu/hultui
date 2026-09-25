@@ -127,7 +127,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _userScale = clamped;
             DisplayScale = _osDisplayScale * _userScale;
             EventTranslator.InputScale = InputScale;
-            _surface?.Resize(PixelWidth, PixelHeight, DisplayScale);
+            ActiveSurface?.Resize(PixelWidth, PixelHeight, DisplayScale);
             // The pixel size did not change, but the layout viewport did: the app relayouts
             // on the same path a real resize takes.
             ResizePending = true;
@@ -161,8 +161,17 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public float InputScale => PixelDensity / DisplayScale;
 
     public IRenderSurface Surface =>
-        (IRenderSurface?)_surface ?? _vulkanSurface
-        ?? throw new InvalidOperationException("Window not initialized");
+        ActiveSurface ?? throw new InvalidOperationException("Window not initialized");
+
+    /// <summary>
+    /// Whichever surface this window was built with, or null before it has one.
+    ///
+    /// <para>Every path that used to say <c>_surface?.Something()</c> goes through here.
+    /// Naming the GL field directly is how the Vulkan window went unresized on every resize
+    /// — the calls were there and quietly did nothing, and the window kept presenting a
+    /// swapchain of the old size with the rest of it black.</para>
+    /// </summary>
+    private IRenderSurface? ActiveSurface => (IRenderSurface?)_surface ?? _vulkanSurface;
     public bool IsOpen { get; private set; }
 
     public EventTranslator EventTranslator { get; } = new();
@@ -905,7 +914,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             PixelHeight = ph;
         }
 
-        _surface?.Resize(pw, ph, DisplayScale);
+        ActiveSurface?.Resize(pw, ph, DisplayScale);
         return true;
     }
 

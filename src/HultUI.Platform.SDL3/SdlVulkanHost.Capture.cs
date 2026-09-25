@@ -44,6 +44,21 @@ internal sealed unsafe partial class SdlVulkanHost
     private int _presentedFrames;
     private bool _captured;
 
+    /// <summary>
+    /// Called when a swapchain is built, so the count starts again and the capture fires
+    /// once per swapchain rather than once per process.
+    ///
+    /// <para>That makes the file the newest swapchain's work: resize the window and what
+    /// lands on disk is from the size it is now, which is the only way to check a resize
+    /// without being able to look at the screen. One-shot-per-process capture fires within
+    /// the first few frames and can never see one.</para>
+    /// </summary>
+    private void ResetCapture()
+    {
+        _presentedFrames = 0;
+        _captured = false;
+    }
+
     /// <summary>Called after Skia's work is done and before the present transition, when the
     /// image holds this frame and is still a colour attachment.</summary>
     private void CaptureIfAsked(VkImage image)
