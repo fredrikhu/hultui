@@ -263,6 +263,32 @@ Two things moved to make room for the second implementation. `GpuFrame` carries
 `WrapTexture` — it holds an `ISkiaExternalSurface` and calls `WrapFrame`, since a method
 named for a GL texture is one a Vulkan surface could never satisfy.
 
+### Why not just build libmpv with Vulkan?
+
+The obvious question, and the answer is not a build flag. mpv v0.41.0's `render.h` defines
+exactly two API types:
+
+```c
+#define MPV_RENDER_API_TYPE_OPENGL "opengl"
+#define MPV_RENDER_API_TYPE_SW     "sw"
+```
+
+There is no `render_vk.h` in the source tree. The **render API** — the one where the host
+provides the target and mpv draws into it — speaks OpenGL or CPU memory, and no
+configuration adds a third.
+
+mpv itself renders with Vulkan perfectly well: `--vo=gpu-next --gpu-api=vulkan`, through
+libplacebo. But that path draws into a surface **mpv owns**, which for an embedded player
+means `--wid` and a child window. That was considered and rejected near the top of this
+document, for reasons that have not changed — the overlay can no longer composite onto the
+picture, video stops being an element in the tree, and the windowing is per platform. It
+would also need libplacebo with Vulkan and a shader compiler, which is the weight the
+trimmed build exists to avoid.
+
+So the GL-into-a-Vulkan-image bridge is not a workaround for having chosen badly. It is the
+only arrangement where mpv keeps rendering through the API that embeds, and the pixels still
+land somewhere a Vulkan renderer can use without a copy.
+
 What is left is the implementation behind it, and the hard part is not the seam:
 
 - **A GL context for a Vulkan window.** SDL cannot make one on a `SDL_WINDOW_VULKAN`
