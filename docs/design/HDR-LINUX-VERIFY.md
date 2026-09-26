@@ -219,12 +219,15 @@ dotnet run --project spikes/HdrInterop -- --probe /path/to/film.mkv
 
 **`pq` or `hlg` is HDR**; `bt.1886` and friends are SDR whatever the filename says. Prefer one
 that reports a real `max luma`, since `target-peak` is otherwise assumed. The file used on
-Windows was 2001 (`pq`, `bt.2020`, max luma 1000.6 nits) from `\proxmox.home\Media`.
+Windows was 2001 (`pq`, `bt.2020`, max luma 1000.6 nits), on the Proxmox media share — which is
+mounted on the Linux box too, so the same file is reachable there.
 
 ### 5a. Does the range reach the swapchain?
 
 ```bash
-HULTUI_RENDERER=vulkan HULTUI_STARTUP=1 HULTUI_VIDEO_HDR_PROBE=120   HULTUI_VULKAN_CAPTURE=/tmp/hdr.ppm HULTUI_VULKAN_CAPTURE_FRAME=600   dotnet run --project samples/HultUI.Samples.VideoPlayer -- /path/to/film.mkv --start=1200
+export HULTUI_RENDERER=vulkan HULTUI_STARTUP=1
+export HULTUI_VIDEO_HDR_PROBE=120 HULTUI_VULKAN_CAPTURE=/tmp/hdr.ppm HULTUI_VULKAN_CAPTURE_FRAME=600
+dotnet run --project samples/HultUI.Samples.VideoPlayer -- /path/to/film.mkv --start=1200
 ```
 
 Two numbers come out, and they answer different questions. `[interop] sample n/6` is read
