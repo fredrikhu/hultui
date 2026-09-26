@@ -446,3 +446,123 @@ changes**. Descriptor count sampled every 2 s: 199 after the first image, then 2
 all 40 changes, 201 at the end. A per-swap leak would have added ~40. So `DestroyInteropImage`
 + `CreateSharedImage` release cleanly on this driver, and the app-level version that stalled
 on Windows is proven here.
+
+## Results — Phase 5
+
+Run 2026-09-26 on the Linux machine by a Claude Code session, with Fredrik at the screens for
+every by-eye item; each one below names him. Base commit `20b9eb6`, plus `804c188` (below),
+without which none of this could run. Same machine and outputs as above; `kscreen-doctor -o`
+at the start: both outputs HDR on, **DP-2 SDR brightness 408 against a peak of 409 nits,
+DP-3 455 against 456**. That matters for 5b and is the subject of a note at the end.
+`env | grep -i HULTUI` was empty. Window placement and "which output" came from the same KWin
+script as before; every by-eye item below was on **DP-2**, Wayland, unless it says otherwise.
+
+**The file.** 2001 was *not* mounted on this box, contrary to the brief; it was mounted by
+hand (`mount -t cifs //proxmox.home/Media`). `--probe`: `pq`, `bt.2020`, 3840x1746 p010,
+colormatrix `dolbyvision`, max luma 1000.603 nits, max CLL 992 — the same file Windows used.
+
+### Found first — every 4K video was black in a Vulkan window (fixed, `804c188`)
+
+The first 5a run gave six samples of **max 0.000** and a black video area in the capture,
+at 20:00 and with `HULTUI_VIDEO_HDR=0` alike, so not phase 5. Ruled out in turn, each by a
+measurement: the overture (a temporary trace showed the seek landing and playback running
+20:00→20:33 at 24 fps); the file, SMB and Dolby Vision (the spike drew the same frame, mean
+0.199); the decoder (spike identical with `hwdec=no`, `auto-copy`, `vulkan-copy`,
+`nvdec-copy`; the app uses `vulkan-copy`). Generated `testsrc2` clips then separated it: the
+app drew 1280x720, 1920x1080, 2560x1440, 3840x720, 1280x1746, 2048x2048 and 2048x2056, and
+was black at **2560x1600, 2560x1700, 3840x1746 and 3840x2160** — not a byte threshold
+(2048x2056 is larger than 2560x1600), so a layout the driver picks by size.
+
+Cause: the Vulkan side allocates the shared image as a **dedicated** allocation and GL was
+never told. `EXT_external_objects` requires `GL_DEDICATED_MEMORY_OBJECT_EXT` to be set on the
+memory object before the import and leaves the result undefined otherwise; here undefined
+was a complete framebuffer, no GL error, and a texture that reads black. Fix:
+`InteropGl.MarkDedicated` (`glMemoryObjectParameterivEXT`) between create and import, on
+both platforms. After it, all four failing sizes draw (max 1.000). **Untested on Windows**,
+which drew the same film without it — the flag is what the spec asks for there too, but
+that is a reason, not a run.
+
+### 5a — pass
+
+`HULTUI_RENDERER=vulkan HULTUI_STARTUP=1 HULTUI_VIDEO_HDR_PROBE=120`, `--start=1200`, capture
+at frame 600. Six samples each; none black after the fix.
+
+| | shared image | swapchain (SDR white 2.54) |
+|---|---|---|
+| default | **4.926** (samples 4.129, 3.496, 4.922, 4.922, 4.926, 1.129) | **12.484**, 109 411 samples above white |
+| `HULTUI_VIDEO_HDR=0` | 1.000, none above | 2.537, none above |
+
+4.926 is 1000/203, the Windows number to the digit. The trace says `video target linear
+light` and `mpv linear target … reads back prim=bt.709 trc=linear peak=1000`. The capture is
+the right frame (Earth, sun on the limb, the Orion craft).
+
+### 5b — the prediction holds, by eye, on a calibrated clip
+
+**Arithmetic first.** `FrameColorFilter` computes 203 / (2.5375 x 80) = 1.000 and returns
+null, and the swapchain agrees: 12.484 ≈ 4.926 x 2.5375, with no extra factor.
+
+**The by-eye test used a made clip, not the film**, because a white part of a graded film is
+wherever the colourist put it. A PQ/BT.2020 HEVC clip of three grey bands at **160, 203 and
+250 nits** (10-bit limited codes 551, 573, 592; generated in Python, encoded with x265, HDR10
+tags). Checked before anyone looked: through the spike the 203 band reads **1.000**
+(0.992/1.000/0.996) and the brightest ~1.24 ≈ 250/203. (The app's frame max of 1.525 on
+this clip is x265 ringing at the band edges, not a band level.) Minimal on Vulkan beside it,
+its white background being UI white.
+
+- **At SDR brightness 408 — Fredrik looked:** the left band dimmer; middle "might be a little
+  bit dimmer but it's hard to see a difference". **This setting cannot test the prediction
+  fully**: reference white is shown at 408 of a 409-nit peak, so anything brighter clips to
+  the same light and the 203 and 250 bands look the same. A video that was too bright would
+  pass.
+- **At SDR brightness 200 on DP-2 (set for the test, restored to 408 after) — Fredrik
+  looked:** all three bands distinct; **left dimmer, middle about the same, right brighter
+  than the Minimal window.** Pass, with headroom on both sides: two independent derivations
+  of 203 agree on screen.
+- **`HULTUI_VIDEO_WHITE=ui`, same setup — Fredrik looked:** unchanged, middle band still the
+  match. Captures of both policies at the same window size: band interiors differ by at most
+  2/255 in 1538 pixels (compression noise between frames), the rest at band edges and in the
+  playback controls. On Wayland the two policies are the same policy.
+
+### 5c — the things that should be untouched: pass, with one older finding
+
+- **X11:** `SDL_VIDEODRIVER=x11`, Vulkan — `B8G8R8A8Unorm/SrgbNonLinear`, `hdrDisplay=off`,
+  `video target encoded`, six samples max 1.000. Capture looks normal.
+- **SDR display — Fredrik looked.** Both outputs HDR off (`kscreen-doctor … hdr.disable`),
+  2001 at 20:00, GL beside Vulkan on DP-2 (KWin-confirmed). Vulkan: 8-bit swapchain, `video
+  target encoded`. "Both look about the same … nothing is washed out or blown out"; a
+  *maybe* of more detail in bright areas on Vulkan, which renders through a half-float image.
+  HDR re-enabled afterwards; `kscreen-doctor` showed 408/455 kept.
+- **`HULTUI_VIDEO_HDR=0`, HDR on:** by code, identical to before phase 5 — mpv's target
+  options are never touched (`ApplyTargetColour` returns early when linear light was never
+  asked for), `FrameColorFilter` returns null, and the frame is wrapped `RgbaF16 / Premul /
+  CreateSrgb()`, the line phase 5 replaced. Numbers as in 5a.
+
+  **By eye it does not match GL — Fredrik looked**, GL beside Vulkan `HDR=0` on DP-2: on
+  Vulkan "the black of space is brighter", the Earth less bright, and "the left one has a
+  little more vibrance in the blues". **Not phase 5, and not video:** asked to compare the
+  dark navy UI chrome of the two windows, Fredrik reported the Vulkan one "lighter and more
+  greyish" too. The whole scRGB window renders shadows lighter than the same content in a GL
+  window.
+
+### New finding — the scRGB path and KWin disagree about what sRGB means
+
+Suspected, not confirmed: Skia converts sRGB content to linear with the **piecewise** sRGB
+curve, and KWin 6 shows an ordinary sRGB window (the GL one) with a **pure 2.2 gamma**. The
+two agree at 1.0 and nearly at 0.5 (0.214 against 0.218), and part near black: a navy
+channel of 0.09 is ~70% more light through the piecewise curve. That is every symptom above —
+raised blacks, greyer dark blues — and it is why Fix 1 passed: it compared white, where the
+curves meet. It predates phase 5 and affects every Vulkan window on HDR Wayland. If it is
+right, the fix is to decode with 2.2 on Wayland (a transfer on the canvas, or on the
+swapchain conversion), and the check is the same side-by-side on a dark theme.
+
+### Also found
+
+- **No HDR headroom on this machine's settings.** With SDR brightness at the panel's peak
+  (408/409, 455/456), everything above reference white clips: the 1000-nit sun in 2001
+  cannot look brighter than the interface. Phase 5 delivers the range to the compositor
+  (12.48 on the swapchain); the settings spend it all on SDR. Lowering SDR brightness is
+  what makes HDR video visibly HDR here.
+- **The spike ignores `target-*` given before initialisation on this build** (encoded and
+  "linear" runs identical to four decimals, max 1.000); with the `late.` prefix, as the
+  backend applies them, they work (max 2.65). On Windows the early form worked. Only the
+  spike's default mode is affected.
