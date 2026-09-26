@@ -234,9 +234,9 @@ internal sealed unsafe class InteropGl
     /// measurement that separates "the producer never made HDR" from "the compositor lost
     /// it".</para>
     /// </summary>
-    public (float Max, long Over1) ReadRange(uint fbo, int width, int height)
+    public (float Max, long Over1, int Levels, int Reversals) ReadRange(uint fbo, int width, int height)
     {
-        if (_readPixels is null || _bindFramebuffer is null) return (0f, 0);
+        if (_readPixels is null || _bindFramebuffer is null) return (0f, 0, 0, 0);
 
         var pixels = new Half[(long)width * height * 4];
         _bindFramebuffer(ReadFramebuffer, fbo);
@@ -253,7 +253,25 @@ internal sealed unsafe class InteropGl
                 if (v > max) max = v;
                 if (v > 1.0001f) over1++;
             }
-        return (max, over1);
+
+        // How many distinct levels one row holds, and how often it changes direction. On a
+        // smooth ramp those two separate a clean path from a dithered one: dithering to eight
+        // bits caps the levels near 256 and reverses direction constantly.
+        var seen = new HashSet<float>();
+        int reversals = 0, lastSign = 0;
+        long rowStart = (long)(height / 2) * width * 4;
+        for (int x = 0; x < width; x++)
+        {
+            float v = (float)pixels[rowStart + (long)x * 4];
+            seen.Add(v);
+            if (x == 0) continue;
+            float delta = v - (float)pixels[rowStart + (long)(x - 1) * 4];
+            int sign = delta > 1e-6f ? 1 : delta < -1e-6f ? -1 : 0;
+            if (sign != 0 && lastSign != 0 && sign != lastSign) reversals++;
+            if (sign != 0) lastSign = sign;
+        }
+
+        return (max, over1, seen.Count, reversals);
     }
 
     public void Finish() => _finish();

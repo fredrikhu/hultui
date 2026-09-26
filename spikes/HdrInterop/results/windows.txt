@@ -287,3 +287,42 @@ three modes are unchanged on Windows:
   interop  : Vulkan read back 0,25 0,5 0,75, VERDICT ok
   churn    : 1000 cycles +1 handle, control +200
   syncbench: 0,26 ms/frame at 1080p, 0,27 at 4K
+
+
+═══════════════════════════════════════════════════════
+MPV_RENDER_PARAM_DEPTH, 2026-09-27, RTX 4080, Windows
+was the half-float target being dithered to 8 bits?
+═══════════════════════════════════════════════════════
+
+Yes. The backend never passed MPV_RENDER_PARAM_DEPTH, and the render API says an
+absent or zero depth means the renderer assumes 8 and dithers to them. The open
+question was whether internal_format supersedes it. It does not.
+
+A 10-bit ramp (1024 columns, limited-range 64..940, so 877 source levels) into an
+RGBA16F shared image, middle row read back:
+
+  DEPTH omitted   256 distinct levels, 250 direction reversals, mean step 0,00193
+  DEPTH = 16      951 distinct levels,  62 reversals,            mean step 0,00100
+  DEPTH = 8       256 distinct levels, 250 reversals,            mean step 0,00193
+
+The third row is the control and the one that settles it: forcing 8 gives output
+identical to omitting it, so "omitted" really is being treated as 8 rather than
+inferred from the target. 256 levels across 1024 pixels with the row reversing
+direction 250 times is quantisation plus dither noise, in a surface that holds
+sixteen bits a channel.
+
+A ten-bit source is needed to see this at all. An eight-bit clip is already on
+the grid being looked for, which is why every earlier measurement here — all of
+them on 8-bit synthetic clips or on maxima rather than gradients — missed it.
+
+Fixed by deriving the depth from the target's internal format: 16 for RGBA16F,
+32 for RGBA32F, 8 for RGBA8 and anything unrecognised. The sink's own texture is
+RGBA8 and still gets 8, so the GL renderer is unchanged.
+
+Confirmed end to end in the app, not just the spike — the same ramp played in
+the video player on the Vulkan renderer, shared image read back through GL:
+
+  middle row 882 levels, 22 reversals
+
+which is the source's 877 levels plus a little YUV-to-RGB rounding. The ten bits
+now arrive.

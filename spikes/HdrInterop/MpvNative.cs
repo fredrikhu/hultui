@@ -21,7 +21,8 @@ internal static unsafe partial class MpvNative
         MPV_EVENT_PLAYBACK_RESTART = 21;
 
     public const int MPV_RENDER_PARAM_API_TYPE = 1, MPV_RENDER_PARAM_OPENGL_INIT_PARAMS = 2,
-        MPV_RENDER_PARAM_OPENGL_FBO = 3, MPV_RENDER_PARAM_FLIP_Y = 4;
+        MPV_RENDER_PARAM_OPENGL_FBO = 3, MPV_RENDER_PARAM_FLIP_Y = 4,
+        MPV_RENDER_PARAM_DEPTH = 5;
 
     static MpvNative() => NativeLibrary.SetDllImportResolver(typeof(MpvNative).Assembly, Resolve);
 

@@ -15,7 +15,7 @@ internal static unsafe class MpvIntoFbo
     public static (bool Ok, string Message) Render(string path, uint fbo, int width, int height,
         bool colorspaceHint, IReadOnlyList<(string Key, string Value)>? options = null,
         IReadOnlyList<(string Key, string Value)>? lateOptions = null,
-        IReadOnlyList<(string Key, string Value)>? postOptions = null)
+        IReadOnlyList<(string Key, string Value)>? postOptions = null, int depth = 0)
     {
         if (!MpvNative.IsAvailable) return (false, "no libmpv found");
 
@@ -99,10 +99,17 @@ internal static unsafe class MpvIntoFbo
                 // Allocated once, outside the loop: a stackalloc inside one is not freed per
                 // iteration, so thirty passes would be thirty allocations living to the end
                 // of the method. Harmless at this size and wrong at any other (CA2014).
-                var parameters = stackalloc mpv_render_param[3];
+                // MPV_RENDER_PARAM_DEPTH: "if omitted or set to 0, the renderer will assume 8.
+                // Typically used to control dithering." Whether internal_format supersedes it
+                // is the question this mode exists to answer.
+                int bits = depth;
+                var parameters = stackalloc mpv_render_param[4];
                 parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_OPENGL_FBO, data = &target };
                 parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_FLIP_Y, data = &flipY };
-                parameters[2] = default;
+                parameters[2] = depth > 0
+                    ? new mpv_render_param { type = MPV_RENDER_PARAM_DEPTH, data = &bits }
+                    : default;
+                parameters[3] = default;
 
                 // Applied once the file is loaded and playing, which is where the real
                 // backend sets them: it learns the target's colour space on the first frame

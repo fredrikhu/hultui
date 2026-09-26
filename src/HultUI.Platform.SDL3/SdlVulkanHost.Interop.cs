@@ -486,9 +486,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         _probeFrames = 0;
         _probesTaken++;
 
-        var (max, over1) = _gl!.ReadRange(_glFramebuffer, _interopWidth, _interopHeight);
+        var (max, over1, levels, reversals) = _gl!.ReadRange(_glFramebuffer, _interopWidth, _interopHeight);
         Console.Error.WriteLine($"[interop] sample {_probesTaken}/{Probes} of the shared image " +
-            $"({_interopWidth}x{_interopHeight}): max {max:0.000}, {over1} above 1.0");
+            $"({_interopWidth}x{_interopHeight}): max {max:0.000}, {over1} above 1.0; " +
+            $"middle row {levels} levels, {reversals} reversals");
     }
 
     [DllImport("kernel32", SetLastError = true)]

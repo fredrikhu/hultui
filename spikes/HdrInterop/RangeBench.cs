@@ -23,8 +23,8 @@ namespace HdrInterop;
 /// </summary>
 internal static unsafe class RangeBench
 {
-    private const int Width = 320;
-    private const int Height = 180;
+    private static int Width = 320;
+    private static int Height = 180;
 
     public static int Run(string[] args)
     {
@@ -48,6 +48,17 @@ internal static unsafe class RangeBench
             .Select(o => (o.Key["late.".Length..], o.Value)).ToArray();
         var postOptions = all.Where(o => o.Key.StartsWith("post."))
             .Select(o => (o.Key["post.".Length..], o.Value)).ToArray();
+
+        // size=WxH renders at the clip's own size, so nothing is resampled — scaling smooths
+        // a gradient and would hide exactly the noise this is looking for.
+        if (all.FirstOrDefault(o => o.Key == "size").Value is { } wh && wh.Contains('x'))
+        {
+            var parts = wh.Split('x', 2);
+            if (int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h))
+            { Width = w; Height = h; }
+        }
+        int depth = int.TryParse(all.FirstOrDefault(o => o.Key == "depth").Value, out int d) ? d : 0;
+        options = options.Where(o => o.Key is not ("size" or "depth")).ToArray();
 
         Console.WriteLine("── what range does mpv write into the shared image? ──");
         Console.WriteLine();
@@ -75,7 +86,7 @@ internal static unsafe class RangeBench
 
         var result = MpvIntoFbo.Render(file, fbo, Width, Height, colorspaceHint: false, options,
             lateOptions.Length == 0 ? null : lateOptions,
-            postOptions.Length == 0 ? null : postOptions);
+            postOptions.Length == 0 ? null : postOptions, depth);
         if (!result.Ok) { Console.WriteLine($"  mpv failed: {result.Message}"); return 2; }
 
         var pixels = vk.ReadBack();
@@ -122,9 +133,48 @@ internal static unsafe class RangeBench
                 $"{(float)pixels[i + 2]:0.0000})");
         }
         Console.WriteLine();
+        ReportSmoothness(pixels);
+
         Console.WriteLine(over1 > 0
             ? "  → values exceed 1.0: the target options carried range through."
             : "  → nothing exceeds 1.0: this is still an SDR-referred picture.");
+    }
+
+    /// <summary>
+    /// How smooth a smooth thing came out — the dithering question.
+    ///
+    /// <para>mpv is told nothing about the target's depth, and the render API says an omitted
+    /// <c>MPV_RENDER_PARAM_DEPTH</c> means it assumes 8 bits and dithers to them. Into a
+    /// half-float target that would be noise added for no reason, and precision phase 4
+    /// existed to keep thrown away. Whether <c>internal_format</c> already tells it otherwise
+    /// is not documented, so it is measured.</para>
+    ///
+    /// <para>Run against a smooth ramp. Dither shows as neighbouring pixels that disagree in
+    /// both directions — a monotonic ramp reversing thousands of times across a row — and as
+    /// values sitting on a coarse grid. A clean 16-bit path gives a nearly monotonic row with
+    /// far more distinct levels than 256.</para>
+    /// </summary>
+    private static void ReportSmoothness(Half[] pixels)
+    {
+        int y = Height / 2;
+        var row = new float[Width];
+        for (int x = 0; x < Width; x++) row[x] = (float)pixels[(y * Width + x) * 4];
+
+        var distinct = new HashSet<float>(row);
+        double totalStep = 0;
+        int reversals = 0;
+        int lastSign = 0;
+        for (int x = 1; x < Width; x++)
+        {
+            float delta = row[x] - row[x - 1];
+            totalStep += Math.Abs(delta);
+            int sign = delta > 1e-6f ? 1 : delta < -1e-6f ? -1 : 0;
+            if (sign != 0 && lastSign != 0 && sign != lastSign) reversals++;
+            if (sign != 0) lastSign = sign;
+        }
+
+        Console.WriteLine($"  middle row ({Width} px): {distinct.Count} distinct levels, " +
+            $"{reversals} direction reversals, mean step {totalStep / (Width - 1):0.00000}");
     }
 
     private static uint ImportIntoGl(VulkanImage vk)

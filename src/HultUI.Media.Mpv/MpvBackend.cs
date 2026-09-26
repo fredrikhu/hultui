@@ -442,16 +442,39 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // and video-timing-offset at 0 (set at start-up), mpv only signals when a frame
         // is due, and the loop draws it on the frame it wakes for.
         int block = 0;
-        var parameters = stackalloc mpv_render_param[4];
+        int depth = DepthOf(target.InternalFormat);
+        var parameters = stackalloc mpv_render_param[5];
         parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_OPENGL_FBO, data = &fbo };
         parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_FLIP_Y, data = &flip };
         parameters[2] = new mpv_render_param { type = MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data = &block };
-        parameters[3] = default;
+        parameters[3] = new mpv_render_param { type = MPV_RENDER_PARAM_DEPTH, data = &depth };
+        parameters[4] = default;
         _lastGLFrameDrawn = mpv_render_context_render(_render, parameters) >= 0;
         return _lastGLFrameDrawn;
     }
 
     private bool _lastGLFrameDrawn;
+
+    /// <summary>
+    /// How many bits a channel the target holds, for <c>MPV_RENDER_PARAM_DEPTH</c>.
+    ///
+    /// <para><b>Omitting this is not neutral.</b> The render API says an absent or zero depth
+    /// means the renderer assumes 8 and dithers to them, and it does not infer anything from
+    /// <c>internal_format</c>: measured on a 10-bit ramp into an RGBA16F target, omitting the
+    /// parameter and forcing it to 8 give byte-identical output — 256 distinct levels across
+    /// 1024 pixels with 250 direction reversals, which is quantisation plus dither noise.
+    /// Saying 16 gives 951 levels and 62 reversals. So the half-float image phase 4 exists to
+    /// provide was being filled with a dithered 8-bit picture.</para>
+    /// </summary>
+    private static int DepthOf(uint internalFormat) => internalFormat switch
+    {
+        GlRgba16f => 16,
+        GlRgba32f => 32,
+        _ => 8,          // GL_RGBA8, and anything unrecognised: the safe assumption
+    };
+
+    private const uint GlRgba16f = 0x881A;
+    private const uint GlRgba32f = 0x8814;
 
     /// <summary>
     /// libplacebo's linear output puts 1.0 at the BT.2408 reference white of 203 nits.
