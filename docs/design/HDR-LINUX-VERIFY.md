@@ -5,6 +5,10 @@ Four findings from `docs/design/HDR-LINUX-BRIEF.md` were fixed on the Windows ma
 one X11 — so nothing about them has been run. This is how to find out whether they work.
 
 Hand this file to a Claude Code session on the Linux machine. It assumes the same setup as the
+**Traps found by this work live in one place** — the Traps section of
+`docs/design/HDR.md`, grouped by shape. Anything learned here belongs there too,
+not only in the results below.
+
 brief: NVIDIA proprietary driver, KDE Plasma, two monitors at scale 1.0 and 1.5, both HDR-capable.
 
 ```bash

@@ -1,7 +1,15 @@
 # HDR output
 
-**Status:** phase 0 done and it passed — see `spikes/HdrInterop`. Nothing else built.
-**Date:** 2026-09-25.
+**Status:** phases 0 to 5 built. Verified on Windows and on Linux (KDE Wayland, NVIDIA);
+untested on Mesa and on a hybrid GPU. HDR video is on by default on the Vulkan renderer,
+which is itself opt-in through `HULTUI_RENDERER=vulkan`.
+**Date:** 2026-09-27.
+
+**Before changing anything here, read [Traps](#traps).** It is not a list of curiosities: most
+of those cost hours, several were shipped and found by the other platform, and four of them were
+nearly recorded as successes by measurements that could not have failed. The Linux runs are in
+`HDR-LINUX-BRIEF.md`, `HDR-LINUX-VERIFY.md` and `HDR-PHASE1-LINUX.md`; the numbers behind the
+claims are in `spikes/HdrInterop/results/`.
 
 The goal is HDR video in Reel and Aperture, on Windows *and* Linux, with the transport
 bar and every other piece of UI composited over it correctly. This is the design that
@@ -514,6 +522,113 @@ nits here, so 3.0) while video reference white wants 2.5375, so UI white and vid
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay
 draws needs a deliberate luminance, and that is a design decision per app rather than a
 renderer setting.
+
+## Traps
+
+Everything below cost hours, and most of it was nearly shipped as a false green. They are
+grouped by **shape** rather than by phase, because the shapes recur and the phases do not: the
+same four mistakes were made repeatedly, in different clothes, by people who had already written
+the previous one down.
+
+### 1. Measurements that cannot fail
+
+The commonest and the worst. A check that reports the same thing whether the code works or not
+reads as evidence and is not.
+
+- **A frame with nothing in it looks exactly like a pipeline that lost the picture.** Both report
+  a maximum of 0.0 or 1.0. Three separate wrong conclusions came from capturing 2001 at frame 60,
+  2.5 seconds into a three-minute black overture — twice *after* the lesson had been written down.
+  Take several spaced samples, and prove the content was there before reading anything into a
+  maximum.
+- **A maximum cannot see dithering.** That is a property of gradients. Every check here was a
+  peak value until one was not, and an 8-bit target dithered inside a 16-bit surface went
+  unnoticed for two phases.
+- **An 8-bit test clip cannot show 8-bit quantisation** — it is already on the grid being looked
+  for. The dithering above needed a 10-bit ramp to appear at all.
+- **`Process.HandleCount` does not move per handle.** It comes through a performance counter and
+  sat flat at 492 while 200 handles leaked. `GetProcessHandleCount` is exact.
+- **Re-exporting one allocation is not a leak test.** NVIDIA on Windows returns the *identical*
+  `HANDLE` every time, so nothing accumulates whatever you do with it. NVIDIA on Linux returns a
+  distinct fd per export — the same test, opposite behaviour. Reallocate each cycle, as the
+  renderer does.
+- **The headless driver proves nothing about this backend.** It renders through
+  `SkiaRasterRenderSurface` and never touches a GPU backend, so a GL-versus-Vulkan screenshot
+  comparison is identical whatever either one does.
+- **A capture proves the image, never the screen.** And some things no capture can show at all:
+  the SDR white scale is invisible to one, because F16 and 8-bit captures agree within 1 LSB
+  while the window is plainly dim — the image is right and the compositor is obeying it.
+- **An idle window may never reach the default capture frame.** It presents 3, 4, or 1 frames
+  depending on which output it opened on; the default is images + 1. A missing capture can mean
+  an idle window rather than a renderer that drew nothing.
+
+**So: build the positive control first.** `--churn` deliberately drops 200 handles and refuses to
+report a verdict unless that raises the count. Two earlier versions of that test reported a clean
+pass while being incapable of failing.
+
+### 2. State another API owns, and moves
+
+Anything holding a handle to something Skia or a driver also tracks will go stale, silently.
+
+- **Never cache a `GRBackendRenderTarget` over a swapchain image.** Skia tracks the layout inside
+  the target and this backend transitions to `PRESENT_SRC_KHR` behind it. Three images meant
+  three good frames and then black for ever. Build it fresh each frame declaring `UNDEFINED`.
+- **Never cache a renderer-owned `SKImage` either**, for the same reason — `DrawGpuFrame`
+  re-wraps whenever `frame.RendererOwned`.
+- **Do not read the shared image through Vulkan.** It needs the layout Skia owns; guessing
+  returned a uniform 0.000 from an image that plainly had a picture in it. Read it through **GL**
+  (`glReadPixels` inside `RunExternalGL`) — GL has no layouts. That is what
+  `HULTUI_VIDEO_HDR_PROBE` does.
+- **Handle ownership is asymmetric across platforms.** GL does *not* take an `OPAQUE_WIN32`
+  handle, so the caller must `CloseHandle`; `glImportMemoryFdEXT` *consumes* the descriptor it is
+  given. Getting it backwards leaks on one platform and double-frees on the other, and neither
+  shows on the first import.
+- **`GL_DEDICATED_MEMORY_OBJECT_EXT` is required** when Vulkan allocated the memory dedicated,
+  which it always does here. Without it the result is undefined, and on NVIDIA-Linux undefined
+  was a texture that read as black above about 2560x1440 — no GL error, complete framebuffer,
+  every 4K film black. Windows happened to work, which is how it shipped.
+
+### 3. Defaults that are not neutral
+
+Several of these APIs treat "unspecified" as a decision, not as "work it out".
+
+- **`MPV_RENDER_PARAM_DEPTH` omitted means 8 bits and dithering**, and mpv does *not* infer it
+  from `internal_format`. Measured: omitted and `DEPTH=8` are byte-identical.
+- **`internal_format = 0` on `mpv_opengl_fbo` means "assume 8"** for the same reason.
+- **`target-colorspace-hint` is a no-op through the render API** and always was. No
+  `MPV_RENDER_PARAM` names a colour space, and `mpv_opengl_fbo` carries only fbo, size and
+  format. The way in is mpv's `target-prim` / `target-trc` / `target-peak` **options**.
+- **Without `target-peak` nothing exceeds 1.0** however the transfer is set. The transfer alone
+  changes the numbers and keeps the ceiling.
+- **Skia returns a null surface with no diagnostic** when the swapchain lacks
+  `VK_IMAGE_USAGE_TRANSFER_SRC_BIT`, or when `GRVkExtensions` or `VkPhysicalDeviceFeatures2` are
+  left null — it then assumes the minimum and declines formats the device plainly supports.
+- **SDL's `SDR_white_level` is the wrong number on Wayland.** It reads 1.0, the EGL convention
+  where 1.0 already *is* reference white, and feeding it in reproduces a dim picture exactly.
+
+### 4. One platform hiding the other's bug
+
+Every one of these was invisible on the machine it was written on.
+
+- **SDR white is a protocol constant on Wayland and a display query on Windows.**
+  `color-management-v1` fixes Windows-scRGB reference white at 2.5375 (203 nits over scRGB's 80);
+  Windows reports whatever its brightness slider says. Asking the monitor on Wayland is the wrong
+  move.
+- **KWin shows an sRGB window through a pure 2.2 gamma**, where Skia uses the piecewise curve.
+  The two meet at white, so white matches and *shadows* do not — which is why it survived phase 2
+  and 3 unnoticed. A colour-space tag cannot fix it, because Skia converts every `SKColor` from
+  piecewise sRGB into whatever the canvas claims to be.
+- **`glXGetProcAddress` returns a dispatch stub for any name at all** under libglvnd. Skia asked
+  for `eglQueryString` on X11, got a stub, parsed garbage, and segfaulted on every GL launch. On
+  Wayland the real functions come back and a made-up name resolves to 0.
+- **Windows tolerates `SDL_GL_MakeCurrent` with a null context; Wayland dereferences it.**
+- **A mixed-scale Wayland desktop reports an output change as two events**, new pixels at the old
+  scale then the same pixels at the new one. Code that treats the second as a pure DPI change
+  preserves a size already computed wrongly.
+- **X11 cannot do HDR at all**, and says so honestly — only `SRGB_NONLINEAR`.
+
+**So: a green suite on one OS says nothing about the other here.** The Linux session found a bug
+in this Windows work and this Windows session found one in theirs, both within a day, both in
+code the author had verified.
 
 ## Zero-copy decode, afterwards
 

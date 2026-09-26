@@ -4,6 +4,10 @@ Everything in `docs/design/HDR.md` phases 1 to 4 is built and verified **on Wind
 This is the list of what to run on Linux, in order, with what each step is meant to prove and
 what a failure would mean. Hand this file to a Claude Code session on the Linux machine and it
 should be able to work from it without further context.
+**Traps found by this work live in one place** — the Traps section of
+`docs/design/HDR.md`, grouped by shape. Anything learned here belongs there too,
+not only in the results below.
+
 
 Phase 1 has its own older list in `docs/design/HDR-PHASE1-LINUX.md` — step 1 there passed on
 Fedora 44 / Mesa 26.2.2, steps 2 to 4 have never run. **Do those first**; nothing below is

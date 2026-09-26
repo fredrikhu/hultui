@@ -104,6 +104,26 @@ frames and posts is fine, because nothing in a frame waits for it. See
 root keeps listening for frames until it is collected. Rebuild a component instead of
 swapping roots, or dispose the player.
 
+**On the Vulkan renderer a video is handed a target the renderer owns, and it is not
+8-bit sRGB.** `HULTUI_RENDERER=vulkan` composites Vulkan images, so it cannot draw a GL
+texture a source made for itself: it lends one instead, through
+`IExternalGLSurface.TryAcquireFrameTarget`, backed by an `RGBA16F` image shared with a
+hidden GL context. On an HDR display that target also asks for **linear light with its
+range intact**, and the frame comes back saying what its 1.0 means in nits
+(`GpuFrame.ReferenceWhiteNits`).
+
+A producer that ignores all this keeps working — it writes encoded pixels, reports a
+reference white of zero, and is composited as before. But a producer that renders into
+the lent target must read `GpuFrameTarget`: **its `InternalFormat` is not `GL_RGBA8`, and
+telling the decoder otherwise, or telling it nothing, throws the extra bits away.** mpv
+assumes 8 bits and dithers to them unless it is passed
+`MPV_RENDER_PARAM_DEPTH` — measured, not guessed.
+
+None of that reaches the GL renderer, which still lends nothing and receives an ordinary
+encoded texture. The whole design, and the traps that go with it, is in
+[design/HDR.md](design/HDR.md) — **read its Traps section before touching the Vulkan
+video path.**
+
 ## `VideoPlayer`
 
 The overlay: a transport bar (play, back/forward by `JumpStep`, scrubber, volume, rate
