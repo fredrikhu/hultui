@@ -201,14 +201,93 @@ needs closing on this driver after all despite `glImportMemoryFdEXT` being speci
 it. Confirm the swaps are really happening by watching for a second
 `vulkan interop image WxH RGBA16F` line per change in `HULTUI_STARTUP=1`.
 
+## Phase 5 — HDR video, which is now on by default
+
+Added after the four fixes above and **never run on Linux**. It is the one item here that
+changes what an ordinary Vulkan window does without anyone opting in, so it is the one most
+worth breaking.
+
+`MpvBackend` now sets `target-prim=bt.709`, `target-trc=linear` and `target-peak` whenever the
+renderer lends an scRGB target, and the frame is composited as linear light instead of an
+encoded picture. `HULTUI_VIDEO_HDR=0` turns it off.
+
+**You need an HDR file.** Confirm what it is before drawing conclusions from it:
+
+```bash
+dotnet run --project spikes/HdrInterop -- --probe /path/to/film.mkv
+```
+
+**`pq` or `hlg` is HDR**; `bt.1886` and friends are SDR whatever the filename says. Prefer one
+that reports a real `max luma`, since `target-peak` is otherwise assumed. The file used on
+Windows was 2001 (`pq`, `bt.2020`, max luma 1000.6 nits) from `\proxmox.home\Media`.
+
+### 5a. Does the range reach the swapchain?
+
+```bash
+HULTUI_RENDERER=vulkan HULTUI_STARTUP=1 HULTUI_VIDEO_HDR_PROBE=120   HULTUI_VULKAN_CAPTURE=/tmp/hdr.ppm HULTUI_VULKAN_CAPTURE_FRAME=600   dotnet run --project samples/HultUI.Samples.VideoPlayer -- /path/to/film.mkv --start=1200
+```
+
+Two numbers come out, and they answer different questions. `[interop] sample n/6` is read
+through GL straight after mpv renders — what the **producer** wrote. `[vulkan] scRGB range` is
+read at capture time, after Skia composited — what reached the **swapchain**. Windows, on a
+1000-nit film:
+
+| | shared image | swapchain (SDR white 3.00) |
+|---|---|---|
+| default | **4.926** | **12.492**, tens of thousands above white |
+| `HULTUI_VIDEO_HDR=0` | 1.000 | 3.000, none above |
+
+**Pass:** the shared image exceeds 1.0 and the swapchain exceeds its SDR white. 4.926 is
+1000/203 — the mastering peak against libplacebo's reference white — so a 1000-nit film should
+give roughly that whatever the machine.
+
+**Fail, and what each means.** Shared image at 1.0: mpv is not honouring the target options on
+this driver, and the spike (`--range`, below) will say so more cheaply. Shared image above 1.0
+but swapchain at the white scale: the loss is in Skia's compositing, which on Windows it is not.
+
+**Read six samples, not one.** A film has plenty of black frames and one reports a maximum of
+0.000, which reads exactly like a producer writing nothing. Three separate wrong conclusions were
+drawn from that on Windows, including twice after the lesson had been written down.
+
+### 5b. The Wayland prediction, which is the interesting part
+
+On Wayland `WhiteScale` is **2.5375 = 203/80**, and libplacebo puts its linear 1.0 at **203
+nits**. Those are the same number, arrived at independently — one from the colour-management
+protocol, one from a readback. So on Wayland the conversion between them is exactly 1, and
+`FrameColorFilter` should return **null**: no scaling at all.
+
+**Which makes a falsifiable prediction: on Wayland, video white and interface white should be
+the same brightness.** On Windows they sit 18% apart, because the UI is drawn at the display's
+SDR white of 240 nits and the video at its true 203.
+
+**So put a white UI element next to a white part of the picture and look.** If they match, two
+independent derivations of 203 agree and the constant is right. If the video is visibly dimmer
+or brighter than the interface, one of them is wrong and this is where it shows — no measurement
+on Windows can catch it, because there the two are *meant* to differ.
+
+`HULTUI_VIDEO_WHITE=ui` forces the other policy (video stretched to match the UI). On Wayland it
+should make no visible difference at all, which is the same prediction from the other side.
+
+### 5c. The things that should be untouched
+
+- **X11.** No scRGB, so no linear light is ever asked for: the trace should say
+  `video target encoded` and video should look exactly as it did before. A regression here would
+  mean the gate is not checking the colour space properly.
+- **An SDR display.** Same expectation — switch the monitors out of HDR mode and check video
+  still looks right, not dark or blown out.
+- **`HULTUI_VIDEO_HDR=0`.** Should be indistinguishable from before phase 5.
+- **The spike, if the app disagrees with it:** `--range <file> target-trc=linear
+  target-prim=bt.709 target-peak=1000` reports what mpv writes into a shared image with no
+  renderer involved, which separates a libplacebo problem from a compositing one in one run.
+
 ## What to send back
 
 Same as before: append results to this file under a **Results** heading and commit, rather than
 pasting. Say which monitor and which display server each observation came from — the brief's one
 ambiguity was a by-eye result whose monitor had been swapped by KDE without anyone noticing.
 
-For the by-eye checks in fixes 1 and 3, **say plainly that a person looked**, and say who looked
-at what. A capture that agrees is not evidence for either of them, and reporting one as though it
+For the by-eye checks in fixes 1 and 3 and in 5b, **say plainly that a person looked**, and say
+who looked at what. A capture that agrees is not evidence for either of them, and reporting one as though it
 were is the specific mistake this whole exercise has already made once.
 
 ## Results
