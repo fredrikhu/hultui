@@ -771,6 +771,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     internal void RefreshDisplayColor()
     {
         if (_vulkanHost is not { } host) return;
+        host.DisplayPeakNits = DisplayPeakNits;
         host.DisplayChanged(IsHdrDisplay, WhiteScale());
     }
 
@@ -802,6 +803,38 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// applied to an scRGB swapchain — the Vulkan surface ignores it for an sRGB one, where
     /// the colour space already says what white is.
     /// </summary>
+    /// <summary>
+    /// What this display can show at its brightest, in nits, or 0 when it will not say.
+    ///
+    /// <para>SDL reports headroom as a multiple of SDR white rather than an absolute
+    /// luminance, which turns out to be the more useful of the two: multiplied by whatever
+    /// 1.0 already means here it gives an absolute peak on both platforms with no branch.
+    /// That is <see cref="WhiteScale"/> times scRGB's 80 — the display's own SDR white on
+    /// Windows, and the 203-nit protocol reference on Wayland, where SDL's
+    /// <c>SDR_white_level</c> reads a useless 1.0 but its headroom is real compositor
+    /// data.</para>
+    ///
+    /// <para>Zero when the window is not on an HDR display or SDL has no number, and the
+    /// caller then assumes rather than believes.</para>
+    /// </summary>
+    public float DisplayPeakNits
+    {
+        get
+        {
+            if (_window == null || !IsHdrDisplay) return 0f;
+            var props = SDL_GetWindowProperties(_window);
+            float headroom;
+            fixed (byte* name = SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT)
+                headroom = SDL_GetFloatProperty(props, name, 0f);
+            // A headroom of exactly 1 is a real answer, not a missing one: it says this
+            // display peaks at its own SDR white, which the Linux machine nearly does
+            // (1.0022, 456 nits over 455). Treating it as unknown would hand the producer
+            // the assumed 1000 instead — the one number guaranteed to be wrong here.
+            if (headroom <= 0f) return 0f;
+            return WhiteScale() * WindowsSdrWhiteLevel.ScRgbReferenceNits * headroom;
+        }
+    }
+
     private float WhiteScale()
     {
         if (float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),

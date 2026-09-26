@@ -154,7 +154,15 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// person running it. Zero means "unknown" rather than "dark", and a producer told zero
     /// assumes rather than believes.</para>
     /// </summary>
-    public float DisplayPeakNits { get; } =
+    public float DisplayPeakNits
+    {
+        get => PeakOverride > 0f ? PeakOverride : _displayPeakNits;
+        set => _displayPeakNits = value;
+    }
+
+    private float _displayPeakNits;
+
+    private static readonly float PeakOverride =
         float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_PEAK_NITS"),
             System.Globalization.CultureInfo.InvariantCulture, out float nits) && nits > 0f
             ? nits : 0f;

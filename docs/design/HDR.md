@@ -509,7 +509,7 @@ that implements `IGpuFrameRenderer` — anything else writes into the pixel ring
 A future producer that ignores the request keeps writing encoded pixels and reports
 `ReferenceWhiteNits` of zero, so the seam degrades without it knowing this exists.
 
-**Still open:** the luminance question below, and Linux, where none of this has run.
+**Still open:** the luminance question below.
 
 **And then the original question.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay draws needs
@@ -629,6 +629,33 @@ Every one of these was invisible on the machine it was written on.
 **So: a green suite on one OS says nothing about the other here.** The Linux session found a bug
 in this Windows work and this Windows session found one in theirs, both within a day, both in
 code the author had verified.
+
+### The display's peak, which was assumed and is now asked for
+
+`target-peak` decides where tone mapping lands, and it was a flat assumed 1000 nits because
+neither platform appeared to expose a peak. SDL does, as **headroom** — a multiple of SDR white
+rather than an absolute luminance, which turns out to be the more useful of the two. Multiplied
+by whatever 1.0 already means here it gives an absolute peak on both platforms with no branch:
+
+> peak nits = `WhiteScale()` x 80 x `SDL.window.HDR_headroom`
+
+which is the display's own SDR white on Windows and the 203-nit protocol reference on Wayland,
+where SDL's `SDR_white_level` reads a useless 1.0 but its headroom is real compositor data.
+
+**This machine's display peaks at 455 nits, not 1000**, so the assumption was wrong by more than
+a factor of two and wrong in the worst direction — mpv was tone-mapping a film to 1000 nits for a
+panel that clips at 455. Measured, same frame, shared image peak:
+
+| `target-peak` | shared image max |
+|---|---|
+| queried (455) | 2.240 |
+| forced 1000 (the old behaviour) | 4.926 |
+
+2.240 x 203 = 455 exactly. `HULTUI_VULKAN_PEAK_NITS` still overrides.
+
+A headroom of exactly 1 is a real answer and is treated as one: it says the display peaks at its
+own SDR white, which the Linux machine nearly does (1.0022). Only a missing number falls back to
+assuming.
 
 ## Zero-copy decode, afterwards
 
