@@ -97,6 +97,7 @@ internal static class Program
 
         // ── 3. Export from Vulkan, import into GL ────────────────────────────
         uint memory = Gl.CreateMemoryObject();
+        Gl.MarkDedicated(memory);
         if (OperatingSystem.IsWindows())
         {
             var handle = vk.ExportWin32Handle();

@@ -254,3 +254,36 @@ Every one of those produced a confident number from a frame with nothing in it.
 The lesson is not "check the timestamp" — it is that a measurement which cannot
 distinguish "nothing was drawn" from "nothing bright was drawn" is not a
 measurement, and both readings here look identical.
+
+
+═══════════════════════════════════════════════════════
+GL_DEDICATED_MEMORY_OBJECT_EXT on Windows, 2026-09-26
+the flag Linux needed, checked on the platform that
+worked without it
+═══════════════════════════════════════════════════════
+
+Linux found that EXT_external_objects requires the imported memory to be marked
+dedicated when Vulkan allocated it that way, and that NVIDIA-Linux returned a
+black texture above about 2560x1440 without it — no GL error, complete
+framebuffer, every 4K film black. Windows happened to work regardless, so the
+flag was added there untested.
+
+It is correct on Windows too. 2001 at 3840x1746, HDR on, after the flag:
+
+  vulkan interop image 3840x1746 RGBA16F (55050240 bytes)
+  shared image max 4,926 (555196 above 1.0)
+  swapchain    max 12,359 against an SDR white of 3,00 (591895 above)
+
+the same numbers as before it, so nothing regressed and the spec-required call
+costs nothing here.
+
+The spike had the same latent bug and now sets the flag too. It went unnoticed
+for the same reason it did in the renderer — the images that read pixels back
+are small (320x180) and undefined happened to mean right — but SyncBench imports
+at 1920x1080 and 3840x2160, where on Linux it would not have. It never showed
+because SyncBench only clears and times; it never looks. After the flag, all
+three modes are unchanged on Windows:
+
+  interop  : Vulkan read back 0,25 0,5 0,75, VERDICT ok
+  churn    : 1000 cycles +1 handle, control +200
+  syncbench: 0,26 ms/frame at 1080p, 0,27 at 4K

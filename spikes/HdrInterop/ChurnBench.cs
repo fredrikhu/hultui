@@ -120,6 +120,7 @@ internal static unsafe class ChurnBench
         }
 
         uint memory = Gl.CreateMemoryObject();
+        Gl.MarkDedicated(memory);
         if (OperatingSystem.IsWindows())
         {
             nint handle = vk.ExportWin32Handle();

@@ -29,6 +29,7 @@ internal static unsafe class Gl
     public const uint TEXTURE_TILING_EXT = 0x9580;
     public const uint OPTIMAL_TILING_EXT = 0x9584;
     public const uint DEVICE_UUID_EXT = 0x9597;
+    public const uint DEDICATED_MEMORY_OBJECT_EXT = 0x9581;
     public const uint UUID_SIZE_EXT = 16;
 
     private static delegate* unmanaged[Cdecl]<uint, byte*> _getString;
@@ -40,6 +41,7 @@ internal static unsafe class Gl
     private static delegate* unmanaged[Cdecl]<void> _finish;
 
     private static delegate* unmanaged[Cdecl]<int, uint*, void> _createMemoryObjects;
+    private static delegate* unmanaged[Cdecl]<uint, uint, int*, void> _memoryObjectParameteriv;
     private static delegate* unmanaged[Cdecl]<uint, ulong, uint, void*, void> _importMemoryWin32Handle;
     private static delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void> _importMemoryFd;
     private static delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void> _textureStorageMem2D;
@@ -68,6 +70,7 @@ internal static unsafe class Gl
         _finish = (delegate* unmanaged[Cdecl]<void>)Proc("glFinish");
 
         _createMemoryObjects = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glCreateMemoryObjectsEXT", optional: true);
+        _memoryObjectParameteriv = (delegate* unmanaged[Cdecl]<uint, uint, int*, void>)Proc("glMemoryObjectParameterivEXT", optional: true);
         _importMemoryWin32Handle = (delegate* unmanaged[Cdecl]<uint, ulong, uint, void*, void>)Proc("glImportMemoryWin32HandleEXT", optional: true);
         _importMemoryFd = (delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void>)Proc("glImportMemoryFdEXT", optional: true);
         _textureStorageMem2D = (delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void>)Proc("glTextureStorageMem2DEXT", optional: true);
@@ -133,6 +136,21 @@ internal static unsafe class Gl
         uint memory = 0;
         _createMemoryObjects(1, &memory);
         return memory;
+    }
+
+    /// <summary>
+    /// Tells GL the memory it is about to import is a dedicated allocation, which
+    /// <see cref="VulkanImage"/> always makes. Required by EXT_external_objects, and
+    /// undefined without it — which on NVIDIA-Linux meant a texture that read as black once
+    /// the image passed about 2560x1440. This spike went without it for the same reason the
+    /// renderer did: its own images are small enough that undefined happened to mean right.
+    /// SyncBench imports at 4K, where it would not have.
+    /// </summary>
+    public static void MarkDedicated(uint memory)
+    {
+        if (_memoryObjectParameteriv is null) return;
+        int yes = 1;
+        _memoryObjectParameteriv(memory, DEDICATED_MEMORY_OBJECT_EXT, &yes);
     }
 
     public static void ImportWin32(uint memory, ulong size, nint handle) =>

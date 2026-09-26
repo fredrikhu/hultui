@@ -130,6 +130,7 @@ internal static unsafe class RangeBench
     private static uint ImportIntoGl(VulkanImage vk)
     {
         uint memory = Gl.CreateMemoryObject();
+        Gl.MarkDedicated(memory);
         if (OperatingSystem.IsWindows()) Gl.ImportWin32(memory, vk.AllocationSize, vk.ExportWin32Handle());
         else Gl.ImportFd(memory, vk.AllocationSize, vk.ExportFd());
         if (Gl.Error() != 0) return 0;
