@@ -1,3 +1,4 @@
+using HultUI.Core.DevTools;
 using HultUI.Core.Rendering;
 using SkiaSharp;
 
@@ -164,18 +165,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // Linear light only where it can survive. An 8-bit sRGB swapchain has no room above
         // white, and the offscreen that carries the extra range exists only for scRGB — ask a
         // producer for HDR into an SDR target and it comes out clipped rather than bright.
-        // Off unless asked for. The plumbing is complete and the picture it produces is not
-        // yet right: mpv accepts the target options and the spike proves they make it write
-        // HDR range into this very image, but nothing above white has yet been seen reaching
-        // the swapchain in the app. Until that is understood, declaring a frame linear when
-        // it may still be encoded makes the picture wrong — brighter than it should be, which
-        // is what it looked like. See docs/design/HDR.md, phase 5.
+        // Only on an scRGB swapchain: an 8-bit sRGB one has no room above white, and a
+        // producer asked for HDR into it returns something clipped rather than something
+        // bright.
         bool linear = HdrVideoEnabled && _frameColorSpace == VkColorSpaceExtendedSrgbLinear;
-        if (linear != _tracedLinear)
+        if (linear != _tracedLinear && StartupTrace.Enabled)
         {
             _tracedLinear = linear;
-            Console.Error.WriteLine($"[vulkan] lending a {(linear ? "LINEAR" : "encoded")} target " +
-                $"(colorSpace={_frameColorSpace} offscreen={_offscreen is not null} peak={_host.DisplayPeakNits:0})");
+            StartupTrace.Mark($"video target {(linear ? "linear light" : "encoded")} " +
+                $"(peak {(_host.DisplayPeakNits > 0f ? $"{_host.DisplayPeakNits:0} nits" : "unknown")})");
         }
 
         target = new GpuFrameTarget(image.GlFramebuffer, image.GlTexture, image.GlInternalFormat,
@@ -354,17 +352,22 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     }
 
     /// <summary>
-    /// <c>HULTUI_VIDEO_HDR=1</c> turns on asking a video producer for linear light with its
-    /// range intact — phase 5, and unfinished.
+    /// Whether a video producer is asked for linear light with its range intact — phase 5.
+    /// On, and <c>HULTUI_VIDEO_HDR=0</c> turns it off.
     ///
-    /// <para>Off by default because the result is not yet correct, not because it is risky to
-    /// try. Everything up to the shared image is proven: <c>spikes/HdrInterop --range</c> gets
-    /// a peak of 2.9 out of a real HDR10 film through the same options this sets, in every
-    /// ordering. What has not been seen is any value above white reaching the swapchain in the
-    /// app, and a frame declared linear while it is still encoded is drawn too bright.</para>
+    /// <para>On by default because the alternative is incoherent: a renderer that went to the
+    /// trouble of picking an HDR swapchain and then asked the decoder for a tone-mapped SDR
+    /// picture has thrown away the only thing the swapchain was for. Measured on a film
+    /// mastered at 1000 nits, a highlight reaches the screen at 982.</para>
+    ///
+    /// <para>The off switch is for a driver that mishandles it, the same reason
+    /// <c>HULTUI_VULKAN_INTEROP=0</c> exists. Nothing else is affected: a producer that does
+    /// not understand the request keeps writing encoded pixels and says so through
+    /// <see cref="GpuFrame.ReferenceWhiteNits"/>, and this asks only on an scRGB
+    /// swapchain.</para>
     /// </summary>
     private static readonly bool HdrVideoEnabled =
-        Environment.GetEnvironmentVariable("HULTUI_VIDEO_HDR") == "1";
+        Environment.GetEnvironmentVariable("HULTUI_VIDEO_HDR") != "0";
 
     /// <summary>
     /// <c>HULTUI_VIDEO_WHITE</c>: where a video's reference white is put.

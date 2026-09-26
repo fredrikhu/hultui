@@ -464,7 +464,7 @@ has to be drawn as *linear* rather than sRGB-encoded, which is a different `SKCo
 wrap in `WrapFrame`. Neither is large; both are untested against real HDR content, which neither
 machine has.
 
-**Built and working, opt-in through `HULTUI_VIDEO_HDR=1`.** The seam carries
+**Built, working, and on by default** (`HULTUI_VIDEO_HDR=0` turns it off). The seam carries
 `WantsLinearLight` and `PeakNits` down to the producer and `ReferenceWhiteNits` back up;
 `MpvBackend` sets `target-prim`/`target-trc`/`target-peak` and reports libplacebo's 203;
 `WrapFrame` declares the image linear and scales it into the canvas.
@@ -493,8 +493,15 @@ spaced samples rather than one, because one landed on black again even after the
 through Vulkan needs the image's layout, which Skia owns and moves; guessing it returned a
 uniform 0.000 from an image that plainly had a picture in it. GL has no layouts.
 
-**Still to decide, and still to check elsewhere.** Whether this should be the default rather
-than a flag; the luminance question below; and Linux, where none of it has run.
+**Why on by default.** A renderer that goes to the trouble of picking an HDR swapchain and then
+asks the decoder for a tone-mapped SDR picture has thrown away the only thing the swapchain was
+for. The blast radius is also smaller than it sounds: `HULTUI_RENDERER=vulkan` is itself opt-in,
+the request is only made on an scRGB swapchain, and `MpvBackend` is the only producer in the tree
+that implements `IGpuFrameRenderer` — anything else writes into the pixel ring and never sees it.
+A future producer that ignores the request keeps writing encoded pixels and reports
+`ReferenceWhiteNits` of zero, so the seam degrades without it knowing this exists.
+
+**Still open:** the luminance question below, and Linux, where none of this has run.
 
 **And then the original question.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay draws needs

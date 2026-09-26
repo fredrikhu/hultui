@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using HultUI.Core.DevTools;
 using HultUI.Core.Rendering;
 using static HultUI.Media.Mpv.Mpv;
 
@@ -505,15 +506,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             int b = mpv_set_property_string(_mpv, "target-trc", "linear");
             int c = mpv_set_property_string(_mpv, "target-peak",
                 peak.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
-            // Read them back rather than trusting the return code: a property that reports
-            // success and then reads as something else is the difference between "mpv ignored
-            // us" and "mpv agreed and something later undid it".
-            Console.Error.WriteLine($"[mpv] linear target set: prim={a} trc={b} peak={c}; " +
-                $"reads back prim={Read("target-prim")} trc={Read("target-trc")} " +
-                $"peak={Read("target-peak")} tone-mapping={Read("tone-mapping")} " +
-                $"inverse={Read("inverse-tone-mapping")} target-contrast={Read("target-contrast")}");
-
-            string Read(string name) => GetString(_mpv, name) ?? "(unset)";
+            // Read back rather than trust the return codes: a property that reports success
+            // and then reads as something else is the difference between "mpv ignored us" and
+            // "mpv agreed and something later undid it". Only under the trace, since it is
+            // several property reads on a path that now runs by default.
+            if (StartupTrace.Enabled)
+                StartupTrace.Mark($"mpv linear target: set {a}/{b}/{c}, reads back " +
+                    $"prim={GetString(_mpv, "target-prim")} trc={GetString(_mpv, "target-trc")} " +
+                    $"peak={GetString(_mpv, "target-peak")}");
         }
         else
         {
