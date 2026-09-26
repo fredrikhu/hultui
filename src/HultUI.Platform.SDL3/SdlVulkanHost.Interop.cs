@@ -302,6 +302,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         RunOnGLContext(() =>
         {
             _glMemoryObject = gl.CreateMemoryObject();
+            gl.MarkDedicated(_glMemoryObject);
             if (OperatingSystem.IsWindows())
             {
                 nint handle = ExportWin32Handle();

@@ -30,6 +30,7 @@ internal sealed unsafe class InteropGl
     private const uint HandleTypeOpaqueWin32 = 0x9587;
     private const uint HandleTypeOpaqueFd = 0x9586;
     private const uint TextureTiling = 0x9580;
+    private const uint DedicatedMemoryObject = 0x9581;
     private const uint OptimalTiling = 0x9584;
     private const uint DeviceUuidExt = 0x9597;
 
@@ -46,6 +47,7 @@ internal sealed unsafe class InteropGl
 
     private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _createMemoryObjects;
     private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _deleteMemoryObjects;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, int*, void> _memoryObjectParameteriv;
     private readonly delegate* unmanaged[Cdecl]<uint, ulong, uint, void*, void> _importMemoryWin32Handle;
     private readonly delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void> _importMemoryFd;
     private readonly delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void> _textureStorageMem2D;
@@ -71,6 +73,7 @@ internal sealed unsafe class InteropGl
 
         _createMemoryObjects = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glCreateMemoryObjectsEXT");
         _deleteMemoryObjects = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteMemoryObjectsEXT");
+        _memoryObjectParameteriv = (delegate* unmanaged[Cdecl]<uint, uint, int*, void>)Proc("glMemoryObjectParameterivEXT");
         _importMemoryWin32Handle = (delegate* unmanaged[Cdecl]<uint, ulong, uint, void*, void>)Proc("glImportMemoryWin32HandleEXT");
         _importMemoryFd = (delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void>)Proc("glImportMemoryFdEXT");
         _textureStorageMem2D = (delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void>)Proc("glTextureStorageMem2DEXT");
@@ -155,6 +158,22 @@ internal sealed unsafe class InteropGl
     {
         if (memory == 0 || _deleteMemoryObjects is null) return;
         _deleteMemoryObjects(1, &memory);
+    }
+
+    /// <summary>
+    /// Tells GL the memory about to be imported is a dedicated allocation, which the Vulkan
+    /// side always makes. Must come after the object is created and before the import.
+    ///
+    /// <para>The spec requires it and leaves the result undefined without it, and on
+    /// NVIDIA-Linux undefined meant a texture that read as black once the image passed a
+    /// size — 2560x1440 drew, 2560x1600 and a 3840x1746 film did not, with no GL error and a
+    /// complete framebuffer. Small images and Windows happened to work without it.</para>
+    /// </summary>
+    public void MarkDedicated(uint memory)
+    {
+        if (_memoryObjectParameteriv is null) return;
+        int yes = 1;
+        _memoryObjectParameteriv(memory, DedicatedMemoryObject, &yes);
     }
 
     public void ImportWin32(uint memory, ulong size, nint handle) =>
