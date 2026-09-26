@@ -326,3 +326,48 @@ the video player on the Vulkan renderer, shared image read back through GL:
 
 which is the source's 877 levels plus a little YUV-to-RGB rounding. The ten bits
 now arrive.
+
+
+═══════════════════════════════════════════════════════
+Synchronisation, 2026-09-27, RTX 4080, Windows
+is the CPU stall the class warned about still there?
+═══════════════════════════════════════════════════════
+
+Mostly not, and what is left is not worth replacing.
+
+The expensive half was already gone: the queue drain after Skia submits had been
+replaced by a semaphore the present waits on. The class comment still described
+the drain, which is how this came to be re-investigated.
+
+SkiaSharp 3.119.2 still cannot be handed a semaphore — no GRFlushInfo, no
+GRBackendSemaphore, and the only native entry points its binding carries are
+gr_direct_context_flush and gr_direct_context_flush_and_submit, neither taking
+flush info. Checked against the assembly rather than assumed.
+
+What the remaining fence costs, 120 frames of continuous animation paced to a
+120 Hz display:
+
+  acquire wait: 0,0064 ms a frame
+
+Six microseconds. Replacing it with a semaphore moves six microseconds from the
+CPU to the GPU.
+
+Where the Vulkan path does cost more than GL, same benchmark, --auto:
+
+  operation            GL        Vulkan
+  create 1,000         28,47     28,73
+  update every 10th     2,41      2,66
+  select row            0,43      0,59
+  swap rows             1,09      1,33
+  remove row            6,73      6,89
+  create 10,000       316,64    319,84
+  append 1,000         38,25     36,78     (Vulkan faster)
+  clear 1,000           0,27      0,41
+
+A fixed 0,15 to 0,25 ms a frame, visible only where the frame is small enough for
+it to matter and invisible on anything layout-bound. That is consistent with the
+two things this backend does that GL does not — one extra command-buffer submit,
+and a render target rebuilt every frame because Skia cannot be told a layout —
+both the same binding limitation as the semaphore, and neither a stall.
+
+VERDICT: do not build the semaphore acquire. The number says no.

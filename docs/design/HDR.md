@@ -657,6 +657,29 @@ A headroom of exactly 1 is a real answer and is treated as one: it says the disp
 own SDR white, which the Linux machine nearly does (1.0022). Only a missing number falls back to
 assuming.
 
+### Synchronisation, measured and left alone
+
+Phase 1 said the CPU stalled once a frame and that fixing it was "the first thing to do if
+this backend is ever to ship". Half of that was already fixed and the comment had not caught
+up: the queue drain after Skia submits was replaced by a semaphore the present waits on.
+
+The other half is the acquire, still a fence because SkiaSharp 3.119.2 has nothing to hand a
+semaphore to — no `GRFlushInfo`, no `GRBackendSemaphore`, and only `gr_direct_context_flush`
+and `flush_and_submit` in its binding, neither taking flush info. **That fence costs 0.0064 ms
+a frame**, over 120 frames of continuous animation paced to a 120 Hz display. Replacing it
+moves six microseconds from the CPU to the GPU.
+
+Where Vulkan does cost more than GL is a fixed **0.15 to 0.25 ms a frame**, and only where the
+frame is small enough to notice: `select row` 0.43 against 0.59 ms, `clear` 0.27 against 0.41,
+while `create 10,000` is 316.6 against 319.8 and `append 1,000` is actually faster on Vulkan.
+That is consistent with the two things this backend does that GL does not — an extra
+command-buffer submit, and a render target rebuilt every frame because Skia cannot be told an
+image's layout. Both are the same binding limitation, and neither is a stall.
+
+**So the synchronisation work is not the blocker it was written up as, and is not being done.**
+What it was blocking — making Vulkan the default renderer — is now a question about Mesa, a
+hybrid GPU and a 0.2 ms frame cost, not about a stall.
+
 ## Zero-copy decode, afterwards
 
 `hwdec` is `auto-copy` today — every frame goes GPU → CPU → GPU. That is affordable at

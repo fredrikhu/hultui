@@ -13,17 +13,25 @@ namespace HultUI.Platform.SDL3;
 /// A Vulkan device and swapchain for an SDL window — the platform half of
 /// <see cref="IVulkanSurfaceHost"/>, and phase 1 of <c>docs/design/HDR.md</c>.
 ///
-/// <para><b>Synchronisation is deliberately the simple kind.</b> A finished Vulkan renderer
-/// acquires with a semaphore, has the renderer wait on it, signals a second on completion
-/// and presents waiting on that — no CPU stall anywhere. That needs semaphores threaded
-/// through the draw submission, and SkiaSharp 3.119.2 exposes no <c>GRFlushInfo</c>: the
-/// binding has <c>Flush()</c> and <c>Submit()</c> and nothing to hang a semaphore on. So
-/// this acquires with a <i>fence</i> and waits on it, then waits the queue idle after Skia
-/// submits. Correct, and a stall of one frame's GPU work per frame.</para>
+/// <para><b>Synchronisation: measured, and left alone.</b> This used to wait the queue idle
+/// after Skia submitted — a real stall, and the reason the class once said it cost a frame's
+/// GPU work per frame. That half is gone: the present-transition submit signals a semaphore
+/// and <c>vkQueuePresentKHR</c> waits on it, which is the ordering the drain was paying for.
+/// What remains is the acquire, which still uses a <i>fence</i> because SkiaSharp 3.119.2
+/// exposes no <c>GRFlushInfo</c> and no <c>GRBackendSemaphore</c> — the only native entry
+/// points its binding has are <c>gr_direct_context_flush</c> and <c>flush_and_submit</c>,
+/// neither taking flush info — so there is nothing to hand a semaphore to.</para>
 ///
-/// <para>That is the right trade for phase 1, whose goal is output indistinguishable from
-/// the GL path rather than a faster path. It is also the first thing to fix if this backend
-/// is ever to ship, and it needs either a richer binding or a submission of our own.</para>
+/// <para><b>That fence costs 0.0064 ms a frame</b>, measured over 120 frames of continuous
+/// animation paced to a 120 Hz display: six microseconds, or eight hundredths of one per
+/// cent of the frame. Replacing it with a semaphore would move six microseconds from the CPU
+/// to the GPU. The residual cost against the GL path is about 0.15 to 0.25 ms a frame, which
+/// shows only on operations small enough for it to matter — <c>select row</c> 0.43 against
+/// 0.59 ms, <c>clear</c> 0.27 against 0.41 — and is invisible on anything layout-bound
+/// (<c>create 10,000</c>: 316.6 against 319.8). That is consistent with the two things this
+/// backend does that GL does not: one extra command-buffer submit per frame, and a render
+/// target Skia makes it rebuild every frame because there is no way to tell Skia an image's
+/// layout. Both are the same binding limitation as the semaphore, and neither is a stall.</para>
 /// </summary>
 internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDisposable
 {
@@ -627,12 +635,40 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         // The fence is how this waits for the image without a semaphore to hand Skia — see
         // the note on the class.
+        long before = AcquireStallTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         Check(WaitForFences(_device, 1, &fence, 1, NoTimeout), "vkWaitForFences");
         Check(ResetFences(_device, 1, &fence), "vkResetFences");
+        if (AcquireStallTrace) RecordAcquireStall(before);
 
         _acquiredIndex = index;
         _haveAcquired = true;
         return Current();
+    }
+
+    /// <summary>
+    /// <c>HULTUI_VULKAN_ACQUIRE_TRACE=1</c> reports what the acquire wait actually costs.
+    ///
+    /// <para>The class comment has said since phase 1 that this backend stalls the CPU once a
+    /// frame. Half of that was true and is now gone — the queue drain after Skia submitted was
+    /// replaced by a semaphore the present waits on. What is left is this fence, and whether it
+    /// is worth replacing depends on a number nobody has taken.</para>
+    /// </summary>
+    private static readonly bool AcquireStallTrace =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_ACQUIRE_TRACE") == "1";
+
+    private long _stallTicks;
+    private int _stallFrames;
+
+    private void RecordAcquireStall(long before)
+    {
+        _stallTicks += System.Diagnostics.Stopwatch.GetTimestamp() - before;
+        if (++_stallFrames < 120) return;
+
+        double ms = _stallTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        Console.Error.WriteLine($"[vulkan] acquire wait: {ms / _stallFrames:0.0000} ms a frame " +
+            $"over {_stallFrames} frames ({ms:0.0} ms total)");
+        _stallTicks = 0;
+        _stallFrames = 0;
     }
 
     private VulkanFrameTarget Current() => new(
