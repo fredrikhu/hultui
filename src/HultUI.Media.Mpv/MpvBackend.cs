@@ -79,8 +79,17 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         mpv_set_option_string(_mpv, "terminal", "no");
         mpv_set_option_string(_mpv, "ytdl", "no");
         // Decode on the GPU where there is a decoder, copy back for mpv's GL pipeline:
-        // the mode that works with a desktop GL context on every platform.
-        mpv_set_option_string(_mpv, "hwdec", "auto-copy");
+        // the mode that works with a desktop GL context on every platform. The copy is what
+        // makes it portable — it hides every difference between NVDEC, D3D11VA, VAAPI and
+        // VideoToolbox — and it is also a round trip through main memory per frame, about
+        // 24 MB of it at 4K.
+        //
+        // HULTUI_MPV_HWDEC overrides it with any mode mpv understands; "auto" is the
+        // zero-copy one, where mpv imports the decoder's surface into GL directly. mpv falls
+        // back to software on its own if the mode it is given cannot initialise.
+        mpv_set_option_string(_mpv, "hwdec",
+            Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
+                ? mode : "auto-copy");
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
         // the render call to make up the difference (see Render, which also turns
         // that sleep off). The loop then wakes and draws it.
@@ -450,10 +459,22 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         parameters[3] = new mpv_render_param { type = MPV_RENDER_PARAM_DEPTH, data = &depth };
         parameters[4] = default;
         _lastGLFrameDrawn = mpv_render_context_render(_render, parameters) >= 0;
+
+        // What mpv actually chose, not what it was asked for. "auto" falls back on its own
+        // when a decoder or its interop will not initialise, and a silent fallback looks
+        // exactly like the mode working — the CPU moves either way, because the fallback is
+        // also hardware decoding.
+        if (_lastGLFrameDrawn && !_tracedHwdec && StartupTrace.Enabled)
+        {
+            _tracedHwdec = true;
+            StartupTrace.Mark($"mpv hwdec: asked {GetString(_mpv, "hwdec")}, " +
+                $"using {GetString(_mpv, "hwdec-current") ?? "(none)"}");
+        }
         return _lastGLFrameDrawn;
     }
 
     private bool _lastGLFrameDrawn;
+    private bool _tracedHwdec;
 
     /// <summary>
     /// How many bits a channel the target holds, for <c>MPV_RENDER_PARAM_DEPTH</c>.

@@ -371,3 +371,55 @@ and a render target rebuilt every frame because Skia cannot be told a layout —
 both the same binding limitation as the semaphore, and neither a stall.
 
 VERDICT: do not build the semaphore acquire. The number says no.
+
+
+═══════════════════════════════════════════════════════
+Zero-copy decode, 2026-09-27, RTX 4080, Windows
+scoped, and not built — the Windows route is 8-bit
+═══════════════════════════════════════════════════════
+
+CPU, 4K HEVC HDR, release build, 20 s window after 12 s settle, Vulkan renderer:
+
+  hwdec=auto-copy (default)   468 ms of CPU per second
+  hwdec=auto                  415 ms/s
+  hwdec=no (software)         921 ms/s
+
+The middle row is NOT a zero-copy saving. Both auto and auto-copy resolve to
+d3d11va-copy on this build, so the 53 ms/s between them is run-to-run variance
+and is reported as such rather than as a result. Reading hwdec-current is what
+showed that; the CPU delta alone looked like a finding.
+
+Asking for a zero-copy mode explicitly:
+
+  hwdec=d3d11va  -> hwdec-current = no      (software)
+  hwdec=dxva2    -> hwdec-current = no      (software)
+  hwdec=nvdec    -> "Unsupported hwdec: nvdec"
+  hwdec=cuda     -> "Unsupported hwdec: cuda"
+
+mpv prints why, in its own configuration line:
+
+  -Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled
+  -Dgl-dxinterop=disabled -Degl-angle=disabled
+
+Set to strip window output backends — "the framework's GL context is the only
+display" — which also stripped the decode interops. Those are different things.
+
+And enabling them would not help on Windows. The only zero-copy bridge that works
+with a desktop WGL context is hwdec_dxva2gldx, and it is 8-bit by construction:
+
+  #define SHARED_SURFACE_D3DFMT D3DFMT_X8R8G8B8
+  mapper->dst_params.imgfmt = IMGFMT_RGB0;
+
+A zero-copy path that throws away the ten bits phases 2 to 5 exist to carry. The
+10-bit bridge is hwdec_d3d11egl, which needs an ANGLE EGL context; ANGLE is GL ES
+over D3D11 and will not import Vulkan memory through GL_EXT_memory_object, so
+taking it would cost the interop the whole design rests on.
+
+VERDICT: zero-copy on Windows is incompatible with this architecture, not merely
+unbuilt. Linux may differ — hwdec_cuda and hwdec_vaapi map the hardware format
+and keep its subformat, so they carry 10 bits — and needs the same native build
+change plus one unanswered question: whether CUDA-GL or VAAPI-EGL interop works
+in a hidden GL context beside a Vulkan device.
+
+Cost of learning this: two flags read and four runs, against rebuilding FFmpeg
+and mpv first and finding out afterwards.

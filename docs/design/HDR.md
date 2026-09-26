@@ -685,10 +685,48 @@ hybrid GPU and a 0.2 ms frame cost, not about a stall.
 `hwdec` is `auto-copy` today — every frame goes GPU → CPU → GPU. That is affordable at
 1080p SDR and wrong at 4K HDR, where it is roughly 24 MB per frame.
 
-It belongs **after** the above, not before, because the destination for a zero-copy frame
-is the Vulkan image from phase 0: `hwdec=auto` keeps frames in GPU memory and mpv renders
-them into the same imported target, so nothing new is needed on the receiving side once
-that target exists. Doing it first would mean building it twice.
+It was going to belong **after** the above, on the reasoning that the destination for a
+zero-copy frame is the Vulkan image from phase 0 — `hwdec=auto` keeps frames in GPU memory,
+mpv renders them into the same imported target, nothing new needed on the receiving side.
+
+**That reasoning was wrong, and investigating it first is what showed why.**
+
+**`hwdec=auto` is already in use and is not zero-copy.** It resolves to `d3d11va-copy` here.
+So does `auto-copy`. Asking for `d3d11va`, `dxva2`, `nvdec` or `cuda` explicitly gives
+`hwdec-current = no` — software decoding — because **this libmpv is built with every
+zero-copy interop disabled**, as its own configuration line says:
+
+```
+-Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled
+-Dgl-dxinterop=disabled -Degl-angle=disabled
+```
+
+The `-copy` variants survive because the decoder is FFmpeg's and needs no GL interop at all.
+Those flags were set to strip *window output* backends — "the framework's GL context is the
+only display" — and stripping display interop stripped decode interop with it, which is a
+different thing and is the thing this phase needs.
+
+**And on Windows the flag change would not help.** With a desktop WGL context the only
+zero-copy bridge is `hwdec_dxva2gldx`, and it shares a `D3DFMT_X8R8G8B8` surface and hands
+back `IMGFMT_RGB0` — **8-bit RGB**. It would deliver a zero-copy path that throws away
+exactly what phases 2 to 5 were built to carry. The 10-bit bridge is `hwdec_d3d11egl`, which
+needs an **ANGLE EGL** context; ANGLE is a D3D11 implementation of GL ES and will not import
+Vulkan memory through `GL_EXT_memory_object`, so adopting it would cost the interop that the
+whole design rests on.
+
+**So zero-copy on Windows is incompatible with this architecture**, not merely unbuilt. The
+copy stays, and what it costs is now known: **468 ms of CPU per second** for 4K HEVC HDR
+(against 921 with hardware decoding off altogether, so the decoder is doing real work).
+
+**Linux is a different answer.** `hwdec_cuda` and `hwdec_vaapi` map the hardware format
+itself (`IMGFMT_CUDA`, `IMGFMT_VAAPI`) and keep the real subformat, so they carry 10 bits.
+Both are disabled in that build too (`-Dvaapi=disabled -Dvdpau=disabled`, and no ffnvcodec),
+so it is the same native-build change — but there it could actually deliver. Unverified:
+whether CUDA-GL or VAAPI-EGL interop works in the hidden GL context beside a Vulkan device,
+which is the one question that decides it.
+
+**Cost of finding this out:** two build flags and an afternoon, against rebuilding FFmpeg and
+mpv first and then discovering the Windows path is 8-bit.
 
 The catch is that `auto-copy` is currently what makes the backend portable — the copy
 hides every difference between NVDEC, VAAPI, D3D11VA and VideoToolbox. Turning it off
