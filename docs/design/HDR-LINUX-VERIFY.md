@@ -566,3 +566,23 @@ swapchain conversion), and the check is the same side-by-side on a dark theme.
   "linear" runs identical to four decimals, max 1.000); with the `late.` prefix, as the
   backend applies them, they work (max 2.65). On Windows the early form worked. Only the
   spike's default mode is affected.
+
+**Confirmed and fixed afterwards.** In an scRGB window on Wayland the UI is now drawn into an
+sRGB-*encoded* offscreen, which Skia fills without converting, and the blit decodes with
+`pow(c, 2.2)` before the white scale; linear-light video is encoded with `pow(c·k, 1/2.2)` so
+that the pair cancels. `HULTUI_SDR_TRANSFER=srgb|2.2` forces either; `IVulkanSurfaceHost.SdrIsGamma22`
+carries the choice, true on Wayland and false on Windows, whose path is unchanged.
+
+- **By capture:** the navy chrome goes from (15, 23, 42) in `srgb` mode to (7, 16, 37) in `2.2`,
+  against a predicted (6, 16, 37) — the 2.2 decode re-encoded by the capture's piecewise
+  curve; 94% of the top bar's pixels within 1 of the prediction, the rest text edges, where
+  blending is now in encoded space as it is on GL. Video unchanged: on the band clip the
+  swapchain max is 3.572 against 3.568 and the band centres are byte-identical; on 2001 the
+  shared image still reads 4.926.
+- **By eye — Fredrik looked**, the same setup as the finding (GL beside Vulkan
+  `HULTUI_VIDEO_HDR=0`, 2001 at 20:00, both on DP-2, HDR on, 408 nits): **"They look
+  identical."** Before the change the Vulkan navy was lighter and greyer and space was
+  brighter.
+- `HultUI.Rendering.Skia.Tests` 140, `HultUI.Core.Tests` 905, `HultUI.Media.Tests` 54: all pass.
+- **Not done:** Windows, where DWM is believed to use the piecewise curve and nothing has
+  changed; and a compositor other than KWin, where the Wayland default is an assumption.

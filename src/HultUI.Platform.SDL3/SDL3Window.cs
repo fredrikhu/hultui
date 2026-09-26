@@ -315,6 +315,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight, hdr);
             // Only meaningful for an scRGB surface; the host ignores it otherwise.
             _vulkanHost.SdrWhiteScale = WhiteScale();
+            _vulkanHost.SdrIsGamma22 = SdrIsGamma22();
             StartupTrace.Mark("vulkan device");
             _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, TakePreloadedText());
             StartupTrace.Mark("skia surface");
@@ -813,6 +814,20 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         return SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
     }
+
+    /// <summary>
+    /// Whether an sRGB window beside this one is shown through a pure 2.2 gamma — true on
+    /// Wayland, where KWin does. A property of the compositor rather than of the display, so
+    /// asked once. <c>HULTUI_SDR_TRANSFER=srgb</c> or <c>=2.2</c> forces either, which is how
+    /// the two are compared by eye.
+    /// </summary>
+    private static bool SdrIsGamma22() => Environment.GetEnvironmentVariable("HULTUI_SDR_TRANSFER") switch
+    {
+        "srgb" => false,
+        "2.2" => true,
+        _ => !OperatingSystem.IsWindows()
+            && string.Equals(SDL_GetCurrentVideoDriver(), "wayland", StringComparison.Ordinal),
+    };
 
     public string? DescribeGraphics()
     {

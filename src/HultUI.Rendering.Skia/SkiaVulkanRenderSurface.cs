@@ -53,6 +53,19 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// </summary>
     private SKSurface? _offscreen;
     private SKPaint? _blit;
+
+    /// <summary>
+    /// The offscreen holds sRGB-encoded values rather than light, and the blit decodes them
+    /// with a 2.2 gamma — the host's <see cref="IVulkanSurfaceHost.SdrIsGamma22"/>.
+    ///
+    /// <para>Not a colour-space tag, because a tag cannot do it. Skia reads every
+    /// <see cref="SKColor"/> as piecewise sRGB and converts it into whatever the canvas says
+    /// it is, faithfully: a canvas tagged "2.2" gets the piecewise light re-expressed, which
+    /// is the thing being got rid of. So the canvas is tagged sRGB, colours land in it
+    /// unconverted — as on an 8-bit swapchain, blending included — and the decoding happens
+    /// in the blit, where nothing converts behind it.</para>
+    /// </summary>
+    private bool _offscreenEncoded;
     private int _offscreenWidth, _offscreenHeight;
 
     private int _width;
@@ -224,7 +237,11 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // Linear when the producer says it wrote light rather than an encoded picture. Get
         // this wrong and Skia applies a transfer that is not there: an HDR frame declared sRGB
         // is decoded a second time and comes out crushed and dark.
-        var space = frame.IsLinearLight ? SKColorSpace.CreateSrgbLinear() : SKColorSpace.CreateSrgb();
+        // Into an encoded offscreen, linear light is declared sRGB too so that Skia leaves it
+        // alone; FrameColorFilter then encodes it with the 2.2 the blit will undo.
+        var space = frame.IsLinearLight && !_offscreenEncoded
+            ? SKColorSpace.CreateSrgbLinear()
+            : SKColorSpace.CreateSrgb();
 
         // Opaque for linear light, and not as a detail. Premultiplied colour is defined only
         // up to its alpha, so a premul image whose channels exceed 1 is describing something
@@ -338,8 +355,13 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // The colour type has to match the swapchain's format or SKSurface.Create quietly
         // returns null — which looks exactly like a driver refusing the render target, and
         // is not that. Most Windows surfaces offer BGRA first.
+        // With an encoded offscreen the swapchain is tagged the same as it, so the blit reaches
+        // the swapchain unconverted and the shader's own decoding is the only one applied.
+        var space = frame.ColorSpace == VkColorSpaceExtendedSrgbLinear && _host.SdrIsGamma22
+            ? SKColorSpace.CreateSrgb()
+            : ColorSpaceFor(frame.ColorSpace);
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
-            ColorTypeFor(frame.Format), ColorSpaceFor(frame.ColorSpace));
+            ColorTypeFor(frame.Format), space);
         if (surface is null)
         {
             target.Dispose();
@@ -405,7 +427,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             ? 1f
             : frame.ReferenceWhiteNits / canvasWhiteNits;
 
-        if (Math.Abs(scale - 1f) < 0.001f) return null;
+        // An encoded offscreen needs the 2.2 encoding whatever the scale, so never null there.
+        if (Math.Abs(scale - 1f) < 0.001f && !_offscreenEncoded) return null;
         if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f) return _frameScale;
 
         _frameScale?.Dispose();
@@ -413,8 +436,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // A shader, not a colour matrix: the matrix clamps at 1 and an HDR frame is made of
         // the values above it. Alpha is left alone — the video is opaque and scaling it would
         // make the frame translucent in exactly the bright places.
-        using var effect = SKRuntimeEffect.CreateColorFilter(
-            "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
+        using var effect = SKRuntimeEffect.CreateColorFilter(_offscreenEncoded
+            ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb * k, half3(0)), half3(1.0 / 2.2)), c.a); }"
+            : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
         if (effect is null) { _frameScale = null; return null; }
 
         var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = scale };
@@ -433,30 +457,37 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// </summary>
     private SKSurface? OffscreenFor(in VulkanFrameTarget frame)
     {
-        if (frame.ColorSpace != VkColorSpaceExtendedSrgbLinear || _host.SdrWhiteScale <= 1.0001f)
+        // A 2.2 decode is needed even at a white scale of 1, and only the offscreen can do it.
+        bool encoded = _host.SdrIsGamma22;
+        if (frame.ColorSpace != VkColorSpaceExtendedSrgbLinear
+            || (_host.SdrWhiteScale <= 1.0001f && !encoded))
         {
             ReleaseOffscreen();
             return null;
         }
 
-        if (_offscreen is not null && _offscreenWidth == frame.WidthPx && _offscreenHeight == frame.HeightPx)
+        if (_offscreen is not null && _offscreenWidth == frame.WidthPx && _offscreenHeight == frame.HeightPx
+            && _offscreenEncoded == encoded)
             return _offscreen;
 
         ReleaseOffscreen();
 
         var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
-            SKAlphaType.Premul, SKColorSpace.CreateSrgbLinear());
+            SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
         _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
         if (_offscreen is null) return null;
 
         _offscreenWidth = frame.WidthPx;
         _offscreenHeight = frame.HeightPx;
+        _offscreenEncoded = encoded;
 
         // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
         // whole thing being worked around. Src rather than SrcOver — the offscreen is the
-        // entire frame and there is nothing underneath worth blending with.
-        using var effect = SKRuntimeEffect.CreateColorFilter(
-            "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
+        // entire frame and there is nothing underneath worth blending with. The decode is on
+        // premultiplied colour, which is exact only at alpha 1 — true of a window's frame.
+        using var effect = SKRuntimeEffect.CreateColorFilter(encoded
+            ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb, half3(0)), half3(2.2)) * k, c.a); }"
+            : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
         if (effect is null) { ReleaseOffscreen(); return null; }
 
         var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = _host.SdrWhiteScale };
@@ -474,6 +505,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _offscreen = null;
         _blit = null;
         _offscreenWidth = _offscreenHeight = 0;
+        _offscreenEncoded = false;
     }
 
     private void ReleaseFrameSurface()

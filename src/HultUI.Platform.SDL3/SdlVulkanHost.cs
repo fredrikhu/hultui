@@ -143,6 +143,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <summary>Set by the window, which is the thing that knows which display it is on.</summary>
     public float SdrWhiteScale { get; set; } = 1f;
 
+    /// <summary>Set by the window, which knows which compositor it is under.</summary>
+    public bool SdrIsGamma22 { get; set; }
+
     /// <summary>
     /// The display's peak luminance, from <c>HULTUI_VULKAN_PEAK_NITS</c> or zero.
     ///

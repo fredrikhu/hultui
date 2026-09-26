@@ -90,6 +90,18 @@ public interface IVulkanSurfaceHost
     /// </summary>
     float DisplayPeakNits => 0f;
 
+    /// <summary>
+    /// Whether the compositor shows an ordinary sRGB window through a pure 2.2 gamma rather
+    /// than the piecewise sRGB curve — and so whether an scRGB window has to decode its own
+    /// sRGB content the same way to look like its neighbours.
+    ///
+    /// <para>True under KWin: side by side on HDR Wayland, the scRGB window's shadows were
+    /// visibly lighter and greyer than the GL window's — the video's blacks and the UI's navy
+    /// alike — while white matched, which is where the two curves meet. False on Windows,
+    /// whose compositor is not known to differ from the piecewise curve Skia uses.</para>
+    /// </summary>
+    bool SdrIsGamma22 => false;
+
     /// <summary>Resolves a Vulkan entry point by name. <paramref name="device"/> is zero for
     /// instance-level commands, which is the convention Skia's own resolver uses.</summary>
     nint GetProcedureAddress(string name, nint instance, nint device);
