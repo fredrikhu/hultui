@@ -287,6 +287,13 @@ should make no visible difference at all, which is the same prediction from the 
   target-prim=bt.709 target-peak=1000` reports what mpv writes into a shared image with no
   renderer involved, which separates a libplacebo problem from a compositing one in one run.
 
+## Separately: zero-copy decode
+
+Not part of verifying the fixes above, and a bigger piece of work — it needs a native rebuild of
+FFmpeg and mpv. `docs/design/HDR-LINUX-ZEROCOPY.md` has it, ordered so the cheap question that
+could end it comes first. Windows has been ruled out; Linux is the only platform where it can
+work.
+
 ## What to send back
 
 Same as before: append results to this file under a **Results** heading and commit, rather than

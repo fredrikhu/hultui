@@ -728,6 +728,11 @@ which is the one question that decides it.
 **Cost of finding this out:** two build flags and an afternoon, against rebuilding FFmpeg and
 mpv first and then discovering the Windows path is 8-bit.
 
+**What to run there is written down**: `docs/design/HDR-LINUX-ZEROCOPY.md`, ordered so that the
+step which can end the project — measuring what the copy actually costs, which needs no rebuild —
+comes first, and the one that decides the approach — whether CUDA can register a texture whose
+storage is Vulkan-owned memory — comes before the build rather than after it.
+
 The catch is that `auto-copy` is currently what makes the backend portable — the copy
 hides every difference between NVDEC, VAAPI, D3D11VA and VideoToolbox. Turning it off
 means those differences become ours, and a per-platform fallback matrix with it.
