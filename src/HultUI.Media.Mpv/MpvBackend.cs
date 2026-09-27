@@ -78,18 +78,19 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         mpv_set_option_string(_mpv, "osc", "no");
         mpv_set_option_string(_mpv, "terminal", "no");
         mpv_set_option_string(_mpv, "ytdl", "no");
-        // Decode on the GPU where there is a decoder, copy back for mpv's GL pipeline:
-        // the mode that works with a desktop GL context on every platform. The copy is what
-        // makes it portable — it hides every difference between NVDEC, D3D11VA, VAAPI and
-        // VideoToolbox — and it is also a round trip through main memory per frame, about
-        // 24 MB of it at 4K.
+        // "auto" tries the zero-copy methods first — mpv imports the decoder's surface into
+        // its own GL textures and renders from there, no trip through main memory — and
+        // then the same -copy methods "auto-copy" would have used, so it is never worse.
+        // Which one it lands on depends on the libmpv's interops: the trimmed Windows
+        // build has none and gets d3d11va-copy exactly as before; a distribution libmpv
+        // with cuda-interop gets nvdec, about 250 ms of CPU a second less at 4K
+        // (docs/design/HDR-LINUX-ZEROCOPY.md).
         //
-        // HULTUI_MPV_HWDEC overrides it with any mode mpv understands; "auto" is the
-        // zero-copy one, where mpv imports the decoder's surface into GL directly. mpv falls
-        // back to software on its own if the mode it is given cannot initialise.
+        // HULTUI_MPV_HWDEC overrides it with any mode mpv understands. mpv falls back to
+        // software on its own if the mode it is given cannot initialise.
         mpv_set_option_string(_mpv, "hwdec",
             Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
-                ? mode : "auto-copy");
+                ? mode : "auto");
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
         // the render call to make up the difference (see Render, which also turns
         // that sleep off). The loop then wakes and draws it.

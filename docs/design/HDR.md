@@ -682,7 +682,8 @@ hybrid GPU and a 0.2 ms frame cost, not about a stall.
 
 ## Zero-copy decode, afterwards
 
-`hwdec` is `auto-copy` today — every frame goes GPU → CPU → GPU. That is affordable at
+`hwdec` was `auto-copy` — every frame goes GPU → CPU → GPU. **It is now `auto`**, for the
+reasons at the end of this section. That is affordable at
 1080p SDR and wrong at 4K HDR, where it is roughly 24 MB per frame.
 
 It was going to belong **after** the above, on the reasoning that the destination for a
@@ -739,9 +740,24 @@ the trimmed build — it loads the distribution's libmpv, which has `cuda-intero
 arrive intact, and 4K CPU drops from ~400 to ~155 ms/s. The crux was not one: mpv registers its
 *own* plane textures with CUDA and renders from them into our FBO like any other frame.
 
-The catch is that `auto-copy` is currently what makes the backend portable — the copy
-hides every difference between NVDEC, VAAPI, D3D11VA and VideoToolbox. Turning it off
-means those differences become ours, and a per-platform fallback matrix with it.
+The catch was going to be that `auto-copy` is what makes the backend portable, and that
+turning it off would make a per-platform fallback matrix ours. **mpv already keeps that
+matrix**: `auto` sorts the non-copying methods first and then tries the same `-copy` methods
+`auto-copy` would (`vd_lavc.c`, "List non-copying entries first"), so it is never worse than
+`auto-copy`. The default is now `auto`: zero-copy on the Linux machine on both renderers
+(GL: 265 → 117 ms/s at 4K, picture checked by screenshot), `d3d11va-copy` on the trimmed
+Windows build exactly as before.
+
+**The Windows conclusion above missed a route, and it is not the licence.** None of the
+Windows interops is GPL-gated in mpv's `meson.build` — only the `direct3d` *video output*
+is, and nothing here needs it. More to the point, `cuda-interop` requires only
+`cuda-hwaccel` (i.e. ffnvcodec) and `gl`, with no platform condition, and
+`hwdec_cuda_gl.c` is plain GL plus `cuGLGetDevices` — no EGL, nothing Linux-specific. CUDA-GL
+interop works under WGL. So **NVIDIA on Windows can probably have ten-bit zero-copy** by the
+same mechanism just proven on Linux: add nv-codec-headers to the FFmpeg build (LGPL-clean;
+only `cuda-nvcc` and `libnpp` are nonfree) and let mpv find ffnvcodec. Unverified — it needs
+that build and a run. AMD and Intel on Windows remain as described: 8-bit via `dxva2gldx` or
+ANGLE, neither usable.
 
 ## What this costs
 

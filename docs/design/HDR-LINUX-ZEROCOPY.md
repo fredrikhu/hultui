@@ -233,3 +233,16 @@ and so is AMD/Intel in general.
    Skia's GL context rather than a hidden one.
 2. **The distributed Linux build** (`native/mpv/build-libmpv.sh`) needs step 3 to get any of this.
    The system-library result says the interop works, so step 3 is no longer a gamble.
+
+### Default changed to `auto` (2026-09-27)
+
+Run with no override on each path, 2001 at 20:00: Vulkan renderer `nvdec` (shared image 925
+levels a row, real content); GL renderer `nvdec`, 265 → 117 ms/s against `auto-copy`, picture
+checked by screenshot; Vulkan with `HULTUI_VULKAN_INTEROP=0` (mpv's software renderer) plays,
+at the same CPU as `auto-copy` (1658 against 1651 ms/s).
+
+**That last one is a trap for step 4's advice.** With no GL interop, `hwdec-current` *still
+reports `nvdec`* while the frames reach the filter chain as plain `p010`, so they were copied.
+`hwdec-current` rules a copy *in* when it names a `-copy` mode, but cannot rule one *out*.
+The proof is the VO format in `HULTUI_MPV_LOG=v`: `VO: [libmpv] … cuda[p010]` is zero-copy,
+`p010` is not.
