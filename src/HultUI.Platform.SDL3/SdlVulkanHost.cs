@@ -181,6 +181,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public uint GraphicsQueueFamily => _queueFamily;
     public uint ApiVersion => (uint)VkVersion.Version_1_2;
     public int ImageCount => _images.Length;
+    public int WidthPx => _widthPx;
+    public int HeightPx => _heightPx;
 
     public string DeviceName { get; private set; } = "";
 

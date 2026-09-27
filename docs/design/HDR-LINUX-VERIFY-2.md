@@ -378,6 +378,15 @@ scaling, not a bug.
   Windows can confirm it. The likely fix is one line: seed `_width/_height` from the host's size when
   the surface is constructed, so the explicit call is a no-op on Vulkan and still sizes GL.
 
+  **Fixed afterwards.** `IVulkanSurfaceHost` now exposes the swapchain's window size
+  (`WidthPx`/`HeightPx`) and `SkiaVulkanRenderSurface` starts from it, so the explicit `Resize`
+  is a no-op on Vulkan and still sizes GL. Result on this machine: **one** start-up build on
+  Wayland (DP-3, 750x450 F16) and X11 (750x450 8-bit). All four GL/Vulkan × Wayland/X11 launches
+  reach `first frame shown`, and the same KWin resize and crossing sequence rebuilds to exactly the
+  sizes it did before. VideoPlayer: one start-up build, zero-copy, real content in the shared
+  image. `HultUI.Rendering.Skia.Tests` 140 and `HultUI.Core.Tests` 905 pass. **Not run on
+  Windows**, where the same one-line change should take its start-up from two builds to one.
+
 ### 2. The resize stretch does not happen on KWin, on either display server, and the measurement could have seen it
 
 **Method.** KWin's `ScreenShot2.CaptureArea` at native resolution (10–15 ms a capture, through a
@@ -471,4 +480,4 @@ between columns carries over.
 - **By-eye drags** for item 1's "resize still works": replaced by KWin-scripted resizes and crossings
   checked against swapchain sizes. A person did not drag or look.
 - **The Vulkan → GL ordering gap** in item 0: found by reading, neither tested nor fixed.
-- **The duplicate start-up swapchain** in item 1: diagnosed, deliberately not fixed.
+- **The duplicate start-up swapchain** in item 1: fixed afterwards (see item 1). Not yet run on Windows.

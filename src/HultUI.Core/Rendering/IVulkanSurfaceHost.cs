@@ -52,6 +52,14 @@ public interface IVulkanSurfaceHost
     int ImageCount { get; }
 
     /// <summary>
+    /// The window size the swapchain was last built for, in device pixels. The renderer starts
+    /// from it, so that being told the same size again — which the window does once, after the
+    /// surface is built, because the GL surface needs it — rebuilds nothing.
+    /// </summary>
+    int WidthPx { get; }
+    int HeightPx { get; }
+
+    /// <summary>
     /// The extensions actually enabled on the instance and the device. Skia validates every
     /// render target against these, and without them it refuses formats the device plainly
     /// supports — a failure that surfaces as a null surface with no reason given.

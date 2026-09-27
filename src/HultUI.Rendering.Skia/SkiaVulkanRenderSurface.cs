@@ -92,6 +92,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
 
+        // The size the swapchain already has. Starting from zero instead made the window's
+        // explicit Resize after construction look like a change, and every launch built a
+        // second swapchain identical to the first.
+        _width = host.WidthPx;
+        _height = host.HeightPx;
+
         // Skia has to be told what is enabled before it will validate anything against the
         // device. Leaving this null lets the context be created and then makes every surface
         // over a perfectly ordinary BGRA swapchain image come back null.
