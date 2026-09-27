@@ -16,6 +16,7 @@ echo "mpv        $MPV_TAG"
 echo "FFmpeg     $FFMPEG_TAG"
 echo "libplacebo $LIBPLACEBO_TAG"
 echo "libass     ${LIBASS_TAG} (or the host package on Windows)"
+echo "nv-codec-headers ${NVCODEC_TAG} (MIT; Linux only for now)"
 echo
 
 echo "mpv build configuration"
@@ -24,7 +25,7 @@ if grep -qE '^#define HAVE_GPL 1' "$SRC/mpv/build/config.h"; then
 else
   echo "  HAVE_GPL 0  (built with -Dgpl=false: LGPL-2.1+)"
 fi
-for f in HAVE_LUA HAVE_JAVASCRIPT HAVE_LIBARCHIVE HAVE_DVDNAV HAVE_CDDA HAVE_LIBBLURAY HAVE_RUBBERBAND HAVE_VULKAN HAVE_SHADERC; do
+for f in HAVE_LUA HAVE_JAVASCRIPT HAVE_LIBARCHIVE HAVE_DVDNAV HAVE_CDDA HAVE_LIBBLURAY HAVE_RUBBERBAND HAVE_VULKAN HAVE_SHADERC HAVE_CUDA_HWACCEL HAVE_CUDA_INTEROP; do
   v=$(grep -E "^#define $f " "$SRC/mpv/build/config.h" | awk '{print $3}')
   echo "  $f ${v:-?}"
 done

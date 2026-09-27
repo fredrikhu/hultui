@@ -80,9 +80,13 @@ wasted.
 `native/mpv/build-libmpv.sh`, Windows branches only. The Linux branch wants the same thing but
 different packages and its own run; leave it.
 
-- **Headers:** `pacman -S mingw-w64-x86_64-ffnvcodec-headers` in the MINGW64 shell. Add it to
-  the pacman line in `native/mpv/README.md`, and install it on the self-hosted Windows runner too
-  (`docs/SELF-HOSTED-RUNNERS.md`), or `mpv-natives.yml` will fail there.
+- **Headers: already in the script.** The Linux change (done after this brief was written)
+  added `build_nvcodec_headers`, which installs nv-codec-headers from the tag pinned in
+  `versions.env` into the build prefix. It is guarded `[ "$HOST" = linux ] || return 0`;
+  **dropping that guard is the whole header change for Windows**. The headers' Makefile already
+  handles MSYS2 (`cygpath`), and no pacman package or runner change is needed. Do not install
+  `mingw-w64-x86_64-ffnvcodec-headers` as well: two copies would have pkg-config choosing
+  between versions.
 - **FFmpeg**, Windows `host_flags`: add `--enable-ffnvcodec --enable-nvdec`. Explicitly, rather
   than relying on autodetect — silent autodetection is how this capability went missing without
   anyone deciding it should. Keep `--disable-nonfree`; do **not** add `cuda-nvcc`, `libnpp` or
@@ -90,13 +94,13 @@ different packages and its own run; leave it.
 - **mpv**, Windows `host_opts`: add `-Dcuda-hwaccel=enabled -Dcuda-interop=enabled` (`enabled`,
   not `auto`, for the same reason). Leave `d3d11`, `direct3d`, `gl-win32`, `gl-dxinterop` and
   `egl-angle` disabled — enabling `gl-dxinterop` brings back the 8-bit `dxva2` bridge.
-- **Versions:** mpv needs ffnvcodec **>= 11.1.5.1**; read FFmpeg n8.1.2's configure output for
-  its own minimum. The header version sets the **minimum NVIDIA driver** the DLL can use CUDA
-  with (listed in nv-codec-headers' README) — record it. An older driver should fall back to a
-  copy mode rather than fail; check that if you can.
+- **Versions:** pinned at n12.1.14.0, the version FFmpeg n8.1.2's configure asks for first
+  (mpv needs >= 11.1.5.1). It sets the **minimum Windows driver at 531.61**. An older driver
+  should fall back to a copy mode rather than fail; check that if you can.
 - **Licence and dependencies**, both of which must be unchanged:
-  - `LICENCE-REPORT.txt` still ends `RESULT: LGPL-2.1+`. Add `HAVE_CUDA_HWACCEL` and
-    `HAVE_CUDA_INTEROP` to the flags `licence-report.sh` prints, so the report shows it.
+  - `LICENCE-REPORT.txt` still ends `RESULT: LGPL-2.1+`, and shows `HAVE_CUDA_HWACCEL 1` and
+    `HAVE_CUDA_INTEROP 1` (already printed). Drop "Linux only for now" from its
+    nv-codec-headers line, and from the README table.
   - `objdump -p libmpv-2.dll | grep 'DLL Name'` lists only OS DLLs — in particular **not**
     `nvcuda.dll` or `nvcuvid.dll`. If either appears, the DLL will not load on a machine without
     an NVIDIA driver, which is worse than no zero-copy.

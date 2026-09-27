@@ -739,6 +739,8 @@ the trimmed build — it loads the distribution's libmpv, which has `cuda-intero
 `hwdec=nvdec` was available all along: `hwdec-current = nvdec`, ten bits and the full range
 arrive intact, and 4K CPU drops from ~400 to ~155 ms/s. The crux was not one: mpv registers its
 *own* plane textures with CUDA and renders from them into our FBO like any other frame.
+**The trimmed LGPL build now has it too** (`build-libmpv.sh`, Linux branch): same VO format,
+same ten bits and range, verified the same way.
 
 The catch was going to be that `auto-copy` is what makes the backend portable, and that
 turning it off would make a per-platform fallback matrix ours. **mpv already keeps that

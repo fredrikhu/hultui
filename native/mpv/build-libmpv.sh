@@ -41,34 +41,62 @@ fetch() {  # fetch <dir> <git url> <tag>
   fi
 }
 
+# ──── nv-codec-headers (Linux only for now): NVDEC and CUDA interop ────
+# Headers and a .pc file, nothing compiled. FFmpeg and mpv load libcuda and libnvcuvid
+# at run time through them rather than linking, so the library still loads on a
+# machine with no NVIDIA driver, and simply finds no CUDA there. Built from the pinned
+# tag rather than a distribution package so the version, and with it the minimum
+# driver, is the same everywhere. Windows is next (docs/design/HDR-WINDOWS-CUDA.md);
+# FFmpeg and mpv autodetect these headers, so installing them there turns CUDA on.
+build_nvcodec_headers() {
+  [ "$HOST" = linux ] || return 0
+  fetch nv-codec-headers https://github.com/FFmpeg/nv-codec-headers.git "$NVCODEC_TAG"
+  if [ -f "$PREFIX/lib/pkgconfig/ffnvcodec.pc" ]; then log "nv-codec-headers: already installed"; return; fi
+  log "nv-codec-headers: install"
+  make -C "$SRC/nv-codec-headers" PREFIX="$PREFIX" install
+}
+
 # ──── FFmpeg: LGPL only, decode only ────
 build_ffmpeg() {
   fetch ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
-  if [ -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ]; then log "ffmpeg: already built"; return; fi
-  log "ffmpeg: configure"
-  cd "$SRC/ffmpeg"
   local host_flags=()
   if [ "$HOST" = windows ]; then
     host_flags=(--target-os=mingw32 --arch=x86_64 --enable-d3d11va --enable-dxva2)
   else
-    # No VAAPI/VDPAU in this first cut: they need a display interop the framework
-    # does not provide yet, and libva would be one more runtime dependency.
-    host_flags=(--disable-vaapi --disable-vdpau --disable-libdrm)
+    # NVDEC, asked for explicitly so missing headers fail here instead of quietly
+    # building without it. Not the nonfree CUDA options (cuda-nvcc, libnpp): those are
+    # for CUDA filters, and decoding needs none of them.
+    # No VAAPI/VDPAU yet. VAAPI zero-copy needs EGL in mpv, and FFmpeg links libva
+    # directly rather than loading it, which would make libva a hard runtime dependency.
+    host_flags=(--enable-ffnvcodec --enable-nvdec --disable-vaapi --disable-vdpau --disable-libdrm)
   fi
   # (libpostproc left the FFmpeg tree in 8.0; nothing to disable.)
-  ./configure --prefix="$PREFIX" \
-    --disable-gpl --disable-nonfree --disable-version3 \
-    --disable-programs --disable-doc --disable-debug \
-    --enable-static --disable-shared --enable-pic \
-    --disable-avdevice \
-    --disable-encoders --disable-muxers --disable-devices \
-    --disable-sdl2 --disable-xlib --disable-libxcb \
-    --enable-zlib --enable-libdav1d \
-    --pkg-config-flags=--static \
-    "${host_flags[@]}"
+  local flags=(--prefix="$PREFIX"
+    --disable-gpl --disable-nonfree --disable-version3
+    --disable-programs --disable-doc --disable-debug
+    --enable-static --disable-shared --enable-pic
+    --disable-avdevice
+    --disable-encoders --disable-muxers --disable-devices
+    --disable-sdl2 --disable-xlib --disable-libxcb
+    --enable-zlib --enable-libdav1d
+    --pkg-config-flags=--static
+    "${host_flags[@]}")
+  # Reuse a built FFmpeg only if it was configured the same way. Otherwise a work
+  # directory from before a flag change keeps the old FFmpeg, and mpv links against
+  # it without complaint: -Dcuda-hwaccel=enabled sees the headers and never learns
+  # that FFmpeg itself was built without NVDEC.
+  local stamp="$PREFIX/ffmpeg-configure.txt"
+  if [ -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ] && [ "$(cat "$stamp" 2>/dev/null)" = "${flags[*]}" ]; then
+    log "ffmpeg: already built"; return
+  fi
+  log "ffmpeg: configure"
+  cd "$SRC/ffmpeg"
+  rm -f "$stamp"
+  ./configure "${flags[@]}"
   log "ffmpeg: build"
   make -j"$JOBS"
   make install
+  printf '%s' "${flags[*]}" > "$stamp"
 }
 
 # ──── libplacebo: GL only, no Vulkan, no shader compilers ────
@@ -114,13 +142,20 @@ build_mpv() {
     host_opts=(-Dc_link_args=-static -Dcpp_link_args=-static -Dprefer_static=true
                -Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled -Dgl-dxinterop=disabled -Degl-angle=disabled)
   else
-    # GL only, through the framework's context: no windowing, no display interop.
+    # GL only, through the framework's context: no windowing, no display output.
+    # Decode interop is a different thing and is on: cuda-interop is what makes
+    # hwdec=nvdec zero-copy (docs/design/HDR-LINUX-ZEROCOPY.md). It needs only GL,
+    # which plain-gl provides, and neither EGL nor a window.
     # Our own prefix holds only static archives, so FFmpeg, libplacebo and libass
     # link in by construction; the distribution's libraries must stay shared (its
     # archives are not PIC — prefer_static here failed the link on libfontconfig.a).
     # What static archives do need is their private dependencies, which pkg-config
     # only lists with --static; the wrapper asks for that on every query.
-    host_opts=(-Dx11=disabled -Dwayland=disabled -Degl=disabled -Ddrm=disabled
+    # x11-clipboard is detected on its own rather than following -Dx11, so on a host
+    # with the X11 and Xfixes headers it links libX11 in; the framework's clipboard is
+    # SDL's.
+    host_opts=(-Dcuda-hwaccel=enabled -Dcuda-interop=enabled
+               -Dx11=disabled -Dx11-clipboard=disabled -Dwayland=disabled -Degl=disabled -Ddrm=disabled
                -Dvaapi=disabled -Dvdpau=disabled -Dpipewire=disabled -Djack=disabled -Dopenal=disabled)
     printf '#!/bin/sh\nexec pkg-config --static "$@"\n' > "$WORK/pkg-config-static"
     chmod +x "$WORK/pkg-config-static"
@@ -160,6 +195,7 @@ collect() {
   cat "$dest/LICENCE-REPORT.txt"
 }
 
+build_nvcodec_headers
 build_ffmpeg
 build_libplacebo
 build_libass

@@ -246,3 +246,38 @@ reports `nvdec`* while the frames reach the filter chain as plain `p010`, so the
 `hwdec-current` rules a copy *in* when it names a `-copy` mode, but cannot rule one *out*.
 The proof is the VO format in `HULTUI_MPV_LOG=v`: `VO: [libmpv] … cuda[p010]` is zero-copy,
 `p010` is not.
+
+### The build change, done (2026-09-27)
+
+`native/mpv/build-libmpv.sh`, Linux branch: nv-codec-headers **n12.1.14.0** installed from the tag
+pinned in `versions.env` (a new `build_nvcodec_headers` step, so no runner package), FFmpeg with
+`--enable-ffnvcodec --enable-nvdec`, mpv with `-Dcuda-hwaccel=enabled -Dcuda-interop=enabled`.
+VAAPI stays off: its interop needs EGL in mpv, FFmpeg links libva outright, and nothing here could
+test it. Built on this Fedora 44 machine, not yet on the Ubuntu runner.
+
+- **Licence report:** `RESULT: LGPL-2.1+`, now printing `HAVE_CUDA_HWACCEL 1` and
+  `HAVE_CUDA_INTEROP 1`. `HultUI.Media.Backends.Tests` 8/8 with `HULTUI_MPV_EXPECT_LGPL=1`.
+- **Dependencies:** `libcuda.so.1` and `libnvcuvid.so.1` appear only as strings to `dlopen`,
+  never as `NEEDED`, so the library still loads with no NVIDIA driver present. The minimum
+  driver for CUDA is 530.41.
+- **And a bug the change did not cause:** the first build had `libX11` and `libXfixes` as
+  `NEEDED`. mpv 0.41's `x11-clipboard` is detected on its own and does not follow `-Dx11`, so it
+  links X11 on any host that has the X11 and Xfixes headers. The Ubuntu runner most likely does
+  not, which is why no shipped build had it; `-Dx11-clipboard=disabled` now says so explicitly.
+- **VO format**, 2001 at 20:00: `cuda[p010]` on the Vulkan renderer **and** on GL.
+- **Ramps:** 10-bit **879 levels / 22 reversals**, VO `cuda[p010]`; 8-bit control 455 / 758, VO
+  `cuda[nv12]`. Identical to the system library.
+- **Range**, peak forced to 1000: shared image max **4.926**, 628k samples above SDR white at the
+  swapchain.
+- **Interop refused** (`HULTUI_VULKAN_INTEROP=0`): VO `p010`, a copy, and it plays.
+- **fds:** 179, flat over 45 s.
+- **CPU**, 4K, Vulkan: `auto` → `nvdec` **192 / 197 ms/s**, `auto-copy` → `nvdec-copy` 381,
+  `no` 946. So the build saves ~185 ms/s.
+
+**Why `auto` costs ~45 ms/s more than with the system library** (193–197 against 143–155, run
+back to back): **audio, not video.** Per-thread CPU puts ~27 ms/s in PulseAudio's `threaded-ml`
+loop and mpv's `ao` thread, where the system library talks to PipeWire natively for ~3. The
+trimmed build has `-Dpipewire=disabled`, so its only audio output is PulseAudio, through
+pipewire-pulse. The decoder, VO and demux threads cost the same in both. Enabling mpv's
+PipeWire output would take most of that back, at the price of `libpipewire-0.3` as a runtime
+dependency. That is a separate decision from zero-copy.

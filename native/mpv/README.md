@@ -11,6 +11,7 @@ in — so an application that ships it takes on LGPL-2.1 obligations and nothing
 | FFmpeg | n8.1.2, no `gpl`/`nonfree`/`version3` | LGPL-2.1+ | demuxers, decoders, protocols |
 | libplacebo | v7.360.1, GL only | LGPL-2.1+ | mpv's GPU video pipeline |
 | libass | 0.17.5 (MSYS2 package on Windows) | ISC | subtitles |
+| nv-codec-headers | n12.1.14.0, Linux only for now | MIT | NVDEC and CUDA interop, loaded at run time |
 | dav1d | host package | BSD-2 | AV1 |
 | freetype, fribidi, harfbuzz, zlib, brotli, libpng | host packages | permissive | text and compression |
 
@@ -33,7 +34,11 @@ the same, but those are GPL. The licence is the whole reason this directory exis
   dependency are linked in. Hardware decoding through D3D11VA/DXVA2 (copy-back).
 - **Linux**: `libmpv.so.2` with FFmpeg, libplacebo and libass inside it; the base
   libraries (freetype, fribidi, harfbuzz, fontconfig, zlib, ALSA, PulseAudio, GL) come
-  from the distribution, as any desktop has them. No VAAPI in this first cut.
+  from the distribution, as any desktop has them. **NVDEC with CUDA interop**, so on
+  NVIDIA `hwdec=auto` decodes with no copy through main memory. CUDA is loaded at run
+  time, not linked: with no NVIDIA driver it finds nothing and mpv moves on. The driver
+  must be 530.41 or newer, the floor set by the header version. No VAAPI yet: its interop
+  needs EGL, and FFmpeg would link libva outright.
 
 ## Building
 
@@ -53,6 +58,9 @@ sudo apt install -y build-essential git meson ninja-build nasm pkg-config python
   libasound2-dev libpulse-dev libgl-dev
 ./build-libmpv.sh
 ```
+
+nv-codec-headers are fetched and installed by the script itself, so neither list above
+has a package for them.
 
 Sources are cloned into `work/src` at the pinned tags, built into `work/prefix`, and
 the result lands in `out/<rid>/` with a `LICENCE-REPORT.txt` that `licence-report.sh`
