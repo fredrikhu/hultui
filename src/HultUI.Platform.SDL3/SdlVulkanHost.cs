@@ -72,6 +72,50 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             _ => null,
         };
 
+    /// <summary>
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c> allocates the swapchain larger than the window and
+    /// presents it un-scaled, through <c>VK_KHR_swapchain_maintenance1</c>. <b>Off by default,
+    /// and the reason is video.</b>
+    ///
+    /// <para>It does what it was built for. Rebuilding three half-float images for every size a
+    /// dragged window passes through is what a resize costs — 122 rebuilds and roughly 5 GB of
+    /// allocation churn across one drag — and over-allocating to a 256-pixel bucket takes that
+    /// to 10 rebuilds and resize CPU from 801 to 466 ms/s. It also removes the resize stretch
+    /// <i>structurally</i> rather than by racing: with ONE_TO_ONE the compositor has nothing to
+    /// scale, and even IMMEDIATE, which stretched 18 frames in 150 with an exact-size swapchain,
+    /// stretched 0 in 150 with this on.</para>
+    ///
+    /// <para><b>And it costs 4K HDR playback about 70% more CPU: 91–95 ms/s against 48–63</b>,
+    /// measured three times against GL as a drift reference. A swapchain whose extent matches
+    /// the window can be handed to the compositor directly; one that does not appears to lose
+    /// that path and be copied instead. Video runs for hours and a drag lasts a second, so the
+    /// default is the one that favours video — the same reasoning that chose MAILBOX over FIFO,
+    /// pointing the other way.</para>
+    ///
+    /// <para>Turning this on only <i>during</i> a drag would get both, and is the obvious next
+    /// step; it needs a settled-size signal the renderer does not have today.</para>
+    /// </summary>
+    private static readonly bool? FixedExtentOverride =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_FIXED_EXTENT") switch
+        {
+            "1" => true,
+            "0" => false,
+            _ => null,
+        };
+
+    /// <summary>Whether the instance got the surface-maintenance pair, so present-scaling
+    /// capabilities can be asked for at all.</summary>
+    private bool _surfaceMaintenanceEnabled;
+
+    /// <summary>Whether the device got <c>swapchain_maintenance1</c> and the surface really
+    /// offers ONE_TO_ONE with MIN gravity. Only then may the swapchain outsize the window.</summary>
+    private bool _fixedExtentAvailable;
+
+    /// <summary>The extent the swapchain images were actually allocated at, which is at least
+    /// the window's and may be larger. The window size is <see cref="_widthPx"/>.</summary>
+    private int _allocWidthPx;
+    private int _allocHeightPx;
+
     /// <summary>Whether this window's display is in HDR mode. Set by the window, which is
     /// the thing that can ask SDL, and refreshed when the window changes display.</summary>
     public bool DisplayIsHdr { get; set; }
@@ -244,6 +288,22 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // display at any point. An extension that goes unused costs nothing.
         if (HasInstanceExtension("VK_EXT_swapchain_colorspace"))
             names = [.. names, "VK_EXT_swapchain_colorspace"];
+
+        // For a swapchain whose extent may differ from the window's. Both are instance
+        // extensions and both are needed: surface_maintenance1 defines the present-scaling
+        // capabilities, and they are only reachable through the chained capability query that
+        // get_surface_capabilities2 provides. Enabled whenever present, like the colour-space
+        // one above — an instance cannot gain an extension later.
+        if (HasInstanceExtension("VK_KHR_get_surface_capabilities2")
+            && (HasInstanceExtension("VK_KHR_surface_maintenance1")
+                || HasInstanceExtension("VK_EXT_surface_maintenance1")))
+        {
+            names = [.. names, "VK_KHR_get_surface_capabilities2"];
+            names = [.. names, HasInstanceExtension("VK_KHR_surface_maintenance1")
+                ? "VK_KHR_surface_maintenance1"
+                : "VK_EXT_surface_maintenance1"];
+            _surfaceMaintenanceEnabled = true;
+        }
         EnabledInstanceExtensions = names;
 
         var appInfo = new VkApplicationInfo { apiVersion = VkVersion.Version_1_2 };
@@ -399,11 +459,28 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (_semaphoreExtensionsEnabled) wanted.AddRange(SemaphoreDeviceExtensions);
         else if (_interopExtensionsEnabled)
             StartupTrace.Mark($"vulkan interop will use glFinish: no {string.Join(", ", noSemaphore)}");
+        // A swapchain that may outsize its window. Needs the instance half (asked for during
+        // Init), the device extension, AND its feature bit turned on explicitly — an extension
+        // whose feature is left false is enabled in name only.
+        string? maintenanceExtension =
+            HasDeviceExtension("VK_KHR_swapchain_maintenance1") ? "VK_KHR_swapchain_maintenance1"
+            : HasDeviceExtension("VK_EXT_swapchain_maintenance1") ? "VK_EXT_swapchain_maintenance1"
+            : null;
+        // Opt-in, not opt-out: see FixedExtentOverride for why the default favours video.
+        bool wantMaintenance = _surfaceMaintenanceEnabled && maintenanceExtension is not null
+            && FixedExtentOverride == true;
+        if (wantMaintenance) wanted.Add(maintenanceExtension!);
         EnabledDeviceExtensions = [.. wanted];
+
+        var maintenanceFeature = new VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR
+        {
+            swapchainMaintenance1 = true,
+        };
 
         using var extensions = new VkStringArray(EnabledDeviceExtensions);
         var deviceInfo = new VkDeviceCreateInfo
         {
+            pNext = wantMaintenance ? &maintenanceFeature : null,
             queueCreateInfoCount = 1,
             pQueueCreateInfos = &queueInfo,
             enabledExtensionCount = extensions.Length,
@@ -417,6 +494,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         VkQueue queue;
         GetDeviceQueue(_device, _queueFamily, 0, &queue);
         _queue = queue;
+
+        // Asked once, after the device: the answer cannot change for this surface, and the
+        // swapchain build needs it every time.
+        _fixedExtentAvailable = wantMaintenance && SurfaceOffersOneToOne();
 
         // Skia reads this to build its caps. Queried after the device exists and kept in
         // unmanaged memory because Skia holds the pointer rather than copying.
@@ -441,6 +522,27 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _acquireFence = fence;
     }
 
+    /// <summary>
+    /// How much bigger than the window the swapchain is allowed to be allocated.
+    ///
+    /// <para>256 is a compromise, and both ends of it were measured. Smaller buckets rebuild more
+    /// often, which is the cost being removed; larger ones waste memory, which is the other thing
+    /// this renderer is already criticised for. At 1560x1140 in half-float, one bucket in each
+    /// dimension is about 12 MB against a 42 MB swapchain, and it turns 122 rebuilds across a
+    /// drag into a handful.</para>
+    /// </summary>
+    private const uint ExtentBucket = 256;
+
+    /// <summary>
+    /// Above this, a reported extent limit is treated as "no limit" rather than as a number.
+    /// This driver answers 0xFFFFFFFE for <c>maxScaledImageExtent</c>, and arithmetic on that is
+    /// how a clamp turns into an overflow.
+    /// </summary>
+    private const uint SaneExtentCeiling = 1u << 20;
+
+    private static uint RoundUpToBucket(uint value) =>
+        value == 0 ? 0 : ((value + ExtentBucket - 1) / ExtentBucket) * ExtentBucket;
+
     private void BuildSwapchain(int widthPx, int heightPx)
     {
         var capabilities = new VkSurfaceCapabilitiesKHR();
@@ -462,6 +564,37 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             return;
         }
 
+        // The window's own size, before any over-allocation. Everything the renderer draws is
+        // sized by this; the images may be bigger.
+        int windowWidth = (int)extent.width;
+        int windowHeight = (int)extent.height;
+
+        // Over-allocate to a bucket, so a drag crosses a boundary occasionally instead of
+        // reallocating three half-float images for every size it passes through. Rounding up
+        // costs at most one bucket in each dimension — about 12 MB at this size — and buys
+        // roughly 5 GB of allocation churn back over a drag.
+        if (_fixedExtentAvailable)
+        {
+            uint bucketW = RoundUpToBucket(extent.width);
+            uint bucketH = RoundUpToBucket(extent.height);
+
+            // Clamped to the SCALED extent range, and deliberately not to
+            // VkSurfaceCapabilitiesKHR.maxImageExtent. On Win32 that equals currentExtent, so
+            // clamping to it pulled the bucket straight back to the window size and the whole
+            // mechanism did nothing while appearing to work. With scaling chained, the spec
+            // bounds imageExtent by min/maxScaledImageExtent instead — which is the point of
+            // asking for the scaling capabilities at all.
+            if (_minScaledWidth > 0) bucketW = Math.Max(bucketW, _minScaledWidth);
+            if (_minScaledHeight > 0) bucketH = Math.Max(bucketH, _minScaledHeight);
+            if (_maxScaledWidth is > 0 and < SaneExtentCeiling) bucketW = Math.Min(bucketW, _maxScaledWidth);
+            if (_maxScaledHeight is > 0 and < SaneExtentCeiling) bucketH = Math.Min(bucketH, _maxScaledHeight);
+
+            // A bucket smaller than the window would present a cropped picture, which is worse
+            // than reallocating. Fall back to the exact size in that case.
+            if (bucketW >= extent.width && bucketH >= extent.height)
+                extent = new VkExtent2D(bucketW, bucketH);
+        }
+
         _format = ChooseFormat(out var colorSpace);
         _colorSpace = colorSpace;
 
@@ -479,8 +612,21 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageCount = capabilities.maxImageCount;
 
         var old = _swapchain;
+
+        // Only chained when the swapchain is actually allowed to differ from the window. Asking
+        // for ONE_TO_ONE says "show the top-left of the image at its true size and leave the
+        // rest"; without it the platform default is STRETCH, which is the resize artefact.
+        var scalingInfo = new VkSwapchainPresentScalingCreateInfoKHR
+        {
+            sType = VkStructureType.SwapchainPresentScalingCreateInfoKHR,
+            scalingBehavior = VkPresentScalingFlagsKHR.OneToOne,
+            presentGravityX = VkPresentGravityFlagsKHR.Min,
+            presentGravityY = VkPresentGravityFlagsKHR.Min,
+        };
+
         var info = new VkSwapchainCreateInfoKHR
         {
+            pNext = _fixedExtentAvailable ? &scalingInfo : null,
             surface = _surface,
             minImageCount = imageCount,
             imageFormat = _format,
@@ -512,9 +658,17 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         CreatePerImageObjects();
 
-        _widthPx = (int)extent.width;
-        _heightPx = (int)extent.height;
-        StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length} {_format}/{_colorSpace}");
+        // Two sizes now, and keeping them apart is the whole discipline here: _widthPx is the
+        // window, which is what gets drawn and presented, and _allocWidthPx is how big the
+        // images really are. They are equal unless the swapchain was over-allocated.
+        _widthPx = windowWidth;
+        _heightPx = windowHeight;
+        _allocWidthPx = (int)extent.width;
+        _allocHeightPx = (int)extent.height;
+        StartupTrace.Mark($"vulkan swapchain {_widthPx}x{_heightPx} x{_images.Length} " +
+            $"{_format}/{_colorSpace}" +
+            (_allocWidthPx != _widthPx || _allocHeightPx != _heightPx
+                ? $" (allocated {_allocWidthPx}x{_allocHeightPx}, one-to-one)" : ""));
         ResetCapture();
     }
 
@@ -589,7 +743,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// so it is IMMEDIATE specifically, not Vulkan, and not frame timing: resize frames
     /// arrive every 26 ms on GL and 30 on Vulkan, near enough the same.</para>
     /// </summary>
-    private VkPresentModeKHR ChoosePresentMode()
+    private VkPresentModeKHR ChoosePresentMode(bool trace = true)
     {
         uint count = 0;
         if (GetSurfacePresentModes(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
@@ -615,18 +769,83 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             for (uint i = 0; i < count; i++) if (modes[i] == wanted) offered = true;
             if (offered)
             {
-                StartupTrace.Mark($"vulkan present mode {wanted} (forced)");
+                if (trace) StartupTrace.Mark($"vulkan present mode {wanted} (forced)");
                 return wanted;
             }
-            StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
+            if (trace) StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
         }
 
         var chosen = mailbox ? VkPresentModeKHR.Mailbox
             : immediate ? VkPresentModeKHR.Immediate
             : VkPresentModeKHR.Fifo;
-        StartupTrace.Mark($"vulkan present mode {chosen}");
+        if (trace) StartupTrace.Mark($"vulkan present mode {chosen}");
         return chosen;
     }
+
+    /// <summary>
+    /// Whether this surface will present a swapchain larger than the window without scaling it.
+    ///
+    /// <para>Asked <b>per present mode</b>, which is the whole reason the chained query exists:
+    /// the scaling a surface supports is a property of how it presents, so the answer for
+    /// MAILBOX says nothing about FIFO. It is asked for the mode actually chosen.</para>
+    ///
+    /// <para>ONE_TO_ONE plus MIN gravity on both axes is the combination that means "show the
+    /// top-left corner of the image at its true size". The default is
+    /// <c>PRESENT_SCALING_STRETCH</c>, which is the resize artefact this is meant to remove,
+    /// named in the specification.</para>
+    /// </summary>
+    private bool SurfaceOffersOneToOne()
+    {
+        if (GetSurfaceCapabilities2 is null) return false;
+
+        var modeInfo = new VkSurfacePresentModeKHR
+        {
+            sType = VkStructureType.SurfacePresentModeKHR,
+            presentMode = ChoosePresentMode(trace: false),
+        };
+        var surfaceInfo = new VkPhysicalDeviceSurfaceInfo2KHR
+        {
+            sType = VkStructureType.PhysicalDeviceSurfaceInfo2KHR,
+            pNext = &modeInfo,
+            surface = _surface,
+        };
+        var scaling = new VkSurfacePresentScalingCapabilitiesKHR
+        {
+            sType = VkStructureType.SurfacePresentScalingCapabilitiesKHR,
+        };
+        var caps = new VkSurfaceCapabilities2KHR
+        {
+            sType = VkStructureType.SurfaceCapabilities2KHR,
+            pNext = &scaling,
+        };
+        if (GetSurfaceCapabilities2(_physicalDevice, &surfaceInfo, &caps) != VkResult.Success)
+            return false;
+
+        bool oneToOne = (scaling.supportedPresentScaling & VkPresentScalingFlagsKHR.OneToOne) != 0;
+        bool gravity = (scaling.supportedPresentGravityX & VkPresentGravityFlagsKHR.Min) != 0
+            && (scaling.supportedPresentGravityY & VkPresentGravityFlagsKHR.Min) != 0;
+
+        // Unsigned, and this driver answers 0xFFFFFFFE — "no limit worth naming" rather than a
+        // real bound, which read as -2 the first time it was printed as a signed int. Anything
+        // past a sane ceiling is treated as unbounded instead of trusted arithmetically.
+        _maxScaledWidth = scaling.maxScaledImageExtent.width;
+        _maxScaledHeight = scaling.maxScaledImageExtent.height;
+        _minScaledWidth = scaling.minScaledImageExtent.width;
+        _minScaledHeight = scaling.minScaledImageExtent.height;
+
+        StartupTrace.Mark($"vulkan present scaling: oneToOne={oneToOne} gravityMin={gravity} " +
+            $"scaledExtent={scaling.minScaledImageExtent.width}x{scaling.minScaledImageExtent.height}" +
+            $"..{_maxScaledWidth}x{_maxScaledHeight}" +
+            (oneToOne && gravity ? " — fixed extent available" : " — rebuilding per resize"));
+        return oneToOne && gravity;
+    }
+
+    /// <summary>The largest extent this surface will present un-scaled. A swapchain may not be
+    /// over-allocated past it, however much slack would be convenient.</summary>
+    private uint _maxScaledWidth;
+    private uint _maxScaledHeight;
+    private uint _minScaledWidth;
+    private uint _minScaledHeight;
 
     /// <summary>
     /// A plain 8-bit BGRA or RGBA format with the sRGB-nonlinear colour space — phase 1 is
@@ -691,8 +910,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (result is VkResult.ErrorOutOfDateKHR)
         {
             // The window changed under us. Rebuilding here rather than reporting an error
-            // keeps the caller's "no frame this time" contract simple.
-            RecreateSwapchain(_widthPx, _heightPx);
+            // keeps the caller's "no frame this time" contract simple. Forced, because the
+            // driver has already said these images are unusable — "the window still fits" is
+            // not an argument against that, and honouring it would hang the window.
+            Rebuild(_widthPx, _heightPx, force: true);
             return null;
         }
         if (result is not (VkResult.Success or VkResult.SuboptimalKHR)) return null;
@@ -777,7 +998,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _haveAcquired = false;
 
         if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
-            RecreateSwapchain(_widthPx, _heightPx);
+            Rebuild(_widthPx, _heightPx, force: true);
     }
 
     /// <summary>Records and submits the transition to PRESENT_SRC_KHR, returning the
@@ -817,9 +1038,44 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         return signal;
     }
 
-    public void RecreateSwapchain(int widthPx, int heightPx)
+    /// <summary>
+    /// Resizes the presented area, rebuilding the swapchain only when it has to.
+    ///
+    /// <para><b>The whole point of the over-allocation is this early return.</b> When the images
+    /// are already big enough for the new window size, nothing is reallocated: the window size is
+    /// simply recorded, and the next frame draws into the same images and presents a smaller
+    /// top-left region of them. A drag that only shrinks the window never rebuilds at all, and
+    /// one that grows rebuilds when it crosses a bucket.</para>
+    ///
+    /// <para>No device wait either, because nothing is being destroyed — that wait was there to
+    /// make it safe to throw the old images away.</para>
+    /// </summary>
+    public void RecreateSwapchain(int widthPx, int heightPx) =>
+        Rebuild(widthPx, heightPx, force: false);
+
+    /// <param name="force">Set when the driver has told us the swapchain is out of date, which
+    /// no amount of "the window still fits" may override — the images have to be replaced
+    /// whatever their size. Without this, an OUT_OF_DATE on the over-allocated path would be
+    /// answered by doing nothing, acquire would keep failing, and the window would never draw
+    /// again.</param>
+    private void Rebuild(int widthPx, int heightPx, bool force)
     {
         if (_disposed) return;
+
+        // _fixedExtentAvailable is not optional here. Without ONE_TO_ONE the presented extent
+        // must equal the window's, so skipping a rebuild because the window merely got SMALLER
+        // would leave an oversized swapchain being scaled — the artefact, reintroduced. Leaving
+        // this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it kept
+        // the skipping and lost only the scaling that justifies it.
+        if (!force && _fixedExtentAvailable && !_swapchain.IsNull && widthPx > 0 && heightPx > 0
+            && widthPx <= _allocWidthPx && heightPx <= _allocHeightPx
+            && ChooseFormat(out _, trace: false) == _format)
+        {
+            _widthPx = widthPx;
+            _heightPx = heightPx;
+            return;
+        }
+
         Check(DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);

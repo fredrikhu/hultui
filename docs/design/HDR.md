@@ -768,6 +768,84 @@ real work — instance and device extensions, a surface capability query, create
 Skia wrapping an image larger than the window — and it is unproven here beyond the extension being
 advertised.
 
+### swapchain_maintenance1: built, works, and off by default because of video
+
+The route out of the resize cost was to stop reallocating: allocate the swapchain larger than the
+window and present it un-scaled, through `VK_KHR_swapchain_maintenance1` and
+`VkSwapchainPresentScalingCreateInfoKHR` with `PRESENT_SCALING_ONE_TO_ONE` and
+`PRESENT_GRAVITY_MIN`. It is implemented, behind `HULTUI_VULKAN_FIXED_EXTENT=1`.
+
+**It does what it was built to do.** Over-allocating to a 256-pixel bucket, A/B on one binary,
+120 resizes, three reps:
+
+| | resize CPU | swapchain builds |
+|---|---|---|
+| GL | 264 ms/s | 0 |
+| Vulkan, rebuild per resize | 801 ms/s | 122 |
+| **Vulkan, fixed extent** | **466 ms/s** | **10** |
+
+Twelve times fewer rebuilds, 42% less CPU through a drag, and the gap to GL down from 3.5x to 2x.
+Validation layers were clean, and the over-allocation cost nothing measurable in working set,
+private bytes or handles (about 13 MB more device memory by arithmetic, which those counters do
+not see).
+
+**It should also remove the stretch structurally rather than by racing** — with `ONE_TO_ONE` the
+compositor has nothing to scale — and one run measured exactly that:
+
+| | stretched frames |
+|---|---|
+| IMMEDIATE, exact-size swapchain (**control**) | 18 of 150 |
+| IMMEDIATE + one-to-one | **0 of 150** |
+| MAILBOX + one-to-one | **0 of 150** |
+
+**That is one run, and it is worth being precise about how much it proves.** A later repeat had the
+control itself stretch 0 of 80, which makes that repeat evidence of nothing. The stretch rate
+varies wildly between runs on the same build — 25 of 174, 18 of 150, 4 of 120, 0 of 150, 0 of 80 —
+so a clean arm only counts when the control beside it fired, and here it did once. The reasoning
+says the fix is structural; the measurement supports it once. It matters less than it sounds,
+because the stretch is already fixed on the shipped default by the live-resize throttle and MAILBOX,
+and this is the opt-in path.
+
+**And it costs 4K HDR playback about 70% more CPU.** Three reps, GL alongside as the drift
+reference because absolute numbers on this machine move by a third between sessions:
+
+| | video CPU |
+|---|---|
+| GL | 52–65 ms/s |
+| Vulkan, rebuild per resize | 48–63 ms/s |
+| **Vulkan, fixed extent** | **91–95 ms/s** |
+
+Tight across reps, so it is real. A swapchain whose extent matches the window can be handed to the
+compositor directly; one that does not appears to lose that path and be copied instead.
+
+**So it is off by default**, and the reasoning is the one already used to choose MAILBOX over FIFO,
+pointing the other way this time: **video runs for hours and a drag lasts a second.** Paying 40 ms/s
+for the whole of a film to save 335 ms/s during a drag is the wrong trade for a renderer that
+exists to play video. The stretch is already fixed without it, by the live-resize throttle and
+MAILBOX.
+
+**The refinement that would get both** is to turn the fixed extent on only *while* a drag is in
+progress and collapse back to an exact-size swapchain when the size settles. It needs a
+settled-size signal the renderer does not have — the platform layer knows when the modal resize
+loop ends, and nothing currently tells the host. That is the next step if resize CPU is worth
+more work.
+
+**Two mistakes on the way, both caught by disciplined checks rather than by reading the code.**
+
+- **The over-allocation silently did nothing at first.** The bucket was clamped to
+  `VkSurfaceCapabilitiesKHR.maxImageExtent`, which on Win32 equals `currentExtent` — so 768x512
+  came straight back to 750x450 and the trace showed a swapchain the same size as the window. With
+  scaling chained the spec bounds the extent by `min/maxScaledImageExtent` instead, which is the
+  whole reason those capabilities are queried. Caught only because the trace prints the allocated
+  extent next to the window's.
+- **`FIXED_EXTENT=0` was not an honest "before".** The rebuild-skipping early return was written
+  without checking whether the fixed extent was actually available, so with the feature *off* a
+  shrinking window still skipped its rebuild — keeping the skip and losing the `ONE_TO_ONE` that
+  makes it correct. The positive control caught it: IMMEDIATE-with-rebuilds stretched **0 of 150**
+  when it should have stretched, which meant the harness was measuring nothing and every clean row
+  beside it was worthless. After the fix the control stretched 18 of 150 and the comparison
+  became real. **A control that fails is the most useful result a run can give.**
+
 ### And the coverage that is still missing
 
 - **Mesa, and a hybrid GPU.** Neither machine has either. Every Vulkan number in this document is
@@ -787,9 +865,9 @@ waits on three costs that apps with no video in them would pay for nothing:
 
 1. **Start-up, +127 ms**, all of it the F16 target's first frame, and not reachable through
    SkiaSharp's `GRContextOptions`.
-2. **Resize CPU, 768–819 against GL's 134–437**, all of it reallocating F16 swapchain images per
-   size change. `VK_EXT_swapchain_maintenance1` with `PRESENT_SCALING_ONE_TO_ONE` is the route and
-   is advertised on this driver.
+2. **Resize CPU, 801 against GL's 264**, all of it reallocating F16 swapchain images per size
+   change. `swapchain_maintenance1` with `PRESENT_SCALING_ONE_TO_ONE` halves it and is built, but
+   costs video 70% more CPU, so it is opt-in — see above. Making it drag-only would get both.
 3. **The scRGB offscreen**, which is most of the memory and half the present cost, and which the
    framework could stop needing. Plus the synchronisation-validation run, Mesa and a hybrid GPU.
 

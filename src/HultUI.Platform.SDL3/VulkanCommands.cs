@@ -29,6 +29,16 @@ internal static unsafe class VulkanCommands
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void> GetPhysicalDeviceFeatures2;
     public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void> GetPhysicalDeviceProperties2;
 
+    /// <summary>
+    /// The chained form of the surface capability query, from
+    /// <c>VK_KHR_get_surface_capabilities2</c>. Needed because the present-scaling capabilities
+    /// of <c>VK_KHR_surface_maintenance1</c> arrive only in its <c>pNext</c>, and they are asked
+    /// <i>per present mode</i> — which the one-argument query has nowhere to say.
+    ///
+    /// <para>Null when the instance lacks the extension; every caller checks.</para>
+    /// </summary>
+    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*, VkResult> GetSurfaceCapabilities2;
+
     // ── device ───────────────────────────────────────────────────────────
     public static delegate* unmanaged<VkDevice, uint, uint, VkQueue*, void> GetDeviceQueue;
     public static delegate* unmanaged<VkDevice, VkSwapchainCreateInfoKHR*, nint, VkSwapchainKHR*, VkResult> CreateSwapchain;
@@ -97,6 +107,8 @@ internal static unsafe class VulkanCommands
         GetMemoryProperties = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void>)I("vkGetPhysicalDeviceMemoryProperties");
         GetPhysicalDeviceFeatures2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void>)I("vkGetPhysicalDeviceFeatures2");
         GetPhysicalDeviceProperties2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void>)I("vkGetPhysicalDeviceProperties2");
+        // Stays null unless VK_KHR_get_surface_capabilities2 was enabled on the instance.
+        GetSurfaceCapabilities2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*, VkResult>)I("vkGetPhysicalDeviceSurfaceCapabilities2KHR");
         _getDeviceProcAddr = (delegate* unmanaged<VkDevice, byte*, nint>)I("vkGetDeviceProcAddr");
     }
 
