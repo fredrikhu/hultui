@@ -33,7 +33,7 @@ the same, but those are GPL. The licence is the whole reason this directory exis
 - **Windows**: one self-contained `libmpv-2.dll`; the static runtime and every
   dependency are linked in. Hardware decoding through D3D11VA/DXVA2 (copy-back).
 - **Linux**: `libmpv.so.2` with FFmpeg, libplacebo and libass inside it; the base
-  libraries (freetype, fribidi, harfbuzz, fontconfig, zlib, ALSA, PulseAudio, GL) come
+  libraries (freetype, fribidi, harfbuzz, fontconfig, zlib, PipeWire, ALSA, PulseAudio, GL) come
   from the distribution, as any desktop has them. **NVDEC with CUDA interop**, so on
   NVIDIA `hwdec=auto` decodes with no copy through main memory. CUDA is loaded at run
   time, not linked: with no NVIDIA driver it finds nothing and mpv moves on. The driver
@@ -55,7 +55,7 @@ Ubuntu 24.04 (the Linux runner):
 ```bash
 sudo apt install -y build-essential git meson ninja-build nasm pkg-config python3 python3-jinja2 autoconf automake libtool \
   libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev libdav1d-dev zlib1g-dev \
-  libasound2-dev libpulse-dev libgl-dev
+  libasound2-dev libpulse-dev libpipewire-0.3-dev libgl-dev
 ./build-libmpv.sh
 ```
 

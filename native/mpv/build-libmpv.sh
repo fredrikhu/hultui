@@ -154,9 +154,13 @@ build_mpv() {
     # x11-clipboard is detected on its own rather than following -Dx11, so on a host
     # with the X11 and Xfixes headers it links libX11 in; the framework's clipboard is
     # SDL's.
+    # PipeWire is the audio output, explicitly: without it mpv falls back to PulseAudio
+    # through pipewire-pulse, which measured ~25 ms of CPU a second more at 4K than the
+    # native client. It makes libpipewire-0.3 a runtime dependency; PulseAudio and ALSA
+    # stay as the fallbacks when no PipeWire daemon is running.
     host_opts=(-Dcuda-hwaccel=enabled -Dcuda-interop=enabled
                -Dx11=disabled -Dx11-clipboard=disabled -Dwayland=disabled -Degl=disabled -Ddrm=disabled
-               -Dvaapi=disabled -Dvdpau=disabled -Dpipewire=disabled -Djack=disabled -Dopenal=disabled)
+               -Dvaapi=disabled -Dvdpau=disabled -Dpipewire=enabled -Djack=disabled -Dopenal=disabled)
     printf '#!/bin/sh\nexec pkg-config --static "$@"\n' > "$WORK/pkg-config-static"
     chmod +x "$WORK/pkg-config-static"
     export PKG_CONFIG="$WORK/pkg-config-static"

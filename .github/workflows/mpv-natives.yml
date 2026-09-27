@@ -79,7 +79,7 @@ jobs:
         run: |
           pkgs="build-essential git meson ninja-build nasm pkg-config python3 python3-jinja2 autoconf automake libtool \
                 libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev libdav1d-dev zlib1g-dev \
-                libasound2-dev libpulse-dev libgl-dev"
+                libasound2-dev libpulse-dev libpipewire-0.3-dev libgl-dev"
           if sudo -n true 2>/dev/null; then
             sudo apt-get update -qq && sudo apt-get install -y -qq $pkgs
           else

@@ -281,3 +281,9 @@ trimmed build has `-Dpipewire=disabled`, so its only audio output is PulseAudio,
 pipewire-pulse. The decoder, VO and demux threads cost the same in both. Enabling mpv's
 PipeWire output would take most of that back, at the price of `libpipewire-0.3` as a runtime
 dependency. That is a separate decision from zero-copy.
+
+**PipeWire output, enabled** (`-Dpipewire=enabled`): mpv opens `pipewire` (5.1, 48 kHz), and the
+gap closes — **142–149 ms/s against the system library's 149–152**, run alternately.
+`libpipewire-0.3.so.0` (MIT) is now `NEEDED`, so the library no longer loads on a system without
+it; accepted, since every current desktop distribution ships it. PulseAudio and ALSA remain the
+fallbacks when no PipeWire daemon is running.
