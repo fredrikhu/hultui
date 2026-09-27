@@ -423,3 +423,42 @@ in a hidden GL context beside a Vulkan device.
 
 Cost of learning this: two flags read and four runs, against rebuilding FFmpeg
 and mpv first and finding out afterwards.
+
+
+═══════════════════════════════════════════════════════
+Why Vulkan costs more than GL on video, 2026-09-27
+and why --syncbench said it did not
+═══════════════════════════════════════════════════════
+
+4K HEVC HDR, zero-copy decode on both, CPU per second:
+
+  GL   (8-bit sRGB, no HDR video)                 56
+  Vulkan, 8-bit sRGB swapchain (F16 off)         176
+  Vulkan, scRGB + offscreen, SDR video           220
+  Vulkan, everything on                          180
+
+The ~120 ms/s appears with the Vulkan renderer at its SIMPLEST. So it is not the
+half-float swapchain and not the offscreen pass, which is where it was first
+guessed to be. (220 against 180 is run-to-run noise; the film streams over SMB.)
+
+What it is, timed inside FinishExternalFrame under a real decode:
+
+  per frame over 120: glFinish 0,740 ms, barrier 0,235 ms  ->  23 ms/s at 24 fps
+  per frame over 120: glFinish 1,167 ms, barrier 0,282 ms  ->  35 ms/s
+  per frame over 120: glFinish 4,174 ms, barrier 0,624 ms  -> 115 ms/s
+  per frame over 120: glFinish 5,330 ms, barrier 0,640 ms  -> 143 ms/s
+
+That is the whole gap.
+
+--syncbench had measured this at 0,27 ms a frame and it was written off on that
+number. The benchmark was not wrong about what it measured; it measured the wrong
+thing. It timed a glClear on an otherwise idle GPU, so glFinish had nothing to
+wait for — which is also why it came out FLAT between 1080p and 4K. A cost that
+does not scale with the thing it should scale with is a warning about the
+benchmark, and it was read as a reassuring result instead.
+
+Fixable, and not blocked by SkiaSharp. glFinish is a CPU block; GL_EXT_semaphore
+is the sharp version — export a VkSemaphore, import it into the GL context,
+signal it with glSignalSemaphoreEXT after mpv draws, and have the barrier submit
+wait on it. Skia is not part of this path at all, so the missing GRFlushInfo that
+blocks the swapchain's acquire does not apply. Worth about 100 ms/s at 4K.

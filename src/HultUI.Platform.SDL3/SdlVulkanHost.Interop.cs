@@ -376,7 +376,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         if (!_interopDirty || _interopImage.IsNull) return;
         _interopDirty = false;
 
+        long beforeFinish = FinishTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         _gl!.Finish();
+        long afterFinish = FinishTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         ProbeRangeOnce();
 
         var cmd = BeginOneShot();
@@ -398,6 +400,38 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         CmdPipelineBarrier(cmd, VkPipelineStageFlags.TopOfPipe, VkPipelineStageFlags.FragmentShader,
             VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
         EndOneShot(cmd);
+        if (FinishTrace) RecordFinish(beforeFinish, afterFinish);
+    }
+
+    /// <summary>
+    /// <c>HULTUI_VULKAN_FINISH_TRACE=1</c> splits what ordering a real video frame costs into
+    /// the <c>glFinish</c> and the barrier submit that follows it.
+    ///
+    /// <para>The spike measured this at 0.27 ms a frame and that number was taken as settled.
+    /// It was measured against a <c>glClear</c> on an otherwise idle GPU, which is not what a
+    /// 4K decode looks like: <c>glFinish</c> waits for whatever GL has outstanding, and on
+    /// this driver waiting is not free of CPU.</para>
+    /// </summary>
+    private static readonly bool FinishTrace =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_FINISH_TRACE") == "1";
+
+    private long _finishTicks, _barrierTicks;
+    private int _finishFrames;
+
+    private void RecordFinish(long before, long afterFinish)
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        _finishTicks += afterFinish - before;
+        _barrierTicks += now - afterFinish;
+        if (++_finishFrames < 120) return;
+
+        double toMs = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        double finish = _finishTicks * toMs, barrier = _barrierTicks * toMs;
+        Console.Error.WriteLine($"[vulkan] per frame over {_finishFrames}: glFinish " +
+            $"{finish / _finishFrames:0.000} ms, barrier submit {barrier / _finishFrames:0.000} ms " +
+            $"({(finish + barrier) / _finishFrames * 24:0} ms of CPU a second at 24 fps)");
+        _finishTicks = _barrierTicks = 0;
+        _finishFrames = 0;
     }
 
     private uint FindMemoryType(uint typeBits, VkMemoryPropertyFlags wanted)

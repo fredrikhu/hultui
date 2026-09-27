@@ -561,6 +561,13 @@ reads as evidence and is not.
   depending on which output it opened on; the default is images + 1. A missing capture can mean
   an idle window rather than a renderer that drew nothing.
 
+- **A benchmark can measure the wrong workload and still be internally perfect.** The
+  GL-to-Vulkan sync was timed at 0.27 ms a frame, *flat* between 1080p and 4K, and written off.
+  It was timing a `glClear` on an idle GPU — nothing for `glFinish` to wait for, which is
+  precisely why the resolution made no difference. Under a real 4K decode the same call is
+  0.74 to 5.33 ms and the flatness is gone. **When a cost does not scale with the thing it
+  should scale with, suspect the benchmark before believing the result.**
+
 **So: build the positive control first.** `--churn` deliberately drops 200 handles and refuses to
 report a verdict unless that raises the count. Two earlier versions of that test reported a clean
 pass while being incapable of failing.
@@ -676,9 +683,37 @@ That is consistent with the two things this backend does that GL does not — an
 command-buffer submit, and a render target rebuilt every frame because Skia cannot be told an
 image's layout. Both are the same binding limitation, and neither is a stall.
 
-**So the synchronisation work is not the blocker it was written up as, and is not being done.**
-What it was blocking — making Vulkan the default renderer — is now a question about Mesa, a
-hybrid GPU and a 0.2 ms frame cost, not about a stall.
+**So the *swapchain* synchronisation is not the blocker it was written up as.** The acquire
+fence is six microseconds and there is nothing to hand Skia a semaphore.
+
+**But that conclusion was then over-extended, and the correction is worth more than the
+original.** A separate synchronisation — the one between the hidden GL context and the Vulkan
+queue over the shared image — was measured by the same spike at 0.27 ms a frame, flat across
+1080p and 4K, and written off on that basis. **The flatness should have been the warning.** It
+was measured against a `glClear` on an otherwise idle GPU: there was nothing for `glFinish` to
+wait for, which is exactly why resolution made no difference.
+
+Measured again against a real 4K decode, per frame, as the film gets busier:
+
+| | `glFinish` | barrier submit | at 24 fps |
+|---|---|---|---|
+| quiet | 0.74 ms | 0.24 ms | 23 ms/s |
+| | 1.17 ms | 0.28 ms | 35 ms/s |
+| busy | 4.17 ms | 0.62 ms | 115 ms/s |
+| busiest | **5.33 ms** | 0.64 ms | **143 ms/s** |
+
+That is the whole of the otherwise unexplained gap between the renderers. Decomposed on 4K
+video, CPU per second: GL 56, Vulkan with an 8-bit sRGB swapchain **176**, Vulkan with scRGB and
+the offscreen 220, Vulkan with everything on 180. The ~120 ms/s appears with the Vulkan renderer
+at its *simplest* — so it is not the half-float swapchain and not the offscreen pass, which is
+where this was first guessed to be.
+
+**And this one is fixable, unlike the swapchain's.** `glFinish` is a blunt CPU block; the sharp
+version is `GL_EXT_semaphore` — export a `VkSemaphore`, import it into the GL context, have
+`glSignalSemaphoreEXT` signal it after mpv draws, and have the barrier submit wait on it instead
+of the CPU. **Skia is not involved at all**, so the `GRFlushInfo` limitation that blocks the
+swapchain side does not apply here. That is the next real piece of work on this renderer, and it
+is worth about 100 ms of CPU a second at 4K.
 
 ## Zero-copy decode, afterwards
 
