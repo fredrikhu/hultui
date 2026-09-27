@@ -11,7 +11,7 @@ in — so an application that ships it takes on LGPL-2.1 obligations and nothing
 | FFmpeg | n8.1.2, no `gpl`/`nonfree`/`version3` | LGPL-2.1+ | demuxers, decoders, protocols |
 | libplacebo | v7.360.1, GL only | LGPL-2.1+ | mpv's GPU video pipeline |
 | libass | 0.17.5 (MSYS2 package on Windows) | ISC | subtitles |
-| nv-codec-headers | n12.1.14.0, Linux only for now | MIT | NVDEC and CUDA interop, loaded at run time |
+| nv-codec-headers | n12.1.14.0 | MIT | NVDEC and CUDA interop, loaded at run time; both hosts |
 | dav1d | host package | BSD-2 | AV1 |
 | freetype, fribidi, harfbuzz, zlib, brotli, libpng | host packages | permissive | text and compression |
 
@@ -31,7 +31,10 @@ the same, but those are GPL. The licence is the whole reason this directory exis
 - **Rubberband, zimg, lcms2, uchardet, VapourSynth**: off. Pitch-corrected speed uses
   mpv's own scaletempo2, which stays.
 - **Windows**: one self-contained `libmpv-2.dll`; the static runtime and every
-  dependency are linked in. Hardware decoding through D3D11VA/DXVA2 (copy-back).
+  dependency are linked in. Hardware decoding through NVDEC with CUDA interop, which
+  is zero-copy and carries ten bits, falling back to D3D11VA/DXVA2 copy-back on
+  hardware without NVDEC. CUDA is loaded at run time, so the DLL still loads where
+  there is no NVIDIA driver — `objdump -p` must never list nvcuda.dll.
 - **Linux**: `libmpv.so.2` with FFmpeg, libplacebo and libass inside it; the base
   libraries (freetype, fribidi, harfbuzz, fontconfig, zlib, PipeWire, ALSA, PulseAudio, GL) come
   from the distribution, as any desktop has them. **NVDEC with CUDA interop**, so on

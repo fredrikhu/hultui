@@ -16,7 +16,7 @@ echo "mpv        $MPV_TAG"
 echo "FFmpeg     $FFMPEG_TAG"
 echo "libplacebo $LIBPLACEBO_TAG"
 echo "libass     ${LIBASS_TAG} (or the host package on Windows)"
-echo "nv-codec-headers ${NVCODEC_TAG} (MIT; Linux only for now)"
+echo "nv-codec-headers ${NVCODEC_TAG} (MIT)"
 echo
 
 echo "mpv build configuration"

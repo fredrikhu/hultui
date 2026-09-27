@@ -41,7 +41,7 @@ fetch() {  # fetch <dir> <git url> <tag>
   fi
 }
 
-# ──── nv-codec-headers (Linux only for now): NVDEC and CUDA interop ────
+# ──── nv-codec-headers: NVDEC and CUDA interop, on both hosts ────
 # Headers and a .pc file, nothing compiled. FFmpeg and mpv load libcuda and libnvcuvid
 # at run time through them rather than linking, so the library still loads on a
 # machine with no NVIDIA driver, and simply finds no CUDA there. Built from the pinned

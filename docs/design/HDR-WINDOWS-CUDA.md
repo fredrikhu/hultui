@@ -234,3 +234,56 @@ small UI operations, and it is not the acquire fence, which is 6 µs. At 24 fps 
 a frame, which points at the F16 swapchain's bandwidth and the offscreen pass rather than at
 anything per-submit. Worth its own measurement before Vulkan is ever made the default; recorded
 here because this is where it showed up.
+
+### 2 and 3. The build change, made and verified
+
+`build-libmpv.sh`: the `[ "$HOST" = linux ] || return 0` guard dropped from
+`build_nvcodec_headers`, `--enable-ffnvcodec --enable-nvdec` on the Windows FFmpeg flags, and
+`-Dcuda-hwaccel=enabled -Dcuda-interop=enabled` on the Windows mpv options. The DirectX interops
+stay disabled. No pacman package and no runner change were needed — the headers' Makefile
+handled MSYS2 on its own, exactly as the brief said.
+
+**Static checks, all as required:**
+
+```
+mpv features : cuda-hwaccel cuda-interop ffnvcodec gl
+licence      : nv-codec-headers n12.1.14.0 (MIT)
+               HAVE_CUDA_HWACCEL 1 / HAVE_CUDA_INTEROP 1
+               --enable-dxva2 --enable-ffnvcodec --enable-nvdec
+               RESULT: LGPL-2.1+ throughout
+objdump -p   : ADVAPI32, AVRT, CRYPT32, DWrite, GDI32, … — OS DLLs only,
+               no nvcuda.dll and no nvcuvid.dll
+```
+
+**Runtime, against our own DLL:**
+
+| | Vulkan | GL |
+|---|---|---|
+| VO format | `cuda[p010]` | `cuda[p010]` |
+| CPU, `auto` | **156 ms/s** | **58 ms/s** |
+| CPU, `auto-copy` | 323 ms/s | 382 ms/s |
+
+The zero-copy figures agree closely with the community build's 198 and 53; the copy figures vary
+more between runs, which is the film streaming over SMB, so read the zero-copy column and the
+direction rather than the exact copy numbers.
+
+- **Ten bits:** `ramp10-hevc.mkv` **879 levels, 22 reversals**; `ramp8-hevc.mkv` **455, 758**.
+  The Linux numbers exactly, on both builds.
+- **HDR range unchanged:** shared image max **2.240** at the display's own 455-nit peak, the same
+  as the copy path, so zero-copy costs nothing in range.
+- **Fallback:** `HULTUI_VULKAN_INTEROP=0` still plays, at 1205 ms/s — mpv's software renderer at
+  4K, expensive and working.
+- **Tests:** backend tests 8/8 with `HULTUI_MPV_EXPECT_LGPL=1`; full solution suite green apart
+  from the known `Junction.Tests` load flake.
+
+**Not verified, and it is a reason rather than a run:** that the DLL still loads on a machine
+with no NVIDIA driver. There is none here. The `objdump` import list above is the evidence — CUDA
+is reached through ffnvcodec's runtime loader and never appears as an import — but nobody has
+watched it start on AMD or Intel hardware. Same for a hybrid laptop where `cuGLGetDevices` should
+find no device and mpv should fall back.
+
+**One trap for whoever runs this script next on Windows:** it requires a **MINGW64** shell, not
+the MSYS one. `C:\msys64\usr\bin\bash.exe` without `MSYSTEM=MINGW64` fails the `uname -s` check
+on line 24 and exits immediately — and launched through `Start-Process` with redirected output
+that looks exactly like a long quiet build. Twenty minutes went into a build that had never
+started; what gave it away was file timestamps in the work tree, not any error.
