@@ -287,6 +287,92 @@ should make no visible difference at all, which is the same prediction from the 
   target-prim=bt.709 target-peak=1000` reports what mpv writes into a shared image with no
   renderer involved, which separates a libplacebo problem from a compositing one in one run.
 
+## Validation, for the semaphore change — the one thing Windows cannot check
+
+**This is the item to run first if you only run one.** Windows sends validation output to
+`OutputDebugString` and the app installs no debug messenger, so the change described below was
+made and measured entirely without the layers ever seeing it. On Linux they print to stdout.
+
+### What changed, and why it is exactly the layers' business
+
+GL and Vulkan used to be ordered over the shared image by `glFinish` — blunt, correct, and
+0.74 to 5.33 ms of blocked CPU a frame on a 4K decode, which turned out to be the whole
+unexplained gap between the renderers. It is now `GL_EXT_semaphore` with
+`VK_KHR_external_semaphore`. Three things changed that only validation can judge:
+
+1. **The layout now arrives through the semaphore.** `glSignalSemaphoreEXT` hands the texture
+   over in `GL_LAYOUT_SHADER_READ_ONLY_EXT`, so the hand-back barrier declares
+   `oldLayout = SHADER_READ_ONLY_OPTIMAL`. It used to declare `GENERAL`, which was the
+   convention for "the other API left it somewhere, assume the loosest thing". Both cannot be
+   right, and a wrong `oldLayout` corrupts contents rather than failing.
+2. **A submit now waits on an imported semaphore**, where before nothing did.
+3. **Command buffers are reused from a ring of three with a fence each**, instead of being
+   freed after a `vkQueueWaitIdle`. That wait is gone, which is where the last 22 ms/s of the
+   saving came from — and freeing or re-recording a buffer that is still executing is undefined
+   rather than diagnosed.
+
+**And the assumption underneath all of it:** with no queue wait, Skia's read of the image later
+in the frame is ordered after our barrier only by *submission order on the one queue*. The
+present transition already relies on that, and it has never been checked by anything.
+
+### Core validation
+
+```bash
+VK_LOADER_LAYERS_ENABLE='*validation*' \
+HULTUI_RENDERER=vulkan HULTUI_STARTUP=1 \
+  dotnet run -c Release --project samples/HultUI.Samples.VideoPlayer -- /path/to/film.mkv --start=1200
+```
+
+Let it run a few minutes, drag the window between outputs, and resize it — the ring has three
+slots and wraps constantly, so time is what exercises it. Then repeat with
+`HULTUI_VULKAN_SEMAPHORE=0`, which restores `glFinish` and the queue wait: **if the layers are
+quiet on the old path and loud on the new one, the messages are the change and not the
+baseline.** That comparison is the point; a single noisy run proves much less.
+
+**What to expect, and what to ignore.** The earlier run on these machines was clean from our code
+across 159 swapchain recreations, with the only errors coming from ffmpeg's Vulkan Video decoder
+(`VUID-VkImageCreateInfo-pNext-06811` and two `vkCmdDecodeVideoKHR` ones). **With NVDEC now
+enabled there will be more decoder and CUDA noise than before** — filter on our own call sites
+rather than on message count.
+
+**What would be a real finding**, roughly in order of likelihood:
+
+- Anything about `oldLayout` not matching the image's current layout on the hand-back barrier —
+  that is item 1 above, and the most likely of the three to be wrong.
+- `vkBeginCommandBuffer` on a buffer still in the pending state, or a fence waited on wrongly —
+  item 3, the ring.
+- A semaphore signalled twice without an intervening wait, or waited on when not signalled —
+  item 2. Worth noting that GL signals it, so the layers only see half the story.
+- Anything about the `VK_QUEUE_FAMILY_EXTERNAL` ownership transfer. That was convention rather
+  than certainty before the change and it still is.
+
+### Synchronisation validation, which is the half that matters
+
+Core validation checks API usage; it will **not** tell you whether submission order actually
+orders Skia's read after our barrier. Synchronisation validation will, and it is a separate
+feature to turn on:
+
+```bash
+VK_LOADER_LAYERS_ENABLE='*validation*' \
+VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT \
+HULTUI_RENDERER=vulkan \
+  dotnet run -c Release --project samples/HultUI.Samples.VideoPlayer -- /path/to/film.mkv --start=1200
+```
+
+Look for `SYNC-HAZARD-READ-AFTER-WRITE` and `SYNC-HAZARD-WRITE-AFTER-READ` naming the shared
+image. **A hazard here would mean the design's central assumption is wrong**, not that a detail
+needs adjusting — and it would apply equally to the present transition, which has relied on the
+same reasoning since phase 1 and would then also need a semaphore.
+
+Run this one on the semaphore path and with `HULTUI_VULKAN_SEMAPHORE=0`, and on both display
+servers. It is slow; a minute of playback is enough.
+
+### If it is clean
+
+Say so explicitly, and say which of the two layers' features were enabled — "validation was
+clean" without naming synchronisation validation does not answer the question this section exists
+for. That would leave Vulkan-by-default gated only on Mesa and a hybrid GPU.
+
 ## Separately: zero-copy decode
 
 Not part of verifying the fixes above, and a bigger piece of work — it needs a native rebuild of
@@ -301,7 +387,9 @@ pasting. Say which monitor and which display server each observation came from �
 ambiguity was a by-eye result whose monitor had been swapped by KDE without anyone noticing.
 
 For the by-eye checks in fixes 1 and 3 and in 5b, **say plainly that a person looked**, and say
-who looked at what. A capture that agrees is not evidence for either of them, and reporting one as though it
+who looked at what. For the validation section, **name which layer features were enabled** —
+core and synchronisation validation answer different questions and only the second tests the
+assumption the interop rests on. A capture that agrees is not evidence for either of them, and reporting one as though it
 were is the specific mistake this whole exercise has already made once.
 
 ## Results
