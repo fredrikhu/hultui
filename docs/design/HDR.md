@@ -756,7 +756,9 @@ is, and nothing here needs it. More to the point, `cuda-interop` requires only
 interop works under WGL. So **NVIDIA on Windows can probably have ten-bit zero-copy** by the
 same mechanism just proven on Linux: add nv-codec-headers to the FFmpeg build (LGPL-clean;
 only `cuda-nvcc` and `libnpp` are nonfree) and let mpv find ffnvcodec. Unverified — it needs
-that build and a run. AMD and Intel on Windows remain as described: 8-bit via `dxva2gldx` or
+that build and a run. **What to run there:** `docs/design/HDR-WINDOWS-CUDA.md`, which starts
+with a community libmpv that already has the interop, so the question is answered before
+anything is built. AMD and Intel on Windows remain as described: 8-bit via `dxva2gldx` or
 ANGLE, neither usable.
 
 ## What this costs
