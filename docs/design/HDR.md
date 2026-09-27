@@ -10,6 +10,11 @@ drawn, now fixed, and the IMMEDIATE present mode, now MAILBOX by default. The me
 present cost turned out to be the price of 16-bit colour rather than of Vulkan.
 **Date:** 2026-09-27.
 
+**Outstanding Linux work is [HDR-LINUX-VERIFY-2.md](HDR-LINUX-VERIFY-2.md)**, which covers the
+window-creation reorder (a Wayland risk introduced on Windows), whether the resize stretch exists on
+KWin at all, and whether Mesa offers the present scaling this relies on. The synchronisation
+validation named there has still never run anywhere.
+
 **Before changing anything here, read [Traps](#traps).** It is not a list of curiosities: most
 of those cost hours, several were shipped and found by the other platform, and four of them were
 nearly recorded as successes by measurements that could not have failed. The Linux runs are in

@@ -1,5 +1,12 @@
 # Verifying the four Linux fixes
 
+> **Every check in this file has been answered — the Results sections below are those answers.**
+> Work that landed afterwards is in [HDR-LINUX-VERIFY-2.md](HDR-LINUX-VERIFY-2.md), which is the
+> file to read for anything still outstanding. The one exception is
+> [Validation, for the semaphore change](#validation-for-the-semaphore-change--the-one-thing-windows-cannot-check)
+> below: it has still never been run, it still describes the current code, and round 2 points back
+> at it as the first thing to do.
+
 Four findings from `docs/design/HDR-LINUX-BRIEF.md` were fixed on the Windows machine in commit
 `00e9a24`. **Three of them are on code paths that Windows cannot execute at all** — two Wayland,
 one X11 — so nothing about them has been run. This is how to find out whether they work.
