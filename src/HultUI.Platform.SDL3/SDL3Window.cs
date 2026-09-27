@@ -307,6 +307,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         _title = title;
 
+        // Settle the real pixel size BEFORE the renderer exists, not after.
+        //
+        // The requested size is in density-independent units and SDL created the window in
+        // window coordinates, so on a scaled display the pixel size is about to change: a
+        // 500x300 request is 750x450 at 150%. This used to be corrected further down, after
+        // the renderer had been built, which cost the Vulkan path an entire wasted swapchain
+        // — built at the requested size, then thrown away and rebuilt at the real one, with a
+        // second surface query for the present mode on the way. GL never cared, because its
+        // drawable follows the window. `ActiveSurface` is still null here, so the `Resize`
+        // inside `UpdateSize` is a no-op rather than an early rebuild.
+        SDL_SyncWindow(_window);
+        UpdateSize();
+        if (Math.Abs(InputScale - 1f) > 0.001f)
+        {
+            SDL_SetWindowSize(_window,
+                (int)MathF.Round(width / InputScale),
+                (int)MathF.Round(height / InputScale));
+            SDL_SyncWindow(_window);
+            UpdateSize();
+        }
+
         if (UseVulkan)
         {
             UpdateSize();
@@ -338,6 +359,17 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             StartupTrace.Mark("skia surface");
         }
 
+        // Tell the surface its size explicitly, once, now that it exists.
+        //
+        // The GL surface used to get this incidentally: the DIP-to-pixel correction ran after
+        // the surface was built, so `UpdateSize` saw a change and passed the size on. Moving
+        // that correction earlier left `UpdateSize` with nothing to report — it early-returns
+        // when the size has not changed — and the GL surface reached its first frame with no
+        // canvas at all ("No canvas set. Call BeginFrame first."). The Vulkan path never
+        // depended on it, because its host is constructed with the size. An explicit call
+        // beats a side effect that only happened to fire on scaled displays.
+        ActiveSurface?.Resize(PixelWidth, PixelHeight, DisplayScale);
+
         // Text input is enabled on focus (see StartTextInput) — leaving it
         // always on would make the Win32 IMM/TSF consume dead keys and
         // IME-toggle hotkeys even over non-text UI.
@@ -365,24 +397,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         else if (OperatingSystem.IsWindows())
             _plainFullscreen = new WindowsPlainFullscreen(GetWin32Hwnd());
 
-        // Give the platform backend a chance to settle the real pixel size
-        // before the first frame on high-DPI displays.
+        // The DIP-to-pixel correction already happened, before the renderer was built. This
+        // re-sync stays because installing a custom frame changes the non-client area, and so
+        // the client pixel size, after that point. It normally finds nothing: `UpdateSize`
+        // returns false and no swapchain is rebuilt.
         SDL_SyncWindow(_window);
         UpdateSize();
-
-        // The requested size is in density-independent units, but SDL created
-        // the window in window coordinates (which equal pixels on Windows). On
-        // a scaled display the two differ, so resize once to give the app the
-        // content area it asked for: e.g. an 800-DIP window becomes 1200 px at
-        // 150%. InputScale ≈ 1 (100% displays, macOS Retina) is a no-op.
-        if (Math.Abs(InputScale - 1f) > 0.001f)
-        {
-            SDL_SetWindowSize(_window,
-                (int)MathF.Round(width / InputScale),
-                (int)MathF.Round(height / InputScale));
-            SDL_SyncWindow(_window);
-            UpdateSize();
-        }
 
         IsOpen = true;
         StartupTrace.Mark("platform window ready");

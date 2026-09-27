@@ -685,6 +685,89 @@ So the honest accounting is three layers, not one:
    Folding that into the framework's own drawing would remove both, and is the phase-2 work of
    giving every `Color` a colour space rather than a renderer change.
 
+### Start-up and resize, chased down: both are the half-float swapchain
+
+The two remaining costs were charged to Vulkan. Neither is Vulkan. **Both are the scRGB F16
+swapchain, and an 8-bit Vulkan window is close to GL on both.**
+
+**Start-up.** Minimal, warm, medians of 5, fresh trace file each run:
+
+| | to first frame | the first frame itself |
+|---|---|---|
+| GL | 552 ms | 55 ms |
+| Vulkan, scRGB F16 | 679 ms | 151 ms |
+| **Vulkan, 8-bit sRGB** | **581 ms** | **51 ms** |
+| Vulkan, F16, white scale 1 | 662 ms | 142 ms |
+
+**An 8-bit Vulkan window's first frame is the same as GL's**, to 4 ms. The whole penalty is the
+half-float target and it lands entirely inside the first frame. It is **not** the scRGB offscreen:
+a white scale of 1 turns that pass off and still costs 142 ms. The signature is a one-off
+compile — a swapchain *rebuild* with the same format costs 0.9 ms, and a second window in the same
+process does not pay it again — so it is pipeline and shader work for the F16 linear target, done
+once when the first frame needs it.
+
+**There is no cheap way to keep it.** SkiaSharp 3.119.2 exposes `GRContextOptions` with only
+`AllowPathMaskCaching`, `AvoidStencilBuffers`, `BufferMapThreshold`, `DoManualMipmapping`,
+`GlyphCacheTextureMaximumBytes` and `RuntimeProgramCacheSize` — Skia's `fPersistentCache`, the
+hook an on-disk pipeline cache would need, is not surfaced. Caching it across runs means native
+work, not a flag.
+
+**One thing was fixed and it did not help the clock.** On a scaled display the window was created
+at the requested DIP size, the renderer was built, and *then* the size was corrected to pixels —
+so the Vulkan path built an entire swapchain at 500x300 and immediately threw it away for 750x450,
+re-querying the surface for a present mode on the way. The correction now happens before the
+renderer exists, and the trace shows one swapchain at the right size. **Total start-up did not
+measurably change** (679 against 677): the ~14 ms of wasted build was replaced by the window sync
+that has to happen either way. It is kept for being less work and less allocation churn, not as a
+win — and saying otherwise would be inventing one.
+
+**That fix also broke the GL renderer, in a way worth recording.** `UpdateSize` early-returns when
+the size has not changed, and the GL surface had been getting its *initial* size from the very
+correction that moved: previously `PixelWidth` was 0 until then, so a change was always detected.
+Moving the correction earlier consumed that transition and the GL window reached its first frame
+with no canvas — `No canvas set. Call BeginFrame first.`, on every launch. The Vulkan path was
+immune because its host is constructed with the size. **The surface is now told its size
+explicitly after it is built**, which is what should have been happening: a hidden dependency on a
+side effect that only fired on scaled displays. No test caught it, because the headless driver
+renders through `SkiaRasterRenderSurface` and never builds either real surface.
+
+**Resize.** The same culprit, and this time it is most of the gap. 120 resizes, `--profile`
+build, two reps:
+
+| | resize CPU | swapchain builds |
+|---|---|---|
+| GL, size varying | 134–437 ms/s | 0 |
+| Vulkan F16, size varying | **768–819 ms/s** | 122 |
+| **Vulkan 8-bit, size varying** | **246–319 ms/s** | 122 |
+| Vulkan F16, size *unchanged* | 46–55 ms/s | 3 |
+| GL, size unchanged | 9 ms/s | 0 |
+
+Three things fall out of that table. **The same 122 rebuilds cost 500 ms/s more in F16 than in
+8-bit**, so it is the *size* of what is reallocated and not the count: three images at ~14 MB
+against three at ~7 MB, 122 times, roughly 5 GB of allocation churn through one drag.
+**Vulkan on an 8-bit swapchain is level with GL** — the ranges overlap. And **resizing to the same
+size is nearly free**, which rules out event and frame handling: it is the rebuild.
+
+Our own CPU inside a rebuild is only 0.9 ms; the rest is driver threads, which
+`Process.TotalProcessorTime` counts and a trace mark does not.
+
+**It cannot be reduced by rebuilding less often, because that is what the stretch was.** Presenting
+an image whose extent does not match the window is exactly what the compositor scales, so "no
+stretch" requires a correctly-sized swapchain for every size the window takes. Fewer rebuilds and
+no stretch are the same trade, seen from two sides.
+
+**The way out is to stop the compositor scaling instead**, and this driver can:
+`VK_EXT_swapchain_maintenance1` and `VK_KHR_swapchain_maintenance1` are both present, and
+`VkSurfacePresentScalingCapabilitiesKHR` offers `PRESENT_SCALING_ONE_TO_ONE_BIT_KHR` alongside
+`PRESENT_SCALING_STRETCH_BIT_KHR` and the three gravity bits. **The default is STRETCH — the
+artefact has a name in the spec.** With `ONE_TO_ONE` and `PRESENT_GRAVITY_MIN`, a swapchain
+allocated once at a generous size (the monitor, say) can be presented un-scaled while the window
+is smaller than it, so a drag reallocates nothing and cannot stretch by construction rather than
+by winning a race. That would address the resize CPU and the stretch's root cause together. It is
+real work — instance and device extensions, a surface capability query, create-info chaining, and
+Skia wrapping an image larger than the window — and it is unproven here beyond the extension being
+advertised.
+
 ### And the coverage that is still missing
 
 - **Mesa, and a hybrid GPU.** Neither machine has either. Every Vulkan number in this document is
@@ -702,14 +785,18 @@ and Aperture — and leave it off for everything else.
 The blocker that decided this is now fixed, so the recommendation is no longer about a defect. It
 waits on three costs that apps with no video in them would pay for nothing:
 
-1. **Start-up, +120 ms.** The double swapchain build during start-up is the first place to look,
-   and the first frame itself costs 149 ms against GL's 56.
-2. **Resize CPU, roughly 800 against GL's 100.** About 500 of that is driver-side under MAILBOX
-   and will not yield to pacing; whether it yields to anything is unknown. IMMEDIATE is a third of
-   it and stretches 1 resize frame in 30.
+1. **Start-up, +127 ms**, all of it the F16 target's first frame, and not reachable through
+   SkiaSharp's `GRContextOptions`.
+2. **Resize CPU, 768–819 against GL's 134–437**, all of it reallocating F16 swapchain images per
+   size change. `VK_EXT_swapchain_maintenance1` with `PRESENT_SCALING_ONE_TO_ONE` is the route and
+   is advertised on this driver.
 3. **The scRGB offscreen**, which is most of the memory and half the present cost, and which the
-   framework could stop needing — see above. Plus the synchronisation-validation run, Mesa and a
-   hybrid GPU.
+   framework could stop needing. Plus the synchronisation-validation run, Mesa and a hybrid GPU.
+
+**All three are the same bill: 16-bit colour.** An 8-bit Vulkan window starts within 30 ms of GL,
+resizes at GL's cost, and sits 7 MB above it. So the question is not really "Vulkan or GL" — it is
+whether a given app wants an HDR-capable surface, which is exactly the decision
+`HULTUI_RENDERER=vulkan` already expresses per app.
 
 **GL is not going away regardless.** `HultUI.WinForms` builds `SkiaGLRenderSurface` directly and
 never reads `HULTUI_RENDERER`, so hosted controls are GL-only and the path has to keep working
