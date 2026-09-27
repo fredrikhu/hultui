@@ -46,10 +46,11 @@ fetch() {  # fetch <dir> <git url> <tag>
 # at run time through them rather than linking, so the library still loads on a
 # machine with no NVIDIA driver, and simply finds no CUDA there. Built from the pinned
 # tag rather than a distribution package so the version, and with it the minimum
-# driver, is the same everywhere. Windows is next (docs/design/HDR-WINDOWS-CUDA.md);
-# FFmpeg and mpv autodetect these headers, so installing them there turns CUDA on.
+# driver, is the same everywhere. Both hosts: CUDA is how Windows gets zero-copy too,
+# the DirectX bridges being 8-bit or needing ANGLE (docs/design/HDR-WINDOWS-CUDA.md).
+# The headers' Makefile handles MSYS2 paths itself, so no pacman package is wanted —
+# two copies would leave pkg-config choosing between versions.
 build_nvcodec_headers() {
-  [ "$HOST" = linux ] || return 0
   fetch nv-codec-headers https://github.com/FFmpeg/nv-codec-headers.git "$NVCODEC_TAG"
   if [ -f "$PREFIX/lib/pkgconfig/ffnvcodec.pc" ]; then log "nv-codec-headers: already installed"; return; fi
   log "nv-codec-headers: install"
@@ -61,7 +62,11 @@ build_ffmpeg() {
   fetch ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
   local host_flags=()
   if [ "$HOST" = windows ]; then
-    host_flags=(--target-os=mingw32 --arch=x86_64 --enable-d3d11va --enable-dxva2)
+    # NVDEC alongside the DirectX decoders, asked for explicitly for the same reason as
+    # on Linux: autodetection is how this went missing without anyone deciding it should.
+    # The DirectX ones stay because they are what AMD and Intel fall back to.
+    host_flags=(--target-os=mingw32 --arch=x86_64 --enable-d3d11va --enable-dxva2
+                --enable-ffnvcodec --enable-nvdec)
   else
     # NVDEC, asked for explicitly so missing headers fail here instead of quietly
     # building without it. Not the nonfree CUDA options (cuda-nvcc, libnpp): those are
@@ -139,7 +144,16 @@ build_mpv() {
   if [ "$HOST" = windows ]; then
     # One DLL with everything inside it: the static runtime, the static deps.
     # No window outputs: the framework's GL context is the only display.
+    # cuda-interop is the zero-copy path here: hwdec_cuda_gl.c is plain GL with no EGL,
+    # GLX or WGL in it, and mpv's gate is "cuda-hwaccel and (gl or vulkan)" with no
+    # platform condition — gl being satisfied by plain-gl, which the render API already
+    # runs on. CUDA itself is loaded at run time through ffnvcodec, so the DLL gains no
+    # dependency on nvcuda.dll and still loads on AMD and Intel machines.
+    #
+    # The DirectX interops stay off. gl-dxinterop in particular would bring back the
+    # 8-bit dxva2 bridge, which is a zero-copy path that throws away the ten bits.
     host_opts=(-Dc_link_args=-static -Dcpp_link_args=-static -Dprefer_static=true
+               -Dcuda-hwaccel=enabled -Dcuda-interop=enabled
                -Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled -Dgl-dxinterop=disabled -Degl-angle=disabled)
   else
     # GL only, through the framework's context: no windowing, no display output.

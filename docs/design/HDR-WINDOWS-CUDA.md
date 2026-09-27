@@ -171,3 +171,66 @@ which driver version, which ffnvcodec version, and what the VO line said on each
 
 **Step 1 is the most valuable part even if nothing else is attempted.** It decides whether
 the build change is worth making, and it needs no build.
+
+## Results
+
+Run 2026-09-27 on the Windows machine (RTX 4080, driver 32.0.16.1062, NVIDIA HDR display
+peaking at 455 nits). **Step 1 passes on every count, on both renderers.**
+
+### 1a. CUDA-GL interop in our own context, with no mpv at all
+
+The brief's step 1 needed a community libmpv. It turned out there was a cheaper question first,
+because of something the Linux run established: **mpv registers its own plane textures, not the
+image we lend it.** So the thing to prove is plain CUDA-GL interop in a plain WGL context, which
+needs no mpv and no download. `spikes/HdrInterop --cudagl` does exactly mpv's sequence —
+`cuGLGetDevices`, then register, map, get the mapped array, unmap — on the plane formats a P010
+frame uses:
+
+```
+  GL renderer : NVIDIA GeForce RTX 4080/PCIe/SSE2
+  CUDA device : 0 (for this GL context)
+
+  GL_R8    (NV12 luma)    registered and mapped
+  GL_RG8   (NV12 chroma)  registered and mapped
+  GL_R16   (P010 luma)    registered and mapped
+  GL_RG16  (P010 chroma)  registered and mapped
+```
+
+The 16-bit pair is the one that matters: an 8-bit-only result would have been the `dxva2` story
+again. **This is the check to repeat first on any new machine** — it is seconds, it needs no
+libmpv, and a failure here means nothing else can work.
+
+### 1b. End to end, with shinchiro's build (GPL, used to measure, not shipped)
+
+`mpv-dev-x86_64-20260927-git-a1bf4b6559`, which lists `cuda-hwaccel cuda-interop`. On **both**
+renderers, after the D3D and EGL drivers fail as expected in a plain WGL context:
+
+```
+[mpv libmpv_render] Loading hwdec driver 'cuda'
+[mpv vd] Using hardware decoding (nvdec).
+[mpv cplayer] VO: [libmpv] 3840x1746 cuda[p010]
+```
+
+`cuda[p010]` on the Vulkan renderer (our hidden context) **and** on GL (Skia's own context).
+
+**CPU**, 2001 at 20:00, release exe, 12 s settle, 20 s window:
+
+| renderer | `auto` (nvdec) | `auto-copy` |
+|---|---|---|
+| Vulkan | **198 ms/s** | 420 ms/s |
+| GL | **53 ms/s** | 215 ms/s |
+
+Less than half on Vulkan, a quarter on GL, and in line with Linux's ~400 → ~155.
+
+**Ten bits survive.** `ramp10-hevc.mkv` reads **879 levels, 22 reversals**; `ramp8-hevc.mkv`
+reads **455, 758**. Those are the Linux numbers exactly, which is a good sign for the ramps as a
+shared instrument.
+
+### A side finding, not about CUDA
+
+The Vulkan renderer costs about **145 ms/s more than GL at 4K** on the same decode path (198 vs
+53, and 420 vs 215). That is far more than the 0.15–0.25 ms a frame the benchmark showed for
+small UI operations, and it is not the acquire fence, which is 6 µs. At 24 fps it is roughly 6 ms
+a frame, which points at the F16 swapchain's bandwidth and the offscreen pass rather than at
+anything per-submit. Worth its own measurement before Vulkan is ever made the default; recorded
+here because this is where it showed up.

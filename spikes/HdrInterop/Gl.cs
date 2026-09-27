@@ -45,6 +45,7 @@ internal static unsafe class Gl
     private static delegate* unmanaged[Cdecl]<uint, ulong, uint, void*, void> _importMemoryWin32Handle;
     private static delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void> _importMemoryFd;
     private static delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void> _textureStorageMem2D;
+    private static delegate* unmanaged[Cdecl]<uint, int, uint, int, int, void> _textureStorage2D;
     private static delegate* unmanaged[Cdecl]<uint, int, uint*, void> _createTextures;
     private static delegate* unmanaged[Cdecl]<int, uint*, void> _deleteTextures;
     private static delegate* unmanaged[Cdecl]<int, uint*, void> _deleteFramebuffers;
@@ -74,6 +75,7 @@ internal static unsafe class Gl
         _importMemoryWin32Handle = (delegate* unmanaged[Cdecl]<uint, ulong, uint, void*, void>)Proc("glImportMemoryWin32HandleEXT", optional: true);
         _importMemoryFd = (delegate* unmanaged[Cdecl]<uint, ulong, uint, int, void>)Proc("glImportMemoryFdEXT", optional: true);
         _textureStorageMem2D = (delegate* unmanaged[Cdecl]<uint, int, uint, int, int, uint, ulong, void>)Proc("glTextureStorageMem2DEXT", optional: true);
+        _textureStorage2D = (delegate* unmanaged[Cdecl]<uint, int, uint, int, int, void>)Proc("glTextureStorage2D");
         _createTextures = (delegate* unmanaged[Cdecl]<uint, int, uint*, void>)Proc("glCreateTextures");
         _deleteTextures = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteTextures");
         _deleteFramebuffers = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteFramebuffers");
@@ -171,6 +173,11 @@ internal static unsafe class Gl
 
     public static void TextureStorageMem(uint texture, int width, int height, uint memory, ulong offset) =>
         _textureStorageMem2D(texture, 1, RGBA16F, width, height, memory, offset);
+
+    /// <summary>Ordinary GL-owned storage, which is what mpv's CUDA interop registers — it
+    /// makes its own plane textures rather than touching anything we lend it.</summary>
+    public static void TextureStorage(uint texture, uint internalFormat, int width, int height) =>
+        _textureStorage2D(texture, 1, internalFormat, width, height);
 
     public static uint CreateFramebuffer()
     {

@@ -36,6 +36,7 @@ internal static class Program
             if (args.Contains("--churn")) return ChurnBench.Run();
             if (args.Contains("--range")) return RangeBench.Run(args);
             if (args.Contains("--probe")) return Probe.Run(args);
+            if (args.Contains("--cudagl")) return CudaGlBench.Run();
             return Run(args.FirstOrDefault(a => !a.StartsWith('-')), args.Contains("--hint"), args.Contains("--skia"));
         }
         catch (Exception ex)
