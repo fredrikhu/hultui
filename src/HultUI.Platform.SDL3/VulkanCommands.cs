@@ -74,6 +74,8 @@ internal static unsafe class VulkanCommands
     public static delegate* unmanaged<VkDevice, VkImage, nint, void> DestroyImage;
     public static delegate* unmanaged<VkDevice, VkMemoryGetWin32HandleInfoKHR*, nint*, VkResult> GetMemoryWin32Handle;
     public static delegate* unmanaged<VkDevice, VkMemoryGetFdInfoKHR*, int*, VkResult> GetMemoryFd;
+    public static delegate* unmanaged<VkDevice, VkSemaphoreGetWin32HandleInfoKHR*, nint*, VkResult> GetSemaphoreWin32Handle;
+    public static delegate* unmanaged<VkDevice, VkSemaphoreGetFdInfoKHR*, int*, VkResult> GetSemaphoreFd;
 
     private static VkInstance _instance;
     private static delegate* unmanaged<VkDevice, byte*, nint> _getDeviceProcAddr;
@@ -138,6 +140,8 @@ internal static unsafe class VulkanCommands
         DestroyImage = (delegate* unmanaged<VkDevice, VkImage, nint, void>)D(device, "vkDestroyImage");
         GetMemoryWin32Handle = (delegate* unmanaged<VkDevice, VkMemoryGetWin32HandleInfoKHR*, nint*, VkResult>)Optional(device, "vkGetMemoryWin32HandleKHR");
         GetMemoryFd = (delegate* unmanaged<VkDevice, VkMemoryGetFdInfoKHR*, int*, VkResult>)Optional(device, "vkGetMemoryFdKHR");
+        GetSemaphoreWin32Handle = (delegate* unmanaged<VkDevice, VkSemaphoreGetWin32HandleInfoKHR*, nint*, VkResult>)Optional(device, "vkGetSemaphoreWin32HandleKHR");
+        GetSemaphoreFd = (delegate* unmanaged<VkDevice, VkSemaphoreGetFdInfoKHR*, int*, VkResult>)Optional(device, "vkGetSemaphoreFdKHR");
     }
 
     /// <summary>Resolves by name, for anything that loads its own entry points — Skia does,

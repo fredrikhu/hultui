@@ -708,12 +708,38 @@ the offscreen 220, Vulkan with everything on 180. The ~120 ms/s appears with the
 at its *simplest* — so it is not the half-float swapchain and not the offscreen pass, which is
 where this was first guessed to be.
 
-**And this one is fixable, unlike the swapchain's.** `glFinish` is a blunt CPU block; the sharp
-version is `GL_EXT_semaphore` — export a `VkSemaphore`, import it into the GL context, have
-`glSignalSemaphoreEXT` signal it after mpv draws, and have the barrier submit wait on it instead
-of the CPU. **Skia is not involved at all**, so the `GRFlushInfo` limitation that blocks the
-swapchain side does not apply here. That is the next real piece of work on this renderer, and it
-is worth about 100 ms of CPU a second at 4K.
+**And this one was fixable, unlike the swapchain's — it is now done.** `GL_EXT_semaphore` with
+`VK_KHR_external_semaphore`: a `VkSemaphore` exported from the device and imported into the GL
+context, signalled by `glSignalSemaphoreEXT` after mpv draws, waited on by the hand-back barrier.
+Skia is not in that path at all, so the `GRFlushInfo` limitation never applied to it.
+
+**It took two steps, and the first one only moved the cost.** Replacing `glFinish` alone took the
+CPU from 156 to 84 ms/s — the signal became free (0.004 ms a frame, from up to 5.33) but the
+barrier submit grew to 6.6, because it still ended in `vkQueueWaitIdle` so that the one-shot
+command buffer could be freed safely. **The wait had simply moved.** Reusing three command
+buffers with a fence each removes it: the slot coming round again has three frames of slack, so
+nothing blocks.
+
+| | CPU on 4K HDR video | ordering, per frame |
+|---|---|---|
+| `glFinish` + queue wait | 156 ms/s | 0.98 – 5.97 ms |
+| semaphore + queue wait | 84 ms/s | 0.91 – 6.62 ms |
+| **semaphore + buffer ring** | **62 ms/s** | **0.05 ms** |
+| GL renderer, for scale | 56 ms/s | — |
+
+So the renderer is now within 6 ms/s of GL on 4K HDR video, where it was 100 behind, and the
+ordering costs 1–2 ms of CPU a second instead of 23–143. `HULTUI_VULKAN_SEMAPHORE=0` goes back to
+`glFinish` for a driver that mishandles it.
+
+The picture is unchanged on both paths — HDR range 2.240 on all six probe samples either way, and
+the ramps read 879 levels against the 8-bit control's 455.
+
+**Not verified: the validation layers.** On Windows their output goes to `OutputDebugString` and
+this app installs no debug messenger, so nothing here has checked the new barrier semantics — a
+layout that now arrives via the semaphore rather than being declared `GENERAL`, a wait semaphore
+on a submit, and command buffers reused rather than freed. **That is exactly the class of change
+validation exists to catch**, and it is cheap on Linux where the layers print to stdout. It
+belongs in the next Linux run.
 
 ## Zero-copy decode, afterwards
 

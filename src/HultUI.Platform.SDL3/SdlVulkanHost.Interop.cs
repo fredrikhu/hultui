@@ -114,7 +114,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
                 $"(GL {Describe(glUuid)} vs Vulkan {Convert.ToHexString(vkUuid)})");
 
         _interopReady = true;
-        StartupTrace.Mark($"vulkan interop ready on {gl.Renderer}");
+        CreateSharedSemaphore(gl);
+        StartupTrace.Mark($"vulkan interop ready on {gl.Renderer}" +
+            (_sharedSemaphore.IsNull ? " (glFinish ordering)" : " (semaphore ordering)"));
         return true;
 
         bool Refuse(string why)
@@ -377,20 +379,56 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         _interopDirty = false;
 
         long beforeFinish = FinishTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        _gl!.Finish();
+
+        // The whole saving. glSignalSemaphoreEXT returns as soon as the signal is queued,
+        // where glFinish returned only once the GPU had finished — 0.74 to 5.33 ms of blocked
+        // CPU a frame on a 4K decode. The barrier submit below waits on the semaphore
+        // instead, so the ordering happens on the GPU, which is where it belongs.
+        if (!_sharedSemaphore.IsNull) _gl!.SignalSemaphore(_glSemaphore, _glTexture);
+        else _gl!.Finish();
+
         long afterFinish = FinishTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         ProbeRangeOnce();
 
-        var cmd = BeginOneShot();
-        // GENERAL, from VK_QUEUE_FAMILY_EXTERNAL: with no shared semaphore to carry a layout,
-        // GENERAL is what the other API is taken to have left it in, and the queue transfer
-        // is what tells Vulkan to stop assuming it owned the image meanwhile.
+        // The ring only exists for the semaphore path; without one the old one-shot is
+        // correct and its wait is what makes freeing the buffer safe.
+        bool ring = !_sharedSemaphore.IsNull && EnsureInteropCommandRing();
+
+        VkCommandBuffer cmd;
+        VkFence slotFence = VkFence.Null;
+        if (ring)
+        {
+            int slot = _interopSlot;
+            _interopSlot = (_interopSlot + 1) % _interopCmd.Length;
+            cmd = _interopCmd[slot];
+            slotFence = _interopFence[slot];
+
+            // Three frames of slack, so in practice this is already signalled.
+            var f = slotFence;
+            WaitForFences(_device, 1, &f, 1, NoTimeout);
+            ResetFences(_device, 1, &f);
+
+            var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
+            Check(BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+        }
+        else
+        {
+            cmd = BeginOneShot();
+        }
+
+        // Where the image comes from depends on how GL handed it over. A signalled semaphore
+        // carries the layout with it — SHADER_READ_ONLY, which is what SignalSemaphore asks
+        // for — so the barrier is left with only the queue ownership to take. Without one,
+        // GENERAL is what the other API is taken to have left it in.
+        var from = _sharedSemaphore.IsNull
+            ? VkImageLayout.General
+            : VkImageLayout.ShaderReadOnlyOptimal;
         var barrier = new VkImageMemoryBarrier
         {
             sType = VkStructureType.ImageMemoryBarrier,
             srcAccessMask = VkAccessFlags.None,
             dstAccessMask = VkAccessFlags.ShaderRead,
-            oldLayout = VkImageLayout.General,
+            oldLayout = from,
             newLayout = VkImageLayout.ShaderReadOnlyOptimal,
             srcQueueFamilyIndex = Vortice.Vulkan.Vulkan.VK_QUEUE_FAMILY_EXTERNAL,
             dstQueueFamilyIndex = _queueFamily,
@@ -399,7 +437,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         };
         CmdPipelineBarrier(cmd, VkPipelineStageFlags.TopOfPipe, VkPipelineStageFlags.FragmentShader,
             VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
-        EndOneShot(cmd);
+        if (ring) SubmitBarrier(cmd, _sharedSemaphore, slotFence);
+        else EndOneShot(cmd);
         if (FinishTrace) RecordFinish(beforeFinish, afterFinish);
     }
 
@@ -432,6 +471,164 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             $"({(finish + barrier) / _finishFrames * 24:0} ms of CPU a second at 24 fps)");
         _finishTicks = _barrierTicks = 0;
         _finishFrames = 0;
+    }
+
+    /// <summary>
+    /// <c>HULTUI_VULKAN_SEMAPHORE=0</c> goes back to ordering GL against Vulkan with
+    /// <c>glFinish</c> and a queue wait.
+    ///
+    /// <para>There to be turned off for a driver that mishandles a shared semaphore, and to
+    /// measure the difference on one clip: on a 4K HDR decode the CPU is 62 ms a second with
+    /// the semaphore and 156 without.</para>
+    /// </summary>
+    private static readonly bool SemaphoreAllowed =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_SEMAPHORE") != "0";
+
+    private VkSemaphore _sharedSemaphore;
+    private uint _glSemaphore;
+
+    /// <summary>
+    /// One semaphore, exported from Vulkan and imported into GL, reused every frame.
+    ///
+    /// <para>Best effort throughout: a driver that will share an image but not a semaphore
+    /// keeps working and pays the old CPU block instead. Every step here may fail quietly,
+    /// and a null <see cref="_sharedSemaphore"/> is what selects that path.</para>
+    /// </summary>
+    private void CreateSharedSemaphore(InteropGl gl)
+    {
+        if (!SemaphoreAllowed || !_semaphoreExtensionsEnabled || !gl.HasSemaphore) return;
+
+        var handleType = OperatingSystem.IsWindows()
+            ? VkExternalSemaphoreHandleTypeFlags.OpaqueWin32
+            : VkExternalSemaphoreHandleTypeFlags.OpaqueFD;
+
+        var export = new VkExportSemaphoreCreateInfo
+        {
+            sType = VkStructureType.ExportSemaphoreCreateInfo,
+            handleTypes = handleType,
+        };
+        var info = new VkSemaphoreCreateInfo { pNext = &export };
+        VkSemaphore semaphore;
+        if (VulkanCommands.CreateSemaphore(_device, &info, 0, &semaphore) != VkResult.Success) return;
+
+        // Exported out here, imported inside the GL context: a lambda cannot take the
+        // address of a captured local, and only the import needs the context anyway.
+        // Two sets of locals on purpose: one the address is taken of, one the lambda
+        // captures. C# forbids a single local being both.
+        nint exportedHandle = 0;
+        int exportedFd = -1;
+        if (OperatingSystem.IsWindows())
+        {
+            if (GetSemaphoreWin32Handle is null) { DestroySemaphore(_device, semaphore, 0); return; }
+            var get = new VkSemaphoreGetWin32HandleInfoKHR
+            {
+                sType = VkStructureType.SemaphoreGetWin32HandleInfoKHR,
+                semaphore = semaphore,
+                handleType = handleType,
+            };
+            if (GetSemaphoreWin32Handle(_device, &get, &exportedHandle) != VkResult.Success)
+            { DestroySemaphore(_device, semaphore, 0); return; }
+        }
+        else
+        {
+            if (GetSemaphoreFd is null) { DestroySemaphore(_device, semaphore, 0); return; }
+            var get = new VkSemaphoreGetFdInfoKHR
+            {
+                sType = VkStructureType.SemaphoreGetFDInfoKHR,
+                semaphore = semaphore,
+                handleType = handleType,
+            };
+            if (GetSemaphoreFd(_device, &get, &exportedFd) != VkResult.Success)
+            { DestroySemaphore(_device, semaphore, 0); return; }
+        }
+
+        nint win32Handle = exportedHandle;
+        int fd = exportedFd;
+        uint imported = 0;
+        RunOnGLContext(() =>
+        {
+            imported = gl.CreateSemaphore();
+            if (OperatingSystem.IsWindows())
+            {
+                gl.ImportSemaphoreWin32(imported, win32Handle);
+                // Ours to close, the same asymmetry as an imported memory object: GL copies
+                // what it needs out of an OPAQUE_WIN32 handle rather than taking it.
+                CloseHandle(win32Handle);
+            }
+            else
+            {
+                gl.ImportSemaphoreFd(imported, fd);   // consumes the descriptor
+            }
+            if (gl.Error() != 0) imported = 0;
+        });
+
+        if (imported == 0) { DestroySemaphore(_device, semaphore, 0); return; }
+        _sharedSemaphore = semaphore;
+        _glSemaphore = imported;
+    }
+
+    /// <summary>
+    /// Command buffers for the hand-back barrier, three of them with a fence each.
+    ///
+    /// <para>A one-shot buffer has to be waited on before it can be freed, and that wait was
+    /// the whole remaining cost once the semaphore removed <c>glFinish</c>: the block simply
+    /// moved from GL into <c>vkQueueWaitIdle</c>, which grew to 6.6 ms a frame. A buffer that
+    /// is reused rather than freed needs no wait at all — only the assurance that the slot
+    /// coming round again has finished, which three frames of slack makes free in practice.</para>
+    /// </summary>
+    private VkCommandBuffer[] _interopCmd = [];
+    private VkFence[] _interopFence = [];
+    private int _interopSlot;
+
+    private bool EnsureInteropCommandRing()
+    {
+        if (_interopCmd.Length > 0) return true;
+
+        var buffers = new VkCommandBuffer[3];
+        var fences = new VkFence[3];
+        var allocate = new VkCommandBufferAllocateInfo
+        {
+            commandPool = _pool,
+            level = VkCommandBufferLevel.Primary,
+            commandBufferCount = 3,
+        };
+        fixed (VkCommandBuffer* p = buffers)
+            if (AllocateCommandBuffers(_device, &allocate, p) != VkResult.Success) return false;
+
+        // Created signalled: the first time round each slot, there is nothing to wait for.
+        var fenceInfo = new VkFenceCreateInfo { flags = VkFenceCreateFlags.Signaled };
+        for (int i = 0; i < fences.Length; i++)
+        {
+            VkFence fence;
+            if (CreateFence(_device, &fenceInfo, 0, &fence) != VkResult.Success) return false;
+            fences[i] = fence;
+        }
+
+        _interopCmd = buffers;
+        _interopFence = fences;
+        return true;
+    }
+
+    /// <summary>
+    /// Submits the hand-back barrier waiting on the semaphore, and does not wait for it.
+    ///
+    /// <para>Nothing blocks the CPU here. Skia reads the image later in the same frame and is
+    /// ordered after this by submission order on the one queue, which is what the present
+    /// transition already relies on.</para>
+    /// </summary>
+    private void SubmitBarrier(VkCommandBuffer cmd, VkSemaphore wait, VkFence fence)
+    {
+        Check(EndCommandBuffer(cmd), "vkEndCommandBuffer");
+        var stage = VkPipelineStageFlags.FragmentShader;
+        var submit = new VkSubmitInfo
+        {
+            waitSemaphoreCount = wait.IsNull ? 0u : 1u,
+            pWaitSemaphores = wait.IsNull ? null : &wait,
+            pWaitDstStageMask = wait.IsNull ? null : &stage,
+            commandBufferCount = 1,
+            pCommandBuffers = &cmd,
+        };
+        Check(QueueSubmit(_queue, 1, &submit, fence), "vkQueueSubmit");
     }
 
     private uint FindMemoryType(uint typeBits, VkMemoryPropertyFlags wanted)
@@ -483,6 +680,15 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     private void DisposeInterop()
     {
         if (_interopReady is null) return;
+        // Before the fences go: a buffer may still be in flight, and the device wait in
+        // Dispose has already happened by the time this runs.
+        foreach (var fence in _interopFence) if (!fence.IsNull) DestroyFence(_device, fence, 0);
+        _interopFence = [];
+        _interopCmd = [];
+        if (_glSemaphore != 0 && _gl is { } g) RunOnGLContext(() => g.DeleteSemaphore(_glSemaphore));
+        if (!_sharedSemaphore.IsNull) DestroySemaphore(_device, _sharedSemaphore, 0);
+        _sharedSemaphore = VkSemaphore.Null;
+        _glSemaphore = 0;
         DestroyInteropImage();
         if (_glContext is not null) SDL_GL_DestroyContext(_glContext);
         if (_glWindow is not null) SDL_DestroyWindow(_glWindow);

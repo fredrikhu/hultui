@@ -34,6 +34,10 @@ internal sealed unsafe class InteropGl
     private const uint OptimalTiling = 0x9584;
     private const uint DeviceUuidExt = 0x9597;
 
+    // GL_EXT_semaphore. The layout is carried by the signal, which is what lets the Vulkan
+    // side skip the CPU wait entirely rather than merely shorten it.
+    private const uint LayoutShaderReadOnly = 0x9591;
+
     private const uint ReadFramebuffer = 0x8CA8;
     private const uint Rgba = 0x1908;
     private const uint HalfFloat = 0x140B;
@@ -61,6 +65,11 @@ internal sealed unsafe class InteropGl
     private readonly delegate* unmanaged[Cdecl]<uint, uint, uint> _checkNamedFramebufferStatus;
     private readonly delegate* unmanaged[Cdecl]<uint, uint, void> _bindFramebuffer;
     private readonly delegate* unmanaged[Cdecl]<int, int, int, int, uint, uint, void*, void> _readPixels;
+    private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _genSemaphores;
+    private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _deleteSemaphores;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, void*, void> _importSemaphoreWin32;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, int, void> _importSemaphoreFd;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, uint*, uint, uint*, uint*, void> _signalSemaphore;
 
     public InteropGl()
     {
@@ -87,6 +96,11 @@ internal sealed unsafe class InteropGl
         _checkNamedFramebufferStatus = (delegate* unmanaged[Cdecl]<uint, uint, uint>)Proc("glCheckNamedFramebufferStatus");
         _bindFramebuffer = (delegate* unmanaged[Cdecl]<uint, uint, void>)Proc("glBindFramebuffer");
         _readPixels = (delegate* unmanaged[Cdecl]<int, int, int, int, uint, uint, void*, void>)Proc("glReadPixels");
+        _genSemaphores = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glGenSemaphoresEXT");
+        _deleteSemaphores = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteSemaphoresEXT");
+        _importSemaphoreWin32 = (delegate* unmanaged[Cdecl]<uint, uint, void*, void>)Proc("glImportSemaphoreWin32HandleEXT");
+        _importSemaphoreFd = (delegate* unmanaged[Cdecl]<uint, uint, int, void>)Proc("glImportSemaphoreFdEXT");
+        _signalSemaphore = (delegate* unmanaged[Cdecl]<uint, uint, uint*, uint, uint*, uint*, void>)Proc("glSignalSemaphoreEXT");
     }
 
     private static nint Proc(string name)
@@ -114,6 +128,17 @@ internal sealed unsafe class InteropGl
         : _importMemoryFd is not null && HasExtension("GL_EXT_memory_object_fd");
 
     public string Renderer => ReadString(Renderer2);
+
+    /// <summary>
+    /// Whether this driver can be handed a Vulkan semaphore, which is what replaces
+    /// <c>glFinish</c>. Both the entry points and the advertised extension, for the reason
+    /// the memory-object check gives.
+    /// </summary>
+    public bool HasSemaphore =>
+        _genSemaphores is not null && _signalSemaphore is not null
+        && (OperatingSystem.IsWindows() ? _importSemaphoreWin32 is not null : _importSemaphoreFd is not null)
+        && HasExtension("GL_EXT_semaphore")
+        && HasExtension(OperatingSystem.IsWindows() ? "GL_EXT_semaphore_win32" : "GL_EXT_semaphore_fd");
 
     private bool HasExtension(string name)
     {
@@ -272,6 +297,41 @@ internal sealed unsafe class InteropGl
         }
 
         return (max, over1, seen.Count, reversals);
+    }
+
+    public uint CreateSemaphore()
+    {
+        uint semaphore = 0;
+        _genSemaphores(1, &semaphore);
+        return semaphore;
+    }
+
+    public void DeleteSemaphore(uint semaphore)
+    {
+        if (semaphore == 0 || _deleteSemaphores is null) return;
+        _deleteSemaphores(1, &semaphore);
+    }
+
+    /// <summary>Win32: GL does not take the handle, so the caller still closes it — the same
+    /// asymmetry as an imported memory object. A file descriptor is consumed.</summary>
+    public void ImportSemaphoreWin32(uint semaphore, nint handle) =>
+        _importSemaphoreWin32(semaphore, HandleTypeOpaqueWin32, (void*)handle);
+
+    public void ImportSemaphoreFd(uint semaphore, int fd) =>
+        _importSemaphoreFd(semaphore, HandleTypeOpaqueFd, fd);
+
+    /// <summary>
+    /// Signals the semaphore once everything GL has issued for this texture is done, and
+    /// hands the texture over in SHADER_READ_ONLY.
+    ///
+    /// <para>This is the whole point: it orders GL against Vulkan on the GPU, where
+    /// <c>glFinish</c> did it by blocking the CPU until the work finished — 0.74 to 5.33 ms a
+    /// frame on a 4K decode.</para>
+    /// </summary>
+    public void SignalSemaphore(uint semaphore, uint texture)
+    {
+        uint layout = LayoutShaderReadOnly;
+        _signalSemaphore(semaphore, 0, null, 1, &texture, &layout);
     }
 
     public void Finish() => _finish();

@@ -462,3 +462,41 @@ is the sharp version — export a VkSemaphore, import it into the GL context,
 signal it with glSignalSemaphoreEXT after mpv draws, and have the barrier submit
 wait on it. Skia is not part of this path at all, so the missing GRFlushInfo that
 blocks the swapchain's acquire does not apply. Worth about 100 ms/s at 4K.
+
+
+═══════════════════════════════════════════════════════
+GL_EXT_semaphore, 2026-09-27, RTX 4080, Windows
+removing the glFinish that was the whole gap
+═══════════════════════════════════════════════════════
+
+4K HEVC HDR at 20:00, release, 20 s window after 12 s settle:
+
+  ordering                        CPU        per frame (finish + barrier)
+  glFinish + queue wait         156 ms/s     0,98 - 5,97 ms
+  semaphore + queue wait         84 ms/s     0,91 - 6,62 ms
+  semaphore + buffer ring        62 ms/s     0,05 ms
+  GL renderer, for scale         56 ms/s     -
+
+The middle row is the lesson. Replacing glFinish made the signal free — 0,004 ms
+a frame, from up to 5,33 — and the barrier submit grew to 6,6, because it still
+ended in vkQueueWaitIdle so the one-shot command buffer could be freed safely.
+The block had moved, not gone. Three command buffers with a fence each remove it:
+the slot coming round again has three frames of slack.
+
+Correctness, both paths:
+  HDR range     2,240 on all six probe samples, semaphore on and off
+  ramp10-hevc   879 levels, 22 reversals
+  ramp8-hevc    455 levels, 758 reversals
+  suite         green apart from the known Junction load flake
+
+A false alarm on the way: the first fallback check read max 0,000 with 1 level on
+samples 5 and 6 and looked like a broken glFinish path. All six samples say 2,240.
+Black frames, for the fourth time in this work — and the fourth time the fix was
+to look at every sample rather than the last one.
+
+NOT verified: the validation layers. On Windows they go to OutputDebugString and
+this app installs no debug messenger. The change alters barrier semantics (a
+layout arriving through the semaphore instead of being declared GENERAL), adds a
+wait semaphore to a submit, and reuses command buffers instead of freeing them —
+exactly what the layers exist to catch. Cheap on Linux, where they print to
+stdout. It belongs in the next Linux run.

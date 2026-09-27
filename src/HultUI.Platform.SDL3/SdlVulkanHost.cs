@@ -140,6 +140,21 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         ? ["VK_KHR_external_memory", "VK_KHR_external_memory_win32", "VK_KHR_dedicated_allocation"]
         : ["VK_KHR_external_memory", "VK_KHR_external_memory_fd", "VK_KHR_dedicated_allocation"];
 
+    /// <summary>
+    /// What ordering GL's writes against Vulkan's reads without stalling the CPU needs.
+    ///
+    /// <para>Asked for separately from the memory extensions and allowed to be absent: a driver
+    /// that shares an image but not a semaphore still works, it just pays <c>glFinish</c> —
+    /// which on a 4K decode is 0.74 to 5.33 ms a frame, so this is worth asking for.</para>
+    /// </summary>
+    private static string[] SemaphoreDeviceExtensions => OperatingSystem.IsWindows()
+        ? ["VK_KHR_external_semaphore", "VK_KHR_external_semaphore_win32"]
+        : ["VK_KHR_external_semaphore", "VK_KHR_external_semaphore_fd"];
+
+    /// <summary>Whether the semaphore extensions were enabled too. False falls back to
+    /// <c>glFinish</c>, which is correct and costs the CPU.</summary>
+    private bool _semaphoreExtensionsEnabled;
+
     /// <summary>Whether every one of those was actually enabled. False means no interop, and
     /// a video on this window goes the software route instead.</summary>
     private bool _interopExtensionsEnabled;
@@ -358,6 +373,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _interopExtensionsEnabled = missing.Length == 0;
         if (_interopExtensionsEnabled) wanted.AddRange(InteropDeviceExtensions);
         else StartupTrace.Mark($"vulkan interop unavailable: no {string.Join(", ", missing)}");
+
+        var noSemaphore = SemaphoreDeviceExtensions.Where(name => !HasDeviceExtension(name)).ToArray();
+        _semaphoreExtensionsEnabled = _interopExtensionsEnabled && noSemaphore.Length == 0;
+        if (_semaphoreExtensionsEnabled) wanted.AddRange(SemaphoreDeviceExtensions);
+        else if (_interopExtensionsEnabled)
+            StartupTrace.Mark($"vulkan interop will use glFinish: no {string.Join(", ", noSemaphore)}");
         EnabledDeviceExtensions = [.. wanted];
 
         using var extensions = new VkStringArray(EnabledDeviceExtensions);
