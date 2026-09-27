@@ -733,6 +733,12 @@ step which can end the project — measuring what the copy actually costs, which
 comes first, and the one that decides the approach — whether CUDA can register a texture whose
 storage is Vulkan-owned memory — comes before the build rather than after it.
 
+**Answered on Linux, and it works** (results in that file). The Linux machine was never running
+the trimmed build — it loads the distribution's libmpv, which has `cuda-interop` — so
+`hwdec=nvdec` was available all along: `hwdec-current = nvdec`, ten bits and the full range
+arrive intact, and 4K CPU drops from ~400 to ~155 ms/s. The crux was not one: mpv registers its
+*own* plane textures with CUDA and renders from them into our FBO like any other frame.
+
 The catch is that `auto-copy` is currently what makes the backend portable — the copy
 hides every difference between NVDEC, VAAPI, D3D11VA and VideoToolbox. Turning it off
 means those differences become ours, and a per-platform fallback matrix with it.

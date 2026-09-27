@@ -140,3 +140,96 @@ which display server, which driver, and which decoder `hwdec-current` reported.
 
 **Step 1's two numbers are the most valuable thing here even if nothing else is attempted** — they
 decide whether this phase is worth anyone's time, on either platform, and they need no build.
+
+## Results (2026-09-27)
+
+**Machine:** RTX 4080, NVIDIA proprietary 615.71.09, Fedora 44, KDE Plasma **Wayland**. Hidden GL
+context is EGL. Release build of `HultUI.Samples.VideoPlayer`, `HULTUI_RENDERER=vulkan`.
+`hwdec-current` under zero-copy: **`nvdec`**, with frames arriving at the VO as `cuda[p010]`.
+
+**Zero-copy already works on this machine, with no rebuild.** The brief assumed Linux runs the
+trimmed natives build. It does not: nothing bundles a `libmpv.so.2` for linux-x64, so the resolver
+falls through to the system library, which here is RPM Fusion's `mpv-libs` 0.41.0, built with
+`-Dcuda-hwaccel -Dcuda-interop -Dvaapi -Degl` and `ffnvcodec`. Every Linux figure recorded in the
+other briefs was taken on that library too. So steps 2 and 3 were not needed to answer the
+question. Step 3 is still needed for anything *distributed*, because the LGPL natives build has
+the interop stripped (and `cuda-interop` is not a GPL feature, so it should survive that).
+
+### 1. What the copy costs
+
+utime+stime of the app process over 20 s, after 12 s of warm-up, `--start=1200`. Two rounds at 4K:
+
+| `hwdec` | resolves to | 4K (2001, 3840x1746 HEVC 10-bit PQ) | 1080p (Queen's Gambit, HEVC 10-bit PQ) |
+|---|---|---|---|
+| `auto-copy` (today's default) | **`vulkan-copy`** | 393, 416 ms/s | 227 ms/s |
+| `nvdec` | `nvdec` | **151, 161 ms/s** | **130 ms/s** |
+| `auto` | `nvdec` | 156, 168 ms/s | — |
+| `no` | software | 957, 962 ms/s | 639 ms/s |
+
+- **The copy is about 250 ms of CPU per second at 4K24**, 60% of what `auto-copy` spends, and
+  about 97 ms/s at 1080p. That is 2.6x for 3.2x the pixels, so it scales as a readback should.
+  Not small. Measured directly as `auto-copy` minus `nvdec` rather than inferred from scaling,
+  because with the interop present the direct A/B was available.
+- `auto-copy` resolves to **`vulkan-copy`** here, not `nvdec-copy`. It is still a copy.
+- **`auto` already picks zero-copy** here, which matters for the default (see the end).
+- The step 1 script as written measures the wrong process: `$!` after `dotnet run` is the CLI
+  host, not the app it launches. These runs launched the built binary directly.
+
+### 2. The crux, which turned out not to be one
+
+CUDA never has to register our Vulkan-imported texture. mpv's `hwdec_cuda` GL interop allocates
+its **own** plane textures, registers *those* with `cuGraphicsGLRegisterImage`, and copies the
+decoded surface into them GPU to GPU. Its shaders then render from them into whatever FBO the
+host lends, which is our imported image, exactly as for software frames. The log shows the CUDA
+interop loading in our hidden EGL context, beside the Vulkan device, with no complaint.
+
+VAAPI also loaded (`Using EGL dmabuf interop via GL_EXT_EGL_image_storage`) but found no VAAPI
+driver, as expected on NVIDIA without `nvidia-vaapi-driver`. **VAAPI zero-copy is untested**,
+and so is AMD/Intel in general.
+
+### 4. Verification
+
+- **`hwdec-current` caught a false pass on the first try.** The first ramp was 1024x64, and
+  NVDEC's minimum HEVC height is 144: `asked nvdec, using no`. It read 883 levels, which would
+  have gone in as "ten bits survive zero-copy" while testing software decode. Also note a
+  **`.y4m` ramp can never exercise this path**: raw video is not hardware-decodable. The ramp
+  has to be HEVC Main10.
+- **Ten bits survive.** A lossless x265 Main10 ramp, 1024x256, limited range 64..940, verified
+  at 877 source levels, middle row read back through GL (`HULTUI_VIDEO_HDR_PROBE=30`):
+
+  | `hwdec` (as reported) | levels | reversals |
+  |---|---|---|
+  | `nvdec` | **879** | 22 |
+  | `vulkan-copy` | 879 | 22 |
+  | `no` | 879 | 22 |
+  | control: same ramp at **8 bits**, `nvdec` | 455 | 758 |
+
+  ```bash
+  ffmpeg -f lavfi -i "color=c=black:s=1024x256:r=24:d=60,format=yuv420p10le" \
+    -vf "geq=lum='64+X*876/1023':cb=512:cr=512" -c:v libx265 -x265-params lossless=1 \
+    -pix_fmt yuv420p10le -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 ramp10.mkv
+  ```
+- **Range survives, with a trap.** At this display's own peak the shared image max is exactly
+  1.000 on both paths. That is not a failure: SDL reports a headroom of ~1.0 here, so the peak
+  is 203 nits and nothing is meant to exceed 1. With `HULTUI_VULKAN_PEAK_NITS=1000`, 2001 at
+  20:00, six samples each, none black (hundreds to thousands of levels per row):
+
+  | | shared image max | swapchain |
+  |---|---|---|
+  | `nvdec` | **4.926** (= 1000/203), up to 6.0M samples above 1 | max 12.445, HDR reached the swapchain |
+  | `vulkan-copy` | 4.926 | max 12.445 |
+
+- **Descriptors:** fd count sampled over 45 s of 4K playback: `nvdec` 199 flat, `auto-copy`
+  250 +/-1. The Vulkan interop image is created by the renderer independently of `hwdec`, so
+  `--churn` was not re-run; the new path adds no fds of its own.
+- **Not done:** resize during zero-copy playback, a hybrid GPU, Mesa, X11/GLX, and the default
+  GL renderer with `hwdec=nvdec` (only the Vulkan renderer was run).
+
+### What this leaves
+
+1. **The default.** Changing `auto-copy` to `auto` gets this saving everywhere the interop is
+   present, and on Windows's trimmed build `auto` already resolves to the same `d3d11va-copy`
+   as today. It needs a run on the GL renderer first, where mpv's CUDA interop would live in
+   Skia's GL context rather than a hidden one.
+2. **The distributed Linux build** (`native/mpv/build-libmpv.sh`) needs step 3 to get any of this.
+   The system-library result says the interop works, so step 3 is no longer a gamble.
