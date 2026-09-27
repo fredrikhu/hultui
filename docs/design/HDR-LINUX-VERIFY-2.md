@@ -265,3 +265,210 @@ both of which earned their place:
   the bug was present, and only the control revealed it.
 
 And say which of these you did **not** get to, rather than leaving it to be inferred from silence.
+
+## Results
+
+Run 2026-09-27/28 on the Linux machine by a Claude Code session, base commit `ec56ee0`, **with no
+code changed** (the controls below were temporary, env-gated patches, reverted before the real
+runs). Fedora 44 KDE Plasma 6 Wayland, RTX 4080 on NVIDIA **615.71.09**, Vulkan loader and
+validation layers **1.4.341**, system `mpv-libs` 0.41.0. `kscreen-doctor -o`: DP-2 2560x1440 scale
+1.0 (primary), DP-3 3840x2160 scale 1.5, both HDR on, SDR brightness 408/455. `env | grep HULTUI`
+empty. "Which output" and window sizes came from KWin (`output.name`, `clientGeometry`), as in
+round 1. **Nobody judged anything by eye this round**: every result is a log, a KWin reading or a
+screen capture. Fredrik's only part was moving the pointer onto DP-2 for the launches that needed it.
+
+**No Mesa and no hybrid GPU here.** Every "Linux" number below is NVIDIA's proprietary driver, so it
+is a second driver rather than the Mesa data point the brief hoped for.
+
+### 0. Synchronisation validation: clean on both paths and both display servers, with controls that fired
+
+**Real runs.** VideoPlayer, 2001 at 20:00, `HULTUI_RENDERER=vulkan`, 90 s each with 21 KWin-driven
+resizes and moves between DP-2 and DP-3 (24–31 swapchain rebuilds a run). Every run showed
+`VO: [libmpv] 3840x1746 cuda[p010]` (zero-copy NVDEC) and the ordering it claimed in the trace.
+
+| | Wayland | X11 |
+|---|---|---|
+| semaphore (`semaphore ordering`) | **0 messages**, 31 swapchains | **0 messages**, 24 swapchains |
+| `HULTUI_VULKAN_SEMAPHORE=0` (`glFinish ordering`) | **0 messages**, 31 swapchains | **0 messages**, 28 swapchains |
+
+**Features enabled: core validation and synchronisation validation**, set by
+`VK_LOADER_LAYERS_ENABLE='*validation*' VK_LAYER_VALIDATE_SYNC=1`, and **proved per run**: each log
+has the layer's own status line, `Current Enables: VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT`
+(requested with `VK_LAYER_REPORT_FLAGS=info,warn,perf,error`). That line was the only validation
+output in all four logs. The brief's `VK_LAYER_ENABLES=…` spelling still works on this layer but is
+deprecated, and it warns that it overrides any new-style setting.
+
+**The controls, which matter more than the zeros.** A quiet layer proves nothing, so the interop
+barrier was temporarily broken on purpose (env-gated patch, reverted afterwards, `git status`
+clean):
+
+| deliberate fault | what the layer said |
+|---|---|
+| mip range past the image's one level (core) | `VUID-VkImageMemoryBarrier-subresourceRange-01724` ×20 — output path works |
+| clear the shared image, then an unordered layout transition, **same** command buffer | `SYNC-HAZARD-WRITE-AFTER-WRITE` ×10, naming the shared image |
+| the same, the transition in a **second submit** | `vkQueueSubmit(): WRITE_AFTER_WRITE … submitted on the current VkQueue`, Wayland and X11 |
+
+The last row is exactly the class the design depends on: a missing dependency **between two submits
+on the one queue**. Sync validation catches it here, sees the shared image, and reports nothing on
+the real code.
+
+**Three controls that did not fire, and why that is information, not failure:**
+- `srcAccessMask = COLOR_ATTACHMENT_WRITE` with `TOP_OF_PIPE`: silent. Not a check this layer makes
+  on legacy image barriers, so it was no control.
+- Two unchained layout transitions, the first one a `QUEUE_FAMILY_EXTERNAL` acquire: silent. Sync
+  validation appears to treat the ownership acquire specially. Not pursued.
+- **The hand-back barrier with its destination scope removed** (`dstStage = TOP_OF_PIPE`,
+  `dstAccess = 0`): silent, even though cross-submit detection demonstrably works. So Skia's sample
+  of the image is ordered by **more than our barrier**. The likely reason is that Skia records its own
+  barrier on the wrapped texture (it tracks layout inside the wrapper). Not confirmed: it would need
+  an API dump. If true, the central assumption holds **with margin** on this Skia. It is also an
+  argument for not removing our barrier on the strength of it.
+
+**Found by reading, not tested, and not something validation can see:** there is no Vulkan → GL
+ordering. There is no release barrier to `QUEUE_FAMILY_EXTERNAL` and no semaphore GL waits on, so
+mpv's GL write of the next video frame is not ordered on the GPU after the previous UI frame's
+Skia sample of the same image. The acquire fence only waits for the frame that last presented *that
+swapchain image*, two or three frames back with MAILBOX and 3–4 images. The old `glFinish` path had
+the same gap (its queue wait ran after GL had already written), so the semaphore change did not
+introduce it. The symptom, if it ever showed, would be a torn or half-updated video frame. It is a
+GL-side write-after-read, invisible to every Vulkan layer by construction.
+
+**A procedural note, since it nearly produced a false pass:** the first batch of these runs passed
+the layer settings as one shell string, which zsh does not split. The layer never loaded, and the
+runs came back "clean". They are not counted above. The per-run `Current Enables` line was added
+so that this cannot happen silently again.
+
+### 1. The window-creation reorder: no crash anywhere, correct sizes, but two swapchain builds at start-up, not one
+
+**On Wayland the moved `SDL_SetWindowSize` never runs**, which removes most of the risk the brief
+was worried about. `InputScale = PixelDensity / DisplayScale`, and on Wayland SDL's window
+coordinates are logical, so on DP-3 that is 1.5 / 1.5 = 1 and the correction branch is skipped. It
+runs on **X11**, where SDL sees a 1.0 density and a 1.5 display scale: XWayland windows are 750x450 X
+pixels, and KWin scales X11 clients down on DP-2. That is correct behaviour for KWin's XWayland
+scaling, not a bug.
+
+- **No crash, and no `No canvas set`**: every Minimal launch this round (more than 70: GL and Vulkan, Wayland and X11,
+  on both outputs), all reaching a live window.
+- **Size**: every launch 500x300 logical by KWin. Wayland on DP-3: swapchain 750x450. **Launched on
+  DP-2**, the mixed-scale case that shrank in round 1 (pointer placed there by Fredrik, output
+  confirmed by KWin): **12/12 at 500x300 (6 GL, 6 Vulkan), 0 at 333x200.** X11 on DP-2: 500x300
+  logical, 750x450 swapchain.
+- **Resize after it**: KWin-driven resizes and DP-3 → DP-2 → DP-3 crossings on all four combinations.
+  Every Vulkan swapchain equalled KWin's client size × the output's scale (700x472@1.5 → 1050x708,
+  900x622@1.0 → 900x622, 500x272@1.5 → 750x408). On X11 the crossings correctly caused no rebuild.
+  GL windows stayed alive and followed. These were scripted, **not dragged or looked at by a person**.
+- **The positive control did not come back as one line.** Wayland on DP-3:
+
+  ```
+  vulkan swapchain 750x450 x3 R16G16B16A16Sfloat/ExtendedSrgbLinearEXT   t=171 ms
+  skia surface
+  vulkan swapchain 750x450 x3 R16G16B16A16Sfloat/ExtendedSrgbLinearEXT   t=197 ms
+  platform window ready
+  ```
+
+  The *wrong-size* build is gone: there is no 500x300 line, so the reorder did what it was for. The
+  second build is the **same size**, and it comes from the GL fix, not from Wayland. The new explicit
+  `ActiveSurface?.Resize(PixelWidth, PixelHeight, DisplayScale)` reaches
+  `SkiaVulkanRenderSurface.Resize`, whose `_width/_height` start at 0, so it never early-returns and
+  calls `RecreateSwapchain`. With the fixed extent off (the default, and unavailable here anyway),
+  `Rebuild` rebuilds unconditionally. X11 shows the same pair, and a launch on DP-2 shows three builds
+  (750x450, 750x450, then 500x300 once KWin reports 1.0) where round 1's fix had got it to two.
+  **By the code this happens on every platform, Windows included.** My guess is that the one-line
+  observation on Windows predates the GL fix in the same commit. **Left unfixed on purpose**, so that
+  Windows can confirm it. The likely fix is one line: seed `_width/_height` from the host's size when
+  the surface is constructed, so the explicit call is a no-op on Vulkan and still sizes GL.
+
+### 2. The resize stretch does not happen on KWin, on either display server, and the measurement could have seen it
+
+**Method.** KWin's `ScreenShot2.CaptureArea` at native resolution (10–15 ms a capture, through a
+temporary authorisation, since removed), five captures straight after each KWin-driven resize
+between 600x400 and 800x533 logical frames (×1.333, the Windows ratio), on DP-3. Two measurements
+per capture: the **indigo button's width in device pixels** (the bar: a stretch makes it wider) and
+the **white client width** along a row (which buffer size the compositor is showing).
+
+| Minimal, Vulkan, `FIXED_EXTENT=0` | captures | stretched | old buffer on screen (stale) |
+|---|---|---|---|
+| Wayland, default (**MAILBOX**) | 200 / 40 resizes | **0** | 40, every first capture, both directions |
+| Wayland, `HULTUI_VULKAN_PRESENT=immediate` (brief's control) | 200 / 40 | **0** | 40 |
+| X11, default | 200 / 40 | **0** | 20, grows only |
+| X11, `immediate` | 200 / 40 | **0** | 20, grows only |
+
+The button measured **137 px in all 800 captures**, stale ones included.
+
+**The brief's control did not fire, and here it cannot**: nothing stretches on this machine, so
+IMMEDIATE is not an arm that "should fail". What stands in for it is the stale count. Every arm
+caught the compositor showing the **previous** buffer right after a resize: the window has its new
+size and the image is the old one. That is exactly the mismatched moment DXGI resolves by scaling,
+and in every such capture KWin showed it **unscaled**, with the button at its true width. So the
+measurement was fast enough to see the moment a stretch would happen, and it saw stale, not
+stretched. That is the answer: **the stretch is a DXGI artefact, and the Windows reasoning should
+not be carried over to KWin.** (On X11 a shrink is never stale, because a top-left crop of the old
+buffer looks identical to the right one.)
+
+**Also found:** NVIDIA's X11 surface offers FIFO, IMMEDIATE and FIFO_LATEST_READY, with **no
+MAILBOX**, so `ChoosePresentMode` gives **IMMEDIATE on X11 by default** (trace:
+`vulkan present mode Immediate`). Wayland gets MAILBOX. The "MAILBOX is the default" in `HDR.md`
+is a Windows-and-Wayland statement.
+
+### 3. `swapchain_maintenance1`: advertised by NVIDIA's Linux driver, but no present scaling on any surface
+
+```
+vulkan present scaling: oneToOne=False gravityMin=False scaledExtent=0x0..0x0 — rebuilding per resize
+```
+
+Same on Wayland and X11. **No swapchain line has an `(allocated …)` suffix**, and the build count
+through a drag equals the rebuild path's. Confirmed independently of our code: `vulkaninfo` lists
+`VK_EXT_swapchain_maintenance1`, `VK_KHR_swapchain_maintenance1` and
+`VK_EXT/KHR_surface_maintenance1` with `swapchainMaintenance1 = true`, but
+`VkSurfacePresentScalingCapabilitiesKHR` is `supportedPresentScaling: None`, gravity `None`, and
+scaled extents 0x0 for **every** surface, Wayland included. So the feature declines itself cleanly,
+which is the "not offered" result the brief anticipated, on NVIDIA rather than Mesa. Under validation
+(core + sync, `FIXED_EXTENT=1`, a drag and output crossings on both display servers): 0 messages,
+though with the feature declined that exercises only the capability query.
+
+**The video A/B was not run, because here it cannot measure anything**: with scaling unavailable,
+`vk-fixed` *is* `vk-rebuild`. Whether a Wayland compositor charges for a non-matching extent stays
+open. Item 2 does bear on it: KWin never scales a mismatched buffer, so the premise of the
+over-allocation (stop the compositor scaling) has nothing to fix on this platform to begin with.
+
+### 4. Numbers: the "every Vulkan penalty is F16" shape does not hold on NVIDIA Linux
+
+Minimal on DP-3 (1.5, HDR, 120 Hz), `HULTUI_A11Y=0`, Release, round-robin. "Vulkan 8-bit" is
+`HULTUI_VULKAN_F16=0` (trace: `B8G8R8A8Unorm/SrgbNonLinear`). Absolute start-up numbers are not
+comparable with Windows' (a different clock origin and a different OS). Compare within a column.
+
+| | GL | Vulkan 8-bit | Vulkan F16 |
+|---|---|---|---|
+| start-up to first frame, median of 5 | 173 ms | 269 | 262 |
+| the first frame itself, median of 5 | 43 ms | 48 | 53 |
+| resize CPU, 120 resizes, 3 reps | 215–228 ms/s | 264–283 | 300–342 |
+| same, size unchanged | 12–16 ms/s | — | 8–20 |
+| one window, private (`smaps_rollup`), 3 reps | 43 MB | 66 | 66–67 |
+| present pass (`Benchmark --profile`, 0.1 ms resolution), 2 reps | 0.1 | 0.1 | 0.1 |
+
+- **Start-up and memory are the API here, not the half-float swapchain.** Vulkan's roughly +95 ms
+  and +23 MB are the same with and without F16. The start-up gap is mostly instance and device
+  creation (76 ms against 34 for GL context creation), plus ~13 ms in window creation and ~9 ms in
+  the Skia surface. F16's first-frame compile, 100 ms on Windows, is **5 ms** here.
+- **Resize**: F16 adds ~50 ms/s over 8-bit (Windows: ~500), and 8-bit Vulkan sits ~50 above GL.
+  The rebuild count is the same in both arms (122).
+- **Present**: no arm resolves above 0.1 ms. Windows' F16 figure of 0.40 would have shown.
+
+So **"the price of 16-bit colour" in `HDR.md` is a Windows (DXGI/NVIDIA 610) conclusion** and should
+be labelled that way. On NVIDIA Linux, 16-bit colour is nearly free and Vulkan's fixed costs are
+the API's.
+
+Method notes: the resize storm is a 16 ms `QTimer` inside a KWin script resizing through 12 sizes,
+with CPU from `/proc/<pid>/stat` utime+stime over 2.5 s (all threads, driver threads included, like
+`TotalProcessorTime`). Memory is **one** window, not two: MultiWindow opens its second window only
+on a click. Linux private pages are not Windows private bytes either, so only the difference
+between columns carries over.
+
+### Not done
+
+- **Item 3's video CPU A/B**, which is unmeasurable on this driver (above).
+- **Mesa, a hybrid GPU, a compositor other than KWin**: none available.
+- **By-eye drags** for item 1's "resize still works": replaced by KWin-scripted resizes and crossings
+  checked against swapchain sizes. A person did not drag or look.
+- **The Vulkan → GL ordering gap** in item 0: found by reading, neither tested nor fixed.
+- **The duplicate start-up swapchain** in item 1: diagnosed, deliberately not fixed.
