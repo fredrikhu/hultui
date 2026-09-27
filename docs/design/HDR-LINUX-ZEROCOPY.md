@@ -253,7 +253,11 @@ The proof is the VO format in `HULTUI_MPV_LOG=v`: `VO: [libmpv] … cuda[p010]` 
 pinned in `versions.env` (a new `build_nvcodec_headers` step, so no runner package), FFmpeg with
 `--enable-ffnvcodec --enable-nvdec`, mpv with `-Dcuda-hwaccel=enabled -Dcuda-interop=enabled`.
 VAAPI stays off: its interop needs EGL in mpv, FFmpeg links libva outright, and nothing here could
-test it. Built on this Fedora 44 machine, not yet on the Ubuntu runner.
+test it. Built on this Fedora 44 machine, and then by `mpv natives` on the Ubuntu 24.04 runner
+(run 36310907292): the log shows `--enable-ffnvcodec --enable-nvdec`, `HAVE_CUDA_HWACCEL 1`,
+`HAVE_CUDA_INTEROP 1`, `RESULT: LGPL-2.1+`, backend tests 8/8, and a `NEEDED` list of base
+libraries plus `libpipewire-0.3.so.0` — no libcuda, no X11. CI never plays video on a GPU, so
+zero-copy itself rests on the runs on this machine.
 
 - **Licence report:** `RESULT: LGPL-2.1+`, now printing `HAVE_CUDA_HWACCEL 1` and
   `HAVE_CUDA_INTEROP 1`. `HultUI.Media.Backends.Tests` 8/8 with `HULTUI_MPV_EXPECT_LGPL=1`.
