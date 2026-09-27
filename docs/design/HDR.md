@@ -2,7 +2,10 @@
 
 **Status:** phases 0 to 5 built. Verified on Windows and on Linux (KDE Wayland, NVIDIA);
 untested on Mesa and on a hybrid GPU. HDR video is on by default on the Vulkan renderer,
-which is itself opt-in through `HULTUI_RENDERER=vulkan`.
+which is itself opt-in through `HULTUI_RENDERER=vulkan` — and
+[stays opt-in](#should-vulkan-be-the-default-renderer-measured-2026-09-27-not-yet): re-benchmarked
+on 2026-09-27, Vulkan now wins on video and loses on start-up, memory and resize, and a visible
+resize stretch blocks it outright.
 **Date:** 2026-09-27.
 
 **Before changing anything here, read [Traps](#traps).** It is not a list of curiosities: most
@@ -522,6 +525,121 @@ nits here, so 3.0) while video reference white wants 2.5375, so UI white and vid
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay
 draws needs a deliberate luminance, and that is a design decision per app rather than a
 renderer setting.
+
+## Should Vulkan be the default renderer? Measured 2026-09-27: not yet
+
+Everything below is one machine — Windows 11, RTX 4080, driver 610.62, a 120 Hz HDR display at
+150% scale, `HULTUI_A11Y=0` throughout, Release builds, configurations run **round-robin** so
+drift landed on both rather than on whichever went second.
+
+**The answer is no, and it is not because Vulkan is slow.** Vulkan has caught up on the thing it
+was behind on and is still behind on the things *every* app pays, including the apps that will
+never show a video.
+
+### Where Vulkan now wins
+
+| | GL | Vulkan | |
+|---|---|---|---|
+| 4K HEVC HDR video, CPU | 51 ms/s | **43 ms/s** | medians of 3; both zero-copy `cuda[p010]` |
+| same, `HULTUI_VULKAN_SEMAPHORE=0` | — | 178 ms/s | what the semaphore is worth |
+| render pass, 10k elements | 0.6 ms | 0.6 ms | identical |
+| second window created | 170–178 ms | **154–161 ms** | |
+| create 10,000 | 167 ms | 168 ms | a wash |
+
+The video figure has crossed over: Vulkan is now *cheaper* than GL on 4K HDR, where before the
+semaphore it was 100 ms/s behind. It also carries sixteen bits a channel and can actually present
+HDR, which GL cannot do at all — that asymmetry is the reason this project exists and no CPU
+number offsets it.
+
+**A caveat on comparing to the earlier table:** these runs are a different clip (a 3840x1608 HEVC
+HDR film on a local disk, not 2001 over the share), so the absolute figures are not comparable to
+the 56/62 recorded earlier. Only the GL-versus-Vulkan comparison *within* this run is.
+
+**The second window corrected a theory.** Every `SdlVulkanHost` builds its own `VkInstance` and
+`VkDevice`, which looked like it should make window two pay the whole 215 ms bring-up again. It
+does not — the driver is already loaded and the second device is cheap, and Vulkan beat GL here.
+Worth recording because the reasoning was sound and the measurement disagreed.
+
+### Where GL still wins, and these are the costs everything pays
+
+| | GL | Vulkan | |
+|---|---|---|---|
+| start-up to first frame | **540 ms** | 661 ms | Minimal, warm, medians of 4 |
+| two windows, working set | **94 MB** | 148 MB | private 91 vs 185 MB; handles 444 vs 838 |
+| resize storm, CPU | **346 ms/s** | 524 ms/s | 120 resizes; GL 132–375, Vulkan 359–546 |
+| select row | **0.51 ms** | 0.91 ms | |
+| swap rows | **0.80 ms** | 1.18 ms | |
+| remove row | **1.68 ms** | 2.21 ms | |
+| present pass | **0.1 ms** | 0.3–0.5 ms | the whole per-frame delta |
+
+**The per-frame delta is present, and only present.** Render is identical to two decimals at both
+1,000 and 10,000 elements; the extra 0.2 to 0.4 ms is in handing the image to the presentation
+engine. It disappears into a frame that already costs 160 ms and doubles a frame that costs 0.5 —
+so it lands precisely on the cheap interaction frames a UI spends most of its life drawing. In
+absolute terms 0.4 ms is far below anything a person can see, which is why this is a reason for
+caution rather than a blocker.
+
+**Start-up is the one a user would notice.** +120 ms on every launch, consistent to within 5 ms
+across runs. Both renderers pay a driver load (GL's ~153 ms hides inside "platform window ready",
+Vulkan's ~215 ms in instance and device creation), but Vulkan's **first frame** costs 149 ms
+against GL's 56, and it builds the swapchain **twice** during start-up because the window is
+created at one size and scaled to another. There is probably something to reclaim here.
+
+### The blocker: resize stretches before it redraws
+
+**Reported by eye, and no capture would have shown it.** On the Vulkan renderer a window being
+dragged by its edge visibly *stretches* its old contents to the new size and then snaps to a
+correct frame. GL does not. It is the single most common thing anyone does to a window and it
+currently looks broken, which by itself decides the question.
+
+What it is **not** — each of these was measured and ruled out:
+
+- **Not dropped frames.** `ResizeThrottleMs = 16` looked like the obvious culprit, since
+  `RenderLiveResizeFrame` returns without drawing when a resize arrives inside the window and
+  `UpdateSize` has already rebuilt the swapchain at the new size by then. But counting frames
+  that really drew, against a known number of resizes, gives **78 of 60 on GL and 78 of 60 on
+  Vulkan** — more frames than resizes on both, because one `SetWindowPos` raises several SDL
+  events. Identical. Setting the throttle to 0 raises both to 179. The throttle is not it.
+- **Not the cost of rebuilding.** Each swapchain rebuild during a storm is **0.9–1.0 ms**, and
+  there is one per resize. Too cheap to see.
+- **Not a leak or a drift.** Vulkan's resize CPU climbs within a sequence (407 → 524 → 546) but
+  resets to 359 on the next, so nothing accumulates across process launches.
+
+What is left is **presentation**, which fits the evidence that frame counts are equal and only
+Vulkan stretches: a Vulkan swapchain on Windows is DXGI underneath, and the surface is presented
+`Immediate` (`ChoosePresentMode` prefers it, to match the GL path's `SetSwapInterval(0)` because
+`Application` does its own pacing). A stretch of the last presented image to the new window size,
+until a new present lands, is the behaviour that description predicts. **This is the leading
+explanation and it is not yet proven** — the next step is a present-mode override so `Fifo` and
+`Mailbox` can be tried, which does not exist today.
+
+### And the coverage that is still missing
+
+- **Mesa, and a hybrid GPU.** Neither machine has either. Every Vulkan number in this document is
+  one vendor's driver.
+- **Synchronisation validation has never run.** The semaphore path rests on Skia's read being
+  ordered after our barrier by submission order alone, and nothing has tested that assumption —
+  see the validation section of `HDR-LINUX-VERIFY.md`. A hazard there would mean the central
+  assumption is wrong, and it would apply to the present transition too.
+
+### The recommendation
+
+**Keep `HULTUI_RENDERER` defaulting to GL. Turn Vulkan on per app, where HDR is the point** — Reel
+and Aperture — and leave it off for everything else.
+
+This is not a holding position waiting for better numbers; the numbers are already good enough. It
+waits on three specific things:
+
+1. The resize stretch, which is a visible defect and needs the present-mode experiment above.
+2. Start-up, where +120 ms is charged to apps that get nothing back for it. The double swapchain
+   build at start-up is the obvious first place to look.
+3. The synchronisation-validation run, plus Mesa and a hybrid GPU.
+
+**GL is not going away regardless.** `HultUI.WinForms` builds `SkiaGLRenderSurface` directly and
+never reads `HULTUI_RENDERER`, so hosted controls are GL-only and the path has to keep working
+whatever the default becomes. Flipping the default would add a second supported renderer, not
+replace one — which is an argument for flipping it only once there is a reason every app benefits
+from, and HDR is not yet that reason for an app with no video in it.
 
 ## Traps
 
