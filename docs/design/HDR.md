@@ -4,8 +4,10 @@
 untested on Mesa and on a hybrid GPU. HDR video is on by default on the Vulkan renderer,
 which is itself opt-in through `HULTUI_RENDERER=vulkan` — and
 [stays opt-in](#should-vulkan-be-the-default-renderer-measured-2026-09-27-not-yet): re-benchmarked
-on 2026-09-27, Vulkan now wins on video and loses on start-up, memory and resize, and a visible
-resize stretch blocks it outright.
+on 2026-09-27, Vulkan now wins on video and loses on start-up, memory and resize. The resize
+stretch that blocked it had two causes — a live-resize frame that could be skipped and then never
+drawn, now fixed, and the IMMEDIATE present mode, now MAILBOX by default. The memory and the
+present cost turned out to be the price of 16-bit colour rather than of Vulkan.
 **Date:** 2026-09-27.
 
 **Before changing anything here, read [Traps](#traps).** It is not a list of curiosities: most
@@ -565,12 +567,12 @@ Worth recording because the reasoning was sound and the measurement disagreed.
 | | GL | Vulkan | |
 |---|---|---|---|
 | start-up to first frame | **540 ms** | 661 ms | Minimal, warm, medians of 4 |
-| two windows, working set | **94 MB** | 148 MB | private 91 vs 185 MB; handles 444 vs 838 |
-| resize storm, CPU | **346 ms/s** | 524 ms/s | 120 resizes; GL 132–375, Vulkan 359–546 |
+| two windows, private memory | **82 MB** | 132 MB | but 89 MB on an 8-bit swapchain — see below |
+| resize storm, CPU | **90–123 ms/s** | 789–804 ms/s | 120 resizes, MAILBOX default, after the throttle fix |
 | select row | **0.51 ms** | 0.91 ms | |
 | swap rows | **0.80 ms** | 1.18 ms | |
 | remove row | **1.68 ms** | 2.21 ms | |
-| present pass | **0.1 ms** | 0.3–0.5 ms | the whole per-frame delta |
+| present pass | **0.10 ms** | 0.30 ms | 0.20 without the scRGB offscreen |
 
 **The per-frame delta is present, and only present.** Render is identical to two decimals at both
 1,000 and 10,000 elements; the extra 0.2 to 0.4 ms is in handing the image to the presentation
@@ -579,39 +581,109 @@ so it lands precisely on the cheap interaction frames a UI spends most of its li
 absolute terms 0.4 ms is far below anything a person can see, which is why this is a reason for
 caution rather than a blocker.
 
+**The resize figure is the MAILBOX default's**, and it is worse than the IMMEDIATE number this
+section first recorded (524 ms/s). That is a deliberate trade for correctness — see the two
+sections below, which is also where the memory and the present cost stop being Vulkan's fault.
+
 **Start-up is the one a user would notice.** +120 ms on every launch, consistent to within 5 ms
 across runs. Both renderers pay a driver load (GL's ~153 ms hides inside "platform window ready",
 Vulkan's ~215 ms in instance and device creation), but Vulkan's **first frame** costs 149 ms
 against GL's 56, and it builds the swapchain **twice** during start-up because the window is
 created at one size and scaled to another. There is probably something to reclaim here.
 
-### The blocker: resize stretches before it redraws
+### The resize stretch: a frame that was never drawn, plus a present mode that hid it badly
 
-**Reported by eye, and no capture would have shown it.** On the Vulkan renderer a window being
-dragged by its edge visibly *stretches* its old contents to the new size and then snaps to a
-correct frame. GL does not. It is the single most common thing anyone does to a window and it
-currently looks broken, which by itself decides the question.
+**Reported by eye, and no capture of ours would have shown it** — a swapchain readback proves the
+image, and the image was always correct. The question was what the *screen* showed, so the answer
+had to come from a screen capture, which is the one job that tool is right for.
 
-What it is **not** — each of these was measured and ruled out:
+**Made measurable.** A window draws a white bar of a fixed device width (200 DIP at scale 1.5 =
+300 px). Resize the window and capture the screen straight away: a bar wider than 300 means the
+compositor scaled a smaller swapchain's image up into the bigger window. A merely *stale* frame
+keeps the bar at 300 — so this separates stale from stretched, which was the whole difficulty.
+It came back at **402 px**, on a resize that grew the window 900 to 1200: a ratio of 1.333, and
+300 x 1.333 = 400. Every stretched sample measured 402 and never anything between.
 
-- **Not dropped frames.** `ResizeThrottleMs = 16` looked like the obvious culprit, since
-  `RenderLiveResizeFrame` returns without drawing when a resize arrives inside the window and
-  `UpdateSize` has already rebuilt the swapchain at the new size by then. But counting frames
-  that really drew, against a known number of resizes, gives **78 of 60 on GL and 78 of 60 on
-  Vulkan** — more frames than resizes on both, because one `SetWindowPos` raises several SDL
-  events. Identical. Setting the throttle to 0 raises both to 179. The throttle is not it.
-- **Not the cost of rebuilding.** Each swapchain rebuild during a storm is **0.9–1.0 ms**, and
-  there is one per resize. Too cheap to see.
-- **Not a leak or a drift.** Vulkan's resize CPU climbs within a sequence (407 → 524 → 546) but
-  resets to 359 on the next, so nothing accumulates across process launches.
+**There are two causes, and the first one is a plain bug.**
 
-What is left is **presentation**, which fits the evidence that frame counts are equal and only
-Vulkan stretches: a Vulkan swapchain on Windows is DXGI underneath, and the surface is presented
-`Immediate` (`ChoosePresentMode` prefers it, to match the GL path's `SetSwapInterval(0)` because
-`Application` does its own pacing). A stretch of the last presented image to the new window size,
-until a new present lands, is the behaviour that description predicts. **This is the leading
-explanation and it is not yet proven** — the next step is a present-mode override so `Fifo` and
-`Mailbox` can be tried, which does not exist today.
+**1. A live-resize frame could be skipped and then never drawn.** `RenderLiveResizeFrame` is
+invoked from an SDL event watch, which is the only code that runs while Win32 owns the thread in
+`WM_ENTERSIZEMOVE`. It was throttled to one frame per 16 ms. But a throttle is only safe where
+something comes round again — and here nothing does until the drag pauses, unlike
+`ProcessPendingResizes`, which leaves `ResizePending` set so a later pass picks it up. The OS has
+already resized the window, so every skipped frame is a stretched composite. **The throttle is
+gone from that path** and stays on the main-loop one. It costs about 36% more resize frames during
+a drag, which is the right trade: those are the frames being looked at.
+
+**2. IMMEDIATE still stretches without it, and MAILBOX does not.** After the fix, across 40
+resizes a pass: GL 0, 0, 0; MAILBOX 0, 0, 0; **IMMEDIATE 0, 2, 2**. So the mode is a real second
+cause and not a workaround for the first. The default is now MAILBOX, overridable with
+`HULTUI_VULKAN_PRESENT`. IMMEDIATE had been preferred to mirror the GL path's
+`SetSwapInterval(0)`, reasoning that `Application` paces itself and FIFO would override that from
+underneath. That was right about FIFO and wrong to stop there: MAILBOX lets the renderer run ahead
+exactly as IMMEDIATE does, and the method's own doc comment had already said so.
+
+| | stretched, after the fix | resize CPU | UI present | 4K HDR video |
+|---|---|---|---|---|
+| GL | 0 of 120 | 90–123 ms/s | 0.10 ms | 55 ms/s |
+| Vulkan, IMMEDIATE | **4 of 120** | 275–366 ms/s | 0.30 ms | 63 ms/s |
+| Vulkan, MAILBOX | **0 of 120** | 789–804 ms/s | 0.30 ms | **54 ms/s** |
+| Vulkan, FIFO | not established | 297–390 ms/s | **0.20 ms** | 78 ms/s |
+
+**What MAILBOX costs is resize CPU, about 2.4x IMMEDIATE.** That is not frames we choose to draw:
+raising the resize throttle halved the frames (293 to 152) and left the CPU unchanged (832 to
+860), so roughly 500 ms/s of it is driver-side and pacing will not reach it. It is the right trade
+anyway — a drag is transient and a stretch is visible — but it is a trade, and
+`HULTUI_VULKAN_PRESENT=immediate` is there for anyone who would rather have the CPU. FIFO is the
+mirror image: cheapest present pass, but 78 ms/s on video against MAILBOX's 54, because it paces
+the loop from underneath, and continuous playback lasts longer than a drag.
+
+**Two of these conclusions were wrong first, and the way they were wrong is the useful part.**
+
+- **"The throttle is ruled out."** It was rejected on the grounds that frames-per-resize came back
+  at 78 of 60 on *both* renderers — identical, and above 100%. But one `SetWindowPos` raises
+  several SDL events, so a count over 100% is perfectly compatible with the *last* event of a size
+  change being the one thrown away, which is exactly the frame that matters. **A ratio above 100%
+  says nothing about whether the right frame was drawn.** The throttle was the larger of the two
+  causes.
+- **"MAILBOX never stretches."** Claimed off 174 samples at the old throttle, where it read 0.
+  It stretches 1 in 40 there. The first number was undersampling a race, not immunity — and the
+  honest reading of a rare event measured once is that the rate is unknown, not zero.
+
+Neither was found by thinking harder about the first measurement. Both were found by testing a
+combination the first measurement had not covered — throttle 0, which no run had tried.
+
+### The memory and the UI cost are the price of 16-bit colour, not of Vulkan
+
+Both of the remaining gaps were charged to "Vulkan" and neither belongs there. Three
+configurations of the same renderer separate them:
+
+| | UI present pass | two windows, private | handles |
+|---|---|---|---|
+| GL | 0.10 ms | 82 MB | 446 |
+| Vulkan, 8-bit sRGB (`HULTUI_VULKAN_F16=0`) | 0.20 ms | **89 MB** | 519 |
+| Vulkan, scRGB F16 + offscreen | 0.40 ms | 132 MB | 655 |
+
+**With an 8-bit swapchain Vulkan costs 7 MB more than GL, not 50.** The rest is what 16 bits a
+channel actually weighs: three F16 swapchain images at 1560x1140 are 14 MB each against an 8-bit
+backbuffer's 7 MB, and on top of that `OffscreenFor` allocates a **full-size F16 offscreen** per
+window — because this display reports 240-nit SDR white, so the white scale is 3.0 and the frame
+has to be drawn at 0..1 and scaled afterwards.
+
+That offscreen is also **half the present-pass cost**: every frame flushes it, snapshots it and
+blits it to the swapchain through a shader. 0.40 ms with it, 0.20 without, against GL's 0.10.
+
+So the honest accounting is three layers, not one:
+
+1. **0.10 ms, GL's own present.** The floor.
+2. **+0.10 ms, Vulkan's present machinery** — an extra submit, the `TransitionToPresent` command
+   buffer, and a `GRBackendRenderTarget` plus `SKSurface` rebuilt every frame because caching one
+   over a swapchain image is the stale-layout trap. This is the only part that is Vulkan-versus-GL,
+   and it is the smallest.
+3. **+0.20 ms and ~43 MB, the scRGB offscreen.** The largest part, and the most avoidable: it
+   exists only to apply the SDR white scale and a 2.2 decode as a separate full-screen pass.
+   Folding that into the framework's own drawing would remove both, and is the phase-2 work of
+   giving every `Color` a colour space rather than a renderer change.
 
 ### And the coverage that is still missing
 
@@ -627,13 +699,17 @@ explanation and it is not yet proven** — the next step is a present-mode overr
 **Keep `HULTUI_RENDERER` defaulting to GL. Turn Vulkan on per app, where HDR is the point** — Reel
 and Aperture — and leave it off for everything else.
 
-This is not a holding position waiting for better numbers; the numbers are already good enough. It
-waits on three specific things:
+The blocker that decided this is now fixed, so the recommendation is no longer about a defect. It
+waits on three costs that apps with no video in them would pay for nothing:
 
-1. The resize stretch, which is a visible defect and needs the present-mode experiment above.
-2. Start-up, where +120 ms is charged to apps that get nothing back for it. The double swapchain
-   build at start-up is the obvious first place to look.
-3. The synchronisation-validation run, plus Mesa and a hybrid GPU.
+1. **Start-up, +120 ms.** The double swapchain build during start-up is the first place to look,
+   and the first frame itself costs 149 ms against GL's 56.
+2. **Resize CPU, roughly 800 against GL's 100.** About 500 of that is driver-side under MAILBOX
+   and will not yield to pacing; whether it yields to anything is unknown. IMMEDIATE is a third of
+   it and stretches 1 resize frame in 30.
+3. **The scRGB offscreen**, which is most of the memory and half the present cost, and which the
+   framework could stop needing — see above. Plus the synchronisation-validation run, Mesa and a
+   hybrid GPU.
 
 **GL is not going away regardless.** `HultUI.WinForms` builds `SkiaGLRenderSurface` directly and
 never reads `HULTUI_RENDERER`, so hosted controls are GL-only and the path has to keep working

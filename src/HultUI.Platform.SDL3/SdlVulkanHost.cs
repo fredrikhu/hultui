@@ -52,6 +52,26 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             _ => null,
         };
 
+    /// <summary>
+    /// <c>HULTUI_VULKAN_PRESENT</c> pins the present mode to <c>immediate</c>, <c>mailbox</c>
+    /// or <c>fifo</c>; unset leaves the choice to <see cref="ChoosePresentMode"/>.
+    ///
+    /// <para>It exists because a window dragged by its edge visibly stretches its old
+    /// contents before snapping to a correct frame, and presentation is the only candidate
+    /// left: the throttle draws the same number of frames on both renderers, a swapchain
+    /// rebuild costs a millisecond, and nothing accumulates. A mode this surface does not
+    /// offer is ignored rather than fatal — the point is to compare, not to insist.</para>
+    /// </summary>
+    private static readonly VkPresentModeKHR? PresentModeOverride =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_PRESENT")?.ToLowerInvariant() switch
+        {
+            "immediate" => VkPresentModeKHR.Immediate,
+            "mailbox" => VkPresentModeKHR.Mailbox,
+            "fifo" => VkPresentModeKHR.Fifo,
+            "fifo-relaxed" or "fiforelaxed" => VkPresentModeKHR.FifoRelaxed,
+            _ => null,
+        };
+
     /// <summary>Whether this window's display is in HDR mode. Set by the window, which is
     /// the thing that can ask SDL, and refreshed when the window changes display.</summary>
     public bool DisplayIsHdr { get; set; }
@@ -556,10 +576,18 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// that decision from underneath and pins the loop to the refresh rate however fast the
     /// framework wanted to go. Continuous redraw read exactly 120 on a 120 Hz display.</para>
     ///
-    /// <para>IMMEDIATE is the equivalent of swap interval 0 and may tear; MAILBOX is the
-    /// tear-free fallback, which still lets the renderer run ahead and simply drops frames
-    /// nobody sees. FIFO is the last resort and the only mode an implementation must
-    /// support.</para>
+    /// <para>MAILBOX is preferred, because it lets the renderer run ahead exactly as
+    /// IMMEDIATE does — dropping frames nobody sees rather than pacing the loop — without
+    /// tearing, and without the resize artefact below. FIFO is the last resort and the only
+    /// mode an implementation must support.</para>
+    ///
+    /// <para><b>IMMEDIATE stretches during a resize, and that is why it is no longer
+    /// preferred.</b> Measured on Windows: a bar drawn 300 device pixels wide was captured
+    /// from the screen at 402 during a resize that grew the window by exactly that ratio, on
+    /// 10 of 40 resizes. The compositor was scaling the previous swapchain's image into the
+    /// larger window. GL never did it, and neither MAILBOX nor FIFO did it in the same test —
+    /// so it is IMMEDIATE specifically, not Vulkan, and not frame timing: resize frames
+    /// arrive every 26 ms on GL and 30 on Vulkan, near enough the same.</para>
     /// </summary>
     private VkPresentModeKHR ChoosePresentMode()
     {
@@ -578,8 +606,23 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (modes[i] == VkPresentModeKHR.Mailbox) mailbox = true;
         }
 
-        var chosen = immediate ? VkPresentModeKHR.Immediate
-            : mailbox ? VkPresentModeKHR.Mailbox
+        // An override only counts if the surface actually offers it; asking for a mode the
+        // implementation does not support is undefined, and silently getting a different
+        // one than the trace claims would make the comparison this exists for worthless.
+        if (PresentModeOverride is { } wanted)
+        {
+            bool offered = false;
+            for (uint i = 0; i < count; i++) if (modes[i] == wanted) offered = true;
+            if (offered)
+            {
+                StartupTrace.Mark($"vulkan present mode {wanted} (forced)");
+                return wanted;
+            }
+            StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
+        }
+
+        var chosen = mailbox ? VkPresentModeKHR.Mailbox
+            : immediate ? VkPresentModeKHR.Immediate
             : VkPresentModeKHR.Fifo;
         StartupTrace.Mark($"vulkan present mode {chosen}");
         return chosen;

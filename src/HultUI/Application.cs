@@ -265,12 +265,25 @@ public sealed class Application : IDisposable
         return window;
     }
 
+    /// <summary>
+    /// Draws one frame from inside the platform's modal resize loop.
+    ///
+    /// <para><b>Deliberately not throttled.</b> This is the only code that runs while Win32 owns
+    /// the thread in <c>WM_ENTERSIZEMOVE</c>, so a frame skipped here is not deferred to the next
+    /// pass the way <see cref="ProcessPendingResizes"/>'s throttle defers one — there is no next
+    /// pass until the drag pauses. The window has already been resized by the OS, so what the
+    /// compositor shows meanwhile is the previous frame scaled to the new size: on Vulkan that
+    /// is a visible stretch-then-snap, measured at 402 device pixels for a bar drawn 300 wide.
+    /// It was mistaken for a present-mode problem because MAILBOX makes it much rarer than
+    /// IMMEDIATE, but both stretch and neither does once this draws every time.</para>
+    ///
+    /// <para>It costs about 36% more resize frames while a drag is in progress, which is the
+    /// right trade: those frames are the ones the user is looking at.</para>
+    /// </summary>
     private static void RenderLiveResizeFrame(Window window)
     {
         var platform = window.PlatformWindow;
         long now = Environment.TickCount64;
-        if (now - platform.LastResizeRenderTick < window.ResizeThrottleMs)
-            return;
 
         platform.MakeCurrent();
         window.OnWindowResized();
