@@ -523,6 +523,14 @@ A future producer that ignores the request keeps writing encoded pixels and repo
 
 **Settled**, by looking — see below.
 
+**And apps can now ask for Vulkan in code**, which they could not before: `HULTUI_RENDERER` was
+the only way in, so nothing built on this framework could *ship* HDR — only be launched with it by
+someone who knew the variable existed. `new Application(..., renderer: RendererKind.Vulkan)` is the
+API, the environment variable still overrides it in both directions, and a machine that cannot
+give a Vulkan window falls back to OpenGL with a line on stderr rather than failing to start.
+Verified across the matrix, and **Reel and Aperture both run on the Vulkan renderer** — the first
+time either app has, since everything before this was measured on samples.
+
 **And then the original question, now answered.** A white transport bar at scRGB 1.0 next to a
 1000-nit highlight looks grey; at the highlight's level it is blinding. Everything the overlay
 draws needs a deliberate luminance, and that is a design decision per app rather than a renderer

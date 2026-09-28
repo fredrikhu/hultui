@@ -5,6 +5,7 @@ using HultUI.Core.Components;
 using HultUI.Core.DevTools;
 using HultUI.Core.Elements;
 using HultUI.Core.Platform;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Core.Threading;
 using HultUI.DevTools;
@@ -183,9 +184,15 @@ public sealed class Application : IDisposable
     /// Creates an application with a primary window on the default (SDL3)
     /// windowing platform.
     /// </summary>
+    /// <param name="renderer">
+    /// Which graphics API to draw through. <see cref="RendererKind.Vulkan"/> is what an app
+    /// wanting HDR output asks for — it is the only renderer that can present it — and costs
+    /// more at start-up and through a resize, both measured in <c>docs/design/HDR.md</c>.
+    /// <c>HULTUI_RENDERER</c> overrides this in both directions.
+    /// </param>
     public Application(string title = "HultUI Application", int width = 800, int height = 600,
-        WindowStyle style = WindowStyle.Default)
-        : this(new SdlWindowingPlatform(), title, width, height, style)
+        WindowStyle style = WindowStyle.Default, RendererKind renderer = RendererKind.Default)
+        : this(new SdlWindowingPlatform(renderer), title, width, height, style)
     {
     }
 

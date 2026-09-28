@@ -3,6 +3,7 @@ using Aperture.Core;
 using Aperture.Theme;
 using HultUI;
 using HultUI.Core.Platform;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Media;
 using HultUI.Media.Mpv;
@@ -29,9 +30,16 @@ internal static class ApertureProgram
             return;
         }
 
-        // The Application ctor creates the SDL window + GL context + Skia GRContext
+        // The Application ctor creates the SDL window + Vulkan device + Skia GRContext
         // synchronously, on this thread.
-        using var app = new Application("Aperture", 1440, 900, WindowStyle.Borderless);
+        //
+        // Vulkan, because Aperture plays HDR video and only Vulkan can present it — see
+        // docs/design/HDR.md. It costs roughly 120 ms more to the first frame and more CPU
+        // through a resize, which the library browser pays without using; the trade is accepted
+        // for the same reason as Reel's, that the point of the app is on the other side of it.
+        // HULTUI_RENDERER=gl goes back if a machine needs it.
+        using var app = new Application("Aperture", 1440, 900, WindowStyle.Borderless,
+            renderer: RendererKind.Vulkan);
         app.Theme = Halide.ToHultTheme();
 
 #if !DEBUG

@@ -1,4 +1,5 @@
 using HultUI.Core.Platform;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using SDL;
 using static SDL.SDL3;
@@ -22,8 +23,23 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
     // finite, and every push also runs the event watchers on the pushing thread.
     private int _wakePending;
 
-    public SdlWindowingPlatform()
+    public SdlWindowingPlatform() : this(RendererKind.Default)
     {
+    }
+
+    /// <summary>
+    /// Creates the platform, asking for a graphics API.
+    ///
+    /// <para>The request is recorded now rather than passed to each window, because it is
+    /// process-wide: the GL driver preload, the shared text pipeline and the video interop's
+    /// hidden GL context all assume one backend. <c>HULTUI_RENDERER</c> still overrides it in
+    /// both directions — it is how the design docs' commands select a renderer, and how a
+    /// machine where Vulkan misbehaves is got working again without a rebuild.</para>
+    /// </summary>
+    public SdlWindowingPlatform(RendererKind renderer)
+    {
+        SDL3Window.RequestRenderer(renderer);
+
         // No SDL_Init needed: registering a type only claims a number.
         if (_wakeEventType == 0)
             _wakeEventType = SDL_RegisterEvents(1);

@@ -45,10 +45,68 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private SkiaVulkanRenderSurface? _vulkanSurface;
     private SdlVulkanHost? _vulkanHost;
 
-    /// <summary>Whether this process was asked for the Vulkan renderer. Read once: a window
-    /// that changed backend halfway through would have nothing to draw into.</summary>
-    internal static readonly bool UseVulkan =
-        Environment.GetEnvironmentVariable("HULTUI_RENDERER") is "vulkan";
+    /// <summary>
+    /// What the app asked for, if anything. Set by <c>Application</c> before its first window
+    /// exists; null means nothing was asked and the default stands.
+    ///
+    /// <para>Process-wide rather than per-window on purpose. Two windows on different backends
+    /// is untested and buys nothing: the GL driver preload, the shared text pipeline and the
+    /// interop's hidden GL context are all process-level, and a mixed process would pay for
+    /// both stacks.</para>
+    /// </summary>
+    private static RendererKind? _requestedRenderer;
+
+    /// <summary>
+    /// <c>HULTUI_RENDERER</c>, when it names something. An override in both directions —
+    /// <c>vulkan</c> turns it on for an app that never asked, anything else turns it off for one
+    /// that did — because it is how every command in the design docs selects a renderer, and how
+    /// a machine where Vulkan misbehaves is got working again without a rebuild.
+    /// </summary>
+    private static RendererKind? EnvironmentRenderer =>
+        Environment.GetEnvironmentVariable("HULTUI_RENDERER") switch
+        {
+            null or "" => null,
+            "vulkan" => RendererKind.Vulkan,
+            _ => RendererKind.OpenGL,
+        };
+
+    /// <summary>
+    /// Records what the app asked for. Called before the first window is created; a later call
+    /// that disagrees is ignored, because a window already exists on a backend that cannot be
+    /// changed under it.
+    /// </summary>
+    internal static void RequestRenderer(RendererKind kind)
+    {
+        if (!_anyWindowCreated)
+        {
+            // Nothing is drawing yet, so a second application in the same process — which the
+            // framework allows once the first is disposed — may still have its say.
+            _requestedRenderer = kind;
+            return;
+        }
+
+        // A window exists on a backend that cannot be changed under it. Saying so beats
+        // returning quietly: an app that asked for Vulkan and got GL would otherwise look like
+        // a renderer bug rather than an ordering one.
+        if (kind != RendererKind.Default && kind != (_requestedRenderer ?? RendererKind.Default))
+            Console.Error.WriteLine(
+                $"[HultUI] {kind} was asked for after a window already exists on " +
+                $"{_requestedRenderer ?? RendererKind.Default}; the renderer is chosen once per " +
+                "process and this request is ignored.");
+    }
+
+    private static bool _anyWindowCreated;
+
+    /// <summary>What this window was actually created with, latched at construction. Every path
+    /// after the window exists asks this rather than the process-wide preference — including
+    /// after a fallback, which is the one thing that can change it and only before the window
+    /// exists.</summary>
+    private bool _useVulkan;
+
+    /// <summary>Whether windows in this process draw through Vulkan. The environment wins over
+    /// the app, and the app over the default.</summary>
+    internal static bool UseVulkan =>
+        (EnvironmentRenderer ?? _requestedRenderer ?? RendererKind.Default) == RendererKind.Vulkan;
     private bool _disposed;
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
@@ -277,7 +335,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // the OS would composite that garbage (a black/white flash), made worse on
         // Windows by the custom frame's SWP_FRAMECHANGED repaint below. The app
         // loop calls Show() right after the first frame is presented instead.
-        var flags = (UseVulkan ? SDL_WindowFlags.SDL_WINDOW_VULKAN : SDL_WindowFlags.SDL_WINDOW_OPENGL)
+        // Latched here, not read again: the rest of this constructor and every frame afterwards
+        // must agree with the flag the window was actually created with. A process that somehow
+        // changed its mind between the two would build a Vulkan surface on a GL window.
+        _useVulkan = UseVulkan;
+        _anyWindowCreated = true;
+
+        var flags = (_useVulkan ? SDL_WindowFlags.SDL_WINDOW_VULKAN : SDL_WindowFlags.SDL_WINDOW_OPENGL)
             | SDL_WindowFlags.SDL_WINDOW_RESIZABLE
             | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY
             | SDL_WindowFlags.SDL_WINDOW_HIDDEN;
@@ -301,6 +365,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         }
         // Without a preload this covers the lazy GL driver load too — SDL does it here.
         StartupTrace.Mark("SDL_CreateWindow");
+
+        // A machine with no usable Vulkan must not take the app down with it. An app that asks
+        // for Vulkan is stating a preference — it wants HDR — and the right answer to "this
+        // machine cannot" is an SDR window and a line saying so, not a crash on startup.
+        //
+        // Only for a request the APP made. When HULTUI_RENDERER asked, the failure is the
+        // answer: that variable is how the design docs test a renderer, and silently handing
+        // back the other one would make every such run a false negative.
+        if (_window == null && _useVulkan && EnvironmentRenderer is null)
+        {
+            Console.Error.WriteLine(
+                $"[HultUI] Vulkan window creation failed ({GetError()}); falling back to OpenGL. " +
+                "HDR output is not available on this machine.");
+            _useVulkan = false;
+            flags = (flags & ~SDL_WindowFlags.SDL_WINDOW_VULKAN) | SDL_WindowFlags.SDL_WINDOW_OPENGL;
+            fixed (byte* titlePtr = titleBytes)
+            {
+                _window = SDL_CreateWindow(titlePtr, width, height, flags);
+            }
+            StartupTrace.Mark("SDL_CreateWindow (fell back to GL)");
+        }
 
         if (_window == null)
             throw new InvalidOperationException($"SDL_CreateWindow failed: {GetError()}");
@@ -328,7 +413,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             UpdateSize();
         }
 
-        if (UseVulkan)
+        if (_useVulkan)
         {
             UpdateSize();
             // Asked before the device exists, because the answer decides the surface format.
