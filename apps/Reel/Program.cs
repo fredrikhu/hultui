@@ -73,7 +73,12 @@ internal static class ReelProgram
         // resize, both measured there — and a library view showing no video pays that too. For a
         // film player that is the right way round: the cost is once at launch, the benefit is
         // every frame of every film. HULTUI_RENDERER=gl goes back if a machine needs it.
-        using var app = new Application("Reel", 1280, 760, renderer: RendererKind.Vulkan);
+        //
+        // Display-colour events too, so that switching HDR or dragging the SDR brightness slider
+        // reaches the picture at once instead of on the next 100 ms poll. About 9 ms of start-up,
+        // and HULTUI_DISPLAY_INFORMATION=0 turns it off.
+        using var app = new Application("Reel", 1280, 760, renderer: RendererKind.Vulkan,
+            displayColorEvents: true);
         app.Theme = Emulsion.ToHultTheme();
 
 #if !DEBUG

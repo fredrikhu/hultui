@@ -92,6 +92,27 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
     private static bool _anyWindowCreated;
 
+    /// <summary>What the app asked for about display-colour events; see
+    /// <see cref="UseDisplayColorEvents"/>. Process-wide like the renderer, and read when each
+    /// window is created.</summary>
+    private static bool _requestedDisplayColorEvents;
+
+    /// <summary>Records whether the app wants display-colour events. Called before the first
+    /// window, alongside <see cref="RequestRenderer"/>.</summary>
+    internal static void RequestDisplayColorEvents(bool enabled) => _requestedDisplayColorEvents = enabled;
+
+    /// <summary>
+    /// Whether a Vulkan window subscribes to WinRT's <c>AdvancedColorInfoChanged</c> (Windows 11
+    /// 22H2 and later) instead of polling the display configuration every 100 ms. The event
+    /// follows a dragged SDR brightness slider immediately where the poll trails it; it is off
+    /// by default because it is hand-rolled COM hooked into the window's message loop, which an
+    /// app without HDR content has no use for. <c>HULTUI_DISPLAY_INFORMATION</c> overrides the
+    /// app in either direction.
+    /// </summary>
+    private static bool UseDisplayColorEvents =>
+        RendererSelection.ResolveDisplayColorEvents(
+            Environment.GetEnvironmentVariable("HULTUI_DISPLAY_INFORMATION"), _requestedDisplayColorEvents);
+
     /// <summary>What this window was actually created with, latched at construction. Every path
     /// after the window exists asks this rather than the process-wide preference — including
     /// after a fallback, which is the one thing that can change it and only before the window
@@ -528,12 +549,25 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         try
         {
             UpdateSize();
+            // Before the display is asked anything, so the first answer comes from the best source.
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
+            {
+                if (UseDisplayColorEvents)
+                    _displayInformation = WindowsDisplayInformation.TryCreate(GetWin32Hwnd(),
+                        () => _displayColorDirty = true);
+                else
+                    StartupTrace.Mark("display colour polled; HULTUI_DISPLAY_INFORMATION=1 or the app turns on events");
+            }
             // Asked before the device exists, because the answer decides the surface format.
-            bool hdr = IsHdrDisplay;
-            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight, hdr);
+            var displayColor = ReadDisplayColor();
+            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight, displayColor.Hdr);
             // Only meaningful for an scRGB surface; the host ignores it otherwise.
-            _vulkanHost.SdrWhiteScale = WhiteScale();
+            _vulkanHost.SdrWhiteScale = displayColor.WhiteScale;
             _vulkanHost.SdrIsGamma22 = SdrIsGamma22();
+            // Here as well as on display events: a window that never gets one before its first
+            // video would otherwise have mpv tone-map to an assumed 1000 nits.
+            _vulkanHost.DisplayPeakNits = displayColor.PeakNits;
+            _appliedDisplayColor = displayColor;
             StartupTrace.Mark("vulkan device");
             _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, text);
             StartupTrace.Mark("skia surface");
@@ -545,6 +579,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _vulkanSurface = null;
             _vulkanHost?.Dispose();
             _vulkanHost = null;
+            // Bound to this window, which the GL fallback is about to destroy.
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)) _displayInformation?.Dispose();
+            _displayInformation = null;
             failure = ex;
             return false;
         }
@@ -646,16 +683,23 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                         focusWin.ActivatedPending = true;
                     break;
 
-                case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
-                case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_CHANGED:
-                    // A different monitor can mean a different HDR state and a different SDR
-                    // white level, and both decide what the swapchain should be.
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
+                    // What decides the swapchain's format and white scale: a different monitor,
+                    // or the same monitor with HDR switched or its SDR brightness moved. The
+                    // second never changes the display, so without its own event an app open
+                    // across Win+Alt+B kept an scRGB swapchain at white scale 3 on an SDR screen.
+                    //
+                    // Only these two. A resize changes neither, and on Windows each refresh is
+                    // several display-configuration queries — which used to run on every
+                    // resize event, on the path already measured as Vulkan's costliest.
                     if (_registry.TryGetValue(evt.window.windowID, out var movedWin))
                         movedWin.RefreshDisplayColor();
                     goto case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN;
 
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_RESIZED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                case (uint)SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_SHOWN:
                 case (uint)SDL_EventType.SDL_EVENT_WINDOW_EXPOSED:
                     // After startup, monitor moves, or the modal resize loop,
@@ -676,6 +720,8 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
                     break;
             }
         }
+
+        if (OperatingSystem.IsWindows()) PollDisplayColor();
         return !quit;
     }
 
@@ -917,14 +963,24 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <para>Not the same question as "can the surface do HDR". A Vulkan surface lists every
     /// format and colour space the driver supports whatever the monitor is set to — the list
     /// is identical with HDR on and off, which was checked rather than assumed — so
-    /// enumeration cannot answer this and phase 3 of docs/design/HDR.md needs an answer. SDL
-    /// asks the compositor, which is the only thing that knows.</para>
+    /// enumeration cannot answer this and phase 3 of docs/design/HDR.md needs an answer. The
+    /// compositor is the only thing that knows.</para>
+    ///
+    /// <para><b>On Windows it is asked directly, not through SDL.</b> SDL calls a display HDR
+    /// when its headroom exceeds 1, so an HDR monitor whose SDR brightness slider sits above
+    /// its peak (480 nits on a 455-nit panel) read as SDR and got an 8-bit swapchain; and SDL
+    /// kept saying HDR for a monitor that had just been switched out of it. See
+    /// <see cref="WindowsDisplayColor.QueryHdr"/>. Elsewhere SDL's answer stands.</para>
     /// </summary>
     public bool IsHdrDisplay
     {
         get
         {
             if (_window == null) return false;
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621) && _displayInformation?.Read() is { } info)
+                return info.Hdr;
+            if (OperatingSystem.IsWindows() && WindowsDisplayColor.QueryHdr(GetWin32Hwnd()) is { } windows)
+                return windows;
             var display = SDL_GetDisplayForWindow(_window);
             if ((uint)display == 0) return false;
             var properties = SDL_GetDisplayProperties(display);
@@ -941,18 +997,72 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// this. See <see cref="WaylandScRgbReferenceWhite"/>.</para>
     /// </summary>
     public float SdrWhiteLevelNits => OperatingSystem.IsWindows()
-        ? WindowsSdrWhiteLevel.Query(GetWin32Hwnd())
-        : WindowsSdrWhiteLevel.ScRgbReferenceNits;
+        ? WindowsDisplayColor.Query(GetWin32Hwnd())
+        : ScRgbReferenceNits;
+
+    /// <summary>scRGB's 1.0, in nits.</summary>
+    private const float ScRgbReferenceNits = 80f;
+
+    /// <summary>What the Vulkan host was last told, so a refresh that finds nothing new does
+    /// nothing — it runs ten times a second on Windows.</summary>
+    private (bool Hdr, float WhiteScale, float PeakNits)? _appliedDisplayColor;
 
     /// <summary>
-    /// Re-asks the display what it is, and hands the answer to the Vulkan host. Called when
-    /// the window changes monitor; a no-op on the GL path, which has no format to change.
+    /// Re-asks the display what it is and, when the answer changed, hands it to the Vulkan host
+    /// and redraws. A no-op on the GL path, which has no format to change.
+    ///
+    /// <para>Called on a monitor change and on SDL's HDR event, and on Windows also whenever
+    /// the display's colour information changes — because nothing SDL sees announces the
+    /// commonest change of all. Dragging the SDR brightness slider sends no window message
+    /// whatever (a subclassed window logging every sent message saw <c>WM_DISPLAYCHANGE</c> for
+    /// Win+Alt+B and nothing for the slider), so SDR windows beside this one followed it live
+    /// and this one kept the old brightness until it was restarted.</para>
+    ///
+    /// <para>On Windows 11 22H2 and later the trigger is WinRT's
+    /// <c>AdvancedColorInfoChanged</c>, which fires within milliseconds of each step of a drag —
+    /// see <see cref="WindowsDisplayInformation"/>. Elsewhere, and wherever that cannot be had,
+    /// the display configuration is polled every 100 ms: a poll costs about 12 µs (median of
+    /// 300; 69 µs at worst), and the loop wakes every 16 ms when idle anyway. A poll a second
+    /// trailed a dragged slider visibly; 100 ms still did, a little.</para>
     /// </summary>
     internal void RefreshDisplayColor()
     {
         if (_vulkanHost is not { } host) return;
-        host.DisplayPeakNits = DisplayPeakNits;
-        host.DisplayChanged(IsHdrDisplay, WhiteScale());
+
+        var now = ReadDisplayColor();
+        if (_appliedDisplayColor == now) return;
+        _appliedDisplayColor = now;
+
+        host.DisplayPeakNits = now.PeakNits;
+        host.DisplayChanged(now.Hdr, now.WhiteScale);
+        // Nothing else redraws an idle window, and a change found by the poll arrives with no
+        // event to cause one. The flag is the platform's way to ask for a relayout and paint.
+        ResizePending = true;
+    }
+
+    private static long _nextDisplayColorPoll;
+    private const int DisplayColorPollMs = 100;
+
+    /// <summary>Applies what the <c>DisplayInformation</c> event flagged, and polls the windows
+    /// that have no such event — see <see cref="RefreshDisplayColor"/>. Windows only: Wayland's
+    /// white is a protocol constant.</summary>
+    private static void PollDisplayColor()
+    {
+        // Event-driven windows first: every pass, because the event has already said something
+        // changed and the flag only makes a burst of them cost one refresh.
+        foreach (var window in _registry.Values)
+        {
+            if (!window._displayColorDirty) continue;
+            window._displayColorDirty = false;
+            window.RefreshDisplayColor();
+        }
+
+        long now = Environment.TickCount64;
+        if (now < _nextDisplayColorPoll) return;
+        _nextDisplayColorPoll = now + DisplayColorPollMs;
+        foreach (var window in _registry.Values)
+            if (window._displayInformation is null)
+                window.RefreshDisplayColor();
     }
 
     /// <summary>
@@ -979,55 +1089,100 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private const float WaylandScRgbReferenceWhite = 2.5375f;
 
     /// <summary>
-    /// What to multiply linear output by so 1.0 lands on the display's SDR white. Only ever
-    /// applied to an scRGB swapchain — the Vulkan surface ignores it for an sRGB one, where
-    /// the colour space already says what white is.
-    /// </summary>
-    /// <summary>
     /// What this display can show at its brightest, in nits, or 0 when it will not say.
     ///
     /// <para>SDL reports headroom as a multiple of SDR white rather than an absolute
-    /// luminance, which turns out to be the more useful of the two: multiplied by whatever
-    /// 1.0 already means here it gives an absolute peak on both platforms with no branch.
-    /// That is <see cref="WhiteScale"/> times scRGB's 80 — the display's own SDR white on
-    /// Windows, and the 203-nit protocol reference on Wayland, where SDL's
-    /// <c>SDR_white_level</c> reads a useless 1.0 but its headroom is real compositor
+    /// luminance, which turns out to be the more useful of the two: multiplied by what that
+    /// SDR white is on the scRGB scale it gives an absolute peak.</para>
+    ///
+    /// <para><b>Which SDR white is platform-specific.</b> On Windows it is SDL's own, because
+    /// headroom is SDL's peak over SDL's white and the two are one snapshot. SDL re-reads them
+    /// only on a display-configuration change, which the brightness slider is not, while this
+    /// window's white is polled — so mixing the two would turn a slider move from 240 to 480
+    /// nits into a peak of 910 on a 455-nit panel. On Wayland SDL's white reads a useless 1.0
+    /// and the 203-nit protocol reference is used instead; its headroom is real compositor
     /// data.</para>
     ///
     /// <para>Zero when the window is not on an HDR display or SDL has no number, and the
     /// caller then assumes rather than believes.</para>
     /// </summary>
-    public float DisplayPeakNits
+    public float DisplayPeakNits => PeakNitsFor(IsHdrDisplay);
+
+    private float PeakNitsFor(bool hdr)
     {
-        get
-        {
-            if (_window == null || !IsHdrDisplay) return 0f;
-            var props = SDL_GetWindowProperties(_window);
-            float headroom;
-            fixed (byte* name = SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT)
-                headroom = SDL_GetFloatProperty(props, name, 0f);
-            // A headroom of exactly 1 is a real answer, not a missing one: it says this
-            // display peaks at its own SDR white, which the Linux machine nearly does
-            // (1.0022, 456 nits over 455). Treating it as unknown would hand the producer
-            // the assumed 1000 instead — the one number guaranteed to be wrong here.
-            if (headroom <= 0f) return 0f;
-            return WhiteScale() * WindowsSdrWhiteLevel.ScRgbReferenceNits * headroom;
-        }
+        if (_window == null || !hdr) return 0f;
+        var props = SDL_GetWindowProperties(_window);
+        float headroom, sdlWhite;
+        fixed (byte* name = SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT)
+            headroom = SDL_GetFloatProperty(props, name, 0f);
+        fixed (byte* name = SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT)
+            sdlWhite = SDL_GetFloatProperty(props, name, 0f);
+        // A headroom of exactly 1 is a real answer, not a missing one: it says this display
+        // peaks at its own SDR white, which the Linux machine nearly does (1.0022, 456 nits
+        // over 455). Treating it as unknown would hand the producer the assumed 1000 instead —
+        // the one number guaranteed to be wrong here. Below 1 is real too: SDR white set
+        // brighter than the panel can go.
+        if (headroom <= 0f) return 0f;
+        float white = OperatingSystem.IsWindows() && sdlWhite > 0f ? sdlWhite : WhiteScale();
+        return white * ScRgbReferenceNits * headroom;
     }
 
+    /// <summary>
+    /// What to multiply linear output by so 1.0 lands on the display's SDR white. Only ever
+    /// applied to an scRGB swapchain — the Vulkan surface ignores it for an sRGB one, where
+    /// the colour space already says what white is.
+    /// </summary>
     private float WhiteScale()
     {
-        if (float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
-                System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f)
-            return forced;
+        if (ForcedWhiteScale is { } forced) return forced;
 
         if (!OperatingSystem.IsWindows()
             && string.Equals(SDL_GetCurrentVideoDriver(), "wayland", StringComparison.Ordinal))
             return WaylandScRgbReferenceWhite;
 
-        return SdrWhiteLevelNits / WindowsSdrWhiteLevel.ScRgbReferenceNits;
+        return SdrWhiteLevelNits / ScRgbReferenceNits;
     }
 
+    /// <summary><c>HULTUI_VULKAN_WHITE_SCALE</c>, when it holds a positive number: a white scale
+    /// that wins over every source, for comparing by eye.</summary>
+    private static float? ForcedWhiteScale =>
+        float.TryParse(Environment.GetEnvironmentVariable("HULTUI_VULKAN_WHITE_SCALE"),
+            System.Globalization.CultureInfo.InvariantCulture, out float forced) && forced > 0f
+            ? forced : null;
+
+    /// <summary>
+    /// HDR state, white scale and peak for the display this window is on, from the best source
+    /// available: Windows' own <c>DisplayInformation</c> where it exists (Windows 11 22H2 and
+    /// later, see <see cref="WindowsDisplayInformation"/>), otherwise the display configuration
+    /// and SDL.
+    ///
+    /// <para><c>DisplayInformation</c> gives all three in one answer, including the peak as an
+    /// absolute luminance — so on that path the peak does not depend on SDL's headroom at all.
+    /// An SDR display reports an SDR white that means nothing for an sRGB swapchain, so its
+    /// scale is 1.</para>
+    /// </summary>
+    private (bool Hdr, float WhiteScale, float PeakNits) ReadDisplayColor()
+    {
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)
+            && _displayInformation?.Read() is { } info)
+        {
+            float white = ForcedWhiteScale
+                ?? (info.Hdr && info.SdrWhiteNits > 0f ? info.SdrWhiteNits / ScRgbReferenceNits : 1f);
+            return (info.Hdr, white, info.Hdr ? info.MaxLuminanceNits : 0f);
+        }
+
+        bool hdr = IsHdrDisplay;
+        return (hdr, WhiteScale(), PeakNitsFor(hdr));
+    }
+
+    /// <summary>Windows' <c>DisplayInformation</c> for this window, when the OS has it and
+    /// this is a Vulkan window — the only kind with a format and a white scale to keep right.</summary>
+    private WindowsDisplayInformation? _displayInformation;
+
+    /// <summary>Set by the <c>DisplayInformation</c> event, cleared when the event loop applies
+    /// it. The event fires once per 4-nit step of a slider drag, a few milliseconds apart, and
+    /// each refresh would relayout; the flag folds a burst into one refresh per loop pass.</summary>
+    private bool _displayColorDirty;
     /// <summary>
     /// Whether an sRGB window beside this one is shown through a pure 2.2 gamma — true on
     /// Wayland, where KWin does. A property of the compositor rather than of the display, so
@@ -1481,6 +1636,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         _vulkanSurface?.Dispose();
         _vulkanHost?.Dispose();
         _surface = null;
+        // Before the window goes: DisplayInformation hooks its message loop.
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)) _displayInformation?.Dispose();
+        _displayInformation = null;
 
         foreach (var cursor in _cursorCache.Values)
             SDL_DestroyCursor((SDL_Cursor*)cursor);

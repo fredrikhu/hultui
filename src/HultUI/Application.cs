@@ -190,9 +190,17 @@ public sealed class Application : IDisposable
     /// more at start-up and through a resize, both measured in <c>docs/design/HDR.md</c>.
     /// <c>HULTUI_RENDERER</c> overrides this in both directions.
     /// </param>
+    /// <param name="displayColorEvents">
+    /// On Windows 11 22H2 and later, have Vulkan windows follow display-colour changes — HDR
+    /// switched on or off, the SDR brightness slider dragged — the moment they happen, through
+    /// WinRT's <c>DisplayInformation</c>, instead of on a 100 ms poll that visibly trails a
+    /// dragged slider. Off by default: it is only worth having for HDR content, and it hooks
+    /// the window's message loop. <c>HULTUI_DISPLAY_INFORMATION</c> overrides this either way.
+    /// </param>
     public Application(string title = "HultUI Application", int width = 800, int height = 600,
-        WindowStyle style = WindowStyle.Default, RendererKind renderer = RendererKind.Default)
-        : this(new SdlWindowingPlatform(renderer), title, width, height, style)
+        WindowStyle style = WindowStyle.Default, RendererKind renderer = RendererKind.Default,
+        bool displayColorEvents = false)
+        : this(new SdlWindowingPlatform(renderer, displayColorEvents), title, width, height, style)
     {
     }
 

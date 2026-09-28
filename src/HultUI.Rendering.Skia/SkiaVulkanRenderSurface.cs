@@ -79,6 +79,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private bool? _tracedLinear;
     private SKColorFilter? _frameScale;
     private float _frameScaleFor;
+    private bool _frameScaleEncoded;
 
     public IRenderContext RenderContext => _renderContext;
     public IMeasureContext MeasureContext => _text.MeasureContext;
@@ -437,10 +438,13 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
         // An encoded offscreen needs the 2.2 encoding whatever the scale, so never null there.
         if (Math.Abs(scale - 1f) < 0.001f && !_offscreenEncoded) return null;
-        if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f) return _frameScale;
+        if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f
+            && _frameScaleEncoded == _offscreenEncoded)
+            return _frameScale;
 
         _frameScale?.Dispose();
         _frameScaleFor = scale;
+        _frameScaleEncoded = _offscreenEncoded;
         // A shader, not a colour matrix: the matrix clamps at 1 and an HDR frame is made of
         // the values above it. Alpha is left alone — the video is opaque and scaling it would
         // make the frame translucent in exactly the bright places.
@@ -477,44 +481,64 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             return null;
         }
 
-        if (_offscreen is not null && _offscreenWidth == frame.WidthPx && _offscreenHeight == frame.HeightPx
-            && _offscreenEncoded == encoded)
-            return _offscreen;
+        if (_offscreen is null || _offscreenWidth != frame.WidthPx || _offscreenHeight != frame.HeightPx
+            || _offscreenEncoded != encoded)
+        {
+            ReleaseOffscreen();
 
-        ReleaseOffscreen();
+            var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
+                SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
+            _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
+            if (_offscreen is null) return null;
 
-        var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
-            SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
-        _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
-        if (_offscreen is null) return null;
+            _offscreenWidth = frame.WidthPx;
+            _offscreenHeight = frame.HeightPx;
+            _offscreenEncoded = encoded;
+        }
 
-        _offscreenWidth = frame.WidthPx;
-        _offscreenHeight = frame.HeightPx;
-        _offscreenEncoded = encoded;
+        // Apart from the surface, because the white scale changes without the size: a move
+        // between two HDR monitors with different SDR white, or the brightness slider. Baked in
+        // with the surface, the UI kept the old monitor's brightness while video — which reads
+        // the scale every frame — took the new one's.
+        float scale = _host.SdrWhiteScale;
+        if (_blit is null || _blitScale != scale)
+        {
+            _blit?.Dispose();
+            _blit = null;
 
-        // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
-        // whole thing being worked around. Src rather than SrcOver — the offscreen is the
-        // entire frame and there is nothing underneath worth blending with. The decode is on
-        // premultiplied colour, which is exact only at alpha 1 — true of a window's frame.
-        using var effect = SKRuntimeEffect.CreateColorFilter(encoded
-            ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb, half3(0)), half3(2.2)) * k, c.a); }"
-            : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
-        if (effect is null) { ReleaseOffscreen(); return null; }
+            // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
+            // whole thing being worked around. Src rather than SrcOver — the offscreen is the
+            // entire frame and there is nothing underneath worth blending with. The decode is on
+            // premultiplied colour, which is exact only at alpha 1 — true of a window's frame.
+            using var effect = SKRuntimeEffect.CreateColorFilter(encoded
+                ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb, half3(0)), half3(2.2)) * k, c.a); }"
+                : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
+            if (effect is null) { ReleaseOffscreen(); return null; }
 
-        var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = _host.SdrWhiteScale };
-        _blit = new SKPaint { ColorFilter = effect.ToColorFilter(uniforms), BlendMode = SKBlendMode.Src };
+            var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = scale };
+            _blit = new SKPaint { ColorFilter = effect.ToColorFilter(uniforms), BlendMode = SKBlendMode.Src };
+            _blitScale = scale;
+        }
         return _offscreen;
     }
 
+    /// <summary>The white scale <see cref="_blit"/> was built with.</summary>
+    private float _blitScale;
+
+    /// <summary>
+    /// Drops the offscreen and its blit. Called every frame that needs no offscreen, so it
+    /// returns at once when there is nothing to drop — and it leaves the video's colour filter
+    /// alone: that one is keyed on its own inputs, and disposing it here recompiled its SkSL on
+    /// every frame of every video drawn without an offscreen.
+    /// </summary>
     private void ReleaseOffscreen()
     {
-        _frameScale?.Dispose();
-        _frameScale = null;
-        _frameScaleFor = 0f;
+        if (_offscreen is null && _blit is null) return;
         _offscreen?.Dispose();
         _blit?.Dispose();
         _offscreen = null;
         _blit = null;
+        _blitScale = 0f;
         _offscreenWidth = _offscreenHeight = 0;
         _offscreenEncoded = false;
     }
@@ -643,6 +667,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public void Dispose()
     {
         DropWrappedSurfaces();
+        ReleaseOffscreen();
+        _frameScale?.Dispose();
+        _frameScale = null;
         _renderContext.Dispose();
         _grContext.Dispose();
         _backend.Dispose();

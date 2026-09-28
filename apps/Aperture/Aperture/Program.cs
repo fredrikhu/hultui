@@ -38,8 +38,12 @@ internal static class ApertureProgram
         // through a resize, which the library browser pays without using; the trade is accepted
         // for the same reason as Reel's, that the point of the app is on the other side of it.
         // HULTUI_RENDERER=gl goes back if a machine needs it.
+        //
+        // Display-colour events too, so that switching HDR or dragging the SDR brightness slider
+        // reaches the picture at once instead of on the next 100 ms poll — the film and the
+        // chrome around it are exactly what that slider is changing.
         using var app = new Application("Aperture", 1440, 900, WindowStyle.Borderless,
-            renderer: RendererKind.Vulkan);
+            renderer: RendererKind.Vulkan, displayColorEvents: true);
         app.Theme = Halide.ToHultTheme();
 
 #if !DEBUG

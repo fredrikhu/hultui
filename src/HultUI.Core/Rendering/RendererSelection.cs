@@ -34,4 +34,18 @@ internal static class RendererSelection
     /// every such run a false negative.
     /// </summary>
     public static bool MayFallBack(RendererKind? environment) => environment is null;
+
+    /// <summary>
+    /// Whether a Vulkan window on Windows subscribes to WinRT's display-colour event rather than
+    /// polling the display configuration: <c>HULTUI_DISPLAY_INFORMATION</c> <c>1</c> or
+    /// <c>0</c> decides, in either direction, and otherwise the app's request does. Off unless
+    /// asked for — it is hand-rolled COM hooked into the window's message loop, which an app
+    /// with no HDR content has no reason to carry.
+    /// </summary>
+    public static bool ResolveDisplayColorEvents(string? environment, bool requested) => environment switch
+    {
+        "1" => true,
+        "0" => false,
+        _ => requested,
+    };
 }

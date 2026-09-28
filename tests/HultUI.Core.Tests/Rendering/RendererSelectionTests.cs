@@ -42,4 +42,15 @@ public class RendererSelectionTests
         // there would make every such run a false negative.
         Assert.False(RendererSelection.MayFallBack(RendererKind.Vulkan));
     }
+
+    [Theory]
+    [InlineData(null, false, false)]   // off unless asked for
+    [InlineData(null, true, true)]     // the app asks
+    [InlineData("", true, true)]
+    [InlineData("1", false, true)]     // the environment turns it on for an app that never asked
+    [InlineData("0", true, false)]     // ...and off for one that did
+    [InlineData("yes", false, false)]  // anything else leaves it to the app
+    public void DisplayColorEvents_AreOffByDefault_AndTheEnvironmentWinsBothWays(
+        string? environment, bool requested, bool expected) =>
+        Assert.Equal(expected, RendererSelection.ResolveDisplayColorEvents(environment, requested));
 }

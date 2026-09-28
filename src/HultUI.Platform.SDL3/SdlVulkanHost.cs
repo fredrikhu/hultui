@@ -389,6 +389,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // counter each time. Asking the surface costs one query and is the honest question.
         bool rebuilding = !_swapchain.IsNull && ChooseFormat(out _, trace: false) != _format;
         StartupTrace.Mark($"vulkan display changed: hdr={isHdr} whiteScale={sdrWhiteScale:0.##} " +
+            $"peak={(DisplayPeakNits > 0f ? $"{DisplayPeakNits:0}" : "unknown")} " +
             (rebuilding ? $"rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}" : "format unchanged"));
         if (rebuilding) RecreateSwapchain(_widthPx, _heightPx);
     }
