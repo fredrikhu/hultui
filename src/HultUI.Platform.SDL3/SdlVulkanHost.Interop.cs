@@ -184,8 +184,26 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     public VulkanInteropImage? LendInteropImage(int widthPx, int heightPx)
     {
         if (_interopReady != true || widthPx <= 0 || heightPx <= 0) return null;
+
+        // GL is about to write the image, so the last frame that sampled it has to be done.
+        // Called on the GL context, before the producer draws. With the semaphore the wait
+        // is the GPU's; without one it is the old blunt kind, which in practice finds the
+        // queue already idle.
+        if (_releasePending)
+        {
+            _gl!.WaitSemaphore(_glReleaseSemaphore, _glTexture);
+            _releasePending = false;
+        }
+        else if (_sharedSemaphore.IsNull && !_interopImage.IsNull)
+        {
+            QueueWaitIdle(_queue);
+        }
+
         if (_interopImage.IsNull || _interopWidth != widthPx || _interopHeight != heightPx)
         {
+            // A GPU-side wait orders GL, not the destruction, which is the CPU's. Rare: the
+            // image follows the video's size, not the window's.
+            if (!_interopImage.IsNull) DeviceWaitIdle(_device);
             DestroyInteropImage();
             if (!CreateSharedImage(widthPx, heightPx)) return null;
         }
@@ -439,6 +457,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
         if (ring) SubmitBarrier(cmd, _sharedSemaphore, slotFence);
         else EndOneShot(cmd);
+        // Taken from GL, so the present has to hand it back: see ReleaseInteropImage.
+        _releaseOwed = ring;
         if (FinishTrace) RecordFinish(beforeFinish, afterFinish);
     }
 
@@ -488,15 +508,54 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     private uint _glSemaphore;
 
     /// <summary>
-    /// One semaphore, exported from Vulkan and imported into GL, reused every frame.
+    /// The other direction: Vulkan signals it once the frame that sampled the image is done,
+    /// and GL waits on it before writing the next one.
+    ///
+    /// <para>Without it nothing ordered a GL write after the previous frame's Skia read of
+    /// the same image. The acquire fence only waits for the frame that last presented
+    /// <i>that swapchain image</i>, two or three frames back. At the video's frame rate the
+    /// read had always finished anyway; with the GPU made to take longer than a frame, 59 of
+    /// 960 GL writes began while it was still pending.</para>
+    /// </summary>
+    private VkSemaphore _releaseSemaphore;
+    private uint _glReleaseSemaphore;
+
+    /// <summary>Set when a frame drew from the image, so its present must release it to GL.</summary>
+    private bool _releaseOwed;
+
+    /// <summary>Set once Vulkan has signalled the release, until GL has waited on it. A binary
+    /// semaphore takes exactly one wait per signal, so this is what keeps the two in step.</summary>
+    private bool _releasePending;
+
+    /// <summary>
+    /// Two semaphores, exported from Vulkan and imported into GL, reused every frame: one
+    /// for each direction the image changes hands.
     ///
     /// <para>Best effort throughout: a driver that will share an image but not a semaphore
     /// keeps working and pays the old CPU block instead. Every step here may fail quietly,
-    /// and a null <see cref="_sharedSemaphore"/> is what selects that path.</para>
+    /// and a null <see cref="_sharedSemaphore"/> is what selects that path. Both or neither,
+    /// so there is only one fallback to reason about.</para>
     /// </summary>
     private void CreateSharedSemaphore(InteropGl gl)
     {
         if (!SemaphoreAllowed || !_semaphoreExtensionsEnabled || !gl.HasSemaphore) return;
+        if (!TryShareSemaphore(gl, out var toVulkan, out uint toVulkanGl)) return;
+        if (!TryShareSemaphore(gl, out var toGl, out uint toGlGl))
+        {
+            RunOnGLContext(() => gl.DeleteSemaphore(toVulkanGl));
+            DestroySemaphore(_device, toVulkan, 0);
+            return;
+        }
+        _sharedSemaphore = toVulkan;
+        _glSemaphore = toVulkanGl;
+        _releaseSemaphore = toGl;
+        _glReleaseSemaphore = toGlGl;
+    }
+
+    private bool TryShareSemaphore(InteropGl gl, out VkSemaphore shared, out uint glSemaphore)
+    {
+        shared = VkSemaphore.Null;
+        glSemaphore = 0;
 
         var handleType = OperatingSystem.IsWindows()
             ? VkExternalSemaphoreHandleTypeFlags.OpaqueWin32
@@ -509,7 +568,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         };
         var info = new VkSemaphoreCreateInfo { pNext = &export };
         VkSemaphore semaphore;
-        if (VulkanCommands.CreateSemaphore(_device, &info, 0, &semaphore) != VkResult.Success) return;
+        if (VulkanCommands.CreateSemaphore(_device, &info, 0, &semaphore) != VkResult.Success) return false;
 
         // Exported out here, imported inside the GL context: a lambda cannot take the
         // address of a captured local, and only the import needs the context anyway.
@@ -519,7 +578,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         int exportedFd = -1;
         if (OperatingSystem.IsWindows())
         {
-            if (GetSemaphoreWin32Handle is null) { DestroySemaphore(_device, semaphore, 0); return; }
+            if (GetSemaphoreWin32Handle is null) { DestroySemaphore(_device, semaphore, 0); return false; }
             var get = new VkSemaphoreGetWin32HandleInfoKHR
             {
                 sType = VkStructureType.SemaphoreGetWin32HandleInfoKHR,
@@ -527,11 +586,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
                 handleType = handleType,
             };
             if (GetSemaphoreWin32Handle(_device, &get, &exportedHandle) != VkResult.Success)
-            { DestroySemaphore(_device, semaphore, 0); return; }
+            { DestroySemaphore(_device, semaphore, 0); return false; }
         }
         else
         {
-            if (GetSemaphoreFd is null) { DestroySemaphore(_device, semaphore, 0); return; }
+            if (GetSemaphoreFd is null) { DestroySemaphore(_device, semaphore, 0); return false; }
             var get = new VkSemaphoreGetFdInfoKHR
             {
                 sType = VkStructureType.SemaphoreGetFDInfoKHR,
@@ -539,7 +598,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
                 handleType = handleType,
             };
             if (GetSemaphoreFd(_device, &get, &exportedFd) != VkResult.Success)
-            { DestroySemaphore(_device, semaphore, 0); return; }
+            { DestroySemaphore(_device, semaphore, 0); return false; }
         }
 
         nint win32Handle = exportedHandle;
@@ -562,9 +621,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             if (gl.Error() != 0) imported = 0;
         });
 
-        if (imported == 0) { DestroySemaphore(_device, semaphore, 0); return; }
-        _sharedSemaphore = semaphore;
-        _glSemaphore = imported;
+        if (imported == 0) { DestroySemaphore(_device, semaphore, 0); return false; }
+        shared = semaphore;
+        glSemaphore = imported;
+        return true;
     }
 
     /// <summary>
@@ -631,6 +691,39 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         Check(QueueSubmit(_queue, 1, &submit, fence), "vkQueueSubmit");
     }
 
+    /// <summary>
+    /// Records the hand-back to GL into the frame's last command buffer and returns the
+    /// semaphore its submit has to signal, or null when this frame did not draw the image.
+    ///
+    /// <para>The mirror of the acquire in <see cref="FinishExternalFrame"/>: ownership back to
+    /// the external queue, layout kept at SHADER_READ_ONLY, which is what GL's wait is told.
+    /// The source scope is the fragment shader because that is where Skia samples it, and
+    /// submission order makes it cover Skia's earlier submit. No access mask: a read leaves
+    /// nothing to make available, so ordering it is all a later write needs.</para>
+    /// </summary>
+    private VkSemaphore? ReleaseInteropImage(VkCommandBuffer cmd)
+    {
+        if (!_releaseOwed || _releaseSemaphore.IsNull || _interopImage.IsNull) return null;
+        _releaseOwed = false;
+
+        var barrier = new VkImageMemoryBarrier
+        {
+            sType = VkStructureType.ImageMemoryBarrier,
+            srcAccessMask = VkAccessFlags.None,
+            dstAccessMask = VkAccessFlags.None,
+            oldLayout = VkImageLayout.ShaderReadOnlyOptimal,
+            newLayout = VkImageLayout.ShaderReadOnlyOptimal,
+            srcQueueFamilyIndex = _queueFamily,
+            dstQueueFamilyIndex = Vortice.Vulkan.Vulkan.VK_QUEUE_FAMILY_EXTERNAL,
+            image = _interopImage,
+            subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
+        };
+        CmdPipelineBarrier(cmd, VkPipelineStageFlags.FragmentShader, VkPipelineStageFlags.BottomOfPipe,
+            VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
+        _releasePending = true;
+        return _releaseSemaphore;
+    }
+
     private uint FindMemoryType(uint typeBits, VkMemoryPropertyFlags wanted)
     {
         var properties = new VkPhysicalDeviceMemoryProperties();
@@ -685,10 +778,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         foreach (var fence in _interopFence) if (!fence.IsNull) DestroyFence(_device, fence, 0);
         _interopFence = [];
         _interopCmd = [];
-        if (_glSemaphore != 0 && _gl is { } g) RunOnGLContext(() => g.DeleteSemaphore(_glSemaphore));
+        if (_gl is { } g) RunOnGLContext(() =>
+        {
+            g.DeleteSemaphore(_glSemaphore);
+            g.DeleteSemaphore(_glReleaseSemaphore);
+        });
         if (!_sharedSemaphore.IsNull) DestroySemaphore(_device, _sharedSemaphore, 0);
-        _sharedSemaphore = VkSemaphore.Null;
-        _glSemaphore = 0;
+        if (!_releaseSemaphore.IsNull) DestroySemaphore(_device, _releaseSemaphore, 0);
+        _sharedSemaphore = _releaseSemaphore = VkSemaphore.Null;
+        _glSemaphore = _glReleaseSemaphore = 0;
+        _releaseOwed = _releasePending = false;
         DestroyInteropImage();
         if (_glContext is not null) SDL_GL_DestroyContext(_glContext);
         if (_glWindow is not null) SDL_DestroyWindow(_glWindow);

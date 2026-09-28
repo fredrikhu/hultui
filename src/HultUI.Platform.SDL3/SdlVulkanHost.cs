@@ -1026,18 +1026,23 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
             VkPipelineStageFlags.BottomOfPipe, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
 
+        // The last submit of the frame, so the shared image goes back to GL here if it was drawn.
+        var release = ReleaseInteropImage(cmd);
+
         Check(EndCommandBuffer(cmd), "vkEndCommandBuffer");
 
-        var signal = _renderFinished[imageIndex];
+        var signals = stackalloc VkSemaphore[2];
+        signals[0] = _renderFinished[imageIndex];
+        if (release is { } r) signals[1] = r;
         var submit = new VkSubmitInfo
         {
             commandBufferCount = 1,
             pCommandBuffers = &cmd,
-            signalSemaphoreCount = 1,
-            pSignalSemaphores = &signal,
+            signalSemaphoreCount = release is null ? 1u : 2u,
+            pSignalSemaphores = signals,
         };
         Check(QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
-        return signal;
+        return signals[0];
     }
 
     /// <summary>

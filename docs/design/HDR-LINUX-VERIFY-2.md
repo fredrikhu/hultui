@@ -333,6 +333,41 @@ the same gap (its queue wait ran after GL had already written), so the semaphore
 introduce it. The symptom, if it ever showed, would be a torn or half-updated video frame. It is a
 GL-side write-after-read, invisible to every Vulkan layer by construction.
 
+**Confirmed and fixed afterwards.** Measured first, with a temporary fence on the present submit
+checked at the moment GL starts writing the shared image. At normal load the previous frame's
+Vulkan work had **always** finished: 0/1200 on Wayland and 0/1200 on X11, and under a 16 ms resize
+storm 0/1440 and 1/960 (each rebuild's `vkDeviceWaitIdle` drains the queue anyway). The UI renders at
+the video's ~24 fps, so each frame has ~40 ms to finish. With the GPU made to take longer (the video
+drawn 20, 60 or 250 extra times per frame with a blur) the exposure appeared: **3, 8 and 59 of 960**
+GL writes started while the previous frame's Skia sample was still pending. Real, and reachable
+whenever frames are GPU-bound.
+
+The fix is the mirror of the existing semaphore. A second shared semaphore runs Vulkan → GL. The
+present submit, the frame's last, records a release barrier (queue family → external,
+`SHADER_READ_ONLY` kept, fragment-shader source scope) when the frame drew the image, and signals
+it. `LendInteropImage`, on the GL context before mpv writes, calls `glWaitSemaphoreEXT` with the
+texture and `GL_LAYOUT_SHADER_READ_ONLY_EXT`. A pending flag keeps it to one wait per signal.
+Without semaphores (`HULTUI_VULKAN_SEMAPHORE=0`, or a driver without them), the fallback does a
+queue wait at the same point instead. Two smaller defects on the same path went in with it:
+- **`glSignalSemaphoreEXT` was never flushed.** The GL context stays current, so no context switch
+  flushes it implicitly, and a Vulkan wait on a binary semaphore needs the signal already submitted.
+  `SignalSemaphore` now calls `glFlush`, which does not block.
+- **The shared image could be destroyed while a frame still sampled it**, when the video's size
+  changes. That branch now waits for the device first. It is rare: the image follows the video's
+  size, not the window's.
+
+Checked:
+- **Sync validation, core + sync (layer status line in every log)**: 60 s runs on the semaphore and
+  fallback paths, Wayland and X11, with moves between outputs. 0 messages each.
+- **A control that the GL wait is live**: marking the release pending without signalling it stalls
+  GL. No probe sample arrived in 20 s, against six from the normal build, whose content kept changing.
+- **Cost**: 4K CPU 128–130 ms/s against 113–144 before (round-robin, a separate build of the parent
+  commit). Descriptors flat at 202–203. Under the forced GPU load, frame throughput is identical
+  before and after (600 frames in 30 s).
+- `HultUI.Rendering.Skia.Tests` 140, `HultUI.Core.Tests` 905, `HultUI.Media.Tests` 54 pass.
+- **Not shown: a torn frame before the fix.** Exposure was measured, not the corruption itself.
+  **Not run on Windows**, where the same code uses `OPAQUE_WIN32` and `GL_EXT_semaphore_win32`.
+
 **A procedural note, since it nearly produced a false pass:** the first batch of these runs passed
 the layer settings as one shell string, which zsh does not split. The layer never loaded, and the
 runs came back "clean". They are not counted above. The per-run `Current Enables` line was added
@@ -479,5 +514,5 @@ between columns carries over.
 - **Mesa, a hybrid GPU, a compositor other than KWin**: none available.
 - **By-eye drags** for item 1's "resize still works": replaced by KWin-scripted resizes and crossings
   checked against swapchain sizes. A person did not drag or look.
-- **The Vulkan → GL ordering gap** in item 0: found by reading, neither tested nor fixed.
+- **The Vulkan → GL ordering gap** in item 0: measured and fixed afterwards (see item 0). Not yet run on Windows.
 - **The duplicate start-up swapchain** in item 1: fixed afterwards (see item 1). Not yet run on Windows.

@@ -48,6 +48,7 @@ internal sealed unsafe class InteropGl
     private readonly delegate* unmanaged[Cdecl]<uint, byte*, void> _getUnsignedBytev;
     private readonly delegate* unmanaged[Cdecl]<uint> _getError;
     private readonly delegate* unmanaged[Cdecl]<void> _finish;
+    private readonly delegate* unmanaged[Cdecl]<void> _flush;
 
     private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _createMemoryObjects;
     private readonly delegate* unmanaged[Cdecl]<int, uint*, void> _deleteMemoryObjects;
@@ -70,6 +71,7 @@ internal sealed unsafe class InteropGl
     private readonly delegate* unmanaged[Cdecl]<uint, uint, void*, void> _importSemaphoreWin32;
     private readonly delegate* unmanaged[Cdecl]<uint, uint, int, void> _importSemaphoreFd;
     private readonly delegate* unmanaged[Cdecl]<uint, uint, uint*, uint, uint*, uint*, void> _signalSemaphore;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, uint*, uint, uint*, uint*, void> _waitSemaphore;
 
     public InteropGl()
     {
@@ -79,6 +81,7 @@ internal sealed unsafe class InteropGl
         _getUnsignedBytev = (delegate* unmanaged[Cdecl]<uint, byte*, void>)Proc("glGetUnsignedBytevEXT");
         _getError = (delegate* unmanaged[Cdecl]<uint>)Proc("glGetError");
         _finish = (delegate* unmanaged[Cdecl]<void>)Proc("glFinish");
+        _flush = (delegate* unmanaged[Cdecl]<void>)Proc("glFlush");
 
         _createMemoryObjects = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glCreateMemoryObjectsEXT");
         _deleteMemoryObjects = (delegate* unmanaged[Cdecl]<int, uint*, void>)Proc("glDeleteMemoryObjectsEXT");
@@ -101,6 +104,7 @@ internal sealed unsafe class InteropGl
         _importSemaphoreWin32 = (delegate* unmanaged[Cdecl]<uint, uint, void*, void>)Proc("glImportSemaphoreWin32HandleEXT");
         _importSemaphoreFd = (delegate* unmanaged[Cdecl]<uint, uint, int, void>)Proc("glImportSemaphoreFdEXT");
         _signalSemaphore = (delegate* unmanaged[Cdecl]<uint, uint, uint*, uint, uint*, uint*, void>)Proc("glSignalSemaphoreEXT");
+        _waitSemaphore = (delegate* unmanaged[Cdecl]<uint, uint, uint*, uint, uint*, uint*, void>)Proc("glWaitSemaphoreEXT");
     }
 
     private static nint Proc(string name)
@@ -135,7 +139,7 @@ internal sealed unsafe class InteropGl
     /// the memory-object check gives.
     /// </summary>
     public bool HasSemaphore =>
-        _genSemaphores is not null && _signalSemaphore is not null
+        _genSemaphores is not null && _signalSemaphore is not null && _waitSemaphore is not null
         && (OperatingSystem.IsWindows() ? _importSemaphoreWin32 is not null : _importSemaphoreFd is not null)
         && HasExtension("GL_EXT_semaphore")
         && HasExtension(OperatingSystem.IsWindows() ? "GL_EXT_semaphore_win32" : "GL_EXT_semaphore_fd");
@@ -328,10 +332,28 @@ internal sealed unsafe class InteropGl
     /// <c>glFinish</c> did it by blocking the CPU until the work finished — 0.74 to 5.33 ms a
     /// frame on a 4K decode.</para>
     /// </summary>
+    /// <summary>
+    /// Signals the semaphore once GL's work on the texture is done, and flushes so the signal
+    /// is actually submitted. A Vulkan wait on a binary semaphore needs the signal already
+    /// submitted, and nothing else on this path flushes: the context stays current, so no
+    /// context switch does it implicitly.
+    /// </summary>
     public void SignalSemaphore(uint semaphore, uint texture)
     {
         uint layout = LayoutShaderReadOnly;
         _signalSemaphore(semaphore, 0, null, 1, &texture, &layout);
+        _flush();
+    }
+
+    /// <summary>
+    /// Makes GL's next commands wait for Vulkan to be done with the texture, which Vulkan
+    /// left in SHADER_READ_ONLY: that is what its sampling needs and what its release
+    /// barrier keeps.
+    /// </summary>
+    public void WaitSemaphore(uint semaphore, uint texture)
+    {
+        uint layout = LayoutShaderReadOnly;
+        _waitSemaphore(semaphore, 0, null, 1, &texture, &layout);
     }
 
     public void Finish() => _finish();
