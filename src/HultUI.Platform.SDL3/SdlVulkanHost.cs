@@ -262,7 +262,18 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public static SdlVulkanHost Create(SDL_Window* window, int widthPx, int heightPx, bool displayIsHdr)
     {
         var host = new SdlVulkanHost { DisplayIsHdr = displayIsHdr };
-        host.Init(window, widthPx, heightPx);
+        try
+        {
+            host.Init(window, widthPx, heightPx);
+        }
+        catch
+        {
+            // A driver that is present but unusable fails partway, with an instance and a
+            // surface already made. The window falls back to GL and is replaced, so whatever
+            // was built has to go now: nothing else holds this host to dispose it later.
+            host.Dispose();
+            throw;
+        }
         return host;
     }
 
@@ -1093,7 +1104,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (_disposed) return;
         _disposed = true;
 
-        if (!_device.IsNull)
+        // The pointer checks matter only after an Init that threw inside LoadDevice; everything
+        // else below was created after LoadDevice finished, so its own null checks cover it.
+        if (!_device.IsNull && DeviceWaitIdle is not null && DestroyDevice is not null)
         {
             DeviceWaitIdle(_device);
             // Before the pool and the device: the shared image is bound to both, and the GL
@@ -1105,8 +1118,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!_swapchain.IsNull) DestroySwapchain(_device, _swapchain, 0);
             DestroyDevice(_device, 0);
         }
-        if (!_surface.IsNull) DestroySurface(_instance, _surface, 0);
-        if (!_instance.IsNull) DestroyInstance(_instance, 0);
+        // Guarded because Dispose also cleans up after an Init that threw, which can be before
+        // LoadInstance resolved these.
+        if (!_surface.IsNull && DestroySurface is not null) DestroySurface(_instance, _surface, 0);
+        if (!_instance.IsNull && DestroyInstance is not null) DestroyInstance(_instance, 0);
         if (_features2 != 0) System.Runtime.InteropServices.Marshal.FreeHGlobal(_features2);
     }
 

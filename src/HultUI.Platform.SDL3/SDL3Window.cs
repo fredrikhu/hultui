@@ -63,12 +63,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// a machine where Vulkan misbehaves is got working again without a rebuild.
     /// </summary>
     private static RendererKind? EnvironmentRenderer =>
-        Environment.GetEnvironmentVariable("HULTUI_RENDERER") switch
-        {
-            null or "" => null,
-            "vulkan" => RendererKind.Vulkan,
-            _ => RendererKind.OpenGL,
-        };
+        RendererSelection.ParseEnvironment(Environment.GetEnvironmentVariable("HULTUI_RENDERER"));
 
     /// <summary>
     /// Records what the app asked for. Called before the first window is created; a later call
@@ -106,7 +101,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// <summary>Whether windows in this process draw through Vulkan. The environment wins over
     /// the app, and the app over the default.</summary>
     internal static bool UseVulkan =>
-        (EnvironmentRenderer ?? _requestedRenderer ?? RendererKind.Default) == RendererKind.Vulkan;
+        RendererSelection.Resolve(EnvironmentRenderer, _requestedRenderer) == RendererKind.Vulkan;
     private bool _disposed;
     private readonly Dictionary<CursorType, nint> _cursorCache = [];
     private CursorType _currentCursor = CursorType.Default;
@@ -359,10 +354,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         JoinPreload();
 
         var titleBytes = MarshalUtf8(title);
-        fixed (byte* titlePtr = titleBytes)
-        {
-            _window = SDL_CreateWindow(titlePtr, width, height, flags);
-        }
+        _window = CreateNativeWindow(titleBytes, width, height, flags);
         // Without a preload this covers the lazy GL driver load too — SDL does it here.
         StartupTrace.Mark("SDL_CreateWindow");
 
@@ -373,17 +365,18 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         // Only for a request the APP made. When HULTUI_RENDERER asked, the failure is the
         // answer: that variable is how the design docs test a renderer, and silently handing
         // back the other one would make every such run a false negative.
-        if (_window == null && _useVulkan && EnvironmentRenderer is null)
+        //
+        // This catches the machine with no Vulkan driver at all: SDL refuses a Vulkan window
+        // when the loader offers no surface extension. A driver that is present but cannot
+        // give a device, a swapchain or a Skia context gets this far and is caught below.
+        if (_window == null && _useVulkan && RendererSelection.MayFallBack(EnvironmentRenderer))
         {
             Console.Error.WriteLine(
                 $"[HultUI] Vulkan window creation failed ({GetError()}); falling back to OpenGL. " +
                 "HDR output is not available on this machine.");
             _useVulkan = false;
             flags = (flags & ~SDL_WindowFlags.SDL_WINDOW_VULKAN) | SDL_WindowFlags.SDL_WINDOW_OPENGL;
-            fixed (byte* titlePtr = titleBytes)
-            {
-                _window = SDL_CreateWindow(titlePtr, width, height, flags);
-            }
+            _window = CreateNativeWindow(titleBytes, width, height, flags);
             StartupTrace.Mark("SDL_CreateWindow (fell back to GL)");
         }
 
@@ -392,56 +385,51 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         _title = title;
 
-        // Settle the real pixel size BEFORE the renderer exists, not after.
-        //
-        // The requested size is in density-independent units and SDL created the window in
-        // window coordinates, so on a scaled display the pixel size is about to change: a
-        // 500x300 request is 750x450 at 150%. This used to be corrected further down, after
-        // the renderer had been built, which cost the Vulkan path an entire wasted swapchain
-        // — built at the requested size, then thrown away and rebuilt at the real one, with a
-        // second surface query for the present mode on the way. GL never cared, because its
-        // drawable follows the window. `ActiveSurface` is still null here, so the `Resize`
-        // inside `UpdateSize` is a no-op rather than an early rebuild.
-        SDL_SyncWindow(_window);
-        UpdateSize();
-        if (Math.Abs(InputScale - 1f) > 0.001f)
+        // Taken once, so that a Vulkan attempt that fails does not lose it to the GL surface
+        // built instead. Nothing in it touches the GPU.
+        var text = TakePreloadedText();
+        try
         {
-            SDL_SetWindowSize(_window,
-                (int)MathF.Round(width / InputScale),
-                (int)MathF.Round(height / InputScale));
-            SDL_SyncWindow(_window);
-            UpdateSize();
+            SettleInitialSize(width, height);
+
+            if (_useVulkan && !TryCreateVulkanRenderer(text, out var vulkanFailure))
+            {
+                if (!RendererSelection.MayFallBack(EnvironmentRenderer))
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(vulkanFailure).Throw();
+
+                // The common case is a driver with no GPU that can present here — a remote
+                // session, a VM, a filtered loader — which SDL cannot see when it creates the
+                // window. A window made SDL_WINDOW_VULKAN cannot take a GL context, so it is
+                // replaced, and the size is settled again for the new one.
+                Console.Error.WriteLine(
+                    $"[HultUI] The Vulkan renderer could not start ({vulkanFailure.Message}); " +
+                    "falling back to OpenGL. HDR output is not available on this machine.");
+                SDL_DestroyWindow(_window);
+                _window = null;
+                _useVulkan = false;
+                flags = (flags & ~SDL_WindowFlags.SDL_WINDOW_VULKAN) | SDL_WindowFlags.SDL_WINDOW_OPENGL;
+                _window = CreateNativeWindow(titleBytes, width, height, flags);
+                StartupTrace.Mark("SDL_CreateWindow (fell back to GL)");
+                if (_window == null)
+                    throw new InvalidOperationException($"SDL_CreateWindow failed: {GetError()}");
+                PixelWidth = PixelHeight = 0;
+                SettleInitialSize(width, height);
+            }
+
+            if (!_useVulkan)
+                CreateGLRenderer(text);
         }
-
-        if (_useVulkan)
+        catch
         {
-            UpdateSize();
-            // Asked before the device exists, because the answer decides the surface format.
-            bool hdr = IsHdrDisplay;
-            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight, hdr);
-            // Only meaningful for an scRGB surface; the host ignores it otherwise.
-            _vulkanHost.SdrWhiteScale = WhiteScale();
-            _vulkanHost.SdrIsGamma22 = SdrIsGamma22();
-            StartupTrace.Mark("vulkan device");
-            _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, TakePreloadedText());
-            StartupTrace.Mark("skia surface");
-        }
-        else
-        {
-            _glContext = SDL_GL_CreateContext(_window);
-            if (_glContext == null)
-                throw new InvalidOperationException($"SDL_GL_CreateContext failed: {GetError()}");
-
-            SDL_GL_MakeCurrent(_window, _glContext);
-            // Disable driver-level vsync — on Wayland the compositor handles
-            // vsync, and swap interval 1 can block during interactive resize.
-            SDL_GL_SetSwapInterval(0);
-            StartupTrace.Mark("gl context");
-
-            // Create SkiaSharp surface with SDL3 GL proc resolver, adopting the preloaded
-            // text pipeline when there is one (null → the surface builds its own).
-            _surface = new SkiaGLRenderSurface(GetGLProcAddress, TakePreloadedText());
-            StartupTrace.Mark("skia surface");
+            // Nothing else knows about the window yet — it is in no registry and has no event
+            // watch — so without this a constructor that throws leaks a hidden native window.
+            _surface?.Dispose();
+            _surface = null;
+            if (_glContext != null) SDL_GL_DestroyContext(_glContext);
+            _glContext = null;
+            if (_window != null) SDL_DestroyWindow(_window);
+            _window = null;
+            throw;
         }
 
         // Tell the surface its size explicitly, once, now that it exists.
@@ -491,6 +479,93 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         IsOpen = true;
         StartupTrace.Mark("platform window ready");
+    }
+
+    private static SDL_Window* CreateNativeWindow(byte[] titleBytes, int width, int height,
+        SDL_WindowFlags flags)
+    {
+        fixed (byte* titlePtr = titleBytes)
+            return SDL_CreateWindow(titlePtr, width, height, flags);
+    }
+
+    /// <summary>
+    /// Settles the real pixel size BEFORE the renderer exists, not after.
+    ///
+    /// <para>The requested size is in density-independent units and SDL created the window in
+    /// window coordinates, so on a scaled display the pixel size is about to change: a 500x300
+    /// request is 750x450 at 150%. This used to be corrected after the renderer had been built,
+    /// which cost the Vulkan path an entire wasted swapchain — built at the requested size, then
+    /// thrown away and rebuilt at the real one, with a second surface query for the present mode
+    /// on the way. GL never cared, because its drawable follows the window.
+    /// <c>ActiveSurface</c> is still null here, so the <c>Resize</c> inside
+    /// <c>UpdateSize</c> is a no-op rather than an early rebuild.</para>
+    /// </summary>
+    private void SettleInitialSize(int width, int height)
+    {
+        SDL_SyncWindow(_window);
+        UpdateSize();
+        if (Math.Abs(InputScale - 1f) > 0.001f)
+        {
+            SDL_SetWindowSize(_window,
+                (int)MathF.Round(width / InputScale),
+                (int)MathF.Round(height / InputScale));
+            SDL_SyncWindow(_window);
+            UpdateSize();
+        }
+    }
+
+    /// <summary>
+    /// Builds the Vulkan device, swapchain and Skia surface, or reports why it could not and
+    /// leaves nothing half-built behind. Everything here can fail on a machine whose driver is
+    /// present but unusable — no GPU that can present to this window, a device the driver will
+    /// not create, a surface without the usage Skia needs — and none of it is visible to SDL
+    /// when it creates the window.
+    /// </summary>
+    private bool TryCreateVulkanRenderer(SkiaTextServices? text,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out Exception? failure)
+    {
+        failure = null;
+        try
+        {
+            UpdateSize();
+            // Asked before the device exists, because the answer decides the surface format.
+            bool hdr = IsHdrDisplay;
+            _vulkanHost = SdlVulkanHost.Create(_window, PixelWidth, PixelHeight, hdr);
+            // Only meaningful for an scRGB surface; the host ignores it otherwise.
+            _vulkanHost.SdrWhiteScale = WhiteScale();
+            _vulkanHost.SdrIsGamma22 = SdrIsGamma22();
+            StartupTrace.Mark("vulkan device");
+            _vulkanSurface = new SkiaVulkanRenderSurface(_vulkanHost, text);
+            StartupTrace.Mark("skia surface");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _vulkanSurface?.Dispose();
+            _vulkanSurface = null;
+            _vulkanHost?.Dispose();
+            _vulkanHost = null;
+            failure = ex;
+            return false;
+        }
+    }
+
+    private void CreateGLRenderer(SkiaTextServices? text)
+    {
+        _glContext = SDL_GL_CreateContext(_window);
+        if (_glContext == null)
+            throw new InvalidOperationException($"SDL_GL_CreateContext failed: {GetError()}");
+
+        SDL_GL_MakeCurrent(_window, _glContext);
+        // Disable driver-level vsync — on Wayland the compositor handles
+        // vsync, and swap interval 1 can block during interactive resize.
+        SDL_GL_SetSwapInterval(0);
+        StartupTrace.Mark("gl context");
+
+        // Create SkiaSharp surface with SDL3 GL proc resolver, adopting the preloaded
+        // text pipeline when there is one (null → the surface builds its own).
+        _surface = new SkiaGLRenderSurface(GetGLProcAddress, text);
+        StartupTrace.Mark("skia surface");
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]

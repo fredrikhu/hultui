@@ -107,8 +107,13 @@ internal static unsafe class VulkanCommands
         GetMemoryProperties = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void>)I("vkGetPhysicalDeviceMemoryProperties");
         GetPhysicalDeviceFeatures2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void>)I("vkGetPhysicalDeviceFeatures2");
         GetPhysicalDeviceProperties2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void>)I("vkGetPhysicalDeviceProperties2");
-        // Stays null unless VK_KHR_get_surface_capabilities2 was enabled on the instance.
-        GetSurfaceCapabilities2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*, VkResult>)I("vkGetPhysicalDeviceSurfaceCapabilities2KHR");
+        // Resolved optionally because the extension is enabled only beside surface_maintenance1.
+        // The spec lets vkGetInstanceProcAddr answer null for a command whose instance extension
+        // was not enabled, and through I() that null would stop the Vulkan renderer starting at
+        // all. The Khronos loader 1.4.357 on Windows happens to hand back a pointer anyway
+        // (checked with the pair deliberately left out), which is why this never threw here;
+        // a stricter loader need not. Callers use it only when the extension is enabled.
+        GetSurfaceCapabilities2 = (delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*, VkResult>)OptionalInstance("vkGetPhysicalDeviceSurfaceCapabilities2KHR");
         _getDeviceProcAddr = (delegate* unmanaged<VkDevice, byte*, nint>)I("vkGetDeviceProcAddr");
     }
 
@@ -172,12 +177,21 @@ internal static unsafe class VulkanCommands
         return (nint)vkGetInstanceProcAddr(new VkInstance(instance == 0 ? _instance.Handle : instance), bytes).Value;
     }
 
+    /// <summary>A core instance command, which every implementation has; missing means the
+    /// loader itself is broken, and saying so beats a null call later.</summary>
     private static nint I(string name)
     {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
-        nint address = (nint)vkGetInstanceProcAddr(_instance, bytes).Value;
+        nint address = OptionalInstance(name);
         if (address == 0) throw new InvalidOperationException($"Vulkan instance command missing: {name}");
         return address;
+    }
+
+    /// <summary>Like <see cref="I"/> but returns zero rather than throwing, for a command that
+    /// belongs to an instance extension the instance may not have enabled.</summary>
+    private static nint OptionalInstance(string name)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
+        return (nint)vkGetInstanceProcAddr(_instance, bytes).Value;
     }
 
     /// <summary>Like <see cref="D"/> but returns zero rather than throwing, for a command
