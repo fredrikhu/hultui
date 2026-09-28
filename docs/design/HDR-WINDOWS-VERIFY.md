@@ -120,3 +120,119 @@ Build Release, then run VideoPlayer on the Vulkan renderer on 2001 at 20:00 as i
 
 Append under a **Results** heading in this file and commit. For the swapchain check, quote the
 trace lines. For GL, say that `first frame shown` appeared, not only that nothing crashed.
+
+## Results
+
+Windows 11, RTX 4080, driver 610.62, two 2560x1440 monitors, the window on the 150% HDR one.
+Release, `HULTUI_A11Y=0`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`. Run at `184ae17`.
+
+### 1. One swapchain at start-up — pass, on both renderers
+
+**Vulkan: exactly one `vulkan swapchain` line, before `platform window ready`, at the right size.**
+
+```
+[startup] vulkan swapchain 750x450 x3 R16G16B16A16Sfloat/ExtendedSrgbLinearEXT +   11,3 ms   t=  575,5 ms
+[startup] platform window ready        +    0,8 ms   t=  602,1 ms
+[startup] first frame shown            +  168,9 ms   t=  788,6 ms
+```
+
+No 500x300 line, so the reorder has not regressed.
+
+**GL: `first frame shown` appeared** — quoted rather than "nothing crashed", as asked:
+
+```
+[startup] platform window ready        +    3,1 ms   t= 1170,2 ms
+[startup] first frame shown            +   66,2 ms   t= 1244,1 ms
+```
+
+stderr was empty on both: no `No canvas set. Call BeginFrame first.`, no exception.
+
+**Your reading of the earlier one-line observation is right.** That trace was taken before the GL
+fix existed — the GL breakage was found afterwards and the explicit `Resize` added in response, and
+both went into `d1d7cd5` together. So the committed code did have two lines on Windows too, exactly
+as the code says it must. Nothing platform-specific, and nothing was ever seen that contradicted
+you.
+
+**Resize still rebuilds, one per size, none skipped.** Four programmatic resizes, four new
+swapchains:
+
+| asked (window px) | client rect | swapchain built |
+|---|---|---|
+| 820x640 | 805x602 | 1208x904 |
+| 900x700 | 885x662 | 1328x994 |
+| 1000x760 | 985x722 | 1478x1084 |
+| 760x560 | 745x522 | 1118x784 |
+
+Each swapchain is the client rect x1.5, which is the same relationship start-up shows (a 500x300
+DIP request builds 750x450), so it is the display scale and not a mismatch. Win32's `GetClientRect`
+reports logical coordinates here while SDL reports backing pixels; that predates this fix — the
+pre-change trace from the earlier session shows the same ratio. **The first resize after start-up
+was not skipped**, which was the specific worry.
+
+**The 100% monitor case was not run.** Both attached monitors are 2560x1440 and this machine has
+no 100% display configured, so the two-builds-instead-of-three check has no hardware here.
+
+### 2. The Vulkan to GL semaphore — pass, and it costs nothing
+
+**The Windows half of the new path really ran**, which was the thing in doubt —
+`OPAQUE_WIN32` for the second semaphore, `GL_EXT_semaphore_win32`, `glWaitSemaphoreEXT` on WGL:
+
+```
+[startup] vulkan interop ready on NVIDIA GeForce RTX 4080/PCIe/SSE2 (semaphore ordering)
+```
+
+Not `glFinish ordering`, so neither semaphore was dropped and the fallback did not quietly stand in.
+
+**Playback advances — no stall.** `HULTUI_VIDEO_HDR_PROBE=48`, six samples, all with content and
+all different:
+
+```
+sample 1/6 ... max 2,240, 496803 above 1.0; middle row 1957 levels, 1068 reversals
+sample 2/6 ... max 2,240, 485074 above 1.0; middle row 1906 levels, 1152 reversals
+sample 3/6 ... max 2,240, 477318 above 1.0; middle row 1901 levels, 1102 reversals
+sample 4/6 ... max 2,240, 477015 above 1.0; middle row 1965 levels, 1218 reversals
+sample 5/6 ... max 2,240, 492154 above 1.0; middle row 1958 levels, 1132 reversals
+sample 6/6 ... max 2,240, 755837 above 1.0; middle row 2019 levels, 1133 reversals
+```
+
+The level counts and above-1.0 counts change between samples, so these are six different frames
+rather than one frozen one. A GL wait on a semaphore nobody signals would have shown here.
+
+**CPU: no measurable cost**, matching your 128–130 against 113–144. Three reps, round-robin,
+against the parent commit built in a worktree, 4K HEVC HDR, 15 s window after a 12 s settle:
+
+| | CPU | |
+|---|---|---|
+| `abeca08` parent, nothing ordering the write | 52, 67, 68 ms/s | `cuda`, semaphore ordering |
+| `184ae17` HEAD, the new semaphore | 58, 73, 62 ms/s | `cuda`, semaphore ordering |
+| HEAD, `HULTUI_VULKAN_SEMAPHORE=0` | 186, 221, 198 ms/s | `cuda`, `glFinish` ordering |
+
+The first two ranges overlap; the difference is inside this machine's noise, which moves by a third
+between sessions. **The fallback plays** and costs what the `glFinish` path has always cost.
+
+*(Method note: the harness printed a "median" that is actually the maximum — PowerShell's
+`[int](3/2)` rounds to 2, not 1. The per-rep values above are the real ones; no conclusion rested
+on the label.)*
+
+### 3. Validation — cannot be run on this machine at all, and an earlier claim of mine was wrong
+
+**There is no validation layer installed here.** `HKLM\SOFTWARE\Khronos\Vulkan\ExplicitLayers`
+and the `HKCU` equivalent do not exist, and there is no Vulkan SDK. `VK_LAYER_LOG_FILENAME` with
+`VK_LOADER_LAYERS_ENABLE=*validation*` and synchronisation validation enabled produced **no log file
+at all** — the layer never loads, so there is nothing to redirect.
+
+**This invalidates something I wrote earlier in `HDR.md`**, and it is corrected there rather than
+quietly dropped: the `swapchain_maintenance1` section claimed "validation layers were clean" for the
+over-allocated swapchain. They were not run. The run produced no layer output and that silence was
+read as approval — a measurement that could not fail, which is the first shape in that document's
+own Traps section, committed while writing about the others.
+
+So the Vulkan side rests on your runs, as your brief anticipated. Nothing on Windows contradicts
+them; Windows simply cannot check.
+
+### Not done
+
+- **The 100% monitor case** — no such display attached (above).
+- **Validation on Windows** — impossible without installing the SDK, which seemed worse than
+  relying on the Linux runs that already cover the same code.
+- **By-eye playback.** The probe samples prove frames changed; a person did not watch the film.

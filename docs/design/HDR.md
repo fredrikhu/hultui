@@ -7,7 +7,8 @@ which is itself opt-in through `HULTUI_RENDERER=vulkan` — and
 on 2026-09-27, Vulkan now wins on video and loses on start-up, memory and resize. The resize
 stretch that blocked it had two causes — a live-resize frame that could be skipped and then never
 drawn, now fixed, and the IMMEDIATE present mode, now MAILBOX by default. The memory and the
-present cost turned out to be the price of 16-bit colour rather than of Vulkan.
+present cost turned out to be the price of 16-bit colour rather than of Vulkan **on Windows**;
+on NVIDIA Linux F16 is nearly free and those costs are the API's instead.
 **Date:** 2026-09-27.
 
 **Outstanding Linux work is [HDR-LINUX-VERIFY-2.md](HDR-LINUX-VERIFY-2.md)**, which covers the
@@ -598,6 +599,11 @@ created at one size and scaled to another. There is probably something to reclai
 
 ### The resize stretch: a frame that was never drawn, plus a present mode that hid it badly
 
+> **This is a Windows artefact.** KWin never stretches a mismatched buffer — 800 captures, none
+> stretched, with stale frames caught and shown at their true size — so the second cause below is
+> DXGI's and the reasoning should not be carried to other compositors. The first cause, a
+> live-resize frame that is never drawn, is platform-independent and was a real bug everywhere.
+
 **Reported by eye, and no capture of ours would have shown it** — a swapchain readback proves the
 image, and the image was always correct. The question was what the *screen* showed, so the answer
 had to come from a screen capture, which is the one job that tool is right for.
@@ -658,7 +664,13 @@ the loop from underneath, and continuous playback lasts longer than a drag.
 Neither was found by thinking harder about the first measurement. Both were found by testing a
 combination the first measurement had not covered — throttle 0, which no run had tried.
 
-### The memory and the UI cost are the price of 16-bit colour, not of Vulkan
+### The memory and the UI cost are the price of 16-bit colour, not of Vulkan — on Windows
+
+> **This holds on Windows and not on Linux.** NVIDIA's Linux driver makes F16 nearly free: 5 ms of
+> first frame against 100 here, about 50 ms/s through a resize storm against about 500, and no
+> memory at all. There Vulkan's fixed costs are the **API's** — roughly +95 ms of start-up and
+> +23 MB with or without F16. So everything below is a **DXGI / NVIDIA 610** finding, not a
+> property of half-float colour. Measurements in `HDR-LINUX-VERIFY-2.md`.
 
 Both of the remaining gaps were charged to "Vulkan" and neither belongs there. Three
 configurations of the same renderer separate them:
@@ -790,9 +802,18 @@ window and present it un-scaled, through `VK_KHR_swapchain_maintenance1` and
 | **Vulkan, fixed extent** | **466 ms/s** | **10** |
 
 Twelve times fewer rebuilds, 42% less CPU through a drag, and the gap to GL down from 3.5x to 2x.
-Validation layers were clean, and the over-allocation cost nothing measurable in working set,
-private bytes or handles (about 13 MB more device memory by arithmetic, which those counters do
-not see).
+The over-allocation cost nothing measurable in working set, private bytes or handles (about 13 MB
+more device memory by arithmetic, which those counters do not see).
+
+**Correction: an earlier version of this section said the validation layers were clean here. They
+were not run.** `VK_LOADER_LAYERS_ENABLE` was set and the run produced no layer output, which was
+read as silence meaning approval — but this Windows machine has **no validation layer installed at
+all**: `HKLM/HKCU\SOFTWARE\Khronos\Vulkan\ExplicitLayers` do not exist and there is no Vulkan
+SDK. The layer never loaded, so nothing could have been reported. That is a measurement that could
+not fail, which is the first shape in [Traps](#traps), and it was made while writing about the
+others. Linux has since run validation properly, including synchronisation validation, on the
+semaphore and `glFinish` paths and both display servers, with deliberate faults proving the checks
+fire — see `HDR-LINUX-VERIFY-2.md`.
 
 **It should also remove the stretch structurally rather than by racing** — with `ONE_TO_ONE` the
 compositor has nothing to scale — and one run measured exactly that:
@@ -876,7 +897,7 @@ waits on three costs that apps with no video in them would pay for nothing:
 3. **The scRGB offscreen**, which is most of the memory and half the present cost, and which the
    framework could stop needing. Plus the synchronisation-validation run, Mesa and a hybrid GPU.
 
-**All three are the same bill: 16-bit colour.** An 8-bit Vulkan window starts within 30 ms of GL,
+**All three are the same bill on Windows: 16-bit colour** (on NVIDIA Linux they are the API's instead — see the note above). An 8-bit Vulkan window starts within 30 ms of GL,
 resizes at GL's cost, and sits 7 MB above it. So the question is not really "Vulkan or GL" — it is
 whether a given app wants an HDR-capable surface, which is exactly the decision
 `HULTUI_RENDERER=vulkan` already expresses per app.
