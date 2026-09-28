@@ -1,7 +1,8 @@
 # HDR output
 
-**Status:** phases 0 to 5 built. Verified on Windows and on Linux (KDE Wayland, NVIDIA);
-untested on Mesa and on a hybrid GPU. HDR video is on by default on the Vulkan renderer,
+**Status:** phases 0 to 5 built, and the luminance policy settled (`reference`, by eye). Verified
+on Windows and on Linux (KDE Wayland, NVIDIA); untested on Mesa and on a hybrid GPU, which is now
+the only substantial gap left. HDR video is on by default on the Vulkan renderer,
 which is itself opt-in through `HULTUI_RENDERER=vulkan` — and
 [stays opt-in](#should-vulkan-be-the-default-renderer-measured-2026-09-27-not-yet): re-benchmarked
 on 2026-09-27, Vulkan now wins on video and loses on start-up, memory and resize. The resize
@@ -520,14 +521,30 @@ that implements `IGpuFrameRenderer` — anything else writes into the pixel ring
 A future producer that ignores the request keeps writing encoded pixels and reports
 `ReferenceWhiteNits` of zero, so the seam degrades without it knowing this exists.
 
-**Still open:** the luminance question below.
+**Settled**, by looking — see below.
 
-**And then the original question.** A white transport bar at scRGB 1.0 next to a 1000-nit
-highlight looks grey; at the highlight's level it is blinding. Everything the overlay draws needs
-a deliberate luminance, and that is a design decision per app rather than a renderer setting. It
-now has a number attached: on Windows the UI's scale comes from the display's own SDR white (240
-nits here, so 3.0) while video reference white wants 2.5375, so UI white and video white sit
-**18% apart** unless one of them is made to yield.
+**And then the original question, now answered.** A white transport bar at scRGB 1.0 next to a
+1000-nit highlight looks grey; at the highlight's level it is blinding. Everything the overlay
+draws needs a deliberate luminance, and that is a design decision per app rather than a renderer
+setting. It has a number attached: on Windows the UI's scale comes from the display's own SDR
+white (240 nits here, so 3.0) while video reference white wants 2.5375, so UI white and video
+white sit **18% apart** unless one of them is made to yield.
+
+**The decision: `reference` stays the default.** Fredrik looked at both on the 240-nit HDR display,
+with a film and the transport bar up, and confirmed the prediction — the bar reads visibly *hotter*
+than the film's whites without `HULTUI_VIDEO_WHITE=ui`, and the two match with it. Given a real
+choice between a correct picture and matching chrome, the correct picture wins: the film's
+absolute luminances are what the HDR work was for, and the interface being 18% hot is a smaller
+wrong than every highlight in the film being 18% off. Apps that would rather have the chrome match
+can set `ui`.
+
+**And this reconciles the Linux result, which looked like a contradiction.** Linux reported the
+same comparison as *"unchanged, middle band still the same"*. That is not disagreement: **on
+Wayland the setting is a no-op.** Wayland's scRGB reference white is the protocol constant 2.5375,
+and 2.5375 x 80 = 203 nits — exactly libplacebo's reference white. UI white and video white already
+coincide there, so the scale computes to 1 and there is nothing for the flag to change. The flag
+only does anything where the display's SDR white differs from 203, which is Windows' case and not
+Wayland's. Both observations were right about their own platform.
 
 **Superseded text:** **5 — SDR UI over HDR video.** A white transport bar at scRGB 1.0 next to a 1000-nit
 highlight looks grey; at the highlight's level it is blinding. Everything the overlay
