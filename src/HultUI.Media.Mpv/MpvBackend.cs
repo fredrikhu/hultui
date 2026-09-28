@@ -78,19 +78,22 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         mpv_set_option_string(_mpv, "osc", "no");
         mpv_set_option_string(_mpv, "terminal", "no");
         mpv_set_option_string(_mpv, "ytdl", "no");
-        // "auto" tries the zero-copy methods first — mpv imports the decoder's surface into
-        // its own GL textures and renders from there, no trip through main memory — and
-        // then the same -copy methods "auto-copy" would have used, so it is never worse.
-        // Which one it lands on depends on the libmpv's interops: the trimmed Windows
-        // build has none and gets d3d11va-copy exactly as before; a distribution libmpv
-        // with cuda-interop gets nvdec, about 250 ms of CPU a second less at 4K
-        // (docs/design/HDR-LINUX-ZEROCOPY.md).
+        // "auto-safe" tries the zero-copy methods first — mpv imports the decoder's surface
+        // into its own GL textures and renders from there, no trip through main memory — and
+        // then the -copy methods "auto-copy" would have used, so it is never worse. On NVIDIA
+        // the bundled libmpv lands on nvdec with CUDA interop, on both platforms; elsewhere on
+        // Windows it lands on d3d11va-copy, because the DirectX interops would bridge at eight
+        // bits and stay disabled (docs/design/HDR.md, zero-copy section).
+        //
+        // "auto-safe" rather than "auto": the same on mpv 0.40 and later, but on an older
+        // distribution libmpv loaded through HULTUI_MPV_PATH, "auto" skips the whitelist and
+        // may pick methods known to be broken.
         //
         // HULTUI_MPV_HWDEC overrides it with any mode mpv understands. mpv falls back to
         // software on its own if the mode it is given cannot initialise.
         mpv_set_option_string(_mpv, "hwdec",
             Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
-                ? mode : "auto");
+                ? mode : "auto-safe");
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
         // the render call to make up the difference (see Render, which also turns
         // that sleep off). The loop then wakes and draws it.
@@ -430,14 +433,17 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             CreateGLContext(getProcAddress);
         if (_render == 0) return false;
 
-        ApplyTargetColour(target);
+        bool targetChanged = _colour.Update(target.WantsLinearLight, target.PeakNits);
+        if (targetChanged) ApplyTargetColour();
 
-        if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn)
-            return false;   // nothing new; the texture still holds the last frame
+        // Nothing new, so the texture still holds the last frame — unless the target's colour
+        // just changed, in which case that frame was drawn for the old options and is redrawn.
+        if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn
+            && !targetChanged)
+            return false;
 
-        // Zero means "whatever the FBO already has", which is right for the sink's own
-        // RGBA8 texture and wrong for a renderer-lent half-float one: told nothing, mpv
-        // assumes eight bits and dithers to them inside a target that holds sixteen.
+        // Passed for completeness: mpv 0.41 ignores it (ra_create_wrapped_fb hard-codes zero).
+        // What stops it dithering a half-float target down to eight bits is DEPTH, below.
         var fbo = new mpv_opengl_fbo
         {
             fbo = (int)target.Framebuffer,
@@ -460,8 +466,9 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         parameters[3] = new mpv_render_param { type = MPV_RENDER_PARAM_DEPTH, data = &depth };
         parameters[4] = default;
         _lastGLFrameDrawn = mpv_render_context_render(_render, parameters) >= 0;
+        if (_lastGLFrameDrawn) _colour.FrameDrawn();
 
-        // What mpv actually chose, not what it was asked for. "auto" falls back on its own
+        // What mpv actually chose, not what it was asked for. "auto-safe" falls back on its own
         // when a decoder or its interop will not initialise, and a silent fallback looks
         // exactly like the mode working — the CPU moves either way, because the fallback is
         // also hardware decoding.
@@ -488,40 +495,28 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     /// Saying 16 gives 951 levels and 62 reversals. So the half-float image phase 4 exists to
     /// provide was being filled with a dithered 8-bit picture.</para>
     /// </summary>
-    private static int DepthOf(uint internalFormat) => internalFormat switch
+    /// <remarks>Capped at 16. mpv computes <c>(1 &lt;&lt; depth) - 1</c> for its dither, which
+    /// is undefined at 32 and zero on x86 — a division by zero in the shader. Dithering to 16
+    /// bits inside a float target is invisible anyway.</remarks>
+    internal static int DepthOf(uint internalFormat) => internalFormat switch
     {
-        GlRgba16f => 16,
-        GlRgba32f => 32,
+        GlRgba16f or GlRgba32f => 16,
         _ => 8,          // GL_RGBA8, and anything unrecognised: the safe assumption
     };
 
     private const uint GlRgba16f = 0x881A;
     private const uint GlRgba32f = 0x8814;
 
-    /// <summary>
-    /// libplacebo's linear output puts 1.0 at the BT.2408 reference white of 203 nits.
-    ///
-    /// <para>Measured rather than assumed: <c>spikes/HdrInterop --range</c> reads back a peak
-    /// of exactly 1.0000 at <c>target-peak=203</c>, 2.0000 at 406 and 5.0000 at 1015. It is
-    /// also the number the Wayland colour-management protocol names as the reference white of
-    /// Windows-scRGB, which is why the two ends of this pipeline need no fudge between
-    /// them.</para>
-    /// </summary>
-    private const float LibplaceboReferenceWhiteNits = 203f;
-
-    /// <summary>What <c>target-peak</c> is told when the renderer does not know the display's
-    /// peak. A common mastering peak, and wrong on a given monitor in a way nothing here can
-    /// detect — neither platform exposes a peak query through this SDL binding.</summary>
-    private const float AssumedPeakNits = 1000f;
-
-    private bool _linearTarget;
-    private float _appliedPeak;
+    private readonly MpvTargetColour _colour = new();
 
     /// <inheritdoc />
-    public float ReferenceWhiteNits => _linearTarget ? LibplaceboReferenceWhiteNits : 0f;
+    /// <remarks>What the frame in the target was drawn with, which is not always what mpv has
+    /// just been told — see <see cref="MpvTargetColour"/>.</remarks>
+    public float ReferenceWhiteNits => _colour.ReferenceWhiteNits;
 
     /// <summary>
-    /// Tells mpv what it is drawing into, when that has changed.
+    /// Tells mpv what it is drawing into, after <see cref="MpvTargetColour.Update"/> said it
+    /// changed.
     ///
     /// <para>There is no render parameter for this — <c>mpv_opengl_fbo</c> carries a
     /// framebuffer, a size and an internal format, and no <c>MPV_RENDER_PARAM</c> names a
@@ -534,23 +529,16 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     /// this is the option that decides whether HDR content keeps its range or is tone-mapped
     /// away before it reaches the target.</para>
     /// </summary>
-    private void ApplyTargetColour(in GpuFrameTarget target)
+    private void ApplyTargetColour()
     {
-        float peak = target.PeakNits > 0f ? target.PeakNits : AssumedPeakNits;
-        if (target.WantsLinearLight == _linearTarget && (!_linearTarget || peak == _appliedPeak))
-            return;
-
-        _linearTarget = target.WantsLinearLight;
-        _appliedPeak = peak;
-
-        if (_linearTarget)
+        if (_colour.Linear)
         {
             // scRGB's primaries are BT.709; the transfer is linear light; the peak is what
             // the display can show, which decides where tone mapping lands.
             int a = mpv_set_property_string(_mpv, "target-prim", "bt.709");
             int b = mpv_set_property_string(_mpv, "target-trc", "linear");
             int c = mpv_set_property_string(_mpv, "target-peak",
-                peak.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+                _colour.PeakNits.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
             // Read back rather than trust the return codes: a property that reports success
             // and then reads as something else is the difference between "mpv ignored us" and
             // "mpv agreed and something later undid it". Only under the trace, since it is

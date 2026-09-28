@@ -154,7 +154,7 @@ screen, Home/End, 0–9 jump to that tenth. Theme through `VideoPlayerTheme`
 macOS; `libmpv.so.2`, `libmpv.so` elsewhere. `HULTUI_MPV_LOG=warn` forwards mpv's log to
 stderr. See [ENVIRONMENT.md](ENVIRONMENT.md).
 
-The backend sets `hwdec=auto`, `keep-open=yes` and disables mpv's own OSC,
+The backend sets `hwdec=auto-safe`, `keep-open=yes` and disables mpv's own OSC,
 terminal and youtube-dl hooks; a trimmed build without those options is fine, they are
 set best-effort.
 

@@ -44,7 +44,7 @@ licence question to answer, not this package's. How the build is made is in
   framebuffer the sink owns and Skia composites the texture; on a raster or
   headless surface mpv's software renderer writes pixels into the sink's ring
   on a worker thread. The sink decides which at the first draw.
-- Hardware decoding is `auto`: zero-copy where the libmpv has an interop for the
-  decoder (NVDEC through CUDA on Linux, for instance), otherwise decoded on the GPU
-  and copied back for mpv's GL pipeline — which is all the trimmed Windows build
-  can do.
+- Hardware decoding is `auto-safe`: zero-copy where the libmpv has an interop for the
+  decoder — NVDEC through CUDA on NVIDIA, on Windows and Linux both, in the bundled
+  build — otherwise decoded on the GPU and copied back for mpv's GL pipeline, which is
+  what a non-NVIDIA Windows machine gets (`d3d11va-copy`).

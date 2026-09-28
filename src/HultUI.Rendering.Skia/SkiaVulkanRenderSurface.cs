@@ -197,7 +197,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         }
 
         target = new GpuFrameTarget(image.GlFramebuffer, image.GlTexture, image.GlInternalFormat,
-            WantsLinearLight: linear, PeakNits: linear ? _host.DisplayPeakNits : 0f);
+            WantsLinearLight: linear,
+            PeakNits: linear
+                ? HdrVideoLuminance.ProducerPeakNits(_host.DisplayPeakNits, _host.SdrWhiteScale, MatchVideoWhiteToUi)
+                : 0f);
         return true;
     }
 
@@ -431,10 +434,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     {
         if (!frame.IsLinearLight) return null;
 
-        float canvasWhiteNits = _host.SdrWhiteScale * ScRgbReferenceNits;
-        float scale = MatchVideoWhiteToUi || canvasWhiteNits <= 0f
-            ? 1f
-            : frame.ReferenceWhiteNits / canvasWhiteNits;
+        float scale = HdrVideoLuminance.FrameScale(frame.ReferenceWhiteNits, _host.SdrWhiteScale,
+            MatchVideoWhiteToUi);
 
         // An encoded offscreen needs the 2.2 encoding whatever the scale, so never null there.
         if (Math.Abs(scale - 1f) < 0.001f && !_offscreenEncoded) return null;
@@ -457,10 +458,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameScale = effect.ToColorFilter(uniforms);
         return _frameScale;
     }
-
-    /// <summary>scRGB fixes 1.0 at 80 nits. Everything luminance-related here is relative to
-    /// that, which is why it is a named constant rather than an 80 in three expressions.</summary>
-    private const float ScRgbReferenceNits = 80f;
 
     /// <summary>
     /// The offscreen to draw into this frame, or null when the swapchain can be drawn on
