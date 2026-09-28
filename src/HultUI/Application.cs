@@ -174,9 +174,22 @@ public sealed class Application : IDisposable
     /// contract (see <c>SDL3Window.BeginPreload</c>). Set <c>HULTUI_STARTUP=1</c> to
     /// print the phase timings it is meant to move.</para>
     /// </summary>
-    public static void BeginGraphicsPreload()
+    public static void BeginGraphicsPreload() => BeginGraphicsPreload(RendererKind.Default);
+
+    /// <summary>
+    /// <see cref="BeginGraphicsPreload()"/> for an app that will ask for a renderer in its
+    /// <see cref="Application"/> constructor, told here too because the preload is decided
+    /// now, before that constructor runs.
+    ///
+    /// <para>A preload warms the <b>OpenGL</b> driver, which a Vulkan window never loads. Told
+    /// nothing, this cannot know the app is about to ask for Vulkan: Reel did exactly that, and
+    /// loaded the GL driver on every launch only for the Vulkan window to wait on it.</para>
+    /// </summary>
+    /// <param name="renderer">The same renderer the app passes to its constructor.</param>
+    public static void BeginGraphicsPreload(RendererKind renderer)
     {
         StartupTrace.Mark("main entry");
+        if (renderer != RendererKind.Default) SDL3Window.RequestRenderer(renderer);
         SDL3Window.BeginPreload();
     }
 

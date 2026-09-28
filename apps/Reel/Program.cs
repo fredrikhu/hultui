@@ -28,12 +28,17 @@ internal static class ReelProgram
         // X11 or Wayland. Reel is a Windows app with an installer and file associations, so
         // it opts in on Windows on its own behalf, and only where that validation holds. An
         // explicit setting either way is the user's and is left alone.
+        //
+        // Reel asks for Vulkan (below), and a Vulkan window never loads the GL driver — so the
+        // renderer is named here too, and the preload only happens when HULTUI_RENDERER=gl puts
+        // the app back on GL. Called without it, the preload could not know, loaded the GL
+        // driver on every launch, and the Vulkan window waited for it.
         if (OperatingSystem.IsWindows() &&
             Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") is null)
         {
             Environment.SetEnvironmentVariable("HULTUI_GL_PRELOAD", "1");
         }
-        Application.BeginGraphicsPreload();
+        Application.BeginGraphicsPreload(RendererKind.Vulkan);
 
         // Registration runs without a window: an installer, a script, or a person who
         // would rather not hunt for a button can do it and be told what happened.

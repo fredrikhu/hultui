@@ -122,6 +122,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     private bool WantsWideColor => WideColorOverride ?? DisplayIsHdr;
 
+    /// <summary>
+    /// Whether the instance has <c>VK_EXT_swapchain_colorspace</c>. Without it
+    /// <c>SRGB_NONLINEAR</c> is the only colour space a swapchain may use, whatever the surface
+    /// lists — so scRGB is never chosen, however much it is wanted.
+    /// </summary>
+    private bool _colorSpaceExtensionEnabled;
+
     // VkImageUsageFlagBits, spelled out because getting these wrong is invisible: an
     // earlier version had 0x04 commented as TRANSFER_SRC when it is SAMPLED, and the
     // swapchain went without the one bit Skia actually requires.
@@ -299,7 +306,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // Enabled whenever the loader has it, not only when wide colour is wanted now: an
         // instance cannot gain an extension later, and the window may be dragged onto an HDR
         // display at any point. An extension that goes unused costs nothing.
-        if (HasInstanceExtension("VK_EXT_swapchain_colorspace"))
+        _colorSpaceExtensionEnabled = HasInstanceExtension("VK_EXT_swapchain_colorspace");
+        if (_colorSpaceExtensionEnabled)
             names = [.. names, "VK_EXT_swapchain_colorspace"];
 
         // For a swapchain whose extent may differ from the window's. Both are instance
@@ -886,7 +894,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // has is 8-bit sRGB, so this is only correct because the renderer now tells Skia what
         // the destination is and lets it convert; before phase 2 it would have washed the
         // whole UI out. Opt-in while that claim is only proven on one machine.
-        if (WantsWideColor)
+        if (WantsWideColor && !_colorSpaceExtensionEnabled)
+        {
+            // Drivers list EXTENDED_SRGB_LINEAR regardless, so taking it from the list here
+            // would be invalid usage that happens to work on the machine it was written on.
+            if (trace) StartupTrace.Mark("vulkan wide colour asked for, but the instance has no VK_EXT_swapchain_colorspace");
+        }
+        else if (WantsWideColor)
         {
             for (uint i = 0; i < count; i++)
             {
