@@ -365,7 +365,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // the swapchain unconverted and the shader's own decoding is the only one applied.
         var space = frame.ColorSpace == VkColorSpaceExtendedSrgbLinear && _host.SdrIsGamma22
             ? SKColorSpace.CreateSrgb()
-            : ColorSpaceFor(frame.ColorSpace);
+            : UseScaledSpace(frame)
+                ? ScaledLinear(_host.SdrWhiteScale)
+                : ColorSpaceFor(frame.ColorSpace);
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
             ColorTypeFor(frame.Format), space);
         if (surface is null)
@@ -466,7 +468,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // A 2.2 decode is needed even at a white scale of 1, and only the offscreen can do it.
         bool encoded = _host.SdrIsGamma22;
         if (frame.ColorSpace != VkColorSpaceExtendedSrgbLinear
-            || (_host.SdrWhiteScale <= 1.0001f && !encoded))
+            || (_host.SdrWhiteScale <= 1.0001f && !encoded)
+            // The scaled destination colour space already applied the white scale as the frame
+            // was drawn, so a second multiply here would square it.
+            || UseScaledSpace(frame))
         {
             ReleaseOffscreen();
             return null;
@@ -557,6 +562,57 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         VkColorSpaceExtendedSrgbLinear => SKColorSpace.CreateSrgbLinear(),
         _ => SKColorSpace.CreateSrgb(),
     };
+
+    /// <summary>
+    /// Linear sRGB with the display's SDR white scale folded into its transfer function, so
+    /// Skia applies the scale as it writes and nothing has to multiply the frame afterwards.
+    ///
+    /// <para>A transfer function maps <i>stored</i> to <i>linear</i>. Declaring the destination
+    /// as <c>linear = stored / k</c> makes Skia solve for a stored value of <c>k</c> when it
+    /// wants linear 1.0 — which is exactly the multiply the offscreen pass existed to do, done
+    /// inside the colour pipeline instead of after it. Measured at k=3: a solid colour, a 50%
+    /// alpha blend and a gradient midpoint all land at exactly 3x their plain-linear values, so
+    /// blending scales with them rather than being scaled afterwards.</para>
+    ///
+    /// <para>The direction is the easy thing to get backwards, and it is silent when wrong:
+    /// <c>a = k</c> divides instead of multiplying, which looks like a dim window rather than
+    /// an error.</para>
+    /// </summary>
+    private static SKColorSpace ScaledLinear(float whiteScale) =>
+        SKColorSpace.CreateRgb(
+            new SKColorSpaceTransferFn(1f, 1f / whiteScale, 0f, 0f, 0f, 0f, 0f),
+            SKColorSpaceXyz.Srgb);
+
+    /// <summary>
+    /// <c>HULTUI_VULKAN_SCALED_SPACE=1</c> carries the white scale in the destination colour
+    /// space instead of the offscreen pass. <b>Opt-in, and the memory is why.</b>
+    ///
+    /// <para>It works, and the output is identical: a capture of the presented swapchain differs
+    /// from the offscreen path in <b>0 of 5,335,200 channels</b>. It takes the present pass from
+    /// 0.40 ms to 0.30, and deletes a full-screen F16 surface, an SkSL colour filter and a blit.
+    /// Video is unaffected.</para>
+    ///
+    /// <para><b>But the memory saving does not appear.</b> Removing the offscreen while keeping a
+    /// plain linear space frees about 17 MB across two windows; removing it in favour of this one
+    /// frees nothing — 132 MB either way, reproducibly. Skia evidently spends about what the
+    /// offscreen cost on a destination space whose transfer function is not one it knows. So the
+    /// trade is 0.10 ms a frame for no memory, on a path off Skia's well-trodden one, which is
+    /// worth having available and not worth making the default.</para>
+    ///
+    /// <para>Untested on Linux: KWin reports gamma 2.2 and takes the offscreen path regardless,
+    /// but an X11 or non-KDE session would reach this, and nothing there has run it.</para>
+    /// </summary>
+    private static readonly bool ScaledSpaceEnabled =
+        Environment.GetEnvironmentVariable("HULTUI_VULKAN_SCALED_SPACE") == "1";
+
+    /// <summary>Whether this frame can carry its white scale in the destination colour space
+    /// rather than in a separate pass. The gamma-2.2 case still cannot: it re-encodes rather
+    /// than scaling, and that is not a gain a transfer function expresses.</summary>
+    private bool UseScaledSpace(in VulkanFrameTarget frame) =>
+        ScaledSpaceEnabled
+        && frame.ColorSpace == VkColorSpaceExtendedSrgbLinear
+        && !_host.SdrIsGamma22
+        && _host.SdrWhiteScale > 1.0001f;
 
     /// <summary>
     /// The Skia colour type for a <c>VkFormat</c>.

@@ -878,6 +878,62 @@ more work.
   beside it was worthless. After the fix the control stretched 18 of 150 and the comparison
   became real. **A control that fails is the most useful result a run can give.**
 
+### The scRGB offscreen: it can go, and it is not worth it
+
+The offscreen was the last item on the list — a full-size F16 surface per window, drawn into at
+0..1 and blitted to the swapchain through an SkSL filter that applies the display's white scale.
+It looked like the biggest remaining prize. **It was chased down and the answer is no, for reasons
+that only measurement gives.**
+
+**First, the prize was smaller than recorded.** "Half the present cost and 43 MB" compared 8-bit
+without the offscreen against F16 with it — two changes at once, so it sized nothing. Separating
+them (`HULTUI_VULKAN_WHITE_SCALE=1` turns the pass off while keeping the half-float target) gives
+four clean layers, identical across four reps:
+
+| | present | private, 2 windows |
+|---|---|---|
+| GL | 0.10 ms | 81 MB |
+| Vulkan, 8-bit | 0.20 (+0.10, Vulkan's own machinery) | 86 (+5) |
+| Vulkan, F16, no offscreen | 0.30 (+0.10, the F16 target) | 115 (+29, the F16 swapchain) |
+| Vulkan, F16 + offscreen | 0.40 (+0.10, **the offscreen**) | 133 (+18, **the offscreen**) |
+
+So the offscreen costs **0.10 ms a frame and about 9 MB a window**, not half the present pass and
+43 MB.
+
+**Second, it can be removed cheaply — the expensive route was never needed.** The pass exists to
+multiply the frame by one scalar, and Skia already converts sRGB to linear on the way into the
+surface. That scalar can ride in the destination colour space: declare it as
+`linear = stored / k` and Skia solves for a stored value of `k` where it wanted 1.0.
+`SKColorSpace.CreateRgb(SKColorSpaceTransferFn, SKColorSpaceXyz)` expresses exactly that, in one
+method, **with no call-site changes** — no `ColorF`, nothing touching themes, gradients, shadows or
+text. Measured at k=3 on the CPU first: a solid colour, a 50% alpha blend and a gradient midpoint
+all land at exactly 3x their plain-linear values, so blending scales with the content rather than
+after it.
+
+**It works on the GPU too, and the output is identical.** A capture of the presented swapchain
+differs from the offscreen path in **0 of 5,335,200 channels**, the present pass drops 0.40 to
+0.30, and video CPU is unchanged.
+
+**And then the memory saving fails to appear.** Removing the offscreen while keeping a *plain*
+linear space frees about 17 MB across two windows; removing it in favour of the scaled space frees
+**nothing** — 132 MB either way, reproducibly across three reps. Skia evidently spends about what
+the offscreen cost on a destination space whose transfer function is not one it recognises. The
+trade is **0.10 ms a frame for no memory, on a path off Skia's well-trodden one**.
+
+**So it ships as `HULTUI_VULKAN_SCALED_SPACE=1` and the default is unchanged.** A tenth of a
+millisecond is 1.2% of a 120 Hz frame; it does not buy a non-standard colour space as the default,
+and the memory that justified the work is not there. The direction to get the memory as well would
+be scaling the content rather than the destination — the `ColorF` route — which is the phase-2
+colour-space work this was trying to avoid, for a prize now known to be 9 MB a window.
+
+**The lesson is the sizing, not the mechanism.** This was ranked as the top remaining item on a
+number that conflated two changes. Twenty minutes of separating them would have ranked it last,
+before any code was written — and the code that was written is small enough to keep, which is the
+only reason it is still here.
+
+**Untested on Linux.** KWin reports gamma 2.2 and takes the offscreen path regardless, but an X11
+or non-KDE session would reach this and nothing there has run it.
+
 ### And the coverage that is still missing
 
 - **Mesa, and a hybrid GPU.** Neither machine has either. Every Vulkan number in this document is
@@ -900,8 +956,9 @@ waits on three costs that apps with no video in them would pay for nothing:
 2. **Resize CPU, 801 against GL's 264**, all of it reallocating F16 swapchain images per size
    change. `swapchain_maintenance1` with `PRESENT_SCALING_ONE_TO_ONE` halves it and is built, but
    costs video 70% more CPU, so it is opt-in — see above. Making it drag-only would get both.
-3. **The scRGB offscreen**, which is most of the memory and half the present cost, and which the
-   framework could stop needing. Plus the synchronisation-validation run, Mesa and a hybrid GPU.
+3. ~~**The scRGB offscreen**~~ — chased down and declined; see above. It costs 0.10 ms a frame and
+   9 MB a window, and the colour-space route that removes it cheaply gives back the time but not
+   the memory. Plus Mesa and a hybrid GPU.
 
 **All three are the same bill on Windows: 16-bit colour** (on NVIDIA Linux they are the API's instead — see the note above). An 8-bit Vulkan window starts within 30 ms of GL,
 resizes at GL's cost, and sits 7 MB above it. So the question is not really "Vulkan or GL" — it is
