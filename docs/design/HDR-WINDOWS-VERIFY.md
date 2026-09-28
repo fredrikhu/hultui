@@ -214,6 +214,40 @@ between sessions. **The fallback plays** and costs what the `glFinish` path has 
 `[int](3/2)` rounds to 2, not 1. The per-rep values above are the real ones; no conclusion rested
 on the label.)*
 
+### 3b. Validation, after installing the SDK — clean, with controls, and one real blind spot
+
+The Vulkan SDK (1.4.357.0) was installed by hand partway through, so the section below — written
+before that — is superseded on the facts but kept for the correction it records.
+
+**The layer really loads now**, which is itself the control the earlier attempt lacked:
+
+```
+[Vulkan Loader] INFO | LAYER: Located json file "C:\VulkanSDK.4.357.0\Bin\VkLayer_khronos_validation.json"
+[Vulkan Loader] WARNING | LAYER: Layer "VK_LAYER_KHRONOS_validation" forced enabled due to env var
+```
+
+With `VK_LAYER_VALIDATE_SYNC=1` (the modern spelling; `VK_LAYER_ENABLES` still works but the layer
+warns it is deprecated), **0 log lines** on every path: the default renderer, `FIXED_EXTENT=1`
+through a 40-step resize storm, video on the semaphore path, and video on the `glFinish` fallback.
+
+**Synchronisation validation is live here, proven by fault injection.** Removing the wait semaphore
+from the present submit produced 21 lines of `SYNC-HAZARD-PRESENT-AFTER-WRITE` immediately, and
+reverting returned it to 0. So the clean runs above are clean, not quiet.
+
+**But it is blind to the GL/Vulkan seam, and that matters for this design.** The other fault —
+dropping the semaphore wait from the interop hand-back barrier, so nothing orders mpv's GL write
+against Skia's read — produced **0 validation messages**. The layer only sees Vulkan-side accesses;
+GL's writes to an external-memory image are invisible to it. **That fault was plainly visible on
+screen as blinking black frames**, spotted by a person watching while the run went by.
+
+So the seam has to be controlled behaviourally, not by the layer — which is what Linux did
+(withholding the signal stalls GL). Two consequences worth carrying:
+
+- A clean synchronisation-validation run **does not** cover the interop seam on either platform.
+  It covers everything either side of it.
+- The blinking-black-frames symptom is the seam's failure signature, and it is a person's test.
+  It also confirms the semaphore earns its place: remove it and the picture breaks visibly.
+
 ### 3. Validation — cannot be run on this machine at all, and an earlier claim of mine was wrong
 
 **There is no validation layer installed here.** `HKLM\SOFTWARE\Khronos\Vulkan\ExplicitLayers`

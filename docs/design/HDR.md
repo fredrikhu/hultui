@@ -805,6 +805,12 @@ Twelve times fewer rebuilds, 42% less CPU through a drag, and the gap to GL down
 The over-allocation cost nothing measurable in working set, private bytes or handles (about 13 MB
 more device memory by arithmetic, which those counters do not see).
 
+**Now actually verified.** The Vulkan SDK was installed afterwards and this path re-run under core
+and synchronisation validation: **0 messages**, with the loader confirming the layer loaded and a
+fault injection (dropping the present submit's wait semaphore) producing 21
+`SYNC-HAZARD-PRESENT-AFTER-WRITE` lines to prove the check fires. The correction below stands as
+the record of how it was got wrong the first time.
+
 **Correction: an earlier version of this section said the validation layers were clean here. They
 were not run.** `VK_LOADER_LAYERS_ENABLE` was set and the run produced no layer output, which was
 read as silence meaning approval — but this Windows machine has **no validation layer installed at
@@ -909,6 +915,14 @@ replace one — which is an argument for flipping it only once there is a reason
 from, and HDR is not yet that reason for an app with no video in it.
 
 ## Traps
+
+**Synchronisation validation does not cover the GL/Vulkan seam.** Proven on Windows by injecting
+the fault it should catch — removing the semaphore wait that orders mpv's GL write against Skia's
+read of the shared image — and getting **0 validation messages**, while a fault on the Vulkan side
+produced 21 immediately. The layer sees Vulkan accesses; GL's writes to an external-memory image
+are invisible to it. The seam's failure signature is **blinking black frames**, which is a person's
+test, and the seam's control is behavioural: withhold the signal and GL stalls. So "synchronisation
+validation was clean" means everything either side of the seam, never the seam itself.
 
 Everything below cost hours, and most of it was nearly shipped as a false green. They are
 grouped by **shape** rather than by phase, because the shapes recur and the phases do not: the
