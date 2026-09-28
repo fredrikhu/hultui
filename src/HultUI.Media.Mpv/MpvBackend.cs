@@ -20,10 +20,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private const ulong ObservePause = 1, ObservePosition = 2, ObserveDuration = 3, ObserveEof = 4,
         ObservePausedForCache = 5, ObserveCacheState = 6;
 
-    private static readonly Lazy<bool> Available = new(() => TryLoad(out _));
+    private static readonly Lazy<(bool Loaded, string? Error)> Available =
+        new(() => (TryLoad(out _, out var error), error));
 
     /// <summary>Whether a libmpv could be found and loaded; false means every <see cref="MpvBackend"/> constructor throws.</summary>
-    public static bool IsAvailable => Available.Value;
+    public static bool IsAvailable => Available.Value.Loaded;
 
     private nint _mpv;
     private readonly Thread _eventThread;
@@ -56,9 +57,12 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     public MpvBackend()
     {
         if (!IsAvailable)
-            throw new DllNotFoundException(
-                "libmpv was not found. Put libmpv-2.dll / libmpv.so.2 / libmpv.2.dylib beside the application, " +
-                "on the library path, or point HULTUI_MPV_PATH at it — see HultUI.Media.Mpv's README.");
+            throw new DllNotFoundException(Available.Value.Error is { } error
+                // Found, and would not load: the reason is what a person needs, not a hunt for
+                // a file they already have. Usually a dependency of libmpv's own.
+                ? $"libmpv was found but could not be loaded — {error}"
+                : "libmpv was not found. Put libmpv-2.dll / libmpv.so.2 / libmpv.2.dylib beside the application, " +
+                  "on the library path, or point HULTUI_MPV_PATH at it — see HultUI.Media.Mpv's README.");
 
         _mpv = mpv_create();
         if (_mpv == 0) throw new InvalidOperationException("mpv_create failed.");

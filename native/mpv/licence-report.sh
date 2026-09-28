@@ -16,7 +16,14 @@ echo "mpv        $MPV_TAG"
 echo "FFmpeg     $FFMPEG_TAG"
 echo "libplacebo $LIBPLACEBO_TAG"
 echo "libass     ${LIBASS_TAG} (or the host package on Windows)"
-echo "nv-codec-headers ${NVCODEC_TAG} (MIT)"
+# What was installed, not only what was asked for: the two differed whenever a work
+# directory outlived a versions.env bump, and the report said the new tag regardless.
+nvinstalled=$(pkg-config --modversion ffnvcodec 2>/dev/null || echo "not found")
+echo "nv-codec-headers ${NVCODEC_TAG} (MIT) — installed: ${nvinstalled}"
+stale=0
+if [ "$nvinstalled" != "${NVCODEC_TAG#n}" ]; then
+  echo "  installed nv-codec-headers ($nvinstalled) is not the pinned ${NVCODEC_TAG#n}  <-- stale work directory"; stale=1
+fi
 echo
 
 echo "mpv build configuration"
@@ -53,5 +60,10 @@ echo
 
 if [ "$fail" = 1 ]; then
   echo "RESULT: NOT LGPL — do not ship"; exit 1
+fi
+if [ "$stale" = 1 ]; then
+  # Not a licence problem, and not reported as one: the binary is built from something
+  # other than what versions.env and the notices name.
+  echo "RESULT: built from a stale work directory — delete it and rebuild before shipping"; exit 1
 fi
 echo "RESULT: LGPL-2.1+ throughout (mpv -Dgpl=false; FFmpeg without gpl/nonfree/version3; libplacebo LGPL-2.1; libass ISC; dav1d BSD-2)"

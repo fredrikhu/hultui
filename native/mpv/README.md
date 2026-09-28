@@ -34,7 +34,8 @@ the same, but those are GPL. The licence is the whole reason this directory exis
   dependency are linked in. Hardware decoding through NVDEC with CUDA interop, which
   is zero-copy and carries ten bits, falling back to D3D11VA/DXVA2 copy-back on
   hardware without NVDEC. CUDA is loaded at run time, so the DLL still loads where
-  there is no NVIDIA driver — `objdump -p` must never list nvcuda.dll.
+  there is no NVIDIA driver — `objdump -p` must never list nvcuda.dll, and the build fails
+  if it does (on Linux, if `readelf` lists libcuda).
 - **Linux**: `libmpv.so.2` with FFmpeg, libplacebo and libass inside it; the base
   libraries (freetype, fribidi, harfbuzz, fontconfig, zlib, PipeWire, ALSA, PulseAudio, GL) come
   from the distribution, as any desktop has them. **NVDEC with CUDA interop**, so on
@@ -67,8 +68,17 @@ has a package for them.
 
 Sources are cloned into `work/src` at the pinned tags, built into `work/prefix`, and
 the result lands in `out/<rid>/` with a `LICENCE-REPORT.txt` that `licence-report.sh`
-writes from the configured trees. The report fails the build if any GPL switch is
-found on. `JOBS=n` sets parallelism; `MPV_WORK` and `MPV_OUT` move the directories.
+writes from the configured trees, followed by the library's runtime dependencies. The
+report fails the build if any GPL switch is found on, or if the installed nv-codec-headers
+are not the pinned ones. `JOBS=n` sets parallelism; `MPV_WORK` and `MPV_OUT` move the
+directories.
+
+A kept `work/` is reused stage by stage, but only for what was built from the same tag and
+options — each stage records that in `work/prefix/stamps/`. A clone that is not at its pinned
+tag stops the build with a message rather than being built from: after a `versions.env` bump,
+delete that clone (or all of `work/`). The script also checks for its toolchain before it
+starts, so running it from Git for Windows' bash, which passes the host check, fails at once
+instead of twenty minutes in.
 
 To use the result: `HULTUI_MPV_PATH=out/win-x64/libmpv-2.dll dotnet test
 tests/HultUI.Media.Backends.Tests`, or pack it — `src/HultUI.Media.Mpv.Natives` picks up

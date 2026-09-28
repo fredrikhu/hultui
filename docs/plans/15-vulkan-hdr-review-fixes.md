@@ -31,9 +31,9 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 4.1 | A video frame is labelled with the settings it was rendered with | 4 | Done |
 | 4.2 | Display peak scaled under `HULTUI_VIDEO_WHITE=ui` | 4 | Done |
 | 4.3 | mpv option hygiene: depth cap, peak clamp, `auto-safe` | 4 | Done |
-| 5.1 | Build fails if the natives import CUDA at load time | 5 | Todo |
-| 5.2 | Notices and README: nv-codec-headers, libpipewire, loader error | 5 | Todo |
-| 5.3 | Build script: pinned-tag checks, toolchain check, report coverage | 5 | Todo |
+| 5.1 | Build fails if the natives import CUDA at load time | 5 | Done |
+| 5.2 | Notices and README: nv-codec-headers, libpipewire, loader error | 5 | Done |
+| 5.3 | Build script: pinned-tag checks, toolchain check, report coverage | 5 | Done |
 | 6.1 | Per-host Vulkan command table | 6 | Todo |
 | 6.2 | GL device UUID via the indexed query | 6 | Todo |
 | 6.3 | Interop state machine hardening | 6 | Todo |
@@ -279,6 +279,23 @@ on AMD or Intel. **Fix:** in `collect()`, fail on `nvcuda`/`nvcuvid` in `objdump
 - Explicit `--disable-cuda-llvm`; the licence report records the installed nv-codec-headers
   version and the NEEDED/DLL lists.
 - `versions.env`: older drivers fall back to software decoding on Linux, not to copy.
+
+**Phase 5 result (2026-09-29).** The full native build was not re-run: it takes the better part
+of an hour per host and CI runs it. Each new piece was exercised on its own instead:
+- **CUDA-link check:** run against the shipped `libmpv-2.dll`'s real import list with MSYS2's
+  `objdump`, where it passes. It fails both controls, the same list with `nvcuda.dll` added and a
+  Linux NEEDED list with `libcuda.so.1`.
+- **Toolchain check:** rejects Git for Windows' bash (`gcc targets 'nothing'`) and passes in a real
+  MSYS2 MINGW64 shell.
+- **Tag check in `fetch()`:** recognises all four existing clones.
+- **Licence report:** passes on the local work tree, and on a pretend pin bump says "built from a
+  stale work directory" rather than "NOT LGPL".
+- **Loader error:** `Mpv.TryLoadFrom` is new, with 2 tests; not recording the error fails one.
+
+The notices gained nv-codec-headers' MIT notice verbatim from the headers. Other MIT components
+already listed (HarfBuzz, Brotli) still have only a row and no text, which is the same gap and was
+there before this plan. A kept work directory rebuilds FFmpeg once, because the new stamps replace
+the old `ffmpeg-configure.txt`.
 
 ## Phase 6 — Robustness in less common configurations
 
