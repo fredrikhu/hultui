@@ -934,6 +934,18 @@ only reason it is still here.
 **Untested on Linux.** KWin reports gamma 2.2 and takes the offscreen path regardless, but an X11
 or non-KDE session would reach this and nothing there has run it.
 
+**And video luminance under it is not fully verified**, which is the other reason the default did
+not move. `FrameColorFilter` computes a video's scale against "the 0..1 offscreen", and on this
+path there is no offscreen — the arithmetic should still land white at 203 nits, because the
+colour space applies the same factor the blit used to, but *should* is not a measurement. What
+could be measured: captures at the same frame number pair up closely, with mean channel values
+45.82/45.64 and 47.64/47.46 between the offscreen and scaled paths, so there is no gross error —
+a misapplied white scale would show as 18% or 3x, not 0.4%. But the count of near-white channels
+differs by about a fifth (0.59% against 0.46%), and an 8-bit capture of frames that are not
+exactly identical cannot say whether that is the highlights changing or the film moving. A
+same-frame comparison was not achievable: the film plays, the procedural sample never takes the
+linear-light path, and pausing needs input this harness cannot deliver.
+
 ### And the coverage that is still missing
 
 - **Mesa, and a hybrid GPU.** Neither machine has either. Every Vulkan number in this document is
