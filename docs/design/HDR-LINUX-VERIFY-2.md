@@ -516,3 +516,77 @@ between columns carries over.
   checked against swapchain sizes. A person did not drag or look.
 - **The Vulkan → GL ordering gap** in item 0: measured and fixed afterwards (see item 0). Not yet run on Windows.
 - **The duplicate start-up swapchain** in item 1: fixed afterwards (see item 1). Not yet run on Windows.
+
+---
+
+## What Windows found afterwards
+
+Both of your fixes pass here; the run is under **Results** in
+[HDR-WINDOWS-VERIFY.md](HDR-WINDOWS-VERIFY.md). In short: one swapchain at start-up on both
+renderers with GL reaching `first frame shown`, and the Vulkan → GL semaphore really exercising the
+Windows half (`OPAQUE_WIN32`, `GL_EXT_semaphore_win32`, `glWaitSemaphoreEXT` on WGL) at no
+measurable CPU cost — 52/67/68 ms/s before against 58/73/62 after, matching your 128–130 against
+113–144.
+
+**Two of your results should be read differently now, and one needs a run.**
+
+### 1. Your synchronisation validation was clean, and it does not cover the interop seam
+
+The Vulkan SDK was installed on the Windows machine, so the layers run there too. Core and
+synchronisation validation are clean on every path, with the loader line proving the layer loaded
+and a fault injection — dropping the present submit's wait semaphore — producing 21
+`SYNC-HAZARD-PRESENT-AFTER-WRITE` lines to prove the check fires.
+
+**Then the more useful fault.** Removing the semaphore wait from the interop hand-back barrier, so
+that nothing orders mpv's GL write against Skia's read of the shared image, produced **zero
+validation messages**. The layer sees Vulkan-side accesses; GL's writes to an external-memory image
+are invisible to it. That same fault was plainly visible on screen as **blinking black frames**,
+noticed by a person watching a run go past.
+
+**So neither platform's clean synchronisation-validation run covers the seam** — they cover
+everything either side of it. Your behavioural control (withhold the signal, GL stalls) is the only
+kind that reaches it, and it was the right instrument. Worth knowing before a future change to the
+interop is signed off on a quiet layer.
+
+### 2. Your "unchanged, middle band still the same" for `HULTUI_VIDEO_WHITE=ui` was correct, and a no-op
+
+That comparison has now been made on Windows, where the transport bar reads **visibly hotter** than
+the film's whites without `ui` and matches with it. The predicted 18% is real.
+
+It is not a contradiction: **on Wayland the setting can do nothing.** The protocol's scRGB reference
+white is 2.5375, and 2.5375 x 80 = **203 nits**, which is exactly libplacebo's reference white — so
+UI white and video white already coincide there and the scale computes to 1. The flag only bites
+where the display's SDR white differs from 203.
+
+`reference` is now the settled default: a correct picture beats matching chrome, since the film's
+absolute luminances are what the phase was for. **No need to re-run this on Wayland** — there is
+nothing there to see, by construction.
+
+### 3. New and untested here: `HULTUI_VULKAN_SCALED_SPACE=1`
+
+The scRGB offscreen can be replaced by folding the white scale into the destination colour space —
+declare the render target `linear = stored / k` and Skia stores `k` where it wanted 1.0, with no
+call-site changes. On Windows it is exact: the presented swapchain differs from the offscreen path
+in **0 of 5,335,200 channels**, and the present pass drops 0.40 ms to 0.30.
+
+**It is opt-in and off**, because the memory saving does not appear: dropping the offscreen for a
+*plain* linear space frees about 17 MB across two windows, dropping it for this one frees nothing.
+Skia evidently spends about what the offscreen cost on a transfer function it does not recognise.
+
+**What would be worth knowing there**, if you have a session spare — none of it is blocking:
+
+- **Does it engage at all?** On KWin it should not: `SdrIsGamma22` is true, so the offscreen path is
+  taken regardless. An **X11 or non-KDE** session is where it would be reached, and nothing has run
+  it. A capture comparison against the default is the check, exactly as for the offscreen.
+- **Does Skia charge the same ~17 MB there?** If Mesa or NVIDIA-on-Linux handles a custom transfer
+  function on its fast path, the trade changes and the default might be worth revisiting — which
+  would then be a per-platform default, the second one this work has produced.
+
+### 4. For your records
+
+- **"Every Vulkan penalty is F16" is now labelled a Windows conclusion** in `HDR.md`, with your
+  numbers beside it. Thank you — that generalisation would have been carried a long way.
+- **The resize stretch is labelled DXGI's**, so the Windows reasoning stays on Windows.
+- **`swapchain_maintenance1`** ships opt-in on Windows too: it halves resize CPU (801 → 466 ms/s,
+  rebuilds 122 → 10) but costs 4K HDR playback about 70% more CPU (91–95 against 48–63), so video
+  decides the default. Your driver offers no present scaling, so it declines itself there anyway.
