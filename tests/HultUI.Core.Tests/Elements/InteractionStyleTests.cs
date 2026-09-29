@@ -97,12 +97,17 @@ public class InteractionStyleTests
     }
 
     [Fact]
-    public void NoOverrides_TrackingIsCheapNoop()
+    public void NoOverrides_HoverIsRecorded_ButNothingIsRestyled()
     {
         var box = Box.New().Background(Blue);
-        box.SetInteractionHovered(true); // no interaction registered — nothing happens
-        Assert.False(box.IsHovered);
+        box.SetInteractionHovered(true); // no interaction style registered
+        Assert.True(box.IsHovered);      // the fact is kept for every element (it once read false)
         Assert.Equal(Blue, box.BackgroundColor);
+
+        box.BackgroundColor = Red;       // an app's own change survives the hover ending
+        box.SetInteractionHovered(false);
+        Assert.False(box.IsHovered);
+        Assert.Equal(Red, box.BackgroundColor);
     }
 
     [Fact]

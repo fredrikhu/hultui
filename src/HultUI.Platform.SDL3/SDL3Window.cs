@@ -1275,7 +1275,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public void SetCursor(CursorType cursor)
     {
         if (cursor == _currentCursor) return;
+        var previous = _currentCursor;
         _currentCursor = cursor;
+
+        // None hides the cursor rather than naming a shape; any other shows it again.
+        if (cursor == CursorType.None)
+        {
+            SDL_HideCursor();
+            return;
+        }
+        if (previous == CursorType.None) SDL_ShowCursor();
 
         if (!_cursorCache.TryGetValue(cursor, out var sdlCursor))
         {
@@ -1342,7 +1351,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         CursorType.ResizeNWSE => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NWSE_RESIZE,
         CursorType.NotAllowed => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NOT_ALLOWED,
         CursorType.Wait => SDL_SystemCursor.SDL_SYSTEM_CURSOR_WAIT,
-        CursorType.None => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT,
+        CursorType.Progress => SDL_SystemCursor.SDL_SYSTEM_CURSOR_PROGRESS,
         CursorType.ColResize => SDL_SystemCursor.SDL_SYSTEM_CURSOR_EW_RESIZE,
         CursorType.RowResize => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NS_RESIZE,
         _ => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT
@@ -1435,6 +1444,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP => evt->button.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION => evt->motion.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL => evt->wheel.windowID,
+            (uint)SDL_EventType.SDL_EVENT_WINDOW_MOUSE_LEAVE => evt->window.windowID,
             (uint)SDL_EventType.SDL_EVENT_KEY_DOWN or
             (uint)SDL_EventType.SDL_EVENT_KEY_UP => evt->key.windowID,
             (uint)SDL_EventType.SDL_EVENT_TEXT_INPUT => evt->text.windowID,

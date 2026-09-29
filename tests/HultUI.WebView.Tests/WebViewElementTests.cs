@@ -304,6 +304,25 @@ public class WebViewElementTests
         Assert.True(after.IsFocused);
     }
 
+    [Fact]
+    public void AShortcutPressedInThePage_ReachesTheAppsHandlers_AndOneTheyTakeNeverReachesThePage()
+    {
+        var pressed = new List<(KeyCode, KeyModifiers)>();
+        using var page = Show(capabilities: WebEngineCapabilities.NativeKeyboard, around: element =>
+            Flex.Column().Children(element).OnKeyDown(e =>
+            {
+                pressed.Add((e.Key, e.Modifiers));
+                if (e.Key == KeyCode.L) e.StopPropagation = true;    // the app's "go to address"
+            }));
+
+        var taken = page.View.RaiseShortcut(KeyCode.L, KeyModifiers.Ctrl);
+        var passed = page.View.RaiseShortcut(KeyCode.F, KeyModifiers.Ctrl);   // the page's find
+
+        Assert.Equal([(KeyCode.L, KeyModifiers.Ctrl), (KeyCode.F, KeyModifiers.Ctrl)], pressed);
+        Assert.True(taken.Handled);
+        Assert.False(passed.Handled);
+    }
+
     // ──── Title, cursor, accessibility ────
 
     [Fact]
@@ -323,13 +342,17 @@ public class WebViewElementTests
     }
 
     [Fact]
-    public void TheCursor_IsThePages()
+    public void TheCursor_IsThePages_AndShowsWithoutAnotherMove()
     {
         using var page = Show();
+        page.Window.MoveMouse(100, 100);
 
+        // The page answers the move with the cursor it wants, after the move was handled.
         page.View.RaiseCursor(CursorType.Pointer);
+        page.Session.PumpFrame();
 
         Assert.Equal(CursorType.Pointer, page.Element.Inherited.Cursor);
+        Assert.Equal(CursorType.Pointer, page.Window.LastCursor);
     }
 
     // ──── Lifetime ────

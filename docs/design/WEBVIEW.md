@@ -369,19 +369,21 @@ Junction's tests had worked around it with a comment. Now a plain flag, set for
 every element; not by creating the interaction state, whose first recompute
 snapshots the element's visuals and would later revert an app's own changes.
 
-**W3 — Pointer leaves the window (`HultUI.Platform.SDL3`, `HultUI`).** SDL's
+**W3 — Pointer leaves the window (`HultUI.Platform.SDL3`, `HultUI`). Shipped in
+step 2** as `InputEvent.PointerLeftWindowInput`. SDL's
 window mouse-leave is not handled, so nothing gets `PointerLeave` when the
 pointer exits the OS window. A page would keep its hover state; so does a button
 at the window edge today. Translate the event and leave the hovered chain.
 
-**W4 — Cursor applies without a move (`HultUI`).** The window reads the cursor
+**W4 — Cursor applies without a move (`HultUI`). Shipped in step 2.** The window reads the cursor
 only on a pointer move. The page's cursor answers a move we forwarded, so it
 arrives just after that move was handled and would show one move late. The
 window re-reads the hovered element's cursor after a style pass that changed it.
 Also: `CursorType.None` maps to the arrow today (hidden cursor missing), and a
 `Progress` kind is worth adding — SDL has both.
 
-**W5 — Key re-entry (`HultUI`).** With the page focused on Windows, keys go to
+**W5 — Key re-entry. Shipped in step 2, in `HultUI.WebView` rather than `HultUI`:**
+the element dispatches the offered key from itself, so no window method was needed. With the page focused on Windows, keys go to
 Chromium, and `AcceleratorKeyPressed` hands back the ones an app might bind. They
 must re-enter HultUI as a `KeyDownEvent` on the focused element's ancestors. The
 WinForms host already translates virtual keys through scan codes to `KeyCode`
@@ -457,8 +459,16 @@ engine if it changed, but nothing more.
    half they aimed at), 22 mapping tests that run anywhere
    (`HultUI.WebView.Engines.Tests`), and the sample's `--check`, which passes under
    NativeAOT in about 380 ms from launch with no trim or AOT warnings.
-   **Still open in step 2:** seams W3 (pointer leaving the window), W4 (cursor without
-   a move) and W5 with `AcceleratorKeyPressed` (app shortcuts while the page has focus).
+   Seams W3, W4 and W5 followed the same day, which **completes step 2**: the pointer
+   leaving the window leaves the hover chain; a cursor changed by a style pass shows
+   without another move (and `CursorType.None` now hides the cursor, beside a new
+   `Progress`); and `AcceleratorKeyPressed` offers shortcuts — Ctrl or Alt held, or
+   F1–F12, never typing, arrows or Escape — to the app, dispatched from the element
+   through its ancestors; a handler that stops one keeps it from the page. A real-window
+   test posts F2 to WebView2's focus window in-process and sees the app's handler run
+   (and fails with the subscription removed). W5 needed no `Window` seam after all: the
+   element dispatches the key itself. The hover fix found the same bug as `IsFocused`
+   in `IsHovered` and `IsPressed`, fixed the same way.
 3. **Windows zero-copy**: GL, then Vulkan.
 4. **Windows accessibility**: `IRawElementProviderHwndOverride` on the UIA
    bridge's window provider for WebView2's focus window; proven in the real-window

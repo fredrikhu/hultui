@@ -160,6 +160,9 @@ internal static unsafe partial class Native
     public static partial nint GetFocus();
 
     [LibraryImport("user32.dll")]
+    public static partial short GetKeyState(int virtualKey);
+
+    [LibraryImport("user32.dll")]
     public static partial nint SetFocus(nint hwnd);
 
     [LibraryImport("user32.dll")]

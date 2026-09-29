@@ -12,6 +12,8 @@ public abstract record InputEvent
     public record MouseButtonInput(float X, float Y, int Button, bool IsDown, KeyModifiers Modifiers) : InputEvent;
     public record MouseMoveInput(float X, float Y, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
     public record MouseWheelInput(float MouseX, float MouseY, float DeltaX, float DeltaY, KeyModifiers Modifiers) : InputEvent;
+    /// <summary>The pointer left the window. No position: it is somewhere else now.</summary>
+    public record PointerLeftWindowInput() : InputEvent;
     public record KeyInput(KeyCode KeyCode, KeyModifiers Modifiers, bool IsDown, bool IsRepeat) : InputEvent;
     public record TextInputInput(string Text) : InputEvent;
     public record TextEditingInput(string Text, int SegmentStart, int SegmentLength) : InputEvent;

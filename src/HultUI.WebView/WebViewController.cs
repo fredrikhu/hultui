@@ -125,6 +125,7 @@ public sealed class WebViewController : IDisposable
     internal CursorType Cursor { get; private set; } = CursorType.Default;
     internal event Action<CursorType>? CursorChanged;
     internal event Action<bool>? FocusLeaving;
+    internal event Action<WebKeyRequest>? KeyFromPage;
     internal event Action<string>? TitleChanged;
 
     // ──── Commands ────
@@ -315,6 +316,10 @@ public sealed class WebViewController : IDisposable
 
             case WebEngineEvent.FocusLeaving l:
                 FocusLeaving?.Invoke(l.Forward);
+                break;
+
+            case WebEngineEvent.KeyFromPage k:
+                KeyFromPage?.Invoke(k.Request);
                 break;
 
             case WebEngineEvent.ProcessFailed p:

@@ -237,10 +237,13 @@ internal sealed unsafe class WebView2View : IWebEngineView
         On(_composition, ICoreWebView2CompositionController.add_CursorChanged, ICoreWebView2CompositionController.remove_CursorChanged,
             ICoreWebView2CursorChangedEventHandler.IID,
             (_, _) => Raise(new WebEngineEvent.CursorChanged(CursorFor(
-                Com.Get<uint>(_composition, ICoreWebView2CompositionController.get_SystemCursorId, "get_SystemCursorId")))),
+                Com.Get<uint>(_composition, ICoreWebView2CompositionController.get_SystemCursorId, "get_SystemCursorId"),
+                Com.Get<nint>(_composition, ICoreWebView2CompositionController.get_Cursor, "get_Cursor")))),
             "add_CursorChanged");
         On(_controller, ICoreWebView2Controller.add_MoveFocusRequested, ICoreWebView2Controller.remove_MoveFocusRequested,
             ICoreWebView2MoveFocusRequestedEventHandler.IID, OnMoveFocusRequested, "add_MoveFocusRequested");
+        On(_controller, ICoreWebView2Controller.add_AcceleratorKeyPressed, ICoreWebView2Controller.remove_AcceleratorKeyPressed,
+            ICoreWebView2AcceleratorKeyPressedEventHandler.IID, OnAcceleratorKey, "add_AcceleratorKeyPressed");
     }
 
     private Uri? Source()
@@ -322,6 +325,39 @@ internal sealed unsafe class WebView2View : IWebEngineView
         if (reason is not (1 or 2)) return;                 // NEXT, PREVIOUS
         Com.Call(args, ICoreWebView2MoveFocusRequestedEventArgs.put_Handled, 1);
         Raise(new WebEngineEvent.FocusLeaving(Forward: reason == 1));
+    }
+
+    /// <summary>
+    /// WebView2 offers keys it considers accelerators before the page acts on them; the
+    /// shortcuts among them go to the app. Raised on the UI thread, answered inside it.
+    /// </summary>
+    private void OnAcceleratorKey(nint sender, nint args)
+    {
+        int kind = Com.Get<int>(args, ICoreWebView2AcceleratorKeyPressedEventArgs.get_KeyEventKind, "get_KeyEventKind");
+        uint vk = Com.Get<uint>(args, ICoreWebView2AcceleratorKeyPressedEventArgs.get_VirtualKey, "get_VirtualKey");
+        int lParam = Com.Get<int>(args, ICoreWebView2AcceleratorKeyPressedEventArgs.get_KeyEventLParam, "get_KeyEventLParam");
+        var modifiers = CurrentModifiers();
+        if (!Win32Keys.IsShortcut(vk, modifiers)) return;
+        var key = Win32Keys.ToKeyCode(vk, (uint)(lParam >> 16) & 0xFF);
+        if (key == KeyCode.Unknown) return;
+
+        bool down = kind is 0 or 2;   // KEY_DOWN, SYSTEM_KEY_DOWN
+        var request = new WebKeyRequest(key, modifiers, down, isRepeat: down && (lParam & (1 << 30)) != 0);
+        Raise(new WebEngineEvent.KeyFromPage(request));
+        if (request.Handled)
+            Com.Call(args, ICoreWebView2AcceleratorKeyPressedEventArgs.put_Handled, 1);
+    }
+
+    /// <summary>The thread's modifier state: WebView2's focus window is on this thread.</summary>
+    private static KeyModifiers CurrentModifiers()
+    {
+        static bool Down(int vk) => Native.GetKeyState(vk) < 0;
+        var m = KeyModifiers.None;
+        if (Down(0x10)) m |= KeyModifiers.Shift;
+        if (Down(0x11)) m |= KeyModifiers.Ctrl;
+        if (Down(0x12)) m |= KeyModifiers.Alt;
+        if (Down(0x5B) || Down(0x5C)) m |= KeyModifiers.Super;
+        return m;
     }
 
     // ──── Commands ────
@@ -463,11 +499,14 @@ internal sealed unsafe class WebView2View : IWebEngineView
         return new Uri(uri.GetLeftPart(UriPartial.Authority));
     }
 
-    /// <summary>The cursor for a Win32 IDC_* resource id.</summary>
-    internal static CursorType CursorFor(uint id) => id switch
+    /// <summary>The cursor for a Win32 IDC_* resource id. Id 0 is a custom cursor (a CSS
+    /// <c>url()</c>, drawn as the arrow) — or, with no cursor handle at all, <c>cursor: none</c>.</summary>
+    internal static CursorType CursorFor(uint id, nint handle = 1) => id switch
     {
+        0 when handle == 0 => CursorType.None,
         32513 => CursorType.Text,
-        32514 or 32650 => CursorType.Wait,
+        32514 => CursorType.Wait,
+        32650 => CursorType.Progress,
         32515 => CursorType.Crosshair,
         32649 => CursorType.Pointer,
         32644 => CursorType.ResizeEW,

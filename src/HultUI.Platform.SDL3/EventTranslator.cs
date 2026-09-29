@@ -51,6 +51,10 @@ public sealed unsafe class EventTranslator
                     TranslateKeyMod(SDL_GetModState())));
                 break;
 
+            case (uint)SDL_EventType.SDL_EVENT_WINDOW_MOUSE_LEAVE:
+                OnInputEvent?.Invoke(new InputEvent.PointerLeftWindowInput());
+                break;
+
             case (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL:
                 OnInputEvent?.Invoke(new InputEvent.MouseWheelInput(
                     evt->wheel.mouse_x * s, evt->wheel.mouse_y * s,

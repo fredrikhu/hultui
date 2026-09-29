@@ -93,10 +93,16 @@ keeps the page as it was.
 **One element per controller.** The element tells the engine where the page is; two
 elements showing one controller would fight over it.
 
-## Limits, for now
+## Keys while the page has focus
 
-- Keyboard shortcuts of the app's do not fire while the page has focus: the keys go to
-  the browser. (Routing them back is framework seam W5 in the design.)
+Typing goes to the page — on Windows through WebView2's own focus window, so input methods
+work as in Edge. Shortcuts are offered to the app first: a key with Ctrl or Alt held, or a
+function key, is dispatched as a `KeyDownEvent` from the web view element up through its
+ancestors, so an app's `OnKeyDown` on the root sees Ctrl+L or F11 as usual. A handler that
+sets `StopPropagation` takes the key, and the page never sees it; otherwise the page gets it
+too. Typing, arrows, Tab and Escape are the page's alone.
+
+## Limits, for now
 - A continuously animating page costs about a third of a core at 1650×1072 on the pixel
   path it uses today; a still page costs nothing. Zero-copy GPU frames are the next step.
 - The page is announced to screen readers as a named group with nothing inside yet.

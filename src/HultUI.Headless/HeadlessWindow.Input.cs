@@ -31,6 +31,9 @@ public sealed partial class HeadlessWindow
         _platform.RaiseInput(new InputEvent.MouseMoveInput(x, y, dx, dy, modifiers));
     }
 
+    /// <summary>The pointer leaves the window, as SDL reports when it crosses the edge.</summary>
+    public void MouseLeaveWindow() => _platform.RaiseInput(new InputEvent.PointerLeftWindowInput());
+
     public void MouseDown(float x, float y, MouseButton button = MouseButton.Left,
         KeyModifiers modifiers = KeyModifiers.None)
     {

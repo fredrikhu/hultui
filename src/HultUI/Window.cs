@@ -23,6 +23,11 @@ public sealed class Window : IOverlayHost, IDisposable
     private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Element? _lastHoveredElement;
+    // The cursor the pointer move last took from the hovered element's style, and whether
+    // the cursor on screen is still that one (not a scrollbar's, a drag's, an autoscroll's).
+    // Lets a style change show without waiting for the next move.
+    private CursorType _hoverCursor;
+    private bool _cursorFollowsHover;
     // The element that captured the pointer on its press (PointerDownEvent.CapturePointer),
     // and the overlay offset its coordinates carry; moves and the release go to it directly.
     private Element? _pointerCaptureTarget;
@@ -741,6 +746,7 @@ public sealed class Window : IOverlayHost, IDisposable
             {
                 StyleResolver.Resolve(_root, theme);
                 ClearFlags(_root, DirtyFlags.Style);
+                ReapplyHoverCursor();
             }
         }
         _perf.EndStyle();
@@ -1101,6 +1107,8 @@ public sealed class Window : IOverlayHost, IDisposable
                     }
                 }
                 PlatformWindow.SetCursor(cursor);
+                _hoverCursor = cursor;
+                _cursorFollowsHover = overScrollbar is null;
                 SetScrollbarHover(overScrollbar, pos);
 
                 // Tooltip tracking
@@ -1360,6 +1368,21 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (dblClickEvt is not null)
                         EventDispatcher.Dispatch(dblClickEvt, target);
                 }
+                break;
+            }
+
+            case InputEvent.PointerLeftWindowInput:
+            {
+                // Out of the window, the pointer is over nothing of ours: leave the hover
+                // chain as a move onto empty space would, or a button at the edge (or a web
+                // page) keeps its hover state until the pointer comes back. Not while a press
+                // holds the pointer — the platform keeps sending that element moves outside.
+                if (_pointerCaptureTarget is not null || _isDragging || _autoScrollTarget is not null) break;
+                _pointerState.UpdateHover(null, default, KeyModifiers.None);
+                _lastHoveredElement = null;
+                _cursorFollowsHover = false;
+                SetScrollbarHover(null, default);
+                UpdateTooltipHover(null);
                 break;
             }
 
@@ -1781,6 +1804,21 @@ public sealed class Window : IOverlayHost, IDisposable
         ctx.DrawRoundedRect(
             new Rect(_autoScrollOrigin.X - 2f, _autoScrollOrigin.Y - 2f, 4f, 4f),
             new CornerRadius(2f), theme.TextColor, Color.Transparent, default);
+    }
+
+    /// <summary>
+    /// After a style pass: the hovered element may want a different cursor now — a web page
+    /// reports the one it wants just after the move that caused it — and the pointer need not
+    /// move again for it to show. Only while the cursor on screen came from that element.
+    /// </summary>
+    private void ReapplyHoverCursor()
+    {
+        if (!_cursorFollowsHover || _lastHoveredElement is not { } hovered) return;
+        if (_pointerCaptureTarget is not null || _isDragging || _autoScrollTarget is not null) return;
+        var cursor = hovered.ResolvedInherited.Cursor;
+        if (cursor == _hoverCursor) return;
+        _hoverCursor = cursor;
+        PlatformWindow.SetCursor(cursor);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using HultUI.Core.Events;
 using HultUI.Core.Styling;
 
 namespace HultUI.WebView;
@@ -52,9 +53,32 @@ public abstract record WebEngineEvent
     /// move on to the next element in the window.</summary>
     public sealed record FocusLeaving(bool Forward) : WebEngineEvent;
 
+    /// <summary>
+    /// A shortcut pressed while the page has the keyboard, offered to the application
+    /// before the page acts on it — only from engines with
+    /// <see cref="WebEngineCapabilities.NativeKeyboard"/>, whose keys never pass through
+    /// the window. The controller answers synchronously; a handled key never reaches the page.
+    /// </summary>
+    public sealed record KeyFromPage(WebKeyRequest Request) : WebEngineEvent;
+
     /// <summary>The page's process died. <see cref="WebViewController.Reload"/> recovers
     /// when <paramref name="CanReload"/>.</summary>
     public sealed record ProcessFailed(string Message, bool CanReload) : WebEngineEvent;
+}
+
+/// <summary>
+/// A key the page's engine offers the application. Engines offer shortcuts only — Ctrl or
+/// Alt held, or a function key — so typing, arrows and Escape stay the page's.
+/// </summary>
+public sealed class WebKeyRequest(KeyCode key, KeyModifiers modifiers, bool isDown, bool isRepeat = false)
+{
+    public KeyCode Key { get; } = key;
+    public KeyModifiers Modifiers { get; } = modifiers;
+    public bool IsDown { get; } = isDown;
+    public bool IsRepeat { get; } = isRepeat;
+
+    /// <summary>Set when something in the application took the key: the page does not see it.</summary>
+    public bool Handled { get; set; }
 }
 
 /// <summary>Why a view failed.</summary>

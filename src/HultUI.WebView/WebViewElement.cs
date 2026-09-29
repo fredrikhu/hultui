@@ -102,6 +102,7 @@ public class WebViewElement : Element
         _controller.FrameArrived += OnFrameArrived;
         _controller.CursorChanged += ApplyCursor;
         _controller.FocusLeaving += OnFocusLeaving;
+        _controller.KeyFromPage += OnKeyFromPage;
         _controller.TitleChanged += ApplyTitle;
         _listening = true;
     }
@@ -113,6 +114,7 @@ public class WebViewElement : Element
         c.FrameArrived -= OnFrameArrived;
         c.CursorChanged -= ApplyCursor;
         c.FocusLeaving -= OnFocusLeaving;
+        c.KeyFromPage -= OnKeyFromPage;
         c.TitleChanged -= ApplyTitle;
         _listening = false;
         _placement = null;
@@ -240,6 +242,22 @@ public class WebViewElement : Element
         // nowhere else to go, wrap inside the page instead of leaving focus nowhere.
         if (!window.MoveFocus(forward) || IsFocused)
             _controller?.Focus(forward ? FocusReason.Next : FocusReason.Previous);
+    }
+
+    /// <summary>
+    /// A shortcut pressed inside a page that holds the keyboard itself. It never passed
+    /// through the window, so it is dispatched here, from this element, and bubbles through
+    /// the app's handlers as a key pressed on the element would. A handler that stops it keeps
+    /// it from the page.
+    /// </summary>
+    private void OnKeyFromPage(WebKeyRequest request)
+    {
+        if (!IsHosted) return;
+        ElementEvent e = request.IsDown
+            ? new KeyDownEvent { Key = request.Key, Modifiers = request.Modifiers, IsRepeat = request.IsRepeat }
+            : new KeyUpEvent { Key = request.Key, Modifiers = request.Modifiers };
+        EventDispatcher.Dispatch(e, this);
+        if (e.StopPropagation || e.Handled) request.Handled = true;
     }
 
     private void OnKeyDown(KeyDownEvent e)

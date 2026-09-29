@@ -294,6 +294,15 @@ public sealed class FakeWebEngineView : IWebEngineView
     public void RaiseNewWindow(Uri uri, bool userInitiated = true) => Raise(new WebEngineEvent.NewWindowRequested(uri, userInitiated));
     public void RaiseCursor(CursorType cursor) => Raise(new WebEngineEvent.CursorChanged(cursor));
     public void RaiseFocusLeaving(bool forward) => Raise(new WebEngineEvent.FocusLeaving(forward));
+
+    /// <summary>A shortcut pressed in the page, as an engine with its own keyboard offers it.
+    /// Returns the request, whose <see cref="WebKeyRequest.Handled"/> says whether the app took it.</summary>
+    public WebKeyRequest RaiseShortcut(KeyCode key, KeyModifiers modifiers = KeyModifiers.None, bool isDown = true)
+    {
+        var request = new WebKeyRequest(key, modifiers, isDown);
+        Raise(new WebEngineEvent.KeyFromPage(request));
+        return request;
+    }
     public void RaiseTitle(string title) => Raise(new WebEngineEvent.TitleChanged(title));
     public void Crash(bool canReload = true) => Raise(new WebEngineEvent.ProcessFailed("The page's process exited.", canReload));
 

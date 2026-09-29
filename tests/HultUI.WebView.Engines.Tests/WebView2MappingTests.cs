@@ -100,4 +100,26 @@ public class WebView2MappingTests
         if (!availability.IsAvailable) Assert.False(string.IsNullOrEmpty(availability.Reason));
         if (!OperatingSystem.IsWindows()) Assert.False(availability.IsAvailable);
     }
+
+    [Theory]
+    [InlineData(0x4C, 0x26, KeyCode.L)]          // L
+    [InlineData(0x57, 0x2C, KeyCode.Z)]          // AZERTY's W sits where US has Z: named by position
+    [InlineData(0x74, 0x3F, KeyCode.F5)]
+    [InlineData(0x31, 0x02, KeyCode.Digit1)]
+    [InlineData(0x26, 0x48, KeyCode.Up)]         // extended: by virtual key
+    [InlineData(0xBD, 0x0C, KeyCode.Minus)]
+    public void WindowsKeys_AreNamedByPosition(uint vk, uint scan, KeyCode expected) =>
+        Assert.Equal(expected, Win32Keys.ToKeyCode(vk, scan));
+
+    [Theory]
+    [InlineData(0x4C, KeyModifiers.Ctrl, true)]    // Ctrl+L
+    [InlineData(0x46, KeyModifiers.Alt, true)]     // Alt+F
+    [InlineData(0x74, KeyModifiers.None, true)]    // F5
+    [InlineData(0x41, KeyModifiers.None, false)]   // typing
+    [InlineData(0x41, KeyModifiers.Shift, false)]
+    [InlineData(0x26, KeyModifiers.None, false)]   // arrows move the page's caret
+    [InlineData(0x1B, KeyModifiers.None, false)]   // Escape closes the page's own menus
+    [InlineData(0x11, KeyModifiers.Ctrl, false)]   // Ctrl itself
+    public void OnlyShortcuts_AreOfferedToTheApp(uint vk, KeyModifiers modifiers, bool offered) =>
+        Assert.Equal(offered, Win32Keys.IsShortcut(vk, modifiers));
 }

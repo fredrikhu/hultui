@@ -231,4 +231,57 @@ public sealed class WebView2Tests
         Assert.True(page.PumpUntil(() => received.Count >= 2), $"clicks received: {string.Join(", ", received)}");
         Assert.Equal(["\"left\"", "\"right\""], received.Take(2));
     });
+
+    [WebView2UiFact]
+    public void AShortcutPressedInThePage_ReachesTheApp() => OnSta(() =>
+    {
+        // Keys go to WebView2's own focus window, never through ours. A key message posted to
+        // that window, in this process, stands in for the keyboard: nothing reaches the
+        // foreground or anyone else's window, which is the line SendKeys crosses.
+        var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+        var engine = new WebView2Engine();
+        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile });
+        var pressed = new List<HultUI.Core.Events.KeyCode>();
+        var element = WebViewElement.New(web).FlexGrow(1);
+        app.SetRoot(Flex.Column().Children(element).OnKeyDown(e =>
+        {
+            pressed.Add(e.Key);
+            e.StopPropagation = true;
+        }));
+        web.NavigateToString("<html><body><input autofocus></body></html>");
+        using var page = new Page { App = app, Engine = engine, Web = web };
+        Assert.True(page.PumpUntil(() => web.State == WebViewState.Ready && !web.IsLoading && web.Frames.IsLoaded));
+
+        element.Focus();
+        page.PumpUntil(() => false, seconds: 0.3);
+        nint focusWindow = FocusWindowOf(app.PrimaryWindow.NativeHandle);
+        Assert.NotEqual(0, focusWindow);
+
+        const uint WM_KEYDOWN = 0x100, WM_KEYUP = 0x101;
+        const nint VK_F2 = 0x71;
+        nint down = 1 | (0x3C << 16), up = unchecked((nint)(1 | (0x3C << 16) | (1 << 30) | (1u << 31)));
+        PostMessage(focusWindow, WM_KEYDOWN, VK_F2, down);
+        PostMessage(focusWindow, WM_KEYUP, VK_F2, up);
+
+        Assert.True(page.PumpUntil(() => pressed.Contains(HultUI.Core.Events.KeyCode.F2), seconds: 5),
+            $"the app never saw F2; it saw [{string.Join(", ", pressed)}]");
+    });
+
+    private static nint FocusWindowOf(nint parent)
+    {
+        nint found = 0;
+        EnumChildWindows(parent, (hwnd, _) =>
+        {
+            var name = new System.Text.StringBuilder(64);
+            GetClassName(hwnd, name, name.Capacity);
+            if (name.ToString() == "Chrome_WidgetWin_0") { found = hwnd; return false; }
+            return true;
+        }, 0);
+        return found;
+    }
+
+    private delegate bool EnumProc(nint hwnd, nint lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumProc proc, nint lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetClassName(nint hwnd, System.Text.StringBuilder name, int max);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
 }
