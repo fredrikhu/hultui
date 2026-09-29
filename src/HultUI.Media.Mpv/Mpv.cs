@@ -113,7 +113,7 @@ internal static unsafe partial class Mpv
 
     public const int MPV_FORMAT_NONE = 0, MPV_FORMAT_STRING = 1, MPV_FORMAT_FLAG = 3, MPV_FORMAT_INT64 = 4, MPV_FORMAT_DOUBLE = 5;
 
-    public const int MPV_EVENT_NONE = 0, MPV_EVENT_SHUTDOWN = 1, MPV_EVENT_LOG_MESSAGE = 2, MPV_EVENT_SET_PROPERTY_REPLY = 4, MPV_EVENT_START_FILE = 6,
+    public const int MPV_EVENT_NONE = 0, MPV_EVENT_SHUTDOWN = 1, MPV_EVENT_LOG_MESSAGE = 2, MPV_EVENT_SET_PROPERTY_REPLY = 4, MPV_EVENT_COMMAND_REPLY = 5, MPV_EVENT_START_FILE = 6,
         MPV_EVENT_END_FILE = 7, MPV_EVENT_FILE_LOADED = 8, MPV_EVENT_VIDEO_RECONFIG = 17, MPV_EVENT_SEEK = 20,
         MPV_EVENT_PLAYBACK_RESTART = 21, MPV_EVENT_PROPERTY_CHANGE = 22;
 
@@ -171,6 +171,7 @@ internal static unsafe partial class Mpv
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_observe_property(nint handle, ulong replyUserdata, string name, int format);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_request_log_messages(nint handle, string minLevel);
     [LibraryImport(Library)] public static partial int mpv_command(nint handle, byte** args);
+    [LibraryImport(Library)] public static partial int mpv_command_async(nint handle, ulong reply_userdata, byte** args);
     [LibraryImport(Library)] public static partial mpv_event* mpv_wait_event(nint handle, double timeout);
 
     // ──── Render API ────
@@ -250,14 +251,16 @@ internal static unsafe partial class Mpv
         return mpv_get_property(handle, name, MPV_FORMAT_FLAG, &value) >= 0 ? value != 0 : null;
     }
 
-    public static int SetFlag(nint handle, string name, bool value)
+    /// <summary>Sets a flag without waiting for mpv's core. See <see cref="SetStringAsync"/>.</summary>
+    public static int SetFlagAsync(nint handle, ulong replyUserdata, string name, bool value)
     {
         int flag = value ? 1 : 0;
-        return mpv_set_property(handle, name, MPV_FORMAT_FLAG, &flag);
+        return mpv_set_property_async(handle, replyUserdata, name, MPV_FORMAT_FLAG, &flag);
     }
 
-    public static int SetDouble(nint handle, string name, double value)
-        => mpv_set_property(handle, name, MPV_FORMAT_DOUBLE, &value);
+    /// <summary>Sets a number without waiting for mpv's core. See <see cref="SetStringAsync"/>.</summary>
+    public static int SetDoubleAsync(nint handle, ulong replyUserdata, string name, double value)
+        => mpv_set_property_async(handle, replyUserdata, name, MPV_FORMAT_DOUBLE, &value);
 
     /// <summary>
     /// Sets a string property without waiting for mpv's core, which answers later with an
@@ -275,7 +278,18 @@ internal static unsafe partial class Mpv
     }
 
     /// <summary>Runs a command given as its argument list, UTF-8 marshalled and null-terminated.</summary>
-    public static int Command(nint handle, params string[] args)
+    public static int Command(nint handle, params string[] args) => RunCommand(handle, null, args);
+
+    /// <summary>
+    /// Queues a command without waiting for mpv's core, which answers later with an
+    /// <c>MPV_EVENT_COMMAND_REPLY</c> carrying <paramref name="replyUserdata"/> and the command's
+    /// error. mpv parses the arguments during the call. Returns below zero only if the command
+    /// could not be parsed or queued.
+    /// </summary>
+    public static int CommandAsync(nint handle, ulong replyUserdata, params string[] args)
+        => RunCommand(handle, replyUserdata, args);
+
+    private static int RunCommand(nint handle, ulong? replyUserdata, string[] args)
     {
         var pinned = new byte[args.Length][];
         var handles = new GCHandle[args.Length];
@@ -289,7 +303,9 @@ internal static unsafe partial class Mpv
                 pointers[i] = (byte*)handles[i].AddrOfPinnedObject();
             }
             pointers[args.Length] = null;
-            return mpv_command(handle, pointers);
+            return replyUserdata is { } tag
+                ? mpv_command_async(handle, tag, pointers)
+                : mpv_command(handle, pointers);
         }
         finally
         {

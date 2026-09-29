@@ -354,6 +354,23 @@ fires under the caller). That frame was in `Render`, waiting for mpv's thread, w
 was waiting for the lock: a deadlock on every fourth or so toggle. The hop breaks
 the cycle for any renderer; see THREADING.md.
 
+The UI thread never waits on mpv's core, because the core can be waiting for the
+UI thread. After every load and seek it waits, for up to 200 ms, for the first
+frame to be rendered, and in GPU mode the UI thread renders. Two cycles were found
+the hard way, each ending in mpv's timeout and a "render() not being called or
+stuck" line:
+- **Commands.** A synchronous `seek` sent while the core waited blocked for the full
+  timeout, so scrubbing froze the window on nearly every seek. Every command and
+  property the UI thread sends is now `mpv_command_async` or
+  `mpv_set_property_async`, answered on the event thread. mpv runs them in order,
+  but a synchronous read can overtake them.
+- **The first frame.** The render path needs the video's size, which is read from
+  the core, which is waiting for the frame. `SkipFrame` takes the frame with
+  `MPV_RENDER_PARAM_SKIP_RENDERING`, and the first render with a size draws it.
+  Reopening a file went from about 600 ms to 3–8 ms.
+
+Plan 15 (items 8.1, 8.3 and 8.4) has the measurements.
+
 - No package dependency. Hand-written `LibraryImport` bindings for the ~40 entry
   points the backend uses (`mpv_create`, `mpv_initialize`, `mpv_command`,
   `mpv_set/get_property`, `mpv_observe_property`, `mpv_wait_event`,

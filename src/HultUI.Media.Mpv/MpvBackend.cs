@@ -171,10 +171,23 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         Load(target);
     }
 
+    // ──── Commands (UI thread) ────
+    //
+    // The UI thread is also mpv's render thread, and mpv's render API forbids a render thread
+    // from waiting on its core: after every seek and load the core waits for the render thread
+    // to draw the first frame. A synchronous seek arriving in that window waited out mpv's
+    // 200 ms timeout. Scrubbing at the rate a mouse drag sends seeks froze the UI for 200 ms on
+    // nearly every one. So every command here is queued and answered on the event thread. mpv
+    // runs them in the order they were queued.
+
+    /// <summary>The reply tag of a loadfile, whose refusal is reported; other replies are ignored,
+    /// as the synchronous calls' results were.</summary>
+    private const ulong LoadReply = 0x100;
+
     private void Load(string target)
     {
-        SetFlag(_mpv, "pause", true);
-        int error = Command(_mpv, "loadfile", target, "replace");
+        SetFlagAsync(_mpv, 0, "pause", true);
+        int error = CommandAsync(_mpv, LoadReply, "loadfile", target, "replace");
         if (error < 0) Raise(new BackendEvent.Failed(ErrorString(error)));
     }
 
@@ -196,37 +209,38 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         if (_eof)
         {
             // keep-open holds the last frame; unpausing there does nothing.
-            Command(_mpv, "seek", "0", "absolute");
+            CommandAsync(_mpv, 0, "seek", "0", "absolute");
             _eof = false;
         }
-        SetFlag(_mpv, "pause", false);
+        SetFlagAsync(_mpv, 0, "pause", false);
     }
 
     public void Pause()
     {
         if (!_loaded) return;
-        SetFlag(_mpv, "pause", true);
+        SetFlagAsync(_mpv, 0, "pause", true);
     }
 
     public void Stop()
     {
         if (!_loaded) return;
-        SetFlag(_mpv, "pause", true);
-        Command(_mpv, "seek", "0", "absolute");
+        SetFlagAsync(_mpv, 0, "pause", true);
+        CommandAsync(_mpv, 0, "seek", "0", "absolute");
     }
 
     public void Seek(TimeSpan position, bool precise)
     {
         if (!_loaded) return;
-        Command(_mpv, "seek", position.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+        CommandAsync(_mpv, 0, "seek",
+            position.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
             precise ? "absolute+exact" : "absolute+keyframes");
     }
 
-    public void SetRate(double rate) => SetDouble(_mpv, "speed", rate);
-    public void SetVolume(float volume) => SetDouble(_mpv, "volume", volume * 100);
-    public void SetMuted(bool muted) => SetFlag(_mpv, "mute", muted);
-    public void SelectAudioTrack(int? id) => mpv_set_property_string(_mpv, "aid", id?.ToString() ?? "no");
-    public void SelectSubtitleTrack(int? id) => mpv_set_property_string(_mpv, "sid", id?.ToString() ?? "no");
+    public void SetRate(double rate) => SetDoubleAsync(_mpv, 0, "speed", rate);
+    public void SetVolume(float volume) => SetDoubleAsync(_mpv, 0, "volume", volume * 100);
+    public void SetMuted(bool muted) => SetFlagAsync(_mpv, 0, "mute", muted);
+    public void SelectAudioTrack(int? id) => SetStringAsync(_mpv, 0, "aid", id?.ToString() ?? "no");
+    public void SelectSubtitleTrack(int? id) => SetStringAsync(_mpv, 0, "sid", id?.ToString() ?? "no");
 
     // ──── Events (mpv thread) ────
 
@@ -235,6 +249,12 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         while (!_stopping)
         {
             var e = mpv_wait_event(_mpv, 0.5);
+            if (_traceHwdec)
+            {
+                _traceHwdec = false;
+                StartupTrace.Mark($"mpv hwdec: asked {GetString(_mpv, "hwdec")}, " +
+                    $"using {GetString(_mpv, "hwdec-current") ?? "(none)"}");
+            }
             if (e is null || e->event_id == MPV_EVENT_NONE) continue;
             try { Handle(e); }
             catch (Exception ex) { Console.Error.WriteLine($"[HultUI.Media.Mpv] event handler failed: {ex}"); }
@@ -252,6 +272,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
 
             case MPV_EVENT_SET_PROPERTY_REPLY:
                 HandlePropertyReply(e);
+                break;
+
+            case MPV_EVENT_COMMAND_REPLY:
+                if (e->reply_userdata == LoadReply && e->error < 0)
+                    Raise(new BackendEvent.Failed(ErrorString(e->error)));
                 break;
 
             case MPV_EVENT_FILE_LOADED:
@@ -485,18 +510,20 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // What mpv actually chose, not what it was asked for. "auto-safe" falls back on its own
         // when a decoder or its interop will not initialise, and a silent fallback looks
         // exactly like the mode working — the CPU moves either way, because the fallback is
-        // also hardware decoding.
+        // also hardware decoding. Read on the event thread, because this one must not wait on
+        // mpv's core.
         if (_lastGLFrameDrawn && !_tracedHwdec && StartupTrace.Enabled)
         {
             _tracedHwdec = true;
-            StartupTrace.Mark($"mpv hwdec: asked {GetString(_mpv, "hwdec")}, " +
-                $"using {GetString(_mpv, "hwdec-current") ?? "(none)"}");
+            _traceHwdec = true;
+            mpv_wakeup(_mpv);
         }
         return _lastGLFrameDrawn;
     }
 
     private bool _lastGLFrameDrawn;
     private bool _tracedHwdec;
+    private volatile bool _traceHwdec;
 
     /// <inheritdoc />
     public bool FrameMayBeWaiting => _updateWaiting;

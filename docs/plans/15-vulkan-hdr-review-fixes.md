@@ -45,6 +45,7 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 8.1 | mpv target options set without blocking the render thread | 8 | Done — the stall was real |
 | 8.2 | Wide colour gamut carried through to scRGB | 8 | Done — eye and Linux pending |
 | 8.3 | mpv's first-frame wait after every load | 8 | Done — reopen 600 ms → 3–8 ms |
+| 8.4 | UI-thread mpv commands without waiting on the core | 8 | Done — scrub seeks 200 ms → under 1 ms |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
 | 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Todo |
 | 10.1 | Stale code comments | 10 | Todo |
@@ -487,7 +488,7 @@ sends property changes at the top of its loop, after the wait.
 - **Reopening a file:** the UI thread was free and the element was painted on every update, but with
   no size it could not take the frame. Three timeouts, about 600 ms, before the picture came up.
 - **Seeks:** 20 seeks 30 ms apart, each call 0.1–0.4 ms, no warning. The size is already known, so
-  the frame is taken at once.
+  the frame is taken at once. Faster seeks hit a different cycle; see 8.4.
 
 **Fix:** `MPV_RENDER_PARAM_SKIP_RENDERING` takes a frame without a target and without drawing it.
 `IGpuFrameRenderer` gains `FrameMayBeWaiting` and `SkipFrame`, both with defaults. The sink calls
@@ -501,6 +502,32 @@ draws the frame taken. The software renderer's thread does the same.
 - **Test:** `Opening_DoesNotLeaveMpvWaitingForItsFirstFrame` reads mpv's `frame-drop-count` after
   two opens on the software path. It fails on the first open without the fix (1, expected 0). A sink
   test checks that GL is entered only when a frame may be waiting.
+
+### 8.4 UI-thread mpv commands without waiting on the core
+
+*Found while checking 8.3's seek result at a faster rate.* The UI thread is also mpv's render
+thread, and it sent every command synchronously. After a seek, mpv's core waits for the render
+thread to draw the first frame. A second synchronous seek sent in that window waits for the core,
+so the UI thread waits for itself until mpv's 200 ms timeout.
+
+**Measured** in the VideoPlayer sample: 80 seeks 4 ms apart, the rate a mouse drag sends them.
+Nearly every seek blocked the UI thread for 195–201 ms, with 14 "stuck" warnings in about 3 s, on
+both renderers. At 30 ms apart the frame was drawn before the next seek came, which is why 8.3's
+check saw nothing.
+
+**Fix:** every command and property the UI thread sends is queued with `mpv_command_async` or
+`mpv_set_property_async`. That covers load, play, pause, stop, seek, rate, volume, mute and track
+selection. mpv lists both as safe from a render thread, and runs them in the order they were
+queued. A refused `loadfile` still reports `Failed`, now from its `MPV_EVENT_COMMAND_REPLY`. The
+start-up trace's hwdec read moved to the event thread.
+- **After:** the same 80 seeks, none slower than 5 ms, and no warnings apart from Vulkan's one at
+  start-up.
+- **Tests:** `Seeks_NeverWaitForMpvsCore` and `Opening_AndReopening_TakesTheFirstFrameAtOnce` in
+  `MpvGLTests` run on mpv's GL path, where the UI thread renders; the headless tests use the
+  software path, whose own thread renders, so they cannot see either cycle. A synchronous seek
+  fails the first (377 ms); a disabled skip fails the second. Both are behind `HULTUI_UITESTS=1`.
+- **Cost:** a read straight after a set can now see the old value, because mpv serves a synchronous
+  read ahead of queued work. `RateVolumeAndMute_ReachMpv` waits for the values.
 
 ## Phase 9 — Tests for what remains
 

@@ -176,8 +176,9 @@ public class MpvBackendTests : IDisposable
         f.Player.Volume = 0.5f;
         f.Player.Muted = true;
 
-        Assert.Equal(2, f.Backend.Peek("speed"), 0.01);
-        Assert.Equal(50, f.Backend.Peek("volume"), 0.01);
-        Assert.Equal("yes", f.Backend.PeekString("mute"));
+        // Queued, not waited for: a read can overtake them, so wait for the values to land.
+        f.Until(() => Math.Abs(f.Backend.Peek("speed") - 2) < 0.01
+            && Math.Abs(f.Backend.Peek("volume") - 50) < 0.01
+            && f.Backend.PeekString("mute") == "yes");
     }
 }
