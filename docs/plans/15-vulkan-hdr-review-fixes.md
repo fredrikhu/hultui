@@ -39,9 +39,9 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 6.3 | Interop state machine hardening | 6 | Done (one limit documented, below) |
 | 6.4 | Present semaphores outlive a pending present | 6 | Done |
 | 7.1 | `FrameColorFilter` stops recompiling SkSL every frame | 7 | Done (with 2.3) |
-| 7.2 | `HULTUI_RENDERER` parsing: case, empty value, recipes | 7 | Todo |
-| 7.3 | SDR white level and HDR state from SDL's window properties | 7 | Todo |
-| 7.4 | Stray scratch files out of the repo root | 7 | Todo |
+| 7.2 | `HULTUI_RENDERER` parsing: case, empty value, recipes | 7 | Done |
+| 7.3 | SDR white level and HDR state from SDL's window properties | 7 | Declined — SDL's values are the problem (2.5) |
+| 7.4 | Stray scratch files out of the repo root | 7 | Done |
 | 8.1 | mpv target options set without blocking the render thread | 8 | Todo |
 | 8.2 | Wide colour gamut carried through to scRGB | 8 | Todo |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
@@ -382,6 +382,26 @@ reads 240 nits on this machine. Wayland keeps the 2.5375 constant.
 
 `vk.png`, `vk-wl.png`, `vk-x11.png`, `vk-validation.png`, `linux-vulkan.txt` at the repo root:
 move under `spikes/HdrInterop/results/` or delete.
+
+**Phase 7 result (2026-09-29).**
+- **7.2:** `RendererSelection.ParseEnvironment` matches `vulkan` in any case, and treats blank as
+  unset. There are 3 new cases, and a case-sensitive match fails 2 of them. `HULTUI_SDR_TRANSFER`
+  is case-insensitive too.
+  - The two HDR-LINUX-VERIFY-2 recipes now say `gl`. They ran samples that default to GL, so they
+    still worked, but their comment ("anything other than vulkan leaves it on GL") no longer held,
+    and the same recipe would put Reel or Aperture on Vulkan.
+  - The ENVIRONMENT.md row is rewritten, which does that part of 10.2: MAILBOX default, HDR format
+    choice, the fallback rule, and apps choosing in code.
+- **7.3 declined.** It proposed replacing `WindowsDisplayColor` with SDL's window properties once
+  they were confirmed to read the same. Item 2.5 found the opposite on this machine:
+  - SDL's HDR flag is wrong at a high slider setting and stale across Win+Alt+B.
+  - Its SDR white is re-read only on a display-configuration change, which the slider does not
+    cause.
+  - SDL's white is used in exactly one place, multiplying its own headroom, because the two are one
+    snapshot.
+- **7.4:** the Phase 1 Linux transcript and its four captures moved together to
+  `spikes/HdrInterop/results/linux-phase1/`, with history kept, and HDR-PHASE1-LINUX.md points to
+  them.
 
 ## Phase 8 — Larger design work
 

@@ -7,18 +7,20 @@ namespace HultUI.Core.Rendering;
 internal static class RendererSelection
 {
     /// <summary>
-    /// What a <c>HULTUI_RENDERER</c> value asks for: null when it names nothing (unset or
-    /// empty), <see cref="RendererKind.Vulkan"/> for <c>vulkan</c>, and
-    /// <see cref="RendererKind.OpenGL"/> for anything else. An override in both directions —
-    /// <c>vulkan</c> turns Vulkan on for an app that never asked, anything else turns it off
-    /// for one that did.
+    /// What a <c>HULTUI_RENDERER</c> value asks for: null when it names nothing (unset, empty or
+    /// blank — so an empty value leaves the app's own choice alone, it does not mean GL),
+    /// <see cref="RendererKind.Vulkan"/> for <c>vulkan</c> in any case, and
+    /// <see cref="RendererKind.OpenGL"/> for anything else (<c>gl</c> by convention). An
+    /// override in both directions — <c>vulkan</c> turns Vulkan on for an app that never asked,
+    /// anything else turns it off for one that did.
+    ///
+    /// <para>Case-insensitive because it used not to be, and <c>Vulkan</c> then silently meant
+    /// GL: the one outcome certain to make someone think the Vulkan renderer was at fault.</para>
     /// </summary>
-    public static RendererKind? ParseEnvironment(string? value) => value switch
-    {
-        null or "" => null,
-        "vulkan" => RendererKind.Vulkan,
-        _ => RendererKind.OpenGL,
-    };
+    public static RendererKind? ParseEnvironment(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null
+        : value.Trim().Equals("vulkan", StringComparison.OrdinalIgnoreCase) ? RendererKind.Vulkan
+        : RendererKind.OpenGL;
 
     /// <summary>The renderer a window is created with: the environment wins over the app, and
     /// the app over the default. <see cref="RendererKind.Default"/> is OpenGL today.</summary>

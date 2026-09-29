@@ -11,6 +11,10 @@ here first — none of that is meaningful until the renderer can draw a window a
 
 ## Results so far (2026-09-25, RTX 4080, Fedora 44, Wayland, Mesa 26.2.2)
 
+The raw transcript and the captures it names (`vk.png`, `vk-wl.png`, `vk-x11.png`,
+`vk-validation.png`) are in `spikes/HdrInterop/results/linux-phase1/`. They were committed at the
+repository root at the time and moved there by the review fixes (plan 15, item 7.4).
+
 **Step 1 passed, identically to Windows** — the same eight `ok` and the same two expected
 failures. So `VK_IMAGE_USAGE_TRANSFER_SRC_BIT` is Skia's requirement rather than anything
 specific to a driver or a platform, which is worth knowing: the error message in

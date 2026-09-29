@@ -72,10 +72,11 @@ Vulkan half — GL is still the default and still what every shipped build uses,
 on Windows.
 
 ```bash
-# GL is the empty renderer value: anything other than "vulkan" leaves it on GL.
+# `gl` asks for GL outright. An empty value means "unset" — it leaves the app's own choice,
+# which is GL for these samples but Vulkan for Reel and Aperture since they ask for it in code.
 for driver in wayland x11; do
-  for renderer in "" vulkan; do
-    echo "== $driver / ${renderer:-gl} =="
+  for renderer in gl vulkan; do
+    echo "== $driver / $renderer =="
     SDL_VIDEODRIVER=$driver HULTUI_RENDERER=$renderer \
     HULTUI_STARTUP=1 HULTUI_A11Y=0 \
       dotnet run -c Release --project samples/HultUI.Samples.Minimal
@@ -205,7 +206,7 @@ exe=samples/HultUI.Samples.VideoPlayer/bin/Release/net10.0/HultUI.Samples.VideoP
 for rep in 1 2 3; do
   for case in gl vk-rebuild vk-fixed; do
     case $case in
-      gl)         env_args=(HULTUI_RENDERER=) ;;
+      gl)         env_args=(HULTUI_RENDERER=gl) ;;
       vk-rebuild) env_args=(HULTUI_RENDERER=vulkan HULTUI_VULKAN_FIXED_EXTENT=0) ;;
       vk-fixed)   env_args=(HULTUI_RENDERER=vulkan HULTUI_VULKAN_FIXED_EXTENT=1) ;;
     esac

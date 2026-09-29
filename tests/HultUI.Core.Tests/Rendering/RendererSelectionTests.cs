@@ -13,7 +13,10 @@ public class RendererSelectionTests
     [Theory]
     [InlineData(null, null)]
     [InlineData("", null)]
+    [InlineData("  ", null)]                      // blank is unset too, not GL
     [InlineData("vulkan", RendererKind.Vulkan)]
+    [InlineData("Vulkan", RendererKind.Vulkan)]   // used to mean GL, silently
+    [InlineData("VULKAN ", RendererKind.Vulkan)]
     [InlineData("gl", RendererKind.OpenGL)]
     [InlineData("opengl", RendererKind.OpenGL)]
     public void TheEnvironmentValue_NamesARendererOrNothing(string? value, RendererKind? expected) =>

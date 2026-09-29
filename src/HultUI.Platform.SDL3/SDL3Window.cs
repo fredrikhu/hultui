@@ -1189,7 +1189,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// asked once. <c>HULTUI_SDR_TRANSFER=srgb</c> or <c>=2.2</c> forces either, which is how
     /// the two are compared by eye.
     /// </summary>
-    private static bool SdrIsGamma22() => Environment.GetEnvironmentVariable("HULTUI_SDR_TRANSFER") switch
+    private static bool SdrIsGamma22() => Environment.GetEnvironmentVariable("HULTUI_SDR_TRANSFER")?.Trim().ToLowerInvariant() switch
     {
         "srgb" => false,
         "2.2" => true,
