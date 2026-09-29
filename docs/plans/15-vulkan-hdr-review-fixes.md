@@ -44,6 +44,7 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 7.4 | Stray scratch files out of the repo root | 7 | Done |
 | 8.1 | mpv target options set without blocking the render thread | 8 | Done — the stall was real |
 | 8.2 | Wide colour gamut carried through to scRGB | 8 | Done — eye and Linux pending |
+| 8.3 | mpv's first-frame wait after every load | 8 | Done — reopen 600 ms → 3–8 ms |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
 | 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Todo |
 | 10.1 | Stale code comments | 10 | Todo |
@@ -429,9 +430,8 @@ the old picture again under the new label. `MpvTargetColour` has 12 tests, inclu
 before confirmation and a late reply to an older change. Playback still confirms the linear target
 before the first frame and keeps 879 levels on the 10-bit ramp.
 
-**Left alone:** one `render() not being called or stuck` at start-up, logged between mpv starting
-its video output and the app's first render call. It is a start-up hand-off wait on mpv's side, not
-a render-thread stall, and predates this plan.
+**Left alone at the time:** one `render() not being called or stuck` at start-up. It turned out to be
+a second wait cycle, fixed in 8.3.
 
 ### 8.2 Wide colour gamut
 
@@ -465,6 +465,42 @@ nothing then clamps. A BT.2020 target would need Skia to convert every frame ins
 **Still open:** the **eye** check (the capture shows the values reach the swapchain, not what the
 compositor and panel make of them) and **Linux**, where KWin's handling of negative scRGB is
 untested.
+
+### 8.3 mpv's first-frame wait after every load
+
+*Found while chasing the start-up "stuck" line 8.1 left alone.* After every load, and after every
+seek, mpv's core queues the first frame and then waits for it to be shown (`vo_wait_frame` in
+`player/video.c`). `vo_libmpv` gives up after 200 ms, logs `mpv_render_context_render() not being
+called or stuck`, and counts the frame as dropped.
+
+**The cycle:** the render thread cannot draw without the video's size. The size comes from
+`video-params`, which the event thread reads with a synchronous `mpv_get_property`. That read needs
+the core, and the core is waiting for the frame. So each side waits for the other until mpv's
+timeout. mpv's render API documents this as a rule: no wait dependency from the render thread on a
+thread that calls other libmpv functions. Observing the property instead does not help, because mpv
+sends property changes at the top of its loop, after the wait.
+
+**Measured** in the VideoPlayer sample on Vulkan, with temporary marks:
+- **Start-up:** the event thread's `FILE_LOADED` reads blocked for 200 ms. The UI thread was busy
+  anyway, rendering its first frame (131 ms) and showing the window (190 ms), so the picture came up
+  no later because of it.
+- **Reopening a file:** the UI thread was free and the element was painted on every update, but with
+  no size it could not take the frame. Three timeouts, about 600 ms, before the picture came up.
+- **Seeks:** 20 seeks 30 ms apart, each call 0.1–0.4 ms, no warning. The size is already known, so
+  the frame is taken at once.
+
+**Fix:** `MPV_RENDER_PARAM_SKIP_RENDERING` takes a frame without a target and without drawing it.
+`IGpuFrameRenderer` gains `FrameMayBeWaiting` and `SkipFrame`, both with defaults. The sink calls
+`SkipFrame` when there is no size but mpv's update callback has fired since the last render. The
+flag matters because `RunExternalGL` flushes Skia on a GL surface. The next `Render` with a target
+draws the frame taken. The software renderer's thread does the same.
+- **Reopen, frame queued to frame shown** (mpv's own log): Vulkan 3 ms, GL 8 ms, no warnings. The
+  first reopen on GL takes 85 ms, all of it a Skia flush of the player's "opening" state drawn for
+  the first time.
+- **Start-up:** GL now shows no warning. Vulkan still shows one, for the busy UI thread above.
+- **Test:** `Opening_DoesNotLeaveMpvWaitingForItsFirstFrame` reads mpv's `frame-drop-count` after
+  two opens on the software path. It fails on the first open without the fix (1, expected 0). A sink
+  test checks that GL is entered only when a frame may be waiting.
 
 ## Phase 9 — Tests for what remains
 

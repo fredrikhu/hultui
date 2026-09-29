@@ -149,6 +149,32 @@ public class GpuFrameSinkTests
         Assert.False(frame.IsLinearLight);
     }
 
+    /// <summary>
+    /// Before the size is known there is nothing to draw at, but a producer that waits for its
+    /// frame to be taken (mpv, after every load) must still be let go, or it waits out its own
+    /// timeout before it can say what the size is. That costs entering GL, which on a GL surface
+    /// is a flush, so the sink enters only when the renderer says a frame may be waiting.
+    /// </summary>
+    [Fact]
+    public void WithoutASize_AWaitingFrameIsSkipped_AndGLIsEnteredOnlyForIt()
+    {
+        var renderer = new CountingRenderer { HasSize = false };
+        var sink = new GpuFrameSink(new PixelFrameSink(), renderer);
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+        Assert.False(sink.TryRenderFrame(surface, out _));   // decides the mode, prepares GL
+        int entered = surface.GLEntries;
+
+        Assert.False(sink.TryRenderFrame(surface, out _));
+        Assert.Equal(entered, surface.GLEntries);
+        Assert.Equal(0, renderer.Skips);
+
+        renderer.Waiting = true;
+        Assert.False(sink.TryRenderFrame(surface, out _));
+        Assert.Equal(entered + 1, surface.GLEntries);
+        Assert.Equal(1, renderer.Skips);
+        Assert.Equal(0, renderer.GLRenders);
+    }
+
     /// <summary>A surface that hands out a target of its own, resolving no GL at all.</summary>
     private sealed class LendingSurface : IExternalGLSurface
     {
@@ -168,7 +194,12 @@ public class GpuFrameSinkTests
         }
 
         public Func<string, nint> GetProcAddress => _ => 0;
-        public void RunExternalGL(Action draw) => draw();
+        public int GLEntries { get; private set; }
+        public void RunExternalGL(Action draw)
+        {
+            GLEntries++;
+            draw();
+        }
 
         public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
         {
@@ -189,9 +220,24 @@ public class GpuFrameSinkTests
         public VideoSinkMode? DecidedMode { get; private set; }
         public int GLRenders { get; private set; }
 
+        public bool HasSize { get; init; } = true;
+        public bool Waiting { get; set; }
+        public int Skips { get; private set; }
+
         public void OnModeDecided(VideoSinkMode mode) => DecidedMode = mode;
         public void PrepareGL(Func<string, nint> getProcAddress) { }
-        public bool TryGetFrameSize(out int width, out int height) { width = 320; height = 180; return true; }
+        public bool TryGetFrameSize(out int width, out int height)
+        {
+            width = HasSize ? 320 : 0;
+            height = HasSize ? 180 : 0;
+            return HasSize;
+        }
+        public bool FrameMayBeWaiting => Waiting;
+        public void SkipFrame(Func<string, nint> getProcAddress)
+        {
+            Skips++;
+            Waiting = false;
+        }
         public bool RendersBottomUp => false;
         public uint LastInternalFormat { get; private set; }
         public uint LastFramebuffer { get; private set; }

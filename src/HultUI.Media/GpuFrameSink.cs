@@ -58,7 +58,13 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
         }
         if (!_renderer.TryGetFrameSize(out int width, out int height) || width <= 0 || height <= 0)
+        {
+            // Nothing to draw at, but possibly a frame to hand over: a producer that waits for
+            // it would otherwise wait out its own timeout before it can tell anyone the size.
+            if (_renderer.FrameMayBeWaiting)
+                surface.RunExternalGL(() => _renderer.SkipFrame(surface.GetProcAddress));
             return false;
+        }
 
         bool drew = false;
         uint framebuffer = 0, texture = 0, format = GpuFrame.Rgba8;

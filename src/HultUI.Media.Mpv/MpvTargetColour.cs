@@ -118,7 +118,7 @@ internal sealed class MpvTargetColour
     /// <summary>The reply tag for one option of a change: generation, whether it asked for linear
     /// light, and which option — in a range no other request of this backend uses.</summary>
     public static ulong ReplyTag(int generation, bool linear, int option) =>
-        ReplyTagBase | ((ulong)(uint)generation << 8) | (linear ? 0x10UL : 0UL) | (ulong)option;
+        ReplyTagBase | ((ulong)(uint)generation << 8) | (linear ? 0x10UL : 0UL) | (ulong)(uint)option;
 
     /// <summary>Reads a tag back; false for a reply that is not one of these.</summary>
     public static bool TryReadReplyTag(ulong tag, out int generation, out bool linear)

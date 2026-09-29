@@ -93,7 +93,7 @@ public interface IGpuFrameRenderer
     bool RendersBottomUp { get; }
 
     /// <summary>
-    /// Draws the current frame into <paramref name="framebuffer"/> (already sized
+    /// Draws the current frame into the framebuffer of <paramref name="target"/> (already sized
     /// <paramref name="width"/>×<paramref name="height"/>, not bound). Returns false when
     /// there is nothing to draw, in which case the last frame stays on screen.
     /// </summary>
@@ -112,6 +112,22 @@ public interface IGpuFrameRenderer
     /// <see cref="GpuFrame.ReferenceWhiteNits"/>.
     /// </summary>
     float ReferenceWhiteNits => 0f;
+
+    /// <summary>
+    /// True when a frame may be waiting although <see cref="TryGetFrameSize"/> is still false.
+    /// The sink then enters the GL context to <see cref="SkipFrame"/>, which it otherwise
+    /// avoids for a frame it cannot draw, because on a GL surface entering costs a flush.
+    /// </summary>
+    bool FrameMayBeWaiting => false;
+
+    /// <summary>
+    /// Takes a waiting frame without drawing it, on a frame where <see cref="TryGetFrameSize"/>
+    /// is false. This is for a producer that holds everything until its frame is taken, and
+    /// learns its size only after that. mpv holds its core for up to 200 ms after every load,
+    /// and the video's size can only be read from the core. The next <see cref="Render"/> that
+    /// has a target draws the frame taken here.
+    /// </summary>
+    void SkipFrame(Func<string, nint> getProcAddress) { }
 
     /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.</summary>
     void ReleaseGL();

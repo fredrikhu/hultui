@@ -48,6 +48,9 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private Thread? _swThread;
     private readonly AutoResetEvent _swWake = new(false);
     private volatile bool _swStopping;
+    // Set by mpv's update callback, cleared when the render thread asks. Lets a frame with no
+    // size to draw at skip only when mpv may be waiting, since entering GL costs a flush.
+    private volatile bool _updateWaiting;
     // With vo=libmpv a file cannot start until a render context exists, and the
     // context's kind is only known once the element has been drawn. A source opened
     // before that waits here and loads the moment the context is up.
@@ -441,6 +444,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         if (_render == 0)
             CreateGLContext(getProcAddress);
         if (_render == 0) return false;
+        _updateWaiting = false;
 
         if (_colour.Update(target.WantsLinearLight, target.PeakNits, target.WideGamut)) ApplyTargetColour();
 
@@ -493,6 +497,36 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
 
     private bool _lastGLFrameDrawn;
     private bool _tracedHwdec;
+
+    /// <inheritdoc />
+    public bool FrameMayBeWaiting => _updateWaiting;
+
+    /// <summary>
+    /// Takes mpv's waiting frame without drawing it, so mpv stops waiting and the size can be
+    /// read. After every load, and before its first frame is shown, mpv's core waits for that
+    /// frame to be rendered, for up to 200 ms. The size comes from the core, so it cannot arrive
+    /// while the core waits, and the app cannot render without it. Each side waited for the
+    /// other until mpv timed out, logged "mpv_render_context_render() not being called or
+    /// stuck", and counted the frame as dropped. Reopening a file took three of those timeouts,
+    /// about 600 ms, before the picture came up.
+    /// </summary>
+    public void SkipFrame(Func<string, nint> getProcAddress)
+    {
+        _updateWaiting = false;
+        if (_render == 0 || (mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0) return;
+        if (TakeFrameWithoutDrawing())
+            _lastGLFrameDrawn = false;   // so the first Render with a target draws it
+    }
+
+    private bool TakeFrameWithoutDrawing()
+    {
+        int skip = 1, block = 0;
+        var parameters = stackalloc mpv_render_param[3];
+        parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_SKIP_RENDERING, data = &skip };
+        parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data = &block };
+        parameters[2] = default;
+        return mpv_render_context_render(_render, parameters) >= 0;
+    }
 
     /// <summary>
     /// How many bits a channel the target holds, for <c>MPV_RENDER_PARAM_DEPTH</c>.
@@ -680,14 +714,22 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         var size = stackalloc int[2];
         var parameters = stackalloc mpv_render_param[5];
         nuint stride = 0;
+        // A frame taken without a size (see SkipFrame) and not yet drawn.
+        bool owed = false;
         fixed (byte* fmt = format)
         {
             while (!_swStopping)
             {
                 _swWake.WaitOne(500);
                 if (_swStopping || _render == 0 || _sink is null) continue;
-                if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0) continue;
-                if (!TryGetFrameSize(out int width, out int height)) continue;
+                bool newFrame = (mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) != 0;
+                if (!newFrame && !owed) continue;
+                if (!TryGetFrameSize(out int width, out int height))
+                {
+                    if (newFrame && TakeFrameWithoutDrawing()) owed = true;
+                    continue;
+                }
+                owed = false;
 
                 using var writer = _sink.Pixels.BeginWrite(width, height, PixelFormat.Rgbx8888);
                 size[0] = width;
@@ -723,7 +765,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             if (GCHandle.FromIntPtr((nint)userdata).Target is MpvBackend self)
             {
                 if (self._mode == VideoSinkMode.Pixels) self._swWake.Set();
-                else self._sink?.RequestRepaint();
+                else
+                {
+                    self._updateWaiting = true;
+                    self._sink?.RequestRepaint();
+                }
             }
         }
         catch { /* never let an exception cross into mpv */ }
