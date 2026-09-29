@@ -111,9 +111,9 @@ with the same kind of wait needs both.
 **A `VideoElement` listens only while a window shows it.** It subscribes to
 `FrameArrived` at its first paint (or on mounting into a shown tree), never from a
 rebuild's throwaway twin, and unsubscribes on unmount or on the first frame that finds
-it no longer hosted. That last case covers the exits that skip its `OnUnmounted`:
-`Window.SetRoot` unmounts nothing, and removing a panel unmounts the panel, not the
-video inside it. Before this, `VideoPlayer` collected one dead listener per rebuild:
+it no longer hosted. That last case covers `Window.SetRoot`, which unmounts nothing;
+removing a panel unmounts the video inside it like any other descendant. Before this,
+`VideoPlayer` collected one dead listener per rebuild:
 47 after four seconds of 10 fps playback in `VideoElementTests`.
 
 **On the Vulkan renderer a video is handed a target the renderer owns, and it is not

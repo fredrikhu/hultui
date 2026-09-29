@@ -22,7 +22,10 @@ public abstract class Component
     /// <summary>Called after the component host is added to the element tree.</summary>
     protected internal virtual void OnMount() { }
 
-    /// <summary>Called after the component host is removed from the element tree.</summary>
+    /// <summary>
+    /// Called after the component host, or any element it sits under, is removed from the
+    /// element tree. The build Effect is disposed first, so the component no longer rebuilds.
+    /// </summary>
     protected internal virtual void OnUnmount() { }
 
     /// <summary>Called before each Build() invocation.</summary>

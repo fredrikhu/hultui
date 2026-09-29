@@ -131,8 +131,8 @@ public class VideoElementTests
         session.PumpFrame();
         Assert.True(video.IsListeningForFrames);
 
-        // What a rebuild that drops the element does. (Exits that skip the element's
-        // unmount are AnElementLeftBehindWithoutAnUnmount_StopsListeningAtTheNextFrame.)
+        // What a rebuild that drops the element does. (SetRoot, the exit that skips the
+        // element's unmount, is AnElementLeftBehindWithoutAnUnmount_StopsListeningAtTheNextFrame.)
         box.RemoveChild(video);
         Assert.False(video.IsListeningForFrames);
 
@@ -262,10 +262,8 @@ public class VideoElementTests
         Assert.Same(live, Assert.Single(FrameListeners(player)));
     }
 
-    [Theory]
-    [InlineData("ancestor removed")]
-    [InlineData("root replaced")]
-    public void AnElementLeftBehindWithoutAnUnmount_StopsListeningAtTheNextFrame(string how)
+    [Fact]
+    public void RemovingAnAncestor_StopsListeningAtOnce()
     {
         using var session = Recording();
         var backend = new FakeMediaBackend();
@@ -277,10 +275,28 @@ public class VideoElementTests
         session.PumpFrame();
         Assert.True(video.IsListeningForFrames);
 
-        // Neither of these reaches the video's OnUnmounted: removing the panel unmounts
-        // the panel only, and SetRoot unmounts nothing.
-        if (how == "ancestor removed") root.RemoveChild(panel);
-        else session.Application.SetRoot(Box.New());
+        // Removal unmounts the whole subtree, not just the panel.
+        root.RemoveChild(panel);
+
+        Assert.False(video.IsListeningForFrames);
+        Assert.Empty(FrameListeners(player));
+    }
+
+    [Fact]
+    public void AnElementLeftBehindWithoutAnUnmount_StopsListeningAtTheNextFrame()
+    {
+        using var session = Recording();
+        var backend = new FakeMediaBackend();
+        using var player = new MediaPlayer(backend);
+        var video = Video.New(player);
+        var panel = Box.New().Children(video);
+        var root = Box.New().Children(panel);
+        session.Application.SetRoot(root);
+        session.PumpFrame();
+        Assert.True(video.IsListeningForFrames);
+
+        // SetRoot unmounts nothing, so this never reaches the video's OnUnmounted.
+        session.Application.SetRoot(Box.New());
         Assert.True(video.IsListeningForFrames);
 
         backend.Sink!.RequestRepaint();

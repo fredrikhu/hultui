@@ -18,8 +18,8 @@ namespace HultUI.Media;
 /// is not enough: the freshly built twin of every rebuild gets a parent, and so
 /// <c>OnMounted</c>, from its builder, then is patched into the live element and thrown
 /// away without an unmount. A player playing under a rebuilding overlay collected one
-/// dead listener per rebuild that way. Nor does every exit unmount: removing an ancestor
-/// unmounts only that ancestor, and <c>SetRoot</c> unmounts nothing.</para>
+/// dead listener per rebuild that way. Nor does every exit unmount: <c>SetRoot</c>
+/// unmounts nothing.</para>
 /// <para>The accessible name defaults to the source's display name.</para>
 /// </remarks>
 public class VideoElement : ImageElement
@@ -84,7 +84,7 @@ public class VideoElement : ImageElement
 
     private void OnFrameArrived()
     {
-        // Left behind without an unmount: an ancestor removed, or the root swapped.
+        // Left behind without an unmount: the root swapped by SetRoot.
         if (!IsHosted) { StopListening(); return; }
         var size = Source?.IntrinsicSize ?? Size.Zero;
         if (size != _lastFrameSize)
