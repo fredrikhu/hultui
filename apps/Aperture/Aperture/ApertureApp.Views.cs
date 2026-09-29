@@ -1,4 +1,5 @@
 ﻿using Aperture.Core;
+using Aperture.Core.Requests;
 using Aperture.Theme;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -56,33 +57,67 @@ public sealed partial class ApertureApp
             column.AddChild(Hint(Icons.Search, "Type at least two letters."));
             return column;
         }
-        if (SearchIsLoading && SearchResults.Count == 0)
-        {
-            column.AddChild(Hint(Icons.Loading, $"Searching {_library?.Server.Name}…"));
-            return column;
-        }
-        if (SearchResults.Count == 0)
-        {
-            column.AddChild(Hint(Icons.Warning, $"Nothing matches “{term}”."));
-            return column;
-        }
 
-        column.AddChild(Ui.SectionHeading($"{SearchResults.Count} result{(SearchResults.Count == 1 ? "" : "s")}"));
+        // The request server answers the same search, for what the library does not have
+        // — which is exactly when a search comes back empty and someone wants to ask for it.
+        EnsureRequestSearch(term);
+        var library = SearchResults;
+        IReadOnlyList<DiscoverItem> elsewhere = _requestServer is null ? [] : RequestSearchResults;
 
-        // A wrap of posters: a search crosses libraries, so the shelf shape is the one
-        // thing every result has in common.
         var scroll = ScrollView.Vertical().FlexGrow(1);
+        var sections = Flex.Column(gap: Halide.S5);
+
+        if (SearchIsLoading && library.Count == 0)
+            sections.AddChild(Hint(Icons.Loading, $"Searching {_library?.Server.Name}…"));
+        else if (library.Count == 0)
+            sections.AddChild(Hint(Icons.Warning, _requestServer is null
+                ? $"Nothing matches “{term}”."
+                : $"Nothing in your library matches “{term}”."));
+        else
+        {
+            var heading = $"{library.Count} result{(library.Count == 1 ? "" : "s")}";
+            if (_requestServer is not null) heading += " in your library";
+            sections.AddChild(Ui.SectionHeading(heading));
+            // A wrap of posters: a search crosses libraries, so the shelf shape is the one
+            // thing every result has in common.
+            sections.AddChild(PosterWrap(library.Count, i => PosterCard(library[i], 140f, cursorIndex: i)));
+        }
+
+        if (_requestServer is not null)
+        {
+            var section = Flex.Column(gap: Halide.S3).AutomationId("search-requestable");
+            if (RequestSearchLoading && elsewhere.Count == 0)
+                section.AddChild(Hint(Icons.Loading, $"Asking {RequestServerTitle}…"));
+            else if (elsewhere.Count > 0)
+            {
+                section.AddChild(Ui.SectionHeading($"Not in your library · {RequestServerTitle}"));
+                int offset = library.Count;
+                section.AddChild(PosterWrap(elsewhere.Count,
+                    i => DiscoverCard(elsewhere[i], 140f, cursorIndex: offset + i)));
+            }
+            sections.AddChild(section);
+        }
+
+        // The field keeps the keyboard while you type; the arrows walk the results only
+        // once one has been reached, which is why the cursor starts unset. One walk, both
+        // sections, in the order drawn.
+        var walk = new List<object>(library.Count + elsewhere.Count);
+        walk.AddRange(library);
+        walk.AddRange(elsewhere);
+        SetCursorList($"search:{term}:{library.Count}:{elsewhere.Count}", walk, VisibleCards(140f));
+
+        scroll.AddChild(sections);
+        column.AddChild(scroll);
+        return column;
+    }
+
+    private static Element PosterWrap(int count, Func<int, Element> card)
+    {
         var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart);
         wrap.Flex.Wrap = FlexWrap.Wrap;
         wrap.Gap(Halide.PosterGap);
-        // The field keeps the keyboard while you type; the arrows walk the results only
-        // once one has been reached, which is why the cursor starts unset.
-        SetCursorList("search:" + term, SearchResults, VisibleCards(140f));
-        for (int i = 0; i < SearchResults.Count; i++)
-            wrap.AddChild(PosterCard(SearchResults[i], 140f, cursorIndex: i));
-        scroll.AddChild(wrap);
-        column.AddChild(scroll);
-        return column;
+        for (int i = 0; i < count; i++) wrap.AddChild(card(i));
+        return wrap;
     }
 
     private static Element Hint(string glyph, string text)
@@ -192,6 +227,8 @@ public sealed partial class ApertureApp
             session.AddChild(Ui.Button(ButtonVariant.Danger, "Sign out", () => SignOut(keepAccount: false),
                 "settings-signout", Icons.SignOut));
             page.AddChild(session);
+
+            page.AddChild(RequestServerCard());
         }
 
         var storage = Card("Where things are kept");

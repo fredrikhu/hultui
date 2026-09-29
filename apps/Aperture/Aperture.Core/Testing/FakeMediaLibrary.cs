@@ -253,6 +253,16 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         return Result(true);
     }
 
+    /// <summary>Quick Connect codes this user has approved, in order.</summary>
+    public List<string> ApprovedCodes { get; } = [];
+
+    public Task<ApertureResult<bool>> AuthorizeQuickConnectAsync(string code, CancellationToken ct = default)
+    {
+        Calls.Add($"AuthorizeQuickConnect({code})");
+        ApprovedCodes.Add(code);
+        return Result(true);
+    }
+
     public void Dispose() => Disposed = true;
 
     private Task<ApertureResult<T>> Result<T>(T value)

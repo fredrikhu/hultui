@@ -109,6 +109,73 @@ answers for a position without the player knowing where stills come from.
 - **Downloads.** `/Items/{id}/Download` is one call; the work is the library of
   what has been downloaded and playing from it when the server is unreachable.
 
+## Slice 7 — requests, through Jellyseerr / Seerr (**slice 7a done**, 2026-09-30)
+
+Researched first: Jellyseerr and Overseerr merged into **Seerr** (seerr-team/seerr, 3.x,
+same `/api/v1` as Jellyseerr 2.x; Overseerr is archived and Plex-only). **No .NET client
+exists on NuGet**, and the OpenAPI spec is missing the fields that matter here, so
+`Aperture.Core/Requests` is hand-written: `SeerrHttp` (auth, errors), `SeerrServer`
+(`IRequestServer`, mapping), `SeerrConnection` (address walk on 5055, probe, three sign-ins,
+resume), `SeerrJson` (source-generated STJ), `FakeRequestServer`.
+
+| 7a — done | |
+|---|---|
+| Connect | Settings card: Quick Connect bridge (no typing, Seerr 3.4+), Jellyfin password, or API key acting as your user; secret in the credential store, paired with the Jellyfin server |
+| Discover | rail button; trending, popular and upcoming shelves with status badges; "Your requests" |
+| Title page | TMDB hero, cast, "More like this", state line; Request (film), season picker (series), 4K where allowed; Approve/Decline for managers; the title's requests with Withdraw |
+| Requests | rail button with a waiting count for managers; filters; everyone's / mine; approve, decline, withdraw on the row |
+| Search | the request server answers beside the library: "Not in your library" |
+| Jump | a title the library has opens the library's page (`jellyfinMediaId`) |
+
+Traps found on the way, each now in a comment or a test:
+
+1. **Status 6 is Blocklisted** (was "Blacklisted" before 3.0), 7 is Deleted. The spec says
+   6 is Deleted — that is Overseerr's numbering.
+2. **The request list has no "declined" filter**, and the validator answers any unknown query
+   parameter or value with a 400 — including parameters a newer server added. Version-gate
+   anything new (`RequestServerInfo.ParsedVersion`).
+3. **`POST /request` can answer 202 with `{message}`** instead of a request (nothing left to
+   ask for). Read as a failure with the server's sentence.
+4. **`/auth/jellyfin` with a `hostname` is a 500** on a configured server — send only
+   username and password.
+5. **The poster cache sent the Jellyfin token to every host.** Now scoped to the Jellyfin
+   origin (`PosterCache.Authorize`), with a test.
+6. **Framework: `MaxWidth` on a stretched column child clamps the box but not its
+   children's layout** — a button in such a card is drawn outside it and cannot be hit. The
+   picker and the lists use a set `Width` + `AlignSelf(FlexStart)` until that is fixed.
+
+**Verified against the lab server** (`http://jellyseer.home:5055` — one "r" — Seerr **3.3.0**
+titled "Jellyseerr", key in `~/.secrets/seerr.key`), read-only: the six live tests pass,
+the probe reads shelves, a series in full and the 27 requests with their titles, and the
+views render real artwork. **All 22 `jellyfinMediaId`s on its requests resolve on
+`jellyfin.home:8096`** (checked through the anonymous image endpoint), so the library jump
+joins. 3.3.0 is below the Quick Connect bridge, so the Settings card asks for the Jellyfin
+password there. **Not exercised live:** making, deciding and withdrawing a request — those
+start real downloads, so they are covered by the wire tests only until someone asks for
+something on purpose.
+
+### 7b — next
+
+- **Request from the library's own page.** A series with seasons missing says so on its
+  Jellyfin page, with the picker there. Needs the TMDB id from Jellyfin's `ProviderIds`.
+- **Download progress** — `mediaInfo.downloadStatus[]` (title, size left, ETA) on the title
+  page and in the requests list; the row that says "on its way" should say how far.
+- **Report a problem** — `POST /issue` (video / audio / subtitles, season and episode) from
+  the player's menu; `mediaId` is the request server's own media id, not TMDB's.
+- **Watchlist** (`/discover/watchlist`, `POST`/`DELETE /watchlist`, `mediaType` required
+  from 3.2) and a Home row for it.
+- **Advanced requests** for users with `REQUEST_ADVANCED`: server, quality profile, root
+  folder (`/service/radarr|sonarr[/{id}]` — never `/settings/*`, which carries the *arr keys).
+- **Quota** on the title page ("2 of 5 films left this week") and a clear refusal when over.
+- **The server's own hide flags** (`hideAvailable`, `hideRequested`, `hideBlocklisted` in
+  `/settings/public`) — they are applied by its web client, so a native one has to as well.
+- **CSRF protection** (off by default): with it on, writes need the `XSRF-TOKEN` cookie
+  echoed as a header. Detect the 403 and say so first; implement if a lab server has it on.
+- **A toast when a request arrives** — the server has no push channel, so poll the user's
+  requests on a slow timer and say when one turns available.
+- Genre, network and studio shelves (`/discover/genreslider/*`), person pages, the
+  administrator's own discover layout (`/settings/discover`).
+
 ## Things deliberately not done
 
 - **A device profile, by default.** Aperture tells the server it can direct-play and

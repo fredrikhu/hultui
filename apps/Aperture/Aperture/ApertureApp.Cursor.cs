@@ -1,4 +1,5 @@
 using Aperture.Core;
+using Aperture.Core.Requests;
 using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Reactivity;
@@ -18,8 +19,10 @@ namespace Aperture;
 /// </summary>
 public sealed partial class ApertureApp
 {
-    /// <summary>What the current view is showing, as its build last described it.</summary>
-    private IReadOnlyList<MediaItem> _cursorItems = [];
+    /// <summary>What the current view is showing, as its build last described it: library
+    /// items, and on the discovery pages titles the library does not have yet
+    /// (<see cref="Aperture.Core.Requests.DiscoverItem"/>).</summary>
+    private IReadOnlyList<object> _cursorItems = [];
 
     /// <summary>How many cards fit across, for the up/down arrows. One for a list.</summary>
     private int _cursorPerRow = 1;
@@ -38,14 +41,17 @@ public sealed partial class ApertureApp
     private bool _pendingCursorFocus;
 
     internal int CursorIndex => _cursorIndex;
-    internal MediaItem? CursorItem =>
+    internal object? CursorEntry =>
         _cursorIndex >= 0 && _cursorIndex < _cursorItems.Count ? _cursorItems[_cursorIndex] : null;
+
+    /// <summary>The library item under the cursor, or null when it is on something else.</summary>
+    internal MediaItem? CursorItem => CursorEntry as MediaItem;
 
     /// <summary>
     /// Called from a view's build: this is what the arrows are walking now. Changing the
     /// key resets the cursor, because "the third poster" means nothing in a different list.
     /// </summary>
-    private void SetCursorList(string key, IReadOnlyList<MediaItem> items, int perRow)
+    private void SetCursorList(string key, IReadOnlyList<object> items, int perRow)
     {
         _cursorItems = items;
         _cursorPerRow = Math.Max(1, perRow);
@@ -116,8 +122,8 @@ public sealed partial class ApertureApp
             case KeyCode.PageDown: return MoveCursor(_cursorPerRow * 3);
             case KeyCode.PageUp: return MoveCursor(-_cursorPerRow * 3);
 
-            case KeyCode.Enter when CursorItem is { } item:
-                Open(item);
+            case KeyCode.Enter when CursorEntry is { } entry:
+                OpenEntry(entry);
                 return true;
 
             // The card's menu, from the keyboard: the dedicated menu key where a keyboard
@@ -128,9 +134,10 @@ public sealed partial class ApertureApp
 
             // Space plays what is under the cursor — a series opens instead, because
             // "play a series" is a question the detail page answers better than a guess.
-            case KeyCode.Space when CursorItem is { } playable:
-                if (playable.IsPlayable) Play(playable, playable.ResumePosition ?? TimeSpan.Zero);
-                else Open(playable);
+            case KeyCode.Space when CursorEntry is { } entry:
+                if (entry is MediaItem { IsPlayable: true } playable)
+                    Play(playable, playable.ResumePosition ?? TimeSpan.Zero);
+                else OpenEntry(entry);
                 return true;
         }
         return false;
@@ -140,7 +147,7 @@ public sealed partial class ApertureApp
     /// the ring is rather than under the pointer, which may be somewhere else entirely.</summary>
     private bool OpenCursorMenu()
     {
-        if (_cursorCard.Current is not { } card || CursorItem is null) return false;
+        if (_cursorCard.Current is not { } card || CursorEntry is null) return false;
 
         // The window rather than the element's OverlayHost: a card realized inside a
         // virtual list has not been through a style pass yet, and that is where the host
@@ -148,6 +155,17 @@ public sealed partial class ApertureApp
         var box = card.Layout.AbsoluteBorderBox;
         _window.OpenContextMenu(card, new HultUI.Core.Primitives.Point(box.X + 24f, box.Y + box.Height - 24f));
         return true;
+    }
+
+    /// <summary>Opens whatever a cursor entry is: a library item's page, or a title's
+    /// discovery page (the library's own page, when the library has it).</summary>
+    private void OpenEntry(object entry)
+    {
+        switch (entry)
+        {
+            case MediaItem item: Open(item); break;
+            case DiscoverItem title: OpenDiscover(title); break;
+        }
     }
 
     /// <summary>Hands the keyboard to the card the cursor moved to, once it is built.

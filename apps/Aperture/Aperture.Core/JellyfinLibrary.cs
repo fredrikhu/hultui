@@ -464,6 +464,25 @@ public sealed class JellyfinLibrary : IMediaLibrary
             : _client.UserFavoriteItems[id].DeleteAsync(q => q.QueryParameters.UserId = User.Id, ct), ct);
     }
 
+    public async Task<ApertureResult<bool>> AuthorizeQuickConnectAsync(string code, CancellationToken ct = default)
+    {
+        try
+        {
+            var approved = await _client.QuickConnect.Authorize
+                .PostAsync(q => { q.QueryParameters.Code = code; q.QueryParameters.UserId = User.Id; }, ct)
+                .ConfigureAwait(false);
+            return ApertureResult<bool>.Success(approved == true);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return ApertureResult<bool>.Fail(JellyfinConnection.Classify(ex, Server.Host));
+        }
+    }
+
     /// <summary>A call whose only interesting outcome is whether it worked. Progress
     /// reports run on a timer, so a failure is classified and handed back rather than
     /// thrown at a caller that has nowhere to put it.</summary>

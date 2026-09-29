@@ -79,10 +79,27 @@ internal static class ApertureProgram
         var address = After("--probe");
         if (string.IsNullOrWhiteSpace(address))
         {
-            Console.Error.WriteLine("usage: Aperture --probe <address> [--api-key-file <path>] [--user <name>]");
+            Console.Error.WriteLine("usage: Aperture --probe <address> [--api-key-file <path>] [--user <name>]"
+                                    + " [--seerr <address> [--seerr-api-key-file <path>]]");
             return false;
         }
 
+        IMediaLibrary? signedIn = null;
+        try
+        {
+            if (!await ProbeJellyfin(address, After("--api-key-file"), After("--user"), l => signedIn = l).ConfigureAwait(false))
+                return false;
+            return After("--seerr") is not { Length: > 0 } seerr
+                || await ProbeRequestServer(seerr, After("--seerr-api-key-file"), signedIn).ConfigureAwait(false);
+        }
+        finally
+        {
+            signedIn?.Dispose();
+        }
+    }
+
+    private static async Task<bool> ProbeJellyfin(string address, string? keyFile, string? user, Action<IMediaLibrary> keep)
+    {
         var device = DeviceIdentity.New("aperture-probe");
         var found = await JellyfinConnection.DiscoverAsync(address, device).ConfigureAwait(false);
         if (!found.Ok)
@@ -93,18 +110,18 @@ internal static class ApertureProgram
         var server = found.Value;
         Console.WriteLine($"{server.Name} {server.Version} at {server.Address}");
 
-        var keyFile = After("--api-key-file");
         var key = keyFile is not null && File.Exists(keyFile) ? File.ReadAllText(keyFile).Trim() : null;
         if (key is null) return true;
 
-        var session = await JellyfinConnection.SignInWithApiKeyAsync(server, key, After("--user"), device)
+        var session = await JellyfinConnection.SignInWithApiKeyAsync(server, key, user, device)
             .ConfigureAwait(false);
         if (!session.Ok)
         {
             Console.Error.WriteLine($"no: {session.Failure!.UserMessage(server.Host)}");
             return false;
         }
-        using var library = session.Value;
+        var library = session.Value;
+        keep(library);
         Console.WriteLine($"signed in as {library.User.Name}");
 
         var libraries = await library.GetLibrariesAsync().ConfigureAwait(false);
@@ -129,4 +146,64 @@ internal static class ApertureProgram
         }
         return true;
     }
+
+    /// <summary>
+    /// The request server, the same way: who it is, and — given its API key — a shelf, a
+    /// search and a series read in full. Everything here is System.Text.Json source
+    /// generation, which is the path a native build has to prove it kept. Read-only: the
+    /// probe never requests anything.
+    /// </summary>
+    private static async Task<bool> ProbeRequestServer(string address, string? keyFile, IMediaLibrary? jellyfin)
+    {
+        var found = await Aperture.Core.Requests.SeerrConnection.DiscoverAsync(address).ConfigureAwait(false);
+        if (!found.Ok)
+        {
+            Console.Error.WriteLine($"no: {found.Failure!.UserMessage(address)}");
+            return false;
+        }
+        var info = found.Value;
+        Console.WriteLine($"{info.Title} {info.Version} at {info.Address}"
+                          + $" (Jellyfin sign-in without a password: {(info.SupportsQuickConnect ? "yes" : "no")},"
+                          + $" 4K: {(info.Movie4kEnabled || info.Series4kEnabled ? "yes" : "no")})");
+
+        var key = keyFile is not null && File.Exists(keyFile) ? File.ReadAllText(keyFile).Trim() : null;
+        if (key is null) return true;
+
+        var session = await Aperture.Core.Requests.SeerrConnection
+            .SignInWithApiKeyAsync(info, jellyfin?.Server.Id ?? "probe", key, jellyfin?.User.Id).ConfigureAwait(false);
+        if (!session.Ok)
+        {
+            Console.Error.WriteLine($"no: {session.Failure!.UserMessage(info.Host)}");
+            return false;
+        }
+        using var server = session.Value;
+        Console.WriteLine($"requests as {server.User.DisplayName}: {PermissionsLine(server.User)}");
+
+        var trending = await server.DiscoverAsync(Aperture.Core.Requests.DiscoverShelf.Trending).ConfigureAwait(false);
+        if (!trending.Ok)
+        {
+            Console.Error.WriteLine($"no: {trending.Failure!.UserMessage(info.Host)}");
+            return false;
+        }
+        int inLibrary = trending.Value.Items.Count(i => i.InLibrary);
+        Console.WriteLine($"trending: {trending.Value.Items.Count} titles, {inLibrary} already in the library");
+
+        var series = await server.GetDetailAsync(Aperture.Core.Requests.DiscoverKind.Tv, 1399).ConfigureAwait(false);
+        if (series.Ok)
+            Console.WriteLine($"read \"{series.Value.Item.Title}\": {series.Value.Seasons.Count} seasons, "
+                              + $"tvdb {series.Value.TvdbId}, {series.Value.Cast.Count} cast");
+
+        var requests = await server.GetRequestsAsync(Aperture.Core.Requests.RequestFilter.All, mine: false, 0, 5)
+            .ConfigureAwait(false);
+        if (requests.Ok)
+            Console.WriteLine($"{requests.Value.Total} requests; newest: "
+                              + string.Join(", ", requests.Value.Items.Select(r => $"{r.Title} ({r.Status})")));
+        return true;
+    }
+
+    private static string PermissionsLine(Aperture.Core.Requests.RequestUser user) =>
+        user.Has(Aperture.Core.Requests.RequestPermission.Admin) ? "administrator"
+        : user.CanManageRequests ? "manages requests"
+        : user.CanRequest(Aperture.Core.Requests.DiscoverKind.Movie) ? "can request"
+        : "browse only";
 }

@@ -66,7 +66,30 @@ public sealed class PosterCache : IDisposable
     /// query parameter, which is the better practice anyway: a token in a URL ends up in
     /// logs, caches and referrers.
     /// </summary>
-    public string? Authorization { get; set; }
+    public string? Authorization { get; private set; }
+
+    /// <summary>The one origin (<c>scheme://host:port</c>) <see cref="Authorization"/> is
+    /// sent to. The cache also fetches from hosts that are not the media server — the
+    /// discovery pages draw posters straight from TMDB — and the session token must never
+    /// ride along to those.</summary>
+    public string? AuthorizedOrigin { get; private set; }
+
+    /// <summary>Sets the header and the server it belongs to together, so there is no
+    /// moment where one is set without the other. Null for either clears both.</summary>
+    public void Authorize(string? serverAddress, string? header)
+    {
+        var origin = serverAddress is not null && Uri.TryCreate(serverAddress, UriKind.Absolute, out var uri)
+            ? uri.GetLeftPart(UriPartial.Authority)
+            : null;
+        bool on = origin is not null && header is { Length: > 0 };
+        AuthorizedOrigin = on ? origin : null;
+        Authorization = on ? header : null;
+    }
+
+    /// <summary>Whether a request to this URL may carry the session header.</summary>
+    internal bool IsAuthorizedFor(Uri url) =>
+        Authorization is { Length: > 0 } && AuthorizedOrigin is { } origin
+        && string.Equals(url.GetLeftPart(UriPartial.Authority), origin, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The picture for a URL, or (null, Pending) while it is fetched. Null URL —
     /// an item the server has no artwork for — is <see cref="Status.Failed"/> at once, so
@@ -115,8 +138,8 @@ public sealed class PosterCache : IDisposable
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (Authorization is { Length: > 0 } auth)
-                request.Headers.TryAddWithoutValidation("Authorization", auth);
+            if (IsAuthorizedFor(url))
+                request.Headers.TryAddWithoutValidation("Authorization", Authorization);
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
                 .ConfigureAwait(false);
             // A 404 here is ordinary: the server reported a tag for an image it no longer

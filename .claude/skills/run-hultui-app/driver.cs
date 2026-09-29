@@ -36,6 +36,8 @@ bool fluentDark = true;
 int fluentAccent = 0;
 string? mediaPath = null;
 string jellyfinServer = "", jellyfinKeyFile = "", jellyfinUser = "";
+string seerrServer = "", seerrKeyFile = "";
+bool seerrDemo = false;
 bool gitlab = false;
 string theme = "";
 var steps = new List<string>();
@@ -57,6 +59,11 @@ for (int i = 0; i < args.Length; i++)
         case "--server": jellyfinServer = args[++i]; break;
         case "--api-key-file": jellyfinKeyFile = args[++i]; break;
         case "--jellyfin-user": jellyfinUser = args[++i]; break;
+        // Aperture's request server: a real Jellyseerr/Seerr by API key (acting as the
+        // Jellyfin user when it knows them), or --seerr-demo for a fixture one.
+        case "--seerr": seerrServer = args[++i]; break;
+        case "--seerr-api-key-file": seerrKeyFile = args[++i]; break;
+        case "--seerr-demo": seerrDemo = true; break;
         case "--size":
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
@@ -209,9 +216,65 @@ Element MountAperture()
         Path.Combine(scratchConfig, "aperture.json"));
     Func<HultUI.Media.IMediaBackend>? backends =
         HultUI.Media.Mpv.MpvBackend.IsAvailable ? () => new HultUI.Media.Mpv.MpvBackend() : null;
-    var a = new Aperture.ApertureApp(session.Application, session.Window.Window, settings, library, backends);
+
+    Aperture.Core.Requests.IRequestServer? requests = null;
+    if (seerrServer.Length > 0)
+    {
+        var key = seerrKeyFile.Length > 0
+            ? File.ReadAllText(seerrKeyFile).Trim()
+            : Environment.GetEnvironmentVariable("APERTURE_SEERR_API_KEY")?.Trim() ?? "";
+        var found = Aperture.Core.Requests.SeerrConnection.DiscoverAsync(seerrServer).GetAwaiter().GetResult();
+        if (!found.Ok) throw new InvalidOperationException("--seerr: " + found.Failure!.Message);
+        var signedIn = Aperture.Core.Requests.SeerrConnection
+            .SignInWithApiKeyAsync(found.Value, library.Server.Id, key, library.User.Id)
+            .GetAwaiter().GetResult();
+        if (!signedIn.Ok) throw new InvalidOperationException("--seerr: " + signedIn.Failure!.Message);
+        requests = signedIn.Value;
+    }
+    else if (seerrDemo)
+    {
+        requests = DemoRequests();
+    }
+
+    var a = new Aperture.ApertureApp(session.Application, session.Window.Window, settings, library, backends,
+        requests: requests);
     instance = a;
     return a.Mount();
+}
+
+// A request server with something on every shelf: a title the demo library has, one asked
+// for, one on its way, a series part-way in, and someone else's request waiting.
+Aperture.Core.Testing.FakeRequestServer DemoRequests()
+{
+    var R = Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.ManageRequests;
+    var fake = new Aperture.Core.Testing.FakeRequestServer(user: new Aperture.Core.Requests.RequestUser(1, "fredrik", R));
+    var trending = Aperture.Core.Requests.DiscoverShelf.Trending;
+    var films = Aperture.Core.Requests.DiscoverShelf.PopularMovies;
+    var upcoming = Aperture.Core.Requests.DiscoverShelf.UpcomingMovies;
+    var series = Aperture.Core.Requests.DiscoverShelf.PopularSeries;
+    string[] names = ["Harbour Lights", "The Quiet Year", "Glass Orchard", "Northbound", "A Field in Winter",
+                      "The Cartographer", "Low Tide", "Paper Moons", "Signal Fires", "The Night Ferry"];
+    for (int i = 0; i < names.Length; i++)
+    {
+        var availability = i switch
+        {
+            1 => Aperture.Core.Requests.Availability.Pending,
+            3 => Aperture.Core.Requests.Availability.Processing,
+            _ => Aperture.Core.Requests.Availability.Unknown,
+        };
+        fake.AddMovie(1000 + i, names[i], 2019 + i % 6, availability, null, trending, i % 2 == 0 ? films : upcoming);
+    }
+    fake.AddMovie(990, "Stalker", 1979, Aperture.Core.Requests.Availability.Available, "m0", trending, films);
+    fake.AddSeries(2000, "The Long Way Home", 2019, Aperture.Core.Requests.Availability.PartiallyAvailable, "s1",
+    [
+        new Aperture.Core.Requests.DiscoverSeason(1, "Season 1", 8, 2019, Aperture.Core.Requests.Availability.Available, Aperture.Core.Requests.Availability.Unknown),
+        new Aperture.Core.Requests.DiscoverSeason(2, "Season 2", 8, 2021, Aperture.Core.Requests.Availability.Unknown, Aperture.Core.Requests.Availability.Unknown),
+        new Aperture.Core.Requests.DiscoverSeason(3, "Season 3", 10, 2023, Aperture.Core.Requests.Availability.Unknown, Aperture.Core.Requests.Availability.Unknown),
+    ], series, trending);
+    for (int i = 0; i < 6; i++) fake.AddSeries(2100 + i, "Series " + (char)('A' + i), 2015 + i, shelves: [series]);
+    fake.AddPendingRequest("movie:1004");
+    fake.AddPendingRequest("tv:2102", [1, 2]);
+    return fake;
 }
 
 // Enough of a library to render every surface: a shelf, something half-watched, a series

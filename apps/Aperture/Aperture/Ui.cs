@@ -150,6 +150,19 @@ public static class Ui
         at.TotalHours >= 1 ? $"{(int)at.TotalHours}:{at.Minutes:00}:{at.Seconds:00}"
                            : $"{at.Minutes}:{at.Seconds:00}";
 
+    /// <summary>"just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", then the date —
+    /// when a request was made, which matters in days rather than seconds.</summary>
+    public static string Ago(DateTimeOffset at, DateTimeOffset? now = null)
+    {
+        var span = (now ?? DateTimeOffset.UtcNow) - at;
+        if (span < TimeSpan.FromMinutes(1)) return "just now";
+        if (span < TimeSpan.FromHours(1)) return $"{(int)span.TotalMinutes} min ago";
+        if (span < TimeSpan.FromDays(1)) return $"{(int)span.TotalHours} h ago";
+        if (span < TimeSpan.FromDays(2)) return "yesterday";
+        if (span < TimeSpan.FromDays(30)) return $"{(int)span.TotalDays} days ago";
+        return at.ToLocalTime().ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     /// <summary>"38 m left" — what a half-watched card says instead of a percentage.</summary>
     public static string Remaining(TimeSpan total, TimeSpan position)
     {

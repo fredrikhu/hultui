@@ -41,6 +41,20 @@ public static class Icons
     public const string User = "user-circle";
     public const string Warning = "warning";
 
+    // The request server.
+    public const string Discover = "compass";
+    public const string Requests = "list-checks";
+    public const string Request = "plus-circle";
+    public const string Pending = "clock";
+    public const string Processing = "download-simple";
+    public const string Available = "check-circle";
+    public const string Declined = "x-circle";
+    public const string Blocklisted = "prohibit";
+    public const string Approve = "check";
+    public const string Decline = "x";
+    public const string Withdraw = "trash";
+    public const string External = "arrow-square-out";
+
     // Window controls (Windows/Linux style; bold so the marks survive caption size).
     public const string WinMinimize = "minus-bold";
     public const string WinMaximize = "square-bold";

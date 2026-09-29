@@ -19,10 +19,20 @@ namespace Aperture;
 public enum ApertureStage { Connect, Browsing }
 
 /// <summary>A place in the app. The stack of these is the back button.</summary>
-/// <param name="Id">The library or item the view is about; null for Home and Search.</param>
+/// <param name="Id">The library or item the view is about; null for Home and Search. For a
+/// discovery title it is the title's key, <c>movie:603</c> or <c>tv:1399</c>.</param>
 public sealed record Route(ApertureView View, string? Id = null, string? Title = null);
 
-public enum ApertureView { Home, Library, Detail, Person, Favourites, Search, Settings }
+public enum ApertureView
+{
+    Home, Library, Detail, Person, Favourites, Search, Settings,
+    /// <summary>The request server's shelves: what is trending, popular and coming.</summary>
+    Discover,
+    /// <summary>One title the request server knows, whether or not the library has it.</summary>
+    DiscoverTitle,
+    /// <summary>Requests made, and — for someone who may — the ones waiting for approval.</summary>
+    Requests,
+}
 
 /// <summary>
 /// Root of Aperture, the Jellyfin client: a Halide-themed shell — title bar, 64dip rail,
@@ -59,7 +69,8 @@ public sealed partial class ApertureApp : Component, IDisposable
     private ApertureStage _stage = ApertureStage.Connect;
 
     public ApertureApp(Application app, Window window, ApertureSettings? settings = null,
-        IMediaLibrary? library = null, Func<IMediaBackend>? backends = null, HttpClient? posterHttp = null)
+        IMediaLibrary? library = null, Func<IMediaBackend>? backends = null, HttpClient? posterHttp = null,
+        Aperture.Core.Requests.IRequestServer? requests = null)
     {
         _app = app;
         _window = window;
@@ -82,8 +93,10 @@ public sealed partial class ApertureApp : Component, IDisposable
             // header — scrubber tiles are behind it — and this path does not go through
             // Adopt, which is where a normal sign-in sets it.
             _library = library;
-            _posters.Authorization = _settings.Device.AuthorizationHeader(library.User.AccessToken);
+            _posters.Authorize(library.Server.Address, _settings.Device.AuthorizationHeader(library.User.AccessToken));
             _stage = ApertureStage.Browsing;
+            // A request server handed in the same way (tests, the driver) is simply in use.
+            _requestServer = requests;
         }
         else
         {
@@ -176,6 +189,11 @@ public sealed partial class ApertureApp : Component, IDisposable
 
     private Element BuildBrowsing()
     {
+        // The request server rides along with the library: reopened from its stored
+        // session once the library is up, and asked for its waiting count for the rail.
+        EnsureRequestServer();
+        EnsurePendingCount();
+
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var rail = BuildRail(); rail.Key = "rail";
         row.AddChild(rail);
@@ -188,6 +206,9 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.Favourites => BuildFavouritesView(),
             ApertureView.Search => BuildSearchView(),
             ApertureView.Settings => BuildSettingsView(),
+            ApertureView.Discover => BuildDiscoverView(),
+            ApertureView.DiscoverTitle => BuildDiscoverTitleView(Current),
+            ApertureView.Requests => BuildRequestsView(),
             _ => BuildHomeView(),
         };
         view.Key = "view-" + Current.View;
@@ -294,6 +315,20 @@ public sealed partial class ApertureApp : Component, IDisposable
             key++;
         }
 
+        // The request server's two doors, under the libraries they fill — and only when one
+        // is connected: a rail button that leads to "connect something first" is furniture.
+        if (_requestServer is { } requests)
+        {
+            rail.AddChild(Box.New().Height(Halide.S2));
+            rail.AddChild(RailButton(Icons.Discover, "Discover", "",
+                active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle,
+                onClick: () => Navigate(new Route(ApertureView.Discover))));
+            rail.AddChild(RailButton(Icons.Requests, "Requests", "",
+                active: Current.View == ApertureView.Requests,
+                onClick: () => Navigate(new Route(ApertureView.Requests)),
+                badge: requests.User.CanManageRequests && PendingRequestCount > 0 ? PendingRequestCount : 0));
+        }
+
         rail.AddChild(Box.New().FlexGrow(1));
         rail.AddChild(RailButton(Icons.FavoriteOn, "Favourites", "0",
             active: Current.View == ApertureView.Favourites,
@@ -308,9 +343,11 @@ public sealed partial class ApertureApp : Component, IDisposable
         return rail;
     }
 
-    private Element RailButton(string glyph, string label, string key, bool active, Action onClick)
+    private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0)
     {
         var fg = active ? Halide.Accent : Halide.TextMuted;
+        var name = key.Length > 0 ? $"{label} ({key})" : label;
+        if (badge > 0) name += $", {badge} waiting";
         var b = Flex.Column(gap: 2)
             .Width(48).Height(48).FlexShrink(0)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
@@ -320,14 +357,27 @@ public sealed partial class ApertureApp : Component, IDisposable
             .BorderColor(active ? Halide.Accent : Color.Transparent)
             .BorderWidth(new Thickness(2, 0, 0, 0))
             .Cursor(CursorType.Pointer)
-            .Tooltip(key.Length > 0 ? $"{label} ({key})" : label)
+            .Tooltip(name)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName(key.Length > 0 ? $"{label} ({key})" : label)
+            .AccessibleName(name)
             .AutomationId("rail-" + label.ToLowerInvariant().Replace(' ', '-'));
         if (active) b.Background(Halide.Tint(Halide.Accent));
         b.AddChild(Ui.Icon(glyph, 18f, fg));
         if (key.Length > 0)
             b.AddChild(Ui.Mono(key, 9f, active ? Halide.Alpha(Halide.Accent, 0.85) : Halide.TextFaint));
+        if (badge > 0)
+        {
+            // A count, top-right: requests waiting on someone who can approve them.
+            var dot = Box.New().Height(15).Padding(new Thickness(0, 4, 0, 4))
+                .CornerRadius(7.5f).Background(Halide.Accent)
+                .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+                .Children(Ui.Mono(badge > 99 ? "99+" : badge.ToString(), 9f, new Color(35, 23, 4)));
+            dot.IsHitTestVisible = false;
+            dot.Position.Type = PositionType.Absolute;
+            dot.Position.Right = Dimension.Px(3);
+            dot.Position.Top = Dimension.Px(4);
+            b.AddChild(dot);
+        }
         b.OnClick(_ => onClick());
         if (!active) b.HoverBg(Halide.Raised);
         return b;
@@ -489,6 +539,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         _quickConnectCts?.Dispose();
         _quickConnectCts = null;
         _posters.Dispose();
+        _requestServer?.Dispose();
+        _requestServer = null;
         _library?.Dispose();
         _library = null;
     }
