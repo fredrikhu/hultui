@@ -42,8 +42,8 @@ internal sealed class MpvTargetColour
     public const float MinPeakNits = 10f;
     public const float MaxPeakNits = 10000f;
 
-    /// <summary>How many options one change sets: prim, trc, peak.</summary>
-    public const int OptionsPerChange = 3;
+    /// <summary>How many options one change sets: prim, trc, peak, gamut mapping.</summary>
+    public const int OptionsPerChange = 4;
 
     /// <summary>Whether mpv has been asked to write linear light.</summary>
     public bool Linear { get; private set; }
@@ -65,16 +65,23 @@ internal sealed class MpvTargetColour
     /// Records what the target wants now. True when that differs from what mpv was last asked
     /// for: the caller must set the options, tagged with the new <see cref="Generation"/>.
     /// </summary>
-    public bool Update(bool wantsLinearLight, float peakNits)
+    public bool Update(bool wantsLinearLight, float peakNits, bool wideGamut = false)
     {
         float peak = Math.Clamp(peakNits > 0f ? peakNits : AssumedPeakNits, MinPeakNits, MaxPeakNits);
-        if (wantsLinearLight == Linear && (!Linear || peak == PeakNits)) return false;
+        bool wide = wantsLinearLight && wideGamut;
+        if (wantsLinearLight == Linear && (!Linear || (peak == PeakNits && wide == WideGamut))) return false;
 
         Linear = wantsLinearLight;
         PeakNits = wantsLinearLight ? peak : 0f;
+        WideGamut = wide;
         Generation++;
         return true;
     }
+
+    /// <summary>Whether mpv has been asked to keep colours outside BT.709 as negative values
+    /// (<c>gamut-mapping-mode=clip</c>) rather than map them inside; only ever with
+    /// <see cref="Linear"/>.</summary>
+    public bool WideGamut { get; private set; }
 
     /// <summary>
     /// mpv has confirmed every option of that change. Only ever moves forward: a slow reply to an

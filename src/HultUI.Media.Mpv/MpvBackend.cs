@@ -106,6 +106,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // fastest way to learn why a source would not open.
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 } logLevel)
             mpv_request_log_messages(_mpv, logLevel);
+        ApplyExtraOptions();
         Check(mpv_initialize(_mpv));
 
         Check(mpv_observe_property(_mpv, ObservePause, "pause", MPV_FORMAT_FLAG));
@@ -441,7 +442,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             CreateGLContext(getProcAddress);
         if (_render == 0) return false;
 
-        if (_colour.Update(target.WantsLinearLight, target.PeakNits)) ApplyTargetColour();
+        if (_colour.Update(target.WantsLinearLight, target.PeakNits, target.WideGamut)) ApplyTargetColour();
 
         // Nothing new, so the texture still holds the last frame — unless mpv has since
         // confirmed a change of target colour, in which case that frame was drawn for the old
@@ -538,6 +539,27 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     /// this is the option that decides whether HDR content keeps its range or is tone-mapped
     /// away before it reaches the target.</para>
     /// </summary>
+    /// <summary>
+    /// <c>HULTUI_MPV_OPTIONS</c>: extra mpv options, <c>name=value</c> pairs separated by
+    /// <c>;</c>, set before initialisation. Diagnostic: it is how a test clip is told what it is
+    /// when its container cannot say — a Y4M of BT.2020 colour bars carries no primaries, and
+    /// <c>vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq</c> supplies them. Only
+    /// the first <c>=</c> of a pair splits, so values may contain their own. A pair mpv refuses
+    /// is reported and skipped.
+    /// </summary>
+    private void ApplyExtraOptions()
+    {
+        if (Environment.GetEnvironmentVariable("HULTUI_MPV_OPTIONS") is not { Length: > 0 } extra) return;
+        foreach (var pair in extra.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0) { Console.Error.WriteLine($"[HultUI.Media.Mpv] HULTUI_MPV_OPTIONS: '{pair}' is not name=value"); continue; }
+            int result = mpv_set_option_string(_mpv, pair[..eq], pair[(eq + 1)..]);
+            if (result < 0)
+                Console.Error.WriteLine($"[HultUI.Media.Mpv] HULTUI_MPV_OPTIONS: {pair[..eq]} refused: {ErrorString(result)}");
+        }
+    }
+
     private void ApplyTargetColour()
     {
         // Asynchronously, and this is not a detail. These run on the render thread inside a
@@ -558,13 +580,20 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             trc = "linear";
             peak = _colour.PeakNits.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
         }
+        // "clip" is not a clamp in mpv's GL renderer: it skips the step that pulls a colour
+        // outside the target's gamut back inside by desaturating it toward grey, so BT.2020 and
+        // P3 colours arrive as negative BT.709 values, which scRGB shows as the colours they
+        // are. "auto" is that desaturation — what an encoded target needs, since it has no
+        // negative values to put them in.
+        string gamut = _colour.WideGamut ? "clip" : "auto";
         int a = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 0), "target-prim", prim);
         int b = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 1), "target-trc", trc);
         int c = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 2), "target-peak", peak);
+        int d = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 3), "gamut-mapping-mode", gamut);
 
         if (StartupTrace.Enabled)
-            StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: asked {prim}/{trc}/{peak}, " +
-                $"queued {a}/{b}/{c} in {Stopwatch.GetElapsedTime(start).TotalMilliseconds:0.00} ms");
+            StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: asked {prim}/{trc}/{peak}/{gamut}, " +
+                $"queued {a}/{b}/{c}/{d} in {Stopwatch.GetElapsedTime(start).TotalMilliseconds:0.00} ms");
     }
 
     // Event thread only: how many of a change's options mpv has answered for.
@@ -593,7 +622,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         if (StartupTrace.Enabled)
             StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: confirmed, " +
                 $"reads back prim={GetString(_mpv, "target-prim")} trc={GetString(_mpv, "target-trc")} " +
-                $"peak={GetString(_mpv, "target-peak")}");
+                $"peak={GetString(_mpv, "target-peak")} gamut={GetString(_mpv, "gamut-mapping-mode")}");
         _sink?.RequestRepaint();
     }
 

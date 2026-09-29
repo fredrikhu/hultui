@@ -222,9 +222,25 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             WantsLinearLight: linear,
             PeakNits: linear
                 ? HdrVideoLuminance.ProducerPeakNits(_host.DisplayPeakNits, _host.SdrWhiteScale, MatchVideoWhiteToUi)
-                : 0f);
+                : 0f,
+            WideGamut: linear && WideGamutEnabled);
         return true;
     }
+
+    /// <summary>
+    /// Whether the scRGB target is offered to the producer as wide-gamut:
+    /// <c>HULTUI_VIDEO_WIDE_GAMUT=0</c> turns it off.
+    ///
+    /// <para>scRGB carries a colour outside BT.709 as negative channel values, and every step
+    /// from the shared image to the swapchain is half-float and keeps them — the offscreen, the
+    /// blit, the scaled colour space, and on the gamma-2.2 path the encode and decode, which
+    /// preserve the sign for exactly this. Measured with BT.2020 colour bars through mpv: asked
+    /// for wide gamut, the green bar arrives as (-0.26, 0.50, -0.04), the BT.2020→709 matrix
+    /// exactly; not asked, as (0, 0.41, 0.12), pulled inside BT.709 and shifted toward cyan.
+    /// The in-gamut controls come out identical either way.</para>
+    /// </summary>
+    private static readonly bool WideGamutEnabled =
+        Environment.GetEnvironmentVariable("HULTUI_VIDEO_WIDE_GAMUT") != "0";
 
     /// <summary>
     /// The lent image as something the canvas can draw.
@@ -471,9 +487,11 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameScaleEncoded = _offscreenEncoded;
         // A shader, not a colour matrix: the matrix clamps at 1 and an HDR frame is made of
         // the values above it. Alpha is left alone — the video is opaque and scaling it would
-        // make the frame translucent in exactly the bright places.
+        // make the frame translucent in exactly the bright places. The 2.2 encode keeps the
+        // sign: a wide-gamut frame holds colours outside BT.709 as negative values, and
+        // clamping them at zero here is the gamut mapping WideGamutEnabled exists to avoid.
         using var effect = SKRuntimeEffect.CreateColorFilter(_offscreenEncoded
-            ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb * k, half3(0)), half3(1.0 / 2.2)), c.a); }"
+            ? "uniform half k; half4 main(half4 c) { half3 v = c.rgb * k; return half4(sign(v) * pow(abs(v), half3(1.0 / 2.2)), c.a); }"
             : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
         if (effect is null) { _frameScale = null; return null; }
 
@@ -529,9 +547,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
             // whole thing being worked around. Src rather than SrcOver — the offscreen is the
             // entire frame and there is nothing underneath worth blending with. The decode is on
-            // premultiplied colour, which is exact only at alpha 1 — true of a window's frame.
+            // premultiplied colour, which is exact only at alpha 1 — true of a window's frame —
+            // and keeps the sign, for the same wide-gamut reason as the video's encode.
             using var effect = SKRuntimeEffect.CreateColorFilter(encoded
-                ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb, half3(0)), half3(2.2)) * k, c.a); }"
+                ? "uniform half k; half4 main(half4 c) { return half4(sign(c.rgb) * pow(abs(c.rgb), half3(2.2)) * k, c.a); }"
                 : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
             if (effect is null) { ReleaseOffscreen(); return null; }
 

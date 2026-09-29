@@ -63,6 +63,20 @@ public class MpvTargetColourTests
     }
 
     [Fact]
+    public void WideGamut_IsAChangeForALinearTarget_AndMeaninglessForAnEncodedOne()
+    {
+        var colour = new MpvTargetColour();
+        Assert.True(colour.Update(true, 455f, wideGamut: true));
+        Assert.True(colour.WideGamut);
+        Assert.False(colour.Update(true, 455f, wideGamut: true));
+        Assert.True(colour.Update(true, 455f, wideGamut: false));   // back to mapping inside BT.709
+
+        Assert.True(colour.Update(false, 0f, wideGamut: true));
+        Assert.False(colour.WideGamut);                               // no negatives in an encoded target
+        Assert.False(colour.Update(false, 0f, wideGamut: false));
+    }
+
+    [Fact]
     public void ReplyTags_RoundTrip_AndOthersAreNotMistakenForThem()
     {
         ulong tag = MpvTargetColour.ReplyTag(generation: 1234567, linear: true, option: 2);

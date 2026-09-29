@@ -43,7 +43,7 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 7.3 | SDR white level and HDR state from SDL's window properties | 7 | Declined — SDL's values are the problem (2.5) |
 | 7.4 | Stray scratch files out of the repo root | 7 | Done |
 | 8.1 | mpv target options set without blocking the render thread | 8 | Done — the stall was real |
-| 8.2 | Wide colour gamut carried through to scRGB | 8 | Todo |
+| 8.2 | Wide colour gamut carried through to scRGB | 8 | Done — eye and Linux pending |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
 | 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Todo |
 | 10.1 | Stale code comments | 10 | Todo |
@@ -440,6 +440,31 @@ though scRGB carries wider colours as negative values. Routes: `gamut-mapping-mo
 BT.2020 target with a linear Rec.2020 wrap so Skia converts. Either way the encoded offscreen's
 `max(c, 0)` must stop clamping negatives. Needs a saturated BT.2020 test pattern; **eye** and
 **Linux**.
+
+**Result (2026-09-29): done by the first route.** The swapchain is scRGB, whose native form for a
+colour outside BT.709 is a negative channel, so mpv is told `gamut-mapping-mode=clip` for a linear
+target and does no gamut mapping. `clip` skips mpv's desaturation, and in a linear float target
+nothing then clamps. A BT.2020 target would need Skia to convert every frame instead.
+- **Test pattern:** `spikes/HdrInterop/make-bars.cs` writes eight bars as a BT.2020 PQ Y4M: the
+  six primaries and secondaries at ~92 nits, grey, and a BT.709 green expressed in BT.2020. The
+  last two are inside BT.709, so they are the controls. The spike's `--range … bars=8` prints each
+  bar.
+- **Spike, into the shared image:** with `auto` the floor is 0 and the green bar reads
+  (0, 0.408, 0.115). With `clip` the floor is -0.383 over 65340 negative samples, and green reads
+  (-0.260, 0.501, -0.045). Both controls are identical in the two modes.
+- **Real renderer, swapchain capture:** min -0.545 with wide gamut and 0.000 with
+  `HULTUI_VIDEO_WIDE_GAMUT=0`. The scaled-colour-space and gamma-2.2 paths also keep -0.545.
+- **Encoded offscreen:** the 2.2 encode and decode shaders are now sign-preserving
+  (`sign(v) * pow(abs(v), …)`). The old shaders, as a control, give 0.000 on the same path.
+- **Switches:** `HULTUI_VIDEO_WIDE_GAMUT=0` goes back to mapping inside BT.709. It means nothing
+  for an encoded target, which cannot hold a negative. `HULTUI_MPV_OPTIONS` passes
+  `name=value;…` to mpv before it starts; the bars need
+  `vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq`, because a Y4M carries no colour
+  tags.
+
+**Still open:** the **eye** check (the capture shows the values reach the swapchain, not what the
+compositor and panel make of them) and **Linux**, where KWin's handling of negative scRGB is
+untested.
 
 ## Phase 9 — Tests for what remains
 

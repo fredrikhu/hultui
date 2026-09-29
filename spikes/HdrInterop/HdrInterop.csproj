@@ -13,6 +13,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- A file-based app of its own (dotnet run make-bars.cs): compiled in here, its top-level
+         statements would quietly become this spike's entry point instead of Program.Main. -->
+    <Compile Remove="make-bars.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Vortice.Vulkan" Version="*" />
     <PackageReference Include="ppy.SDL3-CS" Version="2026.320.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.2" />
