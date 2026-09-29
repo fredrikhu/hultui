@@ -1,0 +1,29 @@
+[HultUI] gfx: video=windows renderer="NVIDIA GeForce RTX 4080/PCIe/SSE2" vendor="NVIDIA Corporation" gl="3.3.0 NVIDIA 610.62" swapInterval=0 samples=0 drawable=1650x1140px window=1650x1140 density=1 scale=1.5 refresh=120Hz hdrDisplay=on sdrWhite=240nits os="Microsoft Windows 10.0.26200"
+environment + composition controller: 367 ms; runtime 154.0.4258.37; scale 1,5
+page element at {X=0,Y=68,Width=1650,Height=1072} (client px); capturing the whole root visual
+  dumped 1650x1140 frame to C:\Users\fredr\source\repos\fredrikhu\hului-revamped\.claude\worktrees\webview-component-repo-62ba8b\spikes\WebView2Capture\results\placement-first-frame.bmp; centre 0xFF121212
+PLACEMENT: 1 frame(s) without the page before the first with it
+PLACEMENT: first page frame 104 ms after navigate (navigation completed at 17 ms), 2 frames; frame 1650x1140, page at (0,0)-(1649,1071)
+PLACEMENT: the page sits at the root visual's origin regardless of Bounds.X/Y
+LATENCY (40 colour changes, 0 missed): script round trip median 0,3, p90 0,4, max 1,9 ms
+LATENCY: change requested -> frame captured median 6,7, p90 11,0, max 17,2 ms
+LATENCY: script completed -> frame captured median 6,4, p90 10,7, max 16,9 ms
+ANIMATION composited 1650x1072: 59,7 captured fps, copy avg 1,70 ms max 2,99 ms; CPU ours 291 ms/s, browser processes 156 ms/s (display 120 Hz)
+ANIMATION windowed baseline, same page and size: CPU ours 3 ms/s, browser processes 141 ms/s
+FOCUS: 1 child window(s) under the SDL window before focus:
+  0x1C0C5E 'Chrome_WidgetWin_0' parent=0x580BBE visible=True (1370,664)-(1370,664) 0x0
+FOCUS: Window.Activated fired 0 time(s) on MoveFocus into the page
+FOCUS: after MoveFocus, GetFocus()=0x1C0C5E 'Chrome_WidgetWin_0', foreground=0x580BBE (ours 0x580BBE)
+  0x1C0C5E 'Chrome_WidgetWin_0' parent=0x580BBE visible=True (1370,664)-(1370,664) 0x0
+FOCUS: page activeElement id = "i", document.hasFocus() = true
+FOCUS: Window.Activated fired 0 time(s) on SetFocus back to ours
+FOCUS: after SetFocus(ours), GetFocus()=0x580BBE, document.hasFocus() = false
+A11Y: AutomationProvider is __ComObject; IRawElementProviderSimple=True, IRawElementProviderFragment=True
+A11Y simple: ProviderOptions=42, Name=NotImplementedException, ControlType=NotImplementedException, HostRawElementProvider=object
+A11Y fragment: Navigate(Parent)=null, Navigate(FirstChild)=null, FragmentRoot=null, BoundingRectangle=(0,68) 1650x1072
+A11Y: for comparison the page is at screen (1370,732) 1650x1072
+A11Y: GetAutomationProviderForWindow(0x1C0C5E) -> object, same as controller's: True
+POPUP: select at css (40,60) 220x32; expecting its popup near screen (1430,870)
+POPUP: mouse points bounds-relative: activeElement="s", 1 new browser window(s)
+  0x100C76 'Chrome_WidgetWin_1' (1430,876)-(1760,1079) 330x203
+done
