@@ -1,5 +1,4 @@
 using Vortice.Vulkan;
-using static HultUI.Platform.SDL3.VulkanCommands;
 
 namespace HultUI.Platform.SDL3;
 
@@ -94,13 +93,13 @@ internal sealed unsafe partial class SdlVulkanHost
             sharingMode = VkSharingMode.Exclusive,
         };
         VkBuffer buffer;
-        Check(CreateBuffer(_device, &bufferInfo, 0, &buffer), "vkCreateBuffer");
+        Check(_vk.CreateBuffer(_device, &bufferInfo, 0, &buffer), "vkCreateBuffer");
 
         var requirements = new VkMemoryRequirements();
-        GetBufferMemoryRequirements(_device, buffer, &requirements);
+        _vk.GetBufferMemoryRequirements(_device, buffer, &requirements);
 
         var properties = new VkPhysicalDeviceMemoryProperties();
-        GetMemoryProperties(_physicalDevice, &properties);
+        _vk.GetMemoryProperties(_physicalDevice, &properties);
         uint typeIndex = uint.MaxValue;
         const VkMemoryPropertyFlags wanted = VkMemoryPropertyFlags.HostVisible | VkMemoryPropertyFlags.HostCoherent;
         for (uint i = 0; i < properties.memoryTypeCount; i++)
@@ -114,14 +113,14 @@ internal sealed unsafe partial class SdlVulkanHost
 
         var allocate = new VkMemoryAllocateInfo { allocationSize = requirements.size, memoryTypeIndex = typeIndex };
         VkDeviceMemory memory;
-        Check(AllocateMemory(_device, &allocate, 0, &memory), "vkAllocateMemory");
-        Check(BindBufferMemory(_device, buffer, memory, 0), "vkBindBufferMemory");
+        Check(_vk.AllocateMemory(_device, &allocate, 0, &memory), "vkAllocateMemory");
+        Check(_vk.BindBufferMemory(_device, buffer, memory, 0), "vkBindBufferMemory");
 
         var cmd = BeginOneShot();
 
         var toSource = Barrier(image, VkImageLayout.ColorAttachmentOptimal, VkImageLayout.TransferSrcOptimal,
             VkAccessFlags.ColorAttachmentWrite, VkAccessFlags.TransferRead);
-        CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput, VkPipelineStageFlags.Transfer,
+        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput, VkPipelineStageFlags.Transfer,
             VkDependencyFlags.None, 0, 0, 0, 0, 1, &toSource);
 
         var region = new VkBufferImageCopy
@@ -129,24 +128,24 @@ internal sealed unsafe partial class SdlVulkanHost
             imageSubresource = new VkImageSubresourceLayers(VkImageAspectFlags.Color, 0, 0, 1),
             imageExtent = new VkExtent3D(width, height, 1),
         };
-        CmdCopyImageToBuffer(cmd, image, VkImageLayout.TransferSrcOptimal, buffer, 1, &region);
+        _vk.CmdCopyImageToBuffer(cmd, image, VkImageLayout.TransferSrcOptimal, buffer, 1, &region);
 
         // Back to where the present transition expects to find it.
         var back = Barrier(image, VkImageLayout.TransferSrcOptimal, VkImageLayout.ColorAttachmentOptimal,
             VkAccessFlags.TransferRead, VkAccessFlags.ColorAttachmentWrite);
-        CmdPipelineBarrier(cmd, VkPipelineStageFlags.Transfer, VkPipelineStageFlags.ColorAttachmentOutput,
+        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.Transfer, VkPipelineStageFlags.ColorAttachmentOutput,
             VkDependencyFlags.None, 0, 0, 0, 0, 1, &back);
 
         EndOneShot(cmd);
 
         void* mapped;
-        Check(MapMemory(_device, memory, 0, bytes, 0, &mapped), "vkMapMemory");
+        Check(_vk.MapMemory(_device, memory, 0, bytes, 0, &mapped), "vkMapMemory");
         WritePpm(path, (byte*)mapped, width, height, _format, SdrWhiteScale);
         if (_format == VkFormat.R16G16B16A16Sfloat) ReportRange((Half*)mapped, width, height);
-        UnmapMemory(_device, memory);
+        _vk.UnmapMemory(_device, memory);
 
-        DestroyBuffer(_device, buffer, 0);
-        FreeMemory(_device, memory, 0);
+        _vk.DestroyBuffer(_device, buffer, 0);
+        _vk.FreeMemory(_device, memory, 0);
         Console.Error.WriteLine($"[vulkan] captured frame {_presentedFrames} ({width}x{height}) to {path}");
     }
 
@@ -257,18 +256,18 @@ internal sealed unsafe partial class SdlVulkanHost
             commandBufferCount = 1,
         };
         VkCommandBuffer cmd;
-        Check(AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
+        Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
         var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
-        Check(BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+        Check(_vk.BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
         return cmd;
     }
 
     private void EndOneShot(VkCommandBuffer cmd)
     {
-        Check(EndCommandBuffer(cmd), "vkEndCommandBuffer");
+        Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
         var submit = new VkSubmitInfo { commandBufferCount = 1, pCommandBuffers = &cmd };
-        Check(QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
-        Check(QueueWaitIdle(_queue), "vkQueueWaitIdle");
-        FreeCommandBuffers(_device, _pool, 1, &cmd);
+        Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
+        Check(_vk.QueueWaitIdle(_queue), "vkQueueWaitIdle");
+        _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
     }
 }

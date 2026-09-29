@@ -1,6 +1,5 @@
 using System.Text;
 using Vortice.Vulkan;
-using static HultUI.Platform.SDL3.VulkanCommands;
 
 namespace HultUI.Platform.SDL3;
 
@@ -41,11 +40,11 @@ internal sealed unsafe partial class SdlVulkanHost
     {
         if (_physicalDevice.IsNull) return false;
         uint count = 0;
-        if (EnumerateDeviceExtensionProperties(_physicalDevice, null, &count, null) != VkResult.Success
+        if (_vk.EnumerateDeviceExtensionProperties(_physicalDevice, null, &count, null) != VkResult.Success
             || count == 0) return false;
 
         var properties = stackalloc VkExtensionProperties[(int)count];
-        if (EnumerateDeviceExtensionProperties(_physicalDevice, null, &count, properties) != VkResult.Success)
+        if (_vk.EnumerateDeviceExtensionProperties(_physicalDevice, null, &count, properties) != VkResult.Success)
             return false;
 
         for (uint i = 0; i < count; i++)
@@ -65,11 +64,11 @@ internal sealed unsafe partial class SdlVulkanHost
         if (_physicalDevice.IsNull || _surface.IsNull) return [];
 
         uint count = 0;
-        if (GetSurfaceFormats(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
+        if (_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
             return [];
 
         var native = stackalloc VkSurfaceFormatKHR[(int)count];
-        if (GetSurfaceFormats(_physicalDevice, _surface, &count, native) != VkResult.Success) return [];
+        if (_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, native) != VkResult.Success) return [];
 
         var list = new List<(VkFormat, VkColorSpaceKHR)>((int)count);
         for (uint i = 0; i < count; i++) list.Add((native[i].format, native[i].colorSpace));

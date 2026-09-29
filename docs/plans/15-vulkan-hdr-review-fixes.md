@@ -34,10 +34,10 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 5.1 | Build fails if the natives import CUDA at load time | 5 | Done |
 | 5.2 | Notices and README: nv-codec-headers, libpipewire, loader error | 5 | Done |
 | 5.3 | Build script: pinned-tag checks, toolchain check, report coverage | 5 | Done |
-| 6.1 | Per-host Vulkan command table | 6 | Todo |
-| 6.2 | GL device UUID via the indexed query | 6 | Todo |
-| 6.3 | Interop state machine hardening | 6 | Todo |
-| 6.4 | Present semaphores outlive a pending present | 6 | Todo |
+| 6.1 | Per-host Vulkan command table | 6 | Done |
+| 6.2 | GL device UUID via the indexed query | 6 | Done — **Linux** (Mesa) check pending |
+| 6.3 | Interop state machine hardening | 6 | Done (one limit documented, below) |
+| 6.4 | Present semaphores outlive a pending present | 6 | Done |
 | 7.1 | `FrameColorFilter` stops recompiling SkSL every frame | 7 | Done (with 2.3) |
 | 7.2 | `HULTUI_RENDERER` parsing: case, empty value, recipes | 7 | Todo |
 | 7.3 | SDR white level and HDR state from SDL's window properties | 7 | Todo |
@@ -327,6 +327,36 @@ fallback. **Linux** (Mesa) to verify.
 `Rebuild` after a SUBOPTIMAL present destroys the per-image semaphores while that present may still
 wait on one. Defer destruction until the image's next acquire, or use present fences where
 `swapchain_maintenance1` is enabled.
+
+**Phase 6 result (2026-09-29).**
+- **6.1:** `VulkanCommands` is an instance per host. Two Vulkan windows each build their own
+  swapchain, draw white at scRGB 3.000, and close cleanly. There is no negative control, because the
+  shared table only breaks when two windows pick different GPUs.
+- **6.2:** the indexed `glGetUnsignedBytei_vEXT` query alone enables interop on NVIDIA (checked with
+  the fallback switched off). With neither query answering, interop is refused as `GL (unknown)` and
+  video takes the software path. GL errors are drained on both sides of the query. Mesa, the reason
+  for the change, still needs the Linux machine.
+- **6.3:**
+  - The glFinish path now releases the image to the external queue (SHADER_READ_ONLY → GENERAL,
+    matching its acquire), where it used to take ownership every frame and never return it.
+  - A frame that took the image and was never presented hands it back through `FlushOwedRelease`,
+    both at the next lend and when the present finds nothing to present.
+  - A second lend in one frame is refused, so a second GPU video source draws nothing instead of
+    overwriting the first or getting its image destroyed under a recorded draw.
+  - **Limit, documented rather than fixed:** a source whose lend is refused, or fails, draws
+    nothing. Its mode is decided once at its first draw, so it cannot fall back to pixels
+    afterwards. Two GPU sources in one Vulkan window would need an image per source.
+- **6.4:** retired semaphores are kept per batch and destroyed after the replacing swapchain has
+  presented a full round of images, plus one. A maximize/restore cycle showed each batch destroyed
+  one round later, and the last one on dispose.
+
+**Validation.** Every path above was run under core and synchronisation validation
+(`VK_LOADER_LAYERS_ENABLE='*validation*' VK_LAYER_VALIDATE_SYNC=1`), with **0 messages**: video on
+the semaphore path, video on the glFinish path (both still 879 levels on the 10-bit ramp), and two
+windows through eight resizes. The layer loaded in each run: two "forced enabled" lines per instance
+and device pair. Dropping the present's wait semaphore produced 4 `SYNC-HAZARD` lines in the same
+setup, so the quiet runs are quiet for the right reason. As before, the GL side of the seam is
+invisible to the layer.
 
 ## Phase 7 — Small cleanups
 

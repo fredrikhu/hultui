@@ -140,6 +140,20 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// a Vulkan renderer can draw.</summary>
     private VulkanInteropImage? _lent;
 
+    /// <summary>
+    /// Whether the shared image has been lent in the frame now open.
+    ///
+    /// <para><b>Once per frame</b>, because there is one shared image per window and Skia reads
+    /// it only when the frame flushes. A second GPU video source in the same frame would have
+    /// rendered over the first one's picture before either was drawn. Worse, at another size it
+    /// would have made the host destroy and recreate the image under a draw already recorded
+    /// against it. A second lend is now refused, so that source draws nothing, and the first
+    /// stays correct. Nothing in the tree has two GPU video sources in one window today (Reel's
+    /// scrubber stills are files); a real second one needs an image per source.</para>
+    /// </summary>
+    private bool _lentThisFrame;
+    private bool _tracedSecondLend;
+
     /// <inheritdoc />
     /// <remarks>
     /// The first read does the work: a hidden GL context, a check that it landed on the same
@@ -179,9 +193,17 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
     {
         target = default;
+        if (_lentThisFrame)
+        {
+            if (!_tracedSecondLend && StartupTrace.Enabled)
+                StartupTrace.Mark("video: a second GPU source in one frame is not supported on Vulkan; it draws nothing");
+            _tracedSecondLend = true;
+            return false;
+        }
         if (Interop?.LendInteropImage(width, height) is not { } image) return false;
 
         _lent = image;
+        _lentThisFrame = true;
         // Linear light only where it can survive. An 8-bit sRGB swapchain has no room above
         // white, and the offscreen that carries the extra range exists only for scRGB — ask a
         // producer for HDR into an SDR target and it comes out clipped rather than bright.
@@ -303,6 +325,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameColorSpace = frame.ColorSpace;
         _renderContext.SetCanvas((OffscreenFor(frame) ?? surface).Canvas);
         _frameOpen = true;
+        _lentThisFrame = false;
         return true;
     }
 

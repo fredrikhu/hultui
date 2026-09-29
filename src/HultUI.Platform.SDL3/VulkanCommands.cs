@@ -11,23 +11,30 @@ namespace HultUI.Platform.SDL3;
 /// as methods. Everything past <c>vkCreateInstance</c> comes from
 /// <c>vkGetInstanceProcAddr</c> / <c>vkGetDeviceProcAddr</c>, which is how Vulkan intends it
 /// and how <c>SDL3Window</c> already resolves GL.</para>
+///
+/// <para><b>One per host, not one per process.</b> Every window builds its own instance and
+/// device, and the spec allows a command resolved for a device to be called only with that
+/// device or its children. This used to be a static table that each new window overwrote, so
+/// the first window went on calling the second window's device pointers. That worked because
+/// both windows load the same driver, and would have broken the day two windows picked
+/// different GPUs.</para>
 /// </summary>
-internal static unsafe class VulkanCommands
+internal sealed unsafe class VulkanCommands
 {
     // ── instance ─────────────────────────────────────────────────────────
-    public static delegate* unmanaged<VkInstance, uint*, VkPhysicalDevice*, VkResult> EnumeratePhysicalDevices;
-    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties*, void> GetPhysicalDeviceProperties;
-    public static delegate* unmanaged<VkPhysicalDevice, uint*, VkQueueFamilyProperties*, void> GetQueueFamilyProperties;
-    public static delegate* unmanaged<VkPhysicalDevice, uint, VkSurfaceKHR, uint*, VkResult> GetSurfaceSupport;
-    public static delegate* unmanaged<VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR*, VkResult> GetSurfaceCapabilities;
-    public static delegate* unmanaged<VkPhysicalDevice, VkSurfaceKHR, uint*, VkSurfaceFormatKHR*, VkResult> GetSurfaceFormats;
-    public static delegate* unmanaged<VkPhysicalDevice, VkSurfaceKHR, uint*, VkPresentModeKHR*, VkResult> GetSurfacePresentModes;
-    public static delegate* unmanaged<VkPhysicalDevice, VkDeviceCreateInfo*, nint, VkDevice*, VkResult> CreateDevice;
-    public static delegate* unmanaged<VkInstance, VkSurfaceKHR, nint, void> DestroySurface;
-    public static delegate* unmanaged<VkInstance, nint, void> DestroyInstance;
-    public static delegate* unmanaged<VkPhysicalDevice, byte*, uint*, VkExtensionProperties*, VkResult> EnumerateDeviceExtensionProperties;
-    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void> GetPhysicalDeviceFeatures2;
-    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void> GetPhysicalDeviceProperties2;
+    public delegate* unmanaged<VkInstance, uint*, VkPhysicalDevice*, VkResult> EnumeratePhysicalDevices;
+    public delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties*, void> GetPhysicalDeviceProperties;
+    public delegate* unmanaged<VkPhysicalDevice, uint*, VkQueueFamilyProperties*, void> GetQueueFamilyProperties;
+    public delegate* unmanaged<VkPhysicalDevice, uint, VkSurfaceKHR, uint*, VkResult> GetSurfaceSupport;
+    public delegate* unmanaged<VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR*, VkResult> GetSurfaceCapabilities;
+    public delegate* unmanaged<VkPhysicalDevice, VkSurfaceKHR, uint*, VkSurfaceFormatKHR*, VkResult> GetSurfaceFormats;
+    public delegate* unmanaged<VkPhysicalDevice, VkSurfaceKHR, uint*, VkPresentModeKHR*, VkResult> GetSurfacePresentModes;
+    public delegate* unmanaged<VkPhysicalDevice, VkDeviceCreateInfo*, nint, VkDevice*, VkResult> CreateDevice;
+    public delegate* unmanaged<VkInstance, VkSurfaceKHR, nint, void> DestroySurface;
+    public delegate* unmanaged<VkInstance, nint, void> DestroyInstance;
+    public delegate* unmanaged<VkPhysicalDevice, byte*, uint*, VkExtensionProperties*, VkResult> EnumerateDeviceExtensionProperties;
+    public delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceFeatures2*, void> GetPhysicalDeviceFeatures2;
+    public delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceProperties2*, void> GetPhysicalDeviceProperties2;
 
     /// <summary>
     /// The chained form of the surface capability query, from
@@ -37,60 +44,60 @@ internal static unsafe class VulkanCommands
     ///
     /// <para>Null when the instance lacks the extension; every caller checks.</para>
     /// </summary>
-    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*, VkResult> GetSurfaceCapabilities2;
+    public delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*, VkResult> GetSurfaceCapabilities2;
 
     // ── device ───────────────────────────────────────────────────────────
-    public static delegate* unmanaged<VkDevice, uint, uint, VkQueue*, void> GetDeviceQueue;
-    public static delegate* unmanaged<VkDevice, VkSwapchainCreateInfoKHR*, nint, VkSwapchainKHR*, VkResult> CreateSwapchain;
-    public static delegate* unmanaged<VkDevice, VkSwapchainKHR, uint*, VkImage*, VkResult> GetSwapchainImages;
-    public static delegate* unmanaged<VkDevice, VkSwapchainKHR, nint, void> DestroySwapchain;
-    public static delegate* unmanaged<VkDevice, VkSwapchainKHR, ulong, VkSemaphore, VkFence, uint*, VkResult> AcquireNextImage;
-    public static delegate* unmanaged<VkQueue, VkPresentInfoKHR*, VkResult> QueuePresent;
-    public static delegate* unmanaged<VkDevice, VkFenceCreateInfo*, nint, VkFence*, VkResult> CreateFence;
-    public static delegate* unmanaged<VkDevice, uint, VkFence*, uint, ulong, VkResult> WaitForFences;
-    public static delegate* unmanaged<VkDevice, uint, VkFence*, VkResult> ResetFences;
-    public static delegate* unmanaged<VkDevice, VkFence, nint, void> DestroyFence;
-    public static delegate* unmanaged<VkDevice, VkSemaphoreCreateInfo*, nint, VkSemaphore*, VkResult> CreateSemaphore;
-    public static delegate* unmanaged<VkDevice, VkSemaphore, nint, void> DestroySemaphore;
-    public static delegate* unmanaged<VkDevice, VkCommandPoolCreateInfo*, nint, VkCommandPool*, VkResult> CreateCommandPool;
-    public static delegate* unmanaged<VkDevice, VkCommandBufferAllocateInfo*, VkCommandBuffer*, VkResult> AllocateCommandBuffers;
-    public static delegate* unmanaged<VkCommandBuffer, VkCommandBufferBeginInfo*, VkResult> BeginCommandBuffer;
-    public static delegate* unmanaged<VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags,
+    public delegate* unmanaged<VkDevice, uint, uint, VkQueue*, void> GetDeviceQueue;
+    public delegate* unmanaged<VkDevice, VkSwapchainCreateInfoKHR*, nint, VkSwapchainKHR*, VkResult> CreateSwapchain;
+    public delegate* unmanaged<VkDevice, VkSwapchainKHR, uint*, VkImage*, VkResult> GetSwapchainImages;
+    public delegate* unmanaged<VkDevice, VkSwapchainKHR, nint, void> DestroySwapchain;
+    public delegate* unmanaged<VkDevice, VkSwapchainKHR, ulong, VkSemaphore, VkFence, uint*, VkResult> AcquireNextImage;
+    public delegate* unmanaged<VkQueue, VkPresentInfoKHR*, VkResult> QueuePresent;
+    public delegate* unmanaged<VkDevice, VkFenceCreateInfo*, nint, VkFence*, VkResult> CreateFence;
+    public delegate* unmanaged<VkDevice, uint, VkFence*, uint, ulong, VkResult> WaitForFences;
+    public delegate* unmanaged<VkDevice, uint, VkFence*, VkResult> ResetFences;
+    public delegate* unmanaged<VkDevice, VkFence, nint, void> DestroyFence;
+    public delegate* unmanaged<VkDevice, VkSemaphoreCreateInfo*, nint, VkSemaphore*, VkResult> CreateSemaphore;
+    public delegate* unmanaged<VkDevice, VkSemaphore, nint, void> DestroySemaphore;
+    public delegate* unmanaged<VkDevice, VkCommandPoolCreateInfo*, nint, VkCommandPool*, VkResult> CreateCommandPool;
+    public delegate* unmanaged<VkDevice, VkCommandBufferAllocateInfo*, VkCommandBuffer*, VkResult> AllocateCommandBuffers;
+    public delegate* unmanaged<VkCommandBuffer, VkCommandBufferBeginInfo*, VkResult> BeginCommandBuffer;
+    public delegate* unmanaged<VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags,
         uint, nint, uint, nint, uint, VkImageMemoryBarrier*, void> CmdPipelineBarrier;
-    public static delegate* unmanaged<VkCommandBuffer, VkResult> EndCommandBuffer;
-    public static delegate* unmanaged<VkQueue, uint, VkSubmitInfo*, VkFence, VkResult> QueueSubmit;
-    public static delegate* unmanaged<VkQueue, VkResult> QueueWaitIdle;
-    public static delegate* unmanaged<VkDevice, VkResult> DeviceWaitIdle;
-    public static delegate* unmanaged<VkDevice, VkCommandPool, uint, VkCommandBuffer*, void> FreeCommandBuffers;
-    public static delegate* unmanaged<VkDevice, VkCommandPool, nint, void> DestroyCommandPool;
-    public static delegate* unmanaged<VkDevice, nint, void> DestroyDevice;
-    public static delegate* unmanaged<VkDevice, VkBufferCreateInfo*, nint, VkBuffer*, VkResult> CreateBuffer;
-    public static delegate* unmanaged<VkDevice, VkBuffer, VkMemoryRequirements*, void> GetBufferMemoryRequirements;
-    public static delegate* unmanaged<VkDevice, VkBuffer, VkDeviceMemory, ulong, VkResult> BindBufferMemory;
-    public static delegate* unmanaged<VkDevice, VkMemoryAllocateInfo*, nint, VkDeviceMemory*, VkResult> AllocateMemory;
-    public static delegate* unmanaged<VkCommandBuffer, VkImage, VkImageLayout, VkBuffer, uint, VkBufferImageCopy*, void> CmdCopyImageToBuffer;
-    public static delegate* unmanaged<VkDevice, VkDeviceMemory, ulong, ulong, uint, void**, VkResult> MapMemory;
-    public static delegate* unmanaged<VkDevice, VkDeviceMemory, void> UnmapMemory;
-    public static delegate* unmanaged<VkDevice, VkBuffer, nint, void> DestroyBuffer;
-    public static delegate* unmanaged<VkDevice, VkDeviceMemory, nint, void> FreeMemory;
-    public static delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void> GetMemoryProperties;
+    public delegate* unmanaged<VkCommandBuffer, VkResult> EndCommandBuffer;
+    public delegate* unmanaged<VkQueue, uint, VkSubmitInfo*, VkFence, VkResult> QueueSubmit;
+    public delegate* unmanaged<VkQueue, VkResult> QueueWaitIdle;
+    public delegate* unmanaged<VkDevice, VkResult> DeviceWaitIdle;
+    public delegate* unmanaged<VkDevice, VkCommandPool, uint, VkCommandBuffer*, void> FreeCommandBuffers;
+    public delegate* unmanaged<VkDevice, VkCommandPool, nint, void> DestroyCommandPool;
+    public delegate* unmanaged<VkDevice, nint, void> DestroyDevice;
+    public delegate* unmanaged<VkDevice, VkBufferCreateInfo*, nint, VkBuffer*, VkResult> CreateBuffer;
+    public delegate* unmanaged<VkDevice, VkBuffer, VkMemoryRequirements*, void> GetBufferMemoryRequirements;
+    public delegate* unmanaged<VkDevice, VkBuffer, VkDeviceMemory, ulong, VkResult> BindBufferMemory;
+    public delegate* unmanaged<VkDevice, VkMemoryAllocateInfo*, nint, VkDeviceMemory*, VkResult> AllocateMemory;
+    public delegate* unmanaged<VkCommandBuffer, VkImage, VkImageLayout, VkBuffer, uint, VkBufferImageCopy*, void> CmdCopyImageToBuffer;
+    public delegate* unmanaged<VkDevice, VkDeviceMemory, ulong, ulong, uint, void**, VkResult> MapMemory;
+    public delegate* unmanaged<VkDevice, VkDeviceMemory, void> UnmapMemory;
+    public delegate* unmanaged<VkDevice, VkBuffer, nint, void> DestroyBuffer;
+    public delegate* unmanaged<VkDevice, VkDeviceMemory, nint, void> FreeMemory;
+    public delegate* unmanaged<VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*, void> GetMemoryProperties;
 
     // Phase 4: an image of our own to share with GL, and the handle that shares it. The
     // export commands come from an extension that may not be there, so they are resolved
     // optionally and are null when the device went without it.
-    public static delegate* unmanaged<VkDevice, VkImageCreateInfo*, nint, VkImage*, VkResult> CreateImage;
-    public static delegate* unmanaged<VkDevice, VkImage, VkMemoryRequirements*, void> GetImageMemoryRequirements;
-    public static delegate* unmanaged<VkDevice, VkImage, VkDeviceMemory, ulong, VkResult> BindImageMemory;
-    public static delegate* unmanaged<VkDevice, VkImage, nint, void> DestroyImage;
-    public static delegate* unmanaged<VkDevice, VkMemoryGetWin32HandleInfoKHR*, nint*, VkResult> GetMemoryWin32Handle;
-    public static delegate* unmanaged<VkDevice, VkMemoryGetFdInfoKHR*, int*, VkResult> GetMemoryFd;
-    public static delegate* unmanaged<VkDevice, VkSemaphoreGetWin32HandleInfoKHR*, nint*, VkResult> GetSemaphoreWin32Handle;
-    public static delegate* unmanaged<VkDevice, VkSemaphoreGetFdInfoKHR*, int*, VkResult> GetSemaphoreFd;
+    public delegate* unmanaged<VkDevice, VkImageCreateInfo*, nint, VkImage*, VkResult> CreateImage;
+    public delegate* unmanaged<VkDevice, VkImage, VkMemoryRequirements*, void> GetImageMemoryRequirements;
+    public delegate* unmanaged<VkDevice, VkImage, VkDeviceMemory, ulong, VkResult> BindImageMemory;
+    public delegate* unmanaged<VkDevice, VkImage, nint, void> DestroyImage;
+    public delegate* unmanaged<VkDevice, VkMemoryGetWin32HandleInfoKHR*, nint*, VkResult> GetMemoryWin32Handle;
+    public delegate* unmanaged<VkDevice, VkMemoryGetFdInfoKHR*, int*, VkResult> GetMemoryFd;
+    public delegate* unmanaged<VkDevice, VkSemaphoreGetWin32HandleInfoKHR*, nint*, VkResult> GetSemaphoreWin32Handle;
+    public delegate* unmanaged<VkDevice, VkSemaphoreGetFdInfoKHR*, int*, VkResult> GetSemaphoreFd;
 
-    private static VkInstance _instance;
-    private static delegate* unmanaged<VkDevice, byte*, nint> _getDeviceProcAddr;
+    private VkInstance _instance;
+    private delegate* unmanaged<VkDevice, byte*, nint> _getDeviceProcAddr;
 
-    public static void LoadInstance(VkInstance instance)
+    public void LoadInstance(VkInstance instance)
     {
         _instance = instance;
         EnumeratePhysicalDevices = (delegate* unmanaged<VkInstance, uint*, VkPhysicalDevice*, VkResult>)I("vkEnumeratePhysicalDevices");
@@ -117,7 +124,7 @@ internal static unsafe class VulkanCommands
         _getDeviceProcAddr = (delegate* unmanaged<VkDevice, byte*, nint>)I("vkGetDeviceProcAddr");
     }
 
-    public static void LoadDevice(VkDevice device)
+    public void LoadDevice(VkDevice device)
     {
         GetDeviceQueue = (delegate* unmanaged<VkDevice, uint, uint, VkQueue*, void>)D(device, "vkGetDeviceQueue");
         CreateSwapchain = (delegate* unmanaged<VkDevice, VkSwapchainCreateInfoKHR*, nint, VkSwapchainKHR*, VkResult>)D(device, "vkCreateSwapchainKHR");
@@ -163,7 +170,7 @@ internal static unsafe class VulkanCommands
 
     /// <summary>Resolves by name, for anything that loads its own entry points — Skia does,
     /// through <c>GRVkBackendContext.GetProcedureAddress</c>.</summary>
-    public static nint Resolve(string name, nint instance, nint device)
+    public nint Resolve(string name, nint instance, nint device)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
         if (device != 0 && _getDeviceProcAddr is not null)
@@ -179,7 +186,7 @@ internal static unsafe class VulkanCommands
 
     /// <summary>A core instance command, which every implementation has; missing means the
     /// loader itself is broken, and saying so beats a null call later.</summary>
-    private static nint I(string name)
+    private nint I(string name)
     {
         nint address = OptionalInstance(name);
         if (address == 0) throw new InvalidOperationException($"Vulkan instance command missing: {name}");
@@ -188,7 +195,7 @@ internal static unsafe class VulkanCommands
 
     /// <summary>Like <see cref="I"/> but returns zero rather than throwing, for a command that
     /// belongs to an instance extension the instance may not have enabled.</summary>
-    private static nint OptionalInstance(string name)
+    private nint OptionalInstance(string name)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
         return (nint)vkGetInstanceProcAddr(_instance, bytes).Value;
@@ -196,13 +203,13 @@ internal static unsafe class VulkanCommands
 
     /// <summary>Like <see cref="D"/> but returns zero rather than throwing, for a command
     /// that belongs to an extension the device may not have enabled.</summary>
-    private static nint Optional(VkDevice device, string name)
+    private nint Optional(VkDevice device, string name)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
         fixed (byte* p = bytes) return _getDeviceProcAddr(device, p);
     }
 
-    private static nint D(VkDevice device, string name)
+    private nint D(VkDevice device, string name)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(name + '\0');
         fixed (byte* p = bytes)

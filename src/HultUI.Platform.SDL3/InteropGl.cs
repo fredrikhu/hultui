@@ -32,6 +32,7 @@ internal sealed unsafe class InteropGl
     private const uint TextureTiling = 0x9580;
     private const uint DedicatedMemoryObject = 0x9581;
     private const uint OptimalTiling = 0x9584;
+    private const uint NumDeviceUuidsExt = 0x9596;
     private const uint DeviceUuidExt = 0x9597;
 
     // GL_EXT_semaphore. The layout is carried by the signal, which is what lets the Vulkan
@@ -46,6 +47,7 @@ internal sealed unsafe class InteropGl
     private readonly delegate* unmanaged[Cdecl]<uint, uint, byte*> _getStringi;
     private readonly delegate* unmanaged[Cdecl]<uint, int*, void> _getIntegerv;
     private readonly delegate* unmanaged[Cdecl]<uint, byte*, void> _getUnsignedBytev;
+    private readonly delegate* unmanaged[Cdecl]<uint, uint, byte*, void> _getUnsignedBytei_v;
     private readonly delegate* unmanaged[Cdecl]<uint> _getError;
     private readonly delegate* unmanaged[Cdecl]<void> _finish;
     private readonly delegate* unmanaged[Cdecl]<void> _flush;
@@ -79,6 +81,7 @@ internal sealed unsafe class InteropGl
         _getStringi = (delegate* unmanaged[Cdecl]<uint, uint, byte*>)Proc("glGetStringi");
         _getIntegerv = (delegate* unmanaged[Cdecl]<uint, int*, void>)Proc("glGetIntegerv");
         _getUnsignedBytev = (delegate* unmanaged[Cdecl]<uint, byte*, void>)Proc("glGetUnsignedBytevEXT");
+        _getUnsignedBytei_v = (delegate* unmanaged[Cdecl]<uint, uint, byte*, void>)Proc("glGetUnsignedBytei_vEXT");
         _getError = (delegate* unmanaged[Cdecl]<uint>)Proc("glGetError");
         _finish = (delegate* unmanaged[Cdecl]<void>)Proc("glFinish");
         _flush = (delegate* unmanaged[Cdecl]<void>)Proc("glFlush");
@@ -166,14 +169,44 @@ internal sealed unsafe class InteropGl
         return p is null ? "" : Marshal.PtrToStringUTF8((nint)p) ?? "";
     }
 
-    /// <summary>The GPU this context is on, as the same sixteen bytes Vulkan reports in
-    /// <c>VkPhysicalDeviceIDProperties</c>. Null when the driver will not say.</summary>
-    public byte[]? DeviceUuid()
+    /// <summary>
+    /// The GPUs this context runs on, as the same sixteen bytes Vulkan reports in
+    /// <c>VkPhysicalDeviceIDProperties</c>. Empty when the driver will not say.
+    ///
+    /// <para><b>An indexed query.</b> <c>GL_EXT_memory_object</c> defines
+    /// <c>DEVICE_UUID_EXT</c> for <c>glGetUnsignedBytei_vEXT</c>, one per index up to
+    /// <c>NUM_DEVICE_UUIDS_EXT</c>, because a context may span several devices; only
+    /// <c>DRIVER_UUID_EXT</c> is for the plain <c>glGetUnsignedBytevEXT</c>. This used the plain
+    /// one, which NVIDIA answers anyway. A driver that follows the spec answers it with
+    /// <c>GL_INVALID_ENUM</c> and writes nothing, and sixteen zero bytes read as "GL is on a
+    /// different GPU", which turned interop off without anything being wrong. The plain query
+    /// stays only as the fallback for a driver without the indexed entry point.</para>
+    /// </summary>
+    public List<byte[]> DeviceUuids()
     {
-        if (_getUnsignedBytev is null) return null;
-        var uuid = new byte[16];
-        fixed (byte* p = uuid) _getUnsignedBytev(DeviceUuidExt, p);
-        return uuid;
+        var uuids = new List<byte[]>();
+        while (_getError() != 0) { }   // so an older error is not taken for this query's
+        if (_getUnsignedBytei_v is not null && _getIntegerv is not null)
+        {
+            int count = 0;
+            _getIntegerv(NumDeviceUuidsExt, &count);
+            for (uint i = 0; i < (uint)Math.Max(count, 0); i++)
+            {
+                var uuid = new byte[16];
+                fixed (byte* p = uuid) _getUnsignedBytei_v(DeviceUuidExt, i, p);
+                if (_getError() == 0) uuids.Add(uuid);
+            }
+        }
+        if (uuids.Count == 0 && _getUnsignedBytev is not null)
+        {
+            var uuid = new byte[16];
+            fixed (byte* p = uuid) _getUnsignedBytev(DeviceUuidExt, p);
+            if (_getError() == 0) uuids.Add(uuid);
+        }
+        // Neither query may leave an error behind: the import steps that follow read the
+        // error state to decide whether they worked.
+        while (_getError() != 0) { }
+        return uuids;
     }
 
     public uint CreateMemoryObject()

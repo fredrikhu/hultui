@@ -5,7 +5,6 @@ using SDL;
 using Vortice.Vulkan;
 using static SDL.SDL3;
 using static Vortice.Vulkan.Vulkan;
-using static HultUI.Platform.SDL3.VulkanCommands;
 
 namespace HultUI.Platform.SDL3;
 
@@ -148,6 +147,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private const uint SwapchainUsage =
         UsageColorAttachment | UsageTransferSrc | UsageTransferDst | UsageSampled;
 
+    /// <summary>This host's Vulkan commands, resolved against its own instance and device —
+    /// see <see cref="VulkanCommands"/> for why it is not shared.</summary>
+    private readonly VulkanCommands _vk = new();
+
     private VkInstance _instance;
     private VkSurfaceKHR _surface;
     private VkPhysicalDevice _physicalDevice;
@@ -264,7 +267,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             ? nits : 0f;
 
     public nint GetProcedureAddress(string name, nint instance, nint device) =>
-        Resolve(name, instance, device);
+        _vk.Resolve(name, instance, device);
 
     public static SdlVulkanHost Create(SDL_Window* window, int widthPx, int heightPx, bool displayIsHdr)
     {
@@ -338,7 +341,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         VkInstance instance;
         Check(vkCreateInstance(&instanceInfo, &instance), "vkCreateInstance");
         _instance = instance;
-        LoadInstance(instance);
+        _vk.LoadInstance(instance);
 
         ulong surfaceHandle = 0;
         if (!SDL_Vulkan_CreateSurface(window, (VkInstance_T*)_instance.Handle, null,
@@ -405,10 +408,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private void PickPhysicalDevice()
     {
         uint count = 0;
-        Check(EnumeratePhysicalDevices(_instance, &count, null), "vkEnumeratePhysicalDevices");
+        Check(_vk.EnumeratePhysicalDevices(_instance, &count, null), "vkEnumeratePhysicalDevices");
         if (count == 0) throw new InvalidOperationException("no Vulkan physical device");
         var devices = stackalloc VkPhysicalDevice[(int)count];
-        Check(EnumeratePhysicalDevices(_instance, &count, devices), "vkEnumeratePhysicalDevices");
+        Check(_vk.EnumeratePhysicalDevices(_instance, &count, devices), "vkEnumeratePhysicalDevices");
 
         VkPhysicalDevice best = default;
         uint bestFamily = 0;
@@ -420,7 +423,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!TryFindPresentQueue(candidate, out uint family)) continue;
 
             var properties = new VkPhysicalDeviceProperties();
-            GetPhysicalDeviceProperties(candidate, &properties);
+            _vk.GetPhysicalDeviceProperties(candidate, &properties);
             bool discrete = properties.deviceType == VkPhysicalDeviceType.DiscreteGpu;
 
             if (best.IsNull || (discrete && !bestDiscrete))
@@ -441,16 +444,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         family = 0;
         uint count = 0;
-        GetQueueFamilyProperties(device, &count, null);
+        _vk.GetQueueFamilyProperties(device, &count, null);
         if (count == 0) return false;
         var families = stackalloc VkQueueFamilyProperties[(int)count];
-        GetQueueFamilyProperties(device, &count, families);
+        _vk.GetQueueFamilyProperties(device, &count, families);
 
         for (uint i = 0; i < count; i++)
         {
             if ((families[i].queueFlags & VkQueueFlags.Graphics) == 0) continue;
             uint supported = 0;
-            if (GetSurfaceSupport(device, i, _surface, &supported) != VkResult.Success) continue;
+            if (_vk.GetSurfaceSupport(device, i, _surface, &supported) != VkResult.Success) continue;
             if (supported == 0) continue;
             family = i;
             return true;
@@ -509,12 +512,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             ppEnabledExtensionNames = extensions,
         };
         VkDevice device;
-        Check(CreateDevice(_physicalDevice, &deviceInfo, 0, &device), "vkCreateDevice");
+        Check(_vk.CreateDevice(_physicalDevice, &deviceInfo, 0, &device), "vkCreateDevice");
         _device = device;
-        LoadDevice(device);
+        _vk.LoadDevice(device);
 
         VkQueue queue;
-        GetDeviceQueue(_device, _queueFamily, 0, &queue);
+        _vk.GetDeviceQueue(_device, _queueFamily, 0, &queue);
         _queue = queue;
 
         // Asked once, after the device: the answer cannot change for this surface, and the
@@ -527,7 +530,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             sizeof(VkPhysicalDeviceFeatures2));
         var features = (VkPhysicalDeviceFeatures2*)_features2;
         *features = new VkPhysicalDeviceFeatures2 { sType = VkStructureType.PhysicalDeviceFeatures2 };
-        GetPhysicalDeviceFeatures2(_physicalDevice, features);
+        _vk.GetPhysicalDeviceFeatures2(_physicalDevice, features);
 
         var poolInfo = new VkCommandPoolCreateInfo
         {
@@ -535,12 +538,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             flags = VkCommandPoolCreateFlags.ResetCommandBuffer,
         };
         VkCommandPool pool;
-        Check(CreateCommandPool(_device, &poolInfo, 0, &pool), "vkCreateCommandPool");
+        Check(_vk.CreateCommandPool(_device, &poolInfo, 0, &pool), "vkCreateCommandPool");
         _pool = pool;
 
         var fenceInfo = new VkFenceCreateInfo();
         VkFence fence;
-        Check(CreateFence(_device, &fenceInfo, 0, &fence), "vkCreateFence");
+        Check(_vk.CreateFence(_device, &fenceInfo, 0, &fence), "vkCreateFence");
         _acquireFence = fence;
     }
 
@@ -568,7 +571,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private void BuildSwapchain(int widthPx, int heightPx)
     {
         var capabilities = new VkSurfaceCapabilitiesKHR();
-        Check(GetSurfaceCapabilities(_physicalDevice, _surface, &capabilities), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+        Check(_vk.GetSurfaceCapabilities(_physicalDevice, _surface, &capabilities), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
         // currentExtent of 0xFFFFFFFF means "you choose", which is what Wayland says; every
         // other case is the compositor telling us the size and disagreeing with it fails.
@@ -667,15 +670,15 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         };
 
         VkSwapchainKHR swapchain;
-        Check(VulkanCommands.CreateSwapchain(_device, &info, 0, &swapchain), "vkCreateSwapchainKHR");
+        Check(_vk.CreateSwapchain(_device, &info, 0, &swapchain), "vkCreateSwapchainKHR");
         _swapchain = swapchain;
-        if (!old.IsNull) DestroySwapchain(_device, old, 0);
+        if (!old.IsNull) _vk.DestroySwapchain(_device, old, 0);
 
         uint got = 0;
-        Check(GetSwapchainImages(_device, _swapchain, &got, null), "vkGetSwapchainImagesKHR");
+        Check(_vk.GetSwapchainImages(_device, _swapchain, &got, null), "vkGetSwapchainImagesKHR");
         var images = new VkImage[got];
         fixed (VkImage* p = images)
-            Check(GetSwapchainImages(_device, _swapchain, &got, p), "vkGetSwapchainImagesKHR");
+            Check(_vk.GetSwapchainImages(_device, _swapchain, &got, p), "vkGetSwapchainImagesKHR");
         _images = images;
 
         CreatePerImageObjects();
@@ -701,7 +704,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// </summary>
     private void CreatePerImageObjects()
     {
-        DestroyPerImageObjects();
+        RetirePerImageObjects();
 
         int count = _images.Length;
         _renderFinished = new VkSemaphore[count];
@@ -718,28 +721,78 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         for (int i = 0; i < count; i++)
         {
             VkSemaphore semaphore;
-            Check(CreateSemaphore(_device, &semaphoreInfo, 0, &semaphore), "vkCreateSemaphore");
+            Check(_vk.CreateSemaphore(_device, &semaphoreInfo, 0, &semaphore), "vkCreateSemaphore");
             _renderFinished[i] = semaphore;
 
             VkCommandBuffer cmd;
-            Check(AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
+            Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
             _presentCmd[i] = cmd;
         }
     }
 
-    private void DestroyPerImageObjects()
+    /// <summary>
+    /// Drops the per-image objects of a swapchain being replaced. The command buffers are freed
+    /// now; the semaphores are retired, not destroyed.
+    ///
+    /// <para><b>Why they wait.</b> A present waits on its image's semaphore, and nothing in core
+    /// Vulkan says when that wait is over. <c>vkDeviceWaitIdle</c> covers queue work, not the
+    /// presentation engine. A rebuild comes straight after a present that returned SUBOPTIMAL
+    /// or OUT_OF_DATE, and that present may still be waiting on a semaphore destroying it here
+    /// would pull away. So they are destroyed only once the swapchain after them has presented
+    /// a full round of its own images; each of those presents was acquired behind a fence wait,
+    /// which is as late as the engine could still be using anything older.
+    /// <c>swapchain_maintenance1</c>'s present fences would make that exact rather than
+    /// conservative, but the extension is only enabled for the fixed-extent path.</para>
+    /// </summary>
+    private void RetirePerImageObjects()
     {
-        // The caller has already waited the device idle; nothing here is in flight.
-        foreach (var semaphore in _renderFinished)
-            if (!semaphore.IsNull) DestroySemaphore(_device, semaphore, 0);
+        // The caller has already waited the device idle, so no command buffer is executing.
+        FreePresentCommandBuffers();
+        if (_renderFinished.Length > 0)
+            _retiredSemaphores.Add((_renderFinished, _images.Length + 1));
         _renderFinished = [];
+    }
 
+    /// <summary>Semaphores of replaced swapchains, each batch with the number of presents still
+    /// to go before it may be destroyed. See <see cref="RetirePerImageObjects"/>.</summary>
+    private readonly List<(VkSemaphore[] Semaphores, int PresentsToGo)> _retiredSemaphores = [];
+
+    /// <summary>Counts a present that was queued against every retired batch, destroying the
+    /// batches whose round is complete.</summary>
+    private void CountPresentForRetired()
+    {
+        for (int i = _retiredSemaphores.Count - 1; i >= 0; i--)
+        {
+            var (semaphores, toGo) = _retiredSemaphores[i];
+            if (--toGo > 0) { _retiredSemaphores[i] = (semaphores, toGo); continue; }
+            foreach (var semaphore in semaphores)
+                if (!semaphore.IsNull) _vk.DestroySemaphore(_device, semaphore, 0);
+            _retiredSemaphores.RemoveAt(i);
+        }
+    }
+
+    private void FreePresentCommandBuffers()
+    {
         for (int i = 0; i < _presentCmd.Length; i++)
         {
             var cmd = _presentCmd[i];
-            if (!cmd.IsNull) FreeCommandBuffers(_device, _pool, 1, &cmd);
+            if (!cmd.IsNull) _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
         }
         _presentCmd = [];
+    }
+
+    /// <summary>Everything per-image, retired or current, for a host being disposed after its
+    /// device has been waited idle.</summary>
+    private void DestroyPerImageObjects()
+    {
+        FreePresentCommandBuffers();
+        foreach (var semaphore in _renderFinished)
+            if (!semaphore.IsNull) _vk.DestroySemaphore(_device, semaphore, 0);
+        _renderFinished = [];
+        foreach (var (semaphores, _) in _retiredSemaphores)
+            foreach (var semaphore in semaphores)
+                if (!semaphore.IsNull) _vk.DestroySemaphore(_device, semaphore, 0);
+        _retiredSemaphores.Clear();
     }
 
     /// <summary>
@@ -768,11 +821,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private VkPresentModeKHR ChoosePresentMode(bool trace = true)
     {
         uint count = 0;
-        if (GetSurfacePresentModes(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
+        if (_vk.GetSurfacePresentModes(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
             return VkPresentModeKHR.Fifo;
 
         var modes = stackalloc VkPresentModeKHR[(int)count];
-        if (GetSurfacePresentModes(_physicalDevice, _surface, &count, modes) != VkResult.Success)
+        if (_vk.GetSurfacePresentModes(_physicalDevice, _surface, &count, modes) != VkResult.Success)
             return VkPresentModeKHR.Fifo;
 
         bool immediate = false, mailbox = false;
@@ -818,7 +871,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// </summary>
     private bool SurfaceOffersOneToOne()
     {
-        if (GetSurfaceCapabilities2 is null) return false;
+        if (_vk.GetSurfaceCapabilities2 is null) return false;
 
         var modeInfo = new VkSurfacePresentModeKHR
         {
@@ -840,7 +893,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             sType = VkStructureType.SurfaceCapabilities2KHR,
             pNext = &scaling,
         };
-        if (GetSurfaceCapabilities2(_physicalDevice, &surfaceInfo, &caps) != VkResult.Success)
+        if (_vk.GetSurfaceCapabilities2(_physicalDevice, &surfaceInfo, &caps) != VkResult.Success)
             return false;
 
         bool oneToOne = (scaling.supportedPresentScaling & VkPresentScalingFlagsKHR.OneToOne) != 0;
@@ -884,11 +937,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         colorSpace = VkColorSpaceKHR.SrgbNonLinear;
 
         uint count = 0;
-        Check(GetSurfaceFormats(_physicalDevice, _surface, &count, null), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+        Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, null), "vkGetPhysicalDeviceSurfaceFormatsKHR");
         if (count == 0) return VkFormat.B8G8R8A8Unorm;
 
         var formats = stackalloc VkSurfaceFormatKHR[(int)count];
-        Check(GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+        Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
 
         // Half-float, linear light, 1.0 being SDR white — scRGB. Every colour the framework
         // has is 8-bit sRGB, so this is only correct because the renderer now tells Skia what
@@ -933,7 +986,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         uint index = 0;
         var fence = _acquireFence;
-        var result = VulkanCommands.AcquireNextImage(_device, _swapchain, NoTimeout, VkSemaphore.Null, fence, &index);
+        var result = _vk.AcquireNextImage(_device, _swapchain, NoTimeout, VkSemaphore.Null, fence, &index);
 
         if (result is VkResult.ErrorOutOfDateKHR)
         {
@@ -949,8 +1002,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // The fence is how this waits for the image without a semaphore to hand Skia — see
         // the note on the class.
         long before = AcquireStallTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        Check(WaitForFences(_device, 1, &fence, 1, NoTimeout), "vkWaitForFences");
-        Check(ResetFences(_device, 1, &fence), "vkResetFences");
+        Check(_vk.WaitForFences(_device, 1, &fence, 1, NoTimeout), "vkWaitForFences");
+        Check(_vk.ResetFences(_device, 1, &fence), "vkResetFences");
         if (AcquireStallTrace) RecordAcquireStall(before);
 
         _acquiredIndex = index;
@@ -994,7 +1047,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     public void PresentAcquiredImage()
     {
-        if (!_haveAcquired || _swapchain.IsNull) return;
+        if (!_haveAcquired || _swapchain.IsNull)
+        {
+            // Nothing to present — the swapchain was rebuilt since the acquire — but a video
+            // drawn this frame still took the shared image, and GL must get it back.
+            FlushOwedRelease();
+            return;
+        }
 
         // The capture reads the image on the CPU, so it is the one thing here that still has
         // to wait for the GPU. Diagnostic only, and off unless asked for.
@@ -1022,8 +1081,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             pSwapchains = &swapchain,
             pImageIndices = &index,
         };
-        var result = QueuePresent(_queue, &present);
+        var result = _vk.QueuePresent(_queue, &present);
         _haveAcquired = false;
+        if (result is VkResult.Success or VkResult.SuboptimalKHR) CountPresentForRetired();
 
         if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
             Rebuild(_widthPx, _heightPx, force: true);
@@ -1035,7 +1095,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         var cmd = _presentCmd[imageIndex];
         var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
-        Check(BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+        Check(_vk.BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
 
         var barrier = new VkImageMemoryBarrier
         {
@@ -1049,13 +1109,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             image = image,
             subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
         };
-        CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
+        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
             VkPipelineStageFlags.BottomOfPipe, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
 
         // The last submit of the frame, so the shared image goes back to GL here if it was drawn.
         var release = ReleaseInteropImage(cmd);
 
-        Check(EndCommandBuffer(cmd), "vkEndCommandBuffer");
+        Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
 
         var signals = stackalloc VkSemaphore[2];
         signals[0] = _renderFinished[imageIndex];
@@ -1067,7 +1127,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             signalSemaphoreCount = release is null ? 1u : 2u,
             pSignalSemaphores = signals,
         };
-        Check(QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
+        Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
         return signals[0];
     }
 
@@ -1109,7 +1169,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             return;
         }
 
-        Check(DeviceWaitIdle(_device), "vkDeviceWaitIdle");
+        Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);
     }
@@ -1121,22 +1181,22 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         // The pointer checks matter only after an Init that threw inside LoadDevice; everything
         // else below was created after LoadDevice finished, so its own null checks cover it.
-        if (!_device.IsNull && DeviceWaitIdle is not null && DestroyDevice is not null)
+        if (!_device.IsNull && _vk.DeviceWaitIdle is not null && _vk.DestroyDevice is not null)
         {
-            DeviceWaitIdle(_device);
+            _vk.DeviceWaitIdle(_device);
             // Before the pool and the device: the shared image is bound to both, and the GL
             // context that also names it outlives neither.
             DisposeInterop();
             DestroyPerImageObjects();
-            if (!_acquireFence.IsNull) DestroyFence(_device, _acquireFence, 0);
-            if (!_pool.IsNull) DestroyCommandPool(_device, _pool, 0);
-            if (!_swapchain.IsNull) DestroySwapchain(_device, _swapchain, 0);
-            DestroyDevice(_device, 0);
+            if (!_acquireFence.IsNull) _vk.DestroyFence(_device, _acquireFence, 0);
+            if (!_pool.IsNull) _vk.DestroyCommandPool(_device, _pool, 0);
+            if (!_swapchain.IsNull) _vk.DestroySwapchain(_device, _swapchain, 0);
+            _vk.DestroyDevice(_device, 0);
         }
         // Guarded because Dispose also cleans up after an Init that threw, which can be before
         // LoadInstance resolved these.
-        if (!_surface.IsNull && DestroySurface is not null) DestroySurface(_instance, _surface, 0);
-        if (!_instance.IsNull && DestroyInstance is not null) DestroyInstance(_instance, 0);
+        if (!_surface.IsNull && _vk.DestroySurface is not null) _vk.DestroySurface(_instance, _surface, 0);
+        if (!_instance.IsNull && _vk.DestroyInstance is not null) _vk.DestroyInstance(_instance, 0);
         if (_features2 != 0) System.Runtime.InteropServices.Marshal.FreeHGlobal(_features2);
     }
 
