@@ -335,7 +335,11 @@ public abstract class Element
     /// <summary>True while the pointer is pressed on this element or a descendant.</summary>
     public bool IsPressed => _interaction?.Pressed ?? false;
     /// <summary>True while this element holds keyboard focus.</summary>
-    public bool IsFocused => _interaction?.Focused ?? false;
+    /// <remarks>Recorded for every element, not only those with focus styles: it used to live
+    /// in the interaction state, which exists only once a focus style is registered, so an
+    /// unstyled element read false while it had focus.</remarks>
+    public bool IsFocused => _focused;
+    private bool _focused;
 
     internal void AddHoverStyle(Action<Element> style) => Interaction.OnHover += style;
     internal void AddPressedStyle(Action<Element> style) => Interaction.OnPressed += style;
@@ -355,6 +359,7 @@ public abstract class Element
     }
     internal void SetInteractionFocused(bool value)
     {
+        _focused = value;
         if (_interaction is { } s && s.Focused != value) { s.Focused = value; s.Recompute(this, animate: true); }
     }
 

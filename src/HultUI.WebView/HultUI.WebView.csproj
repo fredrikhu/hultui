@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A web page as an element, without a browser engine. This package holds what every
+    engine shares: the IWebEngine contract, the reactive WebViewController that owns one
+    engine view and marshals its events to the UI thread, the WebViewElement that paints
+    the page and forwards input to it, and a scripted FakeWebEngine so an application's
+    headless tests need no browser. An engine is a separate package (HultUI.WebView.WebView2
+    on Windows, HultUI.WebView.Wpe on Linux) — see docs/design/WEBVIEW.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.WebView</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HultUI web view: the engine contract, the reactive WebViewController, the WebViewElement, and a fake engine for tests. No browser — add an engine package for one.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.WebView.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI\HultUI.csproj" />
+  </ItemGroup>
+
+</Project>

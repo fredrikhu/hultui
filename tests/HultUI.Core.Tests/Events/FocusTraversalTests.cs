@@ -252,4 +252,46 @@ public class FocusTraversalTests
         Assert.Equal(0, new BoxElement().TabIndex);
         Assert.Equal(0, new ButtonElement().TabIndex);
     }
+
+    [Fact]
+    public void TheFocusEvent_SaysHowFocusArrived()
+    {
+        var root = CreateTree();
+        var a = root.Children[0];
+        var d = root.Children[2];
+        var reasons = new List<(string?, FocusReason)>();
+        foreach (var el in new[] { a, root.Children[1].Children[0], d })
+            el.On<FocusEvent>(e => reasons.Add((e.CurrentTarget?.Name, e.Reason)));
+
+        var fm = new FocusManager();
+        fm.SetFocus(a);                     // code: Element.Focus, a host
+        fm.MoveFocusNext(root);             // Tab
+        fm.MoveFocusPrevious(root);         // Shift+Tab
+        fm.SetFocus(d, FocusReason.Pointer);
+
+        Assert.Equal(
+            [("a", FocusReason.Programmatic), ("c", FocusReason.Next), ("a", FocusReason.Previous), ("d", FocusReason.Pointer)],
+            reasons);
+    }
+
+    [Fact]
+    public void IsFocused_IsTrue_ForAnElementWithNoFocusStyle()
+    {
+        // It lived in the interaction state, which only a focus style creates, so an
+        // unstyled element read false while it held focus.
+        var root = CreateTree();
+        var a = root.Children[0];
+        var d = root.Children[2];
+        var fm = new FocusManager();
+
+        fm.SetFocus(a);
+        Assert.True(a.IsFocused);
+
+        fm.SetFocus(d);
+        Assert.False(a.IsFocused);
+        Assert.True(d.IsFocused);
+
+        fm.ClearFocus();
+        Assert.False(d.IsFocused);
+    }
 }

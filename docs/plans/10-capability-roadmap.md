@@ -16,8 +16,9 @@ A candidate is **in spirit** when it is one of:
   Slider, ScrollView, ContextMenu, VirtualList).
 
 Explicitly **out of spirit** (see [Not included](#not-included-out-of-spirit)):
-a CSS selector/stylesheet cascade, media-query/breakpoint engine, WebView/video,
-and print/PDF export.
+a CSS selector/stylesheet cascade, media-query/breakpoint engine, and print/PDF
+export. (WebView and video were on this list; both were later taken up as opt-in
+satellite packages — see *Not included*.)
 
 ## Priority order
 
@@ -119,8 +120,11 @@ Mirrors the master plan's exclusion list — kept out on purpose, with the reaso
 - **Backdrop-filter (frosted glass), background images, CSS filters, blend modes**
   — low value vs. cost; the `CanvasElement` immediate-mode escape hatch covers
   bespoke cases.
-- **WebView / video / embedded browser, print / PDF export** — out of scope for a
-  Skia UI toolkit.
+- **Print / PDF export** — out of scope for a Skia UI toolkit.
+- ~~WebView / video / embedded browser~~ — reversed. Video shipped as `HultUI.Media`
+  (docs/design/MEDIA.md) and a web view is being built as `HultUI.WebView`
+  (docs/design/WEBVIEW.md). Both are satellite packages an app opts into, so the
+  toolkit itself still carries no decoder and no browser.
 - **Retained SVG/path element** — `CanvasElement` already covers immediate-mode
   vector drawing.
 

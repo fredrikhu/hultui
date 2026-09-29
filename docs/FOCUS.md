@@ -28,7 +28,7 @@ pane.On<BlurEvent>(_ => ...);
 | `IsFocusable` | may hold focus at all (default `false`) |
 | `TabIndex` | Tab order. Positive values first, ascending; **`0` sorts after every positive value** (HTML's rule); a negative value is skipped by Tab but can still be focused by click or by `Focus()` |
 | `Focus()` | focus this element; a silent no-op if it is not focusable |
-| `IsFocused` | read-only |
+| `IsFocused` | read-only; true while the element holds focus, focus style or not |
 | `Window.FocusedElement` | the current holder, or `null` |
 | `Window.MoveFocus(forward, wrap = true)`, `Window.FocusEdge(first)` | programmatic traversal |
 | `Window.ClearFocus()` | the only blur — there is no `Element.Blur()` |
@@ -40,7 +40,10 @@ focusable and has a non-negative index is in the ring, drawn or not.
 `FocusEvent` and `BlurEvent` are dispatched **directly** to the element — they do not
 bubble. Read state from them rather than deriving it from clicks: click already focuses
 the nearest focusable ancestor of what was hit, so Tab and click share one path and
-stay in sync.
+stay in sync. `FocusEvent.Reason` says how focus arrived — `Next` (Tab), `Previous`
+(Shift+Tab), `Pointer` (a press) or `Programmatic` — for an element with a tab order
+of its own inside it, such as a web page, which starts at its first stop on `Next`
+and its last on `Previous`.
 
 ---
 

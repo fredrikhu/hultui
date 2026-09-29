@@ -18,19 +18,25 @@ line changes when this lands.
 ## What an application gets
 
 ```csharp
-var web = new WebViewController(WebEngines.Default(), new WebViewOptions
+IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new WpeEngine();
+var web = new WebViewController(engine, new WebViewOptions
 {
     UserDataFolder = Path.Combine(appData, "WebView"),
 });
 web.Navigate(new Uri("https://example.org"));
 
 Box.New().Children(
-    Toolbar(web),                 // web.Title, web.CanGoBack, web.IsLoading are signals
-    WebView.New(web).FlexGrow(1));
+    Toolbar(web),                        // web.Title, web.CanGoBack, web.IsLoading are signals
+    WebViewElement.New(web).FlexGrow(1));
 
-web.MessageReceived += json => ...;          // window.chrome.webview.postMessage / its WPE twin
+web.MessageReceived += m => ...;          // window.chrome.webview.postMessage / its WPE twin
 await web.ExecuteScriptAsync("document.title");
 ```
+
+The app picks the engine; `HultUI.WebView` cannot name the engine packages, which
+depend on it. The element is `WebViewElement.New`, not a `WebView.New` builder: a
+class named after its own namespace (`HultUI.WebView.WebView`) is unreachable by
+its short name from anywhere inside `HultUI.*` — the `Text` trap again.
 
 Out of scope: tabs, a download manager, extensions, printing, a DOM API from C#,
 host objects in script (`AddHostObjectToScript` is `IDispatch` and fights AOT).
@@ -263,48 +269,63 @@ into the sink like `FrameArrived` on Windows.
 
 ## The contract
 
+**Shipped in step 1** (`src/HultUI.WebView`); the source is the reference, this is
+the shape.
+
 ```csharp
 namespace HultUI.WebView;
 
-/// One page. Created by an engine package; owned by WebViewController.
-public interface IWebEngineView : IDisposable
+public interface IWebEngine : IDisposable          // one per app: owns the browser processes
 {
-    WebEngineCapabilities Capabilities { get; }  // GpuFrames, NativeKeyboard, Accessibility, DevTools…
+    string Name { get; }
+    WebEngineAvailability Availability { get; }    // cheap, never throws: "install the runtime"
+    IWebEngineView CreateView(WebViewOptions options);
+}
 
-    /// UI thread, once. The host gives the window, the frame sink and a repaint hook.
-    void Attach(IWebViewHost host);
-
-    void SetBounds(PixelRect bounds, double scale);   // window client pixels
-    void SetVisible(bool visible);                     // unmounted/hidden → throttled
-
-    void Navigate(Uri uri);
-    void NavigateToString(string html);
+public interface IWebEngineView : IDisposable      // one page; the controller is its only caller
+{
+    WebEngineCapabilities Capabilities { get; }    // NativeKeyboard, DevTools
+    void Attach(IWebViewHost host);                // once, first: the PixelFrameSink frames go to
+    void SetPlacement(in WebViewPlacement p);      // (native window, device-pixel bounds, scale)
+    void SetVisible(bool visible);
+    void Navigate(Uri uri); void NavigateToString(string html);
     void GoBack(); void GoForward(); void Reload(); void Stop();
-    Task<string> ExecuteScriptAsync(string script);    // JSON result
+    Task<string> ExecuteScriptAsync(string script); // JSON result
     void PostMessage(string json);
-
-    void Pointer(in WebPointerInput input);            // view-relative device pixels
-    void Key(in WebKeyInput input);                    // engines without native keyboard
-    void Text(in WebTextInput input);                  // commit / composition
-    void Focus(WebFocusReason reason); void Blur();
-
-    event Action<WebEngineEvent> Event;                // any thread; the controller marshals
+    void SendPointer(in WebPointerInput input);    // device pixels from the page's top-left
+    void SendKey(in WebKeyInput input);            // only without NativeKeyboard
+    void SendText(in WebTextInput input);          // commit or composition, likewise
+    void Focus(FocusReason reason); void Blur();   // Core's FocusReason (seam W2)
+    event Action<WebEngineEvent>? Event;           // any thread; the controller marshals
 }
 ```
 
-`WebEngineEvent` is a closed set: `NavigationStarting` (cancellable, answered
-synchronously on the UI thread), `NavigationCompleted`, `SourceChanged`,
-`TitleChanged`, `HistoryChanged`, `LoadProgress`, `MessageReceived`,
-`NewWindowRequested`, `CursorChanged`, `FocusLeaving` (direction),
-`ProcessFailed`. Frames go through the sink, not the event, exactly as in Media.
+Every member is called on the UI thread. `WebEngineEvent` is a closed set of
+records: `Ready`, `Failed(kind, message)`, `NavigationStarting(request)`,
+`NavigationCompleted`, `SourceChanged`, `TitleChanged`, `HistoryChanged`,
+`MessageReceived(json, origin)`, `NewWindowRequested`, `CursorChanged`,
+`FocusLeaving(forward)`, `ProcessFailed(message, canReload)`. Frames go through
+the sink, not the event, exactly as in Media.
 
-`WebViewController` owns one engine view, holds signals (`Source`, `Title`,
-`IsLoading`, `CanGoBack`, `CanGoForward`, `State`), marshals events, and outlives
-rebuilds. `WebView.New(controller)` is the element: it measures to whatever it
-is given (no intrinsic size), draws the sink, forwards input, reports its window
-bounds to the engine after layout, and on unmount only hides the view — the page
-keeps its state across a tab switch. Mount and unmount must be idempotent
-(rebuild twins).
+`NavigationStarting` carries a `WebNavigationRequest` built with a continuation:
+the controller shows it to the app's handlers (which may `Cancel()` it) and then
+completes it exactly once — in a `finally`, so a throwing handler cannot leave an
+engine waiting. WebView2 raises on the UI thread and gets its answer before the
+handler returns; WPE, on its own thread, waits for the continuation.
+
+`WebViewController` owns one view and the sink, holds signals (`State`, `Error`,
+`Source`, `Title`, `IsLoading`, `CanGoBack`, `CanGoForward`), and marshals events
+like `MediaPlayer`. Until `Ready` it holds navigation, script and messages in
+order; a held script's task completes after, or faults if the engine fails. An
+unavailable engine fails the controller at once with the engine's reason and no
+view. `WebViewElement.New(controller)` has no size of its own, draws the sink one
+device pixel per pixel from its top-left (clipped, so a resize shows the old frame
+unstretched), reports placement after the frame, hides the page on unmount without
+reloading it, and survives rebuild twins the way `VideoElement` does.
+
+`FakeWebEngine` (`HultUI.WebView.Testing`) is ready at its first placement, as
+WebView2 is; pages are solid colours with titles and a real history; every call
+and input is recorded; `Raise*` injects what a page does.
 
 **Defaults that are policy, not plumbing:** new windows are denied and raised as
 an event (the app opens the system browser or navigates in place); `file://` is
@@ -319,7 +340,10 @@ From a survey of the framework on 2026-09-30. Each is useful beyond web views;
 no engine package may need anything not listed here — if implementation finds
 another, it goes here first. W1–W4 are needed for the first Windows version.
 
-**W1 — Reach the window from an element (`HultUI`, `HultUI.Core`).** An element
+**W1 — Reach the window from an element (`HultUI`, `HultUI.Core`). Shipped in
+step 1** as `Window.NativeHandle` and `Window.ContentBoxInWindow(element)` — the
+second because `ScreenContentBox` is off by the overlay's position for anything in
+a popup or dialog, where a sign-in page is likely to live. An element
 finds its `Window` through `OverlayHost is Window` (the `VideoPlayer` pattern),
 which is not set yet in `OnMounted` — resolve at render time. What is missing is
 the handle: `Window.PlatformWindow` is internal and `IWin32WindowHandle` has one
@@ -328,11 +352,17 @@ zero elsewhere; WPE needs none, since we implement its display ourselves). Core
 grants `InternalsVisibleTo HultUI.WebView` for `MeasureContent`, `PatchFrom` and
 `WantsTextInput`, as it does for Media.
 
-**W2 — Focus carries its reason (`HultUI.Core`).** `FocusEvent` says neither how
-focus arrived nor from where. The page needs to know: Tab in lands on its first
-field, Shift+Tab on its last, a click on the element under the pointer. Add
-`FocusEvent.Reason` (`TabForward`, `TabBackward`, `Pointer`, `Programmatic`).
-Tabbing *out* already has `Window.MoveFocus(forward)`.
+**W2 — Focus carries its reason (`HultUI.Core`). Shipped in step 1** as
+`FocusEvent.Reason` (`Programmatic`, `Pointer`, `Next`, `Previous`), set by
+`FocusManager` from Tab, Shift+Tab and the window's press. The page needs it: Tab
+in lands on its first field, Shift+Tab on its last, a click on the element under
+the pointer. Tabbing *out* already had `Window.MoveFocus(forward)`.
+
+Found on the way: **`Element.IsFocused` was false for any element without a focus
+style** — it lived in the interaction state, which only a focus style creates.
+Junction's tests had worked around it with a comment. Now a plain flag, set for
+every element; not by creating the interaction state, whose first recompute
+snapshots the element's visuals and would later revert an app's own changes.
 
 **W3 — Pointer leaves the window (`HultUI.Platform.SDL3`, `HultUI`).** SDL's
 window mouse-leave is not handled, so nothing gets `PointerLeave` when the
@@ -403,9 +433,13 @@ engine if it changed, but nothing more.
    (WPE rendering one page into our window on Wayland) needs a Linux machine with
    WPE 2.54 and runs before step 5. Nothing is built on an assumption either spike
    can break.
-1. **`HultUI.WebView`**: contract, controller, element, `FakeWebEngine`, headless
-   tests, the sample running on the fake. The whole element is provable before an
-   engine exists.
+1. **`HultUI.WebView`** — **done 2026-09-30**: contract, controller, element,
+   `FakeWebEngine`, seams W1 and W2, 33 headless tests (`tests/HultUI.WebView.Tests`),
+   and `samples/HultUI.Samples.WebView` on the fake with 4 more
+   (`tests/HultUI.Samples.WebView.Tests`), both in the cross-platform filter. The
+   sample's dropdown test found that a press which closes a menu over the page leaves
+   its release to land on the page, so the element forwards a release only for a
+   button whose press it forwarded.
 2. **WebView2, pixels**: environment, composition controller, capture into the
    sink, navigation, script, messaging, pointer and cursor, focus and keyboard
    hand-off, runtime detection. Engine tests skip without the runtime.

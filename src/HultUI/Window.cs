@@ -239,6 +239,33 @@ public sealed class Window : IOverlayHost, IDisposable
     public float DisplayScale => PlatformWindow.DisplayScale;
 
     /// <summary>
+    /// The operating system's window behind this one: the HWND on Windows, zero on other
+    /// platforms and in a headless session. For an element that parents something native
+    /// to the window — a browser engine needs a window to create its view under and to
+    /// place its own popups against.
+    /// </summary>
+    public nint NativeHandle => PlatformWindow is IWin32WindowHandle win32 ? win32.Hwnd : 0;
+
+    /// <summary>
+    /// Where <paramref name="element"/>'s content box is in this window, in layout units:
+    /// <see cref="Element.ScreenContentBox"/> — every ancestor scroll applied — plus the
+    /// position of the overlay the element is in, if it is in one. An overlay's content is
+    /// laid out from its own origin, so <c>ScreenContentBox</c> alone is off by exactly that
+    /// much for anything in a popup or dialog. Multiply by <see cref="DisplayScale"/> for
+    /// device pixels.
+    /// </summary>
+    public Rect ContentBoxInWindow(Element element)
+    {
+        var box = element.ScreenContentBox;
+        var root = element;
+        while (root.Parent is not null) root = root.Parent;
+        foreach (var overlay in _overlays)
+            if (ReferenceEquals(overlay.Content, root))
+                return new Rect(box.X + overlay.X, box.Y + overlay.Y, box.Width, box.Height);
+        return box;
+    }
+
+    /// <summary>
     /// The user's zoom on top of the OS scaling: 1.0 is "as the system says", 1.25 draws
     /// everything a quarter larger and fits correspondingly less in the window. This is the
     /// honest form of "bigger text" for an app laid out in fixed units — growing only the
@@ -1233,7 +1260,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     var focusTarget = FindFocusableAncestor(target);
                     if (!isOverlayHit || focusTarget is not null)
                     {
-                        _focusManager.SetFocus(focusTarget);
+                        _focusManager.SetFocus(focusTarget, FocusReason.Pointer);
 
                         // Provide clipboard to text inputs when focused
                         if (focusTarget is TextInputElement textInput)
