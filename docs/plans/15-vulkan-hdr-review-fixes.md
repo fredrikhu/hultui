@@ -43,7 +43,7 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 7.3 | SDR white level and HDR state from SDL's window properties | 7 | Declined — SDL's values are the problem (2.5) |
 | 7.4 | Stray scratch files out of the repo root | 7 | Done |
 | 8.1 | mpv target options set without blocking the render thread | 8 | Done — the stall was real |
-| 8.2 | Wide colour gamut carried through to scRGB | 8 | Done — eye and Linux pending |
+| 8.2 | Wide colour gamut carried through to scRGB | 8 | Done — eye confirmed; Linux pending |
 | 8.3 | mpv's first-frame wait after every load | 8 | Done — reopen 600 ms → 3–8 ms |
 | 8.4 | UI-thread mpv commands without waiting on the core | 8 | Done — scrub seeks 200 ms → under 1 ms |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
@@ -463,9 +463,12 @@ nothing then clamps. A BT.2020 target would need Skia to convert every frame ins
   `vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq`, because a Y4M carries no colour
   tags.
 
-**Still open:** the **eye** check (the capture shows the values reach the swapchain, not what the
-compositor and panel make of them) and **Linux**, where KWin's handling of negative scRGB is
-untested.
+**Eye check (2026-09-29, Windows, HDR on):** the bars played in the VideoPlayer sample on Vulkan,
+with and without `HULTUI_VIDEO_WIDE_GAMUT=0`. The six out-of-gamut bars look more saturated with
+wide gamut. Grey and the BT.709 green look the same both ways, as they should. So DWM and the panel
+show the negative values rather than clipping them.
+
+**Still open:** **Linux**, where KWin's handling of negative scRGB is untested.
 
 ### 8.3 mpv's first-frame wait after every load
 
