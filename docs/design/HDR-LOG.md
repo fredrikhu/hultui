@@ -1,4 +1,34 @@
-# HDR output
+# HDR output — the log
+
+**This is history, not the design.** It is the working record of the HDR work from 2026-09-25 to
+2026-09-28, kept because the measurements and the wrong turns are the useful part. The current
+design, its defaults and its costs are in [HDR.md](HDR.md). Statements below are left as they were
+written, including the ones later work overturned. The main ones:
+
+- **"Opt-in through `HULTUI_RENDERER`."** Apps choose Vulkan in code with
+  `new Application(..., renderer: RendererKind.Vulkan)`, and Reel and Aperture do. The variable
+  overrides the app in both directions.
+- **"Validation never ran."** It ran on Windows with the Vulkan SDK and on Linux: core and
+  synchronisation validation, 0 messages, with a fault injection proving the checks fire. It cannot
+  see the GL/Vulkan seam; see Traps in HDR.md.
+- **"Zero-copy on Windows is incompatible with this architecture."** It shipped (38da446): NVDEC
+  with CUDA interop in the trimmed LGPL build, 4K CPU from 323 to 156 ms/s on Vulkan and from 382
+  to 58 on GL.
+- **Nothing ordered GL's write of the shared image after Vulkan's last read of it.** A second
+  semaphore now runs from Vulkan to GL (184ae17).
+- **"The swapchain is built twice at start-up."** Fixed (ffce665): the surface starts from the
+  size the host built for.
+- **"lcms has to come back."** It did not: libplacebo tone-maps and converts primaries without it.
+  lcms is only for ICC profiles, which nothing here uses.
+- **"The GL fallback was verified across the matrix."** Only the environment override was. The
+  fallback itself first ran under fault injection in plan 15, which also made it cover a driver
+  with no usable GPU.
+- **Numbers that disagree between sections.** Start-up is +127 ms (552 against 679, medians of
+  5). The fixed extent took resize CPU from 3.0x GL's to 1.8x, not "3.5x to 2x". A 1000-nit
+  highlight reaches the screen at 1000 nits when mpv is told a 1000-nit peak (4.926 × 203), not
+  982.
+- **Everything plan 15 changed afterwards:** the display colour source on Windows, the peak, wide
+  gamut, mpv's threading and the fallback. See `docs/plans/15-vulkan-hdr-review-fixes.md`.
 
 **Status:** phases 0 to 5 built, and the luminance policy settled (`reference`, by eye). Verified
 on Windows and on Linux (KDE Wayland, NVIDIA); untested on Mesa and on a hybrid GPU, which is now
@@ -17,7 +47,7 @@ window-creation reorder (a Wayland risk introduced on Windows), whether the resi
 KWin at all, and whether Mesa offers the present scaling this relies on. The synchronisation
 validation named there has still never run anywhere.
 
-**Before changing anything here, read [Traps](#traps).** It is not a list of curiosities: most
+**Before changing anything, read [Traps in HDR.md](HDR.md#traps).** It is not a list of curiosities: most
 of those cost hours, several were shipped and found by the other platform, and four of them were
 nearly recorded as successes by measurements that could not have failed. The Linux runs are in
 `HDR-LINUX-BRIEF.md`, `HDR-LINUX-VERIFY.md` and `HDR-PHASE1-LINUX.md`; the numbers behind the
@@ -1010,127 +1040,9 @@ from, and HDR is not yet that reason for an app with no video in it.
 
 ## Traps
 
-**Synchronisation validation does not cover the GL/Vulkan seam.** Proven on Windows by injecting
-the fault it should catch — removing the semaphore wait that orders mpv's GL write against Skia's
-read of the shared image — and getting **0 validation messages**, while a fault on the Vulkan side
-produced 21 immediately. The layer sees Vulkan accesses; GL's writes to an external-memory image
-are invisible to it. The seam's failure signature is **blinking black frames**, which is a person's
-test, and the seam's control is behavioural: withhold the signal and GL stalls. So "synchronisation
-validation was clean" means everything either side of the seam, never the seam itself.
+Moved to [HDR.md](HDR.md#traps), which keeps them current. They were here, grouped the same way.
 
-Everything below cost hours, and most of it was nearly shipped as a false green. They are
-grouped by **shape** rather than by phase, because the shapes recur and the phases do not: the
-same four mistakes were made repeatedly, in different clothes, by people who had already written
-the previous one down.
-
-### 1. Measurements that cannot fail
-
-The commonest and the worst. A check that reports the same thing whether the code works or not
-reads as evidence and is not.
-
-- **A frame with nothing in it looks exactly like a pipeline that lost the picture.** Both report
-  a maximum of 0.0 or 1.0. Three separate wrong conclusions came from capturing 2001 at frame 60,
-  2.5 seconds into a three-minute black overture — twice *after* the lesson had been written down.
-  Take several spaced samples, and prove the content was there before reading anything into a
-  maximum.
-- **A maximum cannot see dithering.** That is a property of gradients. Every check here was a
-  peak value until one was not, and an 8-bit target dithered inside a 16-bit surface went
-  unnoticed for two phases.
-- **An 8-bit test clip cannot show 8-bit quantisation** — it is already on the grid being looked
-  for. The dithering above needed a 10-bit ramp to appear at all.
-- **`Process.HandleCount` does not move per handle.** It comes through a performance counter and
-  sat flat at 492 while 200 handles leaked. `GetProcessHandleCount` is exact.
-- **Re-exporting one allocation is not a leak test.** NVIDIA on Windows returns the *identical*
-  `HANDLE` every time, so nothing accumulates whatever you do with it. NVIDIA on Linux returns a
-  distinct fd per export — the same test, opposite behaviour. Reallocate each cycle, as the
-  renderer does.
-- **The headless driver proves nothing about this backend.** It renders through
-  `SkiaRasterRenderSurface` and never touches a GPU backend, so a GL-versus-Vulkan screenshot
-  comparison is identical whatever either one does.
-- **A capture proves the image, never the screen.** And some things no capture can show at all:
-  the SDR white scale is invisible to one, because F16 and 8-bit captures agree within 1 LSB
-  while the window is plainly dim — the image is right and the compositor is obeying it.
-- **An idle window may never reach the default capture frame.** It presents 3, 4, or 1 frames
-  depending on which output it opened on; the default is images + 1. A missing capture can mean
-  an idle window rather than a renderer that drew nothing.
-
-- **A benchmark can measure the wrong workload and still be internally perfect.** The
-  GL-to-Vulkan sync was timed at 0.27 ms a frame, *flat* between 1080p and 4K, and written off.
-  It was timing a `glClear` on an idle GPU — nothing for `glFinish` to wait for, which is
-  precisely why the resolution made no difference. Under a real 4K decode the same call is
-  0.74 to 5.33 ms and the flatness is gone. **When a cost does not scale with the thing it
-  should scale with, suspect the benchmark before believing the result.**
-
-**So: build the positive control first.** `--churn` deliberately drops 200 handles and refuses to
-report a verdict unless that raises the count. Two earlier versions of that test reported a clean
-pass while being incapable of failing.
-
-### 2. State another API owns, and moves
-
-Anything holding a handle to something Skia or a driver also tracks will go stale, silently.
-
-- **Never cache a `GRBackendRenderTarget` over a swapchain image.** Skia tracks the layout inside
-  the target and this backend transitions to `PRESENT_SRC_KHR` behind it. Three images meant
-  three good frames and then black for ever. Build it fresh each frame declaring `UNDEFINED`.
-- **Never cache a renderer-owned `SKImage` either**, for the same reason — `DrawGpuFrame`
-  re-wraps whenever `frame.RendererOwned`.
-- **Do not read the shared image through Vulkan.** It needs the layout Skia owns; guessing
-  returned a uniform 0.000 from an image that plainly had a picture in it. Read it through **GL**
-  (`glReadPixels` inside `RunExternalGL`) — GL has no layouts. That is what
-  `HULTUI_VIDEO_HDR_PROBE` does.
-- **Handle ownership is asymmetric across platforms.** GL does *not* take an `OPAQUE_WIN32`
-  handle, so the caller must `CloseHandle`; `glImportMemoryFdEXT` *consumes* the descriptor it is
-  given. Getting it backwards leaks on one platform and double-frees on the other, and neither
-  shows on the first import.
-- **`GL_DEDICATED_MEMORY_OBJECT_EXT` is required** when Vulkan allocated the memory dedicated,
-  which it always does here. Without it the result is undefined, and on NVIDIA-Linux undefined
-  was a texture that read as black above about 2560x1440 — no GL error, complete framebuffer,
-  every 4K film black. Windows happened to work, which is how it shipped.
-
-### 3. Defaults that are not neutral
-
-Several of these APIs treat "unspecified" as a decision, not as "work it out".
-
-- **`MPV_RENDER_PARAM_DEPTH` omitted means 8 bits and dithering**, and mpv does *not* infer it
-  from `internal_format`. Measured: omitted and `DEPTH=8` are byte-identical.
-- **`internal_format = 0` on `mpv_opengl_fbo` means "assume 8"** for the same reason.
-- **`target-colorspace-hint` is a no-op through the render API** and always was. No
-  `MPV_RENDER_PARAM` names a colour space, and `mpv_opengl_fbo` carries only fbo, size and
-  format. The way in is mpv's `target-prim` / `target-trc` / `target-peak` **options**.
-- **Without `target-peak` nothing exceeds 1.0** however the transfer is set. The transfer alone
-  changes the numbers and keeps the ceiling.
-- **Skia returns a null surface with no diagnostic** when the swapchain lacks
-  `VK_IMAGE_USAGE_TRANSFER_SRC_BIT`, or when `GRVkExtensions` or `VkPhysicalDeviceFeatures2` are
-  left null — it then assumes the minimum and declines formats the device plainly supports.
-- **SDL's `SDR_white_level` is the wrong number on Wayland.** It reads 1.0, the EGL convention
-  where 1.0 already *is* reference white, and feeding it in reproduces a dim picture exactly.
-
-### 4. One platform hiding the other's bug
-
-Every one of these was invisible on the machine it was written on.
-
-- **SDR white is a protocol constant on Wayland and a display query on Windows.**
-  `color-management-v1` fixes Windows-scRGB reference white at 2.5375 (203 nits over scRGB's 80);
-  Windows reports whatever its brightness slider says. Asking the monitor on Wayland is the wrong
-  move.
-- **KWin shows an sRGB window through a pure 2.2 gamma**, where Skia uses the piecewise curve.
-  The two meet at white, so white matches and *shadows* do not — which is why it survived phase 2
-  and 3 unnoticed. A colour-space tag cannot fix it, because Skia converts every `SKColor` from
-  piecewise sRGB into whatever the canvas claims to be.
-- **`glXGetProcAddress` returns a dispatch stub for any name at all** under libglvnd. Skia asked
-  for `eglQueryString` on X11, got a stub, parsed garbage, and segfaulted on every GL launch. On
-  Wayland the real functions come back and a made-up name resolves to 0.
-- **Windows tolerates `SDL_GL_MakeCurrent` with a null context; Wayland dereferences it.**
-- **A mixed-scale Wayland desktop reports an output change as two events**, new pixels at the old
-  scale then the same pixels at the new one. Code that treats the second as a pure DPI change
-  preserves a size already computed wrongly.
-- **X11 cannot do HDR at all**, and says so honestly — only `SRGB_NONLINEAR`.
-
-**So: a green suite on one OS says nothing about the other here.** The Linux session found a bug
-in this Windows work and this Windows session found one in theirs, both within a day, both in
-code the author had verified.
-
-### The display's peak, which was assumed and is now asked for
+## The display's peak, which was assumed and is now asked for
 
 `target-peak` decides where tone mapping lands, and it was a flat assumed 1000 nits because
 neither platform appeared to expose a peak. SDL does, as **headroom** — a multiple of SDR white
@@ -1157,7 +1069,7 @@ A headroom of exactly 1 is a real answer and is treated as one: it says the disp
 own SDR white, which the Linux machine nearly does (1.0022). Only a missing number falls back to
 assuming.
 
-### Synchronisation, measured and left alone
+## Synchronisation, measured and left alone
 
 Phase 1 said the CPU stalled once a frame and that fixing it was "the first thing to do if
 this backend is ever to ship". Half of that was already fixed and the comment had not caught
