@@ -36,6 +36,11 @@ internal static class HdrVideoLuminance
             : frameReferenceWhiteNits / canvasWhiteNits;
     }
 
+    /// <summary>Whether a frame of linear light needs a colour filter at all: to scale it, or to
+    /// encode it for a gamma-2.2 offscreen, which it needs whatever the scale.</summary>
+    public static bool NeedsFrameFilter(float frameScale, bool encodedOffscreen) =>
+        encodedOffscreen || Math.Abs(frameScale - 1f) >= 0.001f;
+
     /// <summary>
     /// The peak to hand the producer, in the producer's own nits, or zero when the display's
     /// is unknown.

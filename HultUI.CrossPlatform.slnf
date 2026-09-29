@@ -6,6 +6,7 @@
       "tests/HultUI.Themes.Tests/HultUI.Themes.Tests.csproj",
       "tests/HultUI.Text.Tests/HultUI.Text.Tests.csproj",
       "tests/HultUI.Rendering.Skia.Tests/HultUI.Rendering.Skia.Tests.csproj",
+      "tests/HultUI.Platform.SDL3.Tests/HultUI.Platform.SDL3.Tests.csproj",
       "tests/HultUI.SourceGenerators.Tests/HultUI.SourceGenerators.Tests.csproj",
       "tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj",
       "tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj",

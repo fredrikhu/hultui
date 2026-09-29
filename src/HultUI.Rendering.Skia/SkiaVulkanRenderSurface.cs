@@ -406,11 +406,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // is not that. Most Windows surfaces offer BGRA first.
         // With an encoded offscreen the swapchain is tagged the same as it, so the blit reaches
         // the swapchain unconverted and the shader's own decoding is the only one applied.
-        var space = frame.ColorSpace == VkColorSpaceExtendedSrgbLinear && _host.SdrIsGamma22
-            ? SKColorSpace.CreateSrgb()
-            : UseScaledSpace(frame)
-                ? ScaledLinear(_host.SdrWhiteScale)
-                : ColorSpaceFor(frame.ColorSpace);
+        var space = PathFor(frame) switch
+        {
+            ScRgbFramePath.EncodedOffscreen => SKColorSpace.CreateSrgb(),
+            ScRgbFramePath.ScaledSpace => ScaledLinear(_host.SdrWhiteScale),
+            _ => ColorSpaceFor(frame.ColorSpace),
+        };
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
             ColorTypeFor(frame.Format), space);
         if (surface is null)
@@ -476,8 +477,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         float scale = HdrVideoLuminance.FrameScale(frame.ReferenceWhiteNits, _host.SdrWhiteScale,
             MatchVideoWhiteToUi);
 
-        // An encoded offscreen needs the 2.2 encoding whatever the scale, so never null there.
-        if (Math.Abs(scale - 1f) < 0.001f && !_offscreenEncoded) return null;
+        if (!HdrVideoLuminance.NeedsFrameFilter(scale, _offscreenEncoded)) return null;
         if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f
             && _frameScaleEncoded == _offscreenEncoded)
             return _frameScale;
@@ -508,16 +508,15 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private SKSurface? OffscreenFor(in VulkanFrameTarget frame)
     {
         // A 2.2 decode is needed even at a white scale of 1, and only the offscreen can do it.
-        bool encoded = _host.SdrIsGamma22;
-        if (frame.ColorSpace != VkColorSpaceExtendedSrgbLinear
-            || (_host.SdrWhiteScale <= 1.0001f && !encoded)
-            // The scaled destination colour space already applied the white scale as the frame
-            // was drawn, so a second multiply here would square it.
-            || UseScaledSpace(frame))
+        // The scaled destination colour space already applied the white scale as the frame was
+        // drawn, so an offscreen as well would square it.
+        var path = PathFor(frame);
+        if (path is not (ScRgbFramePath.Offscreen or ScRgbFramePath.EncodedOffscreen))
         {
             ReleaseOffscreen();
             return null;
         }
+        bool encoded = path == ScRgbFramePath.EncodedOffscreen;
 
         if (_offscreen is null || _offscreenWidth != frame.WidthPx || _offscreenHeight != frame.HeightPx
             || _offscreenEncoded != encoded)
@@ -668,14 +667,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private static readonly bool ScaledSpaceEnabled =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_SCALED_SPACE") == "1";
 
-    /// <summary>Whether this frame can carry its white scale in the destination colour space
-    /// rather than in a separate pass. The gamma-2.2 case still cannot: it re-encodes rather
-    /// than scaling, and that is not a gain a transfer function expresses.</summary>
-    private bool UseScaledSpace(in VulkanFrameTarget frame) =>
-        ScaledSpaceEnabled
-        && frame.ColorSpace == VkColorSpaceExtendedSrgbLinear
-        && !_host.SdrIsGamma22
-        && _host.SdrWhiteScale > 1.0001f;
+    /// <summary>How this frame reaches the swapchain. The gamma-2.2 case cannot carry its white
+    /// scale in the destination colour space: it re-encodes rather than scaling, and that is not
+    /// a gain a transfer function expresses.</summary>
+    private ScRgbFramePath PathFor(in VulkanFrameTarget frame) => ScRgbFramePaths.Choose(
+        frame.ColorSpace == VkColorSpaceExtendedSrgbLinear, _host.SdrWhiteScale, _host.SdrIsGamma22,
+        ScaledSpaceEnabled);
 
     /// <summary>
     /// The Skia colour type for a <c>VkFormat</c>.

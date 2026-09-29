@@ -828,32 +828,17 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (_vk.GetSurfacePresentModes(_physicalDevice, _surface, &count, modes) != VkResult.Success)
             return VkPresentModeKHR.Fifo;
 
-        bool immediate = false, mailbox = false;
-        for (uint i = 0; i < count; i++)
-        {
-            if (modes[i] == VkPresentModeKHR.Immediate) immediate = true;
-            if (modes[i] == VkPresentModeKHR.Mailbox) mailbox = true;
-        }
-
         // An override only counts if the surface actually offers it; asking for a mode the
         // implementation does not support is undefined, and silently getting a different
         // one than the trace claims would make the comparison this exists for worthless.
-        if (PresentModeOverride is { } wanted)
+        var chosen = VulkanSwapchainChoice.PresentMode(new ReadOnlySpan<VkPresentModeKHR>(modes, (int)count),
+            PresentModeOverride, out bool forced);
+        if (trace)
         {
-            bool offered = false;
-            for (uint i = 0; i < count; i++) if (modes[i] == wanted) offered = true;
-            if (offered)
-            {
-                if (trace) StartupTrace.Mark($"vulkan present mode {wanted} (forced)");
-                return wanted;
-            }
-            if (trace) StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
+            if (PresentModeOverride is { } wanted && !forced)
+                StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
+            StartupTrace.Mark($"vulkan present mode {chosen}{(forced ? " (forced)" : "")}");
         }
-
-        var chosen = mailbox ? VkPresentModeKHR.Mailbox
-            : immediate ? VkPresentModeKHR.Immediate
-            : VkPresentModeKHR.Fifo;
-        if (trace) StartupTrace.Mark($"vulkan present mode {chosen}");
         return chosen;
     }
 
@@ -923,60 +908,38 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private uint _minScaledHeight;
 
     /// <summary>
-    /// A plain 8-bit BGRA or RGBA format with the sRGB-nonlinear colour space — phase 1 is
-    /// SDR and the aim is to match the GL path exactly. The <c>_SRGB</c> variants are
-    /// deliberately not preferred: they would have the hardware do the encode, which is a
-    /// different answer from the one the GL surface gives, and telling the two apart is the
-    /// whole test for this phase. Phase 3 is where this function learns about HDR.
+    /// The swapchain format: scRGB half-float when <see cref="WantsWideColor"/> and the surface
+    /// allows it, otherwise a plain 8-bit BGRA or RGBA in sRGB-nonlinear, matching the GL path.
+    /// The <c>_SRGB</c> variants are deliberately not preferred: they would have the hardware
+    /// do the encode, which is a different answer from the one the GL surface gives. The
+    /// choice itself is <see cref="VulkanSwapchainChoice.SurfaceFormat"/>.
     /// </summary>
     /// <param name="colorSpace">The colour space that goes with the chosen format.</param>
     /// <param name="trace">False when the answer is only being compared against the current
     /// format rather than acted on, so that asking does not log. Every display event asks.</param>
     private VkFormat ChooseFormat(out VkColorSpaceKHR colorSpace, bool trace = true)
     {
-        colorSpace = VkColorSpaceKHR.SrgbNonLinear;
-
         uint count = 0;
         Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, null), "vkGetPhysicalDeviceSurfaceFormatsKHR");
-        if (count == 0) return VkFormat.B8G8R8A8Unorm;
-
         var formats = stackalloc VkSurfaceFormatKHR[(int)count];
-        Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+        if (count > 0)
+            Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
 
         // Half-float, linear light, 1.0 being SDR white — scRGB. Every colour the framework
         // has is 8-bit sRGB, so this is only correct because the renderer now tells Skia what
         // the destination is and lets it convert; before phase 2 it would have washed the
-        // whole UI out. Opt-in while that claim is only proven on one machine.
-        if (WantsWideColor && !_colorSpaceExtensionEnabled)
-        {
-            // Drivers list EXTENDED_SRGB_LINEAR regardless, so taking it from the list here
-            // would be invalid usage that happens to work on the machine it was written on.
-            if (trace) StartupTrace.Mark("vulkan wide colour asked for, but the instance has no VK_EXT_swapchain_colorspace");
-        }
-        else if (WantsWideColor)
-        {
-            for (uint i = 0; i < count; i++)
-            {
-                if (formats[i].format != VkFormat.R16G16B16A16Sfloat) continue;
-                if (formats[i].colorSpace != VkColorSpaceKHR.ExtendedSrgbLinearEXT) continue;
-                colorSpace = formats[i].colorSpace;
-                return formats[i].format;
-            }
-            if (trace) StartupTrace.Mark("vulkan wide colour asked for, surface has none");
-        }
+        // whole UI out. Without VK_EXT_swapchain_colorspace it is refused even when listed:
+        // drivers list EXTENDED_SRGB_LINEAR regardless, so taking it from the list would be
+        // invalid usage that happens to work on the machine it was written on.
+        var chosen = VulkanSwapchainChoice.SurfaceFormat(new ReadOnlySpan<VkSurfaceFormatKHR>(formats, (int)count),
+            WantsWideColor, _colorSpaceExtensionEnabled, out var wide);
+        if (trace && wide == VulkanSwapchainChoice.WideColor.NoExtension)
+            StartupTrace.Mark("vulkan wide colour asked for, but the instance has no VK_EXT_swapchain_colorspace");
+        if (trace && wide == VulkanSwapchainChoice.WideColor.NotOffered)
+            StartupTrace.Mark("vulkan wide colour asked for, surface has none");
 
-        for (uint i = 0; i < count; i++)
-        {
-            if (formats[i].colorSpace != VkColorSpaceKHR.SrgbNonLinear) continue;
-            if (formats[i].format is VkFormat.B8G8R8A8Unorm or VkFormat.R8G8B8A8Unorm)
-            {
-                colorSpace = formats[i].colorSpace;
-                return formats[i].format;
-            }
-        }
-
-        colorSpace = formats[0].colorSpace;
-        return formats[0].format;
+        colorSpace = chosen.colorSpace;
+        return chosen.format;
     }
 
     public VulkanFrameTarget? AcquireNextImage()
@@ -1160,8 +1123,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // would leave an oversized swapchain being scaled — the artefact, reintroduced. Leaving
         // this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it kept
         // the skipping and lost only the scaling that justifies it.
-        if (!force && _fixedExtentAvailable && !_swapchain.IsNull && widthPx > 0 && heightPx > 0
-            && widthPx <= _allocWidthPx && heightPx <= _allocHeightPx
+        if (VulkanSwapchainChoice.CanKeepSwapchain(force, _fixedExtentAvailable, !_swapchain.IsNull,
+                widthPx, heightPx, _allocWidthPx, _allocHeightPx)
             && ChooseFormat(out _, trace: false) == _format)
         {
             _widthPx = widthPx;

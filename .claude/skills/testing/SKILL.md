@@ -16,8 +16,8 @@ The framework has three test layers plus ad-hoc verification. Pick the lowest la
 | `tests/HultUI.Samples.TodoList.Tests` | component | sample app logic via direct tree-walk + `EventDispatcher.Dispatch` (no session) |
 | `tests/Junction.Tests` | app | `apps/Junction`: pure logic (diff/conflict/patch/graph parsing), `GitRepository` against real temp repos, plus the whole app hosted headless |
 | `tests/VesperCommander.Tests` | app | `apps/VesperCommander`: engines (find/sync/rename/diff/archive) plus headless hosting |
-| `tests/HultUI.Text.Tests`, `HultUI.Rendering.Skia.Tests`, `HultUI.SourceGenerators.Tests`, `HultUI.Platform.Accessibility.Linux.Tests` | subsystem unit | text pipeline, Skia surfaces, reactive generator, AT-SPI constants |
-| `tests/HultUI.UiTests` | real window (Windows-only, **opt-in**) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients. Skipped unless `HULTUI_UITESTS=1` |
+| `tests/HultUI.Text.Tests`, `HultUI.Rendering.Skia.Tests`, `HultUI.Platform.SDL3.Tests`, `HultUI.SourceGenerators.Tests`, `HultUI.Platform.Accessibility.Linux.Tests` | subsystem unit | text pipeline, Skia surfaces and scRGB frame paths, Vulkan swapchain choices, reactive generator, AT-SPI constants |
+| `tests/HultUI.UiTests` | real window (Windows-only, **opt-in**) | FlaUI/UIA3 launches sample **exes**, proves UIA providers work for real AT clients; also the GPU paths the headless driver never reaches (GL sink, mpv's GL path, the Vulkan renderer and its GL fallback). Skipped unless `HULTUI_UITESTS=1` |
 
 ## Running tests
 
@@ -52,7 +52,8 @@ happens to contain the string.
 - **Anything needing a laid-out frame, focus, input funnel, scrolling, animations, or a11y queries** → HultUI.Headless. Full guide: `docs/HEADLESS.md`. Runs on any CI runner, no display.
 - **Sample-app behavior** → host the whole app headlessly (below), or tree-walk like TodoList tests if no layout is needed.
 - **"Does a real screen reader / UIA client see it?"** → HultUI.UiTests with FlaUI. Windows only, launches real windows that take the foreground — run locally with `HULTUI_UITESTS=1`, never in CI.
-- **Perf/GL** → real window with tracing (`HULTUI_TRACE=<path>`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`), or `samples/HultUI.Samples.Benchmark --auto|--profile`, or the live **F12 HUD** (below). Never use the real window for *correctness* checks.
+- **Does the GPU renderer draw, or fall back?** → HultUI.UiTests. `VulkanProbeTests` runs `tests/HultUI.UiTests.VulkanProbe` as its own process (the renderer is chosen once per process, and the Vulkan loader reads `VK_*` fault-injection variables at start) and checks a `HULTUI_VULKAN_CAPTURE` frame; `MpvGLTests` covers mpv on a window, where the UI thread renders. The headless driver draws through a raster surface, and mpv's headless path renders on its own thread, so neither can see these.
+- **Perf/GL** → real window with tracing (`HULTUI_TRACE=<path>`, `SDL_WINDOW_ACTIVATE_WHEN_SHOWN=0`), or `samples/HultUI.Samples.Benchmark --auto|--profile`, or the live **F12 HUD** (below). Never use the real window for *correctness* checks, except of the GPU paths above.
 
 ## Headless quick reference
 

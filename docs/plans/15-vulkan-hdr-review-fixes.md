@@ -46,8 +46,8 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 8.2 | Wide colour gamut carried through to scRGB | 8 | Done — eye confirmed; Linux pending |
 | 8.3 | mpv's first-frame wait after every load | 8 | Done — reopen 600 ms → 3–8 ms |
 | 8.4 | UI-thread mpv commands without waiting on the core | 8 | Done — scrub seeks 200 ms → under 1 ms |
-| 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
-| 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Todo |
+| 9.1 | Pure decisions extracted and unit-tested | 9 | Done |
+| 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Done — Windows; UiTests do not run on Linux |
 | 10.1 | Stale code comments | 10 | Todo |
 | 10.2 | ENVIRONMENT.md | 10 | Todo |
 | 10.3 | HDR.md split into a current design and a dated log | 10 | Todo |
@@ -540,11 +540,40 @@ Extract and test: `FrameColorFilter` scale and peak arithmetic, `ChooseFormat` a
 `ChoosePresentMode` over a list, the rebuild-skip predicate (the `FIXED_EXTENT=0` regression),
 `DepthOf`. (Renderer selection is 1.3; the mpv latch is 4.1.)
 
+**Done (2026-09-29).** Two had been covered already: the scale and peak arithmetic by
+`HdrVideoLuminanceTests` (4.2), and `DepthOf` by `MpvTargetColourTests` (4.3). The rest:
+- **`VulkanSwapchainChoice`** in `HultUI.Platform.SDL3`: `PresentMode`, `SurfaceFormat` and
+  `CanKeepSwapchain`, over spans shaped like the Windows NVIDIA and X11 surfaces. `SdlVulkanHost`
+  asks the surface and passes the answers in; its traces are unchanged. The platform had no unit
+  test project, so `tests/HultUI.Platform.SDL3.Tests` is new, and it is in the cross-platform
+  filter. 10 tests. Removing `fixedExtentAvailable` from the predicate fails the
+  `FIXED_EXTENT=0` regression test.
+- **`ScRgbFramePaths.Choose`** in `HultUI.Rendering.Skia`: the four ways a frame reaches the
+  swapchain (direct, scaled space, offscreen, encoded offscreen). It replaces the separate
+  conditions in `OffscreenFor`, the surface colour space choice and `UseScaledSpace`, which had
+  to agree with each other. With it, `HdrVideoLuminance.NeedsFrameFilter`. 9 tests.
+
 ### 9.2 Real-window Vulkan tests
 
 In `HultUI.UiTests` (opt-in through `HULTUI_UITESTS=1`): boot a sample on Vulkan and check a
 `HULTUI_VULKAN_CAPTURE` frame has content; boot with `VK_DRIVER_FILES` pointed at nothing and check
 it falls back to GL. Skip where Vulkan is unavailable.
+
+**Done (2026-09-29).** `VulkanProbeTests` runs `tests/HultUI.UiTests.VulkanProbe` as its own
+process, for two reasons: the renderer is chosen once per process, and other UiTests open GL
+windows first; and the loader reads the `VK_*` variables when it starts. The probe asks for Vulkan
+in code, as Reel and Aperture do, draws a red and a blue half for 12 forced frames, and exits.
+- **Draws:** the capture (frame 4, the first to reuse an image) is pure red and pure blue where
+  expected. A probe drawing green fails the test.
+- **No usable GPU** (`VK_LOADER_VENDOR_ID_FILTER=0x1234`): "The Vulkan renderer could not start",
+  then GL.
+- **No driver** (`VK_DRIVER_FILES` at a missing file): SDL refuses the Vulkan window, "Vulkan
+  window creation failed", then GL.
+- **`HULTUI_RENDERER=vulkan` with no GPU:** exits non-zero with "no Vulkan physical device", and
+  never falls back.
+
+The tests skip without a Vulkan loader. UiTests are Windows-only, so the Linux fallback remains a
+manual check.
 
 ## Phase 10 — Docs
 

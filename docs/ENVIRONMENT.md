@@ -51,7 +51,7 @@ anything else.
 
 | Variable | Value | Effect |
 |---|---|---|
-| `HULTUI_UITESTS` | non-empty, not `0`/`false` | Enables the real-window UIA suite (`tests/HultUI.UiTests`); otherwise `[UiFact]` reports skipped. |
+| `HULTUI_UITESTS` | non-empty, not `0`/`false` | Enables the real-window suite (`tests/HultUI.UiTests`): UI Automation, the GL sink, mpv's GL path, and the Vulkan renderer with its GL fallback. Otherwise those tests report skipped. |
 | `HULTUI_MPV_EXPECT_LGPL` | `1` | The mpv backend tests assert the loaded libmpv is the trimmed LGPL build rather than only reporting what they found. |
 
 ## Build-time defines
