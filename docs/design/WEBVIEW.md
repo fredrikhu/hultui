@@ -210,6 +210,11 @@ it. So on Windows the bridge's window provider gains that interface (seam W8)
 rather than splicing a fragment into our tree. Until W8 lands the element is
 announced as a named `Group` with nothing inside it.
 
+**NavigationStarting has no deferral** (the IDL offers none), so the answer must be
+given before the handler returns. It is: WebView2 raises it on the UI thread, where the
+controller answers synchronously. An engine that raises elsewhere (WPE) keeps the
+request's continuation instead.
+
 **Threading.** WebView2 must be created on an STA thread with a message pump.
 Junction's and Vesper's `Main` are already `[STAThread]` (for OLE); any app that
 shows a page needs the same. SDL's wait wakes on any
@@ -440,9 +445,20 @@ engine if it changed, but nothing more.
    sample's dropdown test found that a press which closes a menu over the page leaves
    its release to land on the page, so the element forwards a release only for a
    button whose press it forwarded.
-2. **WebView2, pixels**: environment, composition controller, capture into the
-   sink, navigation, script, messaging, pointer and cursor, focus and keyboard
-   hand-off, runtime detection. Engine tests skip without the runtime.
+2. **WebView2, pixels** — **engine done 2026-09-30** (`src/HultUI.WebView.WebView2`):
+   environment per user data folder, composition controller, capture into the sink,
+   navigation, script, messaging, pointer and cursor, focus hand-off both ways,
+   runtime detection. Every COM and WinRT call is a raw vtable call whose slot comes
+   from `scripts/generate-webview2-interop.py`, which reads the C vtable structs in
+   `WebView2.h` and the Windows SDK headers (`Interop/ComSlots.g.cs`); callbacks are
+   hand-built COM objects (`ComHandler`). Proven by 5 real-window tests
+   (`HultUI.UiTests/WebView2Tests`: pixels reach the sink *and* the window's front
+   buffer, script and messages both ways, a refused navigation, clicks landing on the
+   half they aimed at), 22 mapping tests that run anywhere
+   (`HultUI.WebView.Engines.Tests`), and the sample's `--check`, which passes under
+   NativeAOT in about 380 ms from launch with no trim or AOT warnings.
+   **Still open in step 2:** seams W3 (pointer leaving the window), W4 (cursor without
+   a move) and W5 with `AcceleratorKeyPressed` (app shortcuts while the page has focus).
 3. **Windows zero-copy**: GL, then Vulkan.
 4. **Windows accessibility**: `IRawElementProviderHwndOverride` on the UIA
    bridge's window provider for WebView2's focus window; proven in the real-window

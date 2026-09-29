@@ -20,6 +20,8 @@
       href: DRAG-AND-DROP.md
     - name: Video playback
       href: MEDIA.md
+    - name: Web views
+      href: WEBVIEW.md
     - name: Multi-window
       href: MULTI-WINDOW.md
     - name: Custom window chrome

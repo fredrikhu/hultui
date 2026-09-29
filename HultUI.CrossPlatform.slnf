@@ -15,6 +15,7 @@
       "tests/HultUI.Samples.VideoPlayer.Tests/HultUI.Samples.VideoPlayer.Tests.csproj",
       "tests/HultUI.Samples.ProceduralVideo.Tests/HultUI.Samples.ProceduralVideo.Tests.csproj",
       "tests/HultUI.WebView.Tests/HultUI.WebView.Tests.csproj",
+      "tests/HultUI.WebView.Engines.Tests/HultUI.WebView.Engines.Tests.csproj",
       "tests/HultUI.Samples.WebView.Tests/HultUI.Samples.WebView.Tests.csproj",
       "tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj"
     ]

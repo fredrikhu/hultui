@@ -1,0 +1,512 @@
+using HultUI.Core.Events;
+using HultUI.Core.Styling;
+using HultUI.WebView.WebView2.Interop;
+
+namespace HultUI.WebView.WebView2;
+
+/// <summary>
+/// One WebView2 page in visual hosting. Created by <see cref="WebView2Engine"/>; driven by
+/// its <see cref="WebViewController"/>.
+/// </summary>
+/// <remarks>
+/// <para><b>Life.</b> WebView2 needs a parent window, so nothing is created until the first
+/// placement names one: then the environment (shared per user data folder), then the
+/// composition controller, then the capture. <see cref="WebEngineEvent.Ready"/> follows;
+/// a failure on the way raises <see cref="WebEngineEvent.Failed"/> instead.</para>
+/// <para><b>Threads.</b> Every WebView2 call and callback is on the UI thread, which must
+/// be an STA with a message loop — SDL's is one. Only the capture's frames arrive
+/// elsewhere.</para>
+/// <para><b>Keys</b> are WebView2's own: in visual hosting it keeps a child window under the
+/// parent for keyboard focus and the input method, so this view forwards pointer input only
+/// (spike W0, and Microsoft's hosting guide).</para>
+/// </remarks>
+internal sealed unsafe class WebView2View : IWebEngineView
+{
+    private enum Phase { Waiting, Creating, Ready, Failed, Disposed }
+
+    private readonly WebView2Engine _engine;
+    private readonly WebViewOptions _options;
+    private readonly List<(ComHandler Handler, nint Source, int RemoveSlot, long Token)> _subscriptions = [];
+    private IWebViewHost? _host;
+    private Phase _phase;
+    private WebViewPlacement? _placement;
+    private WebViewPlacement? _applied;
+    private bool _visible;
+    private FocusReason? _pendingFocus;
+    private nint _composition, _controller, _controller3, _webview;
+    private ComHandler? _creating;
+    private VisualCapture? _capture;
+
+    public WebView2View(WebView2Engine engine, WebViewOptions options)
+    {
+        _engine = engine;
+        _options = options;
+    }
+
+    public WebEngineCapabilities Capabilities => WebEngineCapabilities.NativeKeyboard | WebEngineCapabilities.DevTools;
+
+    public event Action<WebEngineEvent>? Event;
+
+    private void Raise(WebEngineEvent e) => Event?.Invoke(e);
+
+    public void Attach(IWebViewHost host) => _host = host;
+
+    // ──── Creation ────
+
+    public void SetPlacement(in WebViewPlacement placement)
+    {
+        _placement = placement;
+        switch (_phase)
+        {
+            case Phase.Waiting when placement.Window != 0 && !placement.Bounds.IsEmpty:
+                BeginCreate();
+                break;
+            case Phase.Ready:
+                Apply(placement);
+                break;
+        }
+    }
+
+    private void BeginCreate()
+    {
+        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+        {
+            Fail(WebFailure.InitializationFailed,
+                "WebView2 needs the UI thread to be a single-threaded apartment: put [STAThread] on Main.");
+            return;
+        }
+        _phase = Phase.Creating;
+        _engine.WithEnvironment(_options.UserDataFolder ?? WebView2Engine.DefaultUserDataFolder(), OnEnvironment);
+    }
+
+    private void OnEnvironment(nint environment, WebFailure failure, string? error)
+    {
+        if (_phase != Phase.Creating) return;
+        if (environment == 0) { Fail(failure, error ?? "WebView2 would not start."); return; }
+
+        var env3 = Com.TryQueryInterface(environment, ICoreWebView2Environment3.IID);
+        if (env3 == 0) { Fail(WebFailure.InitializationFailed, "The installed WebView2 Runtime is too old for visual hosting."); return; }
+        try
+        {
+            _creating = ComHandler.ForResult(ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler.IID, OnControllerCreated);
+            int hr = Com.Call(env3, ICoreWebView2Environment3.CreateCoreWebView2CompositionController, _placement!.Value.Window, _creating.Pointer);
+            if (hr < 0)
+            {
+                _creating.Release();
+                _creating = null;
+                Fail(WebFailure.InitializationFailed, $"WebView2 could not create a page (0x{hr:X8}).");
+            }
+        }
+        finally { Com.Release(ref env3); }
+    }
+
+    private void OnControllerCreated(int hr, nint composition)
+    {
+        _creating?.Release();
+        _creating = null;
+        if (_phase != Phase.Creating) return;          // disposed while it was on its way
+        if (hr < 0 || composition == 0)
+        {
+            Fail(WebFailure.InitializationFailed, $"WebView2 could not create a page (0x{hr:X8}).");
+            return;
+        }
+
+        try
+        {
+            Com.AddRef(composition);
+            _composition = composition;
+            _controller = Com.QueryInterface(composition, ICoreWebView2Controller.IID);
+            _controller3 = Com.QueryInterface(composition, ICoreWebView2Controller3.IID);
+            _webview = Com.GetPtr(_controller, ICoreWebView2Controller.get_CoreWebView2, "get_CoreWebView2");
+
+            // We say where the page is and at what scale, in raw pixels; WebView2 must not
+            // second-guess it from the monitor.
+            Com.Check(Com.Call(_controller3, ICoreWebView2Controller3.put_BoundsMode, 0), "put_BoundsMode");
+            Com.Check(Com.Call(_controller3, ICoreWebView2Controller3.put_ShouldDetectMonitorScaleChanges, 0), "put_ShouldDetectMonitorScaleChanges");
+
+            ApplySettings();
+
+            _capture = new VisualCapture(_host!.Pixels);
+            Com.Check(Com.Call(_composition, ICoreWebView2CompositionController.put_RootVisualTarget, _capture.RootVisual), "put_RootVisualTarget");
+
+            Subscribe();
+            Apply(_placement!.Value);
+            Com.Check(Com.Call(_controller, ICoreWebView2Controller.put_IsVisible, _visible ? 1 : 0), "put_IsVisible");
+        }
+        catch (Exception ex)
+        {
+            Fail(WebFailure.InitializationFailed, ex.Message);
+            return;
+        }
+
+        _phase = Phase.Ready;
+        Raise(new WebEngineEvent.Ready());
+        if (_pendingFocus is { } reason)
+        {
+            _pendingFocus = null;
+            Focus(reason);
+        }
+    }
+
+    private void ApplySettings()
+    {
+        var settings = Com.GetPtr(_webview, ICoreWebView2.get_Settings, "get_Settings");
+        try
+        {
+            Com.Call(settings, ICoreWebView2Settings.put_AreDevToolsEnabled, _options.DevTools ? 1 : 0);
+            if (_options.UserAgent is { } agent)
+            {
+                var settings2 = Com.TryQueryInterface(settings, ICoreWebView2Settings2.IID);
+                if (settings2 != 0)
+                {
+                    Com.CallString(settings2, ICoreWebView2Settings2.put_UserAgent, agent);
+                    Com.Release(ref settings2);
+                }
+            }
+        }
+        finally { Com.Release(ref settings); }
+    }
+
+    private void Apply(WebViewPlacement placement)
+    {
+        if (_applied == placement) return;
+        var previous = _applied;
+        _applied = placement;
+        var b = placement.Bounds;
+
+        if (previous is { } p && p.Window != placement.Window && placement.Window != 0)
+            Com.Check(Com.Call(_controller, ICoreWebView2Controller.put_ParentWindow, placement.Window), "put_ParentWindow");
+        if (previous?.Scale != placement.Scale)
+            Com.Check(Com.Call(_controller3, ICoreWebView2Controller3.put_RasterizationScale, (double)placement.Scale), "put_RasterizationScale");
+
+        // Bounds carry the page's true position in the window, though it renders at the
+        // visual's origin whatever they say: the browser places its own popups (a <select>,
+        // a date picker) and its input method against them.
+        var rect = new Native.RECT { Left = b.X, Top = b.Y, Right = b.Right, Bottom = b.Bottom };
+        Com.Check(Com.Call(_controller, ICoreWebView2Controller.put_Bounds, rect), "put_Bounds");
+        _capture!.Resize(b.Width, b.Height);
+    }
+
+    private void Fail(WebFailure kind, string message)
+    {
+        if (_phase is Phase.Failed or Phase.Disposed) return;
+        _phase = Phase.Failed;
+        Raise(new WebEngineEvent.Failed(kind, message));
+    }
+
+    public void SetVisible(bool visible)
+    {
+        _visible = visible;
+        if (_phase == Phase.Ready)
+            Com.Call(_controller, ICoreWebView2Controller.put_IsVisible, visible ? 1 : 0);
+    }
+
+    // ──── Events ────
+
+    private void On(nint source, int addSlot, int removeSlot, Guid handlerIid, Action<nint, nint> handler, string what)
+    {
+        var h = ComHandler.ForEvent(handlerIid, handler);
+        var token = Com.AddHandler(source, addSlot, h.Pointer, what);
+        _subscriptions.Add((h, source, removeSlot, token));
+    }
+
+    private void Subscribe()
+    {
+        On(_webview, ICoreWebView2.add_NavigationStarting, ICoreWebView2.remove_NavigationStarting,
+            ICoreWebView2NavigationStartingEventHandler.IID, OnNavigationStarting, "add_NavigationStarting");
+        On(_webview, ICoreWebView2.add_NavigationCompleted, ICoreWebView2.remove_NavigationCompleted,
+            ICoreWebView2NavigationCompletedEventHandler.IID, OnNavigationCompleted, "add_NavigationCompleted");
+        On(_webview, ICoreWebView2.add_SourceChanged, ICoreWebView2.remove_SourceChanged,
+            ICoreWebView2SourceChangedEventHandler.IID, (_, _) => Raise(new WebEngineEvent.SourceChanged(Source())), "add_SourceChanged");
+        On(_webview, ICoreWebView2.add_DocumentTitleChanged, ICoreWebView2.remove_DocumentTitleChanged,
+            ICoreWebView2DocumentTitleChangedEventHandler.IID,
+            (_, _) => Raise(new WebEngineEvent.TitleChanged(Com.GetString(_webview, ICoreWebView2.get_DocumentTitle, "get_DocumentTitle") ?? "")),
+            "add_DocumentTitleChanged");
+        On(_webview, ICoreWebView2.add_HistoryChanged, ICoreWebView2.remove_HistoryChanged,
+            ICoreWebView2HistoryChangedEventHandler.IID,
+            (_, _) => Raise(new WebEngineEvent.HistoryChanged(
+                Com.GetBool(_webview, ICoreWebView2.get_CanGoBack, "get_CanGoBack"),
+                Com.GetBool(_webview, ICoreWebView2.get_CanGoForward, "get_CanGoForward"))),
+            "add_HistoryChanged");
+        On(_webview, ICoreWebView2.add_WebMessageReceived, ICoreWebView2.remove_WebMessageReceived,
+            ICoreWebView2WebMessageReceivedEventHandler.IID, OnWebMessage, "add_WebMessageReceived");
+        On(_webview, ICoreWebView2.add_NewWindowRequested, ICoreWebView2.remove_NewWindowRequested,
+            ICoreWebView2NewWindowRequestedEventHandler.IID, OnNewWindow, "add_NewWindowRequested");
+        On(_webview, ICoreWebView2.add_ProcessFailed, ICoreWebView2.remove_ProcessFailed,
+            ICoreWebView2ProcessFailedEventHandler.IID, OnProcessFailed, "add_ProcessFailed");
+        On(_composition, ICoreWebView2CompositionController.add_CursorChanged, ICoreWebView2CompositionController.remove_CursorChanged,
+            ICoreWebView2CursorChangedEventHandler.IID,
+            (_, _) => Raise(new WebEngineEvent.CursorChanged(CursorFor(
+                Com.Get<uint>(_composition, ICoreWebView2CompositionController.get_SystemCursorId, "get_SystemCursorId")))),
+            "add_CursorChanged");
+        On(_controller, ICoreWebView2Controller.add_MoveFocusRequested, ICoreWebView2Controller.remove_MoveFocusRequested,
+            ICoreWebView2MoveFocusRequestedEventHandler.IID, OnMoveFocusRequested, "add_MoveFocusRequested");
+    }
+
+    private Uri? Source()
+    {
+        var text = Com.GetString(_webview, ICoreWebView2.get_Source, "get_Source");
+        return Uri.TryCreate(text, UriKind.Absolute, out var uri) ? uri : null;
+    }
+
+    private void OnNavigationStarting(nint sender, nint args)
+    {
+        var text = Com.GetString(args, ICoreWebView2NavigationStartingEventArgs.get_Uri, "get_Uri");
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return;   // nothing to ask about; allow
+        long id = (long)Com.Get<ulong>(args, ICoreWebView2NavigationStartingEventArgs.get_NavigationId, "get_NavigationId");
+        bool user = Com.GetBool(args, ICoreWebView2NavigationStartingEventArgs.get_IsUserInitiated, "get_IsUserInitiated");
+        bool redirect = Com.GetBool(args, ICoreWebView2NavigationStartingEventArgs.get_IsRedirected, "get_IsRedirected");
+
+        // WebView2 offers no deferral for this event: the answer has to be given before the
+        // handler returns. It can be, because WebView2 raises it on the UI thread and the
+        // controller answers there, synchronously, inside Raise.
+        bool cancel = false;
+        var request = new WebNavigationRequest(id, uri, user, redirect, allow => cancel = !allow);
+        Raise(new WebEngineEvent.NavigationStarting(request));
+        if (cancel) Com.Call(args, ICoreWebView2NavigationStartingEventArgs.put_Cancel, 1);
+    }
+
+    private void OnNavigationCompleted(nint sender, nint args)
+    {
+        bool ok = Com.GetBool(args, ICoreWebView2NavigationCompletedEventArgs.get_IsSuccess, "get_IsSuccess");
+        long id = (long)Com.Get<ulong>(args, ICoreWebView2NavigationCompletedEventArgs.get_NavigationId, "get_NavigationId");
+        int status = Com.Get<int>(args, ICoreWebView2NavigationCompletedEventArgs.get_WebErrorStatus, "get_WebErrorStatus");
+        int? http = null;
+        var args2 = Com.TryQueryInterface(args, ICoreWebView2NavigationCompletedEventArgs2.IID);
+        if (args2 != 0)
+        {
+            int code = Com.Get<int>(args2, ICoreWebView2NavigationCompletedEventArgs2.get_HttpStatusCode, "get_HttpStatusCode");
+            if (code != 0) http = code;
+            Com.Release(ref args2);
+        }
+        Raise(new WebEngineEvent.NavigationCompleted(id, ok, http, ok ? null : WebErrorText(status)));
+    }
+
+    private void OnWebMessage(nint sender, nint args)
+    {
+        var json = Com.GetString(args, ICoreWebView2WebMessageReceivedEventArgs.get_WebMessageAsJson, "get_WebMessageAsJson");
+        var source = Com.GetString(args, ICoreWebView2WebMessageReceivedEventArgs.get_Source, "get_Source");
+        if (json is not null) Raise(new WebEngineEvent.MessageReceived(json, OriginOf(source)));
+    }
+
+    private void OnNewWindow(nint sender, nint args)
+    {
+        // Refused here, always; the app decides what the address deserves.
+        Com.Call(args, ICoreWebView2NewWindowRequestedEventArgs.put_Handled, 1);
+        var text = Com.GetString(args, ICoreWebView2NewWindowRequestedEventArgs.get_Uri, "get_Uri");
+        bool user = Com.GetBool(args, ICoreWebView2NewWindowRequestedEventArgs.get_IsUserInitiated, "get_IsUserInitiated");
+        if (Uri.TryCreate(text, UriKind.Absolute, out var uri))
+            Raise(new WebEngineEvent.NewWindowRequested(uri, user));
+    }
+
+    private void OnProcessFailed(nint sender, nint args)
+    {
+        switch (Com.Get<int>(args, ICoreWebView2ProcessFailedEventArgs.get_ProcessFailedKind, "get_ProcessFailedKind"))
+        {
+            case 0:   // BROWSER_PROCESS_EXITED: every view of this environment is gone
+                Fail(WebFailure.EngineExited, "The WebView2 browser process exited.");
+                break;
+            case 1:   // RENDER_PROCESS_EXITED
+                Raise(new WebEngineEvent.ProcessFailed("The page's process exited.", CanReload: true));
+                break;
+            case 2:   // RENDER_PROCESS_UNRESPONSIVE
+                Raise(new WebEngineEvent.ProcessFailed("The page stopped responding.", CanReload: true));
+                break;
+            // Frame, utility, GPU and helper processes: WebView2 restarts those itself.
+        }
+    }
+
+    private void OnMoveFocusRequested(nint sender, nint args)
+    {
+        int reason = Com.Get<int>(args, ICoreWebView2MoveFocusRequestedEventArgs.get_Reason, "get_Reason");
+        if (reason is not (1 or 2)) return;                 // NEXT, PREVIOUS
+        Com.Call(args, ICoreWebView2MoveFocusRequestedEventArgs.put_Handled, 1);
+        Raise(new WebEngineEvent.FocusLeaving(Forward: reason == 1));
+    }
+
+    // ──── Commands ────
+
+    private void RequireReady()
+    {
+        if (_phase != Phase.Ready) throw new InvalidOperationException("The WebView2 page is not ready.");
+    }
+
+    public void Navigate(Uri uri)
+    {
+        RequireReady();
+        Com.Check(Com.CallString(_webview, ICoreWebView2.Navigate, uri.AbsoluteUri), "Navigate " + uri);
+    }
+
+    public void NavigateToString(string html)
+    {
+        RequireReady();
+        Com.Check(Com.CallString(_webview, ICoreWebView2.NavigateToString, html), "NavigateToString");
+    }
+
+    public void GoBack() { RequireReady(); Com.Call(_webview, ICoreWebView2.GoBack); }
+    public void GoForward() { RequireReady(); Com.Call(_webview, ICoreWebView2.GoForward); }
+    public void Reload() { RequireReady(); Com.Call(_webview, ICoreWebView2.Reload); }
+    public void Stop() { RequireReady(); Com.Call(_webview, ICoreWebView2.Stop); }
+
+    public Task<string> ExecuteScriptAsync(string script)
+    {
+        RequireReady();
+        var result = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ComHandler? handler = null;
+        handler = ComHandler.ForResult(ICoreWebView2ExecuteScriptCompletedHandler.IID, (hr, json) =>
+        {
+            handler!.Release();
+            if (hr < 0) result.TrySetException(new System.Runtime.InteropServices.COMException($"The script failed (0x{hr:X8}).", hr));
+            else result.TrySetResult(json == 0 ? "null" : new string((char*)json));
+        });
+        int call = Com.CallString(_webview, ICoreWebView2.ExecuteScript, script, handler.Pointer);
+        if (call < 0)
+        {
+            handler.Release();
+            result.TrySetException(new System.Runtime.InteropServices.COMException($"ExecuteScript failed (0x{call:X8}).", call));
+        }
+        return result.Task;
+    }
+
+    public void PostMessage(string json)
+    {
+        RequireReady();
+        Com.Check(Com.CallString(_webview, ICoreWebView2.PostWebMessageAsJson, json), "PostWebMessageAsJson");
+    }
+
+    // ──── Input ────
+
+    public void SendPointer(in WebPointerInput input)
+    {
+        if (_phase != Phase.Ready) return;
+        var (kind, data) = MouseEvent(input);
+        if (kind == 0) return;
+        var point = input.Action == WebPointerAction.Leave ? default : new Native.POINT { X = input.X, Y = input.Y };
+        ((delegate* unmanaged[Stdcall]<nint, int, int, uint, Native.POINT, int>)(*(nint**)_composition)[ICoreWebView2CompositionController.SendMouseInput])(
+            _composition, kind, VirtualKeys(input), data, point);
+    }
+
+    /// <summary>The COREWEBVIEW2_MOUSE_EVENT_KIND and mouse data for an input; kind 0 to skip.</summary>
+    internal static (int Kind, uint Data) MouseEvent(in WebPointerInput input)
+    {
+        bool dbl = input.ClickCount == 2;
+        uint x = input.Button switch { WebPointerButtons.Back => 1u, WebPointerButtons.Forward => 2u, _ => 0u };
+        return input.Action switch
+        {
+            WebPointerAction.Move => (512, 0),
+            WebPointerAction.Leave => (675, 0),
+            WebPointerAction.Wheel when input.WheelY != 0 => (522, unchecked((uint)(int)MathF.Round(input.WheelY * 120))),
+            // HorizontalWheel is positive to the right; HultUI's scroll sense is the reverse.
+            WebPointerAction.Wheel when input.WheelX != 0 => (526, unchecked((uint)(int)MathF.Round(-input.WheelX * 120))),
+            WebPointerAction.Down => input.Button switch
+            {
+                WebPointerButtons.Left => (dbl ? 515 : 513, 0),
+                WebPointerButtons.Right => (dbl ? 518 : 516, 0),
+                WebPointerButtons.Middle => (dbl ? 521 : 519, 0),
+                WebPointerButtons.Back or WebPointerButtons.Forward => (dbl ? 525 : 523, x),
+                _ => (0, 0),
+            },
+            WebPointerAction.Up => input.Button switch
+            {
+                WebPointerButtons.Left => (514, 0),
+                WebPointerButtons.Right => (517, 0),
+                WebPointerButtons.Middle => (520, 0),
+                WebPointerButtons.Back or WebPointerButtons.Forward => (524, x),
+                _ => (0, 0),
+            },
+            _ => (0, 0),
+        };
+    }
+
+    internal static int VirtualKeys(in WebPointerInput input)
+    {
+        int keys = 0;
+        if ((input.Held & WebPointerButtons.Left) != 0) keys |= 0x1;
+        if ((input.Held & WebPointerButtons.Right) != 0) keys |= 0x2;
+        if ((input.Modifiers & KeyModifiers.Shift) != 0) keys |= 0x4;
+        if ((input.Modifiers & KeyModifiers.Ctrl) != 0) keys |= 0x8;
+        if ((input.Held & WebPointerButtons.Middle) != 0) keys |= 0x10;
+        if ((input.Held & WebPointerButtons.Back) != 0) keys |= 0x20;
+        if ((input.Held & WebPointerButtons.Forward) != 0) keys |= 0x40;
+        return keys;
+    }
+
+    // Keys and text reach the page natively (NativeKeyboard).
+    public void SendKey(in WebKeyInput input) { }
+    public void SendText(in WebTextInput input) { }
+
+    public void Focus(FocusReason reason)
+    {
+        if (_phase != Phase.Ready) { _pendingFocus = reason; return; }
+        int code = reason switch { FocusReason.Next => 1, FocusReason.Previous => 2, _ => 0 };
+        Com.Call(_controller, ICoreWebView2Controller.MoveFocus, code);
+    }
+
+    public void Blur()
+    {
+        _pendingFocus = null;
+        if (_phase != Phase.Ready || _applied is not { Window: var window and not 0 }) return;
+        // Take keyboard focus back from WebView2's focus window; a click on the parent's own
+        // client area would not.
+        var focused = Native.GetFocus();
+        if (focused != 0 && focused != window && Native.IsChild(window, focused))
+            Native.SetFocus(window);
+    }
+
+    // ──── Mapping ────
+
+    /// <summary>A document's origin for message filtering; null for an opaque one.</summary>
+    internal static Uri? OriginOf(string? source)
+    {
+        if (!Uri.TryCreate(source, UriKind.Absolute, out var uri)) return null;
+        if (uri.Scheme is not ("http" or "https")) return null;
+        return new Uri(uri.GetLeftPart(UriPartial.Authority));
+    }
+
+    /// <summary>The cursor for a Win32 IDC_* resource id.</summary>
+    internal static CursorType CursorFor(uint id) => id switch
+    {
+        32513 => CursorType.Text,
+        32514 or 32650 => CursorType.Wait,
+        32515 => CursorType.Crosshair,
+        32649 => CursorType.Pointer,
+        32644 => CursorType.ResizeEW,
+        32645 => CursorType.ResizeNS,
+        32642 => CursorType.ResizeNWSE,
+        32643 => CursorType.ResizeNESW,
+        32646 => CursorType.Move,
+        32648 => CursorType.NotAllowed,
+        _ => CursorType.Default,
+    };
+
+    private static readonly string[] WebErrors =
+    [
+        "Unknown", "CertificateCommonNameIsIncorrect", "CertificateExpired", "ClientCertificateContainsErrors",
+        "CertificateRevoked", "CertificateIsInvalid", "ServerUnreachable", "Timeout", "HttpInvalidServerResponse",
+        "ConnectionAborted", "ConnectionReset", "Disconnected", "CannotConnect", "HostNameNotResolved",
+        "Cancelled", "RedirectFailed", "UnexpectedError", "ValidAuthenticationCredentialsRequired",
+        "ValidProxyAuthenticationRequired",
+    ];
+
+    /// <summary>COREWEBVIEW2_WEB_ERROR_STATUS as text; OPERATION_CANCELED reads "Cancelled", as the fake says.</summary>
+    internal static string WebErrorText(int status) =>
+        (uint)status < (uint)WebErrors.Length ? WebErrors[status] : $"Error {status}";
+
+    public void Dispose()
+    {
+        if (_phase == Phase.Disposed) return;
+        _phase = Phase.Disposed;
+        foreach (var (handler, source, removeSlot, token) in _subscriptions)
+        {
+            Com.RemoveHandler(source, removeSlot, token);
+            handler.Release();
+        }
+        _subscriptions.Clear();
+        _capture?.Dispose();
+        if (_controller != 0) Com.Call(_controller, ICoreWebView2Controller.Close);
+        Com.Release(ref _webview);
+        Com.Release(ref _controller3);
+        Com.Release(ref _controller);
+        Com.Release(ref _composition);
+    }
+}

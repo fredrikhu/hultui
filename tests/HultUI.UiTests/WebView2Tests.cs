@@ -1,0 +1,234 @@
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
+using HultUI.Core.Builders;
+using HultUI.Core.Rendering;
+using HultUI.Platform.SDL3;
+using HultUI.WebView;
+using HultUI.WebView.WebView2;
+using Xunit;
+
+namespace HultUI.UiTests;
+
+/// <summary>
+/// The WebView2 engine on a real window: the page renders offscreen into the captured
+/// visual and its pixels reach the sink, script and messages go both ways, a navigation
+/// the app refuses never happens, and pointer input sent to the page lands where it was
+/// aimed. Needs the WebView2 Runtime, and a desktop: the window takes the foreground.
+/// </summary>
+/// <remarks>
+/// xUnit runs tests on MTA threads, and WebView2 refuses them, so each test runs its body on
+/// a thread of its own marked STA — the thread the application is created on, and so its UI
+/// thread. Pages are string documents: no network is needed.
+/// </remarks>
+[Collection("ui")]
+public sealed class WebView2Tests
+{
+    private sealed class WebView2UiFactAttribute : FactAttribute
+    {
+        public WebView2UiFactAttribute()
+        {
+            if (!UiTestGate.Enabled) Skip = UiTestGate.Reason;
+            else if (!OperatingSystem.IsWindows()) Skip = "WebView2 is Windows-only.";
+            else if (new WebView2Engine().Availability is { IsAvailable: false } a) Skip = "WebView2 unavailable: " + a.Reason;
+        }
+    }
+
+    private static readonly string Profile = Path.Combine(Path.GetTempPath(), "hultui-webview2-tests");
+
+    /// <summary>Runs <paramref name="body"/> on a fresh STA thread and rethrows what it threw.</summary>
+    private static void OnSta(Action body)
+    {
+        ExceptionDispatchInfo? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { body(); }
+            catch (Exception ex) { failure = ExceptionDispatchInfo.Capture(ex); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        failure?.Throw();
+    }
+
+    private sealed class Page : IDisposable
+    {
+        public required Application App { get; init; }
+        public required WebView2Engine Engine { get; init; }
+        public required WebViewController Web { get; init; }
+
+        public bool PumpUntil(Func<bool> condition, double seconds = 20)
+        {
+            var deadline = Stopwatch.StartNew();
+            while (!condition())
+            {
+                if (deadline.Elapsed.TotalSeconds > seconds) return false;
+                App.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+                Thread.Sleep(1);
+            }
+            return true;
+        }
+
+        public T Await<T>(Task<T> task)
+        {
+            Assert.True(PumpUntil(() => task.IsCompleted), "the task never completed");
+            return task.GetAwaiter().GetResult();
+        }
+
+        /// <summary>The page's pixel at the given device-pixel position, as (R, G, B).</summary>
+        public (int R, int G, int B)? Pixel(int x, int y)
+        {
+            var frames = Web.Frames;
+            if (!frames.TryAcquire(out var frame)) return null;
+            try
+            {
+                if (x >= frame.Width || y >= frame.Height) return null;
+                int bgra = System.Runtime.InteropServices.Marshal.ReadInt32(frame.Pixels, y * frame.Stride + x * 4);
+                return ((bgra >> 16) & 0xFF, (bgra >> 8) & 0xFF, bgra & 0xFF);
+            }
+            finally { frames.Release(frame); }
+        }
+
+        public void Dispose()
+        {
+            Web.Dispose();
+            Engine.Dispose();
+            App.Dispose();
+        }
+    }
+
+    private static Page Open(string html)
+    {
+        var app = new Application(new SdlWindowingPlatform(), "WebView2", 480, 320);
+        var engine = new WebView2Engine();
+        var web = new WebViewController(engine, new WebViewOptions { UserDataFolder = Profile });
+        app.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
+        web.NavigateToString(html);
+        var page = new Page { App = app, Engine = engine, Web = web };
+        Assert.True(page.PumpUntil(() => web.State != WebViewState.Initializing), "the engine never became ready");
+        Assert.Equal(WebViewState.Ready, web.State);
+        return page;
+    }
+
+    [WebView2UiFact]
+    public void APage_RendersOffscreen_AndItsPixelsReachTheSink() => OnSta(() =>
+    {
+        using var page = Open("<html><head><title>Magenta</title></head><body style='margin:0;background:#ff00ff'></body></html>");
+
+        Assert.True(page.PumpUntil(() => page.Pixel(10, 10) == (255, 0, 255)),
+            $"the page's pixels never arrived; the sink holds {page.Pixel(10, 10)}");
+        Assert.True(page.PumpUntil(() => page.Web.Title == "Magenta"));
+        // A string document has no address of its own: WebView2 reports none, or about:blank.
+        Assert.True(page.Web.Source is null or { Scheme: "about" or "data" }, $"source was {page.Web.Source}");
+    });
+
+    [WebView2UiFact]
+    public void ThePage_IsCompositedIntoTheWindow() => OnSta(() =>
+    {
+        // The sink holding the page proves the capture; this proves the element draws it:
+        // the window's front buffer, read back through GL, shows the page's colour.
+        using var page = Open("<html><body style='margin:0;background:#00c060'></body></html>");
+        Assert.True(page.PumpUntil(() => page.Pixel(10, 10) == (0, 192, 96)), "the page's pixels never arrived");
+        for (int i = 0; i < 5; i++) page.App.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+        var gl = new GL();
+        var viewport = new int[4];
+        gl.GetIntegerv(0x0BA2 /* GL_VIEWPORT */, viewport);
+        gl.ReadBuffer(0x0404 /* GL_FRONT */);
+        var px = new byte[4];
+        gl.ReadPixels(viewport[2] / 2, viewport[3] / 2, 1, 1, 0x1908 /* RGBA */, 0x1401 /* UNSIGNED_BYTE */, px);
+        Assert.True(px[0] < 8 && Math.Abs(px[1] - 192) <= 8 && Math.Abs(px[2] - 96) <= 8,
+            $"the window's middle was ({px[0]},{px[1]},{px[2]}), expected the page's (0,192,96)");
+    });
+
+    /// <summary>GL 1.1 entry points, which opengl32.dll exports directly; they act on the current context.</summary>
+    private sealed class GL
+    {
+        public GL()
+        {
+            var opengl32 = System.Runtime.InteropServices.NativeLibrary.Load("opengl32.dll");
+            T Load<T>(string name) where T : Delegate =>
+                System.Runtime.InteropServices.Marshal.GetDelegateForFunctionPointer<T>(System.Runtime.InteropServices.NativeLibrary.GetExport(opengl32, name));
+            ReadBuffer = Load<ReadBufferFn>("glReadBuffer");
+            ReadPixels = Load<ReadPixelsFn>("glReadPixels");
+            GetIntegerv = Load<GetIntegervFn>("glGetIntegerv");
+        }
+
+        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] public delegate void ReadBufferFn(uint mode);
+        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] public delegate void ReadPixelsFn(int x, int y, int width, int height, uint format, uint type, byte[] pixels);
+        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] public delegate void GetIntegervFn(uint pname, int[] data);
+
+        public ReadBufferFn ReadBuffer;
+        public ReadPixelsFn ReadPixels;
+        public GetIntegervFn GetIntegerv;
+    }
+
+    [WebView2UiFact]
+    public void ScriptAndMessages_GoBothWays() => OnSta(() =>
+    {
+        using var page = Open("""
+            <html><body><script>
+              chrome.webview.postMessage({ hello: 1 });
+              chrome.webview.addEventListener('message', e => document.title = 'got ' + e.data.n);
+            </script></body></html>
+            """);
+        var received = new List<WebMessage>();
+        page.Web.MessageReceived += received.Add;
+
+        Assert.Equal("3", page.Await(page.Web.ExecuteScriptAsync("1 + 2")));
+
+        // The page posted on load, maybe before the handler above; ask it again to be sure.
+        page.Web.ExecuteScriptAsync("chrome.webview.postMessage({ hello: 2 })");
+        Assert.True(page.PumpUntil(() => received.Any(m => m.Json.Contains("\"hello\":2"))), "no message from the page");
+        Assert.Null(received.Last().Origin);   // a string document's origin is opaque
+
+        page.Web.PostMessage("{\"n\":7}");
+        Assert.True(page.PumpUntil(() => page.Web.Title == "got 7"), $"the page never got the message; title '{page.Web.Title}'");
+    });
+
+    [WebView2UiFact]
+    public void ANavigationTheAppRefuses_NeverHappens() => OnSta(() =>
+    {
+        using var page = Open("<html><body>start</body></html>");
+        Assert.True(page.PumpUntil(() => !page.Web.IsLoading));
+        var before = page.Web.Source;
+        WebNavigationResult? result = null;
+        page.Web.NavigationStarting += r => { if (r.Uri.Host == "blocked.test") r.Cancel(); };
+        page.Web.NavigationCompleted += r => result = r;
+
+        page.Web.Navigate(new Uri("https://blocked.test/"));
+
+        Assert.True(page.PumpUntil(() => result is not null), "the refused navigation never completed");
+        Assert.False(result!.IsSuccess);
+        Assert.Equal(before, page.Web.Source);
+    });
+
+    [WebView2UiFact]
+    public void AClickSentToThePage_LandsWhereItWasAimed() => OnSta(() =>
+    {
+        using var page = Open("""
+            <html><body style='margin:0'>
+              <div id=left style='position:absolute;left:0;top:0;width:50%;height:100%'></div>
+              <div id=right style='position:absolute;left:50%;top:0;width:50%;height:100%'></div>
+              <script>
+                for (const id of ['left', 'right'])
+                  document.getElementById(id).onclick = () => chrome.webview.postMessage(id);
+              </script>
+            </body></html>
+            """);
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => page.Pixel(1, 1) is not null), "no frame");
+        int width = page.Web.Frames.IntrinsicSize.Width is var w and > 0 ? (int)w : 480;
+
+        var view = page.Web.View;
+        foreach (var x in new[] { width / 4, width * 3 / 4 })
+        {
+            view.SendPointer(new WebPointerInput(WebPointerAction.Move, x, 40));
+            view.SendPointer(new WebPointerInput(WebPointerAction.Down, x, 40, WebPointerButtons.Left, WebPointerButtons.Left, 1));
+            view.SendPointer(new WebPointerInput(WebPointerAction.Up, x, 40, WebPointerButtons.Left, WebPointerButtons.None, 1));
+        }
+
+        Assert.True(page.PumpUntil(() => received.Count >= 2), $"clicks received: {string.Join(", ", received)}");
+        Assert.Equal(["\"left\"", "\"right\""], received.Take(2));
+    });
+}

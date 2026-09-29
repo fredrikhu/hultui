@@ -56,6 +56,7 @@
     <Project Path="src/HultUI.Media/HultUI.Media.csproj" />
     <Project Path="src/HultUI.Media.Mpv/HultUI.Media.Mpv.csproj" />
     <Project Path="src/HultUI.WebView/HultUI.WebView.csproj" />
+    <Project Path="src/HultUI.WebView.WebView2/HultUI.WebView.WebView2.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Aperture.Tests/Aperture.Tests.csproj" />
@@ -78,6 +79,7 @@
     <Project Path="tests/HultUI.Samples.VideoPlayer.Tests/HultUI.Samples.VideoPlayer.Tests.csproj" />
     <Project Path="tests/HultUI.Samples.ProceduralVideo.Tests/HultUI.Samples.ProceduralVideo.Tests.csproj" />
     <Project Path="tests/HultUI.WebView.Tests/HultUI.WebView.Tests.csproj" />
+    <Project Path="tests/HultUI.WebView.Engines.Tests/HultUI.WebView.Engines.Tests.csproj" />
     <Project Path="tests/HultUI.Samples.WebView.Tests/HultUI.Samples.WebView.Tests.csproj" />
     <Project Path="tests/HultUI.Platform.Accessibility.Linux.Tests/HultUI.Platform.Accessibility.Linux.Tests.csproj" />
     <Project Path="tests/VesperCommander.Tests/VesperCommander.Tests.csproj" />

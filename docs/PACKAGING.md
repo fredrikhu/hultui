@@ -10,7 +10,7 @@ references become exact-version package dependencies automatically.
 dotnet pack HultUI.slnx -c Release -o artifacts/packages
 ```
 
-produces sixteen packages plus symbol packages (snupkg):
+produces seventeen packages plus symbol packages (snupkg):
 
 | Package | What it is |
 |---|---|
@@ -26,6 +26,7 @@ produces sixteen packages plus symbol packages (snupkg):
 | `HultUI.Media.Mpv` | The libmpv backend. Bindings and `MpvBackend` only; the native library is the consumer's, per its README. |
 | `HultUI.Media.Mpv.Natives` | The trimmed LGPL libmpv itself, under `runtimes/<rid>/native/`. **Not in the solution**: it packs only after `native/mpv/build-libmpv.sh` has produced the binaries, from the `mpv natives` workflow, and errors otherwise. |
 | `HultUI.WebView` | A web page as an element, without a browser: the engine contract, the reactive `WebViewController`, `WebViewElement`, and a fake engine for tests. An engine is a separate package (WebView2 on Windows, WPE WebKit on Linux — `docs/design/WEBVIEW.md`). |
+| `HultUI.WebView.WebView2` | The Windows engine: Edge WebView2 in visual hosting, captured into the page's frames. Hand-written COM, NativeAOT-clean. Brings `WebView2Loader.dll` (Microsoft's package, native assets only); the WebView2 Runtime is the user's (Windows 11 ships it). |
 | `HultUI.Icons`, `HultUI.Syntax`, `HultUI.Themes` | Satellite libraries. |
 | `HultUI.SourceGenerators` | The generator/analyzers standalone, for Core-only projects. Development dependency; no lib output, no symbols package. |
 
@@ -90,7 +91,7 @@ binding follows the key's position rather than its printed letter.
 ## The documentation site
 
 `docfx.json` builds the guides in this folder plus an API reference harvested
-from the XML doc comments — thirteen of the sixteen packable projects, listed
+from the XML doc comments — fourteen of the seventeen packable projects, listed
 explicitly — into `artifacts/docs`. The generated API pages land in `docs/api/`, which is ignored;
 nothing generated is committed.
 
