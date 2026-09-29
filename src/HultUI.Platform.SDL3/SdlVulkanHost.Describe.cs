@@ -9,9 +9,9 @@ namespace HultUI.Platform.SDL3;
 /// <para>The GL version answers "which driver, which swap interval, how many samples" —
 /// questions you ask when a machine renders differently from the one beside it. The Vulkan
 /// version answers those and one more that matters for <c>docs/design/HDR.md</c>: which
-/// formats and colour spaces this surface will actually accept. Phase 3 has to pick an HDR
-/// one, and whether there is one to pick is a property of the display, the compositor and
-/// the driver together — not something to assume from a specification.</para>
+/// formats and colour spaces this surface will actually accept. <c>ChooseFormat</c> picks
+/// from this list, and whether it holds an HDR one is a property of the display, the
+/// compositor and the driver together — not something to assume from a specification.</para>
 /// </summary>
 internal sealed unsafe partial class SdlVulkanHost
 {

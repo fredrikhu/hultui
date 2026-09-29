@@ -9,7 +9,7 @@ public enum BackendCapabilities
     None = 0,
     /// <summary>Delivers frames as pixels through the sink's <see cref="IVideoSink.Pixels"/>.</summary>
     PixelFrames = 1 << 0,
-    /// <summary>Renders on the GPU through an <see cref="IGpuFrameRenderer"/> when the surface is GL.</summary>
+    /// <summary>Renders on the GPU through an <see cref="IGpuFrameRenderer"/> when the surface runs external GL.</summary>
     GpuFrames = 1 << 6,
     /// <summary>Opens <see cref="MediaSourceKind.Uri"/> sources.</summary>
     Uris = 1 << 1,
@@ -28,7 +28,7 @@ public enum VideoSinkMode
 {
     /// <summary>Nothing has been drawn yet, so the surface kind is not known.</summary>
     Undecided,
-    /// <summary>The backend renders on the GPU into a framebuffer the sink owns (a GL surface).</summary>
+    /// <summary>The backend renders on the GPU into the sink's or the surface's framebuffer (a surface that runs external GL).</summary>
     Gpu,
     /// <summary>The backend writes pixels into <see cref="IVideoSink.Pixels"/> (a raster or headless surface).</summary>
     Pixels,
@@ -39,7 +39,7 @@ public enum VideoSinkMode
 /// in <see cref="IMediaBackend.Attach"/>. Two modes: pixels into
 /// <see cref="Pixels"/> from any thread, which every backend can do; and, for a
 /// backend that registers an <see cref="IGpuFrameRenderer"/>, rendering into a GPU
-/// framebuffer when the surface is GL. Which one applies is only known once the
+/// framebuffer when the surface runs external GL. Which one applies is only known once the
 /// element is first drawn — the renderer hears about it through
 /// <see cref="IGpuFrameRenderer.OnModeDecided"/>.
 /// </summary>
@@ -51,7 +51,7 @@ public interface IVideoSink
     /// <summary>
     /// Registers a GPU renderer. Call from <see cref="IMediaBackend.Attach"/>; the
     /// player then draws through a <see cref="GpuFrameSink"/> that calls the renderer on
-    /// a GL surface and reads <see cref="Pixels"/> elsewhere.
+    /// a surface that runs external GL and reads <see cref="Pixels"/> elsewhere.
     /// </summary>
     void UseGpuRenderer(IGpuFrameRenderer renderer);
 

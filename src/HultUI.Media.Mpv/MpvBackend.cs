@@ -8,9 +8,10 @@ using static HultUI.Media.Mpv.Mpv;
 namespace HultUI.Media.Mpv;
 
 /// <summary>
-/// An <see cref="IMediaBackend"/> over one libmpv instance. Commands go straight to
-/// mpv on the caller's thread (its API is thread-safe); mpv's events are read on a
-/// thread of the backend's own and forwarded as <see cref="BackendEvent"/>s; frames
+/// An <see cref="IMediaBackend"/> over one libmpv instance. Commands are queued to mpv
+/// without waiting, because the UI thread is also mpv's render thread; mpv's events and the
+/// commands' replies are read on a thread of the backend's own and forwarded as
+/// <see cref="BackendEvent"/>s; frames
 /// come through the render API — into the sink's GL framebuffer on the render
 /// thread, or as pixels into the sink's ring from a worker, whichever the surface
 /// asked for first.
@@ -90,7 +91,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // then the -copy methods "auto-copy" would have used, so it is never worse. On NVIDIA
         // the bundled libmpv lands on nvdec with CUDA interop, on both platforms; elsewhere on
         // Windows it lands on d3d11va-copy, because the DirectX interops would bridge at eight
-        // bits and stay disabled (docs/design/HDR.md, zero-copy section).
+        // bits and stay disabled (docs/design/HDR.md, Decode).
         //
         // "auto-safe" rather than "auto": the same on mpv 0.40 and later, but on an older
         // distribution libmpv loaded through HULTUI_MPV_PATH, "auto" skips the whitelist and
@@ -586,21 +587,6 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     public float ReferenceWhiteNits => _colour.ReferenceWhiteNits;
 
     /// <summary>
-    /// Tells mpv what it is drawing into, after <see cref="MpvTargetColour.Update"/> said it
-    /// changed.
-    ///
-    /// <para>There is no render parameter for this — <c>mpv_opengl_fbo</c> carries a
-    /// framebuffer, a size and an internal format, and no <c>MPV_RENDER_PARAM</c> names a
-    /// colour space, which is why <c>target-colorspace-hint</c> has never done anything
-    /// through this API. The options are the way in, and they do reach libplacebo: an encoded
-    /// mid-grey of 0.502 comes back at 0.192 under <c>target-trc=linear</c>, which is that
-    /// value decoded through gamma 2.4.</para>
-    ///
-    /// <para>Without <c>target-peak</c> nothing exceeds 1.0 however the transfer is set, so
-    /// this is the option that decides whether HDR content keeps its range or is tone-mapped
-    /// away before it reaches the target.</para>
-    /// </summary>
-    /// <summary>
     /// <c>HULTUI_MPV_OPTIONS</c>: extra mpv options, <c>name=value</c> pairs separated by
     /// <c>;</c>, set before initialisation. Diagnostic: it is how a test clip is told what it is
     /// when its container cannot say — a Y4M of BT.2020 colour bars carries no primaries, and
@@ -621,6 +607,21 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         }
     }
 
+    /// <summary>
+    /// Tells mpv what it is drawing into, after <see cref="MpvTargetColour.Update"/> said it
+    /// changed.
+    ///
+    /// <para>There is no render parameter for this — <c>mpv_opengl_fbo</c> carries a
+    /// framebuffer, a size and an internal format, and no <c>MPV_RENDER_PARAM</c> names a
+    /// colour space, which is why <c>target-colorspace-hint</c> has never done anything
+    /// through this API. The options are the way in, and they do reach libplacebo: an encoded
+    /// mid-grey of 0.502 comes back at 0.192 under <c>target-trc=linear</c>, which is that
+    /// value decoded through gamma 2.4.</para>
+    ///
+    /// <para>Without <c>target-peak</c> nothing exceeds 1.0 however the transfer is set, so
+    /// this is the option that decides whether HDR content keeps its range or is tone-mapped
+    /// away before it reaches the target.</para>
+    /// </summary>
     private void ApplyTargetColour()
     {
         // Asynchronously, and this is not a detail. These run on the render thread inside a

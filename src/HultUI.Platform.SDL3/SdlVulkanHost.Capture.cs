@@ -12,8 +12,8 @@ namespace HultUI.Platform.SDL3;
 /// front of it. So the only honest evidence is the swapchain image itself, read back the way
 /// the phase 0 spike read back its own.</para>
 ///
-/// <para>Set <c>HULTUI_VULKAN_CAPTURE</c> to a path and the next presented frame is written
-/// there as a PPM, once, and the run carries on. Diagnostic only: it stalls the queue and
+/// <para>Set <c>HULTUI_VULKAN_CAPTURE</c> to a path and the first presented frame that reuses
+/// a swapchain image is written there as a PPM, once per swapchain, and the run carries on. Diagnostic only: it stalls the queue and
 /// allocates a staging buffer per capture.</para>
 /// </summary>
 internal sealed unsafe partial class SdlVulkanHost

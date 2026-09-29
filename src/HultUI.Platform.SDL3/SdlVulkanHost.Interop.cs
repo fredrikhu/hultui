@@ -388,13 +388,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     /// Orders what GL wrote before what Vulkan is about to read, and takes the image back
     /// from the external queue.
     ///
-    /// <para>Both halves are the blunt kind. <c>glFinish</c> waits for everything GL has, and
-    /// the barrier is submitted and waited on rather than signalled through a shared
-    /// semaphore. Measured at 0.27 ms a frame at 1080p and 0.29 at 4K — the same number at
-    /// four times the pixels, because it is the cost of a submit rather than of the image —
-    /// against the 175 ms a second the copy it replaces costs.
-    /// <c>VK_KHR_external_semaphore</c> would remove the wait; the measurement is what says
-    /// it is an optimisation rather than a precondition.</para>
+    /// <para>With a shared semaphore, GL signals it and the barrier submit waits on it on the
+    /// GPU, from a ring of command buffers with a fence each, so the CPU does not block. Without
+    /// one, <c>glFinish</c> and a waited one-shot submit order it instead: correct, and 0.74 to
+    /// 5.33 ms a frame under a 4K decode.</para>
     /// </summary>
     public void FinishExternalFrame()
     {
@@ -471,7 +468,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
 
     /// <summary>
     /// <c>HULTUI_VULKAN_FINISH_TRACE=1</c> splits what ordering a real video frame costs into
-    /// the <c>glFinish</c> and the barrier submit that follows it.
+    /// the GL hand-over (<c>glFinish</c>, or the semaphore signal) and the barrier submit that
+    /// follows it.
     ///
     /// <para>The spike measured this at 0.27 ms a frame and that number was taken as settled.
     /// It was measured against a <c>glClear</c> on an otherwise idle GPU, which is not what a
@@ -837,10 +835,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     }
 
     /// <summary>
-    /// <c>HULTUI_VIDEO_HDR_PROBE=&lt;n&gt;</c> reads the shared image back through GL on the
-    /// nth frame and says what the producer actually wrote into it.
+    /// <c>HULTUI_VIDEO_HDR_PROBE=&lt;n&gt;</c> reads the shared image back through GL every nth
+    /// frame, six times, and says what the producer actually wrote into it.
     ///
-    /// <para>One frame, once, because the read is the whole image — 53 MB at 4K — and stalls.
+    /// <para>Six samples because one can land on a black frame, which reads exactly like a
+    /// producer writing nothing; no more, because the read is the whole image — 53 MB at 4K —
+    /// and stalls.
     /// It exists because the two numbers this pipeline reports are answers to different
     /// questions: the swapchain report is taken after Skia has composited, and a missing range
     /// there could be the producer never making one or the renderer losing it.</para>

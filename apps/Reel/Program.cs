@@ -74,7 +74,7 @@ internal static class ReelProgram
         // present an HDR swapchain, and the only one that carries sixteen bits a channel from
         // the decoder to the screen. See docs/design/HDR.md.
         //
-        // It is not free — roughly 120 ms more to the first frame and more CPU through a window
+        // It is not free — roughly 130 ms more to the first frame and more CPU through a window
         // resize, both measured there — and a library view showing no video pays that too. For a
         // film player that is the right way round: the cost is once at launch, the benefit is
         // every frame of every film. HULTUI_RENDERER=gl goes back if a machine needs it.

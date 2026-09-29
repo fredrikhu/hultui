@@ -8,7 +8,7 @@ namespace HultUI.Platform.SDL3;
 /// whichever context is current when this is constructed.
 ///
 /// <para>Hand-rolled rather than taken from a binding package, for the reason the rest of the
-/// tree gives: fifteen functions do not justify a dependency, and the ones that matter here
+/// tree gives: a few dozen functions do not justify a dependency, and the ones that matter here
 /// are extensions (<c>GL_EXT_memory_object</c> and its platform halves) that a general
 /// binding would hide behind a loader of its own.</para>
 ///
@@ -358,18 +358,14 @@ internal sealed unsafe class InteropGl
         _importSemaphoreFd(semaphore, HandleTypeOpaqueFd, fd);
 
     /// <summary>
-    /// Signals the semaphore once everything GL has issued for this texture is done, and
-    /// hands the texture over in SHADER_READ_ONLY.
+    /// Signals the semaphore once everything GL has issued for this texture is done, hands the
+    /// texture over in SHADER_READ_ONLY, and flushes so the signal is actually submitted.
     ///
-    /// <para>This is the whole point: it orders GL against Vulkan on the GPU, where
-    /// <c>glFinish</c> did it by blocking the CPU until the work finished — 0.74 to 5.33 ms a
-    /// frame on a 4K decode.</para>
-    /// </summary>
-    /// <summary>
-    /// Signals the semaphore once GL's work on the texture is done, and flushes so the signal
-    /// is actually submitted. A Vulkan wait on a binary semaphore needs the signal already
-    /// submitted, and nothing else on this path flushes: the context stays current, so no
-    /// context switch does it implicitly.
+    /// <para>This orders GL against Vulkan on the GPU, where <c>glFinish</c> did it by blocking
+    /// the CPU until the work finished — 0.74 to 5.33 ms a frame on a 4K decode. The flush is
+    /// needed because a Vulkan wait on a binary semaphore needs the signal already submitted,
+    /// and nothing else on this path flushes: the context stays current, so no context switch
+    /// does it implicitly.</para>
     /// </summary>
     public void SignalSemaphore(uint semaphore, uint texture)
     {

@@ -55,11 +55,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <c>HULTUI_VULKAN_PRESENT</c> pins the present mode to <c>immediate</c>, <c>mailbox</c>
     /// or <c>fifo</c>; unset leaves the choice to <see cref="ChoosePresentMode"/>.
     ///
-    /// <para>It exists because a window dragged by its edge visibly stretches its old
-    /// contents before snapping to a correct frame, and presentation is the only candidate
-    /// left: the throttle draws the same number of frames on both renderers, a swapchain
-    /// rebuild costs a millisecond, and nothing accumulates. A mode this surface does not
-    /// offer is ignored rather than fatal — the point is to compare, not to insist.</para>
+    /// <para>It exists to compare present modes. IMMEDIATE let the compositor stretch a
+    /// window's old contents during an edge drag, which is why MAILBOX is the default. A mode
+    /// this surface does not offer is ignored rather than fatal — the point is to compare, not
+    /// to insist.</para>
     /// </summary>
     private static readonly VkPresentModeKHR? PresentModeOverride =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_PRESENT")?.ToLowerInvariant() switch
@@ -246,12 +245,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public bool SdrIsGamma22 { get; set; }
 
     /// <summary>
-    /// The display's peak luminance, from <c>HULTUI_VULKAN_PEAK_NITS</c> or zero.
+    /// The display's peak luminance: set by the window from what the display reports, and
+    /// overridden by <c>HULTUI_VULKAN_PEAK_NITS</c>.
     ///
-    /// <para>There is no query behind this. Windows gives an SDR white level and no peak, and
-    /// this SDL binding exposes no HDR headroom, so a number here can only come from the
-    /// person running it. Zero means "unknown" rather than "dark", and a producer told zero
-    /// assumes rather than believes.</para>
+    /// <para>Zero means "unknown" rather than "dark", and a producer told zero assumes rather
+    /// than believes.</para>
     /// </summary>
     public float DisplayPeakNits
     {
@@ -354,9 +352,6 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         BuildSwapchain(widthPx, heightPx);
     }
 
-    /// <summary>The first device with a queue that can both draw and present to this
-    /// surface, preferring a discrete one. A queue that can do only one of the two is no
-    /// use here and the separate-queue arrangement is not worth its complexity.</summary>
     /// <summary>Whether the loader offers an instance extension, asked before the instance
     /// exists — which is the only time it can be asked and the only time it matters.</summary>
     private static bool HasInstanceExtension(string name)
@@ -405,6 +400,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (rebuilding) RecreateSwapchain(_widthPx, _heightPx);
     }
 
+    /// <summary>The first device with a queue that can both draw and present to this
+    /// surface, preferring a discrete one. A queue that can do only one of the two is no
+    /// use here and the separate-queue arrangement is not worth its complexity.</summary>
     private void PickPhysicalDevice()
     {
         uint count = 0;
@@ -658,8 +656,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageColorSpace = colorSpace,
             imageExtent = extent,
             imageArrayLayers = 1,
-            // TransferDst as well as ColorAttachment: Skia wants it for the clear path, and
-            // a swapchain image without it fails GRBackendRenderTarget validation.
+            // What the surface allows of SwapchainUsage. Skia needs COLOR_ATTACHMENT and
+            // TRANSFER_SRC, checked above; see SwapchainUsage.
             imageUsage = (VkImageUsageFlags)_usage,
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
@@ -977,10 +975,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <summary>
     /// <c>HULTUI_VULKAN_ACQUIRE_TRACE=1</c> reports what the acquire wait actually costs.
     ///
-    /// <para>The class comment has said since phase 1 that this backend stalls the CPU once a
-    /// frame. Half of that was true and is now gone — the queue drain after Skia submitted was
-    /// replaced by a semaphore the present waits on. What is left is this fence, and whether it
-    /// is worth replacing depends on a number nobody has taken.</para>
+    /// <para>The acquire waits on a fence because SkiaSharp exposes nothing to hand a semaphore
+    /// to. Measured at 0.0064 ms a frame (see the class note), so it stays; this is for
+    /// measuring it again on another driver.</para>
     /// </summary>
     private static readonly bool AcquireStallTrace =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_ACQUIRE_TRACE") == "1";
@@ -1101,7 +1098,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// are already big enough for the new window size, nothing is reallocated: the window size is
     /// simply recorded, and the next frame draws into the same images and presents a smaller
     /// top-left region of them. A drag that only shrinks the window never rebuilds at all, and
-    /// one that grows rebuilds when it crosses a bucket.</para>
+    /// one that grows rebuilds when it crosses a bucket. Only with
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c>: by default every new size rebuilds.</para>
     ///
     /// <para>No device wait either, because nothing is being destroyed — that wait was there to
     /// make it safe to throw the old images away.</para>

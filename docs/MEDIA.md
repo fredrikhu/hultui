@@ -100,17 +100,30 @@ reason. A backend of your own must do the same; a plain producer that only publi
 frames and posts is fine, because nothing in a frame waits for it. See
 [THREADING.md](THREADING.md).
 
+**The converse: the UI thread must never wait for a decoder that is waiting for it.** In GPU
+mode the UI thread is the render thread, and mpv's core waits up to 200 ms after every load and
+seek for it to draw the first frame. So `MpvBackend` queues every command
+(`mpv_command_async`, `mpv_set_property_async`) and takes a frame that arrives before the
+video's size is known without drawing it (`IGpuFrameRenderer.SkipFrame`). A synchronous seek
+used to freeze the window for 200 ms on nearly every step of a scrub. A backend of your own
+with the same kind of wait needs both.
+
 **`Window.SetRoot` does not unmount the old tree.** A `VideoElement` in a swapped-out
 root keeps listening for frames until it is collected. Rebuild a component instead of
 swapping roots, or dispose the player.
 
 **On the Vulkan renderer a video is handed a target the renderer owns, and it is not
-8-bit sRGB.** `HULTUI_RENDERER=vulkan` composites Vulkan images, so it cannot draw a GL
-texture a source made for itself: it lends one instead, through
+8-bit sRGB.** An app that plays HDR video asks for that renderer with
+`new Application(..., renderer: RendererKind.Vulkan)`, as Reel and Aperture do, and
+`HULTUI_RENDERER` overrides the choice either way. It composites Vulkan images, so it cannot
+draw a GL texture a source made for itself: it lends one instead, through
 `IExternalGLSurface.TryAcquireFrameTarget`, backed by an `RGBA16F` image shared with a
 hidden GL context. On an HDR display that target also asks for **linear light with its
 range intact**, and the frame comes back saying what its 1.0 means in nits
-(`GpuFrame.ReferenceWhiteNits`).
+(`GpuFrame.ReferenceWhiteNits`). It also asks for **wide gamut** (`GpuFrameTarget.WideGamut`):
+colours outside BT.709 kept as negative values, which the scRGB swapchain shows as the colours
+they are. mpv takes these as target options, set asynchronously, and the backend labels a
+frame with the settings mpv has confirmed rather than the ones it was asked for.
 
 A producer that ignores all this keeps working — it writes encoded pixels, reports a
 reference white of zero, and is composited as before. But a producer that renders into
@@ -156,7 +169,11 @@ stderr. See [ENVIRONMENT.md](ENVIRONMENT.md).
 
 The backend sets `hwdec=auto-safe`, `keep-open=yes` and disables mpv's own OSC,
 terminal and youtube-dl hooks; a trimmed build without those options is fine, they are
-set best-effort.
+set best-effort. **On NVIDIA the bundled libmpv decodes zero-copy** on Windows and Linux:
+NVDEC with CUDA interop, which keeps ten bits and never copies a frame through main memory
+(the VO line reads `cuda[p010]`). Elsewhere on Windows it decodes on the GPU and copies
+(`d3d11va-copy`), because the DirectX interops would bridge at 8 bits. `HULTUI_MPV_HWDEC`
+overrides the mode.
 
 ## Testing
 

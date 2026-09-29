@@ -3,8 +3,9 @@ namespace HultUI.Core.Rendering;
 /// <summary>
 /// A render surface that lets foreign code draw with OpenGL inside the frame — a
 /// video decoder rendering into a texture the renderer then composites. Implemented
-/// by the GL-backed Skia surface; a raster surface is not one, and a producer drawn
-/// on it must fall back to <see cref="IPixelImageSource"/>.
+/// by the GL-backed Skia surface, and by the Vulkan one, which shares an image with a
+/// hidden GL context when the driver allows it. A raster surface is not one, and a
+/// producer drawn on it must fall back to <see cref="IPixelImageSource"/>.
 /// </summary>
 public interface IExternalGLSurface : IRenderSurface
 {

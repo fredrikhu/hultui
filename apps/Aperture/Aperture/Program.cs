@@ -34,7 +34,7 @@ internal static class ApertureProgram
         // synchronously, on this thread.
         //
         // Vulkan, because Aperture plays HDR video and only Vulkan can present it — see
-        // docs/design/HDR.md. It costs roughly 120 ms more to the first frame and more CPU
+        // docs/design/HDR.md. It costs roughly 130 ms more to the first frame and more CPU
         // through a resize, which the library browser pays without using; the trade is accepted
         // for the same reason as Reel's, that the point of the app is on the other side of it.
         // HULTUI_RENDERER=gl goes back if a machine needs it.

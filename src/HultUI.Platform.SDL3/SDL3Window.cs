@@ -40,8 +40,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     private SDL_GLContextState* _glContext;
     private SkiaGLRenderSurface? _surface;
 
-    /// <summary>The Vulkan path, when HULTUI_RENDERER=vulkan selected it. Exactly one of
-    /// this and <see cref="_surface"/> is ever non-null. Phase 1 of docs/design/HDR.md.</summary>
+    /// <summary>The Vulkan path, when the app asked for it or HULTUI_RENDERER=vulkan did (see
+    /// <see cref="UseVulkan"/>). Exactly one of this and <see cref="_surface"/> is ever
+    /// non-null. Phase 1 of docs/design/HDR.md.</summary>
     private SkiaVulkanRenderSurface? _vulkanSurface;
     private SdlVulkanHost? _vulkanHost;
 
@@ -952,12 +953,6 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     }
 
     /// <summary>
-    /// Describes the GL configuration this window actually got (not what was
-    /// requested): renderer/vendor/version strings, SDL video driver, achieved
-    /// swap interval, default-framebuffer MSAA samples, and the drawable
-    /// geometry. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
-    /// </summary>
-    /// <summary>
     /// Whether the display this window is on is <i>currently</i> in HDR mode.
     ///
     /// <para>Not the same question as "can the surface do HDR". A Vulkan surface lists every
@@ -1018,10 +1013,11 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     /// Win+Alt+B and nothing for the slider), so SDR windows beside this one followed it live
     /// and this one kept the old brightness until it was restarted.</para>
     ///
-    /// <para>On Windows 11 22H2 and later the trigger is WinRT's
+    /// <para>When the app or <c>HULTUI_DISPLAY_INFORMATION=1</c> turns on display-colour
+    /// events (Windows 11 22H2 and later), the trigger is WinRT's
     /// <c>AdvancedColorInfoChanged</c>, which fires within milliseconds of each step of a drag —
-    /// see <see cref="WindowsDisplayInformation"/>. Elsewhere, and wherever that cannot be had,
-    /// the display configuration is polled every 100 ms: a poll costs about 12 µs (median of
+    /// see <see cref="WindowsDisplayInformation"/>. Otherwise the display configuration is
+    /// polled every 100 ms: a poll costs about 12 µs (median of
     /// 300; 69 µs at worst), and the loop wakes every 16 ms when idle anyway. A poll a second
     /// trailed a dragged slider visibly; 100 ms still did, a little.</para>
     /// </summary>
@@ -1151,9 +1147,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             ? forced : null;
 
     /// <summary>
-    /// HDR state, white scale and peak for the display this window is on, from the best source
-    /// available: Windows' own <c>DisplayInformation</c> where it exists (Windows 11 22H2 and
-    /// later, see <see cref="WindowsDisplayInformation"/>), otherwise the display configuration
+    /// HDR state, white scale and peak for the display this window is on: from Windows' own
+    /// <c>DisplayInformation</c> when display-colour events are on (Windows 11 22H2 and later,
+    /// see <see cref="WindowsDisplayInformation"/>), otherwise from the display configuration
     /// and SDL.
     ///
     /// <para><c>DisplayInformation</c> gives all three in one answer, including the peak as an
@@ -1175,8 +1171,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         return (hdr, WhiteScale(), PeakNitsFor(hdr));
     }
 
-    /// <summary>Windows' <c>DisplayInformation</c> for this window, when the OS has it and
-    /// this is a Vulkan window — the only kind with a format and a white scale to keep right.</summary>
+    /// <summary>Windows' <c>DisplayInformation</c> for this window, when the OS has it,
+    /// display-colour events are on, and this is a Vulkan window — the only kind with a format
+    /// and a white scale to keep right.</summary>
     private WindowsDisplayInformation? _displayInformation;
 
     /// <summary>Set by the <c>DisplayInformation</c> event, cleared when the event loop applies
@@ -1197,6 +1194,13 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             && string.Equals(SDL_GetCurrentVideoDriver(), "wayland", StringComparison.Ordinal),
     };
 
+    /// <summary>
+    /// Describes the graphics configuration this window actually got (not what was
+    /// requested). On GL: renderer/vendor/version strings, SDL video driver, achieved
+    /// swap interval, default-framebuffer MSAA samples, and the drawable geometry. On
+    /// Vulkan: the device, present mode, format and colour space, and the display's HDR
+    /// state. See <see cref="IPlatformWindow.DescribeGraphics"/> for why.
+    /// </summary>
     public string? DescribeGraphics()
     {
         if (_window == null) return null;
@@ -1455,8 +1459,9 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     {
         if (_preloadStarted) return;
         if (Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") != "1") return;
-        // Nothing to warm: a Vulkan window never loads the GL driver, so preloading it
-        // would be pure cost — and Reel turns the preload on by itself on Windows.
+        // Nothing to warm: a Vulkan window never loads the GL driver at start-up (only for its
+        // first video frame), so preloading it would be pure cost — and Reel turns the preload
+        // on by itself on Windows.
         if (UseVulkan) return;
         _preloadStarted = true;
 

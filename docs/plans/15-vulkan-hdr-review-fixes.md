@@ -48,10 +48,10 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 8.4 | UI-thread mpv commands without waiting on the core | 8 | Done — scrub seeks 200 ms → under 1 ms |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Done |
 | 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Done — Windows; UiTests do not run on Linux |
-| 10.1 | Stale code comments | 10 | Todo |
-| 10.2 | ENVIRONMENT.md | 10 | Todo |
-| 10.3 | HDR.md split into a current design and a dated log | 10 | Todo |
-| 10.4 | MEDIA.md, Mpv README, Natives README | 10 | Todo |
+| 10.1 | Stale code comments | 10 | Done |
+| 10.2 | ENVIRONMENT.md | 10 | Done |
+| 10.3 | HDR.md split into a current design and a dated log | 10 | Done |
+| 10.4 | MEDIA.md, Mpv README, Natives README | 10 | Done |
 
 ## Phase 1 — Apps that ask for Vulkan must still start
 
@@ -592,6 +592,26 @@ manual check.
   fallback that was never exercised".
 - **10.4 MEDIA.md, Mpv README, Natives README.** `RendererKind`, the Vulkan video path, NVIDIA
   zero-copy on Windows.
+
+**Done (2026-09-29).**
+- **10.1:** an agent audited the Vulkan, HDR and mpv code comments against the code, and each
+  finding was checked before editing. About 30 fixed across 17 files: the per-image cache, "stalls
+  on purpose", the peak with "no query", "SDR and sRGB", "982 nits", `ColorSpaceFor`'s "not yet
+  here", the dangling `STARTUP.md` link (now `NATIVE-AOT.md`), five stacked or orphaned summaries
+  (one of them from 8.2), comments calling the GPU path GL-only, and one unresolved cref. Three
+  leads found nothing stale: zero-copy, validation and IMMEDIATE were already current in code.
+- **10.2:** the parsing rule stated once and per row where it differs (four values ignore case),
+  rows added for `HULTUI_VULKAN_ACQUIRE_TRACE`, `_FINISH_TRACE`, `_CAPTURE_FRAME` and
+  `_WHITE_SCALE`, `HULTUI_MPV_HWDEC` moved under Media, the present-mode resize numbers taken from
+  HDR.md's table after the throttle fix, and 982 corrected to 1000 nits.
+- **10.3:** `HDR.md` is now the current design in 362 lines: why Vulkan, how a frame gets to the
+  screen, invariants, defaults, costs (one value per quantity), what is not done, the phases, and
+  Traps. The Traps gain the two named here and a fifth shape, waits that only a timeout ends (8.1,
+  8.3, 8.4). The old document moved with its history to `HDR-LOG.md`, under a header listing what
+  later work overturned. The run sheets beside it are left as dated records.
+- **10.4:** `docs/MEDIA.md` (choosing Vulkan in code, wide gamut, NVIDIA zero-copy, the
+  render-thread rule for a backend of one's own), `docs/design/MEDIA.md` (the Vulkan frame path and
+  what was built), and both READMEs.
 
 ## Process
 
