@@ -71,6 +71,90 @@ public sealed class MpvGLTests
         }
     }
 
+    /// <summary>
+    /// After every load, mpv's core waits up to 200 ms for its first frame to be rendered, and on
+    /// a window the thread that renders is the UI thread. Without a size that thread could not
+    /// take the frame, and the size is read from the core, which was waiting. mpv's timeout ended
+    /// it, and mpv counts a frame that timed out as dropped. The file is opened after the render
+    /// context exists, as a second file is, so the UI thread is free when the frame arrives.
+    /// </summary>
+    [MpvUiFact]
+    public void Opening_AndReopening_TakesTheFirstFrameAtOnce()
+    {
+        string clip = TestClip.WriteTempY4m(64, 36, fps: 10, frames: 20);
+        try
+        {
+            using var app = new Application(new SdlWindowingPlatform(), "mpv", 320, 200);
+            var backend = new MpvBackend();
+            using var player = new MediaPlayer(backend);
+            app.SetRoot(Box.New().Background(Color.White).Width(320f).Height(200f).Children(
+                Video.New(player).Width(320f).Height(180f)));
+            for (int i = 0; i < 3; i++) app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+            for (int open = 1; open <= 2; open++)
+            {
+                player.Open(MediaSource.FromFile(clip));
+                RunUntil(app, () => player.State == PlaybackState.Paused);
+                for (int i = 0; i < 5; i++) app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+                Assert.True(backend.Peek("frame-drop-count") == 0, $"open {open}: mpv timed out waiting for its first frame");
+            }
+        }
+        finally
+        {
+            File.Delete(clip);
+        }
+    }
+
+    /// <summary>
+    /// After every seek mpv's core waits for the first frame to be rendered, by the UI thread
+    /// here. A seek that waited for the core therefore waited for the UI thread itself, until
+    /// mpv's 200 ms timeout. Scrubbing at the rate a mouse drag sends seeks froze the window
+    /// for 200 ms on nearly every one. No frame is drawn between these seeks, so from the second
+    /// on, the core is waiting whenever one is sent.
+    /// </summary>
+    [MpvUiFact]
+    public void Seeks_NeverWaitForMpvsCore()
+    {
+        string clip = TestClip.WriteTempY4m(64, 36, fps: 10, frames: 20);
+        try
+        {
+            using var app = new Application(new SdlWindowingPlatform(), "mpv", 320, 200);
+            var backend = new MpvBackend();
+            using var player = new MediaPlayer(backend);
+            app.SetRoot(Box.New().Background(Color.White).Width(320f).Height(200f).Children(
+                Video.New(player).Width(320f).Height(180f)));
+            player.Open(MediaSource.FromFile(clip));
+            RunUntil(app, () => player.State == PlaybackState.Paused);
+            for (int i = 0; i < 5; i++) app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+
+            var slowest = TimeSpan.Zero;
+            for (int i = 0; i < 8; i++)
+            {
+                long start = Stopwatch.GetTimestamp();
+                player.Seek(TimeSpan.FromSeconds(0.3 + i * 0.1));
+                var took = Stopwatch.GetElapsedTime(start);
+                if (took > slowest) slowest = took;
+                Thread.Sleep(30);
+            }
+            Assert.True(slowest < TimeSpan.FromMilliseconds(100), $"the slowest seek took {slowest.TotalMilliseconds:F0} ms");
+
+            // And the last one lands once frames are drawn again.
+            RunUntil(app, () => Math.Abs(backend.Peek("time-pos") - 1.0) < 0.15);
+        }
+        finally
+        {
+            File.Delete(clip);
+        }
+    }
+
+    private static void RunUntil(Application app, Func<bool> condition)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (!condition() && deadline.Elapsed < TimeSpan.FromSeconds(20))
+            app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        Assert.True(condition(), "timed out");
+    }
+
     /// <summary>GL 1.1 entry points, which opengl32.dll exports directly; they act on the current context.</summary>
     private sealed class GL
     {

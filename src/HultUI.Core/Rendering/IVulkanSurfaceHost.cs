@@ -9,8 +9,9 @@ namespace HultUI.Core.Rendering;
 /// <param name="Layout">Its current <c>VkImageLayout</c>, as the raw enum value.</param>
 /// <param name="WidthPx">Width in device pixels.</param>
 /// <param name="HeightPx">Height in device pixels.</param>
-/// <param name="Index">Which image of the swapchain this is, so the renderer can keep one
-/// wrapped surface per image rather than rebuilding every frame.</param>
+/// <param name="Index">Which image of the swapchain this is. The renderer wraps the image
+/// afresh every frame whichever it is: a cached wrapper keeps a layout the image no longer
+/// has.</param>
 /// <param name="Usage">The <c>VkImageUsageFlags</c> the swapchain was created with. Skia
 /// validates the render target against them, so guessing here fails in a way that looks
 /// like the driver refusing the image.</param>
@@ -48,7 +49,7 @@ public interface IVulkanSurfaceHost
     /// <c>VK_MAKE_API_VERSION</c> packs it.</summary>
     uint ApiVersion { get; }
 
-    /// <summary>How many images the swapchain has, so the renderer can size its cache.</summary>
+    /// <summary>How many images the swapchain has.</summary>
     int ImageCount { get; }
 
     /// <summary>
@@ -90,11 +91,10 @@ public interface IVulkanSurfaceHost
     /// <summary>
     /// What this display can show at its brightest, in nits, or zero when nobody knows.
     ///
-    /// <para>Zero is the honest answer today on both platforms: Windows reports an SDR white
-    /// level but no peak, and SDL's binding here exposes neither <c>SDR_WHITE_POINT</c> nor
-    /// <c>HDR_HEADROOM</c>. A producer told zero assumes a common mastering peak instead,
-    /// which is wrong on any particular monitor and cannot currently be made right.
-    /// <c>HULTUI_VULKAN_PEAK_NITS</c> overrides it for a machine whose peak is known.</para>
+    /// <para>The window sets it from Windows' <c>DisplayInformation</c> when display-colour
+    /// events are on, and otherwise from SDL's HDR headroom times the SDR white. Zero means the
+    /// display did not say, and a producer told zero assumes a common mastering peak instead.
+    /// <c>HULTUI_VULKAN_PEAK_NITS</c> overrides it for a display that reports wrongly.</para>
     /// </summary>
     float DisplayPeakNits => 0f;
 
@@ -167,7 +167,7 @@ public readonly record struct VulkanInteropImage(
 ///
 /// <para>It is separate from <see cref="IVulkanSurfaceHost"/> because it is optional in a way
 /// the swapchain is not. A host that cannot do it still renders; a video on such a host goes
-/// the software route it goes today, which works and costs twice the CPU. Nothing here is on
+/// the software route instead, which works and costs far more CPU. Nothing here is on
 /// the path of a window that never shows video.</para>
 ///
 /// <para><b>Why a Vulkan renderer needs this at all.</b> mpv renders with OpenGL and nothing
@@ -182,8 +182,8 @@ public interface IVulkanInteropHost
     /// creating the hidden context, checking it landed on the same GPU as the Vulkan device,
     /// checking the driver offers the external-memory extensions.
     ///
-    /// <para>Deliberately not done at start-up. Loading a GL driver costs around 130 ms (see
-    /// <c>docs/design/STARTUP.md</c>) and most windows never show a video; this runs on the
+    /// <para>Deliberately not done at start-up. Loading a GL driver costs around 150 ms (see
+    /// <c>docs/NATIVE-AOT.md</c>) and most windows never show a video; this runs on the
     /// first frame that actually wants it. Asked more than once, it answers from cache.</para>
     /// </summary>
     bool TryEnableInterop();
@@ -205,12 +205,10 @@ public interface IVulkanInteropHost
     /// Orders what GL just wrote before what Vulkan is about to read, and hands the image
     /// back to the Vulkan queue. No-op when nothing is lent.
     ///
-    /// <para><b>This stalls, on purpose.</b> <c>glFinish</c> and a queue wait are the blunt
-    /// instrument; <c>VK_KHR_external_semaphore</c> with <c>GL_EXT_semaphore</c> is the sharp
-    /// one. The blunt one was measured first — 0.27 ms a frame at 1080p and 0.29 at 4K, flat
-    /// across resolutions because it is the price of a submit rather than of the image — which
-    /// is 7 ms of every second at 24 fps against the 175 ms the copy it replaces costs. So
-    /// semaphores are an optimisation here and not a precondition.</para>
+    /// <para>With a shared semaphore, GL signals it and the Vulkan barrier waits on it on the
+    /// GPU, so the CPU does not block. Without one it falls back to <c>glFinish</c> and a queue
+    /// wait, which is correct and costs: 0.74 to 5.33 ms a frame under a 4K decode, and 156 ms of
+    /// CPU a second against the semaphore's 62.</para>
     /// </summary>
     void FinishExternalFrame();
 }

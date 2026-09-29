@@ -5,7 +5,15 @@ Execution plan for addressing feedback from the Git client sample
 
 ## Current Step
 
-> **All plans complete.**
+> **Plan 15, Vulkan and HDR review fixes** — in progress; its own Status table tracks the items.
+
+## Phase 7 — Vulkan and HDR review
+
+From the 2026-09-28 review of the Vulkan renderer and HDR video work.
+
+| # | Plan | Status |
+|---|------|--------|
+| 15 | [Vulkan and HDR review fixes](15-vulkan-hdr-review-fixes.md) | In progress |
 
 ## Phase 6 — External review follow-ups
 

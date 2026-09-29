@@ -354,6 +354,23 @@ fires under the caller). That frame was in `Render`, waiting for mpv's thread, w
 was waiting for the lock: a deadlock on every fourth or so toggle. The hop breaks
 the cycle for any renderer; see THREADING.md.
 
+The UI thread never waits on mpv's core, because the core can be waiting for the
+UI thread. After every load and seek it waits, for up to 200 ms, for the first
+frame to be rendered, and in GPU mode the UI thread renders. Two cycles were found
+the hard way, each ending in mpv's timeout and a "render() not being called or
+stuck" line:
+- **Commands.** A synchronous `seek` sent while the core waited blocked for the full
+  timeout, so scrubbing froze the window on nearly every seek. Every command and
+  property the UI thread sends is now `mpv_command_async` or
+  `mpv_set_property_async`, answered on the event thread. mpv runs them in order,
+  but a synchronous read can overtake them.
+- **The first frame.** The render path needs the video's size, which is read from
+  the core, which is waiting for the frame. `SkipFrame` takes the frame with
+  `MPV_RENDER_PARAM_SKIP_RENDERING`, and the first render with a size draws it.
+  Reopening a file went from about 600 ms to 3–8 ms.
+
+Plan 15 (items 8.1, 8.3 and 8.4) has the measurements.
+
 - No package dependency. Hand-written `LibraryImport` bindings for the ~40 entry
   points the backend uses (`mpv_create`, `mpv_initialize`, `mpv_command`,
   `mpv_set/get_property`, `mpv_observe_property`, `mpv_wait_event`,
@@ -362,7 +379,10 @@ the cycle for any renderer; see THREADING.md.
 - Frame path: `mpv_render_context_create` with the OpenGL API type and
   `GetProcAddress` from S2; `mpv_render_context_set_update_callback` posts
   dirty+wake; `GpuFrameSink.RenderFrame` calls `mpv_render_context_render` into
-  the sink's FBO inside `RunExternalGL`. On a raster/headless surface it uses the
+  the sink's FBO inside `RunExternalGL`. On the Vulkan renderer the surface lends the
+  target instead: an `RGBA16F` image shared with a hidden GL context, which carries
+  sixteen bits and, on an HDR display, linear light (phase 4 and 5 of
+  `docs/design/HDR.md`). On a raster/headless surface it uses the
   `sw` render API into a `PixelFrameSink` instead, which makes mpv testable
   headlessly with real media.
 - Natives: none on NuGet. The package documents where a build comes from; a
@@ -414,11 +434,11 @@ the project would own.
 | | LibVLCSharp (libvlc 3) | Trimmed libmpv |
 |---|---|---|
 | Decode + demux | VLC's own modules plus FFmpeg; the broadest set of any player | FFmpeg (statically bundled) plus dav1d |
-| Hardware decode | DXVA2/D3D11VA, VAAPI/VDPAU, VideoToolbox. With the memory output the frame is **copied back to system memory and colour-converted on the CPU** (swscale). **Verify** which hwdec modes survive the vmem output on each OS | `d3d11va-copy` / `nvdec` / VAAPI / VideoToolbox. Frames stay NV12 until mpv's GPU shaders convert them; on Windows with desktop GL the copy-back variants are the norm, `nvdec` is zero-copy on NVIDIA |
+| Hardware decode | DXVA2/D3D11VA, VAAPI/VDPAU, VideoToolbox. With the memory output the frame is **copied back to system memory and colour-converted on the CPU** (swscale). **Verify** which hwdec modes survive the vmem output on each OS | `d3d11va-copy` / `nvdec` / VAAPI / VideoToolbox. Frames stay NV12 until mpv's GPU shaders convert them; on Windows with desktop GL the copy-back variants are the norm, `nvdec` is zero-copy on NVIDIA. *As built:* the trimmed build has NVDEC with CUDA interop, zero-copy on NVIDIA on both platforms, and `d3d11va-copy` elsewhere on Windows |
 | Frame delivery to HultUI | CPU RGBA buffers via `SetVideoCallbacks`: one memcpy per frame into a sink slot, then one GPU upload by Skia | Rendered straight into our FBO on the GL thread; Skia composites the texture. No CPU pixels at all on the GL backend |
 | 4K60 feasibility | Doubtful: 33 MB/frame of RGBA through swscale and two copies. 1080p60 is comfortable | Expected fine; scaling and conversion are GPU work |
 | Scaling quality | Skia's linear/mipmap sampling of an RGBA bitmap | mpv's own scalers (spline36, ewa_lanczos), debanding, dithering, interpolation |
-| HDR content | No tone mapping in the vmem path; HDR sources look washed out | Tone-mapped to SDR by libplacebo, correct colours |
+| HDR content | No tone mapping in the vmem path; HDR sources look washed out | Tone-mapped to SDR by libplacebo, correct colours. *As built:* on the Vulkan renderer with an HDR display, passed through as linear light tone-mapped to the display's peak (`docs/design/HDR.md`) |
 | Subtitles | libass; also DVB, teletext, CEA-608/708 | libass; CEA-608/708 through FFmpeg |
 | Audio output | Own: WASAPI/DirectSound, PulseAudio/ALSA, CoreAudio | Own: WASAPI, PulseAudio/PipeWire/ALSA, CoreAudio, SDL |
 | Playback rate | Yes, pitch-corrected (scaletempo) | Yes, pitch-corrected (scaletempo2, better) |

@@ -225,7 +225,7 @@ Components expose lifecycle hooks that you can override:
 | Method | When it runs |
 |---|---|
 | `OnMount()` | After the component is first mounted into the tree |
-| `OnUnmount()` | When the component is removed from the tree |
+| `OnUnmount()` | When the component, or any element it sits under, is removed from the tree |
 | `OnBeforeBuild()` | Immediately before each `Build()` call |
 | `OnAfterBuild()` | Immediately after each `Build()` call |
 

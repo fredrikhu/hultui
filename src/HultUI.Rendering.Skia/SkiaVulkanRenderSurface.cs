@@ -9,15 +9,15 @@ namespace HultUI.Rendering.Skia;
 ///
 /// <para>Phase 1 of <c>docs/design/HDR.md</c>. It exists because HDR needs an HDR-capable
 /// swapchain and OpenGL on Windows cannot ask for one; Vulkan can, on Windows and Linux
-/// both. This phase is deliberately <b>SDR and sRGB</b> — the aim is output indistinguishable
-/// from <see cref="SkiaGLRenderSurface"/>, so that everything after it is a change of colour
-/// handling rather than a change of renderer.</para>
+/// both. On an SDR display it draws 8-bit sRGB, indistinguishable from
+/// <see cref="SkiaGLRenderSurface"/>; on an HDR display it draws scRGB, with the UI's white
+/// at the display's SDR white and video carrying its HDR range.</para>
 ///
 /// <para><b>How it differs from the GL surface.</b> A GL frame has no beginning: Skia draws
 /// into framebuffer 0 whenever it likes and the platform swaps buffers afterwards. A Vulkan
 /// frame has to acquire an image from the swapchain first, and that image is one of several
-/// that rotate. So the surface is not one <see cref="SKSurface"/> but a small cache of them,
-/// one per swapchain image, rebuilt whenever the swapchain is.</para>
+/// that rotate. So each frame wraps the acquired image in a fresh render target and surface,
+/// dropped at the end of the frame.</para>
 ///
 /// <para>This assembly knows nothing about Vulkan beyond what SkiaSharp needs, which is
 /// handles and integers. <see cref="IVulkanSurfaceHost"/> is the whole of the contract.</para>
@@ -48,8 +48,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     /// <summary>
     /// Where the frame is drawn when the swapchain needs values past 1 — see
-    /// <see cref="ColorSpaceFor"/>. Plain 0..1 linear sRGB, so a glyph and a fill agree,
-    /// and multiplied once on the way to the swapchain.
+    /// <see cref="ColorSpaceFor"/>. Plain 0..1 linear sRGB, or sRGB-encoded under a gamma-2.2
+    /// compositor (see <see cref="_offscreenEncoded"/>), so a glyph and a fill agree, and
+    /// multiplied once on the way to the swapchain.
     /// </summary>
     private SKSurface? _offscreen;
     private SKPaint? _blit;
@@ -79,6 +80,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private bool? _tracedLinear;
     private SKColorFilter? _frameScale;
     private float _frameScaleFor;
+    private bool _frameScaleEncoded;
 
     public IRenderContext RenderContext => _renderContext;
     public IMeasureContext MeasureContext => _text.MeasureContext;
@@ -134,10 +136,25 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     private IVulkanInteropHost? Interop => _host as IVulkanInteropHost;
 
-    /// <summary>The image lent out this frame, so that <see cref="WrapFrame"/> knows what it
-    /// is wrapping — the <see cref="GpuFrame"/> itself carries GL names, which name nothing
+    /// <summary>The image lent out this frame, so that
+    /// <see cref="ISkiaExternalSurface.WrapFrame"/> knows what it is wrapping — the
+    /// <see cref="GpuFrame"/> itself carries GL names, which name nothing
     /// a Vulkan renderer can draw.</summary>
     private VulkanInteropImage? _lent;
+
+    /// <summary>
+    /// Whether the shared image has been lent in the frame now open.
+    ///
+    /// <para><b>Once per frame</b>, because there is one shared image per window and Skia reads
+    /// it only when the frame flushes. A second GPU video source in the same frame would have
+    /// rendered over the first one's picture before either was drawn. Worse, at another size it
+    /// would have made the host destroy and recreate the image under a draw already recorded
+    /// against it. A second lend is now refused, so that source draws nothing, and the first
+    /// stays correct. Nothing in the tree has two GPU video sources in one window today (Reel's
+    /// scrubber stills are files); a real second one needs an image per source.</para>
+    /// </summary>
+    private bool _lentThisFrame;
+    private bool _tracedSecondLend;
 
     /// <inheritdoc />
     /// <remarks>
@@ -178,15 +195,20 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
     {
         target = default;
+        if (_lentThisFrame)
+        {
+            if (!_tracedSecondLend && StartupTrace.Enabled)
+                StartupTrace.Mark("video: a second GPU source in one frame is not supported on Vulkan; it draws nothing");
+            _tracedSecondLend = true;
+            return false;
+        }
         if (Interop?.LendInteropImage(width, height) is not { } image) return false;
 
         _lent = image;
+        _lentThisFrame = true;
         // Linear light only where it can survive. An 8-bit sRGB swapchain has no room above
         // white, and the offscreen that carries the extra range exists only for scRGB — ask a
         // producer for HDR into an SDR target and it comes out clipped rather than bright.
-        // Only on an scRGB swapchain: an 8-bit sRGB one has no room above white, and a
-        // producer asked for HDR into it returns something clipped rather than something
-        // bright.
         bool linear = HdrVideoEnabled && _frameColorSpace == VkColorSpaceExtendedSrgbLinear;
         if (linear != _tracedLinear && StartupTrace.Enabled)
         {
@@ -196,9 +218,28 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         }
 
         target = new GpuFrameTarget(image.GlFramebuffer, image.GlTexture, image.GlInternalFormat,
-            WantsLinearLight: linear, PeakNits: linear ? _host.DisplayPeakNits : 0f);
+            WantsLinearLight: linear,
+            PeakNits: linear
+                ? HdrVideoLuminance.ProducerPeakNits(_host.DisplayPeakNits, _host.SdrWhiteScale, MatchVideoWhiteToUi)
+                : 0f,
+            WideGamut: linear && WideGamutEnabled);
         return true;
     }
+
+    /// <summary>
+    /// Whether the scRGB target is offered to the producer as wide-gamut:
+    /// <c>HULTUI_VIDEO_WIDE_GAMUT=0</c> turns it off.
+    ///
+    /// <para>scRGB carries a colour outside BT.709 as negative channel values, and every step
+    /// from the shared image to the swapchain is half-float and keeps them — the offscreen, the
+    /// blit, the scaled colour space, and on the gamma-2.2 path the encode and decode, which
+    /// preserve the sign for exactly this. Measured with BT.2020 colour bars through mpv: asked
+    /// for wide gamut, the green bar arrives as (-0.26, 0.50, -0.04), the BT.2020→709 matrix
+    /// exactly; not asked, as (0, 0.41, 0.12), pulled inside BT.709 and shifted toward cyan.
+    /// The in-gamut controls come out identical either way.</para>
+    /// </summary>
+    private static readonly bool WideGamutEnabled =
+        Environment.GetEnvironmentVariable("HULTUI_VIDEO_WIDE_GAMUT") != "0";
 
     /// <summary>
     /// The lent image as something the canvas can draw.
@@ -261,8 +302,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     }
 
     /// <summary>
-    /// A new size means a new swapchain, and a new swapchain means every wrapped surface
-    /// names an image that no longer exists. They go first, deliberately: destroying a
+    /// A new size may mean a new swapchain, and a new swapchain means this frame's wrapped
+    /// surface names an image that no longer exists. It goes first, deliberately: destroying a
     /// swapchain while Skia still holds render targets over its images is a use-after-free
     /// that the validation layers catch and a release build does not.
     ///
@@ -299,6 +340,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameColorSpace = frame.ColorSpace;
         _renderContext.SetCanvas((OffscreenFor(frame) ?? surface).Canvas);
         _frameOpen = true;
+        _lentThisFrame = false;
         return true;
     }
 
@@ -363,11 +405,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         // is not that. Most Windows surfaces offer BGRA first.
         // With an encoded offscreen the swapchain is tagged the same as it, so the blit reaches
         // the swapchain unconverted and the shader's own decoding is the only one applied.
-        var space = frame.ColorSpace == VkColorSpaceExtendedSrgbLinear && _host.SdrIsGamma22
-            ? SKColorSpace.CreateSrgb()
-            : UseScaledSpace(frame)
-                ? ScaledLinear(_host.SdrWhiteScale)
-                : ColorSpaceFor(frame.ColorSpace);
+        var space = PathFor(frame) switch
+        {
+            ScRgbFramePath.EncodedOffscreen => SKColorSpace.CreateSrgb(),
+            ScRgbFramePath.ScaledSpace => ScaledLinear(_host.SdrWhiteScale),
+            _ => ColorSpaceFor(frame.ColorSpace),
+        };
         var surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.TopLeft,
             ColorTypeFor(frame.Format), space);
         if (surface is null)
@@ -387,8 +430,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     ///
     /// <para>On by default because the alternative is incoherent: a renderer that went to the
     /// trouble of picking an HDR swapchain and then asked the decoder for a tone-mapped SDR
-    /// picture has thrown away the only thing the swapchain was for. Measured on a film
-    /// mastered at 1000 nits, a highlight reaches the screen at 982.</para>
+    /// picture has thrown away the only thing the swapchain was for. On a film mastered at
+    /// 1000 nits, with mpv told a 1000-nit peak, the shared image reaches 4.926 (1000/203) and
+    /// the swapchain 12.5, which is 1000 nits; on a dimmer panel mpv tone-maps to its peak.</para>
     ///
     /// <para>The off switch is for a driver that mishandles it, the same reason
     /// <c>HULTUI_VULKAN_INTEROP=0</c> exists. Nothing else is affected: a producer that does
@@ -430,22 +474,24 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     {
         if (!frame.IsLinearLight) return null;
 
-        float canvasWhiteNits = _host.SdrWhiteScale * ScRgbReferenceNits;
-        float scale = MatchVideoWhiteToUi || canvasWhiteNits <= 0f
-            ? 1f
-            : frame.ReferenceWhiteNits / canvasWhiteNits;
+        float scale = HdrVideoLuminance.FrameScale(frame.ReferenceWhiteNits, _host.SdrWhiteScale,
+            MatchVideoWhiteToUi);
 
-        // An encoded offscreen needs the 2.2 encoding whatever the scale, so never null there.
-        if (Math.Abs(scale - 1f) < 0.001f && !_offscreenEncoded) return null;
-        if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f) return _frameScale;
+        if (!HdrVideoLuminance.NeedsFrameFilter(scale, _offscreenEncoded)) return null;
+        if (_frameScale is not null && Math.Abs(scale - _frameScaleFor) < 0.001f
+            && _frameScaleEncoded == _offscreenEncoded)
+            return _frameScale;
 
         _frameScale?.Dispose();
         _frameScaleFor = scale;
+        _frameScaleEncoded = _offscreenEncoded;
         // A shader, not a colour matrix: the matrix clamps at 1 and an HDR frame is made of
         // the values above it. Alpha is left alone — the video is opaque and scaling it would
-        // make the frame translucent in exactly the bright places.
+        // make the frame translucent in exactly the bright places. The 2.2 encode keeps the
+        // sign: a wide-gamut frame holds colours outside BT.709 as negative values, and
+        // clamping them at zero here is the gamut mapping WideGamutEnabled exists to avoid.
         using var effect = SKRuntimeEffect.CreateColorFilter(_offscreenEncoded
-            ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb * k, half3(0)), half3(1.0 / 2.2)), c.a); }"
+            ? "uniform half k; half4 main(half4 c) { half3 v = c.rgb * k; return half4(sign(v) * pow(abs(v), half3(1.0 / 2.2)), c.a); }"
             : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
         if (effect is null) { _frameScale = null; return null; }
 
@@ -453,10 +499,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameScale = effect.ToColorFilter(uniforms);
         return _frameScale;
     }
-
-    /// <summary>scRGB fixes 1.0 at 80 nits. Everything luminance-related here is relative to
-    /// that, which is why it is a named constant rather than an 80 in three expressions.</summary>
-    private const float ScRgbReferenceNits = 80f;
 
     /// <summary>
     /// The offscreen to draw into this frame, or null when the swapchain can be drawn on
@@ -466,55 +508,75 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private SKSurface? OffscreenFor(in VulkanFrameTarget frame)
     {
         // A 2.2 decode is needed even at a white scale of 1, and only the offscreen can do it.
-        bool encoded = _host.SdrIsGamma22;
-        if (frame.ColorSpace != VkColorSpaceExtendedSrgbLinear
-            || (_host.SdrWhiteScale <= 1.0001f && !encoded)
-            // The scaled destination colour space already applied the white scale as the frame
-            // was drawn, so a second multiply here would square it.
-            || UseScaledSpace(frame))
+        // The scaled destination colour space already applied the white scale as the frame was
+        // drawn, so an offscreen as well would square it.
+        var path = PathFor(frame);
+        if (path is not (ScRgbFramePath.Offscreen or ScRgbFramePath.EncodedOffscreen))
         {
             ReleaseOffscreen();
             return null;
         }
+        bool encoded = path == ScRgbFramePath.EncodedOffscreen;
 
-        if (_offscreen is not null && _offscreenWidth == frame.WidthPx && _offscreenHeight == frame.HeightPx
-            && _offscreenEncoded == encoded)
-            return _offscreen;
+        if (_offscreen is null || _offscreenWidth != frame.WidthPx || _offscreenHeight != frame.HeightPx
+            || _offscreenEncoded != encoded)
+        {
+            ReleaseOffscreen();
 
-        ReleaseOffscreen();
+            var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
+                SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
+            _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
+            if (_offscreen is null) return null;
 
-        var info = new SKImageInfo(frame.WidthPx, frame.HeightPx, SKColorType.RgbaF16,
-            SKAlphaType.Premul, encoded ? SKColorSpace.CreateSrgb() : SKColorSpace.CreateSrgbLinear());
-        _offscreen = SKSurface.Create(_grContext, budgeted: true, info);
-        if (_offscreen is null) return null;
+            _offscreenWidth = frame.WidthPx;
+            _offscreenHeight = frame.HeightPx;
+            _offscreenEncoded = encoded;
+        }
 
-        _offscreenWidth = frame.WidthPx;
-        _offscreenHeight = frame.HeightPx;
-        _offscreenEncoded = encoded;
+        // Apart from the surface, because the white scale changes without the size: a move
+        // between two HDR monitors with different SDR white, or the brightness slider. Baked in
+        // with the surface, the UI kept the old monitor's brightness while video — which reads
+        // the scale every frame — took the new one's.
+        float scale = _host.SdrWhiteScale;
+        if (_blit is null || _blitScale != scale)
+        {
+            _blit?.Dispose();
+            _blit = null;
 
-        // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
-        // whole thing being worked around. Src rather than SrcOver — the offscreen is the
-        // entire frame and there is nothing underneath worth blending with. The decode is on
-        // premultiplied colour, which is exact only at alpha 1 — true of a window's frame.
-        using var effect = SKRuntimeEffect.CreateColorFilter(encoded
-            ? "uniform half k; half4 main(half4 c) { return half4(pow(max(c.rgb, half3(0)), half3(2.2)) * k, c.a); }"
-            : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
-        if (effect is null) { ReleaseOffscreen(); return null; }
+            // A shader rather than a colour matrix: the matrix filter clamps to 1, which is the
+            // whole thing being worked around. Src rather than SrcOver — the offscreen is the
+            // entire frame and there is nothing underneath worth blending with. The decode is on
+            // premultiplied colour, which is exact only at alpha 1 — true of a window's frame —
+            // and keeps the sign, for the same wide-gamut reason as the video's encode.
+            using var effect = SKRuntimeEffect.CreateColorFilter(encoded
+                ? "uniform half k; half4 main(half4 c) { return half4(sign(c.rgb) * pow(abs(c.rgb), half3(2.2)) * k, c.a); }"
+                : "uniform half k; half4 main(half4 c) { return half4(c.rgb * k, c.a); }", out _);
+            if (effect is null) { ReleaseOffscreen(); return null; }
 
-        var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = _host.SdrWhiteScale };
-        _blit = new SKPaint { ColorFilter = effect.ToColorFilter(uniforms), BlendMode = SKBlendMode.Src };
+            var uniforms = new SKRuntimeEffectUniforms(effect) { ["k"] = scale };
+            _blit = new SKPaint { ColorFilter = effect.ToColorFilter(uniforms), BlendMode = SKBlendMode.Src };
+            _blitScale = scale;
+        }
         return _offscreen;
     }
 
+    /// <summary>The white scale <see cref="_blit"/> was built with.</summary>
+    private float _blitScale;
+
+    /// <summary>
+    /// Drops the offscreen and its blit. Called every frame that needs no offscreen, so it
+    /// returns at once when there is nothing to drop — and it leaves the video's colour filter
+    /// alone: that one is keyed on its own inputs, and disposing it here recompiled its SkSL on
+    /// every frame of every video drawn without an offscreen.
+    /// </summary>
     private void ReleaseOffscreen()
     {
-        _frameScale?.Dispose();
-        _frameScale = null;
-        _frameScaleFor = 0f;
+        if (_offscreen is null && _blit is null) return;
         _offscreen?.Dispose();
         _blit?.Dispose();
         _offscreen = null;
         _blit = null;
+        _blitScale = 0f;
         _offscreenWidth = _offscreenHeight = 0;
         _offscreenEncoded = false;
     }
@@ -538,10 +600,6 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     ///
     /// <para>A null here is not "no colour management": it is Skia's legacy path, where
     /// blending happens in whatever space the bytes are already in.</para>
-    /// </summary>
-    /// <summary>
-    /// The colour space of the swapchain, told to Skia so that it converts rather than
-    /// assumes — phase 2 of <c>docs/design/HDR.md</c>.
     ///
     /// <para><b>The SDR white scale is deliberately not here.</b> scRGB fixes 1.0 at 80 nits
     /// while Windows draws SDR white at whatever its brightness slider says, so an scRGB
@@ -552,10 +610,10 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     /// (sRGB red into linear Display P3 lands at 0.823 for both). <b>No paint can put a
     /// glyph past 1</b> — not a scaled colour space, not a colour matrix, not an SkSL colour
     /// filter. The scale has to stop being a property of the drawing and become a property
-    /// of the finished image: draw at 0..1 offscreen, multiply once on the way to the
-    /// swapchain. That is built and proven in the spike and not yet here, which is why
-    /// HULTUI_VULKAN_F16 stays off and why the F16 path is uniformly dim rather than
-    /// unevenly bright.</para>
+    /// of the finished image: draw at 0..1 offscreen and multiply once on the way to the
+    /// swapchain (see <see cref="OffscreenFor"/>), or, with <c>HULTUI_VULKAN_SCALED_SPACE=1</c>,
+    /// let a transfer function store k where Skia wanted 1.0 (see <see cref="ScaledLinear"/>).
+    /// This method returns only the plain space.</para>
     /// </summary>
     private static SKColorSpace ColorSpaceFor(uint colorSpace) => colorSpace switch
     {
@@ -605,14 +663,12 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     private static readonly bool ScaledSpaceEnabled =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_SCALED_SPACE") == "1";
 
-    /// <summary>Whether this frame can carry its white scale in the destination colour space
-    /// rather than in a separate pass. The gamma-2.2 case still cannot: it re-encodes rather
-    /// than scaling, and that is not a gain a transfer function expresses.</summary>
-    private bool UseScaledSpace(in VulkanFrameTarget frame) =>
-        ScaledSpaceEnabled
-        && frame.ColorSpace == VkColorSpaceExtendedSrgbLinear
-        && !_host.SdrIsGamma22
-        && _host.SdrWhiteScale > 1.0001f;
+    /// <summary>How this frame reaches the swapchain. The gamma-2.2 case cannot carry its white
+    /// scale in the destination colour space: it re-encodes rather than scaling, and that is not
+    /// a gain a transfer function expresses.</summary>
+    private ScRgbFramePath PathFor(in VulkanFrameTarget frame) => ScRgbFramePaths.Choose(
+        frame.ColorSpace == VkColorSpaceExtendedSrgbLinear, _host.SdrWhiteScale, _host.SdrIsGamma22,
+        ScaledSpaceEnabled);
 
     /// <summary>
     /// The Skia colour type for a <c>VkFormat</c>.
@@ -643,6 +699,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     public void Dispose()
     {
         DropWrappedSurfaces();
+        ReleaseOffscreen();
+        _frameScale?.Dispose();
+        _frameScale = null;
         _renderContext.Dispose();
         _grContext.Dispose();
         _backend.Dispose();

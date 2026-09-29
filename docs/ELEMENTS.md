@@ -126,6 +126,12 @@ away. Assemble the full list and call it once, or use `AddChild` for the odd ext
 `ReplaceChildren` unmounts only the elements that actually leave, so a child present in
 both the old and the new list is moved, not remounted.
 
+Removing an element unmounts everything under it too: a component hosted three levels
+down stops rebuilding and gets its `OnUnmount`. Putting a removed element back (a cached
+panel, say) mounts it and everything under it again, even if it is a descendant of the
+removed subtree and still has its old parent. A mounted element added somewhere else is
+moved and hears neither.
+
 ---
 
 ## 1. BoxElement

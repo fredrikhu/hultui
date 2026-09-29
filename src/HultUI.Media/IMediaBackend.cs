@@ -9,7 +9,7 @@ public enum BackendCapabilities
     None = 0,
     /// <summary>Delivers frames as pixels through the sink's <see cref="IVideoSink.Pixels"/>.</summary>
     PixelFrames = 1 << 0,
-    /// <summary>Renders on the GPU through an <see cref="IGpuFrameRenderer"/> when the surface is GL.</summary>
+    /// <summary>Renders on the GPU through an <see cref="IGpuFrameRenderer"/> when the surface runs external GL.</summary>
     GpuFrames = 1 << 6,
     /// <summary>Opens <see cref="MediaSourceKind.Uri"/> sources.</summary>
     Uris = 1 << 1,
@@ -28,7 +28,7 @@ public enum VideoSinkMode
 {
     /// <summary>Nothing has been drawn yet, so the surface kind is not known.</summary>
     Undecided,
-    /// <summary>The backend renders on the GPU into a framebuffer the sink owns (a GL surface).</summary>
+    /// <summary>The backend renders on the GPU into the sink's or the surface's framebuffer (a surface that runs external GL).</summary>
     Gpu,
     /// <summary>The backend writes pixels into <see cref="IVideoSink.Pixels"/> (a raster or headless surface).</summary>
     Pixels,
@@ -39,7 +39,7 @@ public enum VideoSinkMode
 /// in <see cref="IMediaBackend.Attach"/>. Two modes: pixels into
 /// <see cref="Pixels"/> from any thread, which every backend can do; and, for a
 /// backend that registers an <see cref="IGpuFrameRenderer"/>, rendering into a GPU
-/// framebuffer when the surface is GL. Which one applies is only known once the
+/// framebuffer when the surface runs external GL. Which one applies is only known once the
 /// element is first drawn — the renderer hears about it through
 /// <see cref="IGpuFrameRenderer.OnModeDecided"/>.
 /// </summary>
@@ -51,7 +51,7 @@ public interface IVideoSink
     /// <summary>
     /// Registers a GPU renderer. Call from <see cref="IMediaBackend.Attach"/>; the
     /// player then draws through a <see cref="GpuFrameSink"/> that calls the renderer on
-    /// a GL surface and reads <see cref="Pixels"/> elsewhere.
+    /// a surface that runs external GL and reads <see cref="Pixels"/> elsewhere.
     /// </summary>
     void UseGpuRenderer(IGpuFrameRenderer renderer);
 
@@ -93,7 +93,7 @@ public interface IGpuFrameRenderer
     bool RendersBottomUp { get; }
 
     /// <summary>
-    /// Draws the current frame into <paramref name="framebuffer"/> (already sized
+    /// Draws the current frame into the framebuffer of <paramref name="target"/> (already sized
     /// <paramref name="width"/>×<paramref name="height"/>, not bound). Returns false when
     /// there is nothing to draw, in which case the last frame stays on screen.
     /// </summary>
@@ -112,6 +112,22 @@ public interface IGpuFrameRenderer
     /// <see cref="GpuFrame.ReferenceWhiteNits"/>.
     /// </summary>
     float ReferenceWhiteNits => 0f;
+
+    /// <summary>
+    /// True when a frame may be waiting although <see cref="TryGetFrameSize"/> is still false.
+    /// The sink then enters the GL context to <see cref="SkipFrame"/>, which it otherwise
+    /// avoids for a frame it cannot draw, because on a GL surface entering costs a flush.
+    /// </summary>
+    bool FrameMayBeWaiting => false;
+
+    /// <summary>
+    /// Takes a waiting frame without drawing it, on a frame where <see cref="TryGetFrameSize"/>
+    /// is false. This is for a producer that holds everything until its frame is taken, and
+    /// learns its size only after that. mpv holds its core for up to 200 ms after every load,
+    /// and the video's size can only be read from the core. The next <see cref="Render"/> that
+    /// has a target draws the frame taken here.
+    /// </summary>
+    void SkipFrame(Func<string, nint> getProcAddress) { }
 
     /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.</summary>
     void ReleaseGL();

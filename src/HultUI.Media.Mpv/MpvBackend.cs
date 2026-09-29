@@ -8,9 +8,10 @@ using static HultUI.Media.Mpv.Mpv;
 namespace HultUI.Media.Mpv;
 
 /// <summary>
-/// An <see cref="IMediaBackend"/> over one libmpv instance. Commands go straight to
-/// mpv on the caller's thread (its API is thread-safe); mpv's events are read on a
-/// thread of the backend's own and forwarded as <see cref="BackendEvent"/>s; frames
+/// An <see cref="IMediaBackend"/> over one libmpv instance. Commands are queued to mpv
+/// without waiting, because the UI thread is also mpv's render thread; mpv's events and the
+/// commands' replies are read on a thread of the backend's own and forwarded as
+/// <see cref="BackendEvent"/>s; frames
 /// come through the render API — into the sink's GL framebuffer on the render
 /// thread, or as pixels into the sink's ring from a worker, whichever the surface
 /// asked for first.
@@ -20,10 +21,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private const ulong ObservePause = 1, ObservePosition = 2, ObserveDuration = 3, ObserveEof = 4,
         ObservePausedForCache = 5, ObserveCacheState = 6;
 
-    private static readonly Lazy<bool> Available = new(() => TryLoad(out _));
+    private static readonly Lazy<(bool Loaded, string? Error)> Available =
+        new(() => (TryLoad(out _, out var error), error));
 
     /// <summary>Whether a libmpv could be found and loaded; false means every <see cref="MpvBackend"/> constructor throws.</summary>
-    public static bool IsAvailable => Available.Value;
+    public static bool IsAvailable => Available.Value.Loaded;
 
     private nint _mpv;
     private readonly Thread _eventThread;
@@ -47,6 +49,9 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private Thread? _swThread;
     private readonly AutoResetEvent _swWake = new(false);
     private volatile bool _swStopping;
+    // Set by mpv's update callback, cleared when the render thread asks. Lets a frame with no
+    // size to draw at skip only when mpv may be waiting, since entering GL costs a flush.
+    private volatile bool _updateWaiting;
     // With vo=libmpv a file cannot start until a render context exists, and the
     // context's kind is only known once the element has been drawn. A source opened
     // before that waits here and loads the moment the context is up.
@@ -56,9 +61,12 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     public MpvBackend()
     {
         if (!IsAvailable)
-            throw new DllNotFoundException(
-                "libmpv was not found. Put libmpv-2.dll / libmpv.so.2 / libmpv.2.dylib beside the application, " +
-                "on the library path, or point HULTUI_MPV_PATH at it — see HultUI.Media.Mpv's README.");
+            throw new DllNotFoundException(Available.Value.Error is { } error
+                // Found, and would not load: the reason is what a person needs, not a hunt for
+                // a file they already have. Usually a dependency of libmpv's own.
+                ? $"libmpv was found but could not be loaded — {error}"
+                : "libmpv was not found. Put libmpv-2.dll / libmpv.so.2 / libmpv.2.dylib beside the application, " +
+                  "on the library path, or point HULTUI_MPV_PATH at it — see HultUI.Media.Mpv's README.");
 
         _mpv = mpv_create();
         if (_mpv == 0) throw new InvalidOperationException("mpv_create failed.");
@@ -78,19 +86,22 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         mpv_set_option_string(_mpv, "osc", "no");
         mpv_set_option_string(_mpv, "terminal", "no");
         mpv_set_option_string(_mpv, "ytdl", "no");
-        // "auto" tries the zero-copy methods first — mpv imports the decoder's surface into
-        // its own GL textures and renders from there, no trip through main memory — and
-        // then the same -copy methods "auto-copy" would have used, so it is never worse.
-        // Which one it lands on depends on the libmpv's interops: the trimmed Windows
-        // build has none and gets d3d11va-copy exactly as before; a distribution libmpv
-        // with cuda-interop gets nvdec, about 250 ms of CPU a second less at 4K
-        // (docs/design/HDR-LINUX-ZEROCOPY.md).
+        // "auto-safe" tries the zero-copy methods first — mpv imports the decoder's surface
+        // into its own GL textures and renders from there, no trip through main memory — and
+        // then the -copy methods "auto-copy" would have used, so it is never worse. On NVIDIA
+        // the bundled libmpv lands on nvdec with CUDA interop, on both platforms; elsewhere on
+        // Windows it lands on d3d11va-copy, because the DirectX interops would bridge at eight
+        // bits and stay disabled (docs/design/HDR.md, Decode).
+        //
+        // "auto-safe" rather than "auto": the same on mpv 0.40 and later, but on an older
+        // distribution libmpv loaded through HULTUI_MPV_PATH, "auto" skips the whitelist and
+        // may pick methods known to be broken.
         //
         // HULTUI_MPV_HWDEC overrides it with any mode mpv understands. mpv falls back to
         // software on its own if the mode it is given cannot initialise.
         mpv_set_option_string(_mpv, "hwdec",
             Environment.GetEnvironmentVariable("HULTUI_MPV_HWDEC") is { Length: > 0 } mode
-                ? mode : "auto");
+                ? mode : "auto-safe");
         // No headroom: mpv signals a frame when it is due, not early with a sleep in
         // the render call to make up the difference (see Render, which also turns
         // that sleep off). The loop then wakes and draws it.
@@ -99,6 +110,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         // fastest way to learn why a source would not open.
         if (Environment.GetEnvironmentVariable("HULTUI_MPV_LOG") is { Length: > 0 } logLevel)
             mpv_request_log_messages(_mpv, logLevel);
+        ApplyExtraOptions();
         Check(mpv_initialize(_mpv));
 
         Check(mpv_observe_property(_mpv, ObservePause, "pause", MPV_FORMAT_FLAG));
@@ -160,10 +172,23 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         Load(target);
     }
 
+    // ──── Commands (UI thread) ────
+    //
+    // The UI thread is also mpv's render thread, and mpv's render API forbids a render thread
+    // from waiting on its core: after every seek and load the core waits for the render thread
+    // to draw the first frame. A synchronous seek arriving in that window waited out mpv's
+    // 200 ms timeout. Scrubbing at the rate a mouse drag sends seeks froze the UI for 200 ms on
+    // nearly every one. So every command here is queued and answered on the event thread. mpv
+    // runs them in the order they were queued.
+
+    /// <summary>The reply tag of a loadfile, whose refusal is reported; other replies are ignored,
+    /// as the synchronous calls' results were.</summary>
+    private const ulong LoadReply = 0x100;
+
     private void Load(string target)
     {
-        SetFlag(_mpv, "pause", true);
-        int error = Command(_mpv, "loadfile", target, "replace");
+        SetFlagAsync(_mpv, 0, "pause", true);
+        int error = CommandAsync(_mpv, LoadReply, "loadfile", target, "replace");
         if (error < 0) Raise(new BackendEvent.Failed(ErrorString(error)));
     }
 
@@ -185,37 +210,38 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         if (_eof)
         {
             // keep-open holds the last frame; unpausing there does nothing.
-            Command(_mpv, "seek", "0", "absolute");
+            CommandAsync(_mpv, 0, "seek", "0", "absolute");
             _eof = false;
         }
-        SetFlag(_mpv, "pause", false);
+        SetFlagAsync(_mpv, 0, "pause", false);
     }
 
     public void Pause()
     {
         if (!_loaded) return;
-        SetFlag(_mpv, "pause", true);
+        SetFlagAsync(_mpv, 0, "pause", true);
     }
 
     public void Stop()
     {
         if (!_loaded) return;
-        SetFlag(_mpv, "pause", true);
-        Command(_mpv, "seek", "0", "absolute");
+        SetFlagAsync(_mpv, 0, "pause", true);
+        CommandAsync(_mpv, 0, "seek", "0", "absolute");
     }
 
     public void Seek(TimeSpan position, bool precise)
     {
         if (!_loaded) return;
-        Command(_mpv, "seek", position.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+        CommandAsync(_mpv, 0, "seek",
+            position.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
             precise ? "absolute+exact" : "absolute+keyframes");
     }
 
-    public void SetRate(double rate) => SetDouble(_mpv, "speed", rate);
-    public void SetVolume(float volume) => SetDouble(_mpv, "volume", volume * 100);
-    public void SetMuted(bool muted) => SetFlag(_mpv, "mute", muted);
-    public void SelectAudioTrack(int? id) => mpv_set_property_string(_mpv, "aid", id?.ToString() ?? "no");
-    public void SelectSubtitleTrack(int? id) => mpv_set_property_string(_mpv, "sid", id?.ToString() ?? "no");
+    public void SetRate(double rate) => SetDoubleAsync(_mpv, 0, "speed", rate);
+    public void SetVolume(float volume) => SetDoubleAsync(_mpv, 0, "volume", volume * 100);
+    public void SetMuted(bool muted) => SetFlagAsync(_mpv, 0, "mute", muted);
+    public void SelectAudioTrack(int? id) => SetStringAsync(_mpv, 0, "aid", id?.ToString() ?? "no");
+    public void SelectSubtitleTrack(int? id) => SetStringAsync(_mpv, 0, "sid", id?.ToString() ?? "no");
 
     // ──── Events (mpv thread) ────
 
@@ -224,6 +250,12 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         while (!_stopping)
         {
             var e = mpv_wait_event(_mpv, 0.5);
+            if (_traceHwdec)
+            {
+                _traceHwdec = false;
+                StartupTrace.Mark($"mpv hwdec: asked {GetString(_mpv, "hwdec")}, " +
+                    $"using {GetString(_mpv, "hwdec-current") ?? "(none)"}");
+            }
             if (e is null || e->event_id == MPV_EVENT_NONE) continue;
             try { Handle(e); }
             catch (Exception ex) { Console.Error.WriteLine($"[HultUI.Media.Mpv] event handler failed: {ex}"); }
@@ -237,6 +269,15 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             case MPV_EVENT_LOG_MESSAGE:
                 var log = (mpv_event_log_message*)e->data;
                 Console.Error.Write($"[mpv {Marshal.PtrToStringUTF8((nint)log->prefix)}] {Marshal.PtrToStringUTF8((nint)log->text)}");
+                break;
+
+            case MPV_EVENT_SET_PROPERTY_REPLY:
+                HandlePropertyReply(e);
+                break;
+
+            case MPV_EVENT_COMMAND_REPLY:
+                if (e->reply_userdata == LoadReply && e->error < 0)
+                    Raise(new BackendEvent.Failed(ErrorString(e->error)));
                 break;
 
             case MPV_EVENT_FILE_LOADED:
@@ -429,15 +470,20 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         if (_render == 0)
             CreateGLContext(getProcAddress);
         if (_render == 0) return false;
+        _updateWaiting = false;
 
-        ApplyTargetColour(target);
+        if (_colour.Update(target.WantsLinearLight, target.PeakNits, target.WideGamut)) ApplyTargetColour();
 
-        if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn)
-            return false;   // nothing new; the texture still holds the last frame
+        // Nothing new, so the texture still holds the last frame — unless mpv has since
+        // confirmed a change of target colour, in which case that frame was drawn for the old
+        // options and is drawn again. Confirmed, not merely asked for: the options are set
+        // asynchronously, and a redraw before mpv has them would draw the old picture again.
+        if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn
+            && !_colour.AppliedSinceLastFrame)
+            return false;
 
-        // Zero means "whatever the FBO already has", which is right for the sink's own
-        // RGBA8 texture and wrong for a renderer-lent half-float one: told nothing, mpv
-        // assumes eight bits and dithers to them inside a target that holds sixteen.
+        // Passed for completeness: mpv 0.41 ignores it (ra_create_wrapped_fb hard-codes zero).
+        // What stops it dithering a half-float target down to eight bits is DEPTH, below.
         var fbo = new mpv_opengl_fbo
         {
             fbo = (int)target.Framebuffer,
@@ -460,22 +506,55 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         parameters[3] = new mpv_render_param { type = MPV_RENDER_PARAM_DEPTH, data = &depth };
         parameters[4] = default;
         _lastGLFrameDrawn = mpv_render_context_render(_render, parameters) >= 0;
+        if (_lastGLFrameDrawn) _colour.FrameDrawn();
 
-        // What mpv actually chose, not what it was asked for. "auto" falls back on its own
+        // What mpv actually chose, not what it was asked for. "auto-safe" falls back on its own
         // when a decoder or its interop will not initialise, and a silent fallback looks
         // exactly like the mode working — the CPU moves either way, because the fallback is
-        // also hardware decoding.
+        // also hardware decoding. Read on the event thread, because this one must not wait on
+        // mpv's core.
         if (_lastGLFrameDrawn && !_tracedHwdec && StartupTrace.Enabled)
         {
             _tracedHwdec = true;
-            StartupTrace.Mark($"mpv hwdec: asked {GetString(_mpv, "hwdec")}, " +
-                $"using {GetString(_mpv, "hwdec-current") ?? "(none)"}");
+            _traceHwdec = true;
+            mpv_wakeup(_mpv);
         }
         return _lastGLFrameDrawn;
     }
 
     private bool _lastGLFrameDrawn;
     private bool _tracedHwdec;
+    private volatile bool _traceHwdec;
+
+    /// <inheritdoc />
+    public bool FrameMayBeWaiting => _updateWaiting;
+
+    /// <summary>
+    /// Takes mpv's waiting frame without drawing it, so mpv stops waiting and the size can be
+    /// read. After every load, and before its first frame is shown, mpv's core waits for that
+    /// frame to be rendered, for up to 200 ms. The size comes from the core, so it cannot arrive
+    /// while the core waits, and the app cannot render without it. Each side waited for the
+    /// other until mpv timed out, logged "mpv_render_context_render() not being called or
+    /// stuck", and counted the frame as dropped. Reopening a file took three of those timeouts,
+    /// about 600 ms, before the picture came up.
+    /// </summary>
+    public void SkipFrame(Func<string, nint> getProcAddress)
+    {
+        _updateWaiting = false;
+        if (_render == 0 || (mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0) return;
+        if (TakeFrameWithoutDrawing())
+            _lastGLFrameDrawn = false;   // so the first Render with a target draws it
+    }
+
+    private bool TakeFrameWithoutDrawing()
+    {
+        int skip = 1, block = 0;
+        var parameters = stackalloc mpv_render_param[3];
+        parameters[0] = new mpv_render_param { type = MPV_RENDER_PARAM_SKIP_RENDERING, data = &skip };
+        parameters[1] = new mpv_render_param { type = MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data = &block };
+        parameters[2] = default;
+        return mpv_render_context_render(_render, parameters) >= 0;
+    }
 
     /// <summary>
     /// How many bits a channel the target holds, for <c>MPV_RENDER_PARAM_DEPTH</c>.
@@ -488,40 +567,49 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     /// Saying 16 gives 951 levels and 62 reversals. So the half-float image phase 4 exists to
     /// provide was being filled with a dithered 8-bit picture.</para>
     /// </summary>
-    private static int DepthOf(uint internalFormat) => internalFormat switch
+    /// <remarks>Capped at 16. mpv computes <c>(1 &lt;&lt; depth) - 1</c> for its dither, which
+    /// is undefined at 32 and zero on x86 — a division by zero in the shader. Dithering to 16
+    /// bits inside a float target is invisible anyway.</remarks>
+    internal static int DepthOf(uint internalFormat) => internalFormat switch
     {
-        GlRgba16f => 16,
-        GlRgba32f => 32,
+        GlRgba16f or GlRgba32f => 16,
         _ => 8,          // GL_RGBA8, and anything unrecognised: the safe assumption
     };
 
     private const uint GlRgba16f = 0x881A;
     private const uint GlRgba32f = 0x8814;
 
-    /// <summary>
-    /// libplacebo's linear output puts 1.0 at the BT.2408 reference white of 203 nits.
-    ///
-    /// <para>Measured rather than assumed: <c>spikes/HdrInterop --range</c> reads back a peak
-    /// of exactly 1.0000 at <c>target-peak=203</c>, 2.0000 at 406 and 5.0000 at 1015. It is
-    /// also the number the Wayland colour-management protocol names as the reference white of
-    /// Windows-scRGB, which is why the two ends of this pipeline need no fudge between
-    /// them.</para>
-    /// </summary>
-    private const float LibplaceboReferenceWhiteNits = 203f;
-
-    /// <summary>What <c>target-peak</c> is told when the renderer does not know the display's
-    /// peak. A common mastering peak, and wrong on a given monitor in a way nothing here can
-    /// detect — neither platform exposes a peak query through this SDL binding.</summary>
-    private const float AssumedPeakNits = 1000f;
-
-    private bool _linearTarget;
-    private float _appliedPeak;
+    private readonly MpvTargetColour _colour = new();
 
     /// <inheritdoc />
-    public float ReferenceWhiteNits => _linearTarget ? LibplaceboReferenceWhiteNits : 0f;
+    /// <remarks>What the frame in the target was drawn with, which is not always what mpv has
+    /// just been told — see <see cref="MpvTargetColour"/>.</remarks>
+    public float ReferenceWhiteNits => _colour.ReferenceWhiteNits;
 
     /// <summary>
-    /// Tells mpv what it is drawing into, when that has changed.
+    /// <c>HULTUI_MPV_OPTIONS</c>: extra mpv options, <c>name=value</c> pairs separated by
+    /// <c>;</c>, set before initialisation. Diagnostic: it is how a test clip is told what it is
+    /// when its container cannot say — a Y4M of BT.2020 colour bars carries no primaries, and
+    /// <c>vf=format=colormatrix=bt.2020-ncl:primaries=bt.2020:gamma=pq</c> supplies them. Only
+    /// the first <c>=</c> of a pair splits, so values may contain their own. A pair mpv refuses
+    /// is reported and skipped.
+    /// </summary>
+    private void ApplyExtraOptions()
+    {
+        if (Environment.GetEnvironmentVariable("HULTUI_MPV_OPTIONS") is not { Length: > 0 } extra) return;
+        foreach (var pair in extra.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0) { Console.Error.WriteLine($"[HultUI.Media.Mpv] HULTUI_MPV_OPTIONS: '{pair}' is not name=value"); continue; }
+            int result = mpv_set_option_string(_mpv, pair[..eq], pair[(eq + 1)..]);
+            if (result < 0)
+                Console.Error.WriteLine($"[HultUI.Media.Mpv] HULTUI_MPV_OPTIONS: {pair[..eq]} refused: {ErrorString(result)}");
+        }
+    }
+
+    /// <summary>
+    /// Tells mpv what it is drawing into, after <see cref="MpvTargetColour.Update"/> said it
+    /// changed.
     ///
     /// <para>There is no render parameter for this — <c>mpv_opengl_fbo</c> carries a
     /// framebuffer, a size and an internal format, and no <c>MPV_RENDER_PARAM</c> names a
@@ -534,38 +622,70 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     /// this is the option that decides whether HDR content keeps its range or is tone-mapped
     /// away before it reaches the target.</para>
     /// </summary>
-    private void ApplyTargetColour(in GpuFrameTarget target)
+    private void ApplyTargetColour()
     {
-        float peak = target.PeakNits > 0f ? target.PeakNits : AssumedPeakNits;
-        if (target.WantsLinearLight == _linearTarget && (!_linearTarget || peak == _appliedPeak))
-            return;
-
-        _linearTarget = target.WantsLinearLight;
-        _appliedPeak = peak;
-
-        if (_linearTarget)
+        // Asynchronously, and this is not a detail. These run on the render thread inside a
+        // frame, and a synchronous mpv_set_property waits for mpv's core — which, with a frame
+        // due, is waiting on its video output, which is waiting for the render this thread is
+        // holding up. Measured on the first HDR frame: 360 ms, released only by mpv's own
+        // timeout, one "render() not being called or stuck" per property. Replies arrive on
+        // the event thread; see HandlePropertyReply.
+        long start = Stopwatch.GetTimestamp();
+        int generation = _colour.Generation;
+        bool linear = _colour.Linear;
+        string prim = "auto", trc = "auto", peak = "auto";
+        if (linear)
         {
             // scRGB's primaries are BT.709; the transfer is linear light; the peak is what
             // the display can show, which decides where tone mapping lands.
-            int a = mpv_set_property_string(_mpv, "target-prim", "bt.709");
-            int b = mpv_set_property_string(_mpv, "target-trc", "linear");
-            int c = mpv_set_property_string(_mpv, "target-peak",
-                peak.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
-            // Read back rather than trust the return codes: a property that reports success
-            // and then reads as something else is the difference between "mpv ignored us" and
-            // "mpv agreed and something later undid it". Only under the trace, since it is
-            // several property reads on a path that now runs by default.
-            if (StartupTrace.Enabled)
-                StartupTrace.Mark($"mpv linear target: set {a}/{b}/{c}, reads back " +
-                    $"prim={GetString(_mpv, "target-prim")} trc={GetString(_mpv, "target-trc")} " +
-                    $"peak={GetString(_mpv, "target-peak")}");
+            prim = "bt.709";
+            trc = "linear";
+            peak = _colour.PeakNits.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
         }
-        else
+        // "clip" is not a clamp in mpv's GL renderer: it skips the step that pulls a colour
+        // outside the target's gamut back inside by desaturating it toward grey, so BT.2020 and
+        // P3 colours arrive as negative BT.709 values, which scRGB shows as the colours they
+        // are. "auto" is that desaturation — what an encoded target needs, since it has no
+        // negative values to put them in.
+        string gamut = _colour.WideGamut ? "clip" : "auto";
+        int a = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 0), "target-prim", prim);
+        int b = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 1), "target-trc", trc);
+        int c = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 2), "target-peak", peak);
+        int d = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 3), "gamut-mapping-mode", gamut);
+
+        if (StartupTrace.Enabled)
+            StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: asked {prim}/{trc}/{peak}/{gamut}, " +
+                $"queued {a}/{b}/{c}/{d} in {Stopwatch.GetElapsedTime(start).TotalMilliseconds:0.00} ms");
+    }
+
+    // Event thread only: how many of a change's options mpv has answered for.
+    private int _replyGeneration;
+    private int _repliesReceived;
+
+    /// <summary>
+    /// An answer to one of <see cref="ApplyTargetColour"/>'s options. When all of a change's
+    /// have arrived the change is confirmed, and the frame is drawn again under it — the element
+    /// may be sitting on a paused picture that nothing else would redraw.
+    /// </summary>
+    private void HandlePropertyReply(mpv_event* e)
+    {
+        if (!MpvTargetColour.TryReadReplyTag(e->reply_userdata, out int generation, out bool linear)) return;
+        if (e->error < 0)
+            Console.Error.WriteLine($"[HultUI.Media.Mpv] setting the target colour failed: {ErrorString(e->error)}");
+
+        if (generation != _replyGeneration)
         {
-            mpv_set_property_string(_mpv, "target-prim", "auto");
-            mpv_set_property_string(_mpv, "target-trc", "auto");
-            mpv_set_property_string(_mpv, "target-peak", "auto");
+            _replyGeneration = generation;
+            _repliesReceived = 0;
         }
+        if (++_repliesReceived < MpvTargetColour.OptionsPerChange) return;
+
+        _colour.Applied(generation, linear);
+        if (StartupTrace.Enabled)
+            StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: confirmed, " +
+                $"reads back prim={GetString(_mpv, "target-prim")} trc={GetString(_mpv, "target-trc")} " +
+                $"peak={GetString(_mpv, "target-peak")} gamut={GetString(_mpv, "gamut-mapping-mode")}");
+        _sink?.RequestRepaint();
     }
 
     private void CreateGLContext(Func<string, nint> getProcAddress)
@@ -622,14 +742,22 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         var size = stackalloc int[2];
         var parameters = stackalloc mpv_render_param[5];
         nuint stride = 0;
+        // A frame taken without a size (see SkipFrame) and not yet drawn.
+        bool owed = false;
         fixed (byte* fmt = format)
         {
             while (!_swStopping)
             {
                 _swWake.WaitOne(500);
                 if (_swStopping || _render == 0 || _sink is null) continue;
-                if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0) continue;
-                if (!TryGetFrameSize(out int width, out int height)) continue;
+                bool newFrame = (mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) != 0;
+                if (!newFrame && !owed) continue;
+                if (!TryGetFrameSize(out int width, out int height))
+                {
+                    if (newFrame && TakeFrameWithoutDrawing()) owed = true;
+                    continue;
+                }
+                owed = false;
 
                 using var writer = _sink.Pixels.BeginWrite(width, height, PixelFormat.Rgbx8888);
                 size[0] = width;
@@ -665,7 +793,11 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             if (GCHandle.FromIntPtr((nint)userdata).Target is MpvBackend self)
             {
                 if (self._mode == VideoSinkMode.Pixels) self._swWake.Set();
-                else self._sink?.RequestRepaint();
+                else
+                {
+                    self._updateWaiting = true;
+                    self._sink?.RequestRepaint();
+                }
             }
         }
         catch { /* never let an exception cross into mpv */ }

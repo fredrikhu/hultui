@@ -45,6 +45,13 @@ dotnet run --project spikes/HdrInterop -- "D:\films\Stalker.mkv"
 
 `HULTUI_MPV_PATH` points at a libmpv if one is not beside the binary.
 
+**Wide gamut** (plan 15, item 8.2): `make-bars.cs` writes BT.2020 colour bars as a Y4M, and
+`--range` with `bars=8` prints what each bar became in the shared image. Out-of-gamut colours
+kept as negative BT.709 values mean wide gamut survived; a clean zero floor means it was mapped
+inside BT.709. The two command lines are at the top of `make-bars.cs`. `--range` now clears the
+image to -100, not -1, because a real negative such as BT.2020 green's red at -0.59 would
+otherwise have been counted as unwritten.
+
 ## What came out
 
 ```

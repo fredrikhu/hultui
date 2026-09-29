@@ -17,6 +17,9 @@
     <!-- VideoElement overrides MeasureContent and PatchFrom, which are internal;
          a first-party element package gets the same access the framework has. -->
     <InternalsVisibleTo Include="HultUI.Media" />
+    <!-- RendererSelection: the renderer choice lives here so Core.Tests can cover it, and
+         the SDL3 platform is what acts on it. -->
+    <InternalsVisibleTo Include="HultUI.Platform.SDL3" />
   </ItemGroup>
 
 </Project>

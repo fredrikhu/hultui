@@ -41,10 +41,18 @@ licence question to answer, not this package's. How the build is made is in
 - `keep-open=yes`: reaching the end stops at the last frame rather than
   unloading; `Play` from there restarts from the beginning.
 - Frames go through mpv's render API. On a GL surface mpv renders into a
-  framebuffer the sink owns and Skia composites the texture; on a raster or
+  framebuffer the sink owns and Skia composites the texture. On the Vulkan
+  renderer mpv renders, still through GL, into a sixteen-bit image the renderer
+  shares with a hidden GL context, with no copy; on an HDR display it draws linear
+  light with the film's range and wide-gamut colours intact. On a raster or
   headless surface mpv's software renderer writes pixels into the sink's ring
   on a worker thread. The sink decides which at the first draw.
-- Hardware decoding is `auto`: zero-copy where the libmpv has an interop for the
-  decoder (NVDEC through CUDA on Linux, for instance), otherwise decoded on the GPU
-  and copied back for mpv's GL pipeline — which is all the trimmed Windows build
-  can do.
+- HDR needs the Vulkan renderer, which an app asks for with
+  `new Application(..., renderer: RendererKind.Vulkan)`; `docs/design/HDR.md` in the
+  repository has the design and what it costs.
+- Commands are queued to mpv without waiting, because the UI thread is also mpv's
+  render thread and mpv waits for it after every load and seek.
+- Hardware decoding is `auto-safe`: zero-copy where the libmpv has an interop for the
+  decoder — NVDEC through CUDA on NVIDIA, on Windows and Linux both, in the bundled
+  build — otherwise decoded on the GPU and copied back for mpv's GL pipeline, which is
+  what a non-NVIDIA Windows machine gets (`d3d11va-copy`).

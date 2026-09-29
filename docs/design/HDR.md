@@ -1,1328 +1,362 @@
 # HDR output
 
-**Status:** phases 0 to 5 built, and the luminance policy settled (`reference`, by eye). Verified
-on Windows and on Linux (KDE Wayland, NVIDIA); untested on Mesa and on a hybrid GPU, which is now
-the only substantial gap left. HDR video is on by default on the Vulkan renderer,
-which is itself opt-in through `HULTUI_RENDERER=vulkan` — and
-[stays opt-in](#should-vulkan-be-the-default-renderer-measured-2026-09-27-not-yet): re-benchmarked
-on 2026-09-27, Vulkan now wins on video and loses on start-up, memory and resize. The resize
-stretch that blocked it had two causes — a live-resize frame that could be skipped and then never
-drawn, now fixed, and the IMMEDIATE present mode, now MAILBOX by default. The memory and the
-present cost turned out to be the price of 16-bit colour rather than of Vulkan **on Windows**;
-on NVIDIA Linux F16 is nearly free and those costs are the API's instead.
-**Date:** 2026-09-27.
+**Status, 2026-09-29.** HDR video plays on the Vulkan renderer, with the transport bar and the rest
+of the UI composited over it, on Windows and on Linux (KDE Wayland, NVIDIA). Apps choose Vulkan in
+code: Reel and Aperture do, and everything else stays on OpenGL. **Untested:** Mesa, AMD and
+Intel, and a hybrid GPU. Every Vulkan number here comes from one vendor's driver.
 
-**Outstanding Linux work is [HDR-LINUX-VERIFY-2.md](HDR-LINUX-VERIFY-2.md)**, which covers the
-window-creation reorder (a Wayland risk introduced on Windows), whether the resize stretch exists on
-KWin at all, and whether Mesa offers the present scaling this relies on. The synchronisation
-validation named there has still never run anywhere.
+This page is the current design: how a frame gets to the screen, the rules it depends on, the
+defaults and what they cost, and what is not done. How it got here, with every measurement and
+every wrong turn, is [HDR-LOG.md](HDR-LOG.md). Platform run sheets are the `HDR-LINUX-*.md` and
+`HDR-WINDOWS-*.md` files beside it, and the review fixes are `docs/plans/15-vulkan-hdr-review-fixes.md`.
 
-**Before changing anything here, read [Traps](#traps).** It is not a list of curiosities: most
-of those cost hours, several were shipped and found by the other platform, and four of them were
-nearly recorded as successes by measurements that could not have failed. The Linux runs are in
-`HDR-LINUX-BRIEF.md`, `HDR-LINUX-VERIFY.md` and `HDR-PHASE1-LINUX.md`; the numbers behind the
-claims are in `spikes/HdrInterop/results/`.
+**Before changing anything, read [Traps](#traps).** Most of them cost hours, several were shipped
+and found by the other platform, and many were nearly recorded as successes by a measurement that
+could not have failed.
 
-The goal is HDR video in Reel and Aperture, on Windows *and* Linux, with the transport
-bar and every other piece of UI composited over it correctly. This is the design that
-follows from wanting all three at once, and it is not a small one.
+## Why Vulkan
 
-## Why the current stack cannot do it
+HDR is a property of the **presented surface**: the compositor has to be handed an HDR-capable
+swapchain before anything drawn into it can be HDR. **OpenGL on Windows cannot ask for one.** No
+WGL colour-space extension is honoured for HDR.
 
-HDR is a property of the **presented surface**, not of the drawing. A window has to be
-handed to the compositor as an HDR-capable swapchain — scRGB FP16, or HDR10 with PQ
-encoding and metadata — before anything drawn into it can be HDR.
+Two faster routes were rejected because they are Windows-only, and because video would stop being
+an element in the tree: **mpv owning the output** (`--wid`, a child window) and **DirectComposition**
+with separate video and UI swapchains. **Vulkan** has `VK_EXT_swapchain_colorspace` on Windows and
+Linux, and SkiaSharp 3.119.2 ships its Vulkan backend.
 
-**OpenGL on Windows has no way to ask for one.** WGL has no colorspace extension that
-any driver honours for HDR. So the present path is the blocker: `SkiaGLRenderSurface`
-draws perfectly good pixels and then hands them to a swapchain that can only be SDR.
+**mpv's render API only speaks OpenGL or CPU memory.** There is no Vulkan render type, and building
+libmpv with Vulkan does not add one: mpv's own Vulkan output draws into a surface mpv owns, which is
+the `--wid` route again. So mpv keeps rendering with GL, into an image the Vulkan device allocated
+and exported. That bridge is external memory, and it is the part the whole design rests on.
 
-That is the whole problem. It is not Skia, not mpv, and not the element tree.
+## How a frame gets to the screen
 
-## What is ruled out, and why
+### Choosing the renderer
 
-Two arrangements would give HDR sooner, and both were rejected for the same reason:
-they are Windows-only.
+`new Application(..., renderer: RendererKind.Vulkan)` asks for Vulkan. **`HULTUI_RENDERER`
+overrides the app in both directions**, because it is how the design docs select a renderer and how
+a machine where Vulkan misbehaves gets working again without a rebuild. The renderer is chosen once
+per process.
 
-- **mpv owns the video output** (`--wid`, a child window, `vo=gpu-next` with
-  `gpu-api=d3d11`). mpv does PQ passthrough and tone mapping itself and it works today.
-  But the overlay can no longer composite onto the picture — it has to become a layered
-  window above a child HWND — and the whole arrangement is Win32.
-- **DirectComposition with two visuals**, video in an HDR swapchain and UI in a second
-  with premultiplied alpha. Correct, standard on Windows, and has no Linux counterpart.
+**An app's request falls back to GL** when Vulkan cannot start, with a line on stderr. There are two
+paths: SDL refuses the Vulkan window when there is no driver at all, and a driver with no usable GPU
+(a remote session, a VM, a filtered loader) fails later, when the host is created. **A request
+from `HULTUI_RENDERER` never falls back**: the failure is the answer, since a silent GL would make
+every such run a false negative. `HultUI.WinForms` hosts GL only.
 
-Both also stop video being an element in the tree, which is the thing that makes the
-current `VideoPlayer` overlay simple.
+### The swapchain (`SdlVulkanHost`)
 
-## The route: Vulkan everywhere
+- **Format:** scRGB half-float (`R16G16B16A16_SFLOAT` with `EXTENDED_SRGB_LINEAR`) when the
+  display is in HDR mode and the instance enabled `VK_EXT_swapchain_colorspace`, otherwise 8-bit
+  `B8G8R8A8_UNORM` or `R8G8B8A8_UNORM` in sRGB-nonlinear. Never the `_SRGB` formats.
+- **Present mode:** MAILBOX, then IMMEDIATE, then FIFO. IMMEDIATE let the compositor stretch the
+  previous image into a resized window.
+- **Resize:** rebuilt for every size by default. `HULTUI_VULKAN_FIXED_EXTENT=1` over-allocates and
+  presents one-to-one through `swapchain_maintenance1` instead.
+- **Synchronisation:** a semaphore per image orders the present after the frame. The acquire waits
+  on a fence, because SkiaSharp exposes nothing to hand a semaphore to; it costs 0.0064 ms a frame.
+- **Per window:** each host has its own instance, device and command table. Device-level function
+  pointers are never shared between windows.
 
-Cross-platform plus HDR leaves exactly one API. **Vulkan** has
-`VK_EXT_swapchain_colorspace` and `VK_EXT_hdr_metadata` on both Windows and Linux, and
-SkiaSharp 3.119.2 exposes the backend (`GRContext.CreateVulkan`, the `GRVk*` types are
-in the shipped assembly). D3D12 is also exposed and is also Windows-only, so it is out
-for the same reason as the two above.
+The choices themselves are `VulkanSwapchainChoice`, unit-tested without a GPU.
 
-### The part that makes this harder than it looks
+### Drawing the UI (`SkiaVulkanRenderSurface`)
 
-`SkiaGLRenderSurface` does **not** share one framebuffer with mpv. mpv renders into its
-own GL texture and Skia wraps it as an image to draw:
+The render target over a swapchain image is **built fresh every frame**: Skia tracks the image's
+layout inside it, and the host moves the layout behind Skia's back.
 
-```csharp
-internal SKImage? WrapTexture(in GpuFrame frame)   // SkiaGLRenderSurface
-```
+On scRGB, 1.0 is 80 nits, and the UI's white has to land at the display's SDR white instead: the
+**white scale**, SDR white over 80 (3.0 for 240 nits). **Skia cannot put a glyph past 1.0**, with
+any paint, colour matrix or shader. So the frame is drawn into a 0..1 offscreen, where glyphs and
+fills agree, and multiplied once on the way to the swapchain. `ScRgbFramePaths.Choose` picks one of
+four routes:
 
-That seam is what keeps video an ordinary element. It also breaks the moment Skia stops
-speaking GL: **mpv's render API is OpenGL-only.** `mpv_render_context_create` accepts
-`opengl` and `sw`, nothing else — there is no Vulkan render type upstream, and the
-constants in `Mpv.cs` reflect exactly that. So a Vulkan `WrapTexture` has a GL texture on
-one side and a Vulkan image on the other.
+| Route | When |
+|---|---|
+| Direct | not scRGB, or a white scale of 1 |
+| Offscreen | scRGB with a white scale above 1 (Windows) |
+| Encoded offscreen | the compositor decodes sRGB with gamma 2.2 (KWin), at any white scale |
+| Scaled space | `HULTUI_VULKAN_SCALED_SPACE=1`: the scale rides in the destination colour space, no pass |
 
-The bridge is **external memory**: allocate the image in Vulkan, export it
-(`VK_KHR_external_memory_win32` / `_fd`), import it into the GL context that mpv renders
-with (`GL_EXT_memory_object_win32` / `_fd`), and give mpv an FBO over the imported
-texture. Done once per resize, not per frame. This is a standard technique and it is also
-**the single biggest risk in the plan** — if the interop does not work on the drivers we
-care about, the route collapses and HDR goes back to being Windows-only.
+The encoded offscreen exists because **KWin shows an sRGB window through a pure 2.2 gamma** while
+Skia uses the piecewise curve, so shadows came out lighter than a GL window beside them. The UI is
+drawn encoded and decoded with 2.2 in the blit. Both shaders keep the sign of negative values, for
+wide gamut.
 
-Hence: the interop is the first thing built, on its own, before any of the rest.
+### Display colour: HDR state, SDR white, peak
 
-### The build has to change too
+| | HDR state | SDR white | peak |
+|---|---|---|---|
+| **Windows** | display configuration (`GET_ADVANCED_COLOR_INFO_2`) | display configuration, per monitor | white × SDL's headroom |
+| **Windows, events on** | WinRT `DisplayInformation` | `DisplayInformation` | `DisplayInformation`, absolute |
+| **Wayland** | SDL | the protocol constant **2.5375** (203 nits) | 203 × SDL's headroom |
+| **X11** | none: X11 offers only sRGB-nonlinear | — | — |
 
-`native/mpv/build-libmpv.sh` deliberately trims all of this out:
+- **SDL's HDR flag is wrong on Windows.** It calls a display HDR when headroom exceeds 1, so a
+  slider above the panel's peak reads SDR, and it goes stale across Win+Alt+B.
+- **Nothing announces the SDR brightness slider.** The window gets no message at all. So Windows is
+  polled every 100 ms (about 12 µs a poll), unless the app turns on display-colour events
+  (`displayColorEvents: true`, which Reel and Aperture pass, or `HULTUI_DISPLAY_INFORMATION=1`).
+  The events are hand-rolled COM with no new dependency, and track a dragged slider at once.
+- **On Wayland SDR white is a protocol constant**, not a property of the monitor. SDL's
+  `SDR_white_level` reads 1.0 there, and using it gives a dim picture.
+- **A change** arrives as a display or HDR-state event, or from the poll. The swapchain is rebuilt
+  only if its format changes, and the blit follows the new white scale either way.
+- **HDR metadata is not sent.** For scRGB, Windows composites from the display's own profile, and
+  invented numbers are worse than none.
 
-```
--Dvulkan=disabled -Dshaderc=disabled -Dglslang=disabled -Dlcms=disabled
--Dopengl=enabled  -Dd3d11=disabled
-```
+### Video: mpv into a shared image
 
-For HDR, **`lcms` has to come back** — without colour management mpv cannot tone map or
-convert primaries. `vulkan`/`shaderc` are only needed if mpv itself ever renders with
-Vulkan, which on this route it does not: it keeps rendering with GL into an imported
-image. So the build grows by libLCMS2 and its licence-report entry, and not by a shader
-compiler. That is a much smaller concession than it first looked.
+1. **A hidden GL context** beside the Vulkan device, created on the first frame that draws a video.
+   It must be on the same GPU: the device UUIDs are compared, through the indexed
+   `glGetUnsignedBytei_vEXT` query.
+2. **A shared `RGBA16F` image**, allocated dedicated and exportable, exported as a Win32 handle or
+   an fd, and imported into GL (`GL_EXT_memory_object`, with `GL_DEDICATED_MEMORY_OBJECT_EXT`) as a
+   texture with a framebuffer over it.
+3. **mpv renders into that framebuffer** through its GL render API, told the format and
+   `MPV_RENDER_PARAM_DEPTH=16`. Skia then draws the image. There is no copy through main memory.
+4. **Ordering, both ways.** GL signals a semaphore after mpv draws, which the Vulkan hand-back
+   barrier waits on. A second semaphore runs back: the present releases the image to the external
+   queue and signals it, and GL waits on it before the next write (184ae17). The barrier command
+   buffers are a ring of three with a fence each, so nothing blocks the CPU.
+   `HULTUI_VULKAN_SEMAPHORE=0` goes back to `glFinish` and a queue wait.
+
+**A failure is harmless.** A missing extension, a context on another GPU or a refused import leaves
+`SupportsExternalGL` false, and the video takes its pixel path, which is slower and works.
+`HULTUI_VULKAN_INTEROP=0` refuses the interop outright. **One GPU video source per window** can
+use it; a second in the same frame draws nothing on Vulkan.
+
+### HDR video
+
+On an scRGB target, mpv is told to draw linear light for the display:
+
+- `target-prim=bt.709`, `target-trc=linear`, `target-peak` = the display's peak (10 to 10000 nits).
+- `gamut-mapping-mode=clip`, so colours outside BT.709 stay as negative values, which scRGB shows
+  as the colours they are. `HULTUI_VIDEO_WIDE_GAMUT=0` maps them into BT.709 instead.
+- **libplacebo's linear 1.0 is exactly 203 nits**, the BT.2408 reference white. The frame is drawn
+  at 203 over the canvas's white (203/240 on Windows) under the default `reference` policy, so a
+  1000-nit highlight is 1000 nits. `HULTUI_VIDEO_WHITE=ui` stretches it to the UI's white instead.
+  On Wayland the two already agree, since 2.5375 × 80 = 203.
+
+The options are set **asynchronously**, and a frame is labelled with the settings mpv has
+*confirmed*, not the ones it was asked for (`MpvTargetColour`). A paused frame is drawn again once
+a change is confirmed. `HULTUI_VIDEO_HDR=0` turns all of this off.
+
+### Decode
+
+`hwdec=auto-safe`. **On NVIDIA it is zero-copy on both platforms**: the trimmed LGPL libmpv has
+NVDEC with CUDA interop (38da446 on Windows), and mpv registers its own plane textures with CUDA and
+renders from them into the shared framebuffer. The VO line reads `cuda[p010]`. The DirectX interops
+stay off, because they bridge at 8 bits. So AMD and Intel on Windows decode on the GPU and copy
+(`d3d11va-copy`). The natives build refuses to link `nvcuda` at load time, so the DLL still loads on
+a machine without NVIDIA's driver.
+
+### mpv's threads
+
+**The UI thread is mpv's render thread, and it never waits on mpv's core.** After every load and
+seek, the core waits up to 200 ms for the first frame to be drawn. So every command from the UI
+thread is queued (`mpv_command_async`, `mpv_set_property_async`), and a frame that arrives before
+the video's size is known is taken without drawing (`MPV_RENDER_PARAM_SKIP_RENDERING`) and drawn
+once the size arrives.
+
+## Invariants
+
+The rules the design depends on. Each one was broken once, and most failed silently.
+
+- **Never cache** a render target over a swapchain image, or a wrapped renderer-owned image. Skia
+  tracks the layout inside them.
+- **Swapchain images need `TRANSFER_SRC`.** Without it Skia returns a null surface and says
+  nothing.
+- **scRGB only with `VK_EXT_swapchain_colorspace` enabled.** Drivers list the colour space either
+  way.
+- **The white scale is applied once**: by the blit, or by the scaled colour space, never both.
+- **Read the shared image through GL**, never Vulkan. Skia owns its Vulkan layout.
+- **A Win32 handle is closed by the caller; an fd is consumed by the import.**
+- **An app's request may fall back to GL; `HULTUI_RENDERER`'s may not.**
+- **A frame's colour label follows what mpv confirmed.**
+- **The UI thread makes no synchronous libmpv call** once a render context exists.
+- **The natives never import `nvcuda` at load time.**
+
+## Defaults
+
+Every switch is described in [ENVIRONMENT.md](../ENVIRONMENT.md).
+
+| Decision | Default | Why | Switch |
+|---|---|---|---|
+| Renderer | GL; Vulkan per app | Vulkan costs start-up, memory and resize CPU that apps without HDR video would pay for nothing | `renderer:`, `HULTUI_RENDERER` |
+| Swapchain format | follows the display | enumeration lists the same formats in HDR and out | `HULTUI_VULKAN_F16` |
+| Present mode | MAILBOX | no resize stretch, and video level with GL | `HULTUI_VULKAN_PRESENT` |
+| Fixed extent | off | halves resize CPU, costs 4K video about 70% | `HULTUI_VULKAN_FIXED_EXTENT` |
+| Scaled colour space | off | 0.10 ms a frame and no memory saved, on a path off Skia's usual one | `HULTUI_VULKAN_SCALED_SPACE` |
+| Display-colour events | off, apps opt in | COM in the message loop, which apps without HDR do not need | `displayColorEvents:`, `HULTUI_DISPLAY_INFORMATION` |
+| HDR video | on | an HDR swapchain with a tone-mapped picture wastes the swapchain | `HULTUI_VIDEO_HDR` |
+| Video white | `reference` | decided by eye: a correct picture beats matching chrome | `HULTUI_VIDEO_WHITE` |
+| Wide gamut | on | confirmed by eye on Windows | `HULTUI_VIDEO_WIDE_GAMUT` |
+| Interop, semaphores | on | the copy cost 675 ms/s of CPU at 1080p on Linux; the semaphore saves 135 ms/s at 4K on Windows | `HULTUI_VULKAN_INTEROP`, `HULTUI_VULKAN_SEMAPHORE` |
+| hwdec | `auto-safe` | zero-copy where the interop exists, a copy otherwise | `HULTUI_MPV_HWDEC` |
+
+## What it costs
+
+Windows 11, RTX 4080, a 120 Hz HDR display at 150%, Release builds, 2026-09-27. One value per
+quantity; where HDR-LOG.md has several, these are the most careful.
+
+| | GL | Vulkan | |
+|---|---|---|---|
+| start-up to first frame | 552 ms | 679 ms | +127, all in the first frame of an F16 target; 8-bit Vulkan is 581 |
+| second window | 170–178 ms | **154–161 ms** | |
+| present pass | **0.10 ms** | 0.40 ms | 0.20 of it Vulkan and the F16 target, 0.10 the offscreen |
+| private memory, two windows | **81 MB** | 133 MB | 86 on an 8-bit swapchain; the offscreen is 9 MB a window |
+| resize CPU, 120 resizes | **90–123 ms/s** | 789–804 ms/s | MAILBOX; IMMEDIATE 275–366, FIFO 297–390 |
+| 4K HEVC HDR video, CPU | 51 ms/s | **43 ms/s** | both zero-copy; 178 without the semaphore |
+
+- **The Windows costs are 16-bit colour, not Vulkan.** An 8-bit Vulkan window starts within 30 ms
+  of GL, resizes at GL's cost, and sits 5 MB above it.
+- **On NVIDIA Linux F16 is nearly free.** There the fixed costs are the API's: about +95 ms of
+  start-up and +23 MB, with or without F16.
+- **The fixed extent**, in its own A/B: 10 swapchain builds instead of 122, and resize CPU from
+  801 to 466 ms/s (GL 264), which is 3.0x GL's down to 1.8x. It costs 4K video 91–95 ms/s against
+  48–63.
+- **Resize CPU under MAILBOX is driver-side.** Halving the frames drawn during a resize left it
+  unchanged.
+
+## Not done
+
+- **Mesa, AMD, Intel, a hybrid GPU.** No machine here has one.
+- **Linux checks still open:** negative scRGB (wide gamut) on KWin, the indexed device-UUID query
+  on Mesa, the scaled colour space, and the GL fallback, whose automated tests are Windows-only.
+- **Zero-copy on AMD and Intel under Windows.** Their only bridges are 8-bit, or need ANGLE, which
+  cannot import Vulkan memory.
+- **Start-up's +127 ms.** It is pipeline compilation for the F16 target, and SkiaSharp exposes no
+  persistent pipeline cache.
+- **A fixed extent only while dragging** would get both its resize saving and full video speed. It
+  needs a settled-size signal the renderer does not have.
+- **HDR10 swapchains and HDR metadata.** scRGB was chosen: HDR10 would halve bandwidth, but PQ is
+  absolute luminance and Skia's colour management is relative.
+- **Video luminance under the scaled colour space** matches the offscreen path to 0.4% on average,
+  but no same-frame comparison was possible.
+- **A second GPU video source in one window** draws nothing on Vulkan.
+- **One "render() not being called or stuck" line at Vulkan start-up** remains, logged only at
+  `HULTUI_MPV_LOG=v`. The UI thread is busy with its first frame and the window reveal, so the
+  picture comes up no later because of it.
 
 ## Phases
 
-**0 — The interop spike. DONE, and it works.** `spikes/HdrInterop`: a Vulkan `RGBA16F`
-image, exported, imported into a GL context, cleared from GL and read back through Vulkan
-with the colour intact — and then mpv decoding into the same FBO, which read back as real
-video rather than the clear colour. On an RTX 4080 on Windows.
+Code comments name these phases.
 
-Confirmed on **Linux** as well, on the same card: the `fd` export imports into GL, the
-colour survives the round trip, and mpv decodes into the shared image. Windows and Linux
-return the same pixel values for the same frame, to two decimals — so the bridge this whole
-route rests on is cross-platform in fact, not on paper.
-
-`target-colorspace-hint` turns out to be a no-op without render params describing the
-target, so it belongs in phase 4 and is opt-in in the spike until then.
-
-*Not* proven anywhere: AMD and Intel, and Mesa rather than NVIDIA's own driver. Those are
-where an `fd` export is most likely to behave differently, and phase 1 should be treated as
-unproven on them.
-
-**1 — `SkiaVulkanRenderSurface`. DONE on Windows.** An app runs on
-`HULTUI_RENDERER=vulkan` and draws correctly: the captured swapchain image is the Minimal
-sample, indigo button and antialiased text, 30 distinct colours. GL is untouched and
-remains the default.
-
-One trap worth carrying forward: **Skia refuses a render target without
-`VK_IMAGE_USAGE_TRANSFER_SRC_BIT`** and says nothing — `SKSurface.Create` simply returns
-null. The bisect in `spikes/HdrInterop` pins it.
-
-**Untested on Linux, and untested under resize anywhere.** The commands for both are in
-[HDR-PHASE1-LINUX.md](HDR-PHASE1-LINUX.md), which is the next thing to do — phase 2 changes
-colour handling and wants a known-good renderer underneath it.
-
-The original plan for this phase read:
-
-**1 — `SkiaVulkanRenderSurface`.** A fourth `IRenderSurface` — the interface is four
-members and there are already three implementations, so this is the least novel part.
-Vulkan instance, device, swapchain, `GRVkBackendContext`, wrapping swapchain images as
-Skia render targets, resize, present. SDR only, sRGB, identical output to the GL surface.
-Selected by an environment variable so the GL path stays the default and the shipping one.
-
-**2 — F16 and a colour space.** Move the surface to `RgbaF16` with an explicit
-`SKColorSpace`. Every `Color` in the framework is currently 8-bit sRGB with no tag, so
-this is where the UI either keeps looking right or goes subtly wrong everywhere — themes,
-gradients, the shadow and tint work in every app. Expect this phase to be about the apps,
-not the renderer.
-
-**Detection, found while starting phase 3:** a Vulkan surface lists every format and colour
-space the *driver* supports, not what the *display* is doing. The list is byte-for-byte the
-same with the monitor in HDR mode and out of it — checked, not assumed — so enumeration can
-never answer "is HDR on". SDL asks the compositor, which is the only thing that knows:
-`SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN`, surfaced as `IPlatformWindow.IsHdrDisplay` and
-printed by `DescribeGraphics` on both backends.
-
-**scRGB is 80 nits, and Windows is not** (2026-09-25, found by photographing two windows
-side by side rather than by any capture). `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` fixes
-1.0 at 80 nits; Windows composites SDR content at its "SDR content brightness" level, which
-on this machine reads **240 nits** through `DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL`.
-So a correct linear 1.0 lands three times too dim beside every other window, and the
-swapchain image is right the whole time — the capture cannot see it and neither can a
-screenshot, because the compositor is doing exactly what it was told.
-
-**Where that factor can live, investigated** (`spikes/HdrInterop --text`):
-
-| how | fill | glyph |
-|---|---|---|
-| destination primaries divided by 3 | 3 | 1 |
-| `SKColorFilter.CreateColorMatrix` ×3 | 1 (clamped) | 1 |
-| `paint.ColorF` = 3 | 12.8 (through the transfer fn) | 1 |
-| SkSL colour filter ×3 | 3 | 1 |
-| **drawn 0..1 offscreen, image scaled once on the way out** | **3** | **3** |
-
-**No paint can put a glyph past 1.** Not a bent colour space, not a colour matrix, not a
-shader. And it is not that text escapes colour management — sRGB red into a linear Display
-P3 destination lands at 0.823 for a fill and 0.824 for a glyph, so text is converted exactly
-like a fill. The clamp is specific to exceeding 1 on the glyph path.
-
-So the scale stops being a property of the drawing and becomes a property of the finished
-picture: render the frame into an offscreen surface at 0..1, where a glyph and a fill agree
-because neither is being asked for anything unusual, then multiply once while blitting to
-the swapchain. **Built**, and white text now matches white fills exactly — nought
-mis-scaled white pixels against the 8-bit reference, where before there were 511.
-
-**The clamp is at 1, and only upward.** Scaling *down* works per paint for both fills and
-glyphs (0.251 and 0.251 through either a colour matrix or an SkSL filter). That matters for
-the choice below, because HDR10 scales down where scRGB scales up.
-
-### scRGB or HDR10, measured
-
-| | unpaced fps |
+| Phase | What it built |
 |---|---|
-| 8-bit sRGB, straight to the swapchain | ~7500 (drifts 7100–9200 between runs) |
-| F16 scRGB, straight to the swapchain | ~4110 |
-| F16 scRGB, offscreen and blit | ~3950 |
-
-**The extra pass costs about 4%.** The 2× is the 64-bit render target, not the blit — which
-was the thing worth knowing, because it was the blit that looked like the reason to prefer
-HDR10.
-
-So **scRGB stays**. HDR10 would halve the bandwidth, being 32 bits a pixel like the 8-bit
-path, and its downward scale needs no offscreen. Against that: PQ encodes *absolute*
-luminance and Skia's colour management is relative, so sRGB white would land at 10,000 nits
-and putting it back at 240 means a linear scale applied before a non-linear encode — which
-is not what a colour filter does, and not something the colour space can express either.
-That is a new investigation with its own unknowns, in exchange for bandwidth that is not
-currently the constraint. Worth revisiting if it ever is.
-
-**3 — The HDR swapchain. Built on Windows.** The format now follows the display rather than
-an environment variable: `IsHdrDisplay` decides, `HULTUI_VULKAN_F16` overrides it either way
-(1 forces scRGB on, 0 forces it off), and the SDR white level comes from the display too.
-`VK_EXT_swapchain_colorspace` is enabled whenever the loader has it, not only when wide
-colour is wanted at startup — an instance cannot gain an extension later and a window can be
-dragged onto an HDR display at any time.
-
-`SDL_EVENT_WINDOW_DISPLAY_CHANGED` re-asks, and rebuilds the swapchain only when the answer
-changes. **Tested both ways** on a machine with one HDR monitor and one SDR one:
-
-```
-display changed: hdr=False whiteScale=1  format unchanged      (SDR monitor, 80 nits)
-display changed: hdr=True  whiteScale=3  rebuilding for scRGB  (HDR monitor, 240 nits)
-display changed: hdr=False whiteScale=1  rebuilding for sRGB   (back again)
-```
-
-SDL emits several of those events per move; the guard means one rebuild each way and the
-rest say so.
-
-**The white level is per monitor**, which only shows on a mixed setup: the query follows the
-window's display through `MonitorFromWindow` and matches the GDI device name against the
-display configuration's source name. Asking whichever active path answered first — which is
-what it did before there was a mixed setup to try — is answering about the wrong screen half
-the time.
-
-**HDR metadata is deliberately not sent.** `VK_EXT_hdr_metadata` is present on this device,
-but `VkHdrMetadataEXT` wants the display's maximum and minimum luminance and the content's
-light levels. SDL's binding here has neither `SDR_WHITE_POINT` nor `HDR_HEADROOM`; the white
-point came from the Windows display configuration API and maximum luminance would need DXGI
-as well. Sending invented numbers is worse than sending none — a display may tone map to
-them — and for an scRGB swapchain Windows composites from the display's own profile anyway.
-It belongs with HDR10, where the numbers are load-bearing.
-
-**Linux, now run.** X11 indeed cannot: it offers only `SRGB_NONLINEAR` and reports no HDR,
-correctly. Wayland does the whole thing — 28 surface formats including
-`R16G16B16A16Sfloat/ExtendedSrgbLinearEXT`, SDL reports HDR when the monitors are in HDR mode,
-and phase 3 picks scRGB by itself with nothing forced.
-
-**But the white level is a different quantity there, and the window came out dim.** On Windows
-SDR white is a property of the display, queried per monitor. On Wayland it is a **protocol
-constant**: `color-management-v1` defines Windows-scRGB — which is what a compositor takes
-`VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT` to be — as 1.0 = 80 cd/m², and says that where a
-reference white must be assumed it is **2.5375**, the BT.2408 reference of 203 cd/m². The
-compositor maps that onto whatever its output drives SDR white at, so the number does not move
-with the monitor and asking the monitor is the wrong move.
-
-That matches what was found by eye before the protocol was read: on KWin with two HDR monitors
-at 408 and 455 nits, 1 and 2.0 are visibly dim, 5.1 (408/80) too bright, and 2.54 matches the GL
-window on **both** — which a scale proportional to the monitor's brightness could not have done.
-
-Two traps worth stating. **SDL's own `SDR_white_level` is the wrong number for this path**: it
-reads 1.0 on Wayland, following the EGL convention where 1.0 already *is* reference white, and
-feeding it in reproduces the dim picture exactly. And **no capture can show this** — the F16 and
-8-bit captures agree within 1 LSB, because the image is right and only the scale is wrong. Only
-the screen shows it.
-
-`SDL3Window.WhiteScale` now returns 2.5375 on Wayland. Mesa's WSI was not tested and may not
-present scRGB as Windows-scRGB at all.
-
-**4 — HDR video through the seam.**
-
-**The starting point is not what this plan assumed.** Video already plays on the Vulkan
-renderer, correctly, today — a 1080p file decodes and composites under the transport bar
-with nothing added. `GpuFrameSink` chooses its path by whichever the surface asks for first,
-and since `SkiaVulkanRenderSurface` is not an `IExternalGLSurface`, it falls through to the
-pixel path and mpv uses its own software renderer. Nothing is broken; it is simply going the
-long way round.
-
-**What that costs, measured:** the same file, the same window, 10 seconds of wall clock —
-**1.75 CPU-seconds on GL and 3.50 on Vulkan.** Exactly twice, and at 1080p. A 4K frame is
-four times the pixels, so the gap widens with the content people actually want HDR for.
-
-So phase 4 is not "make video work on Vulkan", it is "stop routing it through main memory",
-and the prize is that doubled CPU plus the ability to carry more than 8 bits at all.
-
-The route is phase 0's bridge, in the real renderer:
-
-1. A GL context alongside the Vulkan device, on the same GPU — the window is created
-   `SDL_WINDOW_VULKAN` and has none, so this is a second, hidden one. The spike already
-   creates exactly this pair and checks the device UUIDs match.
-2. A Vulkan `RGBA16F` image, exported and imported into that GL context as a texture with an
-   FBO over it — `internal_format` on `mpv_opengl_fbo` stops being 0.
-3. mpv renders into it as it already does on GL, and Skia draws the Vulkan image directly.
-   No CPU copy anywhere.
-4. ~~`target-colorspace-hint` then means something.~~ **This step was wrong — see below.**
-
-**The seam is done** (`GpuFrameTarget`, `IExternalGLSurface.TryAcquireFrameTarget`,
-`ISkiaExternalSurface.WrapFrame`). Target ownership can now sit on either side: the source
-keeps making its own texture unless the renderer says it cannot composite one, in which case
-the renderer lends a framebuffer and composites whatever it lent. A GL surface says nothing
-and behaves exactly as before; the default implementation returns false.
-
-Two things moved to make room for the second implementation. `GpuFrame` carries
-`RendererOwned`, because a Vulkan surface has no meaningful texture name to put in
-`TextureId`. And the render context no longer names `SkiaGLRenderSurface` and call its
-`WrapTexture` — it holds an `ISkiaExternalSurface` and calls `WrapFrame`, since a method
-named for a GL texture is one a Vulkan surface could never satisfy.
-
-**What the ordering costs, measured.** The one thing that could have made this arrangement
-worse than the copy it removes is synchronisation: GL and Vulkan write and read one image,
-and something has to order them. The spike's `--syncbench` measures the crudest ordering
-there is — `glFinish` on the GL side, a barrier submit and `vkQueueWaitIdle` on the Vulkan
-side — as a stand-in for mpv rendering and Skia reading:
-
-| | GL draw | + `glFinish` | + Vulkan wait | total |
-|---|---|---|---|---|
-| 1080p | 0.00 ms | 0.02 ms | 0.25 ms | **0.27 ms/frame** |
-| 4K | 0.00 ms | 0.04 ms | 0.25 ms | **0.29 ms/frame** |
-
-The cost is flat across resolutions, which says what it is: not the image being waited on,
-but the fixed price of submitting a command buffer and waiting for the queue to drain — and
-a renderer that already submits work every frame pays most of that regardless. At 24 fps it
-is **7 ms of the 1000 ms in a second**, against the 175 ms/s the software copy costs at
-1080p. Even at 60 fps it is 16 ms/s.
-
-So external semaphores (`VK_KHR_external_semaphore` with `GL_EXT_semaphore`) would remove
-the stall, but they are an optimisation rather than a precondition. Phase 4 can be built
-with the blunt ordering and tightened later if a profile ever asks for it.
-
-**Built, and working on Windows.** `SdlVulkanHost.Interop` makes the hidden GL context,
-creates an exportable `RGBA16F` image, imports it into GL as a texture with a framebuffer over
-it, and hands the Vulkan handle back to `SkiaVulkanRenderSurface` to draw. mpv is told the
-framebuffer's internal format, so `internal_format` on `mpv_opengl_fbo` is no longer 0 and the
-decoder stops assuming eight bits inside a target that holds sixteen.
-
-Evidence, on an RTX 4080: `vulkan interop ready on NVIDIA GeForce RTX 4080/PCIe/SSE2` followed
-by `vulkan interop image 320x180 RGBA16F`, and a captured swapchain frame that holds the clip
-the right way up with the right colours. The capture is the only honest evidence there is —
-the headless driver renders through `SkiaRasterRenderSurface` and never touches this backend.
-
-**Three things make a failure harmless rather than fatal.** The GL context is not created until
-the first frame that draws a video, so a window that never shows one pays none of the 130 ms it
-costs. Every step that can fail — a missing extension, a GL context on the other GPU, an import
-the driver refuses — answers by leaving `SupportsExternalGL` false, which sends the source down
-its pixel path: the slower route that worked before, rather than a renderer compositing an image
-it cannot read. And `HULTUI_VULKAN_INTEROP=0` refuses it outright, for a machine where it is
-available and still wrong.
-
-**The CPU saving, measured on Linux.** It could not be measured on Windows — an uncompressed
-1080p test clip is about 75 MB/s of disk reads, larger than the copy being measured, and the
-readings swung between 39 and 276 ms of CPU per second. On a compressed 1080p24 x264 clip, in a
-release build, over a 10-second window after five seconds of warm-up, two rounds agreeing to 1%:
-
-| Path | CPU |
-|---|---|
-| Vulkan, interop | **135 ms/s** |
-| Vulkan, `HULTUI_VULKAN_INTEROP=0` | **810 ms/s** |
-| OpenGL renderer | 122–127 ms/s |
-
-So the interop removes about **675 ms of CPU per second** and puts the Vulkan renderer level
-with GL, which is what the phase was for. Why the software path costs 810 ms/s there against the
-~175 estimated on Windows is unexplained; the two Linux figures come from identical mpv settings,
-so the comparison between them holds whatever that turns out to be.
-
-**Linux works, on the NVIDIA proprietary driver.** Wayland and X11 both, the frame the right way
-up with the right colours, no fallback to the software path, and the fd half of the handle
-question behaves. Synchronisation is *cheaper* there: 0.16 ms a frame at both 1080p and 4K
-against Windows' 0.27 on the same card. Validation printed nothing about this code across 159
-swapchain recreations — in particular nothing about the `FinishExternalFrame` queue-family
-transfer or its `GENERAL` layout, which was the part of phase 4 that is convention rather than
-certainty. Details in `docs/design/HDR-LINUX-BRIEF.md`.
-
-**The export cycle does not leak, on Windows.** `spikes/HdrInterop --churn` runs a thousand
-export-import-release cycles and counts the process's handles: no change, against a control of
-200 deliberately dropped handles that raises it by 200. The control is the point — the first two
-versions of that test both reported a clean pass while being incapable of failing. One exported
-the same allocation every time, and **NVIDIA hands back the identical Win32 handle for repeated
-exports of one `VkDeviceMemory`**, so nothing could accumulate; the other read
-`Process.HandleCount`, which comes through a performance counter that does not move per handle
-and showed a flat line while 200 handles leaked. The renderer reallocates on a size change, so
-the honest cycle reallocates too.
-
-The same command runs on Linux and answers the fd half, with a control of its own: there, a
-descriptor is consumed by the import, so the control exports one and never imports it.
-
-**The scRGB path carries video correctly.** With the display in HDR, the frame goes through the
-interop into the shared image, is drawn into the linear F16 offscreen as sRGB, and is multiplied
-by the white scale on the way to the swapchain — and the captured result is identical to the
-8-bit run to within 1 LSB (255,169,166 over 0,0,145 in both). That was the last combination
-listed as untested on either platform.
-
-**Still untested:** Mesa and a hybrid GPU, neither of which exists on the machines to hand.
-
-**Phase 4 delivers the bits and the copy, but not yet the range.** Step 4 of the plan above
-assumed `target-colorspace-hint` would start working once there was a real target colour space to
-hint at. There still is no way to say what that target is. `mpv_opengl_fbo` carries `fbo`, `w`,
-`h` and `internal_format` and nothing else, and no `MPV_RENDER_PARAM` describes a colour space —
-the whole list is API_TYPE, OPENGL_INIT_PARAMS, OPENGL_FBO, FLIP_Y, DEPTH, ICC_PROFILE,
-AMBIENT_LIGHT, WL_DISPLAY, ADVANCED_CONTROL, NEXT_FRAME_INFO, BLOCK_FOR_TARGET_TIME,
-SKIP_RENDERING, the DRM pair and the SW group. The phase 0 finding stands unchanged, and nothing
-about phase 4 altered it.
-
-What follows is that **mpv still believes it is drawing to an SDR sRGB target**, and tone-maps HDR
-content down before it ever reaches the half-float image. The interop removes the copy and carries
-sixteen bits of precision; it does not yet carry HDR range. Every frame checked so far has been
-SDR content, where this makes no difference and the numbers came out exact — which is precisely
-why it did not show up.
-
-The route is mpv's own options rather than a render param: `target-prim`, `target-trc` and
-`target-peak`, set to describe the swapchain when it is scRGB. **Tried, and it works** — see
-below.
-
-### Why not just build libmpv with Vulkan?
-
-The obvious question, and the answer is not a build flag. mpv v0.41.0's `render.h` defines
-exactly two API types:
-
-```c
-#define MPV_RENDER_API_TYPE_OPENGL "opengl"
-#define MPV_RENDER_API_TYPE_SW     "sw"
-```
-
-There is no `render_vk.h` in the source tree. The **render API** — the one where the host
-provides the target and mpv draws into it — speaks OpenGL or CPU memory, and no
-configuration adds a third.
-
-mpv itself renders with Vulkan perfectly well: `--vo=gpu-next --gpu-api=vulkan`, through
-libplacebo. But that path draws into a surface **mpv owns**, which for an embedded player
-means `--wid` and a child window. That was considered and rejected near the top of this
-document, for reasons that have not changed — the overlay can no longer composite onto the
-picture, video stops being an element in the tree, and the windowing is per platform. It
-would also need libplacebo with Vulkan and a shader compiler, which is the weight the
-trimmed build exists to avoid.
-
-So the GL-into-a-Vulkan-image bridge is not a workaround for having chosen badly. It is the
-only arrangement where mpv keeps rendering through the API that embeds, and the pixels still
-land somewhere a Vulkan renderer can use without a copy.
-
-What is left is the implementation behind it, and the hard part is not the seam:
-
-- **A GL context for a Vulkan window.** SDL cannot make one on a `SDL_WINDOW_VULKAN`
-  window, so it means a second hidden window purely to host the context — which is what the
-  phase 0 spike does, including checking the device UUIDs match.
-- **Cross-API synchronisation, every frame.** GL writes the image and Vulkan reads it. The
-  spike settled this with `glFinish` and a queue wait, which is correct and is a stall on
-  both sides; doing it properly wants `VK_KHR_external_semaphore` with `GL_EXT_semaphore`.
-  Until that is measured, it is not certain the 1.75 CPU-seconds saved are not partly spent
-  again on stalls.
-
-**5 — HDR range, then SDR UI over it.**
-
-**The enabling question is answered.** `spikes/HdrInterop --range` renders a clip into the
-shared image and reports what came back. Three findings, in order:
-
-`target-trc` **does reach libplacebo through the OpenGL render API.** A mid-grey that arrives
-encoded at 0.5020 comes back at 0.1921 with `target-trc=linear`, which is that value decoded
-through gamma 2.4. The options are not ignored just because no render param carries them.
-
-**SDR content cannot show range, whatever the target says.** Every combination above left the
-maximum at exactly 1.0, because an SDR source has nothing brighter than reference white. Telling
-the clip it is PQ BT.2020 on the way in (`vf=format=gamma=pq:primaries=bt.2020`) gives it
-something to carry, and then `target-peak` opens the range: the maximum goes to 4.9258.
-
-**`target-peak` sets the range, and the normalisation is exact:**
-
-| `target-peak` | maximum written |
-|---|---|
-| 203 | 1.0000 |
-| 406 | 2.0000 |
-| 1015 | 5.0000 |
-
-So **libplacebo's linear output puts 1.0 at 203 nits** — the BT.2408 reference white, to four
-decimals. That is the same 203 the Wayland colour-management protocol names as the reference
-white of Windows-scRGB, which is where the 2.5375 in `SDL3Window.WhiteScale` comes from. The two
-ends of this pipeline already agree on the constant, and the conversion is therefore
-
-> mpv linear (1.0 = 203 nits) → scRGB (1.0 = 80 nits) is a multiply by **2.5375**
-
-which is exactly the scale the Wayland path already applies to the whole frame.
-
-**What that leaves to build.** A seam, because `HultUI.Media` has no idea what colour space the
-renderer chose: the renderer knows it lent an scRGB target and what the display's peak is, and
-the backend needs both to set `target-trc`, `target-prim` and `target-peak`. Then the video image
-has to be drawn as *linear* rather than sRGB-encoded, which is a different `SKColorSpace` on the
-wrap in `WrapFrame`. Neither is large; both are untested against real HDR content, which neither
-machine has.
-
-**Built, working, and on by default** (`HULTUI_VIDEO_HDR=0` turns it off). The seam carries
-`WantsLinearLight` and `PeakNits` down to the producer and `ReferenceWhiteNits` back up;
-`MpvBackend` sets `target-prim`/`target-trc`/`target-peak` and reports libplacebo's 203;
-`WrapFrame` declares the image linear and scales it into the canvas.
-
-**Measured end to end on a real HDR10 film** (2001, PQ/BT.2020, mastering peak 1000.6 nits),
-at two points in the pipeline in the same run:
-
-| | shared image | swapchain |
-|---|---|---|
-| `HULTUI_VIDEO_HDR=0` | max **1.000**, none above 1 | max **3.000** (= SDR white), none above |
-| `HULTUI_VIDEO_HDR=1` | max **4.766**, 1.2M samples above 1 | max **7.180**, 257k samples above SDR white |
-
-4.926 appeared in another sample, which is 1000/203 exactly: the mastering peak, arriving
-intact. And the 0..1 offscreen does **not** clamp — 7.18 passed through it — so the worry that
-phase 2's design would block this was unfounded.
-
-**Two false conclusions on the way there, both from the same mistake.** 2001 opens on a
-three-minute black overture, and several measurements were taken at frame 60, about 2.5 seconds
-in. A black frame reports a maximum of 0.000 or 1.000 and reads exactly like a producer that
-tone-mapped everything away, so the pipeline was twice declared broken when it was working and
-the film was simply black. The sample now takes `--start=<seconds>`, and the probe takes six
-spaced samples rather than one, because one landed on black again even after the seek.
-
-**The measurement that settled it** was reading the shared image back **through GL**, inside
-`RunExternalGL` right after mpv renders (`HULTUI_VIDEO_HDR_PROBE=<n>`). The equivalent read
-through Vulkan needs the image's layout, which Skia owns and moves; guessing it returned a
-uniform 0.000 from an image that plainly had a picture in it. GL has no layouts.
-
-**Why on by default.** A renderer that goes to the trouble of picking an HDR swapchain and then
-asks the decoder for a tone-mapped SDR picture has thrown away the only thing the swapchain was
-for. The blast radius is also smaller than it sounds: `HULTUI_RENDERER=vulkan` is itself opt-in,
-the request is only made on an scRGB swapchain, and `MpvBackend` is the only producer in the tree
-that implements `IGpuFrameRenderer` — anything else writes into the pixel ring and never sees it.
-A future producer that ignores the request keeps writing encoded pixels and reports
-`ReferenceWhiteNits` of zero, so the seam degrades without it knowing this exists.
-
-**Settled**, by looking — see below.
-
-**And apps can now ask for Vulkan in code**, which they could not before: `HULTUI_RENDERER` was
-the only way in, so nothing built on this framework could *ship* HDR — only be launched with it by
-someone who knew the variable existed. `new Application(..., renderer: RendererKind.Vulkan)` is the
-API, the environment variable still overrides it in both directions, and a machine that cannot
-give a Vulkan window falls back to OpenGL with a line on stderr rather than failing to start.
-Verified across the matrix, and **Reel and Aperture both run on the Vulkan renderer** — the first
-time either app has, since everything before this was measured on samples.
-
-**And then the original question, now answered.** A white transport bar at scRGB 1.0 next to a
-1000-nit highlight looks grey; at the highlight's level it is blinding. Everything the overlay
-draws needs a deliberate luminance, and that is a design decision per app rather than a renderer
-setting. It has a number attached: on Windows the UI's scale comes from the display's own SDR
-white (240 nits here, so 3.0) while video reference white wants 2.5375, so UI white and video
-white sit **18% apart** unless one of them is made to yield.
-
-**The decision: `reference` stays the default.** Fredrik looked at both on the 240-nit HDR display,
-with a film and the transport bar up, and confirmed the prediction — the bar reads visibly *hotter*
-than the film's whites without `HULTUI_VIDEO_WHITE=ui`, and the two match with it. Given a real
-choice between a correct picture and matching chrome, the correct picture wins: the film's
-absolute luminances are what the HDR work was for, and the interface being 18% hot is a smaller
-wrong than every highlight in the film being 18% off. Apps that would rather have the chrome match
-can set `ui`.
-
-**And this reconciles the Linux result, which looked like a contradiction.** Linux reported the
-same comparison as *"unchanged, middle band still the same"*. That is not disagreement: **on
-Wayland the setting is a no-op.** Wayland's scRGB reference white is the protocol constant 2.5375,
-and 2.5375 x 80 = 203 nits — exactly libplacebo's reference white. UI white and video white already
-coincide there, so the scale computes to 1 and there is nothing for the flag to change. The flag
-only does anything where the display's SDR white differs from 203, which is Windows' case and not
-Wayland's. Both observations were right about their own platform.
-
-**Superseded text:** **5 — SDR UI over HDR video.** A white transport bar at scRGB 1.0 next to a 1000-nit
-highlight looks grey; at the highlight's level it is blinding. Everything the overlay
-draws needs a deliberate luminance, and that is a design decision per app rather than a
-renderer setting.
-
-## Should Vulkan be the default renderer? Measured 2026-09-27: not yet
-
-Everything below is one machine — Windows 11, RTX 4080, driver 610.62, a 120 Hz HDR display at
-150% scale, `HULTUI_A11Y=0` throughout, Release builds, configurations run **round-robin** so
-drift landed on both rather than on whichever went second.
-
-**The answer is no, and it is not because Vulkan is slow.** Vulkan has caught up on the thing it
-was behind on and is still behind on the things *every* app pays, including the apps that will
-never show a video.
-
-### Where Vulkan now wins
-
-| | GL | Vulkan | |
-|---|---|---|---|
-| 4K HEVC HDR video, CPU | 51 ms/s | **43 ms/s** | medians of 3; both zero-copy `cuda[p010]` |
-| same, `HULTUI_VULKAN_SEMAPHORE=0` | — | 178 ms/s | what the semaphore is worth |
-| render pass, 10k elements | 0.6 ms | 0.6 ms | identical |
-| second window created | 170–178 ms | **154–161 ms** | |
-| create 10,000 | 167 ms | 168 ms | a wash |
-
-The video figure has crossed over: Vulkan is now *cheaper* than GL on 4K HDR, where before the
-semaphore it was 100 ms/s behind. It also carries sixteen bits a channel and can actually present
-HDR, which GL cannot do at all — that asymmetry is the reason this project exists and no CPU
-number offsets it.
-
-**A caveat on comparing to the earlier table:** these runs are a different clip (a 3840x1608 HEVC
-HDR film on a local disk, not 2001 over the share), so the absolute figures are not comparable to
-the 56/62 recorded earlier. Only the GL-versus-Vulkan comparison *within* this run is.
-
-**The second window corrected a theory.** Every `SdlVulkanHost` builds its own `VkInstance` and
-`VkDevice`, which looked like it should make window two pay the whole 215 ms bring-up again. It
-does not — the driver is already loaded and the second device is cheap, and Vulkan beat GL here.
-Worth recording because the reasoning was sound and the measurement disagreed.
-
-### Where GL still wins, and these are the costs everything pays
-
-| | GL | Vulkan | |
-|---|---|---|---|
-| start-up to first frame | **540 ms** | 661 ms | Minimal, warm, medians of 4 |
-| two windows, private memory | **82 MB** | 132 MB | but 89 MB on an 8-bit swapchain — see below |
-| resize storm, CPU | **90–123 ms/s** | 789–804 ms/s | 120 resizes, MAILBOX default, after the throttle fix |
-| select row | **0.51 ms** | 0.91 ms | |
-| swap rows | **0.80 ms** | 1.18 ms | |
-| remove row | **1.68 ms** | 2.21 ms | |
-| present pass | **0.10 ms** | 0.30 ms | 0.20 without the scRGB offscreen |
-
-**The per-frame delta is present, and only present.** Render is identical to two decimals at both
-1,000 and 10,000 elements; the extra 0.2 to 0.4 ms is in handing the image to the presentation
-engine. It disappears into a frame that already costs 160 ms and doubles a frame that costs 0.5 —
-so it lands precisely on the cheap interaction frames a UI spends most of its life drawing. In
-absolute terms 0.4 ms is far below anything a person can see, which is why this is a reason for
-caution rather than a blocker.
-
-**The resize figure is the MAILBOX default's**, and it is worse than the IMMEDIATE number this
-section first recorded (524 ms/s). That is a deliberate trade for correctness — see the two
-sections below, which is also where the memory and the present cost stop being Vulkan's fault.
-
-**Start-up is the one a user would notice.** +120 ms on every launch, consistent to within 5 ms
-across runs. Both renderers pay a driver load (GL's ~153 ms hides inside "platform window ready",
-Vulkan's ~215 ms in instance and device creation), but Vulkan's **first frame** costs 149 ms
-against GL's 56, and it builds the swapchain **twice** during start-up because the window is
-created at one size and scaled to another. There is probably something to reclaim here.
-
-### The resize stretch: a frame that was never drawn, plus a present mode that hid it badly
-
-> **This is a Windows artefact.** KWin never stretches a mismatched buffer — 800 captures, none
-> stretched, with stale frames caught and shown at their true size — so the second cause below is
-> DXGI's and the reasoning should not be carried to other compositors. The first cause, a
-> live-resize frame that is never drawn, is platform-independent and was a real bug everywhere.
-
-**Reported by eye, and no capture of ours would have shown it** — a swapchain readback proves the
-image, and the image was always correct. The question was what the *screen* showed, so the answer
-had to come from a screen capture, which is the one job that tool is right for.
-
-**Made measurable.** A window draws a white bar of a fixed device width (200 DIP at scale 1.5 =
-300 px). Resize the window and capture the screen straight away: a bar wider than 300 means the
-compositor scaled a smaller swapchain's image up into the bigger window. A merely *stale* frame
-keeps the bar at 300 — so this separates stale from stretched, which was the whole difficulty.
-It came back at **402 px**, on a resize that grew the window 900 to 1200: a ratio of 1.333, and
-300 x 1.333 = 400. Every stretched sample measured 402 and never anything between.
-
-**There are two causes, and the first one is a plain bug.**
-
-**1. A live-resize frame could be skipped and then never drawn.** `RenderLiveResizeFrame` is
-invoked from an SDL event watch, which is the only code that runs while Win32 owns the thread in
-`WM_ENTERSIZEMOVE`. It was throttled to one frame per 16 ms. But a throttle is only safe where
-something comes round again — and here nothing does until the drag pauses, unlike
-`ProcessPendingResizes`, which leaves `ResizePending` set so a later pass picks it up. The OS has
-already resized the window, so every skipped frame is a stretched composite. **The throttle is
-gone from that path** and stays on the main-loop one. It costs about 36% more resize frames during
-a drag, which is the right trade: those are the frames being looked at.
-
-**2. IMMEDIATE still stretches without it, and MAILBOX does not.** After the fix, across 40
-resizes a pass: GL 0, 0, 0; MAILBOX 0, 0, 0; **IMMEDIATE 0, 2, 2**. So the mode is a real second
-cause and not a workaround for the first. The default is now MAILBOX, overridable with
-`HULTUI_VULKAN_PRESENT`. IMMEDIATE had been preferred to mirror the GL path's
-`SetSwapInterval(0)`, reasoning that `Application` paces itself and FIFO would override that from
-underneath. That was right about FIFO and wrong to stop there: MAILBOX lets the renderer run ahead
-exactly as IMMEDIATE does, and the method's own doc comment had already said so.
-
-| | stretched, after the fix | resize CPU | UI present | 4K HDR video |
-|---|---|---|---|---|
-| GL | 0 of 120 | 90–123 ms/s | 0.10 ms | 55 ms/s |
-| Vulkan, IMMEDIATE | **4 of 120** | 275–366 ms/s | 0.30 ms | 63 ms/s |
-| Vulkan, MAILBOX | **0 of 120** | 789–804 ms/s | 0.30 ms | **54 ms/s** |
-| Vulkan, FIFO | not established | 297–390 ms/s | **0.20 ms** | 78 ms/s |
-
-**What MAILBOX costs is resize CPU, about 2.4x IMMEDIATE.** That is not frames we choose to draw:
-raising the resize throttle halved the frames (293 to 152) and left the CPU unchanged (832 to
-860), so roughly 500 ms/s of it is driver-side and pacing will not reach it. It is the right trade
-anyway — a drag is transient and a stretch is visible — but it is a trade, and
-`HULTUI_VULKAN_PRESENT=immediate` is there for anyone who would rather have the CPU. FIFO is the
-mirror image: cheapest present pass, but 78 ms/s on video against MAILBOX's 54, because it paces
-the loop from underneath, and continuous playback lasts longer than a drag.
-
-**Two of these conclusions were wrong first, and the way they were wrong is the useful part.**
-
-- **"The throttle is ruled out."** It was rejected on the grounds that frames-per-resize came back
-  at 78 of 60 on *both* renderers — identical, and above 100%. But one `SetWindowPos` raises
-  several SDL events, so a count over 100% is perfectly compatible with the *last* event of a size
-  change being the one thrown away, which is exactly the frame that matters. **A ratio above 100%
-  says nothing about whether the right frame was drawn.** The throttle was the larger of the two
-  causes.
-- **"MAILBOX never stretches."** Claimed off 174 samples at the old throttle, where it read 0.
-  It stretches 1 in 40 there. The first number was undersampling a race, not immunity — and the
-  honest reading of a rare event measured once is that the rate is unknown, not zero.
-
-Neither was found by thinking harder about the first measurement. Both were found by testing a
-combination the first measurement had not covered — throttle 0, which no run had tried.
-
-### The memory and the UI cost are the price of 16-bit colour, not of Vulkan — on Windows
-
-> **This holds on Windows and not on Linux.** NVIDIA's Linux driver makes F16 nearly free: 5 ms of
-> first frame against 100 here, about 50 ms/s through a resize storm against about 500, and no
-> memory at all. There Vulkan's fixed costs are the **API's** — roughly +95 ms of start-up and
-> +23 MB with or without F16. So everything below is a **DXGI / NVIDIA 610** finding, not a
-> property of half-float colour. Measurements in `HDR-LINUX-VERIFY-2.md`.
-
-Both of the remaining gaps were charged to "Vulkan" and neither belongs there. Three
-configurations of the same renderer separate them:
-
-| | UI present pass | two windows, private | handles |
-|---|---|---|---|
-| GL | 0.10 ms | 82 MB | 446 |
-| Vulkan, 8-bit sRGB (`HULTUI_VULKAN_F16=0`) | 0.20 ms | **89 MB** | 519 |
-| Vulkan, scRGB F16 + offscreen | 0.40 ms | 132 MB | 655 |
-
-**With an 8-bit swapchain Vulkan costs 7 MB more than GL, not 50.** The rest is what 16 bits a
-channel actually weighs: three F16 swapchain images at 1560x1140 are 14 MB each against an 8-bit
-backbuffer's 7 MB, and on top of that `OffscreenFor` allocates a **full-size F16 offscreen** per
-window — because this display reports 240-nit SDR white, so the white scale is 3.0 and the frame
-has to be drawn at 0..1 and scaled afterwards.
-
-That offscreen is also **half the present-pass cost**: every frame flushes it, snapshots it and
-blits it to the swapchain through a shader. 0.40 ms with it, 0.20 without, against GL's 0.10.
-
-So the honest accounting is three layers, not one:
-
-1. **0.10 ms, GL's own present.** The floor.
-2. **+0.10 ms, Vulkan's present machinery** — an extra submit, the `TransitionToPresent` command
-   buffer, and a `GRBackendRenderTarget` plus `SKSurface` rebuilt every frame because caching one
-   over a swapchain image is the stale-layout trap. This is the only part that is Vulkan-versus-GL,
-   and it is the smallest.
-3. **+0.20 ms and ~43 MB, the scRGB offscreen.** The largest part, and the most avoidable: it
-   exists only to apply the SDR white scale and a 2.2 decode as a separate full-screen pass.
-   Folding that into the framework's own drawing would remove both, and is the phase-2 work of
-   giving every `Color` a colour space rather than a renderer change.
-
-### Start-up and resize, chased down: both are the half-float swapchain
-
-The two remaining costs were charged to Vulkan. Neither is Vulkan. **Both are the scRGB F16
-swapchain, and an 8-bit Vulkan window is close to GL on both.**
-
-**Start-up.** Minimal, warm, medians of 5, fresh trace file each run:
-
-| | to first frame | the first frame itself |
-|---|---|---|
-| GL | 552 ms | 55 ms |
-| Vulkan, scRGB F16 | 679 ms | 151 ms |
-| **Vulkan, 8-bit sRGB** | **581 ms** | **51 ms** |
-| Vulkan, F16, white scale 1 | 662 ms | 142 ms |
-
-**An 8-bit Vulkan window's first frame is the same as GL's**, to 4 ms. The whole penalty is the
-half-float target and it lands entirely inside the first frame. It is **not** the scRGB offscreen:
-a white scale of 1 turns that pass off and still costs 142 ms. The signature is a one-off
-compile — a swapchain *rebuild* with the same format costs 0.9 ms, and a second window in the same
-process does not pay it again — so it is pipeline and shader work for the F16 linear target, done
-once when the first frame needs it.
-
-**There is no cheap way to keep it.** SkiaSharp 3.119.2 exposes `GRContextOptions` with only
-`AllowPathMaskCaching`, `AvoidStencilBuffers`, `BufferMapThreshold`, `DoManualMipmapping`,
-`GlyphCacheTextureMaximumBytes` and `RuntimeProgramCacheSize` — Skia's `fPersistentCache`, the
-hook an on-disk pipeline cache would need, is not surfaced. Caching it across runs means native
-work, not a flag.
-
-**One thing was fixed and it did not help the clock.** On a scaled display the window was created
-at the requested DIP size, the renderer was built, and *then* the size was corrected to pixels —
-so the Vulkan path built an entire swapchain at 500x300 and immediately threw it away for 750x450,
-re-querying the surface for a present mode on the way. The correction now happens before the
-renderer exists, and the trace shows one swapchain at the right size. **Total start-up did not
-measurably change** (679 against 677): the ~14 ms of wasted build was replaced by the window sync
-that has to happen either way. It is kept for being less work and less allocation churn, not as a
-win — and saying otherwise would be inventing one.
-
-**That fix also broke the GL renderer, in a way worth recording.** `UpdateSize` early-returns when
-the size has not changed, and the GL surface had been getting its *initial* size from the very
-correction that moved: previously `PixelWidth` was 0 until then, so a change was always detected.
-Moving the correction earlier consumed that transition and the GL window reached its first frame
-with no canvas — `No canvas set. Call BeginFrame first.`, on every launch. The Vulkan path was
-immune because its host is constructed with the size. **The surface is now told its size
-explicitly after it is built**, which is what should have been happening: a hidden dependency on a
-side effect that only fired on scaled displays. No test caught it, because the headless driver
-renders through `SkiaRasterRenderSurface` and never builds either real surface.
-
-**Resize.** The same culprit, and this time it is most of the gap. 120 resizes, `--profile`
-build, two reps:
-
-| | resize CPU | swapchain builds |
-|---|---|---|
-| GL, size varying | 134–437 ms/s | 0 |
-| Vulkan F16, size varying | **768–819 ms/s** | 122 |
-| **Vulkan 8-bit, size varying** | **246–319 ms/s** | 122 |
-| Vulkan F16, size *unchanged* | 46–55 ms/s | 3 |
-| GL, size unchanged | 9 ms/s | 0 |
-
-Three things fall out of that table. **The same 122 rebuilds cost 500 ms/s more in F16 than in
-8-bit**, so it is the *size* of what is reallocated and not the count: three images at ~14 MB
-against three at ~7 MB, 122 times, roughly 5 GB of allocation churn through one drag.
-**Vulkan on an 8-bit swapchain is level with GL** — the ranges overlap. And **resizing to the same
-size is nearly free**, which rules out event and frame handling: it is the rebuild.
-
-Our own CPU inside a rebuild is only 0.9 ms; the rest is driver threads, which
-`Process.TotalProcessorTime` counts and a trace mark does not.
-
-**It cannot be reduced by rebuilding less often, because that is what the stretch was.** Presenting
-an image whose extent does not match the window is exactly what the compositor scales, so "no
-stretch" requires a correctly-sized swapchain for every size the window takes. Fewer rebuilds and
-no stretch are the same trade, seen from two sides.
-
-**The way out is to stop the compositor scaling instead**, and this driver can:
-`VK_EXT_swapchain_maintenance1` and `VK_KHR_swapchain_maintenance1` are both present, and
-`VkSurfacePresentScalingCapabilitiesKHR` offers `PRESENT_SCALING_ONE_TO_ONE_BIT_KHR` alongside
-`PRESENT_SCALING_STRETCH_BIT_KHR` and the three gravity bits. **The default is STRETCH — the
-artefact has a name in the spec.** With `ONE_TO_ONE` and `PRESENT_GRAVITY_MIN`, a swapchain
-allocated once at a generous size (the monitor, say) can be presented un-scaled while the window
-is smaller than it, so a drag reallocates nothing and cannot stretch by construction rather than
-by winning a race. That would address the resize CPU and the stretch's root cause together. It is
-real work — instance and device extensions, a surface capability query, create-info chaining, and
-Skia wrapping an image larger than the window — and it is unproven here beyond the extension being
-advertised.
-
-### swapchain_maintenance1: built, works, and off by default because of video
-
-The route out of the resize cost was to stop reallocating: allocate the swapchain larger than the
-window and present it un-scaled, through `VK_KHR_swapchain_maintenance1` and
-`VkSwapchainPresentScalingCreateInfoKHR` with `PRESENT_SCALING_ONE_TO_ONE` and
-`PRESENT_GRAVITY_MIN`. It is implemented, behind `HULTUI_VULKAN_FIXED_EXTENT=1`.
-
-**It does what it was built to do.** Over-allocating to a 256-pixel bucket, A/B on one binary,
-120 resizes, three reps:
-
-| | resize CPU | swapchain builds |
-|---|---|---|
-| GL | 264 ms/s | 0 |
-| Vulkan, rebuild per resize | 801 ms/s | 122 |
-| **Vulkan, fixed extent** | **466 ms/s** | **10** |
-
-Twelve times fewer rebuilds, 42% less CPU through a drag, and the gap to GL down from 3.5x to 2x.
-The over-allocation cost nothing measurable in working set, private bytes or handles (about 13 MB
-more device memory by arithmetic, which those counters do not see).
-
-**Now actually verified.** The Vulkan SDK was installed afterwards and this path re-run under core
-and synchronisation validation: **0 messages**, with the loader confirming the layer loaded and a
-fault injection (dropping the present submit's wait semaphore) producing 21
-`SYNC-HAZARD-PRESENT-AFTER-WRITE` lines to prove the check fires. The correction below stands as
-the record of how it was got wrong the first time.
-
-**Correction: an earlier version of this section said the validation layers were clean here. They
-were not run.** `VK_LOADER_LAYERS_ENABLE` was set and the run produced no layer output, which was
-read as silence meaning approval — but this Windows machine has **no validation layer installed at
-all**: `HKLM/HKCU\SOFTWARE\Khronos\Vulkan\ExplicitLayers` do not exist and there is no Vulkan
-SDK. The layer never loaded, so nothing could have been reported. That is a measurement that could
-not fail, which is the first shape in [Traps](#traps), and it was made while writing about the
-others. Linux has since run validation properly, including synchronisation validation, on the
-semaphore and `glFinish` paths and both display servers, with deliberate faults proving the checks
-fire — see `HDR-LINUX-VERIFY-2.md`.
-
-**It should also remove the stretch structurally rather than by racing** — with `ONE_TO_ONE` the
-compositor has nothing to scale — and one run measured exactly that:
-
-| | stretched frames |
-|---|---|
-| IMMEDIATE, exact-size swapchain (**control**) | 18 of 150 |
-| IMMEDIATE + one-to-one | **0 of 150** |
-| MAILBOX + one-to-one | **0 of 150** |
-
-**That is one run, and it is worth being precise about how much it proves.** A later repeat had the
-control itself stretch 0 of 80, which makes that repeat evidence of nothing. The stretch rate
-varies wildly between runs on the same build — 25 of 174, 18 of 150, 4 of 120, 0 of 150, 0 of 80 —
-so a clean arm only counts when the control beside it fired, and here it did once. The reasoning
-says the fix is structural; the measurement supports it once. It matters less than it sounds,
-because the stretch is already fixed on the shipped default by the live-resize throttle and MAILBOX,
-and this is the opt-in path.
-
-**And it costs 4K HDR playback about 70% more CPU.** Three reps, GL alongside as the drift
-reference because absolute numbers on this machine move by a third between sessions:
-
-| | video CPU |
-|---|---|
-| GL | 52–65 ms/s |
-| Vulkan, rebuild per resize | 48–63 ms/s |
-| **Vulkan, fixed extent** | **91–95 ms/s** |
-
-Tight across reps, so it is real. A swapchain whose extent matches the window can be handed to the
-compositor directly; one that does not appears to lose that path and be copied instead.
-
-**So it is off by default**, and the reasoning is the one already used to choose MAILBOX over FIFO,
-pointing the other way this time: **video runs for hours and a drag lasts a second.** Paying 40 ms/s
-for the whole of a film to save 335 ms/s during a drag is the wrong trade for a renderer that
-exists to play video. The stretch is already fixed without it, by the live-resize throttle and
-MAILBOX.
-
-**The refinement that would get both** is to turn the fixed extent on only *while* a drag is in
-progress and collapse back to an exact-size swapchain when the size settles. It needs a
-settled-size signal the renderer does not have — the platform layer knows when the modal resize
-loop ends, and nothing currently tells the host. That is the next step if resize CPU is worth
-more work.
-
-**Two mistakes on the way, both caught by disciplined checks rather than by reading the code.**
-
-- **The over-allocation silently did nothing at first.** The bucket was clamped to
-  `VkSurfaceCapabilitiesKHR.maxImageExtent`, which on Win32 equals `currentExtent` — so 768x512
-  came straight back to 750x450 and the trace showed a swapchain the same size as the window. With
-  scaling chained the spec bounds the extent by `min/maxScaledImageExtent` instead, which is the
-  whole reason those capabilities are queried. Caught only because the trace prints the allocated
-  extent next to the window's.
-- **`FIXED_EXTENT=0` was not an honest "before".** The rebuild-skipping early return was written
-  without checking whether the fixed extent was actually available, so with the feature *off* a
-  shrinking window still skipped its rebuild — keeping the skip and losing the `ONE_TO_ONE` that
-  makes it correct. The positive control caught it: IMMEDIATE-with-rebuilds stretched **0 of 150**
-  when it should have stretched, which meant the harness was measuring nothing and every clean row
-  beside it was worthless. After the fix the control stretched 18 of 150 and the comparison
-  became real. **A control that fails is the most useful result a run can give.**
-
-### The scRGB offscreen: it can go, and it is not worth it
-
-The offscreen was the last item on the list — a full-size F16 surface per window, drawn into at
-0..1 and blitted to the swapchain through an SkSL filter that applies the display's white scale.
-It looked like the biggest remaining prize. **It was chased down and the answer is no, for reasons
-that only measurement gives.**
-
-**First, the prize was smaller than recorded.** "Half the present cost and 43 MB" compared 8-bit
-without the offscreen against F16 with it — two changes at once, so it sized nothing. Separating
-them (`HULTUI_VULKAN_WHITE_SCALE=1` turns the pass off while keeping the half-float target) gives
-four clean layers, identical across four reps:
-
-| | present | private, 2 windows |
-|---|---|---|
-| GL | 0.10 ms | 81 MB |
-| Vulkan, 8-bit | 0.20 (+0.10, Vulkan's own machinery) | 86 (+5) |
-| Vulkan, F16, no offscreen | 0.30 (+0.10, the F16 target) | 115 (+29, the F16 swapchain) |
-| Vulkan, F16 + offscreen | 0.40 (+0.10, **the offscreen**) | 133 (+18, **the offscreen**) |
-
-So the offscreen costs **0.10 ms a frame and about 9 MB a window**, not half the present pass and
-43 MB.
-
-**Second, it can be removed cheaply — the expensive route was never needed.** The pass exists to
-multiply the frame by one scalar, and Skia already converts sRGB to linear on the way into the
-surface. That scalar can ride in the destination colour space: declare it as
-`linear = stored / k` and Skia solves for a stored value of `k` where it wanted 1.0.
-`SKColorSpace.CreateRgb(SKColorSpaceTransferFn, SKColorSpaceXyz)` expresses exactly that, in one
-method, **with no call-site changes** — no `ColorF`, nothing touching themes, gradients, shadows or
-text. Measured at k=3 on the CPU first: a solid colour, a 50% alpha blend and a gradient midpoint
-all land at exactly 3x their plain-linear values, so blending scales with the content rather than
-after it.
-
-**It works on the GPU too, and the output is identical.** A capture of the presented swapchain
-differs from the offscreen path in **0 of 5,335,200 channels**, the present pass drops 0.40 to
-0.30, and video CPU is unchanged.
-
-**And then the memory saving fails to appear.** Removing the offscreen while keeping a *plain*
-linear space frees about 17 MB across two windows; removing it in favour of the scaled space frees
-**nothing** — 132 MB either way, reproducibly across three reps. Skia evidently spends about what
-the offscreen cost on a destination space whose transfer function is not one it recognises. The
-trade is **0.10 ms a frame for no memory, on a path off Skia's well-trodden one**.
-
-**So it ships as `HULTUI_VULKAN_SCALED_SPACE=1` and the default is unchanged.** A tenth of a
-millisecond is 1.2% of a 120 Hz frame; it does not buy a non-standard colour space as the default,
-and the memory that justified the work is not there. The direction to get the memory as well would
-be scaling the content rather than the destination — the `ColorF` route — which is the phase-2
-colour-space work this was trying to avoid, for a prize now known to be 9 MB a window.
-
-**The lesson is the sizing, not the mechanism.** This was ranked as the top remaining item on a
-number that conflated two changes. Twenty minutes of separating them would have ranked it last,
-before any code was written — and the code that was written is small enough to keep, which is the
-only reason it is still here.
-
-**Untested on Linux.** KWin reports gamma 2.2 and takes the offscreen path regardless, but an X11
-or non-KDE session would reach this and nothing there has run it.
-
-**And video luminance under it is not fully verified**, which is the other reason the default did
-not move. `FrameColorFilter` computes a video's scale against "the 0..1 offscreen", and on this
-path there is no offscreen — the arithmetic should still land white at 203 nits, because the
-colour space applies the same factor the blit used to, but *should* is not a measurement. What
-could be measured: captures at the same frame number pair up closely, with mean channel values
-45.82/45.64 and 47.64/47.46 between the offscreen and scaled paths, so there is no gross error —
-a misapplied white scale would show as 18% or 3x, not 0.4%. But the count of near-white channels
-differs by about a fifth (0.59% against 0.46%), and an 8-bit capture of frames that are not
-exactly identical cannot say whether that is the highlights changing or the film moving. A
-same-frame comparison was not achievable: the film plays, the procedural sample never takes the
-linear-light path, and pausing needs input this harness cannot deliver.
-
-### And the coverage that is still missing
-
-- **Mesa, and a hybrid GPU.** Neither machine has either. Every Vulkan number in this document is
-  one vendor's driver.
-- **Synchronisation validation has never run.** The semaphore path rests on Skia's read being
-  ordered after our barrier by submission order alone, and nothing has tested that assumption —
-  see the validation section of `HDR-LINUX-VERIFY.md`. A hazard there would mean the central
-  assumption is wrong, and it would apply to the present transition too.
-
-### The recommendation
-
-**Keep `HULTUI_RENDERER` defaulting to GL. Turn Vulkan on per app, where HDR is the point** — Reel
-and Aperture — and leave it off for everything else.
-
-The blocker that decided this is now fixed, so the recommendation is no longer about a defect. It
-waits on three costs that apps with no video in them would pay for nothing:
-
-1. **Start-up, +127 ms**, all of it the F16 target's first frame, and not reachable through
-   SkiaSharp's `GRContextOptions`.
-2. **Resize CPU, 801 against GL's 264**, all of it reallocating F16 swapchain images per size
-   change. `swapchain_maintenance1` with `PRESENT_SCALING_ONE_TO_ONE` halves it and is built, but
-   costs video 70% more CPU, so it is opt-in — see above. Making it drag-only would get both.
-3. ~~**The scRGB offscreen**~~ — chased down and declined; see above. It costs 0.10 ms a frame and
-   9 MB a window, and the colour-space route that removes it cheaply gives back the time but not
-   the memory. Plus Mesa and a hybrid GPU.
-
-**All three are the same bill on Windows: 16-bit colour** (on NVIDIA Linux they are the API's instead — see the note above). An 8-bit Vulkan window starts within 30 ms of GL,
-resizes at GL's cost, and sits 7 MB above it. So the question is not really "Vulkan or GL" — it is
-whether a given app wants an HDR-capable surface, which is exactly the decision
-`HULTUI_RENDERER=vulkan` already expresses per app.
-
-**GL is not going away regardless.** `HultUI.WinForms` builds `SkiaGLRenderSurface` directly and
-never reads `HULTUI_RENDERER`, so hosted controls are GL-only and the path has to keep working
-whatever the default becomes. Flipping the default would add a second supported renderer, not
-replace one — which is an argument for flipping it only once there is a reason every app benefits
-from, and HDR is not yet that reason for an app with no video in it.
+| 0 | `spikes/HdrInterop`: the external-memory bridge, proven on Windows and Linux |
+| 1 | `SkiaVulkanRenderSurface`: the Vulkan renderer, SDR |
+| 2 | the half-float scRGB swapchain, and the offscreen for the white scale |
+| 3 | the swapchain following the display's HDR state and SDR white |
+| 4 | video through the shared image, without a copy |
+| 5 | HDR range through mpv's target options, and the luminance policy |
 
 ## Traps
 
-**Synchronisation validation does not cover the GL/Vulkan seam.** Proven on Windows by injecting
-the fault it should catch — removing the semaphore wait that orders mpv's GL write against Skia's
-read of the shared image — and getting **0 validation messages**, while a fault on the Vulkan side
-produced 21 immediately. The layer sees Vulkan accesses; GL's writes to an external-memory image
-are invisible to it. The seam's failure signature is **blinking black frames**, which is a person's
-test, and the seam's control is behavioural: withhold the signal and GL stalls. So "synchronisation
-validation was clean" means everything either side of the seam, never the seam itself.
+**Synchronisation validation does not see the GL/Vulkan seam.** Removing the semaphore wait that
+orders mpv's GL write before Skia's read gave **0 validation messages**, while a fault on the
+Vulkan side gave 21 at once. GL's writes to external memory are invisible to the layer. The seam's
+failure is **blinking black frames**, which a person sees, and its control is behavioural: withhold
+the signal and GL stalls. "Validation was clean" covers everything either side of the seam, never
+the seam.
 
-Everything below cost hours, and most of it was nearly shipped as a false green. They are
-grouped by **shape** rather than by phase, because the shapes recur and the phases do not: the
-same four mistakes were made repeatedly, in different clothes, by people who had already written
-the previous one down.
+The traps below are grouped by **shape**, because the shapes recur and the phases do not.
 
 ### 1. Measurements that cannot fail
 
-The commonest and the worst. A check that reports the same thing whether the code works or not
-reads as evidence and is not.
+A check that reports the same thing whether the code works or not reads as evidence and is not.
+**Build the positive control first.**
 
-- **A frame with nothing in it looks exactly like a pipeline that lost the picture.** Both report
-  a maximum of 0.0 or 1.0. Three separate wrong conclusions came from capturing 2001 at frame 60,
-  2.5 seconds into a three-minute black overture — twice *after* the lesson had been written down.
-  Take several spaced samples, and prove the content was there before reading anything into a
-  maximum.
-- **A maximum cannot see dithering.** That is a property of gradients. Every check here was a
-  peak value until one was not, and an 8-bit target dithered inside a 16-bit surface went
-  unnoticed for two phases.
-- **An 8-bit test clip cannot show 8-bit quantisation** — it is already on the grid being looked
-  for. The dithering above needed a 10-bit ramp to appear at all.
-- **`Process.HandleCount` does not move per handle.** It comes through a performance counter and
-  sat flat at 492 while 200 handles leaked. `GetProcessHandleCount` is exact.
-- **Re-exporting one allocation is not a leak test.** NVIDIA on Windows returns the *identical*
-  `HANDLE` every time, so nothing accumulates whatever you do with it. NVIDIA on Linux returns a
-  distinct fd per export — the same test, opposite behaviour. Reallocate each cycle, as the
-  renderer does.
-- **The headless driver proves nothing about this backend.** It renders through
-  `SkiaRasterRenderSurface` and never touches a GPU backend, so a GL-versus-Vulkan screenshot
-  comparison is identical whatever either one does.
-- **A capture proves the image, never the screen.** And some things no capture can show at all:
-  the SDR white scale is invisible to one, because F16 and 8-bit captures agree within 1 LSB
-  while the window is plainly dim — the image is right and the compositor is obeying it.
-- **An idle window may never reach the default capture frame.** It presents 3, 4, or 1 frames
-  depending on which output it opened on; the default is images + 1. A missing capture can mean
-  an idle window rather than a renderer that drew nothing.
-
-- **A benchmark can measure the wrong workload and still be internally perfect.** The
-  GL-to-Vulkan sync was timed at 0.27 ms a frame, *flat* between 1080p and 4K, and written off.
-  It was timing a `glClear` on an idle GPU — nothing for `glFinish` to wait for, which is
-  precisely why the resolution made no difference. Under a real 4K decode the same call is
-  0.74 to 5.33 ms and the flatness is gone. **When a cost does not scale with the thing it
-  should scale with, suspect the benchmark before believing the result.**
-
-**So: build the positive control first.** `--churn` deliberately drops 200 handles and refuses to
-report a verdict unless that raises the count. Two earlier versions of that test reported a clean
-pass while being incapable of failing.
+- **A frame with nothing in it looks exactly like a pipeline that lost the picture.** Both report a
+  maximum of 0.0 or 1.0. Three wrong conclusions came from capturing 2001 during its black
+  overture, twice after the lesson was written down. Take several spaced samples and prove the
+  content was there.
+- **A maximum cannot see dithering**, and **an 8-bit test clip cannot show 8-bit quantisation**. It
+  took a 10-bit ramp to find an 8-bit target dithered inside a 16-bit one.
+- **`Process.HandleCount` does not move per handle**; `GetProcessHandleCount` does.
+  **Re-exporting one allocation is not a leak test**: NVIDIA on Windows returns the same `HANDLE`
+  every time. Reallocate each cycle, as the renderer does.
+- **The headless driver proves nothing about this renderer.** It draws through
+  `SkiaRasterRenderSurface`. A swapchain capture (`HULTUI_VULKAN_CAPTURE`) is the evidence, and the
+  real-window tests in `HultUI.UiTests` use it.
+- **A capture proves the image, never the screen.** A wrong SDR white scale is invisible to every
+  capture: the image is right and the compositor obeys it.
+- **An idle window may never reach the default capture frame.** A missing capture can mean an idle
+  window, not a renderer that drew nothing.
+- **A benchmark can measure the wrong workload.** The GL-to-Vulkan ordering was timed at 0.27 ms
+  a frame, flat from 1080p to 4K, against a `glClear` on an idle GPU. Under a real 4K decode it was
+  0.74 to 5.33 ms. A cost that does not scale with what it should scale with is a suspect benchmark.
+- **A validation run with no layer installed reports nothing.** On Windows,
+  `VK_LOADER_LAYERS_ENABLE` does nothing without the SDK, and the silence was once recorded as
+  clean. Inject a fault and see the layer catch it.
+- **A fallback that was never exercised.** The GL fallback was "verified across the matrix", but
+  only the environment override had run. The fallback itself first ran under fault injection
+  (`VK_LOADER_VENDOR_ID_FILTER=0x1234` for a driver with no GPU, `VK_DRIVER_FILES` at a missing
+  file for no driver), and one of its two paths did not exist. Both are now UiTests.
 
 ### 2. State another API owns, and moves
 
-Anything holding a handle to something Skia or a driver also tracks will go stale, silently.
+Anything holding a handle to something Skia or a driver also tracks goes stale, silently.
 
-- **Never cache a `GRBackendRenderTarget` over a swapchain image.** Skia tracks the layout inside
-  the target and this backend transitions to `PRESENT_SRC_KHR` behind it. Three images meant
-  three good frames and then black for ever. Build it fresh each frame declaring `UNDEFINED`.
-- **Never cache a renderer-owned `SKImage` either**, for the same reason — `DrawGpuFrame`
-  re-wraps whenever `frame.RendererOwned`.
-- **Do not read the shared image through Vulkan.** It needs the layout Skia owns; guessing
-  returned a uniform 0.000 from an image that plainly had a picture in it. Read it through **GL**
-  (`glReadPixels` inside `RunExternalGL`) — GL has no layouts. That is what
-  `HULTUI_VIDEO_HDR_PROBE` does.
-- **Handle ownership is asymmetric across platforms.** GL does *not* take an `OPAQUE_WIN32`
-  handle, so the caller must `CloseHandle`; `glImportMemoryFdEXT` *consumes* the descriptor it is
-  given. Getting it backwards leaks on one platform and double-frees on the other, and neither
-  shows on the first import.
-- **`GL_DEDICATED_MEMORY_OBJECT_EXT` is required** when Vulkan allocated the memory dedicated,
-  which it always does here. Without it the result is undefined, and on NVIDIA-Linux undefined
-  was a texture that read as black above about 2560x1440 — no GL error, complete framebuffer,
-  every 4K film black. Windows happened to work, which is how it shipped.
+- **Never cache a render target over a swapchain image.** Three images meant three good frames and
+  then black for ever. **Never cache a renderer-owned `SKImage`** either.
+- **Do not read the shared image through Vulkan.** Guessing its layout returned 0.000 from an image
+  with a picture in it. Read it through GL, as `HULTUI_VIDEO_HDR_PROBE` does.
+- **Layouts Skia owns are assumed, not known.** The present barrier assumes
+  `COLOR_ATTACHMENT_OPTIMAL`, and the hand-back barrier assumes `SHADER_READ_ONLY_OPTIMAL`, because
+  SkiaSharp cannot report or be told a layout. That holds for today's drawing (linear sampling, no
+  mipmaps). A Skia update that draws differently would break it with no error.
+- **Handle ownership is asymmetric.** GL does not take ownership of a Win32 handle;
+  `glImportMemoryFdEXT` consumes the fd. Backwards leaks on one platform and double-frees on the
+  other.
+- **`GL_DEDICATED_MEMORY_OBJECT_EXT` is required** for a dedicated allocation. Without it NVIDIA on
+  Linux read every 4K texture as black, with no GL error. Windows happened to work.
 
 ### 3. Defaults that are not neutral
 
-Several of these APIs treat "unspecified" as a decision, not as "work it out".
-
-- **`MPV_RENDER_PARAM_DEPTH` omitted means 8 bits and dithering**, and mpv does *not* infer it
-  from `internal_format`. Measured: omitted and `DEPTH=8` are byte-identical.
-- **`internal_format = 0` on `mpv_opengl_fbo` means "assume 8"** for the same reason.
-- **`target-colorspace-hint` is a no-op through the render API** and always was. No
-  `MPV_RENDER_PARAM` names a colour space, and `mpv_opengl_fbo` carries only fbo, size and
-  format. The way in is mpv's `target-prim` / `target-trc` / `target-peak` **options**.
-- **Without `target-peak` nothing exceeds 1.0** however the transfer is set. The transfer alone
-  changes the numbers and keeps the ceiling.
-- **Skia returns a null surface with no diagnostic** when the swapchain lacks
-  `VK_IMAGE_USAGE_TRANSFER_SRC_BIT`, or when `GRVkExtensions` or `VkPhysicalDeviceFeatures2` are
-  left null — it then assumes the minimum and declines formats the device plainly supports.
-- **SDL's `SDR_white_level` is the wrong number on Wayland.** It reads 1.0, the EGL convention
-  where 1.0 already *is* reference white, and feeding it in reproduces a dim picture exactly.
+- **An omitted `MPV_RENDER_PARAM_DEPTH` means 8 bits and dithering**; mpv does not infer it from
+  the format. **`internal_format = 0`** means 8 bits too.
+- **`target-colorspace-hint` does nothing through the render API.** No render parameter names a
+  colour space. The way in is the `target-prim`, `target-trc` and `target-peak` options, and
+  without `target-peak` nothing exceeds 1.0.
+- **mpv's default gamut mapping desaturates** wide-gamut colours into BT.709. `clip` keeps them.
+- **Skia returns a null surface with no diagnostic** without `TRANSFER_SRC`, or when
+  `GRVkExtensions` or `VkPhysicalDeviceFeatures2` are left null.
+- **SDL's `SDR_white_level` is wrong on Wayland** (it reads 1.0), and **SDL's HDR flag is wrong on
+  Windows** (headroom-based and stale).
+- **The Windows loader (1.4.357) returns a pointer for commands of extensions that were not
+  enabled.** A null check proves nothing about whether an extension may be used, and a test
+  that leaves one out cannot reproduce the crash a stricter loader would give.
 
 ### 4. One platform hiding the other's bug
 
-Every one of these was invisible on the machine it was written on.
+Each of these was invisible on the machine it was written on.
 
 - **SDR white is a protocol constant on Wayland and a display query on Windows.**
-  `color-management-v1` fixes Windows-scRGB reference white at 2.5375 (203 nits over scRGB's 80);
-  Windows reports whatever its brightness slider says. Asking the monitor on Wayland is the wrong
-  move.
-- **KWin shows an sRGB window through a pure 2.2 gamma**, where Skia uses the piecewise curve.
-  The two meet at white, so white matches and *shadows* do not — which is why it survived phase 2
-  and 3 unnoticed. A colour-space tag cannot fix it, because Skia converts every `SKColor` from
-  piecewise sRGB into whatever the canvas claims to be.
-- **`glXGetProcAddress` returns a dispatch stub for any name at all** under libglvnd. Skia asked
-  for `eglQueryString` on X11, got a stub, parsed garbage, and segfaulted on every GL launch. On
-  Wayland the real functions come back and a made-up name resolves to 0.
+- **KWin decodes sRGB with 2.2**, so white matches and shadows do not, and no colour-space tag can
+  fix it.
+- **`glXGetProcAddress` returns a stub for any name** under libglvnd; Skia parsed garbage from one
+  and crashed every GL launch on X11.
 - **Windows tolerates `SDL_GL_MakeCurrent` with a null context; Wayland dereferences it.**
-- **A mixed-scale Wayland desktop reports an output change as two events**, new pixels at the old
-  scale then the same pixels at the new one. Code that treats the second as a pure DPI change
-  preserves a size already computed wrongly.
-- **X11 cannot do HDR at all**, and says so honestly — only `SRGB_NONLINEAR`.
+- **A mixed-scale Wayland desktop reports an output change as two events.**
+- **F16 is expensive on Windows and nearly free on NVIDIA Linux.** A cost measured on one says
+  nothing about the other.
 
-**So: a green suite on one OS says nothing about the other here.** The Linux session found a bug
-in this Windows work and this Windows session found one in theirs, both within a day, both in
-code the author had verified.
+### 5. Waits that only a timeout ends
 
-### The display's peak, which was assumed and is now asked for
+mpv breaks a deadlock with a 200 ms timeout and a line at the `v` log level, so the only symptoms
+are a stall and a log nobody reads. All three were real.
 
-`target-peak` decides where tone mapping lands, and it was a flat assumed 1000 nits because
-neither platform appeared to expose a peak. SDL does, as **headroom** — a multiple of SDR white
-rather than an absolute luminance, which turns out to be the more useful of the two. Multiplied
-by whatever 1.0 already means here it gives an absolute peak on both platforms with no branch:
+- **A synchronous `mpv_set_property` on the render thread** waited for the core, which waited for
+  the render: 200–360 ms per change of target colour.
+- **A frame with no size to draw at**, because the size is read from the core, which was waiting
+  for that frame. Reopening a file took three timeouts, about 600 ms.
+- **A synchronous seek while the core waited for a frame.** Scrubbing froze the window for 200 ms
+  on nearly every seek. At 30 ms between seeks the frame was drawn first, so a slow scrub test saw
+  nothing.
 
-> peak nits = `WhiteScale()` x 80 x `SDL.window.HDR_headroom`
-
-which is the display's own SDR white on Windows and the 203-nit protocol reference on Wayland,
-where SDL's `SDR_white_level` reads a useless 1.0 but its headroom is real compositor data.
-
-**This machine's display peaks at 455 nits, not 1000**, so the assumption was wrong by more than
-a factor of two and wrong in the worst direction — mpv was tone-mapping a film to 1000 nits for a
-panel that clips at 455. Measured, same frame, shared image peak:
-
-| `target-peak` | shared image max |
-|---|---|
-| queried (455) | 2.240 |
-| forced 1000 (the old behaviour) | 4.926 |
-
-2.240 x 203 = 455 exactly. `HULTUI_VULKAN_PEAK_NITS` still overrides.
-
-A headroom of exactly 1 is a real answer and is treated as one: it says the display peaks at its
-own SDR white, which the Linux machine nearly does (1.0022). Only a missing number falls back to
-assuming.
-
-### Synchronisation, measured and left alone
-
-Phase 1 said the CPU stalled once a frame and that fixing it was "the first thing to do if
-this backend is ever to ship". Half of that was already fixed and the comment had not caught
-up: the queue drain after Skia submits was replaced by a semaphore the present waits on.
-
-The other half is the acquire, still a fence because SkiaSharp 3.119.2 has nothing to hand a
-semaphore to — no `GRFlushInfo`, no `GRBackendSemaphore`, and only `gr_direct_context_flush`
-and `flush_and_submit` in its binding, neither taking flush info. **That fence costs 0.0064 ms
-a frame**, over 120 frames of continuous animation paced to a 120 Hz display. Replacing it
-moves six microseconds from the CPU to the GPU.
-
-Where Vulkan does cost more than GL is a fixed **0.15 to 0.25 ms a frame**, and only where the
-frame is small enough to notice: `select row` 0.43 against 0.59 ms, `clear` 0.27 against 0.41,
-while `create 10,000` is 316.6 against 319.8 and `append 1,000` is actually faster on Vulkan.
-That is consistent with the two things this backend does that GL does not — an extra
-command-buffer submit, and a render target rebuilt every frame because Skia cannot be told an
-image's layout. Both are the same binding limitation, and neither is a stall.
-
-**So the *swapchain* synchronisation is not the blocker it was written up as.** The acquire
-fence is six microseconds and there is nothing to hand Skia a semaphore.
-
-**But that conclusion was then over-extended, and the correction is worth more than the
-original.** A separate synchronisation — the one between the hidden GL context and the Vulkan
-queue over the shared image — was measured by the same spike at 0.27 ms a frame, flat across
-1080p and 4K, and written off on that basis. **The flatness should have been the warning.** It
-was measured against a `glClear` on an otherwise idle GPU: there was nothing for `glFinish` to
-wait for, which is exactly why resolution made no difference.
-
-Measured again against a real 4K decode, per frame, as the film gets busier:
-
-| | `glFinish` | barrier submit | at 24 fps |
-|---|---|---|---|
-| quiet | 0.74 ms | 0.24 ms | 23 ms/s |
-| | 1.17 ms | 0.28 ms | 35 ms/s |
-| busy | 4.17 ms | 0.62 ms | 115 ms/s |
-| busiest | **5.33 ms** | 0.64 ms | **143 ms/s** |
-
-That is the whole of the otherwise unexplained gap between the renderers. Decomposed on 4K
-video, CPU per second: GL 56, Vulkan with an 8-bit sRGB swapchain **176**, Vulkan with scRGB and
-the offscreen 220, Vulkan with everything on 180. The ~120 ms/s appears with the Vulkan renderer
-at its *simplest* — so it is not the half-float swapchain and not the offscreen pass, which is
-where this was first guessed to be.
-
-**And this one was fixable, unlike the swapchain's — it is now done.** `GL_EXT_semaphore` with
-`VK_KHR_external_semaphore`: a `VkSemaphore` exported from the device and imported into the GL
-context, signalled by `glSignalSemaphoreEXT` after mpv draws, waited on by the hand-back barrier.
-Skia is not in that path at all, so the `GRFlushInfo` limitation never applied to it.
-
-**It took two steps, and the first one only moved the cost.** Replacing `glFinish` alone took the
-CPU from 156 to 84 ms/s — the signal became free (0.004 ms a frame, from up to 5.33) but the
-barrier submit grew to 6.6, because it still ended in `vkQueueWaitIdle` so that the one-shot
-command buffer could be freed safely. **The wait had simply moved.** Reusing three command
-buffers with a fence each removes it: the slot coming round again has three frames of slack, so
-nothing blocks.
-
-| | CPU on 4K HDR video | ordering, per frame |
-|---|---|---|
-| `glFinish` + queue wait | 156 ms/s | 0.98 – 5.97 ms |
-| semaphore + queue wait | 84 ms/s | 0.91 – 6.62 ms |
-| **semaphore + buffer ring** | **62 ms/s** | **0.05 ms** |
-| GL renderer, for scale | 56 ms/s | — |
-
-So the renderer is now within 6 ms/s of GL on 4K HDR video, where it was 100 behind, and the
-ordering costs 1–2 ms of CPU a second instead of 23–143. `HULTUI_VULKAN_SEMAPHORE=0` goes back to
-`glFinish` for a driver that mishandles it.
-
-The picture is unchanged on both paths — HDR range 2.240 on all six probe samples either way, and
-the ramps read 879 levels against the 8-bit control's 455.
-
-**Not verified: the validation layers.** On Windows their output goes to `OutputDebugString` and
-this app installs no debug messenger, so nothing here has checked the new barrier semantics — a
-layout that now arrives via the semaphore rather than being declared `GENERAL`, a wait semaphore
-on a submit, and command buffers reused rather than freed. **That is exactly the class of change
-validation exists to catch**, and it is cheap on Linux where the layers print to stdout. It
-belongs in the next Linux run.
-
-## Zero-copy decode, afterwards
-
-`hwdec` was `auto-copy` — every frame goes GPU → CPU → GPU. **It is now `auto`**, for the
-reasons at the end of this section. That is affordable at
-1080p SDR and wrong at 4K HDR, where it is roughly 24 MB per frame.
-
-It was going to belong **after** the above, on the reasoning that the destination for a
-zero-copy frame is the Vulkan image from phase 0 — `hwdec=auto` keeps frames in GPU memory,
-mpv renders them into the same imported target, nothing new needed on the receiving side.
-
-**That reasoning was wrong, and investigating it first is what showed why.**
-
-**`hwdec=auto` is already in use and is not zero-copy.** It resolves to `d3d11va-copy` here.
-So does `auto-copy`. Asking for `d3d11va`, `dxva2`, `nvdec` or `cuda` explicitly gives
-`hwdec-current = no` — software decoding — because **this libmpv is built with every
-zero-copy interop disabled**, as its own configuration line says:
-
-```
--Dd3d11=disabled -Ddirect3d=disabled -Dgl-win32=disabled
--Dgl-dxinterop=disabled -Degl-angle=disabled
-```
-
-The `-copy` variants survive because the decoder is FFmpeg's and needs no GL interop at all.
-Those flags were set to strip *window output* backends — "the framework's GL context is the
-only display" — and stripping display interop stripped decode interop with it, which is a
-different thing and is the thing this phase needs.
-
-**And on Windows the flag change would not help.** With a desktop WGL context the only
-zero-copy bridge is `hwdec_dxva2gldx`, and it shares a `D3DFMT_X8R8G8B8` surface and hands
-back `IMGFMT_RGB0` — **8-bit RGB**. It would deliver a zero-copy path that throws away
-exactly what phases 2 to 5 were built to carry. The 10-bit bridge is `hwdec_d3d11egl`, which
-needs an **ANGLE EGL** context; ANGLE is a D3D11 implementation of GL ES and will not import
-Vulkan memory through `GL_EXT_memory_object`, so adopting it would cost the interop that the
-whole design rests on.
-
-**So zero-copy on Windows is incompatible with this architecture**, not merely unbuilt. The
-copy stays, and what it costs is now known: **468 ms of CPU per second** for 4K HEVC HDR
-(against 921 with hardware decoding off altogether, so the decoder is doing real work).
-
-**Linux is a different answer.** `hwdec_cuda` and `hwdec_vaapi` map the hardware format
-itself (`IMGFMT_CUDA`, `IMGFMT_VAAPI`) and keep the real subformat, so they carry 10 bits.
-Both are disabled in that build too (`-Dvaapi=disabled -Dvdpau=disabled`, and no ffnvcodec),
-so it is the same native-build change — but there it could actually deliver. Unverified:
-whether CUDA-GL or VAAPI-EGL interop works in the hidden GL context beside a Vulkan device,
-which is the one question that decides it.
-
-**Cost of finding this out:** two build flags and an afternoon, against rebuilding FFmpeg and
-mpv first and then discovering the Windows path is 8-bit.
-
-**What to run there is written down**: `docs/design/HDR-LINUX-ZEROCOPY.md`, ordered so that the
-step which can end the project — measuring what the copy actually costs, which needs no rebuild —
-comes first, and the one that decides the approach — whether CUDA can register a texture whose
-storage is Vulkan-owned memory — comes before the build rather than after it.
-
-**Answered on Linux, and it works** (results in that file). The Linux machine was never running
-the trimmed build — it loads the distribution's libmpv, which has `cuda-interop` — so
-`hwdec=nvdec` was available all along: `hwdec-current = nvdec`, ten bits and the full range
-arrive intact, and 4K CPU drops from ~400 to ~155 ms/s. The crux was not one: mpv registers its
-*own* plane textures with CUDA and renders from them into our FBO like any other frame.
-**The trimmed LGPL build now has it too** (`build-libmpv.sh`, Linux branch): same VO format,
-same ten bits and range, verified the same way.
-
-The catch was going to be that `auto-copy` is what makes the backend portable, and that
-turning it off would make a per-platform fallback matrix ours. **mpv already keeps that
-matrix**: `auto` sorts the non-copying methods first and then tries the same `-copy` methods
-`auto-copy` would (`vd_lavc.c`, "List non-copying entries first"), so it is never worse than
-`auto-copy`. The default is now `auto`: zero-copy on the Linux machine on both renderers
-(GL: 265 → 117 ms/s at 4K, picture checked by screenshot), `d3d11va-copy` on the trimmed
-Windows build exactly as before.
-
-**The Windows conclusion above missed a route, and it is not the licence.** None of the
-Windows interops is GPL-gated in mpv's `meson.build` — only the `direct3d` *video output*
-is, and nothing here needs it. More to the point, `cuda-interop` requires only
-`cuda-hwaccel` (i.e. ffnvcodec) and `gl`, with no platform condition, and
-`hwdec_cuda_gl.c` is plain GL plus `cuGLGetDevices` — no EGL, nothing Linux-specific. CUDA-GL
-interop works under WGL. So **NVIDIA on Windows can probably have ten-bit zero-copy** by the
-same mechanism just proven on Linux: add nv-codec-headers to the FFmpeg build (LGPL-clean;
-only `cuda-nvcc` and `libnpp` are nonfree) and let mpv find ffnvcodec. Unverified — it needs
-that build and a run. **What to run there:** `docs/design/HDR-WINDOWS-CUDA.md`, which starts
-with a community libmpv that already has the interop, so the question is answered before
-anything is built. AMD and Intel on Windows remain as described: 8-bit via `dxva2gldx` or
-ANGLE, neither usable.
-
-## What this costs
-
-Phases 0–1 are the bulk of the engineering. Phase 2 is the one most likely to produce
-visible regressions in apps that have nothing to do with video. Phase 3 is small but
-untestable without an HDR display and an HDR-capable compositor on each platform.
-
-Headless tests carry on unaffected throughout: they run on `SkiaRasterRenderSurface` and
-never touch a GPU backend, which is why none of this shows up in CI either way. The
-verification for all of it is a real window on a real machine.
+The detector is mpv's `frame-drop-count`: a first frame that timed out counts as dropped. The
+headless tests use mpv's software renderer, which has its own thread and cannot see any of these.
+`MpvGLTests` in `HultUI.UiTests` run the GL path, where the UI thread renders.

@@ -5,10 +5,11 @@ using HultUI.Core.Rendering;
 namespace HultUI.Media;
 
 /// <summary>
-/// The frame source for a backend with an <see cref="IGpuFrameRenderer"/>. On a GL
-/// surface it owns a texture and framebuffer, asks the renderer to draw into them on
-/// every frame, and hands the texture to the renderer to composite; on any other
-/// surface it is the backend's pixel ring. Which of the two applies is decided by
+/// The frame source for a backend with an <see cref="IGpuFrameRenderer"/>. On a surface
+/// that runs external GL it asks the renderer to draw on every frame, into a target the
+/// surface lends (the Vulkan case) or into a texture and framebuffer of its own (plain GL),
+/// and hands the result to the surface to composite; on any other surface it is the
+/// backend's pixel ring. Which of the two applies is decided by
 /// whichever the surface asks for first, and told to the renderer once.
 /// </summary>
 public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposable
@@ -58,7 +59,13 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
         }
         if (!_renderer.TryGetFrameSize(out int width, out int height) || width <= 0 || height <= 0)
+        {
+            // Nothing to draw at, but possibly a frame to hand over: a producer that waits for
+            // it would otherwise wait out its own timeout before it can tell anyone the size.
+            if (_renderer.FrameMayBeWaiting)
+                surface.RunExternalGL(() => _renderer.SkipFrame(surface.GetProcAddress));
             return false;
+        }
 
         bool drew = false;
         uint framebuffer = 0, texture = 0, format = GpuFrame.Rgba8;

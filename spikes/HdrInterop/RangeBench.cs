@@ -58,7 +58,10 @@ internal static unsafe class RangeBench
             { Width = w; Height = h; }
         }
         int depth = int.TryParse(all.FirstOrDefault(o => o.Key == "depth").Value, out int d) ? d : 0;
-        options = options.Where(o => o.Key is not ("size" or "depth")).ToArray();
+        // bars=N prints the centre of each of N vertical bars — for a colour-bar clip, where
+        // the question is what each colour became, not what the whole image ranges over.
+        Bars = int.TryParse(all.FirstOrDefault(o => o.Key == "bars").Value, out int b) ? b : 0;
+        options = options.Where(o => o.Key is not ("size" or "depth" or "bars")).ToArray();
 
         Console.WriteLine("── what range does mpv write into the shared image? ──");
         Console.WriteLine();
@@ -78,10 +81,12 @@ internal static unsafe class RangeBench
         if (fbo == 0) { Console.WriteLine("  could not import the image into GL"); return 1; }
 
         // Cleared to something no decoder would produce, so "mpv wrote nothing" cannot be
-        // mistaken for "mpv wrote black".
+        // mistaken for "mpv wrote black". Far below zero, not just below it: a wide-gamut colour
+        // converted to BT.709 primaries is negative in earnest — BT.2020 green has a red of about
+        // -0.59 — and a clear colour of -1 with a cut at -0.5 would have filed it as unwritten.
         Gl.BindFramebuffer(fbo);
         Gl.Viewport(Width, Height);
-        Gl.ClearTo(-1f, -1f, -1f, 1f);
+        Gl.ClearTo(ClearValue, ClearValue, ClearValue, 1f);
         Gl.Finish();
 
         var result = MpvIntoFbo.Render(file, fbo, Width, Height, colorspaceHint: false, options,
@@ -94,20 +99,24 @@ internal static unsafe class RangeBench
         return 0;
     }
 
+    private const float ClearValue = -100f;
+    private static int Bars;
+
     private static void Report(Half[] pixels)
     {
         float min = float.MaxValue, max = float.MinValue, total = 0;
-        int count = 0, over1 = 0, negative = 0;
+        int count = 0, over1 = 0, cleared = 0, below0 = 0;
         for (int i = 0; i < pixels.Length; i += 4)
         {
             for (int c = 0; c < 3; c++)
             {
                 float v = (float)pixels[i + c];
                 if (float.IsNaN(v)) continue;
-                if (v < -0.5f) { negative++; continue; }   // the clear colour, never written
+                if (v < ClearValue / 2) { cleared++; continue; }   // the clear colour, never written
                 min = Math.Min(min, v);
                 max = Math.Max(max, v);
                 if (v > 1.0001f) over1++;
+                if (v < -0.001f) below0++;
                 total += v;
                 count++;
             }
@@ -117,10 +126,24 @@ internal static unsafe class RangeBench
 
         Console.WriteLine();
         Console.WriteLine($"  written : {count / 3} of {Width * Height} pixels" +
-            (negative > 0 ? $"  ({negative / 3} still hold the clear colour)" : ""));
+            (cleared > 0 ? $"  ({cleared / 3} still hold the clear colour)" : ""));
         Console.WriteLine($"  range   : min {min:0.0000}  max {max:0.0000}  mean {total / count:0.0000}");
         Console.WriteLine($"  over 1.0: {over1} channel samples");
+        Console.WriteLine($"  below 0 : {below0} channel samples — outside the target's gamut, kept rather than mapped in");
         Console.WriteLine();
+
+        if (Bars > 0)
+        {
+            Console.WriteLine($"  bars at the middle row (r, g, b):");
+            int y = Height / 2;
+            for (int bar = 0; bar < Bars; bar++)
+            {
+                int x = (int)((bar + 0.5) * Width / Bars);
+                int i = (y * Width + x) * 4;
+                Console.WriteLine($"    {bar + 1}: ({(float)pixels[i],8:0.0000}, {(float)pixels[i + 1],8:0.0000}, {(float)pixels[i + 2],8:0.0000})");
+            }
+            Console.WriteLine();
+        }
 
         // The clip this is meant to be run against has a bright band, a mid grey and a dark
         // band, which is what makes encoded and linear tell apart at a glance.

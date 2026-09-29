@@ -77,6 +77,13 @@ the known case (`HultUI.Media` hops such requests through the thread pool); a
 plain producer that only publishes and posts is fine, because nothing in a frame
 waits for it.
 
+The converse holds too: a frame must not wait for a thread that is waiting for
+that frame. mpv's core waits, for up to 200 ms after every load and seek, for the
+UI thread to draw the first frame. So the mpv backend never makes a synchronous
+libmpv call on the UI thread, and it takes a frame it cannot size yet rather than
+leaving it. Each of those used to wait out mpv's timeout. mpv's render API states
+the rule under "Threading" in `render.h`.
+
 ## What happens when you get it wrong
 
 Nothing visible, at first — which is the problem. A background write to a

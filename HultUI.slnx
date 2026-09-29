@@ -64,10 +64,12 @@
     <Project Path="tests/HultUI.Icons.Tests/HultUI.Icons.Tests.csproj" />
     <Project Path="tests/HultUI.Text.Tests/HultUI.Text.Tests.csproj" />
     <Project Path="tests/HultUI.Rendering.Skia.Tests/HultUI.Rendering.Skia.Tests.csproj" />
+    <Project Path="tests/HultUI.Platform.SDL3.Tests/HultUI.Platform.SDL3.Tests.csproj" />
     <Project Path="tests/HultUI.SourceGenerators.Tests/HultUI.SourceGenerators.Tests.csproj" />
     <Project Path="tests/HultUI.Samples.TodoList.Tests/HultUI.Samples.TodoList.Tests.csproj" />
     <Project Path="tests/HultUI.Samples.Fluent.Tests/HultUI.Samples.Fluent.Tests.csproj" />
     <Project Path="tests/HultUI.UiTests/HultUI.UiTests.csproj" />
+    <Project Path="tests/HultUI.UiTests.VulkanProbe/HultUI.UiTests.VulkanProbe.csproj" />
     <Project Path="tests/HultUI.Headless.Tests/HultUI.Headless.Tests.csproj" />
     <Project Path="tests/HultUI.Media.Tests/HultUI.Media.Tests.csproj" />
     <Project Path="tests/HultUI.Media.Backends.Tests/HultUI.Media.Backends.Tests.csproj" />

@@ -21,24 +21,63 @@ SRC=$WORK/src
 OUT=${MPV_OUT:-$HERE/out}
 JOBS=${JOBS:-$(nproc)}
 
+log() { printf '\n\033[1;34m== %s\033[0m\n' "$*"; }
+die() { printf 'build-libmpv: %s\n' "$*" >&2; exit 1; }
+
 case "$(uname -s)" in
   MINGW64_NT*) HOST=windows; RID=win-x64 ;;
   Linux)       HOST=linux;   RID=linux-x64 ;;
-  *) echo "unsupported host: $(uname -s) (run from an MSYS2 MINGW64 shell or Linux)" >&2; exit 1 ;;
+  *) die "unsupported host: $(uname -s) (run from an MSYS2 MINGW64 shell or Linux)" ;;
 esac
+
+# The host check above is not enough on Windows: Git for Windows' bash also reports
+# MINGW64_NT (and sets MSYSTEM=MINGW64), passes it, and then fails twenty minutes later at
+# "make: command not found". Ask for the toolchain itself, up front.
+check_toolchain() {
+  local tool missing=()
+  for tool in git make meson ninja pkg-config strip; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if [ "$HOST" = windows ]; then
+    command -v objdump >/dev/null 2>&1 || missing+=(objdump)
+    [ "${MSYSTEM:-}" = MINGW64 ] || die "MSYSTEM is '${MSYSTEM:-unset}', not MINGW64: run from an MSYS2 MINGW64 shell"
+    local machine
+    machine=$(gcc -dumpmachine 2>/dev/null || true)
+    [ "$machine" = x86_64-w64-mingw32 ] || die "gcc targets '${machine:-nothing}', not x86_64-w64-mingw32: this is not an MSYS2 MINGW64 toolchain (Git for Windows' bash passes the host check and has none)"
+  else
+    command -v readelf >/dev/null 2>&1 || missing+=(readelf)
+  fi
+  [ ${#missing[@]} -eq 0 ] || die "missing tools: ${missing[*]} (see README.md for the packages)"
+}
+check_toolchain
 
 mkdir -p "$SRC" "$PREFIX" "$OUT/$RID"
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export PATH="$PREFIX/bin:$PATH"
-
-log() { printf '\n\033[1;34m== %s\033[0m\n' "$*"; }
 
 fetch() {  # fetch <dir> <git url> <tag>
   local dir=$1 url=$2 tag=$3
   if [ ! -d "$SRC/$dir/.git" ]; then
     log "fetch $dir $tag"
     git -c advice.detachedHead=false clone --depth 1 --branch "$tag" "$url" "$SRC/$dir"
+    return
   fi
+  # A work directory kept from before a versions.env bump still holds the old tree, and
+  # every "already built" check below would then happily reuse it. CI never sees this —
+  # its checkout is clean — but a local rebuild does.
+  local have
+  have=$(git -C "$SRC/$dir" describe --tags --exact-match 2>/dev/null || echo "(not at a tag)")
+  [ "$have" = "$tag" ] || die "$SRC/$dir is at $have, versions.env wants $tag: delete it (or the whole work directory) and run again"
+}
+
+# "Already built" means built from this tag with these options, not merely that the output
+# exists: each stage writes what it was built from, and is redone when that differs.
+built_from() {  # built_from <name> <what it must have been built from>
+  [ "$(cat "$PREFIX/stamps/$1" 2>/dev/null)" = "$2" ]
+}
+record_built() {  # record_built <name> <what it was built from>
+  mkdir -p "$PREFIX/stamps"
+  printf '%s' "$2" > "$PREFIX/stamps/$1"
 }
 
 # ──── nv-codec-headers: NVDEC and CUDA interop, on both hosts ────
@@ -52,9 +91,12 @@ fetch() {  # fetch <dir> <git url> <tag>
 # two copies would leave pkg-config choosing between versions.
 build_nvcodec_headers() {
   fetch nv-codec-headers https://github.com/FFmpeg/nv-codec-headers.git "$NVCODEC_TAG"
-  if [ -f "$PREFIX/lib/pkgconfig/ffnvcodec.pc" ]; then log "nv-codec-headers: already installed"; return; fi
+  if [ -f "$PREFIX/lib/pkgconfig/ffnvcodec.pc" ] && built_from nv-codec-headers "$NVCODEC_TAG"; then
+    log "nv-codec-headers: already installed"; return
+  fi
   log "nv-codec-headers: install"
   make -C "$SRC/nv-codec-headers" PREFIX="$PREFIX" install
+  record_built nv-codec-headers "$NVCODEC_TAG"
 }
 
 # ──── FFmpeg: LGPL only, decode only ────
@@ -76,8 +118,12 @@ build_ffmpeg() {
     host_flags=(--enable-ffnvcodec --enable-nvdec --disable-vaapi --disable-vdpau --disable-libdrm)
   fi
   # (libpostproc left the FFmpeg tree in 8.0; nothing to disable.)
+  # cuda-llvm off explicitly: FFmpeg autodetects it wherever clang has an nvptx target. It is
+  # free software, so this is not about the licence — it is the same drift the explicit
+  # --enable-nvdec exists to stop, a feature arriving because a runner happened to have it.
   local flags=(--prefix="$PREFIX"
     --disable-gpl --disable-nonfree --disable-version3
+    --disable-cuda-llvm
     --disable-programs --disable-doc --disable-debug
     --enable-static --disable-shared --enable-pic
     --disable-avdevice
@@ -86,31 +132,34 @@ build_ffmpeg() {
     --enable-zlib --enable-libdav1d
     --pkg-config-flags=--static
     "${host_flags[@]}")
-  # Reuse a built FFmpeg only if it was configured the same way. Otherwise a work
-  # directory from before a flag change keeps the old FFmpeg, and mpv links against
-  # it without complaint: -Dcuda-hwaccel=enabled sees the headers and never learns
-  # that FFmpeg itself was built without NVDEC.
-  local stamp="$PREFIX/ffmpeg-configure.txt"
-  if [ -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ] && [ "$(cat "$stamp" 2>/dev/null)" = "${flags[*]}" ]; then
+  # Reuse a built FFmpeg only if it was configured the same way, from the same tag, against
+  # the same headers. Otherwise a work directory from before a flag change keeps the old
+  # FFmpeg, and mpv links against it without complaint: -Dcuda-hwaccel=enabled sees the
+  # headers and never learns that FFmpeg itself was built without NVDEC.
+  local want="$FFMPEG_TAG nv-codec-headers=$NVCODEC_TAG ${flags[*]}"
+  if [ -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ] && built_from ffmpeg "$want"; then
     log "ffmpeg: already built"; return
   fi
   log "ffmpeg: configure"
   cd "$SRC/ffmpeg"
-  rm -f "$stamp"
+  rm -f "$PREFIX/stamps/ffmpeg"
   ./configure "${flags[@]}"
   log "ffmpeg: build"
   make -j"$JOBS"
   make install
-  printf '%s' "${flags[*]}" > "$stamp"
+  record_built ffmpeg "$want"
 }
 
 # ──── libplacebo: GL only, no Vulkan, no shader compilers ────
 build_libplacebo() {
   fetch libplacebo https://github.com/haasn/libplacebo.git "$LIBPLACEBO_TAG"
-  if [ -f "$PREFIX/lib/pkgconfig/libplacebo.pc" ]; then log "libplacebo: already built"; return; fi
+  if [ -f "$PREFIX/lib/pkgconfig/libplacebo.pc" ] && built_from libplacebo "$LIBPLACEBO_TAG"; then
+    log "libplacebo: already built"; return
+  fi
   cd "$SRC/libplacebo"
   git submodule update --init --depth 1
   log "libplacebo: configure"
+  rm -rf build
   meson setup build --prefix="$PREFIX" --libdir=lib --buildtype=release --default-library=static \
     -Dvulkan=disabled -Dshaderc=disabled -Dglslang=disabled -Dlcms=disabled \
     -Dopengl=enabled -Dd3d11=disabled -Dlibdovi=disabled -Dunwind=disabled -Dxxhash=disabled \
@@ -118,13 +167,16 @@ build_libplacebo() {
   log "libplacebo: build"
   meson compile -C build -j "$JOBS"
   meson install -C build
+  record_built libplacebo "$LIBPLACEBO_TAG"
 }
 
 # ──── libass (Linux only; MSYS2's package is used on Windows) ────
 build_libass() {
   [ "$HOST" = linux ] || return 0
   fetch libass https://github.com/libass/libass.git "$LIBASS_TAG"
-  if [ -f "$PREFIX/lib/pkgconfig/libass.pc" ]; then log "libass: already built"; return; fi
+  if [ -f "$PREFIX/lib/pkgconfig/libass.pc" ] && built_from libass "$LIBASS_TAG"; then
+    log "libass: already built"; return
+  fi
   cd "$SRC/libass"
   log "libass: configure"
   ./autogen.sh
@@ -132,6 +184,7 @@ build_libass() {
   log "libass: build"
   make -j"$JOBS"
   make install
+  record_built libass "$LIBASS_TAG"
 }
 
 # ──── mpv: the library only, GPL parts off ────
@@ -194,23 +247,39 @@ build_mpv() {
 
 collect() {
   log "collect $RID"
-  local dest=$OUT/$RID
+  local dest=$OUT/$RID lib deps
   if [ "$HOST" = windows ]; then
+    lib=$dest/libmpv-2.dll
     cp "$SRC/mpv/build/libmpv-2.dll" "$dest/"
-    strip "$dest/libmpv-2.dll" || true
-    ls -la "$dest/libmpv-2.dll"
+    strip "$lib" || true
+    ls -la "$lib"
     # A self-contained DLL depends on nothing outside the OS.
-    log "runtime dependencies"
-    objdump -p "$dest/libmpv-2.dll" | grep -i 'DLL Name' | sort
+    deps=$(objdump -p "$lib" | grep -i 'DLL Name' | sed -E 's/^[[:space:]]*DLL Name:[[:space:]]*//' | sort)
   else
-    cp "$SRC/mpv/build/libmpv.so.2"* "$dest/" 2>/dev/null || cp "$SRC/mpv/build/libmpv.so" "$dest/libmpv.so.2"
-    strip "$dest/libmpv.so.2" || true
+    lib=$dest/libmpv.so.2
+    cp "$SRC/mpv/build/libmpv.so.2"* "$dest/" 2>/dev/null || cp "$SRC/mpv/build/libmpv.so" "$lib"
+    strip "$lib" || true
     ls -la "$dest/"
-    log "runtime dependencies"
-    readelf -d "$dest/libmpv.so.2" | grep NEEDED
+    deps=$(readelf -d "$lib" | grep NEEDED | sed -E 's/.*\[(.*)\].*/\1/' | sort)
   fi
+  log "runtime dependencies"
+  printf '%s\n' "$deps"
+  check_no_cuda_link "$deps"
+
   bash "$HERE/licence-report.sh" "$WORK" > "$dest/LICENCE-REPORT.txt"
+  { echo; echo "Runtime dependencies of $(basename "$lib")"; printf '  %s\n' $deps; } >> "$dest/LICENCE-REPORT.txt"
   cat "$dest/LICENCE-REPORT.txt"
+}
+
+# CUDA is reached through ffnvcodec's loader, which opens the driver's libraries at run time,
+# so the library still loads on a machine with no NVIDIA driver and simply finds no CUDA
+# there. Linking them instead would build and pass every test on an NVIDIA runner, and ship
+# a library that fails to load on every AMD and Intel machine. This rule used to live only in
+# the README; now the build enforces it.
+check_no_cuda_link() {  # check_no_cuda_link <dependency list>
+  local bad
+  bad=$(printf '%s\n' "$1" | grep -iE '^(nvcuda|nvcuvid|nvidia-encode|libcuda|libnvcuvid|libnvidia-encode)[.]' || true)
+  [ -z "$bad" ] || die "the library links NVIDIA's driver libraries directly, and would not load without an NVIDIA driver: $(echo $bad)"
 }
 
 build_nvcodec_headers

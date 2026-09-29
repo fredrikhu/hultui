@@ -3,8 +3,9 @@ namespace HultUI.Core.Rendering;
 /// <summary>
 /// A render surface that lets foreign code draw with OpenGL inside the frame — a
 /// video decoder rendering into a texture the renderer then composites. Implemented
-/// by the GL-backed Skia surface; a raster surface is not one, and a producer drawn
-/// on it must fall back to <see cref="IPixelImageSource"/>.
+/// by the GL-backed Skia surface, and by the Vulkan one, which shares an image with a
+/// hidden GL context when the driver allows it. A raster surface is not one, and a
+/// producer drawn on it must fall back to <see cref="IPixelImageSource"/>.
 /// </summary>
 public interface IExternalGLSurface : IRenderSurface
 {
@@ -86,9 +87,18 @@ public interface IExternalGLSurface : IRenderSurface
 /// <param name="PeakNits">What the display can actually show at its brightest, for a producer
 /// that must tone-map to it. Zero when unknown, which means the producer should assume rather
 /// than believe.</param>
+/// <param name="WideGamut">True when the renderer carries colours outside BT.709 as negative
+/// channel values — as scRGB does — so a linear-light producer should write them that way
+/// rather than squeeze them into BT.709's gamut first.
+///
+/// <para>The third half of HDR, after range and precision. Most HDR content is mastered in P3
+/// inside a BT.2020 container, and a producer told only "linear BT.709" maps every colour
+/// outside that gamut inwards before it reaches the target: BT.2020 green arrived as (0, 0.41,
+/// 0.12), shifted toward cyan, where the target could have held (-0.26, 0.50, -0.04). Only
+/// meaningful with <paramref name="WantsLinearLight"/>.</para></param>
 public readonly record struct GpuFrameTarget(
     uint Framebuffer, uint TextureId, uint InternalFormat,
-    bool WantsLinearLight = false, float PeakNits = 0f);
+    bool WantsLinearLight = false, float PeakNits = 0f, bool WideGamut = false);
 
 /// <summary>
 /// A GL texture the renderer composites, as an <see cref="IGpuImageSource"/> describes

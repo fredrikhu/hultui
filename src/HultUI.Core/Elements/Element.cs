@@ -215,8 +215,13 @@ public abstract class Element
     /// Whether this element hangs off a root a window is showing. <see cref="OnMounted"/>
     /// means "got a parent", which the freshly built twin of a rebuild also does, so an
     /// element that drives its own animation asks this instead: a twin's root has no host,
-    /// a discarded root has had its host cleared, and only what is actually on screen says
-    /// yes. A walk to the root, cheap enough for a per-frame check.
+    /// a discarded root and a removed subtree's top have had their host cleared, and only
+    /// what is actually on screen says yes. A walk to the root, cheap enough for a
+    /// per-frame check.
+    ///
+    /// <para>Removal unmounts the whole removed subtree, so <see cref="OnUnmounted"/> covers
+    /// that exit. This check is for the two that never unmount: the twin, and a root
+    /// dropped by <c>Window.SetRoot</c>.</para>
     /// </summary>
     public bool IsHosted
     {
@@ -793,22 +798,70 @@ public abstract class Element
     protected virtual void OnMounted() { }
     protected virtual void OnUnmounted() { }
 
+    // Whether OnMounted has fired more recently than OnUnmounted. Not the same as having a
+    // parent: an element deep in a removed subtree keeps its parent and is unmounted.
+    private bool _mounted;
+
+    /// <summary>
+    /// Mounts this element and anything under it that is not mounted, children first: the
+    /// order a freshly built tree mounts in, since a builder adds each child to its parent
+    /// before that parent has one of its own. A fresh subtree's children are all mounted
+    /// already, so this reads only the direct children; it goes deeper only into a subtree
+    /// coming back after a removal unmounted it.
+    /// </summary>
+    private void Mount()
+    {
+        if (_children is not null)
+        {
+            // By index: a component mounting can write signals that rebuild other parts of
+            // the tree, and a foreach would throw on the change.
+            for (int i = 0; i < _children.Count; i++)
+                if (!_children[i]._mounted) _children[i].Mount();
+        }
+        _mounted = true;
+        OnMounted();
+        // A freshly mounted subtree has no resolved inherited style yet, so it would
+        // measure with a zero font size (zero-height text) until some later restyle. Flag
+        // it so the next frame's style pass resolves it before layout. Structural ops
+        // otherwise mark only layout/children.
+        MarkStyleDirty();
+    }
+
+    /// <summary>
+    /// Unmounts this element and every mounted element under it, top down, so a component
+    /// host stops rebuilding before the elements it built hear about it. The walk covers
+    /// the whole subtree: the removal already cost a build of at least that size.
+    /// </summary>
+    private void Unmount()
+    {
+        if (_mounted)
+        {
+            _mounted = false;
+            OnUnmounted();
+        }
+        if (_children is null) return;
+        for (int i = 0; i < _children.Count; i++) // by index: see Mount
+            _children[i].Unmount();
+    }
+
     // ──── Tree mutation ────
     //
     // Lifecycle contract:
-    //   OnMounted  fires when an element enters a tree for the first time.
-    //   OnUnmounted fires when an element permanently leaves a tree.
+    //   OnMounted  fires when an element gets a parent while unmounted: the first time it
+    //              enters a tree, or when it comes back after a removal. Everything under
+    //              it that the removal unmounted mounts with it.
+    //   OnUnmounted fires when an element permanently leaves a tree, and on every element
+    //              under it: a component hosted three levels down has left too.
     //
-    // When an element is *moved* (it already has a parent and is added to a
-    // different one), neither lifecycle event fires — the element was never
-    // truly removed.  This prevents ComponentHost from tearing down its
-    // reactive Effect every time a parent component rebuilds and passes the
-    // same child through a helper like SplitPane.Build().
+    // When an element is *moved* (it is mounted and is added to a different parent),
+    // neither lifecycle event fires — the element was never truly removed. This
+    // prevents ComponentHost from tearing down its reactive Effect every time a parent
+    // component rebuilds and passes the same child through a helper like
+    // SplitPane.Build(). The builder moves the host into the new tree before the
+    // reconciler removes the old one, so the old one no longer contains it.
 
     public void AddChild(Element child)
     {
-        var wasParented = child.Parent is not null;
-
         if (child.Parent is not null)
             DetachSilently(child);
 
@@ -817,21 +870,12 @@ public abstract class Element
         MarkLayoutDirty();
         MarkChildrenDirty();
 
-        if (!wasParented)
-        {
-            child.OnMounted();
-            // A freshly mounted subtree has no resolved inherited style yet, so
-            // it would measure with a zero font size (zero-height text) until
-            // some later restyle. Flag it so the next frame's style pass resolves
-            // it before layout. Structural ops otherwise mark only layout/children.
-            child.MarkStyleDirty();
-        }
+        if (!child._mounted)
+            child.Mount();
     }
 
     public void InsertChild(int index, Element child)
     {
-        var wasParented = child.Parent is not null;
-
         if (child.Parent is not null)
             DetachSilently(child);
 
@@ -840,11 +884,8 @@ public abstract class Element
         MarkLayoutDirty();
         MarkChildrenDirty();
 
-        if (!wasParented)
-        {
-            child.OnMounted();
-            child.MarkStyleDirty(); // see AddChild: resolve the new subtree's style
-        }
+        if (!child._mounted)
+            child.Mount();
     }
 
     public void RemoveChild(Element child)
@@ -852,8 +893,11 @@ public abstract class Element
         if (_children?.Remove(child) == true)
         {
             ClearFocusIfRemoved(child);
-            child.OnUnmounted();
+            child.Unmount();
             child.Parent = null;
+            // The style pass copied the window onto every element it resolved; left in
+            // place, it tells IsHosted this subtree is still on screen.
+            child.OverlayHost = null;
             MarkLayoutDirty();
             MarkChildrenDirty();
         }
@@ -861,17 +905,16 @@ public abstract class Element
 
     public void ReplaceChildren(params Element[] children)
     {
-        // Snapshot which incoming children are already mounted somewhere so
-        // we can distinguish moves (silent) from first mounts (fire OnMounted).
-        var alreadyMounted = new HashSet<Element>();
+        // Take incoming children out of their current parents first. One that sits inside
+        // a child about to leave is being moved, and must not be unmounted with it.
         foreach (var child in children)
         {
-            if (child.Parent is not null)
-                alreadyMounted.Add(child);
+            if (child.Parent is not null && !ReferenceEquals(child.Parent, this))
+                DetachSilently(child);
         }
 
-        // Remove old children. Only fire OnUnmounted for elements that are
-        // genuinely leaving — not those that reappear in the new list.
+        // Remove old children. Only unmount elements that are genuinely
+        // leaving — not those that reappear in the new list.
         var newSet = new HashSet<Element>(children);
         if (_children is not null)
         {
@@ -880,7 +923,8 @@ public abstract class Element
                 if (!newSet.Contains(old))
                 {
                     ClearFocusIfRemoved(old);
-                    old.OnUnmounted();
+                    old.Unmount();
+                    old.OverlayHost = null; // see RemoveChild
                 }
                 old.Parent = null;
             }
@@ -891,17 +935,14 @@ public abstract class Element
         var list = _children ??= new List<Element>(children.Length);
         foreach (var child in children)
         {
-            if (child.Parent is not null)
+            if (child.Parent is not null) // only an element listed twice
                 DetachSilently(child);
 
             child.Parent = this;
             list.Add(child);
 
-            if (!alreadyMounted.Contains(child))
-            {
-                child.OnMounted();
-                child.MarkStyleDirty(); // see AddChild: resolve the new subtree's style
-            }
+            if (!child._mounted)
+                child.Mount();
         }
         MarkLayoutDirty();
         MarkChildrenDirty();

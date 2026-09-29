@@ -5,7 +5,6 @@ using SDL;
 using Vortice.Vulkan;
 using static SDL.SDL3;
 using static Vortice.Vulkan.Vulkan;
-using static HultUI.Platform.SDL3.VulkanCommands;
 
 namespace HultUI.Platform.SDL3;
 
@@ -56,11 +55,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <c>HULTUI_VULKAN_PRESENT</c> pins the present mode to <c>immediate</c>, <c>mailbox</c>
     /// or <c>fifo</c>; unset leaves the choice to <see cref="ChoosePresentMode"/>.
     ///
-    /// <para>It exists because a window dragged by its edge visibly stretches its old
-    /// contents before snapping to a correct frame, and presentation is the only candidate
-    /// left: the throttle draws the same number of frames on both renderers, a swapchain
-    /// rebuild costs a millisecond, and nothing accumulates. A mode this surface does not
-    /// offer is ignored rather than fatal — the point is to compare, not to insist.</para>
+    /// <para>It exists to compare present modes. IMMEDIATE let the compositor stretch a
+    /// window's old contents during an edge drag, which is why MAILBOX is the default. A mode
+    /// this surface does not offer is ignored rather than fatal — the point is to compare, not
+    /// to insist.</para>
     /// </summary>
     private static readonly VkPresentModeKHR? PresentModeOverride =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_PRESENT")?.ToLowerInvariant() switch
@@ -122,6 +120,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     private bool WantsWideColor => WideColorOverride ?? DisplayIsHdr;
 
+    /// <summary>
+    /// Whether the instance has <c>VK_EXT_swapchain_colorspace</c>. Without it
+    /// <c>SRGB_NONLINEAR</c> is the only colour space a swapchain may use, whatever the surface
+    /// lists — so scRGB is never chosen, however much it is wanted.
+    /// </summary>
+    private bool _colorSpaceExtensionEnabled;
+
     // VkImageUsageFlagBits, spelled out because getting these wrong is invisible: an
     // earlier version had 0x04 commented as TRANSFER_SRC when it is SAMPLED, and the
     // swapchain went without the one bit Skia actually requires.
@@ -140,6 +145,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// </summary>
     private const uint SwapchainUsage =
         UsageColorAttachment | UsageTransferSrc | UsageTransferDst | UsageSampled;
+
+    /// <summary>This host's Vulkan commands, resolved against its own instance and device —
+    /// see <see cref="VulkanCommands"/> for why it is not shared.</summary>
+    private readonly VulkanCommands _vk = new();
 
     private VkInstance _instance;
     private VkSurfaceKHR _surface;
@@ -236,12 +245,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     public bool SdrIsGamma22 { get; set; }
 
     /// <summary>
-    /// The display's peak luminance, from <c>HULTUI_VULKAN_PEAK_NITS</c> or zero.
+    /// The display's peak luminance: set by the window from what the display reports, and
+    /// overridden by <c>HULTUI_VULKAN_PEAK_NITS</c>.
     ///
-    /// <para>There is no query behind this. Windows gives an SDR white level and no peak, and
-    /// this SDL binding exposes no HDR headroom, so a number here can only come from the
-    /// person running it. Zero means "unknown" rather than "dark", and a producer told zero
-    /// assumes rather than believes.</para>
+    /// <para>Zero means "unknown" rather than "dark", and a producer told zero assumes rather
+    /// than believes.</para>
     /// </summary>
     public float DisplayPeakNits
     {
@@ -257,12 +265,23 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             ? nits : 0f;
 
     public nint GetProcedureAddress(string name, nint instance, nint device) =>
-        Resolve(name, instance, device);
+        _vk.Resolve(name, instance, device);
 
     public static SdlVulkanHost Create(SDL_Window* window, int widthPx, int heightPx, bool displayIsHdr)
     {
         var host = new SdlVulkanHost { DisplayIsHdr = displayIsHdr };
-        host.Init(window, widthPx, heightPx);
+        try
+        {
+            host.Init(window, widthPx, heightPx);
+        }
+        catch
+        {
+            // A driver that is present but unusable fails partway, with an instance and a
+            // surface already made. The window falls back to GL and is replaced, so whatever
+            // was built has to go now: nothing else holds this host to dispose it later.
+            host.Dispose();
+            throw;
+        }
         return host;
     }
 
@@ -288,7 +307,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // Enabled whenever the loader has it, not only when wide colour is wanted now: an
         // instance cannot gain an extension later, and the window may be dragged onto an HDR
         // display at any point. An extension that goes unused costs nothing.
-        if (HasInstanceExtension("VK_EXT_swapchain_colorspace"))
+        _colorSpaceExtensionEnabled = HasInstanceExtension("VK_EXT_swapchain_colorspace");
+        if (_colorSpaceExtensionEnabled)
             names = [.. names, "VK_EXT_swapchain_colorspace"];
 
         // For a swapchain whose extent may differ from the window's. Both are instance
@@ -319,7 +339,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         VkInstance instance;
         Check(vkCreateInstance(&instanceInfo, &instance), "vkCreateInstance");
         _instance = instance;
-        LoadInstance(instance);
+        _vk.LoadInstance(instance);
 
         ulong surfaceHandle = 0;
         if (!SDL_Vulkan_CreateSurface(window, (VkInstance_T*)_instance.Handle, null,
@@ -332,9 +352,6 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         BuildSwapchain(widthPx, heightPx);
     }
 
-    /// <summary>The first device with a queue that can both draw and present to this
-    /// surface, preferring a discrete one. A queue that can do only one of the two is no
-    /// use here and the separate-queue arrangement is not worth its complexity.</summary>
     /// <summary>Whether the loader offers an instance extension, asked before the instance
     /// exists — which is the only time it can be asked and the only time it matters.</summary>
     private static bool HasInstanceExtension(string name)
@@ -378,17 +395,21 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // counter each time. Asking the surface costs one query and is the honest question.
         bool rebuilding = !_swapchain.IsNull && ChooseFormat(out _, trace: false) != _format;
         StartupTrace.Mark($"vulkan display changed: hdr={isHdr} whiteScale={sdrWhiteScale:0.##} " +
+            $"peak={(DisplayPeakNits > 0f ? $"{DisplayPeakNits:0}" : "unknown")} " +
             (rebuilding ? $"rebuilding for {(WantsWideColor ? "scRGB" : "sRGB")}" : "format unchanged"));
         if (rebuilding) RecreateSwapchain(_widthPx, _heightPx);
     }
 
+    /// <summary>The first device with a queue that can both draw and present to this
+    /// surface, preferring a discrete one. A queue that can do only one of the two is no
+    /// use here and the separate-queue arrangement is not worth its complexity.</summary>
     private void PickPhysicalDevice()
     {
         uint count = 0;
-        Check(EnumeratePhysicalDevices(_instance, &count, null), "vkEnumeratePhysicalDevices");
+        Check(_vk.EnumeratePhysicalDevices(_instance, &count, null), "vkEnumeratePhysicalDevices");
         if (count == 0) throw new InvalidOperationException("no Vulkan physical device");
         var devices = stackalloc VkPhysicalDevice[(int)count];
-        Check(EnumeratePhysicalDevices(_instance, &count, devices), "vkEnumeratePhysicalDevices");
+        Check(_vk.EnumeratePhysicalDevices(_instance, &count, devices), "vkEnumeratePhysicalDevices");
 
         VkPhysicalDevice best = default;
         uint bestFamily = 0;
@@ -400,7 +421,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             if (!TryFindPresentQueue(candidate, out uint family)) continue;
 
             var properties = new VkPhysicalDeviceProperties();
-            GetPhysicalDeviceProperties(candidate, &properties);
+            _vk.GetPhysicalDeviceProperties(candidate, &properties);
             bool discrete = properties.deviceType == VkPhysicalDeviceType.DiscreteGpu;
 
             if (best.IsNull || (discrete && !bestDiscrete))
@@ -421,16 +442,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         family = 0;
         uint count = 0;
-        GetQueueFamilyProperties(device, &count, null);
+        _vk.GetQueueFamilyProperties(device, &count, null);
         if (count == 0) return false;
         var families = stackalloc VkQueueFamilyProperties[(int)count];
-        GetQueueFamilyProperties(device, &count, families);
+        _vk.GetQueueFamilyProperties(device, &count, families);
 
         for (uint i = 0; i < count; i++)
         {
             if ((families[i].queueFlags & VkQueueFlags.Graphics) == 0) continue;
             uint supported = 0;
-            if (GetSurfaceSupport(device, i, _surface, &supported) != VkResult.Success) continue;
+            if (_vk.GetSurfaceSupport(device, i, _surface, &supported) != VkResult.Success) continue;
             if (supported == 0) continue;
             family = i;
             return true;
@@ -489,12 +510,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             ppEnabledExtensionNames = extensions,
         };
         VkDevice device;
-        Check(CreateDevice(_physicalDevice, &deviceInfo, 0, &device), "vkCreateDevice");
+        Check(_vk.CreateDevice(_physicalDevice, &deviceInfo, 0, &device), "vkCreateDevice");
         _device = device;
-        LoadDevice(device);
+        _vk.LoadDevice(device);
 
         VkQueue queue;
-        GetDeviceQueue(_device, _queueFamily, 0, &queue);
+        _vk.GetDeviceQueue(_device, _queueFamily, 0, &queue);
         _queue = queue;
 
         // Asked once, after the device: the answer cannot change for this surface, and the
@@ -507,7 +528,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             sizeof(VkPhysicalDeviceFeatures2));
         var features = (VkPhysicalDeviceFeatures2*)_features2;
         *features = new VkPhysicalDeviceFeatures2 { sType = VkStructureType.PhysicalDeviceFeatures2 };
-        GetPhysicalDeviceFeatures2(_physicalDevice, features);
+        _vk.GetPhysicalDeviceFeatures2(_physicalDevice, features);
 
         var poolInfo = new VkCommandPoolCreateInfo
         {
@@ -515,12 +536,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             flags = VkCommandPoolCreateFlags.ResetCommandBuffer,
         };
         VkCommandPool pool;
-        Check(CreateCommandPool(_device, &poolInfo, 0, &pool), "vkCreateCommandPool");
+        Check(_vk.CreateCommandPool(_device, &poolInfo, 0, &pool), "vkCreateCommandPool");
         _pool = pool;
 
         var fenceInfo = new VkFenceCreateInfo();
         VkFence fence;
-        Check(CreateFence(_device, &fenceInfo, 0, &fence), "vkCreateFence");
+        Check(_vk.CreateFence(_device, &fenceInfo, 0, &fence), "vkCreateFence");
         _acquireFence = fence;
     }
 
@@ -548,7 +569,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private void BuildSwapchain(int widthPx, int heightPx)
     {
         var capabilities = new VkSurfaceCapabilitiesKHR();
-        Check(GetSurfaceCapabilities(_physicalDevice, _surface, &capabilities), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+        Check(_vk.GetSurfaceCapabilities(_physicalDevice, _surface, &capabilities), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
         // currentExtent of 0xFFFFFFFF means "you choose", which is what Wayland says; every
         // other case is the compositor telling us the size and disagreeing with it fails.
@@ -635,8 +656,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             imageColorSpace = colorSpace,
             imageExtent = extent,
             imageArrayLayers = 1,
-            // TransferDst as well as ColorAttachment: Skia wants it for the clear path, and
-            // a swapchain image without it fails GRBackendRenderTarget validation.
+            // What the surface allows of SwapchainUsage. Skia needs COLOR_ATTACHMENT and
+            // TRANSFER_SRC, checked above; see SwapchainUsage.
             imageUsage = (VkImageUsageFlags)_usage,
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
@@ -647,15 +668,15 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         };
 
         VkSwapchainKHR swapchain;
-        Check(VulkanCommands.CreateSwapchain(_device, &info, 0, &swapchain), "vkCreateSwapchainKHR");
+        Check(_vk.CreateSwapchain(_device, &info, 0, &swapchain), "vkCreateSwapchainKHR");
         _swapchain = swapchain;
-        if (!old.IsNull) DestroySwapchain(_device, old, 0);
+        if (!old.IsNull) _vk.DestroySwapchain(_device, old, 0);
 
         uint got = 0;
-        Check(GetSwapchainImages(_device, _swapchain, &got, null), "vkGetSwapchainImagesKHR");
+        Check(_vk.GetSwapchainImages(_device, _swapchain, &got, null), "vkGetSwapchainImagesKHR");
         var images = new VkImage[got];
         fixed (VkImage* p = images)
-            Check(GetSwapchainImages(_device, _swapchain, &got, p), "vkGetSwapchainImagesKHR");
+            Check(_vk.GetSwapchainImages(_device, _swapchain, &got, p), "vkGetSwapchainImagesKHR");
         _images = images;
 
         CreatePerImageObjects();
@@ -681,7 +702,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// </summary>
     private void CreatePerImageObjects()
     {
-        DestroyPerImageObjects();
+        RetirePerImageObjects();
 
         int count = _images.Length;
         _renderFinished = new VkSemaphore[count];
@@ -698,28 +719,78 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         for (int i = 0; i < count; i++)
         {
             VkSemaphore semaphore;
-            Check(CreateSemaphore(_device, &semaphoreInfo, 0, &semaphore), "vkCreateSemaphore");
+            Check(_vk.CreateSemaphore(_device, &semaphoreInfo, 0, &semaphore), "vkCreateSemaphore");
             _renderFinished[i] = semaphore;
 
             VkCommandBuffer cmd;
-            Check(AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
+            Check(_vk.AllocateCommandBuffers(_device, &allocate, &cmd), "vkAllocateCommandBuffers");
             _presentCmd[i] = cmd;
         }
     }
 
-    private void DestroyPerImageObjects()
+    /// <summary>
+    /// Drops the per-image objects of a swapchain being replaced. The command buffers are freed
+    /// now; the semaphores are retired, not destroyed.
+    ///
+    /// <para><b>Why they wait.</b> A present waits on its image's semaphore, and nothing in core
+    /// Vulkan says when that wait is over. <c>vkDeviceWaitIdle</c> covers queue work, not the
+    /// presentation engine. A rebuild comes straight after a present that returned SUBOPTIMAL
+    /// or OUT_OF_DATE, and that present may still be waiting on a semaphore destroying it here
+    /// would pull away. So they are destroyed only once the swapchain after them has presented
+    /// a full round of its own images; each of those presents was acquired behind a fence wait,
+    /// which is as late as the engine could still be using anything older.
+    /// <c>swapchain_maintenance1</c>'s present fences would make that exact rather than
+    /// conservative, but the extension is only enabled for the fixed-extent path.</para>
+    /// </summary>
+    private void RetirePerImageObjects()
     {
-        // The caller has already waited the device idle; nothing here is in flight.
-        foreach (var semaphore in _renderFinished)
-            if (!semaphore.IsNull) DestroySemaphore(_device, semaphore, 0);
+        // The caller has already waited the device idle, so no command buffer is executing.
+        FreePresentCommandBuffers();
+        if (_renderFinished.Length > 0)
+            _retiredSemaphores.Add((_renderFinished, _images.Length + 1));
         _renderFinished = [];
+    }
 
+    /// <summary>Semaphores of replaced swapchains, each batch with the number of presents still
+    /// to go before it may be destroyed. See <see cref="RetirePerImageObjects"/>.</summary>
+    private readonly List<(VkSemaphore[] Semaphores, int PresentsToGo)> _retiredSemaphores = [];
+
+    /// <summary>Counts a present that was queued against every retired batch, destroying the
+    /// batches whose round is complete.</summary>
+    private void CountPresentForRetired()
+    {
+        for (int i = _retiredSemaphores.Count - 1; i >= 0; i--)
+        {
+            var (semaphores, toGo) = _retiredSemaphores[i];
+            if (--toGo > 0) { _retiredSemaphores[i] = (semaphores, toGo); continue; }
+            foreach (var semaphore in semaphores)
+                if (!semaphore.IsNull) _vk.DestroySemaphore(_device, semaphore, 0);
+            _retiredSemaphores.RemoveAt(i);
+        }
+    }
+
+    private void FreePresentCommandBuffers()
+    {
         for (int i = 0; i < _presentCmd.Length; i++)
         {
             var cmd = _presentCmd[i];
-            if (!cmd.IsNull) FreeCommandBuffers(_device, _pool, 1, &cmd);
+            if (!cmd.IsNull) _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
         }
         _presentCmd = [];
+    }
+
+    /// <summary>Everything per-image, retired or current, for a host being disposed after its
+    /// device has been waited idle.</summary>
+    private void DestroyPerImageObjects()
+    {
+        FreePresentCommandBuffers();
+        foreach (var semaphore in _renderFinished)
+            if (!semaphore.IsNull) _vk.DestroySemaphore(_device, semaphore, 0);
+        _renderFinished = [];
+        foreach (var (semaphores, _) in _retiredSemaphores)
+            foreach (var semaphore in semaphores)
+                if (!semaphore.IsNull) _vk.DestroySemaphore(_device, semaphore, 0);
+        _retiredSemaphores.Clear();
     }
 
     /// <summary>
@@ -748,39 +819,24 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private VkPresentModeKHR ChoosePresentMode(bool trace = true)
     {
         uint count = 0;
-        if (GetSurfacePresentModes(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
+        if (_vk.GetSurfacePresentModes(_physicalDevice, _surface, &count, null) != VkResult.Success || count == 0)
             return VkPresentModeKHR.Fifo;
 
         var modes = stackalloc VkPresentModeKHR[(int)count];
-        if (GetSurfacePresentModes(_physicalDevice, _surface, &count, modes) != VkResult.Success)
+        if (_vk.GetSurfacePresentModes(_physicalDevice, _surface, &count, modes) != VkResult.Success)
             return VkPresentModeKHR.Fifo;
-
-        bool immediate = false, mailbox = false;
-        for (uint i = 0; i < count; i++)
-        {
-            if (modes[i] == VkPresentModeKHR.Immediate) immediate = true;
-            if (modes[i] == VkPresentModeKHR.Mailbox) mailbox = true;
-        }
 
         // An override only counts if the surface actually offers it; asking for a mode the
         // implementation does not support is undefined, and silently getting a different
         // one than the trace claims would make the comparison this exists for worthless.
-        if (PresentModeOverride is { } wanted)
+        var chosen = VulkanSwapchainChoice.PresentMode(new ReadOnlySpan<VkPresentModeKHR>(modes, (int)count),
+            PresentModeOverride, out bool forced);
+        if (trace)
         {
-            bool offered = false;
-            for (uint i = 0; i < count; i++) if (modes[i] == wanted) offered = true;
-            if (offered)
-            {
-                if (trace) StartupTrace.Mark($"vulkan present mode {wanted} (forced)");
-                return wanted;
-            }
-            if (trace) StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
+            if (PresentModeOverride is { } wanted && !forced)
+                StartupTrace.Mark($"vulkan present mode {wanted} not offered, choosing instead");
+            StartupTrace.Mark($"vulkan present mode {chosen}{(forced ? " (forced)" : "")}");
         }
-
-        var chosen = mailbox ? VkPresentModeKHR.Mailbox
-            : immediate ? VkPresentModeKHR.Immediate
-            : VkPresentModeKHR.Fifo;
-        if (trace) StartupTrace.Mark($"vulkan present mode {chosen}");
         return chosen;
     }
 
@@ -798,7 +854,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// </summary>
     private bool SurfaceOffersOneToOne()
     {
-        if (GetSurfaceCapabilities2 is null) return false;
+        if (_vk.GetSurfaceCapabilities2 is null) return false;
 
         var modeInfo = new VkSurfacePresentModeKHR
         {
@@ -820,7 +876,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             sType = VkStructureType.SurfaceCapabilities2KHR,
             pNext = &scaling,
         };
-        if (GetSurfaceCapabilities2(_physicalDevice, &surfaceInfo, &caps) != VkResult.Success)
+        if (_vk.GetSurfaceCapabilities2(_physicalDevice, &surfaceInfo, &caps) != VkResult.Success)
             return false;
 
         bool oneToOne = (scaling.supportedPresentScaling & VkPresentScalingFlagsKHR.OneToOne) != 0;
@@ -850,54 +906,38 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     private uint _minScaledHeight;
 
     /// <summary>
-    /// A plain 8-bit BGRA or RGBA format with the sRGB-nonlinear colour space — phase 1 is
-    /// SDR and the aim is to match the GL path exactly. The <c>_SRGB</c> variants are
-    /// deliberately not preferred: they would have the hardware do the encode, which is a
-    /// different answer from the one the GL surface gives, and telling the two apart is the
-    /// whole test for this phase. Phase 3 is where this function learns about HDR.
+    /// The swapchain format: scRGB half-float when <see cref="WantsWideColor"/> and the surface
+    /// allows it, otherwise a plain 8-bit BGRA or RGBA in sRGB-nonlinear, matching the GL path.
+    /// The <c>_SRGB</c> variants are deliberately not preferred: they would have the hardware
+    /// do the encode, which is a different answer from the one the GL surface gives. The
+    /// choice itself is <see cref="VulkanSwapchainChoice.SurfaceFormat"/>.
     /// </summary>
     /// <param name="colorSpace">The colour space that goes with the chosen format.</param>
     /// <param name="trace">False when the answer is only being compared against the current
     /// format rather than acted on, so that asking does not log. Every display event asks.</param>
     private VkFormat ChooseFormat(out VkColorSpaceKHR colorSpace, bool trace = true)
     {
-        colorSpace = VkColorSpaceKHR.SrgbNonLinear;
-
         uint count = 0;
-        Check(GetSurfaceFormats(_physicalDevice, _surface, &count, null), "vkGetPhysicalDeviceSurfaceFormatsKHR");
-        if (count == 0) return VkFormat.B8G8R8A8Unorm;
-
+        Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, null), "vkGetPhysicalDeviceSurfaceFormatsKHR");
         var formats = stackalloc VkSurfaceFormatKHR[(int)count];
-        Check(GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+        if (count > 0)
+            Check(_vk.GetSurfaceFormats(_physicalDevice, _surface, &count, formats), "vkGetPhysicalDeviceSurfaceFormatsKHR");
 
         // Half-float, linear light, 1.0 being SDR white — scRGB. Every colour the framework
         // has is 8-bit sRGB, so this is only correct because the renderer now tells Skia what
         // the destination is and lets it convert; before phase 2 it would have washed the
-        // whole UI out. Opt-in while that claim is only proven on one machine.
-        if (WantsWideColor)
-        {
-            for (uint i = 0; i < count; i++)
-            {
-                if (formats[i].format != VkFormat.R16G16B16A16Sfloat) continue;
-                if (formats[i].colorSpace != VkColorSpaceKHR.ExtendedSrgbLinearEXT) continue;
-                colorSpace = formats[i].colorSpace;
-                return formats[i].format;
-            }
-            if (trace) StartupTrace.Mark("vulkan wide colour asked for, surface has none");
-        }
+        // whole UI out. Without VK_EXT_swapchain_colorspace it is refused even when listed:
+        // drivers list EXTENDED_SRGB_LINEAR regardless, so taking it from the list would be
+        // invalid usage that happens to work on the machine it was written on.
+        var chosen = VulkanSwapchainChoice.SurfaceFormat(new ReadOnlySpan<VkSurfaceFormatKHR>(formats, (int)count),
+            WantsWideColor, _colorSpaceExtensionEnabled, out var wide);
+        if (trace && wide == VulkanSwapchainChoice.WideColor.NoExtension)
+            StartupTrace.Mark("vulkan wide colour asked for, but the instance has no VK_EXT_swapchain_colorspace");
+        if (trace && wide == VulkanSwapchainChoice.WideColor.NotOffered)
+            StartupTrace.Mark("vulkan wide colour asked for, surface has none");
 
-        for (uint i = 0; i < count; i++)
-        {
-            if (formats[i].colorSpace != VkColorSpaceKHR.SrgbNonLinear) continue;
-            if (formats[i].format is VkFormat.B8G8R8A8Unorm or VkFormat.R8G8B8A8Unorm)
-            {
-                colorSpace = formats[i].colorSpace;
-                return formats[i].format;
-            }
-        }
-
-        colorSpace = formats[0].colorSpace;
-        return formats[0].format;
+        colorSpace = chosen.colorSpace;
+        return chosen.format;
     }
 
     public VulkanFrameTarget? AcquireNextImage()
@@ -907,7 +947,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         uint index = 0;
         var fence = _acquireFence;
-        var result = VulkanCommands.AcquireNextImage(_device, _swapchain, NoTimeout, VkSemaphore.Null, fence, &index);
+        var result = _vk.AcquireNextImage(_device, _swapchain, NoTimeout, VkSemaphore.Null, fence, &index);
 
         if (result is VkResult.ErrorOutOfDateKHR)
         {
@@ -923,8 +963,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // The fence is how this waits for the image without a semaphore to hand Skia — see
         // the note on the class.
         long before = AcquireStallTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        Check(WaitForFences(_device, 1, &fence, 1, NoTimeout), "vkWaitForFences");
-        Check(ResetFences(_device, 1, &fence), "vkResetFences");
+        Check(_vk.WaitForFences(_device, 1, &fence, 1, NoTimeout), "vkWaitForFences");
+        Check(_vk.ResetFences(_device, 1, &fence), "vkResetFences");
         if (AcquireStallTrace) RecordAcquireStall(before);
 
         _acquiredIndex = index;
@@ -935,10 +975,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// <summary>
     /// <c>HULTUI_VULKAN_ACQUIRE_TRACE=1</c> reports what the acquire wait actually costs.
     ///
-    /// <para>The class comment has said since phase 1 that this backend stalls the CPU once a
-    /// frame. Half of that was true and is now gone — the queue drain after Skia submitted was
-    /// replaced by a semaphore the present waits on. What is left is this fence, and whether it
-    /// is worth replacing depends on a number nobody has taken.</para>
+    /// <para>The acquire waits on a fence because SkiaSharp exposes nothing to hand a semaphore
+    /// to. Measured at 0.0064 ms a frame (see the class note), so it stays; this is for
+    /// measuring it again on another driver.</para>
     /// </summary>
     private static readonly bool AcquireStallTrace =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_ACQUIRE_TRACE") == "1";
@@ -968,7 +1007,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
     public void PresentAcquiredImage()
     {
-        if (!_haveAcquired || _swapchain.IsNull) return;
+        if (!_haveAcquired || _swapchain.IsNull)
+        {
+            // Nothing to present — the swapchain was rebuilt since the acquire — but a video
+            // drawn this frame still took the shared image, and GL must get it back.
+            FlushOwedRelease();
+            return;
+        }
 
         // The capture reads the image on the CPU, so it is the one thing here that still has
         // to wait for the GPU. Diagnostic only, and off unless asked for.
@@ -996,8 +1041,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             pSwapchains = &swapchain,
             pImageIndices = &index,
         };
-        var result = QueuePresent(_queue, &present);
+        var result = _vk.QueuePresent(_queue, &present);
         _haveAcquired = false;
+        if (result is VkResult.Success or VkResult.SuboptimalKHR) CountPresentForRetired();
 
         if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
             Rebuild(_widthPx, _heightPx, force: true);
@@ -1009,7 +1055,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     {
         var cmd = _presentCmd[imageIndex];
         var begin = new VkCommandBufferBeginInfo { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
-        Check(BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
+        Check(_vk.BeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer");
 
         var barrier = new VkImageMemoryBarrier
         {
@@ -1023,13 +1069,13 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             image = image,
             subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
         };
-        CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
+        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
             VkPipelineStageFlags.BottomOfPipe, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
 
         // The last submit of the frame, so the shared image goes back to GL here if it was drawn.
         var release = ReleaseInteropImage(cmd);
 
-        Check(EndCommandBuffer(cmd), "vkEndCommandBuffer");
+        Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
 
         var signals = stackalloc VkSemaphore[2];
         signals[0] = _renderFinished[imageIndex];
@@ -1041,7 +1087,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             signalSemaphoreCount = release is null ? 1u : 2u,
             pSignalSemaphores = signals,
         };
-        Check(QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
+        Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
         return signals[0];
     }
 
@@ -1052,7 +1098,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
     /// are already big enough for the new window size, nothing is reallocated: the window size is
     /// simply recorded, and the next frame draws into the same images and presents a smaller
     /// top-left region of them. A drag that only shrinks the window never rebuilds at all, and
-    /// one that grows rebuilds when it crosses a bucket.</para>
+    /// one that grows rebuilds when it crosses a bucket. Only with
+    /// <c>HULTUI_VULKAN_FIXED_EXTENT=1</c>: by default every new size rebuilds.</para>
     ///
     /// <para>No device wait either, because nothing is being destroyed — that wait was there to
     /// make it safe to throw the old images away.</para>
@@ -1074,8 +1121,8 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         // would leave an oversized swapchain being scaled — the artefact, reintroduced. Leaving
         // this check out also made HULTUI_VULKAN_FIXED_EXTENT=0 a dishonest "before": it kept
         // the skipping and lost only the scaling that justifies it.
-        if (!force && _fixedExtentAvailable && !_swapchain.IsNull && widthPx > 0 && heightPx > 0
-            && widthPx <= _allocWidthPx && heightPx <= _allocHeightPx
+        if (VulkanSwapchainChoice.CanKeepSwapchain(force, _fixedExtentAvailable, !_swapchain.IsNull,
+                widthPx, heightPx, _allocWidthPx, _allocHeightPx)
             && ChooseFormat(out _, trace: false) == _format)
         {
             _widthPx = widthPx;
@@ -1083,7 +1130,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
             return;
         }
 
-        Check(DeviceWaitIdle(_device), "vkDeviceWaitIdle");
+        Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle");
         _haveAcquired = false;
         BuildSwapchain(widthPx, heightPx);
     }
@@ -1093,20 +1140,24 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (_disposed) return;
         _disposed = true;
 
-        if (!_device.IsNull)
+        // The pointer checks matter only after an Init that threw inside LoadDevice; everything
+        // else below was created after LoadDevice finished, so its own null checks cover it.
+        if (!_device.IsNull && _vk.DeviceWaitIdle is not null && _vk.DestroyDevice is not null)
         {
-            DeviceWaitIdle(_device);
+            _vk.DeviceWaitIdle(_device);
             // Before the pool and the device: the shared image is bound to both, and the GL
             // context that also names it outlives neither.
             DisposeInterop();
             DestroyPerImageObjects();
-            if (!_acquireFence.IsNull) DestroyFence(_device, _acquireFence, 0);
-            if (!_pool.IsNull) DestroyCommandPool(_device, _pool, 0);
-            if (!_swapchain.IsNull) DestroySwapchain(_device, _swapchain, 0);
-            DestroyDevice(_device, 0);
+            if (!_acquireFence.IsNull) _vk.DestroyFence(_device, _acquireFence, 0);
+            if (!_pool.IsNull) _vk.DestroyCommandPool(_device, _pool, 0);
+            if (!_swapchain.IsNull) _vk.DestroySwapchain(_device, _swapchain, 0);
+            _vk.DestroyDevice(_device, 0);
         }
-        if (!_surface.IsNull) DestroySurface(_instance, _surface, 0);
-        if (!_instance.IsNull) DestroyInstance(_instance, 0);
+        // Guarded because Dispose also cleans up after an Init that threw, which can be before
+        // LoadInstance resolved these.
+        if (!_surface.IsNull && _vk.DestroySurface is not null) _vk.DestroySurface(_instance, _surface, 0);
+        if (!_instance.IsNull && _vk.DestroyInstance is not null) _vk.DestroyInstance(_instance, 0);
         if (_features2 != 0) System.Runtime.InteropServices.Marshal.FreeHGlobal(_features2);
     }
 

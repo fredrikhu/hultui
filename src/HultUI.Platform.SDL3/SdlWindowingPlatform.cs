@@ -36,9 +36,24 @@ public sealed unsafe class SdlWindowingPlatform : IWindowingPlatform
     /// both directions — it is how the design docs' commands select a renderer, and how a
     /// machine where Vulkan misbehaves is got working again without a rebuild.</para>
     /// </summary>
-    public SdlWindowingPlatform(RendererKind renderer)
+    public SdlWindowingPlatform(RendererKind renderer) : this(renderer, displayColorEvents: false)
+    {
+    }
+
+    /// <summary>
+    /// Creates the platform, asking for a graphics API and for whether Vulkan windows follow
+    /// display-colour changes by event.
+    /// </summary>
+    /// <param name="renderer">See <see cref="SdlWindowingPlatform(RendererKind)"/>.</param>
+    /// <param name="displayColorEvents">On Windows 11 22H2 and later, subscribe each Vulkan
+    /// window to WinRT's <c>AdvancedColorInfoChanged</c>, so that switching HDR or dragging the
+    /// SDR brightness slider reaches it immediately rather than on the next 100 ms poll. For
+    /// apps that show HDR content; <c>HULTUI_DISPLAY_INFORMATION</c> overrides it either
+    /// way.</param>
+    public SdlWindowingPlatform(RendererKind renderer, bool displayColorEvents)
     {
         SDL3Window.RequestRenderer(renderer);
+        SDL3Window.RequestDisplayColorEvents(displayColorEvents);
 
         // No SDL_Init needed: registering a type only claims a number.
         if (_wakeEventType == 0)

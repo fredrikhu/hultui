@@ -28,12 +28,17 @@ internal static class ReelProgram
         // X11 or Wayland. Reel is a Windows app with an installer and file associations, so
         // it opts in on Windows on its own behalf, and only where that validation holds. An
         // explicit setting either way is the user's and is left alone.
+        //
+        // Reel asks for Vulkan (below), and a Vulkan window never loads the GL driver — so the
+        // renderer is named here too, and the preload only happens when HULTUI_RENDERER=gl puts
+        // the app back on GL. Called without it, the preload could not know, loaded the GL
+        // driver on every launch, and the Vulkan window waited for it.
         if (OperatingSystem.IsWindows() &&
             Environment.GetEnvironmentVariable("HULTUI_GL_PRELOAD") is null)
         {
             Environment.SetEnvironmentVariable("HULTUI_GL_PRELOAD", "1");
         }
-        Application.BeginGraphicsPreload();
+        Application.BeginGraphicsPreload(RendererKind.Vulkan);
 
         // Registration runs without a window: an installer, a script, or a person who
         // would rather not hunt for a button can do it and be told what happened.
@@ -69,11 +74,16 @@ internal static class ReelProgram
         // present an HDR swapchain, and the only one that carries sixteen bits a channel from
         // the decoder to the screen. See docs/design/HDR.md.
         //
-        // It is not free — roughly 120 ms more to the first frame and more CPU through a window
+        // It is not free — roughly 130 ms more to the first frame and more CPU through a window
         // resize, both measured there — and a library view showing no video pays that too. For a
         // film player that is the right way round: the cost is once at launch, the benefit is
         // every frame of every film. HULTUI_RENDERER=gl goes back if a machine needs it.
-        using var app = new Application("Reel", 1280, 760, renderer: RendererKind.Vulkan);
+        //
+        // Display-colour events too, so that switching HDR or dragging the SDR brightness slider
+        // reaches the picture at once instead of on the next 100 ms poll. About 9 ms of start-up,
+        // and HULTUI_DISPLAY_INFORMATION=0 turns it off.
+        using var app = new Application("Reel", 1280, 760, renderer: RendererKind.Vulkan,
+            displayColorEvents: true);
         app.Theme = Emulsion.ToHultTheme();
 
 #if !DEBUG

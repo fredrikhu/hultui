@@ -173,7 +173,9 @@ into a corpse. Two rules for an element that drives its own animation:
    screen.
 2. **Check `IsHosted` on every tick and cancel when it goes false.** `Element.IsHosted`
    walks to the root and asks whether a window is showing it; a twin's root has no host,
-   and a swapped-out root has had its host cleared.
+   and a swapped-out root or removed subtree has had its host cleared. Removal runs
+   `OnUnmounted` on every element in the removed subtree, but neither the twin nor a root
+   dropped by `SetRoot` is ever unmounted, so the tick is the only notice those get.
 
 This is what the framework's own `SpinnerElement` and indeterminate `ProgressBarElement`
 do:

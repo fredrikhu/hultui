@@ -12,14 +12,19 @@ namespace HultUI.Media;
 /// measures to the video's aspect ratio inside whatever space it is given.
 /// </summary>
 /// <remarks>
-/// Listening starts when the element is mounted and stops when it leaves the tree, so
-/// a throwaway element from a rebuild never keeps a player's frames marking a detached
-/// tree dirty. The accessible name defaults to the source's display name.
+/// <para>Listening starts only while the element hangs off a hosted root — at its first
+/// paint, or on mounting into a tree a window already shows — and stops when it is
+/// unmounted or a frame finds it no longer hosted. <see cref="Element.OnMounted"/> alone
+/// is not enough: the freshly built twin of every rebuild gets a parent, and so
+/// <c>OnMounted</c>, from its builder, then is patched into the live element and thrown
+/// away without an unmount. A player playing under a rebuilding overlay collected one
+/// dead listener per rebuild that way. Nor does every exit unmount: <c>SetRoot</c>
+/// unmounts nothing.</para>
+/// <para>The accessible name defaults to the source's display name.</para>
 /// </remarks>
 public class VideoElement : ImageElement
 {
     private MediaPlayer? _player;
-    private bool _mounted;
     private bool _listening;
     private Size _lastFrameSize;
 
@@ -52,20 +57,20 @@ public class VideoElement : ImageElement
     protected override void OnMounted()
     {
         base.OnMounted();
-        _mounted = true;
         StartListening();
     }
 
     protected override void OnUnmounted()
     {
         base.OnUnmounted();
-        _mounted = false;
         StopListening();
     }
 
+    // A twin's root has no host, so a rebuild's throwaway never subscribes. The hosted
+    // walk runs only while not yet listening; Render calls this every frame.
     private void StartListening()
     {
-        if (_listening || !_mounted || _player is null) return;
+        if (_listening || _player is null || !IsHosted) return;
         _player.FrameArrived += OnFrameArrived;
         _listening = true;
     }
@@ -79,6 +84,8 @@ public class VideoElement : ImageElement
 
     private void OnFrameArrived()
     {
+        // Left behind without an unmount: the root swapped by SetRoot.
+        if (!IsHosted) { StopListening(); return; }
         var size = Source?.IntrinsicSize ?? Size.Zero;
         if (size != _lastFrameSize)
         {
@@ -111,10 +118,13 @@ public class VideoElement : ImageElement
     /// <summary>
     /// Unlike an image, a video is drawn even before its first frame: the renderer's
     /// visit is what tells the frame source which kind of surface it is on, and a
-    /// decoder needs to know that before it can load anything.
+    /// decoder needs to know that before it can load anything. The first paint is also
+    /// where an element that entered the tree inside a freshly built subtree, or before its
+    /// root was shown, starts listening for frames.
     /// </summary>
     public override void Render(IRenderContext ctx)
     {
+        StartListening();
         if (Source is null) return;
         ctx.DrawImage(Source, Layout.AbsoluteContentBox, Fit);
     }

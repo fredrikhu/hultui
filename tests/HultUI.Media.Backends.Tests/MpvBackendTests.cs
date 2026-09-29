@@ -99,6 +99,27 @@ public class MpvBackendTests : IDisposable
         Assert.Equal(PlaybackState.Paused, f.Player.State);
     }
 
+    /// <summary>
+    /// After every load mpv holds its core until the first frame has been taken, for up to
+    /// 200 ms, and the size to draw that frame at only arrives once the core lets go. A frame
+    /// taken without a size ends the wait at once. One left waiting times out, and mpv counts
+    /// it as dropped. Both opens are checked, because a second file starts with the first one's
+    /// size already forgotten.
+    /// </summary>
+    [MpvFact]
+    public void Opening_DoesNotLeaveMpvWaitingForItsFirstFrame()
+    {
+        using var f = new Fixture();
+
+        f.Player.Open(Clip);
+        f.Until(() => f.Player.State == PlaybackState.Paused);
+        Assert.Equal(0, f.Backend.Peek("frame-drop-count"));
+
+        f.Player.Open(Clip);
+        f.Until(() => f.Player.State == PlaybackState.Paused);
+        Assert.Equal(0, f.Backend.Peek("frame-drop-count"));
+    }
+
     [MpvFact]
     public void ReachingTheEnd_EndsPlayback_AndPlayStartsOver()
     {
@@ -155,8 +176,9 @@ public class MpvBackendTests : IDisposable
         f.Player.Volume = 0.5f;
         f.Player.Muted = true;
 
-        Assert.Equal(2, f.Backend.Peek("speed"), 0.01);
-        Assert.Equal(50, f.Backend.Peek("volume"), 0.01);
-        Assert.Equal("yes", f.Backend.PeekString("mute"));
+        // Queued, not waited for: a read can overtake them, so wait for the values to land.
+        f.Until(() => Math.Abs(f.Backend.Peek("speed") - 2) < 0.01
+            && Math.Abs(f.Backend.Peek("volume") - 50) < 0.01
+            && f.Backend.PeekString("mute") == "yes");
     }
 }
