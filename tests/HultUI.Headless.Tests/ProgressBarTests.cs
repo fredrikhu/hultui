@@ -42,6 +42,28 @@ public class ProgressBarTests
     }
 
     [Fact]
+    public void Indeterminate_StopsWhenThePanelHoldingItIsRemoved()
+    {
+        using var session = HeadlessSession.Create();
+        var bar = ProgressBar.New().Indeterminate();
+        var panel = Box.New().Children(bar);
+        var root = Box.New().Children(panel);
+        session.Window.SetRoot(root);
+        session.PumpFrame();
+        session.PumpFrame(TimeSpan.FromMilliseconds(300));
+        Assert.True(AnimationManager.HasActiveAnimations);
+
+        // Removing the panel unmounts the panel, not the bar inside it. The style pass had
+        // copied the window onto both; the panel's copy must go, or the bar still reads as
+        // hosted and sweeps a subtree nobody can see.
+        root.RemoveChild(panel);
+        Assert.False(bar.IsHosted);
+        session.PumpFrames(2);
+        Assert.Equal(0f, bar.SweepPosition);
+        Assert.False(AnimationManager.HasActiveAnimations);
+    }
+
+    [Fact]
     public void ARebuildTwin_NeverStartsASweep()
     {
         using var session = HeadlessSession.Create();

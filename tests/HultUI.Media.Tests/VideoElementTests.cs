@@ -1,6 +1,10 @@
+using System.Reflection;
 using HultUI.Core.Builders;
+using HultUI.Core.Components;
+using HultUI.Core.Elements;
 using HultUI.Core.Layout;
 using HultUI.Core.Primitives;
+using HultUI.Core.Reactivity;
 using HultUI.Headless;
 using HultUI.Media.Testing;
 using Xunit;
@@ -113,7 +117,7 @@ public class VideoElementTests
     }
 
     [Fact]
-    public void Listening_FollowsMounting()
+    public void Listening_FollowsBeingOnScreen()
     {
         using var session = Recording();
         var backend = new FakeMediaBackend();
@@ -122,12 +126,13 @@ public class VideoElementTests
         Assert.False(video.IsListeningForFrames);    // built, not yet in a tree
 
         var box = Box.New().Children(video);
+        Assert.False(video.IsListeningForFrames);    // in a tree no window shows
         session.Application.SetRoot(box);
+        session.PumpFrame();
         Assert.True(video.IsListeningForFrames);
 
-        // What a rebuild that drops the element does. (Replacing the whole root with
-        // SetRoot does not unmount the old tree; that is the window's contract, not
-        // this element's.)
+        // What a rebuild that drops the element does. (Exits that skip the element's
+        // unmount are AnElementLeftBehindWithoutAnUnmount_StopsListeningAtTheNextFrame.)
         box.RemoveChild(video);
         Assert.False(video.IsListeningForFrames);
 
@@ -162,5 +167,125 @@ public class VideoElementTests
         var log = session.Window.RenderLog.ToString();
         Assert.Contains("version=2", log);
         Assert.Same(two.Frames, video.Source);
+    }
+
+    /// <summary>A component that builds a fresh video element on every rebuild and keeps each one.</summary>
+    private sealed class Rebuilding(MediaPlayer player) : Component
+    {
+        public Signal<int> Generation { get; } = new(0);
+        public List<VideoElement> Built { get; } = [];
+
+        public override Element Build()
+        {
+            _ = Generation.Value;
+            var video = Video.New(player);
+            Built.Add(video);
+            return Box.New().Children(video);
+        }
+    }
+
+    /// <summary>Who the player would call on its next frame.</summary>
+    private static object?[] FrameListeners(MediaPlayer player)
+    {
+        var field = typeof(MediaPlayer).GetField(nameof(MediaPlayer.FrameArrived), BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("MediaPlayer.FrameArrived is no longer a field-like event");
+        return ((Delegate?)field.GetValue(player))?.GetInvocationList().Select(d => d.Target).ToArray() ?? [];
+    }
+
+    private static IEnumerable<Element> Descendants(Element element)
+    {
+        foreach (var child in element.Children)
+        {
+            yield return child;
+            foreach (var below in Descendants(child)) yield return below;
+        }
+    }
+
+    [Fact]
+    public void ARebuild_LeavesOnlyTheLiveElementListening()
+    {
+        using var session = Recording();
+        var backend = new FakeMediaBackend();
+        using var player = new MediaPlayer(backend);
+        var view = new Rebuilding(player);
+        session.Application.SetRoot(view.Mount());
+        player.Open(Clip);
+        session.PumpFrame();
+
+        for (int i = 1; i <= 3; i++)
+        {
+            view.Generation.Value = i;
+            session.PumpFrame();
+        }
+
+        // The first build is the live element; every later one built a twin, which got a
+        // parent (and so OnMounted) from its builder, was patched into the live element
+        // and thrown away — without ever being unmounted. (Opening the clip rebuilds too:
+        // the builder reads the player's source for the accessible name.)
+        var live = view.Built[0];
+        var twins = view.Built.Skip(1).ToArray();
+        Assert.True(twins.Length >= 3);
+        Assert.True(session.Window.Window.IsInTree(live));
+        Assert.All(twins, twin => Assert.True(twin.IsDetached));
+
+        Assert.True(live.IsListeningForFrames);
+        Assert.All(twins, twin => Assert.False(twin.IsListeningForFrames));
+        Assert.Same(live, Assert.Single(FrameListeners(player)));
+
+        // A frame reaches the live element, which repaints.
+        session.Window.RenderLog.Clear();
+        backend.Sink!.RequestRepaint();
+        Assert.True(session.PumpFrame());
+        Assert.Contains("DrawImage", session.Window.RenderLog.ToString());
+    }
+
+    [Fact]
+    public void TheVideoPlayer_RebuildingAroundItsPicture_LeavesOneListener()
+    {
+        // The shape the twin leak was found in: VideoPlayer rebuilds its whole overlay as
+        // playback starts and the bar fades, and its picture is one child of that build.
+        using var session = HeadlessSession.Create(640, 400);
+        var backend = new FakeMediaBackend { FrameRate = 10 };
+        using var player = new MediaPlayer(backend);
+        var root = Box.New().Children(new VideoPlayer(player).Mount().Width(640f).Height(400f));
+        session.Application.SetRoot(root);
+        player.Open(Clip);
+        session.PumpFrames(2);
+        player.Play();
+        for (int i = 0; i < 40; i++)
+        {
+            backend.Advance(TimeSpan.FromMilliseconds(100));
+            session.PumpFrame();
+        }
+
+        var live = Assert.Single(Descendants(root).OfType<VideoElement>());
+        Assert.Same(live, Assert.Single(FrameListeners(player)));
+    }
+
+    [Theory]
+    [InlineData("ancestor removed")]
+    [InlineData("root replaced")]
+    public void AnElementLeftBehindWithoutAnUnmount_StopsListeningAtTheNextFrame(string how)
+    {
+        using var session = Recording();
+        var backend = new FakeMediaBackend();
+        using var player = new MediaPlayer(backend);
+        var video = Video.New(player);
+        var panel = Box.New().Children(video);
+        var root = Box.New().Children(panel);
+        session.Application.SetRoot(root);
+        session.PumpFrame();
+        Assert.True(video.IsListeningForFrames);
+
+        // Neither of these reaches the video's OnUnmounted: removing the panel unmounts
+        // the panel only, and SetRoot unmounts nothing.
+        if (how == "ancestor removed") root.RemoveChild(panel);
+        else session.Application.SetRoot(Box.New());
+        Assert.True(video.IsListeningForFrames);
+
+        backend.Sink!.RequestRepaint();
+
+        Assert.False(video.IsListeningForFrames);
+        Assert.Empty(FrameListeners(player));
     }
 }

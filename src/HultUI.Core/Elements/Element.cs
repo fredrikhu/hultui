@@ -215,8 +215,13 @@ public abstract class Element
     /// Whether this element hangs off a root a window is showing. <see cref="OnMounted"/>
     /// means "got a parent", which the freshly built twin of a rebuild also does, so an
     /// element that drives its own animation asks this instead: a twin's root has no host,
-    /// a discarded root has had its host cleared, and only what is actually on screen says
-    /// yes. A walk to the root, cheap enough for a per-frame check.
+    /// a discarded root and a removed subtree's top have had their host cleared, and only
+    /// what is actually on screen says yes. A walk to the root, cheap enough for a
+    /// per-frame check.
+    ///
+    /// <para>This is also the check for an element deep inside a removed subtree, which
+    /// never hears <see cref="OnUnmounted"/>: removal unmounts only the element removed,
+    /// not its descendants.</para>
     /// </summary>
     public bool IsHosted
     {
@@ -854,6 +859,9 @@ public abstract class Element
             ClearFocusIfRemoved(child);
             child.OnUnmounted();
             child.Parent = null;
+            // The style pass copied the window onto every element it resolved; left in
+            // place, it tells IsHosted this subtree is still on screen.
+            child.OverlayHost = null;
             MarkLayoutDirty();
             MarkChildrenDirty();
         }
@@ -881,6 +889,7 @@ public abstract class Element
                 {
                     ClearFocusIfRemoved(old);
                     old.OnUnmounted();
+                    old.OverlayHost = null; // see RemoveChild
                 }
                 old.Parent = null;
             }
