@@ -113,7 +113,7 @@ internal static unsafe partial class Mpv
 
     public const int MPV_FORMAT_NONE = 0, MPV_FORMAT_STRING = 1, MPV_FORMAT_FLAG = 3, MPV_FORMAT_INT64 = 4, MPV_FORMAT_DOUBLE = 5;
 
-    public const int MPV_EVENT_NONE = 0, MPV_EVENT_SHUTDOWN = 1, MPV_EVENT_LOG_MESSAGE = 2, MPV_EVENT_START_FILE = 6,
+    public const int MPV_EVENT_NONE = 0, MPV_EVENT_SHUTDOWN = 1, MPV_EVENT_LOG_MESSAGE = 2, MPV_EVENT_SET_PROPERTY_REPLY = 4, MPV_EVENT_START_FILE = 6,
         MPV_EVENT_END_FILE = 7, MPV_EVENT_FILE_LOADED = 8, MPV_EVENT_VIDEO_RECONFIG = 17, MPV_EVENT_SEEK = 20,
         MPV_EVENT_PLAYBACK_RESTART = 21, MPV_EVENT_PROPERTY_CHANGE = 22;
 
@@ -165,6 +165,7 @@ internal static unsafe partial class Mpv
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_set_option_string(nint handle, string name, string data);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_set_property_string(nint handle, string name, string data);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_set_property(nint handle, string name, int format, void* data);
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_set_property_async(nint handle, ulong reply_userdata, string name, int format, void* data);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_get_property(nint handle, string name, int format, void* data);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial byte* mpv_get_property_string(nint handle, string name);
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)] public static partial int mpv_observe_property(nint handle, ulong replyUserdata, string name, int format);
@@ -257,6 +258,21 @@ internal static unsafe partial class Mpv
 
     public static int SetDouble(nint handle, string name, double value)
         => mpv_set_property(handle, name, MPV_FORMAT_DOUBLE, &value);
+
+    /// <summary>
+    /// Sets a string property without waiting for mpv's core, which answers later with an
+    /// <c>MPV_EVENT_SET_PROPERTY_REPLY</c> carrying <paramref name="replyUserdata"/>. mpv copies
+    /// the value during the call. Returns below zero only if the request could not be queued.
+    /// </summary>
+    public static int SetStringAsync(nint handle, ulong replyUserdata, string name, string value)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(value + '\0');
+        fixed (byte* p = bytes)
+        {
+            byte* text = p;
+            return mpv_set_property_async(handle, replyUserdata, name, MPV_FORMAT_STRING, &text);
+        }
+    }
 
     /// <summary>Runs a command given as its argument list, UTF-8 marshalled and null-terminated.</summary>
     public static int Command(nint handle, params string[] args)

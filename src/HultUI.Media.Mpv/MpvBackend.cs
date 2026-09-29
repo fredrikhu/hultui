@@ -246,6 +246,10 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
                 Console.Error.Write($"[mpv {Marshal.PtrToStringUTF8((nint)log->prefix)}] {Marshal.PtrToStringUTF8((nint)log->text)}");
                 break;
 
+            case MPV_EVENT_SET_PROPERTY_REPLY:
+                HandlePropertyReply(e);
+                break;
+
             case MPV_EVENT_FILE_LOADED:
                 ReadGeometry();
                 Raise(new BackendEvent.DurationChanged(ReadDuration()));
@@ -437,13 +441,14 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
             CreateGLContext(getProcAddress);
         if (_render == 0) return false;
 
-        bool targetChanged = _colour.Update(target.WantsLinearLight, target.PeakNits);
-        if (targetChanged) ApplyTargetColour();
+        if (_colour.Update(target.WantsLinearLight, target.PeakNits)) ApplyTargetColour();
 
-        // Nothing new, so the texture still holds the last frame — unless the target's colour
-        // just changed, in which case that frame was drawn for the old options and is redrawn.
+        // Nothing new, so the texture still holds the last frame — unless mpv has since
+        // confirmed a change of target colour, in which case that frame was drawn for the old
+        // options and is drawn again. Confirmed, not merely asked for: the options are set
+        // asynchronously, and a redraw before mpv has them would draw the old picture again.
         if ((mpv_render_context_update(_render) & MPV_RENDER_UPDATE_FRAME) == 0 && _lastGLFrameDrawn
-            && !targetChanged)
+            && !_colour.AppliedSinceLastFrame)
             return false;
 
         // Passed for completeness: mpv 0.41 ignores it (ra_create_wrapped_fb hard-codes zero).
@@ -535,29 +540,61 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     /// </summary>
     private void ApplyTargetColour()
     {
-        if (_colour.Linear)
+        // Asynchronously, and this is not a detail. These run on the render thread inside a
+        // frame, and a synchronous mpv_set_property waits for mpv's core — which, with a frame
+        // due, is waiting on its video output, which is waiting for the render this thread is
+        // holding up. Measured on the first HDR frame: 360 ms, released only by mpv's own
+        // timeout, one "render() not being called or stuck" per property. Replies arrive on
+        // the event thread; see HandlePropertyReply.
+        long start = Stopwatch.GetTimestamp();
+        int generation = _colour.Generation;
+        bool linear = _colour.Linear;
+        string prim = "auto", trc = "auto", peak = "auto";
+        if (linear)
         {
             // scRGB's primaries are BT.709; the transfer is linear light; the peak is what
             // the display can show, which decides where tone mapping lands.
-            int a = mpv_set_property_string(_mpv, "target-prim", "bt.709");
-            int b = mpv_set_property_string(_mpv, "target-trc", "linear");
-            int c = mpv_set_property_string(_mpv, "target-peak",
-                _colour.PeakNits.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
-            // Read back rather than trust the return codes: a property that reports success
-            // and then reads as something else is the difference between "mpv ignored us" and
-            // "mpv agreed and something later undid it". Only under the trace, since it is
-            // several property reads on a path that now runs by default.
-            if (StartupTrace.Enabled)
-                StartupTrace.Mark($"mpv linear target: set {a}/{b}/{c}, reads back " +
-                    $"prim={GetString(_mpv, "target-prim")} trc={GetString(_mpv, "target-trc")} " +
-                    $"peak={GetString(_mpv, "target-peak")}");
+            prim = "bt.709";
+            trc = "linear";
+            peak = _colour.PeakNits.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
         }
-        else
+        int a = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 0), "target-prim", prim);
+        int b = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 1), "target-trc", trc);
+        int c = SetStringAsync(_mpv, MpvTargetColour.ReplyTag(generation, linear, 2), "target-peak", peak);
+
+        if (StartupTrace.Enabled)
+            StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: asked {prim}/{trc}/{peak}, " +
+                $"queued {a}/{b}/{c} in {Stopwatch.GetElapsedTime(start).TotalMilliseconds:0.00} ms");
+    }
+
+    // Event thread only: how many of a change's options mpv has answered for.
+    private int _replyGeneration;
+    private int _repliesReceived;
+
+    /// <summary>
+    /// An answer to one of <see cref="ApplyTargetColour"/>'s options. When all of a change's
+    /// have arrived the change is confirmed, and the frame is drawn again under it — the element
+    /// may be sitting on a paused picture that nothing else would redraw.
+    /// </summary>
+    private void HandlePropertyReply(mpv_event* e)
+    {
+        if (!MpvTargetColour.TryReadReplyTag(e->reply_userdata, out int generation, out bool linear)) return;
+        if (e->error < 0)
+            Console.Error.WriteLine($"[HultUI.Media.Mpv] setting the target colour failed: {ErrorString(e->error)}");
+
+        if (generation != _replyGeneration)
         {
-            mpv_set_property_string(_mpv, "target-prim", "auto");
-            mpv_set_property_string(_mpv, "target-trc", "auto");
-            mpv_set_property_string(_mpv, "target-peak", "auto");
+            _replyGeneration = generation;
+            _repliesReceived = 0;
         }
+        if (++_repliesReceived < MpvTargetColour.OptionsPerChange) return;
+
+        _colour.Applied(generation, linear);
+        if (StartupTrace.Enabled)
+            StartupTrace.Mark($"mpv {(linear ? "linear" : "encoded")} target {generation}: confirmed, " +
+                $"reads back prim={GetString(_mpv, "target-prim")} trc={GetString(_mpv, "target-trc")} " +
+                $"peak={GetString(_mpv, "target-peak")}");
+        _sink?.RequestRepaint();
     }
 
     private void CreateGLContext(Func<string, nint> getProcAddress)

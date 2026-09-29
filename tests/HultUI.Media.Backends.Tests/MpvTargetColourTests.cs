@@ -18,14 +18,60 @@ public class MpvTargetColourTests
         colour.FrameDrawn();
         Assert.Equal(0f, colour.ReferenceWhiteNits);
 
-        // The window moves to an HDR monitor while the film is paused: mpv is told at once...
+        // The window moves to an HDR monitor while the film is paused: mpv is asked at once...
         Assert.True(colour.Update(wantsLinearLight: true, peakNits: 455f));
         Assert.True(colour.Linear);
         // ...but the frame in the target is still the encoded one, and says so.
         Assert.Equal(0f, colour.ReferenceWhiteNits);
 
+        colour.Applied(colour.Generation, linear: true);
+        Assert.True(colour.AppliedSinceLastFrame);   // so the paused frame is drawn again
         colour.FrameDrawn();
         Assert.Equal(203f, colour.ReferenceWhiteNits);
+        Assert.False(colour.AppliedSinceLastFrame);
+    }
+
+    [Fact]
+    public void AFrameDrawnBeforeMpvConfirms_KeepsTheOldLabel()
+    {
+        // The options are set asynchronously. A frame mpv draws before its core has taken them
+        // is drawn under the old ones, and must not be labelled as light.
+        var colour = new MpvTargetColour();
+        colour.Update(wantsLinearLight: true, peakNits: 455f);
+        Assert.False(colour.AppliedSinceLastFrame);
+
+        colour.FrameDrawn();
+        Assert.Equal(0f, colour.ReferenceWhiteNits);
+
+        colour.Applied(colour.Generation, linear: true);
+        colour.FrameDrawn();
+        Assert.Equal(203f, colour.ReferenceWhiteNits);
+    }
+
+    [Fact]
+    public void ALateReplyToAnOlderChange_DoesNotTakeTheLabelBack()
+    {
+        var colour = new MpvTargetColour();
+        colour.Update(true, 455f);
+        int first = colour.Generation;
+        colour.Update(false, 0f);
+        colour.Applied(colour.Generation, linear: false);
+        colour.Applied(first, linear: true);     // arrives last, and is older
+
+        colour.FrameDrawn();
+        Assert.Equal(0f, colour.ReferenceWhiteNits);
+    }
+
+    [Fact]
+    public void ReplyTags_RoundTrip_AndOthersAreNotMistakenForThem()
+    {
+        ulong tag = MpvTargetColour.ReplyTag(generation: 1234567, linear: true, option: 2);
+        Assert.True(MpvTargetColour.TryReadReplyTag(tag, out int generation, out bool linear));
+        Assert.Equal(1234567, generation);
+        Assert.True(linear);
+
+        Assert.False(MpvTargetColour.TryReadReplyTag(0, out _, out _));
+        Assert.False(MpvTargetColour.TryReadReplyTag(3, out _, out _));   // an observe id
     }
 
     [Fact]

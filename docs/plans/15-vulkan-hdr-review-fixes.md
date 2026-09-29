@@ -42,7 +42,7 @@ phase 2 `b9b13d6` (which also carries 7.1), phase 3 `59ff937`, phase 4 `6e261ff`
 | 7.2 | `HULTUI_RENDERER` parsing: case, empty value, recipes | 7 | Done |
 | 7.3 | SDR white level and HDR state from SDL's window properties | 7 | Declined — SDL's values are the problem (2.5) |
 | 7.4 | Stray scratch files out of the repo root | 7 | Done |
-| 8.1 | mpv target options set without blocking the render thread | 8 | Todo |
+| 8.1 | mpv target options set without blocking the render thread | 8 | Done — the stall was real |
 | 8.2 | Wide colour gamut carried through to scRGB | 8 | Todo |
 | 9.1 | Pure decisions extracted and unit-tested | 9 | Todo |
 | 9.2 | Real-window Vulkan smoke and fallback tests | 9 | Todo |
@@ -410,6 +410,28 @@ move under `spikes/HdrInterop/results/` or delete.
 *Plausible, unmeasured:* `mpv_set_property` waits for the core, which calls the VO synchronously,
 which may be waiting (up to 200 ms) for the very render this thread is doing. Measure first
 (`HULTUI_STARTUP=1`, time the "mpv linear target" mark); if real, use `mpv_set_property_async`.
+
+**Result (2026-09-29): real, and worse than feared.** Timed with `HULTUI_MPV_LOG=v`:
+- **First HDR frame:** the three synchronous sets held the render thread for **360 ms**, and mpv
+  logged `mpv_render_context_render() not being called or stuck` once per property. This is a
+  deadlock that only mpv's timeout breaks: the set waits for the core, the core for its video
+  output, and the output for the render this thread is holding up.
+- **Mid-playback:** a temporary hook flipped the target every 60 frames, because moving the window
+  to the other monitor changed nothing (both are HDR at the same white). Synchronously, every change
+  took **198–361 ms** (median 200) with 8 "stuck" warnings. Asynchronously it takes **0.01–0.45 ms**
+  (median 0.01), all 6 changes are confirmed, and there are no warnings beyond one at start-up.
+
+**Fix:** `mpv_set_property_async`, each option tagged with the change's generation. The event
+thread counts the replies, and once all three are in, `MpvTargetColour.Applied` records the change
+and asks for a repaint. The frame label, and the forced redraw from 4.1, now follow what mpv has
+*confirmed* rather than what it was asked, because a redraw before mpv has the options would draw
+the old picture again under the new label. `MpvTargetColour` has 12 tests, including a frame drawn
+before confirmation and a late reply to an older change. Playback still confirms the linear target
+before the first frame and keeps 879 levels on the 10-bit ramp.
+
+**Left alone:** one `render() not being called or stuck` at start-up, logged between mpv starting
+its video output and the app's first render call. It is a start-up hand-off wait on mpv's side, not
+a render-thread stall, and predates this plan.
 
 ### 8.2 Wide colour gamut
 
