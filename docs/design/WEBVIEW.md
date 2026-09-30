@@ -273,16 +273,13 @@ candidate position, and how scrolling and drag-selection feel.
 
 - **Narrator** reads the page as it reads the web view in Claude Desktop — the same
   stops, the same containers between the app and the document. Good enough.
-- **IME (Japanese): the candidate list appears in the right place on google.com and
-  does not appear at all on wikipedia.org's search box. Brave shows it on both.** Open.
-  Narrowed the same day: on wikipedia.org the composition text shows in the box, Enter
-  commits it, and **Tab opens the list, in the right place** — so composition and the
-  caret position both work, and only the list opening by itself is missing. The two
-  fields differ in kind: Wikipedia's is `<input type="search">`, Google's a `<textarea>`.
-  Chromium tells the input method which kind a field is, and an input method may hold its
-  suggestions back in a search field, which has its own. That would make this the
-  engine's behaviour and not the hosting's — but it does not explain Brave, so it is a
-  guess until the same page is tried in Edge itself. Step 6.
+- **IME (Japanese): works, and matches Edge.** The candidate list opens by itself in the
+  right place on google.com. In wikipedia.org's search box the composition text shows and
+  Enter commits it, but the list opens only on Tab — and **Edge itself does the same on
+  that page**, so it is the engine's behaviour and not the hosting's. The fields differ in
+  kind (`<input type="search">` against Google's `<textarea>`), which is the likely reason:
+  a search field shows its own suggestions. Brave opens the list on both; that is a
+  difference between Brave and Edge, not ours to chase. Closed.
 
 ## Linux engines
 
@@ -576,6 +573,5 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
-6. **Polish**: the IME candidate list that is missing on some pages (above), HultUI
-   context menu and script dialogs over the engine's, downloads, drag and drop into the
-   page.
+6. **Polish**: HultUI context menu and script dialogs over the engine's, downloads,
+   drag and drop into the page.
