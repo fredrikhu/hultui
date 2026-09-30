@@ -1,9 +1,10 @@
 # The web view on Linux: a brief for a Claude Code session there
 
-Steps 1 to 4 of `docs/design/WEBVIEW.md` are built and verified **on Windows only**: the
-contract and element (`src/HultUI.WebView`), the WebView2 engine
-(`src/HultUI.WebView.WebView2`), zero-copy on GL and Vulkan, and Windows accessibility. Step 5
-is the Linux engine. This file is what a session on the Linux machine needs to do it without
+Steps 1 to 4 and 6 of `docs/design/WEBVIEW.md`, and seam W7, are built and verified **on
+Windows only**, and are on `main` since 2026-09-30: the contract and element
+(`src/HultUI.WebView`), the WebView2 engine (`src/HultUI.WebView.WebView2`), zero-copy on GL
+and Vulkan, Windows accessibility, and the page's menus, dialogs, downloads, permissions and
+drags. Step 5 is the Linux engine. This file is what a session on the Linux machine needs to do it without
 any other context: the decision, the machine, a spike with ten questions in order, and then the
 build.
 
@@ -55,7 +56,7 @@ Fixed by the design, and by what Windows already ships:
   an in-canvas overlay, and a native child would cover them.
 - **The contract.** `IWebEngine`, `IWebEngineView`, `IWebViewHost`, `WebEngineEvent`
   (`src/HultUI.WebView/IWebEngine.cs`, `WebEngineEvent.cs`). The controller, the element and
-  the 37 headless tests do not know which engine they have. Read `WebView2View.cs` as the
+  the headless tests in `tests/HultUI.WebView.Tests` do not know which engine they have. Read `WebView2View.cs` as the
   worked example of an engine, not as something to mirror line by line.
 - **The package.** `src/HultUI.WebView.Cef`, engine class `CefEngine`, `Name` = `"CEF"`.
   `net10.0`, in `HultUI.CrossPlatform.slnf`, and it must publish under NativeAOT with no
@@ -109,7 +110,7 @@ sudo dnf install cef cef-devel dotnet-sdk-10.0 clang zlib-devel mesa-dri-drivers
 git clone git@github.com:fredrikhu/hului-revamped.git && cd hului-revamped
 git checkout claude/webview-component-repo-62ba8b
 dotnet build HultUI.CrossPlatform.slnf
-dotnet test tests/HultUI.WebView.Tests          # 37 pass on the fake engine, no browser
+dotnet test tests/HultUI.WebView.Tests          # 64 pass on the fake engine, no browser
 dotnet run --project samples/HultUI.Samples.WebView -- --fake   # a HultUI window in the compositor
 ```
 
