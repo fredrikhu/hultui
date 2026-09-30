@@ -1,3 +1,4 @@
+using HultUI.Core.Rendering;
 using HultUI.Core.Builders;
 using HultUI.Core.Primitives;
 using HultUI.Headless;
@@ -54,7 +55,7 @@ public class MpvBackendTests : IDisposable
 
         Assert.InRange(f.Player.Duration!.Value.TotalSeconds, 1.9, 2.1);
         Assert.Equal(new Size(64, 36), f.Player.VideoSize);
-        Assert.Equal(VideoSinkMode.Pixels, f.Player.SinkMode);
+        Assert.Equal(GpuSinkMode.Pixels, f.Player.SinkMode);
     }
 
     [MpvFact]

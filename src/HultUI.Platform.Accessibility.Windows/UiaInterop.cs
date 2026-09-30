@@ -140,6 +140,8 @@ internal static partial class UiaInterop
     public const int UIA_IsKeyboardFocusablePropertyId = 30009;
     public const int UIA_HasKeyboardFocusPropertyId = 30008;
     public const int UIA_IsEnabledPropertyId = 30010;
+    public const int UIA_IsControlElementPropertyId = 30016;
+    public const int UIA_IsContentElementPropertyId = 30017;
     public const int UIA_IsOffscreenPropertyId = 30022;
     public const int UIA_ControlTypePropertyId = 30003;
     public const int UIA_ValueValuePropertyId = 30045;
@@ -214,8 +216,11 @@ internal static partial class UiaInterop
     public const int NavigateDirection_LastChild = 4;
 
     // ──── ProviderOptions flags
-    public const int ProviderOptions_ServerSideProvider = 0x1;
-    public const int ProviderOptions_UseComThreading = 0x10;
+    // (The first of these read 0x1 until the web view needed the override flag: that is
+    // ClientSideProvider, which the providers here are not. UIA was lenient about it.)
+    public const int ProviderOptions_ServerSideProvider = 0x2;
+    public const int ProviderOptions_OverrideProvider = 0x8;
+    public const int ProviderOptions_UseComThreading = 0x20;
 
     // ──── ToggleState
     public const int ToggleState_Off = 0;

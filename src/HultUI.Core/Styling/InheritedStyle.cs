@@ -142,7 +142,10 @@ public enum CursorType : byte
     ResizeNWSE,
     NotAllowed,
     Wait,
+    /// <summary>No cursor: hidden while the pointer is over the element.</summary>
     None,
     ColResize,
-    RowResize
+    RowResize,
+    /// <summary>Busy in the background: the arrow with a spinner, still clickable.</summary>
+    Progress
 }

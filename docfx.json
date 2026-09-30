@@ -15,6 +15,8 @@
             "src/HultUI.Headless/HultUI.Headless.csproj",
             "src/HultUI.Media/HultUI.Media.csproj",
             "src/HultUI.Media.Mpv/HultUI.Media.Mpv.csproj",
+            "src/HultUI.WebView/HultUI.WebView.csproj",
+            "src/HultUI.WebView.WebView2/HultUI.WebView.WebView2.csproj",
             "src/HultUI.Icons/HultUI.Icons.csproj",
             "src/HultUI.Syntax/HultUI.Syntax.csproj"
           ]

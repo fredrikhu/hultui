@@ -12,7 +12,9 @@ public sealed class FocusManager
     /// </summary>
     public Action<Element?>? FocusChanged { get; set; }
 
-    public void SetFocus(Element? element)
+    /// <param name="element">The element to focus; null clears focus.</param>
+    /// <param name="reason">Why, carried on the <see cref="FocusEvent"/> the element gets.</param>
+    public void SetFocus(Element? element, FocusReason reason = FocusReason.Programmatic)
     {
         if (ReferenceEquals(FocusedElement, element))
             return;
@@ -29,7 +31,7 @@ public sealed class FocusManager
         if (element is not null)
         {
             element.SetInteractionFocused(true);
-            EventDispatcher.DispatchDirect(new FocusEvent(), element);
+            EventDispatcher.DispatchDirect(new FocusEvent { Reason = reason }, element);
         }
 
         FocusChanged?.Invoke(element);
@@ -51,7 +53,7 @@ public sealed class FocusManager
     {
         var next = FocusTraversal.FindNext(root, FocusedElement, wrap);
         if (next is null) return false;
-        SetFocus(next);
+        SetFocus(next, FocusReason.Next);
         return true;
     }
 
@@ -63,7 +65,7 @@ public sealed class FocusManager
     {
         var prev = FocusTraversal.FindPrevious(root, FocusedElement, wrap);
         if (prev is null) return false;
-        SetFocus(prev);
+        SetFocus(prev, FocusReason.Previous);
         return true;
     }
 }

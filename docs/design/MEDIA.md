@@ -145,7 +145,7 @@ public interface IGpuImageSource : IImageSource
   buffer.
 - The headless render log marks such a source `gpu`.
 
-`GpuFrameSink` — the Media-side source that hands a backend an FBO to render into
+`GpuFrameSink` — the source that hands a backend an FBO to render into
 and falls back to the pixel ring elsewhere — shipped with the mpv backend (below).
 
 ### S3 — Wake the parked loop (`HultUI.Core`, `HultUI`, `HultUI.Platform.SDL3`)
@@ -243,7 +243,7 @@ surface types). Contents:
 | `VideoElement` / `Video.New(player)` | `ImageElement` subclass: intrinsic size from `VideoSize`, `Fit` for letterbox/cover, role `Image` with the media title as label. Paints whatever frame source the backend attached. |
 | `VideoPlayer` | Component: `VideoElement` + transport bar (play/pause, scrubber `Slider`, elapsed/remaining, volume, rate, track menus via `ContextMenu`, fullscreen). Auto-hides controls on idle pointer with the existing tween machinery. Keyboard: space, arrows, `M`, `F`. Themed from `Theme` tokens. |
 | `PixelFrameSink` | Triple-buffered `IPixelImageSource`. Backend writes into the free slot on its thread, publishes, then the sink bumps `Version` and posts dirty+wake. Never blocks the decoder on the renderer or vice versa. |
-| `GpuFrameSink` | `IGpuImageSource` over an FBO+texture the sink owns; `RenderFrame` calls the backend's GL draw inside `RunExternalGL`. Falls back to a `PixelFrameSink` when the surface is not GL. |
+| `GpuFrameSink` | `IGpuImageSource` over an FBO+texture the sink owns; `RenderFrame` calls the backend's GL draw inside `RunExternalGL`. Falls back to a `PixelFrameSink` when the surface is not GL. **Moved to `HultUI.Core.Rendering` on 2026-09-30**, with `IGpuFrameRenderer` and the mode enum (renamed `GpuSinkMode` from `VideoSinkMode`), when the web view became a second producer — the same move `PixelFrameSink` made. |
 | `FakeMediaBackend` (namespace `HultUI.Media.Testing`) | Scripted backend: synthetic frames of a chosen size and colour, fake duration, instant seeks, scriptable errors and buffering. Lives in the package, not a separate one, so an app's headless tests need nothing extra. |
 
 ### `IMediaBackend`
@@ -338,7 +338,7 @@ with a 1080p file maximized: ~29 fps before, loop-bound after.
 
 Sink contract as built: `IVideoSink.UseGpuRenderer(IGpuFrameRenderer)` from
 `Attach`, and `RequestRepaint()` from any thread. The first draw decides the mode
-(`VideoSinkMode.Gpu` on a GL surface, `Pixels` elsewhere) and tells the renderer
+(`GpuSinkMode.Gpu` on a GL surface, `Pixels` elsewhere; `VideoSinkMode` until the 2026-09-30 move to Core) and tells the renderer
 once through `OnModeDecided`; in pixel mode the backend renders mpv's `sw` output
 into the ring from a worker thread woken by mpv's update callback, in GPU mode
 `Render` runs inside `RunExternalGL` on the UI thread. `PixelFrameWriter.Address`

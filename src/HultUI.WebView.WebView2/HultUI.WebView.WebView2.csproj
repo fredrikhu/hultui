@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Windows engine for HultUI.WebView: Microsoft Edge WebView2 in visual hosting,
+    its root visual captured with Windows.Graphics.Capture and copied into the page's
+    frame sink. Every COM and WinRT call is a hand-written vtable call (Interop/), because
+    Microsoft's managed wrapper uses built-in COM, which NativeAOT turns off; the slots are
+    generated from the headers by scripts/generate-webview2-interop.py.
+
+    The only native file is WebView2Loader.dll, taken from Microsoft's package with its
+    native assets alone, so no managed wrapper, WinForms or WPF assembly comes along.
+    See docs/design/WEBVIEW.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.WebView.WebView2</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Portable source, Windows at run time: the engine reports itself unavailable
+         elsewhere, and the package stays in the cross-platform build and docs. -->
+    <SupportedOSPlatform>windows</SupportedOSPlatform>
+    <Description>HultUI web view engine for Windows: Microsoft Edge WebView2, composited, NativeAOT-compatible. Needs the WebView2 Runtime, which Windows 11 ships.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HultUI.WebView.Engines.Tests" />
+    <InternalsVisibleTo Include="HultUI.UiTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HultUI.WebView\HultUI.WebView.csproj" />
+    <!-- WebView2Loader.dll only (runtimes/<rid>/native). The package's build targets are
+         what add its managed assemblies, so leaving them out leaves those out too, here and
+         for anyone who references this package. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" IncludeAssets="native" PrivateAssets="none" />
+  </ItemGroup>
+
+</Project>

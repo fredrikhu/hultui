@@ -79,7 +79,7 @@ public static class AccessibilityTreeBuilder
     {
         var box = element.Layout.AbsoluteBorderBox;
         var onScreen = new Rect(box.X - scrollX, box.Y - scrollY, box.Width, box.Height);
-        return new AccessibilityNode(
+        var node = new AccessibilityNode(
             element.Id,
             ResolveRole(element),
             ResolveName(element),
@@ -92,6 +92,8 @@ public static class AccessibilityTreeBuilder
             value: ResolveValue(element),
             automationId: element.AutomationId,
             expanded: element.AccessibleExpanded);
+        node.NativeContent = element.NativeAccessibleContent;
+        return node;
     }
 
     private static void BuildChildren(Element element, AccessibilityNode parent, FocusManager? focusManager,

@@ -23,6 +23,11 @@ public sealed class Window : IOverlayHost, IDisposable
     private readonly DevToolsOverlay _devTools;
     private Element? _root;
     private Element? _lastHoveredElement;
+    // The cursor the pointer move last took from the hovered element's style, and whether
+    // the cursor on screen is still that one (not a scrollbar's, a drag's, an autoscroll's).
+    // Lets a style change show without waiting for the next move.
+    private CursorType _hoverCursor;
+    private bool _cursorFollowsHover;
     // The element that captured the pointer on its press (PointerDownEvent.CapturePointer),
     // and the overlay offset its coordinates carry; moves and the release go to it directly.
     private Element? _pointerCaptureTarget;
@@ -87,6 +92,7 @@ public sealed class Window : IOverlayHost, IDisposable
     // ──── Context menu state ────
     private OverlayHandle _contextMenuOverlay;
     private ContextMenuElement? _contextMenuElement;
+    private Action? _contextMenuClosed;
     // One level of nesting: the flyout for a root item with Children.
     private OverlayHandle _contextSubmenuOverlay;
     private ContextMenuElement? _contextSubmenuElement;
@@ -237,6 +243,33 @@ public sealed class Window : IOverlayHost, IDisposable
     /// way to the screen, and the visible result is a soft or aliased icon.
     /// </summary>
     public float DisplayScale => PlatformWindow.DisplayScale;
+
+    /// <summary>
+    /// The operating system's window behind this one: the HWND on Windows, zero on other
+    /// platforms and in a headless session. For an element that parents something native
+    /// to the window — a browser engine needs a window to create its view under and to
+    /// place its own popups against.
+    /// </summary>
+    public nint NativeHandle => PlatformWindow is IWin32WindowHandle win32 ? win32.Hwnd : 0;
+
+    /// <summary>
+    /// Where <paramref name="element"/>'s content box is in this window, in layout units:
+    /// <see cref="Element.ScreenContentBox"/> — every ancestor scroll applied — plus the
+    /// position of the overlay the element is in, if it is in one. An overlay's content is
+    /// laid out from its own origin, so <c>ScreenContentBox</c> alone is off by exactly that
+    /// much for anything in a popup or dialog. Multiply by <see cref="DisplayScale"/> for
+    /// device pixels.
+    /// </summary>
+    public Rect ContentBoxInWindow(Element element)
+    {
+        var box = element.ScreenContentBox;
+        var root = element;
+        while (root.Parent is not null) root = root.Parent;
+        foreach (var overlay in _overlays)
+            if (ReferenceEquals(overlay.Content, root))
+                return new Rect(box.X + overlay.X, box.Y + overlay.Y, box.Width, box.Height);
+        return box;
+    }
 
     /// <summary>
     /// The user's zoom on top of the OS scaling: 1.0 is "as the system says", 1.25 draws
@@ -714,6 +747,7 @@ public sealed class Window : IOverlayHost, IDisposable
             {
                 StyleResolver.Resolve(_root, theme);
                 ClearFlags(_root, DirtyFlags.Style);
+                ReapplyHoverCursor();
             }
         }
         _perf.EndStyle();
@@ -1074,6 +1108,8 @@ public sealed class Window : IOverlayHost, IDisposable
                     }
                 }
                 PlatformWindow.SetCursor(cursor);
+                _hoverCursor = cursor;
+                _cursorFollowsHover = overScrollbar is null;
                 SetScrollbarHover(overScrollbar, pos);
 
                 // Tooltip tracking
@@ -1233,7 +1269,7 @@ public sealed class Window : IOverlayHost, IDisposable
                     var focusTarget = FindFocusableAncestor(target);
                     if (!isOverlayHit || focusTarget is not null)
                     {
-                        _focusManager.SetFocus(focusTarget);
+                        _focusManager.SetFocus(focusTarget, FocusReason.Pointer);
 
                         // Provide clipboard to text inputs when focused
                         if (focusTarget is TextInputElement textInput)
@@ -1333,6 +1369,21 @@ public sealed class Window : IOverlayHost, IDisposable
                     if (dblClickEvt is not null)
                         EventDispatcher.Dispatch(dblClickEvt, target);
                 }
+                break;
+            }
+
+            case InputEvent.PointerLeftWindowInput:
+            {
+                // Out of the window, the pointer is over nothing of ours: leave the hover
+                // chain as a move onto empty space would, or a button at the edge (or a web
+                // page) keeps its hover state until the pointer comes back. Not while a press
+                // holds the pointer — the platform keeps sending that element moves outside.
+                if (_pointerCaptureTarget is not null || _isDragging || _autoScrollTarget is not null) break;
+                _pointerState.UpdateHover(null, default, KeyModifiers.None);
+                _lastHoveredElement = null;
+                _cursorFollowsHover = false;
+                SetScrollbarHover(null, default);
+                UpdateTooltipHover(null);
                 break;
             }
 
@@ -1506,11 +1557,11 @@ public sealed class Window : IOverlayHost, IDisposable
             }
 
             // ──── OS-level drag & drop ────
-            case InputEvent.DropBeginInput:
+            case InputEvent.DropBeginInput begin:
             {
                 _isExternalDrag = true;
                 _isDragging = true;
-                _dragData = new DragData();
+                _dragData = new DragData { NativeData = begin.NativeData };
                 _dragHoveredElement = null;
                 _dragAccepted = false;
                 _dragModifiers = KeyModifiers.None;
@@ -1522,6 +1573,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (!_isExternalDrag) break;
                 var pos = new Point(dropPos.X, dropPos.Y);
                 UpdateDragHover(pos, dropPos.Modifiers);
+                if (dropPos.Feedback is { } feedback) feedback.Accepted = _dragAccepted;
                 break;
             }
 
@@ -1541,7 +1593,14 @@ public sealed class Window : IOverlayHost, IDisposable
 
             case InputEvent.DropCompleteInput complete:
             {
-                EndExternalDrag(complete.Modifiers);
+                bool dropped = EndExternalDrag(complete.Modifiers);
+                if (complete.Feedback is { } feedback) feedback.Accepted = dropped;
+                break;
+            }
+
+            case InputEvent.DropCancelInput:
+            {
+                if (_isExternalDrag) CancelExternalDrag();
                 break;
             }
         }
@@ -1754,6 +1813,21 @@ public sealed class Window : IOverlayHost, IDisposable
         ctx.DrawRoundedRect(
             new Rect(_autoScrollOrigin.X - 2f, _autoScrollOrigin.Y - 2f, 4f, 4f),
             new CornerRadius(2f), theme.TextColor, Color.Transparent, default);
+    }
+
+    /// <summary>
+    /// After a style pass: the hovered element may want a different cursor now — a web page
+    /// reports the one it wants just after the move that caused it — and the pointer need not
+    /// move again for it to show. Only while the cursor on screen came from that element.
+    /// </summary>
+    private void ReapplyHoverCursor()
+    {
+        if (!_cursorFollowsHover || _lastHoveredElement is not { } hovered) return;
+        if (_pointerCaptureTarget is not null || _isDragging || _autoScrollTarget is not null) return;
+        var cursor = hovered.ResolvedInherited.Cursor;
+        if (cursor == _hoverCursor) return;
+        _hoverCursor = cursor;
+        PlatformWindow.SetCursor(cursor);
     }
 
     /// <summary>
@@ -2007,8 +2081,20 @@ public sealed class Window : IOverlayHost, IDisposable
     /// parentless chain and reached none of the live ancestors that had accepted it: the drag
     /// visibly highlighted its target and then dropped into nothing.</para>
     /// </summary>
-    private void EndExternalDrag(KeyModifiers modifiers)
+    /// <summary>The drag left the window, or was called off: the hovered element is told it
+    /// left, and nobody gets a drop.</summary>
+    private void CancelExternalDrag()
     {
+        if (_dragHoveredElement is not null && _dragData is not null)
+            EventDispatcher.Dispatch(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = _dragModifiers }, _dragHoveredElement);
+        PlatformWindow.SetCursor(CursorType.Default);
+        ResetDragState();
+    }
+
+    /// <summary>Delivers an OS drop; true when an element took it.</summary>
+    private bool EndExternalDrag(KeyModifiers modifiers)
+    {
+        bool dropped = false;
         // The last drop-position update is what carried a modifier sample; a platform
         // that reports none on the release itself keeps whatever the drag was holding.
         if (modifiers == KeyModifiers.None) modifiers = _dragModifiers;
@@ -2021,7 +2107,10 @@ public sealed class Window : IOverlayHost, IDisposable
                 var overEvt = new DragOverEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers };
                 EventDispatcher.Dispatch(overEvt, target);
                 if (overEvt.Accepted)
+                {
                     EventDispatcher.Dispatch(new DropEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers }, target);
+                    dropped = true;
+                }
             }
 
             // Leave goes to whatever the hover last recorded — that is the element whose
@@ -2032,6 +2121,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
         PlatformWindow.SetCursor(CursorType.Default);
         ResetDragState();
+        return dropped;
     }
 
     private void ResetDragState()
@@ -2295,6 +2385,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 {
                     _contextMenuOverlay = default;
                     _contextMenuElement = null;
+                    NotifyContextMenuClosed();
                 }
                 if (_overlays[i].Id == _contextSubmenuOverlay.Id)
                 {
@@ -2401,6 +2492,27 @@ public sealed class Window : IOverlayHost, IDisposable
     /// right-clicked. No-op if the target (or an ancestor) has no context menu.</summary>
     public void OpenContextMenu(Element target, Point pos) => TryShowContextMenu(target, pos);
 
+    /// <summary>
+    /// Open a context menu of <paramref name="items"/> at <paramref name="pos"/>, for content
+    /// that decides its menu itself and after the click that asked for it — a web page's
+    /// engine answers a right-click a moment later, with the page's own items.
+    /// </summary>
+    /// <param name="items">What to show. Nothing opens for an empty list, and
+    /// <paramref name="onClosed"/> still runs.</param>
+    /// <param name="pos">Top-left corner, in window coordinates.</param>
+    /// <param name="onClosed">Runs once, when the menu has closed for any reason — an item
+    /// chosen, a click outside, Escape, another menu opening — and after the chosen item's
+    /// action, so an owner waiting for a choice can treat a close with none as a dismissal.</param>
+    public void OpenContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action? onClosed = null)
+    {
+        if (items.Count == 0)
+        {
+            if (onClosed is not null) Application.InvokeOnMainThread(onClosed);
+            return;
+        }
+        ShowContextMenu(items, pos, onClosed);
+    }
+
     private void TryShowContextMenu(Element target, Point pos)
     {
         var (owner, itemsProvider) = FindContextMenuOwner(target);
@@ -2408,9 +2520,14 @@ public sealed class Window : IOverlayHost, IDisposable
 
         var items = itemsProvider();
         if (items.Count == 0) return;
+        ShowContextMenu(items, pos, onClosed: null);
+    }
 
+    private void ShowContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action? onClosed)
+    {
         // Close any existing context menu first
         CloseContextMenu();
+        _contextMenuClosed = onClosed;
 
         var theme = Application.Theme;
         var menuElement = new ContextMenuElement(items, theme.ContextMenu, CloseContextMenu);
@@ -2471,6 +2588,19 @@ public sealed class Window : IOverlayHost, IDisposable
             _contextMenuOverlay = default;
         }
         _contextMenuElement = null;
+        NotifyContextMenuClosed();
+    }
+
+    /// <summary>
+    /// Tells the owner of the menu that just closed. Posted, not called: a chosen item closes
+    /// the menu first and runs its action after, and the owner must see the action before the
+    /// close, or it would take every choice for a dismissal.
+    /// </summary>
+    private void NotifyContextMenuClosed()
+    {
+        var closed = _contextMenuClosed;
+        _contextMenuClosed = null;
+        if (closed is not null) Application.InvokeOnMainThread(closed);
     }
 
     private static (Element? owner, Func<IReadOnlyList<ContextMenuItem>>? itemsProvider) FindContextMenuOwner(Element? element)

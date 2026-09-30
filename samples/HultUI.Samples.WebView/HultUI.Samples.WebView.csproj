@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A browser window: back, forward, reload, an address bar, the page, and a status line,
+    plus a home page that talks to the app through postMessage and a toolbar dropdown that
+    opens over the page. WebView2 on Windows; elsewhere, until the CEF engine exists, the
+    fake engine's solid-colour pages (and anywhere with the fake argument). The check
+    argument loads, scripts and messages the home page and exits, for proving a build
+    works; see Program.cs and docs/design/WEBVIEW.md.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HultUI.Samples.WebView</RootNamespace>
+    <!-- Published as the apps are: the WebView2 engine's hand-written COM exists for this. -->
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HultUI\HultUI.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.WebView\HultUI.WebView.csproj" />
+    <ProjectReference Include="..\..\src\HultUI.WebView.WebView2\HultUI.WebView.WebView2.csproj" />
+  </ItemGroup>
+
+</Project>

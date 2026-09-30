@@ -138,8 +138,7 @@ public class HistoryViewTests
             session.Window.PressKey(KeyCode.Slash);       // focuses the filter
             session.PumpFrames(2);
             var field = SearchField(session);
-            // Assert.Same, not IsFocused: focus lives on the window, and the field's own
-            // interaction state does not track it.
+            // Focus lives on the window; asking it names the element rather than a flag.
             Assert.Same(field, session.Window.Window.FocusedElement);
 
             foreach (var ch in "main")

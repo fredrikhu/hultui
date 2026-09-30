@@ -128,6 +128,24 @@ var dropZone = Box.New()
     });
 ```
 
+### What is known during the hover
+
+**On Windows**, the window's drop target is HultUI's own, and it reads the files and text
+as the drag enters: `DragData.Files` and `DragData.Text` are filled for every `DragEnter` and
+`DragOver`, so a zone can accept only what it can use — `e.Accepted = e.DragData.HasFiles`
+— and the pointer shows the no-entry cursor wherever nothing accepts. The operating system is
+told the answer on each step (copy by default; Shift for move, Ctrl+Shift for link, as in
+Explorer), and a drag that leaves the window is a `DragLeave`, never a drop.
+
+`DragData.NativeData` is the drag's own `IDataObject*` for the length of the drag, for content
+that hands it on to something that reads it itself — the web view does, so a page gets every
+format the source offered, not just files and text.
+
+This needs `[STAThread]` on the entry point, as dragging out does; without it the window keeps
+SDL's drop target, which reads the data **only on the drop** — during the hover `DragData` is
+empty, and a zone that checks it in `DragOver` never accepts. **On Linux and macOS** that is
+how it still is.
+
 ---
 
 ## Dragging Files Out to Other Applications

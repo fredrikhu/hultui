@@ -57,15 +57,23 @@ public interface IExternalGLSurface : IRenderSurface
     /// would have to be read back through main memory, which is what the software path does
     /// today and costs twice the CPU at 1080p.</para>
     ///
-    /// <para>Called inside <see cref="RunExternalGL"/>, where a GL context is current. The
-    /// target belongs to the renderer and stays valid until the next call with a different
-    /// size, or until the surface is disposed.</para>
+    /// <para>Each <paramref name="owner"/> — one per GPU source — gets a target of its own, so a
+    /// video and a web page can both draw in one frame. Called inside <see cref="RunExternalGL"/>,
+    /// where a GL context is current. The target belongs to the renderer and stays valid until
+    /// the owner's next call with a different size, until <see cref="ReleaseFrameTarget"/>, or
+    /// until the surface is disposed.</para>
     /// </summary>
-    bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
+    bool TryAcquireFrameTarget(object owner, int width, int height, out GpuFrameTarget target)
     {
         target = default;
         return false;
     }
+
+    /// <summary>
+    /// <paramref name="owner"/> will not draw again: its target, if it was lent one, can go.
+    /// Any thread.
+    /// </summary>
+    void ReleaseFrameTarget(object owner) { }
 }
 
 /// <summary>

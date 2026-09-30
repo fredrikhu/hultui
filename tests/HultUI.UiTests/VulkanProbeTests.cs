@@ -54,6 +54,50 @@ public sealed class VulkanProbeTests
     }
 
     /// <summary>
+    /// Two web pages side by side in one Vulkan window: two GPU sources, each rendering into a
+    /// shared image of its own (seam W7). With one image per window the second was refused and
+    /// its half of the window stayed empty.
+    /// </summary>
+    [VulkanUiFact]
+    public void TwoGpuSources_InOneVulkanWindow_BothReachTheScreen()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string capture = Path.Combine(Path.GetTempPath(), $"hultui-vulkan-webviews-{Guid.NewGuid():N}.ppm");
+        try
+        {
+            var run = RunProbe(new()
+            {
+                ["HULTUI_VULKAN_CAPTURE"] = capture,
+                // Counted from the swapchain build, frames drawn while the pages load included:
+                // at 60 the capture came before they had drawn and showed an empty window. They
+                // are ready in well under a second, some 40 frames at most.
+                ["HULTUI_VULKAN_CAPTURE_FRAME"] = "300",
+                ["HULTUI_STARTUP"] = "1",
+            }, "--webviews");
+
+            Assert.True(run.ExitCode == 0, run.Output);
+            Assert.Contains("probe: both pages drew", run.Output);
+            Assert.True(File.Exists(capture), "no capture was written:\n" + run.Output);
+
+            var (width, height, pixels) = ReadPpm(capture);
+            var left = Pixel(pixels, width, width / 4, height / 2);
+            var right = Pixel(pixels, width, width * 3 / 4, height / 2);
+            Assert.True(left is { R: < 60, G: > 200, B: < 60 }, $"left page was {left}, expected green\n{run.Output}");
+            Assert.True(right is { R: > 200, G: < 60, B: > 200 }, $"right page was {right}, expected magenta\n{run.Output}");
+            // Both went through the shared-image path, not the pixel fallback that would pass
+            // this test without the seam.
+            Assert.Contains("vulkan interop: source 2 of this window", run.Output);
+            // A disposed page gives its image back; the other keeps its own.
+            Assert.Contains("vulkan interop: a source gave its image back (1 left)", run.Output);
+            Assert.Contains("probe: done", run.Output);
+        }
+        finally
+        {
+            File.Delete(capture);
+        }
+    }
+
+    /// <summary>
     /// A driver that cannot give a device here, as in a remote session, a VM or a filtered loader.
     /// SDL creates the Vulkan window without complaint, and the renderer then fails to start.
     /// </summary>
@@ -107,16 +151,16 @@ public sealed class VulkanProbeTests
     /// Runs the probe with <paramref name="environment"/> on top of this process's, minus the
     /// variables that would change what is being tested. A null value removes one.
     /// </summary>
-    private static (int ExitCode, string Output) RunProbe(Dictionary<string, string?> environment)
+    private static (int ExitCode, string Output) RunProbe(Dictionary<string, string?> environment, string arguments = "")
     {
-        var start = new ProcessStartInfo(SamplePath.VulkanProbe())
+        var start = new ProcessStartInfo(SamplePath.VulkanProbe(), arguments)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
         // An app's request may fall back only when HULTUI_RENDERER has not asked.
-        foreach (var name in new[] { "HULTUI_RENDERER", "HULTUI_VULKAN_CAPTURE", "HULTUI_VULKAN_CAPTURE_FRAME",
+        foreach (var name in new[] { "HULTUI_RENDERER", "HULTUI_VULKAN_CAPTURE", "HULTUI_VULKAN_CAPTURE_FRAME", "HULTUI_STARTUP",
                      "VK_LOADER_VENDOR_ID_FILTER", "VK_DRIVER_FILES", "VK_ICD_FILENAMES" })
             start.Environment.Remove(name);
         start.Environment["SDL_WINDOW_ACTIVATE_WHEN_SHOWN"] = "0";   // do not take the foreground

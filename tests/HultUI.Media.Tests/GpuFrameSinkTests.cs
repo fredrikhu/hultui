@@ -18,7 +18,7 @@ public class GpuFrameSinkTests
     {
         using var player = new MediaPlayer(new FakeMediaBackend());
         Assert.IsType<PixelFrameSink>(player.Frames);
-        Assert.Equal(VideoSinkMode.Pixels, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Pixels, player.SinkMode);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class GpuFrameSinkTests
         using var player = new MediaPlayer(new FakeMediaBackend { GpuRenderer = renderer });
 
         Assert.IsType<GpuFrameSink>(player.Frames);
-        Assert.Equal(VideoSinkMode.Undecided, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Undecided, player.SinkMode);
         Assert.Null(renderer.DecidedMode);
     }
 
@@ -43,8 +43,8 @@ public class GpuFrameSinkTests
         player.Open(MediaSource.FromFile("clip.mp4"));
         session.PumpFrame();
 
-        Assert.Equal(VideoSinkMode.Pixels, player.SinkMode);
-        Assert.Equal(VideoSinkMode.Pixels, renderer.DecidedMode);
+        Assert.Equal(GpuSinkMode.Pixels, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Pixels, renderer.DecidedMode);
         Assert.Equal(0, renderer.GLRenders);
         Assert.Contains("gpu", session.Window.RenderLog.ToString());   // the log names the source kind
         Assert.Contains("version=1", session.Window.RenderLog.ToString());
@@ -93,6 +93,29 @@ public class GpuFrameSinkTests
         Assert.True(frame.RendererOwned);
         Assert.Equal(9u, frame.TextureId);
         Assert.Equal(0x881Au, frame.InternalFormat);
+    }
+
+    /// <summary>
+    /// Each sink asks for its target as itself, so a surface can give every GPU source an image
+    /// of its own — on Vulkan a video and a page in one window each draw (seam W7) — and gives
+    /// it back when it goes, or a window would keep every image it ever lent.
+    /// </summary>
+    [Fact]
+    public void EachSink_AsksForItsOwnTarget_AndGivesItBackWhenDisposed()
+    {
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+        var video = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+        var page = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+
+        Assert.True(video.TryRenderFrame(surface, out _));
+        Assert.True(page.TryRenderFrame(surface, out _));
+        Assert.Equal([video, page], surface.Owners);
+        Assert.Empty(surface.Released);
+
+        page.Dispose();
+        Assert.Equal([page], surface.Released);
+        page.Dispose();
+        Assert.Single(surface.Released);
     }
 
     /// <summary>
@@ -201,11 +224,20 @@ public class GpuFrameSinkTests
             draw();
         }
 
-        public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
+        /// <summary>Who asked for a target, in order.</summary>
+        public List<object> Owners { get; } = [];
+
+        /// <summary>Who gave theirs back.</summary>
+        public List<object> Released { get; } = [];
+
+        public bool TryAcquireFrameTarget(object owner, int width, int height, out GpuFrameTarget target)
         {
+            Owners.Add(owner);
             target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat, _linear, _peakNits);
             return _lends;
         }
+
+        public void ReleaseFrameTarget(object owner) => Released.Add(owner);
 
         public IRenderContext RenderContext => throw new NotSupportedException();
         public IMeasureContext MeasureContext => throw new NotSupportedException();
@@ -217,14 +249,14 @@ public class GpuFrameSinkTests
     /// <summary>A GPU renderer that only counts.</summary>
     private sealed class CountingRenderer : IGpuFrameRenderer
     {
-        public VideoSinkMode? DecidedMode { get; private set; }
+        public GpuSinkMode? DecidedMode { get; private set; }
         public int GLRenders { get; private set; }
 
         public bool HasSize { get; init; } = true;
         public bool Waiting { get; set; }
         public int Skips { get; private set; }
 
-        public void OnModeDecided(VideoSinkMode mode) => DecidedMode = mode;
+        public void OnModeDecided(GpuSinkMode mode) => DecidedMode = mode;
         public void PrepareGL(Func<string, nint> getProcAddress) { }
         public bool TryGetFrameSize(out int width, out int height)
         {

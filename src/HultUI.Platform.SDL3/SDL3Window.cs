@@ -14,6 +14,7 @@ namespace HultUI.Platform.SDL3;
 public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle
 {
     private static bool _sdlInitialized;
+    private WindowsDropTarget? _dropTarget;
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
 
     // ──── Graphics preload (HULTUI_GL_PRELOAD=1) ────
@@ -491,6 +492,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _customFrame = WindowsCustomFrame.Install(this, GetWin32Hwnd());
         else if (OperatingSystem.IsWindows())
             _plainFullscreen = new WindowsPlainFullscreen(GetWin32Hwnd());
+        // HultUI's own drop target in place of SDL's, which knows what is dragged only on the
+        // drop (see WindowsDropTarget). Not on a thread that cannot host OLE: SDL's stays.
+        if (OperatingSystem.IsWindows())
+            _dropTarget = WindowsDropTarget.Install(GetWin32Hwnd(), e => InputReceived?.Invoke(e), () => DisplayScale);
 
         // The DIP-to-pixel correction already happened, before the renderer was built. This
         // re-sync stays because installing a custom frame changes the non-client area, and so
@@ -1275,7 +1280,16 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
     public void SetCursor(CursorType cursor)
     {
         if (cursor == _currentCursor) return;
+        var previous = _currentCursor;
         _currentCursor = cursor;
+
+        // None hides the cursor rather than naming a shape; any other shows it again.
+        if (cursor == CursorType.None)
+        {
+            SDL_HideCursor();
+            return;
+        }
+        if (previous == CursorType.None) SDL_ShowCursor();
 
         if (!_cursorCache.TryGetValue(cursor, out var sdlCursor))
         {
@@ -1342,7 +1356,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         CursorType.ResizeNWSE => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NWSE_RESIZE,
         CursorType.NotAllowed => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NOT_ALLOWED,
         CursorType.Wait => SDL_SystemCursor.SDL_SYSTEM_CURSOR_WAIT,
-        CursorType.None => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT,
+        CursorType.Progress => SDL_SystemCursor.SDL_SYSTEM_CURSOR_PROGRESS,
         CursorType.ColResize => SDL_SystemCursor.SDL_SYSTEM_CURSOR_EW_RESIZE,
         CursorType.RowResize => SDL_SystemCursor.SDL_SYSTEM_CURSOR_NS_RESIZE,
         _ => SDL_SystemCursor.SDL_SYSTEM_CURSOR_DEFAULT
@@ -1435,6 +1449,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             (uint)SDL_EventType.SDL_EVENT_MOUSE_BUTTON_UP => evt->button.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_MOTION => evt->motion.windowID,
             (uint)SDL_EventType.SDL_EVENT_MOUSE_WHEEL => evt->wheel.windowID,
+            (uint)SDL_EventType.SDL_EVENT_WINDOW_MOUSE_LEAVE => evt->window.windowID,
             (uint)SDL_EventType.SDL_EVENT_KEY_DOWN or
             (uint)SDL_EventType.SDL_EVENT_KEY_UP => evt->key.windowID,
             (uint)SDL_EventType.SDL_EVENT_TEXT_INPUT => evt->text.windowID,
@@ -1536,6 +1551,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
         StartupTrace.Mark("SDL_Init");
+
     }
 
     public static void ShutdownSDL()
@@ -1622,8 +1638,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         // Restore SDL's window procedure before the window is destroyed.
         if (OperatingSystem.IsWindows())
+        {
             _customFrame?.Dispose();
+            _dropTarget?.Dispose();
+        }
         _customFrame = null;
+        _dropTarget = null;
 
         SDL_RemoveEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
 

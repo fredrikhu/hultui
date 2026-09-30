@@ -5,6 +5,7 @@ internal static class SamplePath
 {
     public static string Accessibility() => Resolve("HultUI.Samples.Accessibility");
     public static string VirtualList() => Resolve("HultUI.Samples.VirtualList");
+    public static string WebView() => Resolve("HultUI.Samples.WebView");
 
     /// <summary>The WinForms host sample, which targets net10.0-windows rather than net10.0.</summary>
     public static string WinFormsHost() => Resolve("HultUI.Samples.WinFormsHost", "net10.0-windows");

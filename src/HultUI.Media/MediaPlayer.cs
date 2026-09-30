@@ -68,8 +68,8 @@ public sealed class MediaPlayer : IDisposable
     /// </summary>
     public IPixelImageSource Frames => _gpuSink ?? (IPixelImageSource)_sink;
 
-    /// <summary>How frames reach the screen; <see cref="VideoSinkMode.Pixels"/> for a backend with no GPU renderer.</summary>
-    public VideoSinkMode SinkMode => _gpuSink?.Mode ?? VideoSinkMode.Pixels;
+    /// <summary>How frames reach the screen; <see cref="GpuSinkMode.Pixels"/> for a backend with no GPU renderer.</summary>
+    public GpuSinkMode SinkMode => _gpuSink?.Mode ?? GpuSinkMode.Pixels;
 
     /// <summary>A frame was published. UI thread. <see cref="VideoElement"/> subscribes.</summary>
     public event Action? FrameArrived;

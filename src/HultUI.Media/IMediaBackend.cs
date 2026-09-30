@@ -23,17 +23,6 @@ public enum BackendCapabilities
     PreciseSeek = 1 << 5,
 }
 
-/// <summary>How a backend's frames reach the screen, decided at the first draw.</summary>
-public enum VideoSinkMode
-{
-    /// <summary>Nothing has been drawn yet, so the surface kind is not known.</summary>
-    Undecided,
-    /// <summary>The backend renders on the GPU into the sink's or the surface's framebuffer (a surface that runs external GL).</summary>
-    Gpu,
-    /// <summary>The backend writes pixels into <see cref="IVideoSink.Pixels"/> (a raster or headless surface).</summary>
-    Pixels,
-}
-
 /// <summary>
 /// Where a backend puts its frames. Created by the player, handed to the backend once
 /// in <see cref="IMediaBackend.Attach"/>. Two modes: pixels into
@@ -63,74 +52,6 @@ public interface IVideoSink
     /// waits on, such as mpv's update callback.
     /// </summary>
     void RequestRepaint();
-}
-
-/// <summary>
-/// A backend that can draw its current frame into a GL framebuffer. Every method runs
-/// on the render thread, inside the frame, with the GL context current.
-/// </summary>
-public interface IGpuFrameRenderer
-{
-    /// <summary>
-    /// The first draw decided the mode. In <see cref="VideoSinkMode.Gpu"/> the
-    /// renderer will be asked to <see cref="Render"/>; in <see cref="VideoSinkMode.Pixels"/>
-    /// it must produce frames into the sink's pixel ring on its own.
-    /// </summary>
-    void OnModeDecided(VideoSinkMode mode);
-
-    /// <summary>
-    /// Called once, right after <see cref="OnModeDecided"/> reported
-    /// <see cref="VideoSinkMode.Gpu"/>, inside the GL frame with the context current:
-    /// the place to create whatever the renderer needs before any frame exists — a
-    /// decoder's GL render context has to be there before it can load a file.
-    /// </summary>
-    void PrepareGL(Func<string, nint> getProcAddress);
-
-    /// <summary>The size to render at, usually the video's coded size; false before it is known.</summary>
-    bool TryGetFrameSize(out int width, out int height);
-
-    /// <summary>True when the renderer fills the framebuffer bottom row first, GL style.</summary>
-    bool RendersBottomUp { get; }
-
-    /// <summary>
-    /// Draws the current frame into the framebuffer of <paramref name="target"/> (already sized
-    /// <paramref name="width"/>×<paramref name="height"/>, not bound). Returns false when
-    /// there is nothing to draw, in which case the last frame stays on screen.
-    /// </summary>
-    /// <param name="getProcAddress">Resolver for GL entry points in the current context.</param>
-    /// <param name="target">The framebuffer and what the renderer wants in it: its internal
-    /// format, whether it will be composited as linear light, and the display's peak. A
-    /// producer that is not told any of this stays at eight encoded bits in a target that
-    /// could carry sixteen and a range above white.</param>
-    /// <param name="width">The target's width in pixels.</param>
-    /// <param name="height">The target's height in pixels.</param>
-    bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height);
-
-    /// <summary>
-    /// What the value 1.0 means in the frame just rendered, in nits, or zero for an ordinary
-    /// encoded picture. Read after <see cref="Render"/> and passed on in
-    /// <see cref="GpuFrame.ReferenceWhiteNits"/>.
-    /// </summary>
-    float ReferenceWhiteNits => 0f;
-
-    /// <summary>
-    /// True when a frame may be waiting although <see cref="TryGetFrameSize"/> is still false.
-    /// The sink then enters the GL context to <see cref="SkipFrame"/>, which it otherwise
-    /// avoids for a frame it cannot draw, because on a GL surface entering costs a flush.
-    /// </summary>
-    bool FrameMayBeWaiting => false;
-
-    /// <summary>
-    /// Takes a waiting frame without drawing it, on a frame where <see cref="TryGetFrameSize"/>
-    /// is false. This is for a producer that holds everything until its frame is taken, and
-    /// learns its size only after that. mpv holds its core for up to 200 ms after every load,
-    /// and the video's size can only be read from the core. The next <see cref="Render"/> that
-    /// has a target draws the frame taken here.
-    /// </summary>
-    void SkipFrame(Func<string, nint> getProcAddress) { }
-
-    /// <summary>Frees GL resources. Render thread, context current, before the sink deletes its own.</summary>
-    void ReleaseGL();
 }
 
 /// <summary>

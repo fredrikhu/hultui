@@ -10,6 +10,15 @@ public sealed class DragData
     private Dictionary<string, object>? _custom;
 
     // ──── OS-level drop data ────
+
+    /// <summary>
+    /// The platform's own data object while an OS drag is over the window — on Windows an
+    /// <c>IDataObject*</c>, with every format the source offers, not only the files and text
+    /// read into <see cref="Files"/> and <see cref="Text"/>. Valid until the drag leaves or is
+    /// dropped; zero when the platform has none to give. For content that hands a drag on to
+    /// something that reads it itself, as a web page's engine does.
+    /// </summary>
+    public nint NativeData { get; internal set; }
     public List<string> Files { get; } = [];
     public string? Text { get; set; }
     public bool HasFiles => Files.Count > 0;

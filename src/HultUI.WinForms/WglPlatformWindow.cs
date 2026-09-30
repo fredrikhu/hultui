@@ -281,6 +281,7 @@ internal static class CursorMap
         CursorType.ResizeNWSE => Cursors.SizeNWSE,
         CursorType.NotAllowed => Cursors.No,
         CursorType.Wait => Cursors.WaitCursor,
+        CursorType.Progress => Cursors.AppStarting,
         // Splitter cursors: WinForms has no dedicated column/row resize, and the plain
         // resize arrows are what every splitter in a WinForms app already uses.
         CursorType.ColResize => Cursors.VSplit,

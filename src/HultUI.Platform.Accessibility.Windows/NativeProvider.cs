@@ -38,6 +38,14 @@ internal interface INativeFragmentRoot
     int GetFocus(out IntPtr pRetVal);
 }
 
+/// <summary>IRawElementProviderHwndOverride: the provider that stands for a child window.</summary>
+[SupportedOSPlatform("windows")]
+internal interface INativeHwndOverride
+{
+    // Returns an AddRef'd IRawElementProviderSimple*, or null for "no override".
+    int GetOverrideProviderForHwnd(IntPtr hwnd, out IntPtr pRetVal);
+}
+
 [SupportedOSPlatform("windows")]
 internal interface INativeInvoke { int Invoke(); }
 
@@ -146,6 +154,7 @@ internal static unsafe class NativeProvider
     private static readonly Guid IID_Simple = new("d6dd68d1-86fd-4332-8666-9abedea2d24c");
     private static readonly Guid IID_Fragment = new("f7063da8-8359-439c-9297-bbc5299a7d87");
     private static readonly Guid IID_FragmentRoot = new("620ce2a5-ab8f-40a9-86cb-de3c75599b58");
+    private static readonly Guid IID_HwndOverride = new("1d5df27c-8947-4425-b8d9-79787bb460b8");
     private static readonly Guid IID_Invoke = new("54fcb24b-e18e-47a2-b4d3-eccbe77599a2");
     private static readonly Guid IID_Toggle = new("56d00bd0-c4f4-433c-a836-1a52a57e0892");
     private static readonly Guid IID_Value = new("c7935180-6fb3-4201-b174-7df73adbf64a");
@@ -160,6 +169,7 @@ internal static unsafe class NativeProvider
     private static readonly IntPtr VtSimple;
     private static readonly IntPtr VtFragment;
     private static readonly IntPtr VtFragmentRoot;
+    private static readonly IntPtr VtHwndOverride;
     private static readonly IntPtr VtInvoke;
     private static readonly IntPtr VtToggle;
     private static readonly IntPtr VtValue;
@@ -193,6 +203,9 @@ internal static unsafe class NativeProvider
         VtFragmentRoot = BuildVtable(
             (IntPtr)(delegate* unmanaged<IntPtr, double, double, IntPtr*, int>)&Root_ElementProviderFromPoint,
             (IntPtr)(delegate* unmanaged<IntPtr, IntPtr*, int>)&Root_GetFocus);
+
+        VtHwndOverride = BuildVtable(
+            (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr*, int>)&Override_GetProvider);
 
         VtInvoke = BuildVtable(
             (IntPtr)(delegate* unmanaged<IntPtr, int>)&Invoke_Invoke);
@@ -286,6 +299,7 @@ internal static unsafe class NativeProvider
         if (logic is INativeSimple) { vt[n] = VtSimple; iids[n] = IID_Simple; n++; }
         if (logic is INativeFragment) { vt[n] = VtFragment; iids[n] = IID_Fragment; n++; }
         if (logic is INativeFragmentRoot) { vt[n] = VtFragmentRoot; iids[n] = IID_FragmentRoot; n++; }
+        if (logic is INativeHwndOverride) { vt[n] = VtHwndOverride; iids[n] = IID_HwndOverride; n++; }
         if (logic is INativeInvoke) { vt[n] = VtInvoke; iids[n] = IID_Invoke; n++; }
         if (logic is INativeToggle) { vt[n] = VtToggle; iids[n] = IID_Toggle; n++; }
         if (logic is INativeValue) { vt[n] = VtValue; iids[n] = IID_Value; n++; }
@@ -437,6 +451,9 @@ internal static unsafe class NativeProvider
     // ── IRawElementProviderFragmentRoot ──
     [UnmanagedCallersOnly] private static int Root_ElementProviderFromPoint(IntPtr t, double x, double y, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).ElementProviderFromPoint(x, y, out *p); } catch { *p = IntPtr.Zero; return 0; } }
     [UnmanagedCallersOnly] private static int Root_GetFocus(IntPtr t, IntPtr* p) { try { return ((INativeFragmentRoot)Target(t)!).GetFocus(out *p); } catch { *p = IntPtr.Zero; return 0; } }
+
+    // ── IRawElementProviderHwndOverride ──
+    [UnmanagedCallersOnly] private static int Override_GetProvider(IntPtr t, IntPtr hwnd, IntPtr* p) { try { return ((INativeHwndOverride)Target(t)!).GetOverrideProviderForHwnd(hwnd, out *p); } catch { *p = IntPtr.Zero; return 0; } }
 
     // ── IServiceProvider ──
     [UnmanagedCallersOnly] private static int SP_QueryService(IntPtr t, Guid* service, Guid* riid, IntPtr* ppv)

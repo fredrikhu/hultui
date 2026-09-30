@@ -462,6 +462,14 @@ public sealed unsafe class WindowsAccessibilityBridge : IAccessibilityBridge, ID
     private void RaisePropertyChanged(UiaFragment wrapper, string propertyName)
     {
         if (!RaiseEvents) return;
+        if (propertyName == AccessibilityProperties.NativeContent)
+        {
+            // A foreign tree came or went. Its window moves between the window root and the
+            // node, so both have different children now.
+            RaiseStructureChanged(wrapper.ElementId, UiaInterop.StructureChangeType_ChildrenInvalidated);
+            RaiseStructureChanged(null, UiaInterop.StructureChangeType_ChildrenInvalidated);
+            return;
+        }
         int propertyId = propertyName switch
         {
             AccessibilityProperties.Name => UiaInterop.UIA_NamePropertyId,

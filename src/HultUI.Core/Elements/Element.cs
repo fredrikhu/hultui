@@ -330,12 +330,19 @@ public abstract class Element
     private InteractionStyles? _interaction;
     private InteractionStyles Interaction => _interaction ??= new InteractionStyles();
 
+    // Hover, press and focus are recorded for every element, not only those with interaction
+    // styles: they used to live in the interaction state, which exists only once such a style
+    // is registered, so an unstyled element read false while the pointer was over it or it
+    // had focus. The state is not created on demand either — its first recompute snapshots
+    // the element's visuals, and a later one would revert an app's own changes.
+    private bool _hovered, _pressed, _focused;
+
     /// <summary>True while the pointer is over this element or a descendant.</summary>
-    public bool IsHovered => _interaction?.Hovered ?? false;
+    public bool IsHovered => _hovered;
     /// <summary>True while the pointer is pressed on this element or a descendant.</summary>
-    public bool IsPressed => _interaction?.Pressed ?? false;
+    public bool IsPressed => _pressed;
     /// <summary>True while this element holds keyboard focus.</summary>
-    public bool IsFocused => _interaction?.Focused ?? false;
+    public bool IsFocused => _focused;
 
     internal void AddHoverStyle(Action<Element> style) => Interaction.OnHover += style;
     internal void AddPressedStyle(Action<Element> style) => Interaction.OnPressed += style;
@@ -347,14 +354,17 @@ public abstract class Element
     // state changes; no-ops when the element has no interaction styling registered.
     internal void SetInteractionHovered(bool value)
     {
+        _hovered = value;
         if (_interaction is { } s && s.Hovered != value) { s.Hovered = value; s.Recompute(this, animate: true); }
     }
     internal void SetInteractionPressed(bool value)
     {
+        _pressed = value;
         if (_interaction is { } s && s.Pressed != value) { s.Pressed = value; s.Recompute(this, animate: true); }
     }
     internal void SetInteractionFocused(bool value)
     {
+        _focused = value;
         if (_interaction is { } s && s.Focused != value) { s.Focused = value; s.Recompute(this, animate: true); }
     }
 
@@ -390,6 +400,13 @@ public abstract class Element
     /// key downs only, and typed characters never arrive.
     /// </summary>
     internal virtual bool WantsTextInput => false;
+
+    /// <summary>
+    /// Content of this element that keeps its own accessibility tree — a web page's engine.
+    /// The accessibility tree gives it to the node as
+    /// <see cref="Accessibility.AccessibilityNode.NativeContent"/>. Empty by default.
+    /// </summary>
+    internal virtual Accessibility.NativeAccessibleContent NativeAccessibleContent => default;
 
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
