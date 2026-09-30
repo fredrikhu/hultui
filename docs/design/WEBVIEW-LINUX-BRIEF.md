@@ -318,4 +318,4 @@ In this order; each ends with its tests green and the step written into
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
-if the owner has said to. The Windows side is done: step 6 (polish) and seam W7.
+if the owner has said to. The Windows side is done: step 6 (polish) and seam W7, with `main` merged in on 2026-09-30.
