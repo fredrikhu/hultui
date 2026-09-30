@@ -199,10 +199,9 @@ Traps on the way:
 3. **Removing from the watchlist takes `mediaType` from 3.2** and a 3.1 server refuses the
    parameter outright, so it is sent by version. Adding answers 409 for "already on it",
    which is success.
-4. **Left out, deliberately:** recently added (the library's Home has it, from Jellyfin),
-   streaming-service rows (their data is an undocumented string), and `hideRequested`
-   (the server's web client does not apply it either). Studios and networks were on this
-   list too, until they were added from the web client's own lists (below).
+4. **Left out, deliberately:** recently added (the library's Home has it, from Jellyfin) and
+   `hideRequested` (the server's web client does not apply it either). Studios, networks
+   and streaming-service rows were on this list too, until they were added (below).
 
 Verified against the lab server, read-only: the layout (all twelve built-in rows), the
 genre rows and a genre page, a person, the watchlist, and Radarr's profiles and folders
@@ -257,9 +256,19 @@ server's image cache passes the path through unchanged. A card opens the studio'
 page at a time, on the loader genre pages use. A live test fetches every compiled logo and
 the first studio's and network's titles, so a list gone stale shows up there.
 
-**Still open:**
+**Since, streaming services:** a streaming-service row is a custom row the administrator
+makes (types 20 and 21 — there is no built-in one), drawn by the name it was given. Its
+data is what the server's web page writes from its provider picker, `SE,8|337` — a region,
+then TMDB watch-provider ids, any of which will do — and its own page splits it at the comma
+into `watchRegion` and `watchProviders` on `/discover/movies` or `/discover/tv`. Data that
+does not read that way leaves the row empty rather than sending the query without the
+filter, which answers with every film there is under a heading that says "Netflix". The lab
+server has no such row, and making one would change its layout, so the live test makes the
+row up in memory: Netflix in the US reads fewer titles than no filter, and Netflix or
+Disney+ more than Netflix alone.
 
-- Streaming-service rows, once their data format is pinned down.
+**Still open:** nothing on the Discover page; every row of the server's layout is drawn but
+"recently added", which Home has from Jellyfin.
 
 ## Things deliberately not done
 

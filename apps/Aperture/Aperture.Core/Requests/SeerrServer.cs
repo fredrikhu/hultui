@@ -250,11 +250,32 @@ public sealed class SeerrServer : IRequestServer
             SliderKind.Search when slider.Data is not null => ($"search?query={Data()}&page={p}", null),
             SliderKind.Studio when slider.Data is not null => ($"discover/movies?studio={Data()}&page={p}", DiscoverKind.Movie),
             SliderKind.Network when slider.Data is not null => ($"discover/tv?network={Data()}&page={p}", DiscoverKind.Tv),
+            SliderKind.MovieStreaming when StreamingQuery(slider.Data) is { } q => ($"discover/movies?{q}&page={p}", DiscoverKind.Movie),
+            SliderKind.TvStreaming when StreamingQuery(slider.Data) is { } q => ($"discover/tv?{q}&page={p}", DiscoverKind.Tv),
             _ => null,
         };
         return route is { } r
             ? PageAsync(r.Path, r.Kind, ct)
             : Task.FromResult(ApertureResult<DiscoverPage>.Success(DiscoverPage.Empty));
+    }
+
+    /// <summary>
+    /// A streaming-service row's data as the discover routes want it. The server stores it
+    /// as its web page's selector writes it — <c>SE,8|337</c>: a region, then the services'
+    /// TMDB ids, any of which will do — and its own page splits it at the comma. Anything
+    /// else is refused (null) rather than sent: without the filter the route answers with
+    /// every film there is, under a heading that says "Netflix".
+    /// </summary>
+    internal static string? StreamingQuery(string? data)
+    {
+        if (data?.Split(',') is not [var region, var providers]) return null;
+        region = region.Trim();
+        providers = providers.Trim();
+        if (region.Length != 2 || !region.All(char.IsAsciiLetter)) return null;
+        if (providers.Split('|') is not { Length: > 0 } ids
+            || !ids.All(id => id.Length > 0 && id.All(char.IsAsciiDigit)))
+            return null;
+        return $"watchRegion={Uri.EscapeDataString(region.ToUpperInvariant())}&watchProviders={Uri.EscapeDataString(providers)}";
     }
 
     public async Task<ApertureResult<IReadOnlyList<DiscoverGenre>>> GetGenresAsync(DiscoverKind kind, CancellationToken ct = default)

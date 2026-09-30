@@ -134,12 +134,13 @@ public sealed partial class ApertureApp
     /// settles in one step rather than row by row. A server whose layout cannot be read
     /// gets the built-in default, which is what a fresh install has anyway.
     ///
-    /// <para>Left out, on purpose: <b>recently added</b> (the library's own Home has it,
-    /// straight from Jellyfin, which is where it comes from) and <b>streaming services</b>
-    /// (its data is an undocumented region-and-providers string). <b>Studios</b> and
+    /// <para>Left out, on purpose: <b>recently added</b> — the library's own Home has it,
+    /// straight from Jellyfin, which is where it comes from. <b>Studios</b> and
     /// <b>networks</b> are the lists the server's web page compiles in
     /// (<see cref="DiscoverCompanies"/>) — the API does not serve them, so they cost no call.
-    /// Recent requests are their own loader.</para>
+    /// A <b>streaming-service</b> row is a custom row like any other, its region and services
+    /// read from its data (<see cref="SeerrServer.StreamingQuery"/>). Recent requests are
+    /// their own loader.</para>
     /// </summary>
     private void EnsureDiscoverRows()
     {
@@ -211,7 +212,7 @@ public sealed partial class ApertureApp
     /// called it.</summary>
     internal string? SliderTitle(DiscoverSlider slider) => slider.Kind switch
     {
-        SliderKind.RecentlyAdded or SliderKind.MovieStreaming or SliderKind.TvStreaming => null,
+        SliderKind.RecentlyAdded => null,
         SliderKind.RecentRequests => _requestServer?.User.CanManageRequests == true ? "Recent requests" : "Your requests",
         SliderKind.Watchlist => "Your watchlist",
         SliderKind.Trending => "Trending",
@@ -227,7 +228,7 @@ public sealed partial class ApertureApp
         _ => slider.Title ?? slider.Kind switch
         {
             SliderKind.Search => $"“{slider.Data}”",
-            SliderKind.MovieGenre or SliderKind.MovieKeyword or SliderKind.Studio => "Films",
+            SliderKind.MovieGenre or SliderKind.MovieKeyword or SliderKind.Studio or SliderKind.MovieStreaming => "Films",
             _ => "Series",
         },
     };

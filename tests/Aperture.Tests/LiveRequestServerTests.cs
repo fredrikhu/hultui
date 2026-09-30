@@ -189,6 +189,24 @@ public class LiveRequestServerTests
         Assert.NotEmpty(details.Value.Profiles);
         Assert.NotEmpty(details.Value.RootFolders);
     }
+    /// <summary>A streaming-service row the way the server stores one (Netflix, in the US):
+    /// titles come back, and fewer than without the filter — which proves it was applied.
+    /// Read only: the row is made up here, never saved to the server's layout.</summary>
+    [LiveRequestServerFact]
+    public async Task AStreamingServiceRowNarrowsTheShelf()
+    {
+        using var server = await LiveRequestServer.ConnectAsync(null, Ct);
+        var netflix = await server.GetSliderAsync(new DiscoverSlider(0, SliderKind.MovieStreaming, "Netflix", "US,8", true, 0), ct: Ct);
+        Assert.True(netflix.Ok, netflix.Failure?.Message);
+        Assert.NotEmpty(netflix.Value.Items);
+        var everything = await server.GetSliderAsync(new DiscoverSlider(0, SliderKind.PopularMovies, null, null, true, 0), ct: Ct);
+        Assert.True(everything.Ok, everything.Failure?.Message);
+        Assert.InRange(netflix.Value.TotalResults, 1, everything.Value.TotalResults - 1);
+
+        var either = await server.GetSliderAsync(new DiscoverSlider(0, SliderKind.MovieStreaming, "Netflix or Disney+", "US,8|337", true, 0), ct: Ct);
+        Assert.True(either.Value.TotalResults > netflix.Value.TotalResults, "the services were not read as any-of");
+    }
+
     /// <summary>The studio and network lists are compiled in, so this is what notices one
     /// going stale: every id still has titles behind it (the first of each list, which
     /// is enough to prove the routes), and every logo still loads through the server's

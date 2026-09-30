@@ -532,6 +532,26 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void AStreamingServiceRowIsDrawnByTheNameItWasGiven()
+    {
+        var requests = Requests();
+        requests.Layout = [new DiscoverSlider(1, SliderKind.PopularMovies, null, null, Enabled: true, Order: 0)];
+        requests.AddCustomRow(new DiscoverSlider(7, SliderKind.TvStreaming, "On Netflix", "SE,8", true, 1), "tv:1399");
+        requests.AddCustomRow(new DiscoverSlider(8, SliderKind.MovieStreaming, "On Disney+", "SE,337", false, 2), "movie:603");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "On Netflix");
+            Assert.NotNull(session.Window.FindByAutomationId("discover-card-tv:1399"));
+            Assert.Contains("GetSlider(TvStreaming,7)", requests.Calls);
+            // Switched off by the administrator: not asked for, not drawn.
+            Assert.False(Shows(session, "On Disney+"));
+            Assert.DoesNotContain("GetSlider(MovieStreaming,8)", requests.Calls);
+        });
+    }
+
+    [Fact]
     public void ANetworkCardOpensItsSeriesAPageAtATime()
     {
         var requests = Requests();

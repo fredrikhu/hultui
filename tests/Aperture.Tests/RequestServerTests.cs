@@ -423,6 +423,9 @@ public class RequestServerTests
     [InlineData(SliderKind.TvKeyword, "210024,9951", "/api/v1/discover/tv", "keywords=210024%2C9951")]
     [InlineData(SliderKind.Search, "studio ghibli", "/api/v1/search", "query=studio%20ghibli")]
     [InlineData(SliderKind.Network, "213", "/api/v1/discover/tv", "network=213")]
+    // A streaming-service row: a region, then services any of which will do.
+    [InlineData(SliderKind.MovieStreaming, "SE,8|337", "/api/v1/discover/movies", "watchRegion=SE&watchProviders=8%7C337")]
+    [InlineData(SliderKind.TvStreaming, "us,1899", "/api/v1/discover/tv", "watchRegion=US&watchProviders=1899")]
     public async Task ACustomRowAsksForWhatItsDataSays(SliderKind kind, string data, string path, string query)
     {
         var router = new Router().On("GET", path, _ => Json("""{ "page": 1, "totalPages": 1, "totalResults": 0, "results": [] }"""));
@@ -430,6 +433,29 @@ public class RequestServerTests
         var result = await server.GetSliderAsync(new DiscoverSlider(9, kind, "Row", data, true, 0));
         Assert.True(result.Ok, result.Failure?.Message);
         Assert.Contains(query, router.Last(path).Query);
+    }
+
+    /// <summary>Unfiltered, the route answers with every film there is — under a heading
+    /// that says "Netflix". A row whose data does not read is left empty instead.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("SE")]
+    [InlineData("SE,")]
+    [InlineData(",8")]
+    [InlineData("SWE,8")]
+    [InlineData("SE,8|")]
+    [InlineData("SE,netflix")]
+    [InlineData("SE,8,9")]
+    public async Task AStreamingRowThatDoesNotReadAsksForNothing(string? data)
+    {
+        Assert.Null(SeerrServer.StreamingQuery(data));
+        var router = new Router();
+        using var server = await SessionServer(router);
+        var result = await server.GetSliderAsync(new DiscoverSlider(9, SliderKind.MovieStreaming, "On Netflix", data, true, 0));
+        Assert.True(result.Ok);
+        Assert.Empty(result.Value.Items);
+        Assert.DoesNotContain(router.Requests, r => r.Path.StartsWith("/api/v1/discover", StringComparison.Ordinal));
     }
 
     [Fact]
