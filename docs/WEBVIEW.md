@@ -174,10 +174,10 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
 - On the Vulkan renderer, one GPU source per window: a web view and a playing video in the
   same Vulkan window share the renderer's one interop image, so the second draws nothing.
   Separate windows, or the GL renderer, are unaffected.
-- Drags: a page is offered files dragged from outside, sees their types and can accept them
-  (Windows, with `[STAThread]`). Whether the drop itself completes, and whether a drag that
-  starts inside the page does, is not yet proven — WebView2's visual hosting has open bugs
-  there. The sample's home page has a drop zone and a sortable list to try it.
+- Drag and drop needs `[STAThread]` on Windows: files and text dropped from outside reach the
+  page, drags inside the page work, and a page's drag can be dropped on another application.
+  A file drag takes about half a second to light up a page's drop zone. On Linux, drops wait
+  for the CEF engine.
 - Windows only until the CEF engine exists; `FakeWebEngine` runs anywhere.
 
 ## Testing

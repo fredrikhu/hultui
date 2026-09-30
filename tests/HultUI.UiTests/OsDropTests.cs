@@ -163,9 +163,10 @@ public sealed unsafe class OsDropTests
             DragLeave(target);
         }
         finally { Marshal.Release(data); }
-        // Not pinned: the drop itself. Played like this it does not complete — the browser
-        // keeps the drag going and the page never sees drop or dragleave — and whether a
-        // real OLE drag completes is open (see docs/design/WEBVIEW.md, step 6).
+        // Not pinned: the drop itself. Played like this, with no DoDragDrop behind it, the
+        // browser never finishes the drag — the page never sees drop or dragleave — while a
+        // real drag from File Explorer completes (checked by hand; docs/design/WEBVIEW.md,
+        // step 6).
     });
 
     [StructLayout(LayoutKind.Sequential)]

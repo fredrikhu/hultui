@@ -540,13 +540,26 @@ with SDL's target it heard nothing at all until the next pump — seen); a page 
 `dragenter` with the `Files` type and its acceptance reaches OLE. Found: WebView2 answers
 for a point only when the point moves, so a still drag reports the old answer.
 
-**Not proven: the drop into the page.** Played this way the browser never finishes the drag —
+**The drop into the page: proven by hand** (the owner, 2026-09-30, the sample with a real
+mouse): files dragged from File Explorer onto the page's drop zone arrive by name; a
+sortable list inside the page reorders by dragging (HTML5 drag and drop, the case WebView2's
+tracker calls broken in composition hosting); a page item dragged onto another application
+(the Run dialog) arrives as its text; and Vesper Commander's own drops work as before, now
+with the copy, move and no-entry cursors during the hover. Two observations: the drop zone
+lights up about half a second after a file drag enters (text is quick), and our side of that
+is 7 ms — measured, the page's `dragenter` comes about 120 ms after `DragEnter` returns, for
+files and text alike, in a synthetic drag. Whether the rest is WebView2's or Explorer's is
+open; Brave on the same page is the comparison.
+
+What the synthetic test could not do, for the record: played without a real `DoDragDrop`, the
+browser never finishes the drag —
 `drop` and `dragleave` never reach the page, and its `dragover` events keep coming after
 `Drop` and `DragLeave` have been called and returned success. Two readings. The test plays a
 drag with no `DoDragDrop` behind it, which a real one always has; or WebView2's visual
 hosting cannot finish a drag, which its own tracker records for drags that start inside a
-page (WebView2Feedback #5237, #5486: open, "never worked" in composition hosting). The sample's
-home page now has a drop zone and a sortable list to settle it with a real mouse.
+page (WebView2Feedback #5237, #5486: open, "never worked" in composition hosting). The real
+drag settled it: the first. So `OsDropTests` pins the hover and the acceptance, and the drop
+is a hand check.
 
 
 **Known limits to document:** a web view inside a `ScrollView` loses the middle
@@ -624,8 +637,7 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
-6. **Polish** — menus, dialogs, downloads and permissions **done**; drag and drop built,
-   its last step unproven (below).
+6. **Polish — done.** Menus, dialogs, downloads, permissions, and drag and drop (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
    copying entries, none of a browser's; the app may change them or take the menu over),
