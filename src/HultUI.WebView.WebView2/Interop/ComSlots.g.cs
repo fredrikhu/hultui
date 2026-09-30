@@ -479,6 +479,360 @@ namespace HultUI.WebView.WebView2.Interop;
         public const int Invoke = 3;
     }
 
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2_4
+    {
+        public static readonly Guid IID = new("20d02d59-6df2-42dc-bd06-f98a694b1302");
+        public const int get_Settings = 3;
+        public const int get_Source = 4;
+        public const int Navigate = 5;
+        public const int NavigateToString = 6;
+        public const int add_NavigationStarting = 7;
+        public const int remove_NavigationStarting = 8;
+        public const int add_ContentLoading = 9;
+        public const int remove_ContentLoading = 10;
+        public const int add_SourceChanged = 11;
+        public const int remove_SourceChanged = 12;
+        public const int add_HistoryChanged = 13;
+        public const int remove_HistoryChanged = 14;
+        public const int add_NavigationCompleted = 15;
+        public const int remove_NavigationCompleted = 16;
+        public const int add_FrameNavigationStarting = 17;
+        public const int remove_FrameNavigationStarting = 18;
+        public const int add_FrameNavigationCompleted = 19;
+        public const int remove_FrameNavigationCompleted = 20;
+        public const int add_ScriptDialogOpening = 21;
+        public const int remove_ScriptDialogOpening = 22;
+        public const int add_PermissionRequested = 23;
+        public const int remove_PermissionRequested = 24;
+        public const int add_ProcessFailed = 25;
+        public const int remove_ProcessFailed = 26;
+        public const int AddScriptToExecuteOnDocumentCreated = 27;
+        public const int RemoveScriptToExecuteOnDocumentCreated = 28;
+        public const int ExecuteScript = 29;
+        public const int CapturePreview = 30;
+        public const int Reload = 31;
+        public const int PostWebMessageAsJson = 32;
+        public const int PostWebMessageAsString = 33;
+        public const int add_WebMessageReceived = 34;
+        public const int remove_WebMessageReceived = 35;
+        public const int CallDevToolsProtocolMethod = 36;
+        public const int get_BrowserProcessId = 37;
+        public const int get_CanGoBack = 38;
+        public const int get_CanGoForward = 39;
+        public const int GoBack = 40;
+        public const int GoForward = 41;
+        public const int GetDevToolsProtocolEventReceiver = 42;
+        public const int Stop = 43;
+        public const int add_NewWindowRequested = 44;
+        public const int remove_NewWindowRequested = 45;
+        public const int add_DocumentTitleChanged = 46;
+        public const int remove_DocumentTitleChanged = 47;
+        public const int get_DocumentTitle = 48;
+        public const int AddHostObjectToScript = 49;
+        public const int RemoveHostObjectFromScript = 50;
+        public const int OpenDevToolsWindow = 51;
+        public const int add_ContainsFullScreenElementChanged = 52;
+        public const int remove_ContainsFullScreenElementChanged = 53;
+        public const int get_ContainsFullScreenElement = 54;
+        public const int add_WebResourceRequested = 55;
+        public const int remove_WebResourceRequested = 56;
+        public const int AddWebResourceRequestedFilter = 57;
+        public const int RemoveWebResourceRequestedFilter = 58;
+        public const int add_WindowCloseRequested = 59;
+        public const int remove_WindowCloseRequested = 60;
+        public const int add_WebResourceResponseReceived = 61;
+        public const int remove_WebResourceResponseReceived = 62;
+        public const int NavigateWithWebResourceRequest = 63;
+        public const int add_DOMContentLoaded = 64;
+        public const int remove_DOMContentLoaded = 65;
+        public const int get_CookieManager = 66;
+        public const int get_Environment = 67;
+        public const int TrySuspend = 68;
+        public const int Resume = 69;
+        public const int get_IsSuspended = 70;
+        public const int SetVirtualHostNameToFolderMapping = 71;
+        public const int ClearVirtualHostNameToFolderMapping = 72;
+        public const int add_FrameCreated = 73;
+        public const int remove_FrameCreated = 74;
+        public const int add_DownloadStarting = 75;
+        public const int remove_DownloadStarting = 76;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2_11
+    {
+        public static readonly Guid IID = new("0be78e56-c193-4051-b943-23b460c08bdb");
+        public const int get_Settings = 3;
+        public const int get_Source = 4;
+        public const int Navigate = 5;
+        public const int NavigateToString = 6;
+        public const int add_NavigationStarting = 7;
+        public const int remove_NavigationStarting = 8;
+        public const int add_ContentLoading = 9;
+        public const int remove_ContentLoading = 10;
+        public const int add_SourceChanged = 11;
+        public const int remove_SourceChanged = 12;
+        public const int add_HistoryChanged = 13;
+        public const int remove_HistoryChanged = 14;
+        public const int add_NavigationCompleted = 15;
+        public const int remove_NavigationCompleted = 16;
+        public const int add_FrameNavigationStarting = 17;
+        public const int remove_FrameNavigationStarting = 18;
+        public const int add_FrameNavigationCompleted = 19;
+        public const int remove_FrameNavigationCompleted = 20;
+        public const int add_ScriptDialogOpening = 21;
+        public const int remove_ScriptDialogOpening = 22;
+        public const int add_PermissionRequested = 23;
+        public const int remove_PermissionRequested = 24;
+        public const int add_ProcessFailed = 25;
+        public const int remove_ProcessFailed = 26;
+        public const int AddScriptToExecuteOnDocumentCreated = 27;
+        public const int RemoveScriptToExecuteOnDocumentCreated = 28;
+        public const int ExecuteScript = 29;
+        public const int CapturePreview = 30;
+        public const int Reload = 31;
+        public const int PostWebMessageAsJson = 32;
+        public const int PostWebMessageAsString = 33;
+        public const int add_WebMessageReceived = 34;
+        public const int remove_WebMessageReceived = 35;
+        public const int CallDevToolsProtocolMethod = 36;
+        public const int get_BrowserProcessId = 37;
+        public const int get_CanGoBack = 38;
+        public const int get_CanGoForward = 39;
+        public const int GoBack = 40;
+        public const int GoForward = 41;
+        public const int GetDevToolsProtocolEventReceiver = 42;
+        public const int Stop = 43;
+        public const int add_NewWindowRequested = 44;
+        public const int remove_NewWindowRequested = 45;
+        public const int add_DocumentTitleChanged = 46;
+        public const int remove_DocumentTitleChanged = 47;
+        public const int get_DocumentTitle = 48;
+        public const int AddHostObjectToScript = 49;
+        public const int RemoveHostObjectFromScript = 50;
+        public const int OpenDevToolsWindow = 51;
+        public const int add_ContainsFullScreenElementChanged = 52;
+        public const int remove_ContainsFullScreenElementChanged = 53;
+        public const int get_ContainsFullScreenElement = 54;
+        public const int add_WebResourceRequested = 55;
+        public const int remove_WebResourceRequested = 56;
+        public const int AddWebResourceRequestedFilter = 57;
+        public const int RemoveWebResourceRequestedFilter = 58;
+        public const int add_WindowCloseRequested = 59;
+        public const int remove_WindowCloseRequested = 60;
+        public const int add_WebResourceResponseReceived = 61;
+        public const int remove_WebResourceResponseReceived = 62;
+        public const int NavigateWithWebResourceRequest = 63;
+        public const int add_DOMContentLoaded = 64;
+        public const int remove_DOMContentLoaded = 65;
+        public const int get_CookieManager = 66;
+        public const int get_Environment = 67;
+        public const int TrySuspend = 68;
+        public const int Resume = 69;
+        public const int get_IsSuspended = 70;
+        public const int SetVirtualHostNameToFolderMapping = 71;
+        public const int ClearVirtualHostNameToFolderMapping = 72;
+        public const int add_FrameCreated = 73;
+        public const int remove_FrameCreated = 74;
+        public const int add_DownloadStarting = 75;
+        public const int remove_DownloadStarting = 76;
+        public const int add_ClientCertificateRequested = 77;
+        public const int remove_ClientCertificateRequested = 78;
+        public const int OpenTaskManagerWindow = 79;
+        public const int PrintToPdf = 80;
+        public const int add_IsMutedChanged = 81;
+        public const int remove_IsMutedChanged = 82;
+        public const int get_IsMuted = 83;
+        public const int put_IsMuted = 84;
+        public const int add_IsDocumentPlayingAudioChanged = 85;
+        public const int remove_IsDocumentPlayingAudioChanged = 86;
+        public const int get_IsDocumentPlayingAudio = 87;
+        public const int add_IsDefaultDownloadDialogOpenChanged = 88;
+        public const int remove_IsDefaultDownloadDialogOpenChanged = 89;
+        public const int get_IsDefaultDownloadDialogOpen = 90;
+        public const int OpenDefaultDownloadDialog = 91;
+        public const int CloseDefaultDownloadDialog = 92;
+        public const int get_DefaultDownloadDialogCornerAlignment = 93;
+        public const int put_DefaultDownloadDialogCornerAlignment = 94;
+        public const int get_DefaultDownloadDialogMargin = 95;
+        public const int put_DefaultDownloadDialogMargin = 96;
+        public const int add_BasicAuthenticationRequested = 97;
+        public const int remove_BasicAuthenticationRequested = 98;
+        public const int CallDevToolsProtocolMethodForSession = 99;
+        public const int add_ContextMenuRequested = 100;
+        public const int remove_ContextMenuRequested = 101;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2CompositionController3
+    {
+        public static readonly Guid IID = new("9570570e-4d76-4361-9ee1-f04d0dbdfb1e");
+        public const int get_RootVisualTarget = 3;
+        public const int put_RootVisualTarget = 4;
+        public const int SendMouseInput = 5;
+        public const int SendPointerInput = 6;
+        public const int get_Cursor = 7;
+        public const int get_SystemCursorId = 8;
+        public const int add_CursorChanged = 9;
+        public const int remove_CursorChanged = 10;
+        public const int get_AutomationProvider = 11;
+        public const int DragEnter = 12;
+        public const int DragLeave = 13;
+        public const int DragOver = 14;
+        public const int Drop = 15;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ContextMenuRequestedEventArgs
+    {
+        public static readonly Guid IID = new("a1d309ee-c03f-11eb-8529-0242ac130003");
+        public const int get_MenuItems = 3;
+        public const int get_ContextMenuTarget = 4;
+        public const int get_Location = 5;
+        public const int put_SelectedCommandId = 6;
+        public const int get_SelectedCommandId = 7;
+        public const int put_Handled = 8;
+        public const int get_Handled = 9;
+        public const int GetDeferral = 10;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ContextMenuRequestedEventHandler
+    {
+        public static readonly Guid IID = new("04d3fe1d-ab87-42fb-a898-da241d35b63c");
+        public const int Invoke = 3;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ContextMenuItemCollection
+    {
+        public static readonly Guid IID = new("f562a2f5-c415-45cf-b909-d4b7c1e276d3");
+        public const int get_Count = 3;
+        public const int GetValueAtIndex = 4;
+        public const int RemoveValueAtIndex = 5;
+        public const int InsertValueAtIndex = 6;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ContextMenuItem
+    {
+        public static readonly Guid IID = new("7aed49e3-a93f-497a-811c-749c6b6b6c65");
+        public const int get_Name = 3;
+        public const int get_Label = 4;
+        public const int get_CommandId = 5;
+        public const int get_ShortcutKeyDescription = 6;
+        public const int get_Icon = 7;
+        public const int get_Kind = 8;
+        public const int put_IsEnabled = 9;
+        public const int get_IsEnabled = 10;
+        public const int put_IsChecked = 11;
+        public const int get_IsChecked = 12;
+        public const int get_Children = 13;
+        public const int add_CustomItemSelected = 14;
+        public const int remove_CustomItemSelected = 15;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ContextMenuTarget
+    {
+        public static readonly Guid IID = new("b8611d99-eed6-4f3f-902c-a198502ad472");
+        public const int get_Kind = 3;
+        public const int get_IsEditable = 4;
+        public const int get_IsRequestedForMainFrame = 5;
+        public const int get_PageUri = 6;
+        public const int get_FrameUri = 7;
+        public const int get_HasLinkUri = 8;
+        public const int get_LinkUri = 9;
+        public const int get_HasLinkText = 10;
+        public const int get_LinkText = 11;
+        public const int get_HasSourceUri = 12;
+        public const int get_SourceUri = 13;
+        public const int get_HasSelection = 14;
+        public const int get_SelectionText = 15;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ScriptDialogOpeningEventArgs
+    {
+        public static readonly Guid IID = new("7390bb70-abe0-4843-9529-f143b31b03d6");
+        public const int get_Uri = 3;
+        public const int get_Kind = 4;
+        public const int get_Message = 5;
+        public const int Accept = 6;
+        public const int get_DefaultText = 7;
+        public const int get_ResultText = 8;
+        public const int put_ResultText = 9;
+        public const int GetDeferral = 10;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2ScriptDialogOpeningEventHandler
+    {
+        public static readonly Guid IID = new("ef381bf9-afa8-4e37-91c4-8ac48524bdfb");
+        public const int Invoke = 3;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2DownloadStartingEventArgs
+    {
+        public static readonly Guid IID = new("e99bbe21-43e9-4544-a732-282764eafa60");
+        public const int get_DownloadOperation = 3;
+        public const int get_Cancel = 4;
+        public const int put_Cancel = 5;
+        public const int get_ResultFilePath = 6;
+        public const int put_ResultFilePath = 7;
+        public const int get_Handled = 8;
+        public const int put_Handled = 9;
+        public const int GetDeferral = 10;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2DownloadStartingEventHandler
+    {
+        public static readonly Guid IID = new("efedc989-c396-41ca-83f7-07f845a55724");
+        public const int Invoke = 3;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2DownloadOperation
+    {
+        public static readonly Guid IID = new("3d6b6cf2-afe1-44c7-a995-c65117714336");
+        public const int add_BytesReceivedChanged = 3;
+        public const int remove_BytesReceivedChanged = 4;
+        public const int add_EstimatedEndTimeChanged = 5;
+        public const int remove_EstimatedEndTimeChanged = 6;
+        public const int add_StateChanged = 7;
+        public const int remove_StateChanged = 8;
+        public const int get_Uri = 9;
+        public const int get_ContentDisposition = 10;
+        public const int get_MimeType = 11;
+        public const int get_TotalBytesToReceive = 12;
+        public const int get_BytesReceived = 13;
+        public const int get_EstimatedEndTime = 14;
+        public const int get_ResultFilePath = 15;
+        public const int get_State = 16;
+        public const int get_InterruptReason = 17;
+        public const int Cancel = 18;
+        public const int Pause = 19;
+        public const int Resume = 20;
+        public const int get_CanResume = 21;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2BytesReceivedChangedEventHandler
+    {
+        public static readonly Guid IID = new("828e8ab6-d94c-4264-9cef-5217170d6251");
+        public const int Invoke = 3;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2StateChangedEventHandler
+    {
+        public static readonly Guid IID = new("81336594-7ede-4ba9-bf71-acf0a95b58dd");
+        public const int Invoke = 3;
+    }
+
     /// <summary>From d3d11.h.</summary>
     internal static class ID3D11Device
     {

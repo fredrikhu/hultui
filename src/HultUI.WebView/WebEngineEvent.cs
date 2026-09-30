@@ -68,6 +68,17 @@ public abstract record WebEngineEvent
     /// </summary>
     public sealed record AccessibleContentChanged : WebEngineEvent;
 
+    /// <summary>The page asked for a context menu. Answer it — the controller does.</summary>
+    public sealed record ContextMenuRequested(WebContextMenuRequest Request) : WebEngineEvent;
+
+    /// <summary>The page opened <c>alert</c>, <c>confirm</c>, <c>prompt</c> or a leave-page
+    /// question, and its script waits for the answer. The controller sees it answered.</summary>
+    public sealed record ScriptDialogRequested(WebScriptDialogRequest Request) : WebEngineEvent;
+
+    /// <summary>The page started a download, which waits for a place to go. The controller
+    /// sees it answered — cancelled, unless the application says where.</summary>
+    public sealed record DownloadRequested(WebDownloadRequest Request) : WebEngineEvent;
+
     /// <summary>The page's process died. <see cref="WebViewController.Reload"/> recovers
     /// when <paramref name="CanReload"/>.</summary>
     public sealed record ProcessFailed(string Message, bool CanReload) : WebEngineEvent;

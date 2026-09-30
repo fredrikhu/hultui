@@ -325,6 +325,63 @@ public sealed class FakeWebEngineView : IWebEngineView
         return request;
     }
     public void RaiseTitle(string title) => Raise(new WebEngineEvent.TitleChanged(title));
+
+    /// <summary>The entries a fake page offers when none are given: the browser's own and a
+    /// page's editing ones, in the order an engine lists them.</summary>
+    public static IReadOnlyList<WebContextMenuItem> StandardEngineMenu { get; } =
+    [
+        new("back", "Back", WebContextMenuItemKind.Command, 1),
+        new("reload", "Reload", WebContextMenuItemKind.Command, 2),
+        WebContextMenuItem.Separator(),
+        new("cut", "Cut", WebContextMenuItemKind.Command, 3) { ShortcutHint = "Ctrl+X" },
+        new("copy", "Copy", WebContextMenuItemKind.Command, 4) { ShortcutHint = "Ctrl+C" },
+        new("paste", "Paste", WebContextMenuItemKind.Command, 5) { ShortcutHint = "Ctrl+V" },
+        WebContextMenuItem.Separator(),
+        new("saveAs", "Save as", WebContextMenuItemKind.Command, 6),
+        new("print", "Print", WebContextMenuItemKind.Command, 7),
+        WebContextMenuItem.Separator(),
+        new("inspectElement", "Inspect", WebContextMenuItemKind.Command, 8),
+    ];
+
+    /// <summary>What the engine was told about each context menu: the entry chosen, or null for none.</summary>
+    public List<WebContextMenuItem?> ContextMenuAnswers { get; } = [];
+
+    /// <summary>A right-click in the page at device pixels (<paramref name="x"/>, <paramref name="y"/>).</summary>
+    public WebContextMenuRequest RaiseContextMenu(int x, int y, IReadOnlyList<WebContextMenuItem>? items = null,
+        WebContextMenuTarget? target = null, bool devTools = false)
+    {
+        var request = new WebContextMenuRequest(x, y, target ?? new WebContextMenuTarget { PageUri = CurrentUri },
+            items ?? StandardEngineMenu, ContextMenuAnswers.Add, devTools);
+        Raise(new WebEngineEvent.ContextMenuRequested(request));
+        return request;
+    }
+
+    /// <summary>What the page was told about each of its dialogs: accepted or not, and a prompt's text.</summary>
+    public List<(bool Accepted, string? Text)> ScriptDialogAnswers { get; } = [];
+
+    /// <summary>The page calls <c>alert</c>, <c>confirm</c> or <c>prompt</c>, or asks before unloading.</summary>
+    public WebScriptDialogRequest RaiseScriptDialog(WebScriptDialogKind kind, string message, string? defaultText = null)
+    {
+        var request = new WebScriptDialogRequest(kind, message, defaultText, CurrentUri,
+            (accepted, text) => ScriptDialogAnswers.Add((accepted, text)));
+        Raise(new WebEngineEvent.ScriptDialogRequested(request));
+        return request;
+    }
+
+    /// <summary>Where each download was told to go; null for cancelled.</summary>
+    public List<string?> DownloadAnswers { get; } = [];
+
+    /// <summary>The page starts a download. Drive its progress through the request's <see cref="WebDownloadRequest.Download"/>.</summary>
+    public WebDownloadRequest RaiseDownload(Uri uri, string suggestedFileName, long? totalBytes = null)
+    {
+        WebDownload? download = null;
+        download = new WebDownload(() => download!.Finish(WebDownloadState.Cancelled));
+        var request = new WebDownloadRequest(uri, suggestedFileName, null, totalBytes, download, DownloadAnswers.Add);
+        Raise(new WebEngineEvent.DownloadRequested(request));
+        return request;
+    }
+
+    private Uri? CurrentUri => _index >= 0 && _index < _history.Count ? _history[_index].Item1 : null;
     public void Crash(bool canReload = true) => Raise(new WebEngineEvent.ProcessFailed("The page's process exited.", canReload));
 
     /// <summary>Raises any event, from any thread — to test the controller's marshalling.</summary>

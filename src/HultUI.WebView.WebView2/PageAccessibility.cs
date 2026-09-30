@@ -52,6 +52,10 @@ internal sealed unsafe class PageAccessibility
     /// time and moves the browser window after the page's bounds, so a miss is not final: call
     /// again later. True when what <see cref="Content"/> returns has changed.
     /// </summary>
+    /// <param name="parentWindow">The app's window, whose children include the focus window.</param>
+    /// <param name="composition">The page's composition controller, whose provider identifies its focus window.</param>
+    /// <param name="environment">The WebView2 environment, which maps windows to providers.</param>
+    /// <param name="browserProcess">The browser process, which owns the browser window.</param>
     /// <param name="pageOnScreen">The page's rectangle on screen, which the browser window matches.</param>
     public bool Update(nint parentWindow, nint composition, nint environment, uint browserProcess, Native.RECT pageOnScreen)
     {

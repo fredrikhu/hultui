@@ -92,6 +92,7 @@ public sealed class Window : IOverlayHost, IDisposable
     // ──── Context menu state ────
     private OverlayHandle _contextMenuOverlay;
     private ContextMenuElement? _contextMenuElement;
+    private Action? _contextMenuClosed;
     // One level of nesting: the flyout for a root item with Children.
     private OverlayHandle _contextSubmenuOverlay;
     private ContextMenuElement? _contextSubmenuElement;
@@ -2360,6 +2361,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 {
                     _contextMenuOverlay = default;
                     _contextMenuElement = null;
+                    NotifyContextMenuClosed();
                 }
                 if (_overlays[i].Id == _contextSubmenuOverlay.Id)
                 {
@@ -2466,6 +2468,27 @@ public sealed class Window : IOverlayHost, IDisposable
     /// right-clicked. No-op if the target (or an ancestor) has no context menu.</summary>
     public void OpenContextMenu(Element target, Point pos) => TryShowContextMenu(target, pos);
 
+    /// <summary>
+    /// Open a context menu of <paramref name="items"/> at <paramref name="pos"/>, for content
+    /// that decides its menu itself and after the click that asked for it — a web page's
+    /// engine answers a right-click a moment later, with the page's own items.
+    /// </summary>
+    /// <param name="items">What to show. Nothing opens for an empty list, and
+    /// <paramref name="onClosed"/> still runs.</param>
+    /// <param name="pos">Top-left corner, in window coordinates.</param>
+    /// <param name="onClosed">Runs once, when the menu has closed for any reason — an item
+    /// chosen, a click outside, Escape, another menu opening — and after the chosen item's
+    /// action, so an owner waiting for a choice can treat a close with none as a dismissal.</param>
+    public void OpenContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action? onClosed = null)
+    {
+        if (items.Count == 0)
+        {
+            if (onClosed is not null) Application.InvokeOnMainThread(onClosed);
+            return;
+        }
+        ShowContextMenu(items, pos, onClosed);
+    }
+
     private void TryShowContextMenu(Element target, Point pos)
     {
         var (owner, itemsProvider) = FindContextMenuOwner(target);
@@ -2473,9 +2496,14 @@ public sealed class Window : IOverlayHost, IDisposable
 
         var items = itemsProvider();
         if (items.Count == 0) return;
+        ShowContextMenu(items, pos, onClosed: null);
+    }
 
+    private void ShowContextMenu(IReadOnlyList<ContextMenuItem> items, Point pos, Action? onClosed)
+    {
         // Close any existing context menu first
         CloseContextMenu();
+        _contextMenuClosed = onClosed;
 
         var theme = Application.Theme;
         var menuElement = new ContextMenuElement(items, theme.ContextMenu, CloseContextMenu);
@@ -2536,6 +2564,19 @@ public sealed class Window : IOverlayHost, IDisposable
             _contextMenuOverlay = default;
         }
         _contextMenuElement = null;
+        NotifyContextMenuClosed();
+    }
+
+    /// <summary>
+    /// Tells the owner of the menu that just closed. Posted, not called: a chosen item closes
+    /// the menu first and runs its action after, and the owner must see the action before the
+    /// close, or it would take every choice for a dismissal.
+    /// </summary>
+    private void NotifyContextMenuClosed()
+    {
+        var closed = _contextMenuClosed;
+        _contextMenuClosed = null;
+        if (closed is not null) Application.InvokeOnMainThread(closed);
     }
 
     private static (Element? owner, Func<IReadOnlyList<ContextMenuItem>>? itemsProvider) FindContextMenuOwner(Element? element)

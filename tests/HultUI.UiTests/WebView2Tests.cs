@@ -346,6 +346,143 @@ public sealed class WebView2Tests
             $"before the move the list was ({first.dx},{first.dy}) px from the field; after moving the window by (90,70) it was ({second.dx},{second.dy})");
     });
 
+    [WebView2UiFact]
+    public void ARightClick_AsksTheAppForAMenu_WithThePagesEntries_AndAChoiceIsCarriedOut() => OnSta(() =>
+    {
+        using var page = Open("""
+            <html><body style='margin:0'>
+              <input id=t value='hello world' style='position:absolute;left:20px;top:20px;width:200px;height:30px'>
+              <script>chrome.webview.postMessage('ready');</script>
+            </body></html>
+            """);
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"") && page.Web.Frames.IsLoaded), "the page never got ready");
+        float scale = page.App.PrimaryWindow.DisplayScale;
+        GetWindowThreadProcessId(FocusWindowOf(page.App.PrimaryWindow.NativeHandle), out uint browser);
+        var before = BrowserWindows(browser);
+
+        // The app takes the menu over, so the test can choose without a pointer on screen.
+        WebContextMenuRequest? asked = null;
+        page.Web.ContextMenuRequested += r => { r.Handled = true; asked = r; };
+        int x = (int)(100 * scale), y = (int)(35 * scale);
+        var view = page.Web.View;
+        view.SendPointer(new WebPointerInput(WebPointerAction.Move, x, y));
+        view.SendPointer(new WebPointerInput(WebPointerAction.Down, x, y, WebPointerButtons.Right, WebPointerButtons.Right, 1));
+        view.SendPointer(new WebPointerInput(WebPointerAction.Up, x, y, WebPointerButtons.Right, WebPointerButtons.None, 1));
+        Assert.True(page.PumpUntil(() => asked is not null, seconds: 5), "no context menu was asked for");
+
+        var names = asked!.EngineItems.Select(i => i.Name).ToList();
+        Assert.True(asked.Target.IsEditable, "the input was not reported as editable");
+        Assert.Contains("selectAll", names);
+        Assert.Contains("paste", names);
+        Assert.DoesNotContain(asked.Items, i => i.Label.Contains('&'));
+        // Where the page says the menu was asked for: the click, in the page's device pixels.
+        Assert.True(Math.Abs(asked.X - x) <= 2 && Math.Abs(asked.Y - y) <= 2, $"asked at ({asked.X},{asked.Y}); clicked at ({x},{y})");
+        // WebView2's own menu did not open.
+        page.PumpUntil(() => false, seconds: 0.3);
+        Assert.Empty(BrowserWindows(browser).Except(before));
+
+        asked.Select(asked.EngineItems.First(i => i.Name == "selectAll"));
+        var selected = "";
+        Assert.True(page.PumpUntil(() =>
+        {
+            selected = page.Await(page.Web.ExecuteScriptAsync("document.getElementById('t').selectionEnd - document.getElementById('t').selectionStart"));
+            return selected == "11";
+        }, seconds: 5), $"Select all selected {selected} characters, not 11");
+    });
+
+    [WebView2UiFact]
+    public void ThePagesDialogs_ComeToTheApp_AndTheirAnswersReachThePage() => OnSta(() =>
+    {
+        using var page = Open("<html><body><script>chrome.webview.postMessage('ready');</script></body></html>");
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"")), "the page never got ready");
+        GetWindowThreadProcessId(FocusWindowOf(page.App.PrimaryWindow.NativeHandle), out uint browser);
+        var before = BrowserWindows(browser);
+
+        var asked = new List<WebScriptDialogRequest>();
+        page.Web.ScriptDialogRequested += d =>
+        {
+            asked.Add(d);
+            if (d.Kind == WebScriptDialogKind.Prompt) d.Accept("from the app");
+            else if (d.Kind == WebScriptDialogKind.Confirm) d.Accept();
+            else d.Handled = true; // the alert is answered below, after a look around
+        };
+
+        page.Web.ExecuteScriptAsync("""
+            setTimeout(() => {
+              const c = confirm('Sure?');
+              const p = prompt('Name?', 'Ann');
+              alert('Done');
+              chrome.webview.postMessage(`confirm:${c} prompt:${p}`);
+            }, 0)
+            """);
+        Assert.True(page.PumpUntil(() => asked.Count == 3, seconds: 5), $"dialogs asked: {asked.Count}");
+        Assert.Equal([WebScriptDialogKind.Confirm, WebScriptDialogKind.Prompt, WebScriptDialogKind.Alert], asked.Select(d => d.Kind));
+        Assert.Equal("Sure?", asked[0].Message);
+        Assert.Equal("Ann", asked[1].DefaultText);
+
+        // The page's script is stopped at the alert, and WebView2 has not drawn one of its own.
+        page.PumpUntil(() => false, seconds: 0.3);
+        Assert.DoesNotContain(received, m => m.StartsWith("\"confirm:"));
+        Assert.Empty(BrowserWindows(browser).Except(before));
+
+        asked[2].Accept();
+        Assert.True(page.PumpUntil(() => received.Contains("\"confirm:true prompt:from the app\""), seconds: 5),
+            $"the page said: {string.Join(", ", received)}");
+    });
+
+    private const string DownloadPage = """
+        <html><body>
+          <a id=d href='data:text/plain,hello%20download' download='hello.txt'>get</a>
+          <script>chrome.webview.postMessage('ready');</script>
+        </body></html>
+        """;
+
+    // One download per page: a page that starts a second one without a click in between is
+    // stopped by the browser's own guard against automatic downloads.
+
+    [WebView2UiFact]
+    public void ADownloadNobodyAnswers_IsCancelled() => OnSta(() =>
+    {
+        using var page = Open(DownloadPage);
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"")), "the page never got ready");
+
+        WebDownloadRequest? asked = null;
+        page.Web.DownloadRequested += r => asked = r;
+        page.Web.ExecuteScriptAsync("document.getElementById('d').click()");
+
+        Assert.True(page.PumpUntil(() => asked is not null, seconds: 10), "no download was asked for");
+        Assert.Equal("hello.txt", asked!.SuggestedFileName);
+        Assert.Equal(WebDownloadState.Cancelled, asked.Download.State);
+    });
+
+    [WebView2UiFact]
+    public void ADownload_ArrivesWhereTheAppSays() => OnSta(() =>
+    {
+        using var page = Open(DownloadPage);
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"")), "the page never got ready");
+
+        var path = Path.Combine(Path.GetTempPath(), $"hultui-download-{Guid.NewGuid():N}.txt");
+        WebDownload? saved = null;
+        page.Web.DownloadRequested += r => saved = r.SaveTo(path);
+        page.Web.ExecuteScriptAsync("document.getElementById('d').click()");
+        try
+        {
+            Assert.True(page.PumpUntil(() => saved is { State: WebDownloadState.Completed or WebDownloadState.Failed }, seconds: 10),
+                $"the download is {saved?.State.ToString() ?? "not asked for"}");
+            Assert.Equal(WebDownloadState.Completed, saved!.State);
+            Assert.Equal("hello download", File.ReadAllText(path));
+        }
+        finally { File.Delete(path); }
+    });
+
     private static void Click(IWebEngineView view, int x, int y)
     {
         view.SendPointer(new WebPointerInput(WebPointerAction.Move, x, y));

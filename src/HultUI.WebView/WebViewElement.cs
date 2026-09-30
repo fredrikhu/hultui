@@ -27,7 +27,7 @@ namespace HultUI.WebView;
 /// page's first stop, Shift+Tab on its last; tabbing out of the page moves focus on to
 /// the window's next element.</para>
 /// </remarks>
-public class WebViewElement : Element
+public partial class WebViewElement : Element
 {
     private WebViewController? _controller;
     private bool _listening;
@@ -108,6 +108,8 @@ public class WebViewElement : Element
         _controller.KeyFromPage += OnKeyFromPage;
         _controller.TitleChanged += ApplyTitle;
         _controller.AccessibleContentChanged += OnAccessibleContentChanged;
+        _controller.ContextMenuToShow += ShowPageMenu;
+        _controller.ScriptDialogToShow += ShowScriptDialog;
         _listening = true;
     }
 
@@ -121,6 +123,8 @@ public class WebViewElement : Element
         c.KeyFromPage -= OnKeyFromPage;
         c.TitleChanged -= ApplyTitle;
         c.AccessibleContentChanged -= OnAccessibleContentChanged;
+        c.ContextMenuToShow -= ShowPageMenu;
+        c.ScriptDialogToShow -= ShowScriptDialog;
         _listening = false;
         _placement = null;
         c.SetVisible(false);

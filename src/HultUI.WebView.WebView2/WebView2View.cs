@@ -22,7 +22,7 @@ namespace HultUI.WebView.WebView2;
 /// parent for keyboard focus and the input method, so this view forwards pointer input only
 /// (spike W0, and Microsoft's hosting guide).</para>
 /// </remarks>
-internal sealed unsafe class WebView2View : IWebEngineView
+internal sealed unsafe partial class WebView2View : IWebEngineView
 {
     private enum Phase { Waiting, Creating, Ready, Failed, Disposed }
 
@@ -182,6 +182,8 @@ internal sealed unsafe class WebView2View : IWebEngineView
         try
         {
             Com.Call(settings, ICoreWebView2Settings.put_AreDevToolsEnabled, _options.DevTools ? 1 : 0);
+            // The page's alert, confirm and prompt come to us (ScriptDialogOpening) instead.
+            Com.Call(settings, ICoreWebView2Settings.put_AreDefaultScriptDialogsEnabled, 0);
             if (_options.UserAgent is { } agent)
             {
                 var settings2 = Com.TryQueryInterface(settings, ICoreWebView2Settings2.IID);
@@ -283,6 +285,7 @@ internal sealed unsafe class WebView2View : IWebEngineView
             ICoreWebView2MoveFocusRequestedEventHandler.IID, OnMoveFocusRequested, "add_MoveFocusRequested");
         On(_controller, ICoreWebView2Controller.add_AcceleratorKeyPressed, ICoreWebView2Controller.remove_AcceleratorKeyPressed,
             ICoreWebView2AcceleratorKeyPressedEventHandler.IID, OnAcceleratorKey, "add_AcceleratorKeyPressed");
+        SubscribePageUi();
     }
 
     private Uri? Source()
@@ -670,6 +673,7 @@ internal sealed unsafe class WebView2View : IWebEngineView
             handler.Release();
         }
         _subscriptions.Clear();
+        ReleasePageUi();
         _parentWatch?.Dispose();
         _parentWatch = null;
         _accessibilityRetry?.Dispose();

@@ -138,6 +138,35 @@ public sealed class WebViewController : IDisposable
     /// <summary>The view's <see cref="IWebEngineView.AccessibleContent"/> changed. UI thread.</summary>
     internal event Action? AccessibleContentChanged;
 
+    /// <summary>
+    /// The page asked for a context menu. Handlers may change <see cref="WebContextMenuRequest.Items"/>
+    /// — by default the editing and copying entries, none of a browser's — or set
+    /// <see cref="WebContextMenuRequest.Handled"/> and answer it themselves. Otherwise the
+    /// element opens a HultUI context menu where the page asked. UI thread.
+    /// </summary>
+    public event Action<WebContextMenuRequest>? ContextMenuRequested;
+
+    /// <summary>
+    /// The page opened one of its own dialogs, and its script waits. A handler may answer it
+    /// (<see cref="WebScriptDialogRequest.Accept"/>, <see cref="WebScriptDialogRequest.Cancel"/>)
+    /// or set <see cref="WebScriptDialogRequest.Handled"/> and answer later; otherwise the
+    /// element shows it as a HultUI dialog over the page. UI thread.
+    /// </summary>
+    public event Action<WebScriptDialogRequest>? ScriptDialogRequested;
+
+    /// <summary>
+    /// The page started a download. It is cancelled unless a handler calls
+    /// <see cref="WebDownloadRequest.SaveTo"/>, or <see cref="WebDownloadRequest.Defer"/> and
+    /// answers later. UI thread.
+    /// </summary>
+    public event Action<WebDownloadRequest>? DownloadRequested;
+
+    /// <summary>A context menu nobody took over, for the element to open. UI thread.</summary>
+    internal event Action<WebContextMenuRequest>? ContextMenuToShow;
+
+    /// <summary>A page dialog nobody answered, for the element to show. UI thread.</summary>
+    internal event Action<WebScriptDialogRequest>? ScriptDialogToShow;
+
     // ──── Commands ────
 
     public void Navigate(Uri uri)
@@ -320,6 +349,42 @@ public sealed class WebViewController : IDisposable
 
             case WebEngineEvent.AccessibleContentChanged:
                 AccessibleContentChanged?.Invoke();
+                break;
+
+            case WebEngineEvent.ContextMenuRequested m:
+                try { ContextMenuRequested?.Invoke(m.Request); }
+                finally
+                {
+                    // The engine waits for the menu's answer; nothing may leave it waiting.
+                    var r = m.Request;
+                    if (!r.IsCompleted && !r.Handled)
+                    {
+                        if (r.Items.Count > 0 && ContextMenuToShow is { } show) show(r);
+                        else r.Dismiss();
+                    }
+                }
+                break;
+
+            case WebEngineEvent.ScriptDialogRequested d:
+                try { ScriptDialogRequested?.Invoke(d.Request); }
+                finally
+                {
+                    // The page's script is stopped until this is answered.
+                    var r = d.Request;
+                    if (!r.IsCompleted && !r.Handled)
+                    {
+                        if (ScriptDialogToShow is { } show) show(r);
+                        else r.Cancel();
+                    }
+                }
+                break;
+
+            case WebEngineEvent.DownloadRequested l:
+                try { DownloadRequested?.Invoke(l.Request); }
+                finally
+                {
+                    if (!l.Request.IsCompleted && !l.Request.IsDeferred) l.Request.Cancel();
+                }
                 break;
 
             case WebEngineEvent.HistoryChanged h:
