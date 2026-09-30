@@ -195,16 +195,51 @@ Win32 focus moving into that child and back is not a window focus change to SDL:
 **W0 counted zero `Window.Activated` events either way**, so Vesper's
 edit-and-return (which runs on that event) is safe.
 
-**Accessibility.** `ICoreWebView2CompositionController2.AutomationProvider`
-returns the page's UIA root. **W0: it is an *override* provider**
-(`ProviderOptions` = ServerSide | OverrideProvider | UseComThreading), with no
-parent and a client-relative rectangle, and
-`ICoreWebView2Environment4.GetAutomationProviderForWindow(Chrome_WidgetWin_0)`
-returns the same object. The IDL says why: hosts are expected to implement
-`IRawElementProviderHwndOverride` and answer for WebView2's focus window with
-it. So on Windows the bridge's window provider gains that interface (seam W8)
-rather than splicing a fragment into our tree. Until W8 lands the element is
-announced as a named `Group` with nothing inside it.
+**Accessibility** (step 4, done). WebView2 keeps two windows for a composited page, and
+the page's UI Automation tree is reached through them, not through WebView2's API:
+
+- **The focus window**: `Chrome_WidgetWin_0`, a 0×0 child of the app's window. UIA lists
+  it under the window root, with everything the browser exposes below it — the embedded
+  browser's own views (about a hundred, most of them hidden) and, nine levels down, the
+  page's document. Left alone, a screen reader finds the page beside the app's tree, not
+  in it, and the web view element is an empty group.
+- **The browser window**: `Chrome_WidgetWin_1`, a top-level window of the browser
+  process, invisible and click-through, kept exactly over the page on screen. Its
+  providers resolve a point to the page's element. The focus window's cannot: it has no
+  area, and the browser window is not its child in Win32, so UIA cannot find it by
+  position either.
+
+The web view's node **is the override provider for the focus window** (UIA's "provider
+repositioning"): the root answers `IRawElementProviderHwndOverride` with the node's
+provider, which names the window as its host (`UiaHostProviderFromHwnd`) and declares
+`ProviderOptions_OverrideProvider`. UIA then joins the node with the window's own
+providers, so the browser's tree hangs under the element and no longer under the window
+root, with the element's name, rectangle and place among its siblings. A hit test inside
+the element is answered with a provider that only stands for the browser window
+(`UiaWindowStandIn`), and UIA asks that window's providers, which drill to the page's
+button. Focus needs nothing: the focus window holds Win32 focus, and UIA asks it.
+
+Three things found on the way:
+
+- **WebView2's own provider is not usable.** `ICoreWebView2CompositionController2.
+  AutomationProvider` (the same object `GetAutomationProviderForWindow` returns for the
+  focus window) has options ServerSide | Override | UseComThreading, no name, no children,
+  a client-relative rectangle, and answers neither `ElementProviderFromPoint` nor
+  `GetFocus` — in screen or client coordinates. Registered as the override it moved
+  nothing and gave the window a wrong rectangle. It is kept for one job: it is what tells
+  this page's focus window from another page's.
+- **The override flag is load-bearing.** A node that names a host window without it is
+  taken for the window's main provider; UIA asks for the override again and never stops —
+  a client's `GetNextSibling` hung until the app was killed.
+- **The bridge's `ProviderOptions` constants were wrong** (`ServerSideProvider` read 0x1,
+  which is `ClientSideProvider`). UIA had been lenient; fixed to the header's values.
+
+**The window's position.** The browser reports every rectangle in screen coordinates and
+opens its popups there, and only learns where the app's window is from
+`NotifyParentWindowPositionChanged`. HultUI has no moved event, so the engine subclasses
+the parent window (`ParentWindowWatch`, comctl32) and calls it on `WM_WINDOWPOSCHANGED`.
+Before this a moved window left the page's rectangles — and a `<select>`'s list — where
+the window had been.
 
 **NavigationStarting has no deferral** (the IDL offers none), so the answer must be
 given before the handler returns. It is: WebView2 raises it on the UI thread, where the
@@ -398,20 +433,20 @@ of different sizes — a web view and a video, or two videos today — fight ove
 Lend per source. Needed for zero-copy on Vulkan (phase 3), not before.
 
 **W8 — Foreign accessibility subtree (`HultUI.Core`, both bridges).** Neither
-bridge can host a subtree it did not build. On Windows W0 showed WebView2's
-provider is an HWND *override* provider for its focus window, so the Windows half
-is `IRawElementProviderHwndOverride` on the window provider, returning
-`GetAutomationProviderForWindow(hwnd)`; where that lands in the tree relative to
-the element is for the real-window suite to show. The general splice below is
-what AT-SPI needs. UIA today: `UiaFragment.Navigate` returns
-only our fragments, `GetEmbeddedFragmentRoots` is null, hit testing and focus
-only know our snapshot, and `NativeProvider.LogicOf` is undefined for a foreign
-pointer. AT-SPI: children are local paths on our bus only, and no node offers a
-`Socket`. The seam: an `AccessibilityNode` slot for an external root, set from an
-element hook in `AccessibilityTreeBuilder`; on Windows the host fragment returns
-the AddRef'd foreign provider as its child and delegates point and focus queries
-into it; on Linux a child may be a `(bus, path)` pair and the host node
-implements `Socket.Embedded`. Phase 4, after the page works.
+bridge could host a subtree it did not build. **Windows half done (step 4):**
+`Element.NativeAccessibleContent` (internal; a web view overrides it) →
+`AccessibilityNode.NativeContent`, a `NativeAccessibleContent(Window, HitTestWindow)`.
+The differ reports a change to it as `AccessibilityProperties.NativeContent`, and an
+element says when it changed with `NotifyAccessibilityPropertyChanged` — the tree is
+only rebuilt for a reason, and nothing else changes when an engine finds its windows.
+The UIA bridge does the rest as described under *Accessibility* above: HWND override on
+the root, the node as override provider, a stand-in provider for hit tests, and a
+`ChildrenInvalidated` on the node and the root when content arrives or leaves. The
+engine's side is `IWebEngineView.AccessibleContent` plus
+`WebEngineEvent.AccessibleContentChanged`.
+**Linux half open:** AT-SPI children are local paths on our bus only, and no node offers
+a `Socket`. A child has to be a `(bus, path)` pair and the host node implement
+`Socket.Embedded`; `NativeAccessibleContent` grows whatever names WebKit's plug. Step 5.
 
 Not needed, checked: pixel-density math (`ScreenContentBox × Window.DisplayScale`
 is device pixels; use it rather than `LocalPosition`, which ignores scrolling),
@@ -485,9 +520,17 @@ engine if it changed, but nothing more.
    one Vulkan window still conflict (the second lend is refused and draws nothing); fixing
    it means generalising the host's single image — its semaphores, release bookkeeping
    and GL objects, hardened in plan 15 and verified on Linux — to one per source.
-4. **Windows accessibility**: `IRawElementProviderHwndOverride` on the UIA
-   bridge's window provider for WebView2's focus window; proven in the real-window
-   suite.
+4. **Windows accessibility — done.** The page's UIA tree hangs under the web view element,
+   a point over the page resolves to the page's element, focus in the page is reported as
+   the page's element, and all of it follows the window when it moves. Seam W8's Windows
+   half, `ParentWindowWatch`, and a fix to the bridge's `ProviderOptions` values. Proven
+   against real WebView2 by `WebViewAccessibilityTests` in the real-window suite (placement,
+   hit test and the move each seen failing first; focus worked before and is pinned), and
+   at the provider interfaces by
+   `NativeContentUiaTests`. What a reader still meets that is not ours: the embedded
+   browser's own views between the element and the document, as in any WebView2 app.
+   One new contract member beside the two above: `IWebViewHost.Post`, because an engine
+   that has to look again later is on a timer thread and its objects are not.
 5. **Linux engine**, same order: pixels, input, zero-copy, accessibility.
 6. **Polish**: HultUI context menu and script dialogs over the engine's, downloads,
    drag and drop into the page.

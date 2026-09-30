@@ -107,6 +107,19 @@ public sealed class FakeWebEngineView : IWebEngineView
     public FocusReason? LastFocusReason { get; private set; }
     public bool IsDisposed { get; private set; }
 
+    /// <summary>What the view reports as the page's own accessibility tree; empty by default,
+    /// like an engine without one. Setting it says so, as an engine must.</summary>
+    public HultUI.Core.Accessibility.NativeAccessibleContent AccessibleContent
+    {
+        get;
+        set
+        {
+            if (field == value) return;
+            field = value;
+            Raise(new WebEngineEvent.AccessibleContentChanged());
+        }
+    }
+
     /// <summary>What <see cref="ExecuteScriptAsync"/> answers; returns <c>"null"</c> when unset.</summary>
     public Func<string, string>? Script { get; set; }
 

@@ -316,6 +316,51 @@ internal static class Probes
         Native.EnumChildWindows(h.Hwnd, (hwnd, _) => { if (Native.ClassOf(hwnd) == "Chrome_WidgetWin_0") focusWindow = hwnd; return true; }, 0);
         var viaWindow = AutomationProviderForWindow(h.Env, focusWindow);
         log($"A11Y: GetAutomationProviderForWindow(0x{focusWindow:X}) -> {(viaWindow is null ? "null" : "object")}, same as controller's: {(viaWindow is not null && ap is not null ? SameIdentity(viaWindow, ap) : "n/a")}");
+
+        // Step 4 questions: does the page provider hit-test and report focus, and does telling
+        // WebView2 where its parent is put its rectangle on the screen?
+        if (ap is IRawElementProviderFragment f2)
+        {
+            h.Cc.NotifyParentWindowPositionChanged();
+            await Task.Delay(300);
+            log($"A11Y after NotifyParentWindowPositionChanged: BoundingRectangle={Try(() => f2.BoundingRectangle)}, FirstChild={Try(() => f2.Navigate(3))}");
+        }
+        log($"A11Y: IRawElementProviderFragmentRoot={ap is IRawElementProviderFragmentRoot}");
+        if (ap is IRawElementProviderFragmentRoot fr)
+        {
+            var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonDocument.Parse(await h.Web.ExecuteScriptAsync(
+                "JSON.stringify(document.querySelector('button').getBoundingClientRect())")).RootElement.GetString()!).RootElement;
+            double scale = h.Cc.RasterizationScale;
+            Native.POINT origin = default;
+            Native.ClientToScreen(h.Hwnd, ref origin);
+            double sx = origin.X + h.PageRect.X + (json.GetProperty("x").GetDouble() + json.GetProperty("width").GetDouble() / 2) * scale;
+            double sy = origin.Y + h.PageRect.Y + (json.GetProperty("y").GetDouble() + json.GetProperty("height").GetDouble() / 2) * scale;
+            object? hit = null;
+            string hitText = Try(() => hit = fr.ElementProviderFromPoint(sx, sy));
+            log($"A11Y: ElementProviderFromPoint(button centre {sx:0},{sy:0}) -> {hitText}");
+            if (hit is null)
+            {
+                // The stub's own rectangle is client-relative; is its hit test too?
+                double cx = sx - origin.X, cy = sy - origin.Y;
+                hitText = Try(() => hit = fr.ElementProviderFromPoint(cx, cy));
+                log($"A11Y: ElementProviderFromPoint(client-relative {cx:0},{cy:0}) -> {hitText}");
+            }
+            for (int i = 0; hit is not null && i < 8; i++)
+            {
+                string name = hit is IRawElementProviderSimple hs ? Try(() => hs.GetPropertyValue(30005)) : "?";
+                string type = hit is IRawElementProviderSimple ht ? Try(() => ht.GetPropertyValue(30003)) : "?";
+                string rect = hit is IRawElementProviderFragment hf ? Try(() => hf.BoundingRectangle) : "?";
+                log($"  up {i}: name={name} type={type} rect={rect} isRoot={SameIdentity(hit, ap)}");
+                hit = hit is IRawElementProviderFragment up ? up.Navigate(0) : null;
+            }
+            h.Cc.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+            await h.Web.ExecuteScriptAsync("document.querySelector('button').focus()");
+            await Task.Delay(300);
+            object? focus = null;
+            string focusText = Try(() => focus = fr.GetFocus());
+            string focusName = focus is IRawElementProviderSimple fs ? Try(() => fs.GetPropertyValue(30005)) : "-";
+            log($"A11Y: GetFocus -> {focusText} name={focusName}");
+        }
     }
 
     /// <summary>ICoreWebView2CompositionController2::get_AutomationProvider (vtable slot 11), which

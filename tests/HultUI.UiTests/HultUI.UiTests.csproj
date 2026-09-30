@@ -37,6 +37,8 @@
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\HultUI.Samples.WinFormsHost\HultUI.Samples.WinFormsHost.csproj"
                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\HultUI.Samples.WebView\HultUI.Samples.WebView.csproj"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\HultUI.UiTests.VulkanProbe\HultUI.UiTests.VulkanProbe.csproj"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>

@@ -61,6 +61,13 @@ public abstract record WebEngineEvent
     /// </summary>
     public sealed record KeyFromPage(WebKeyRequest Request) : WebEngineEvent;
 
+    /// <summary>
+    /// What <see cref="IWebEngineView.AccessibleContent"/> returns has changed: the engine
+    /// found the windows its accessibility tree lives in, or lost them. The accessibility
+    /// tree is only rebuilt when something says it is out of date, and this is that.
+    /// </summary>
+    public sealed record AccessibleContentChanged : WebEngineEvent;
+
     /// <summary>The page's process died. <see cref="WebViewController.Reload"/> recovers
     /// when <paramref name="CanReload"/>.</summary>
     public sealed record ProcessFailed(string Message, bool CanReload) : WebEngineEvent;

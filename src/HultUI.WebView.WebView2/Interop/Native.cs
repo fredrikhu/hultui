@@ -163,6 +163,55 @@ internal static unsafe partial class Native
     public static partial short GetKeyState(int virtualKey);
 
     [LibraryImport("user32.dll")]
+    public static partial int EnumChildWindows(nint parent, delegate* unmanaged[Stdcall]<nint, nint, int> proc, nint state);
+
+    [LibraryImport("user32.dll")]
+    public static partial int GetClassNameW(nint hwnd, char* name, int max);
+
+    [LibraryImport("user32.dll")]
+    public static partial int EnumWindows(delegate* unmanaged[Stdcall]<nint, nint, int> proc, nint state);
+
+    [LibraryImport("user32.dll")]
+    public static partial uint GetWindowThreadProcessId(nint hwnd, uint* process);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindow(nint hwnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindowVisible(nint hwnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetWindowRect(nint hwnd, out RECT rect);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool ClientToScreen(nint hwnd, ref POINT point);
+
+    // ──── comctl32: window subclassing ────
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WINDOWPOS
+    {
+        public nint Hwnd, InsertAfter;
+        public int X, Y, Cx, Cy;
+        public uint Flags;
+    }
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowSubclass(nint hwnd, delegate* unmanaged[Stdcall]<nint, uint, nint, nint, nuint, nuint, nint> proc, nuint id, nuint data);
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool RemoveWindowSubclass(nint hwnd, delegate* unmanaged[Stdcall]<nint, uint, nint, nint, nuint, nuint, nint> proc, nuint id);
+
+    [LibraryImport("comctl32.dll")]
+    public static partial nint DefSubclassProc(nint hwnd, uint message, nint wParam, nint lParam);
+
+    [LibraryImport("user32.dll")]
     public static partial nint SetFocus(nint hwnd);
 
     [LibraryImport("user32.dll")]

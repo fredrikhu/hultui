@@ -378,6 +378,36 @@ public class WebViewElementTests
     // ──── Title, cursor, accessibility ────
 
     [Fact]
+    public void ThePagesOwnAccessibilityTree_ReachesTheBridge_WhenTheEngineFindsIt()
+    {
+        using var page = Show();
+        var bridge = page.Window.InstallAccessibilityBridge();
+        page.Session.PumpFrame();
+        Assert.True(Hosting(bridge.CurrentTree!).NativeContent.IsEmpty); // an engine finds its windows in its own time
+        bridge.ClearDiffs();
+
+        // Nothing in the element tree changes when it does, and the accessibility tree is
+        // only rebuilt for a reason: the engine saying so has to be one.
+        page.View.AccessibleContent = new NativeAccessibleContent(0x1234, 0x5678);
+        page.Session.PumpFrame();
+
+        Assert.Equal(new NativeAccessibleContent(0x1234, 0x5678), Hosting(bridge.CurrentTree!).NativeContent);
+        var change = Assert.Single(Assert.Single(bridge.Diffs).PropertyChanged);
+        Assert.Equal(AccessibilityProperties.NativeContent, change.PropertyName);
+
+        static AccessibilityNode Hosting(AccessibilityNode root)
+        {
+            var pending = new Stack<AccessibilityNode>([root]);
+            while (pending.TryPop(out var node))
+            {
+                if (node.Role == AccessibilityRole.Group) return node;
+                foreach (var child in node.Children) pending.Push(child);
+            }
+            throw new InvalidOperationException("no web view node in the tree");
+        }
+    }
+
+    [Fact]
     public void ThePagesTitle_NamesIt_UnlessTheAppDid()
     {
         using var page = Show();

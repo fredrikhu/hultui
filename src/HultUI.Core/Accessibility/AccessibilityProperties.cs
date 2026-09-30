@@ -15,4 +15,11 @@ public static class AccessibilityProperties
     public const string IsFocused = "IsFocused";
     public const string IsEnabled = "IsEnabled";
     public const string BoundingRect = "BoundingRect";
+
+    /// <summary>
+    /// <see cref="AccessibilityNode.NativeContent"/> changed: a foreign tree arrived under the
+    /// node, left it, or was replaced. A structure change more than a property one — the
+    /// node's children are different — and a bridge that joins foreign trees treats it so.
+    /// </summary>
+    public const string NativeContent = "NativeContent";
 }

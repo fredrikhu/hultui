@@ -135,6 +135,9 @@ public sealed class WebViewController : IDisposable
     internal event Action<WebKeyRequest>? KeyFromPage;
     internal event Action<string>? TitleChanged;
 
+    /// <summary>The view's <see cref="IWebEngineView.AccessibleContent"/> changed. UI thread.</summary>
+    internal event Action? AccessibleContentChanged;
+
     // ──── Commands ────
 
     public void Navigate(Uri uri)
@@ -315,6 +318,10 @@ public sealed class WebViewController : IDisposable
                 TitleChanged?.Invoke(t.Title);
                 break;
 
+            case WebEngineEvent.AccessibleContentChanged:
+                AccessibleContentChanged?.Invoke();
+                break;
+
             case WebEngineEvent.HistoryChanged h:
                 ReactiveRuntime.Batch(() =>
                 {
@@ -398,6 +405,9 @@ public sealed class WebViewController : IDisposable
         }
 
         public void RequestRepaint() => owner.OnRepaintRequested();
+
+        public void Post(Action action) =>
+            Application.InvokeOnMainThread(() => { if (!owner._disposed) action(); });
     }
 
     /// <summary>Stands in for a view the engine could not create, so no member needs a

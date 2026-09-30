@@ -66,6 +66,7 @@ public sealed class WebViewSampleApp : IDisposable
     public Element Mount()
     {
         Page = WebViewElement.New(Web).FlexGrow(1).FlexBasis(0);
+        Page.AutomationId = "page"; // how a UI Automation client finds the page's place in the tree
         return Flex.Column().Children(
             new Toolbar(this).Mount().FlexShrink(0),
             Page,

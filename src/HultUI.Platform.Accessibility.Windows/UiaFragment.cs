@@ -74,7 +74,12 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     public int GetProviderOptions(out int pRetVal)
     {
-        pRetVal = UiaInterop.ProviderOptions_ServerSideProvider;
+        // A node that stands for a child window is that window's override provider, and must
+        // say so: without the flag UIA takes it for the window's main provider, asks the root
+        // for the override again, and never stops.
+        pRetVal = Node.NativeContent.IsEmpty
+            ? UiaInterop.ProviderOptions_ServerSideProvider
+            : UiaInterop.ProviderOptions_ServerSideProvider | UiaInterop.ProviderOptions_OverrideProvider;
         return 0;
     }
 
@@ -124,6 +129,16 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
 
     public int GetPropertyValue(int propertyId, out UiaVariant pRetVal)
     {
+        // A node that stands for a child window answers together with that window's own
+        // providers. Left to them, a web view's node was not a control: the control view
+        // dropped it, and a hit test on it came back as its parent. So the node says it is.
+        if (propertyId is UiaInterop.UIA_IsControlElementPropertyId or UiaInterop.UIA_IsContentElementPropertyId
+            && !Node.NativeContent.IsEmpty)
+        {
+            pRetVal = UiaVariant.FromBool(true);
+            return 0;
+        }
+
         pRetVal = propertyId switch
         {
             UiaInterop.UIA_NamePropertyId when _name is not null => UiaVariant.FromBStr(_name),
@@ -145,8 +160,14 @@ internal sealed class UiaFragment : INativeSimple, INativeFragment
     public int GetHostRawElementProvider(out IntPtr pRetVal)
     {
         // Host chaining lives on the fragment root only; element fragments must
-        // return null or UIA double-walks to the HWND host.
+        // return null or UIA double-walks to the HWND host. The exception is a node that
+        // stands for a child window (provider repositioning): naming that window's host
+        // provider couples this node with it, so the window's own tree becomes this node's
+        // children, and the root's HWND override keeps the window from appearing twice.
+        var window = Node.NativeContent.Window;
         pRetVal = IntPtr.Zero;
+        if (window != IntPtr.Zero && UiaInterop.UiaHostProviderFromHwnd(window, out var host) >= 0)
+            pRetVal = host;
         return 0;
     }
 

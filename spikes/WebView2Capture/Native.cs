@@ -67,6 +67,13 @@ internal interface IRawElementProviderSimple
     IRawElementProviderSimple? HostRawElementProvider { get; }
 }
 
+[ComImport, Guid("620ce2a5-ab8f-40a9-86cb-de3c75599b58"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IRawElementProviderFragmentRoot
+{
+    [return: MarshalAs(UnmanagedType.IUnknown)] object? ElementProviderFromPoint(double x, double y);
+    [return: MarshalAs(UnmanagedType.IUnknown)] object? GetFocus();
+}
+
 [ComImport, Guid("f7063da8-8359-439c-9297-bbc5299a7d87"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 internal interface IRawElementProviderFragment
 {

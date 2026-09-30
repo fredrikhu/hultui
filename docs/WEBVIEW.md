@@ -93,6 +93,23 @@ keeps the page as it was.
 **One element per controller.** The element tells the engine where the page is; two
 elements showing one controller would fight over it.
 
+## Screen readers
+
+The page's own accessibility tree — the browser's, with its headings, links and fields — is
+part of the window's: it hangs under the web view element, where a reader walking the
+app's tree comes to it. The element itself is a group named after the page's title (or
+whatever the app set as `AccessibleName`), with the rectangle it has on screen. A point
+over the page resolves to the page's element under it, not to the group, and focus inside
+the page is reported as the focused field or button. None of it needs anything from the
+app.
+
+Between the element and the page's document a reader passes the embedded browser's own
+containers, as in any WebView2 application; they are unnamed panes and the control view
+skips most of them. The tree arrives a moment after the page does — the engine waits for
+the browser to make its windows — and until then the element is an empty group.
+
+Give the element an `AutomationId` if UI tests need to find the page's place in the tree.
+
 ## Keys while the page has focus
 
 Typing goes to the page — on Windows through WebView2's own focus window, so input methods
@@ -118,7 +135,6 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
 - On the Vulkan renderer, one GPU source per window: a web view and a playing video in the
   same Vulkan window share the renderer's one interop image, so the second draws nothing.
   Separate windows, or the GL renderer, are unaffected.
-- The page is announced to screen readers as a named group with nothing inside yet.
 - Files dropped on the page do not reach it.
 - Windows only until the WPE engine exists; `FakeWebEngine` runs anywhere.
 

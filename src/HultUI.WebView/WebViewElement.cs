@@ -79,6 +79,9 @@ public class WebViewElement : Element
     /// <summary>Engines that take forwarded keys need the window's text input (and IME) while focused.</summary>
     internal override bool WantsTextInput => ForwardsKeys;
 
+    /// <summary>The page's own accessibility tree, where the engine keeps one.</summary>
+    internal override NativeAccessibleContent NativeAccessibleContent => _controller?.View.AccessibleContent ?? default;
+
     private bool ForwardsKeys =>
         _controller is { } c && (c.Capabilities & WebEngineCapabilities.NativeKeyboard) == 0;
 
@@ -104,6 +107,7 @@ public class WebViewElement : Element
         _controller.FocusLeaving += OnFocusLeaving;
         _controller.KeyFromPage += OnKeyFromPage;
         _controller.TitleChanged += ApplyTitle;
+        _controller.AccessibleContentChanged += OnAccessibleContentChanged;
         _listening = true;
     }
 
@@ -116,6 +120,7 @@ public class WebViewElement : Element
         c.FocusLeaving -= OnFocusLeaving;
         c.KeyFromPage -= OnKeyFromPage;
         c.TitleChanged -= ApplyTitle;
+        c.AccessibleContentChanged -= OnAccessibleContentChanged;
         _listening = false;
         _placement = null;
         c.SetVisible(false);
@@ -303,6 +308,13 @@ public class WebViewElement : Element
         AccessibleName = name;
         _titleName = name;
     }
+
+    /// <summary>
+    /// The engine found the page's own accessibility tree, or lost it. Nothing in the element
+    /// tree changed, so the window would not look again by itself.
+    /// </summary>
+    private void OnAccessibleContentChanged() =>
+        NotifyAccessibilityPropertyChanged(AccessibilityProperties.NativeContent);
 
     private void ApplyCursor(CursorType cursor)
     {

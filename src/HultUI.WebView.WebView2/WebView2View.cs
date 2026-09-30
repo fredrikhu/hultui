@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
@@ -38,6 +39,17 @@ internal sealed unsafe class WebView2View : IWebEngineView
     private ComHandler? _creating;
     private VisualCapture? _capture;
     private CaptureRenderer? _renderer;
+    private nint _environment;
+    private readonly PageAccessibility _accessibility = new();
+    private int _accessibilityLooksLeft = AccessibilityLooks;
+    private Timer? _accessibilityRetry;
+    private IDisposable? _parentWatch;
+
+    /// <summary>How often a missing accessibility window is looked for again, and for how long: 12 seconds.</summary>
+    private const int AccessibilityLookInterval = 300, AccessibilityLooks = 40;
+
+    /// <summary>The windows the page's own UI Automation tree lives in, once WebView2 has made them.</summary>
+    public NativeAccessibleContent AccessibleContent => _accessibility.Content;
 
     /// <summary>How the page's frames are delivered; decided by the element's first draw.</summary>
     internal GpuSinkMode FrameMode => _renderer?.Mode ?? GpuSinkMode.Undecided;
@@ -96,6 +108,8 @@ internal sealed unsafe class WebView2View : IWebEngineView
     {
         if (_phase != Phase.Creating) return;
         if (environment == 0) { Fail(failure, error ?? "WebView2 would not start."); return; }
+        Com.AddRef(environment);
+        _environment = environment;
 
         var env3 = Com.TryQueryInterface(environment, ICoreWebView2Environment3.IID);
         if (env3 == 0) { Fail(WebFailure.InitializationFailed, "The installed WebView2 Runtime is too old for visual hosting."); return; }
@@ -153,6 +167,7 @@ internal sealed unsafe class WebView2View : IWebEngineView
         }
 
         _phase = Phase.Ready;
+        AttachAccessibility();
         Raise(new WebEngineEvent.Ready());
         if (_pendingFocus is { } reason)
         {
@@ -189,6 +204,16 @@ internal sealed unsafe class WebView2View : IWebEngineView
 
         if (previous is { } p && p.Window != placement.Window && placement.Window != 0)
             Com.Check(Com.Call(_controller, ICoreWebView2Controller.put_ParentWindow, placement.Window), "put_ParentWindow");
+        if (previous?.Window != placement.Window)
+        {
+            _parentWatch?.Dispose();
+            _parentWatch = placement.Window != 0 ? ParentWindowWatch.Watch(placement.Window, OnParentWindowMoved) : null;
+            if (!_accessibility.Content.IsEmpty)
+            {
+                _accessibility.Clear();
+                Raise(new WebEngineEvent.AccessibleContentChanged());
+            }
+        }
         if (previous?.Scale != placement.Scale)
             Com.Check(Com.Call(_controller3, ICoreWebView2Controller3.put_RasterizationScale, (double)placement.Scale), "put_RasterizationScale");
 
@@ -198,6 +223,7 @@ internal sealed unsafe class WebView2View : IWebEngineView
         var rect = new Native.RECT { Left = b.X, Top = b.Y, Right = b.Right, Bottom = b.Bottom };
         Com.Check(Com.Call(_controller, ICoreWebView2Controller.put_Bounds, rect), "put_Bounds");
         _capture!.Resize(b.Width, b.Height);
+        if (!_accessibility.IsComplete) AttachAccessibility();
     }
 
     private void Fail(WebFailure kind, string message)
@@ -282,8 +308,65 @@ internal sealed unsafe class WebView2View : IWebEngineView
         if (cancel) Com.Call(args, ICoreWebView2NavigationStartingEventArgs.put_Cancel, 1);
     }
 
+    /// <summary>
+    /// The window moved on screen. The browser places its popups and its input method against
+    /// the page's screen position and reports it to assistive technology, and only learns the
+    /// window's from this call.
+    /// </summary>
+    private void OnParentWindowMoved()
+    {
+        if (_phase == Phase.Ready)
+            Com.Call(_controller, ICoreWebView2Controller.NotifyParentWindowPositionChanged);
+    }
+
+    /// <summary>
+    /// Something happened that may have produced the page's accessibility windows
+    /// (<see cref="PageAccessibility"/>): the page is ready, a navigation finished, the page
+    /// took focus, it was placed. Look, and look again for a while if they are not there.
+    /// </summary>
+    private void AttachAccessibility()
+    {
+        _accessibilityLooksLeft = AccessibilityLooks;
+        LookForAccessibilityWindows();
+    }
+
+    /// <summary>
+    /// One look, and another in a moment if a window is still missing. WebView2 makes them in
+    /// its own time and moves the browser's after the page's bounds, so the first look —
+    /// made as the page is placed — usually finds the focus window and not the other, and a
+    /// hit test over the page would be answered with the element's box until something else
+    /// happened to look again. The looks are counted: a browser that never makes the windows
+    /// is not asked for ever.
+    /// </summary>
+    private void LookForAccessibilityWindows()
+    {
+        if (_phase != Phase.Ready || _accessibility.IsComplete) return;
+
+        if (FindAccessibilityWindows()) Raise(new WebEngineEvent.AccessibleContentChanged());
+        if (_accessibility.IsComplete || _accessibilityLooksLeft-- <= 0) return;
+        _accessibilityRetry ??= new Timer(_ => _host?.Post(LookForAccessibilityWindows));
+        _accessibilityRetry.Change(AccessibilityLookInterval, Timeout.Infinite);
+    }
+
+    private bool FindAccessibilityWindows()
+    {
+        if (_applied is not { Window: var window and not 0 } placement) return false;
+
+        var origin = new Native.POINT();
+        Native.ClientToScreen(window, ref origin);
+        var b = placement.Bounds;
+        var onScreen = new Native.RECT
+        {
+            Left = origin.X + b.X, Top = origin.Y + b.Y, Right = origin.X + b.Right, Bottom = origin.Y + b.Bottom,
+        };
+        uint browser = 0;
+        ((delegate* unmanaged[Stdcall]<nint, uint*, int>)(*(nint**)_webview)[ICoreWebView2.get_BrowserProcessId])(_webview, &browser);
+        return _accessibility.Update(window, _composition, _environment, browser, onScreen);
+    }
+
     private void OnNavigationCompleted(nint sender, nint args)
     {
+        AttachAccessibility();
         bool ok = Com.GetBool(args, ICoreWebView2NavigationCompletedEventArgs.get_IsSuccess, "get_IsSuccess");
         long id = (long)Com.Get<ulong>(args, ICoreWebView2NavigationCompletedEventArgs.get_NavigationId, "get_NavigationId");
         int status = Com.Get<int>(args, ICoreWebView2NavigationCompletedEventArgs.get_WebErrorStatus, "get_WebErrorStatus");
@@ -487,6 +570,7 @@ internal sealed unsafe class WebView2View : IWebEngineView
     public void Focus(FocusReason reason)
     {
         if (_phase != Phase.Ready) { _pendingFocus = reason; return; }
+        AttachAccessibility();
         int code = reason switch { FocusReason.Next => 1, FocusReason.Previous => 2, _ => 0 };
         Com.Call(_controller, ICoreWebView2Controller.MoveFocus, code);
     }
@@ -586,11 +670,17 @@ internal sealed unsafe class WebView2View : IWebEngineView
             handler.Release();
         }
         _subscriptions.Clear();
+        _parentWatch?.Dispose();
+        _parentWatch = null;
+        _accessibilityRetry?.Dispose();
+        _accessibilityRetry = null;
+        _accessibility.Clear();
         _capture?.Dispose();
         if (_controller != 0) Com.Call(_controller, ICoreWebView2Controller.Close);
         Com.Release(ref _webview);
         Com.Release(ref _controller3);
         Com.Release(ref _controller);
         Com.Release(ref _composition);
+        Com.Release(ref _environment);
     }
 }

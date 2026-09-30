@@ -47,6 +47,13 @@ public sealed class AccessibilityNode
     /// </summary>
     public bool IsVirtualItemContainer { get; internal set; }
 
+    /// <summary>
+    /// Content with an accessibility tree of its own, in windows of its own — a web page's.
+    /// The bridge makes that tree this node's children and sends hit tests inside the node
+    /// there. Empty for everything else.
+    /// </summary>
+    public NativeAccessibleContent NativeContent { get; internal set; }
+
     private readonly List<AccessibilityNode> _children = [];
 
     internal AccessibilityNode(

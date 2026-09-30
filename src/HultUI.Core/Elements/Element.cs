@@ -401,6 +401,13 @@ public abstract class Element
     /// </summary>
     internal virtual bool WantsTextInput => false;
 
+    /// <summary>
+    /// Content of this element that keeps its own accessibility tree — a web page's engine.
+    /// The accessibility tree gives it to the node as
+    /// <see cref="Accessibility.AccessibilityNode.NativeContent"/>. Empty by default.
+    /// </summary>
+    internal virtual Accessibility.NativeAccessibleContent NativeAccessibleContent => default;
+
     // ──── Drag & Drop ────
     public bool Draggable { get; set; }
 

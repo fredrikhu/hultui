@@ -47,7 +47,7 @@ scroll and type in by hand — the way to check IME and the overlay over the pag
 | Cost of a continuously animating page, 1650×1072 | Captured at **60 fps**; staging copy 1.7 ms avg, 3.0 max. **Our process 291–334 ms/s CPU composited vs 3–6 ms/s windowed**; the browser's processes cost the same either way (141–200 ms/s). A still page costs nothing: frames arrive only on change. |
 | Keyboard focus | WebView2 keeps one 0×0 child, `Chrome_WidgetWin_0`, under our window. `MoveFocus` puts Win32 focus there (page `hasFocus()` true); `SetFocus(ours)` takes it back (false). **`Window.Activated` fires on neither** — SDL sees no window focus change. |
 | `<select>` popup | Opens as the browser's own top-level window at screen (1430, 876); the element's bottom-left is at (1430, 870). **Correct**, via `Bounds`. Mouse points are **bounds-relative**. |
-| Accessibility | The provider is an **override provider** (`ProviderOptions` 42 = ServerSide + OverrideProvider + UseComThreading), with a host provider, no parent, and a client-relative bounding rectangle. `GetAutomationProviderForWindow(Chrome_WidgetWin_0)` returns the same object. The intended route is `IRawElementProviderHwndOverride` on our window for that child. Its children were empty with no UIA client attached (Chromium builds its tree lazily). |
+| Accessibility | The provider is an **override provider** (`ProviderOptions` 42 = ServerSide + OverrideProvider + UseComThreading), with a host provider, no parent, and a client-relative bounding rectangle. `GetAutomationProviderForWindow(Chrome_WidgetWin_0)` returns the same object. The intended route is `IRawElementProviderHwndOverride` on our window for that child. Its children were empty with no UIA client attached (Chromium builds its tree lazily). **Step 4 found more** (`-- a11y` runs only this probe): the children stay empty with a client attached, `ElementProviderFromPoint` and `GetFocus` answer null in screen and in client coordinates, and `NotifyParentWindowPositionChanged` does not move the rectangle. The provider carries nothing; it only identifies the window. |
 
 ## What it changes in the design
 
@@ -55,7 +55,9 @@ scroll and type in by hand — the way to check IME and the overlay over the pag
   animating page, from the staging copy plus Skia re-uploading 7 MB per drawn frame.
   Zero-copy (phase 3) is worth doing, not just nice; for static and mostly static pages the
   pixel path is free.
-- Accessibility on Windows is an HWND override, not a fragment splice (seam W8).
+- Accessibility on Windows is an HWND override, not a fragment splice (seam W8) — but with
+  **our** node as the override provider, not WebView2's, which turned out to be empty. See
+  *Accessibility* in the design doc for what step 4 built.
 - The focus hand-off is exactly as designed, and the `Window.Activated` worry is gone.
 
 ## Not answered here (by hand, in `interactive`)

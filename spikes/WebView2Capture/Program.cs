@@ -62,12 +62,15 @@ internal static class Program
                 return;
             }
 
-            await Probes.Latency(host, Log);
-            await Probes.Animation(host, Log);
-            await Probes.Windowed(host, Log);
+            if (mode != "a11y")
+            {
+                await Probes.Latency(host, Log);
+                await Probes.Animation(host, Log);
+                await Probes.Windowed(host, Log);
+            }
             await Probes.FocusWindows(host, Log);
             await Probes.Accessibility(host, Log);
-            await Probes.SelectPopup(host, Log);
+            if (mode != "a11y") await Probes.SelectPopup(host, Log);
             Log("done");
         }
         catch (Exception ex)

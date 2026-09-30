@@ -1,3 +1,4 @@
+using HultUI.Core.Accessibility;
 using HultUI.Core.Events;
 using HultUI.Core.Rendering;
 
@@ -99,6 +100,14 @@ public interface IWebEngineView : IDisposable
     /// <summary>The element lost focus to something else in the window.</summary>
     void Blur();
 
+    /// <summary>
+    /// Where the page's own accessibility tree lives, for the platform bridge to join to the
+    /// app's at the element; empty when the engine has none, or not yet. Read on the UI thread
+    /// when the accessibility tree is built, which is only when something changed: raise
+    /// <see cref="WebEngineEvent.AccessibleContentChanged"/> when this does.
+    /// </summary>
+    NativeAccessibleContent AccessibleContent => default;
+
     event Action<WebEngineEvent>? Event;
 }
 
@@ -124,6 +133,13 @@ public interface IWebViewHost
     /// here: publishing to <see cref="Pixels"/> asks.)
     /// </summary>
     void RequestRepaint();
+
+    /// <summary>
+    /// Any thread: runs <paramref name="action"/> on the UI thread, soon, and not at all once
+    /// the controller is disposed. For what an engine has to try again later — its objects
+    /// belong to that thread, and a timer's callback is not on it.
+    /// </summary>
+    void Post(Action action);
 }
 
 /// <summary>What a view does itself rather than through the element.</summary>
