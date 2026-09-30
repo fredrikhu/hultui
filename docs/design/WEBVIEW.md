@@ -275,8 +275,14 @@ candidate position, and how scrolling and drag-selection feel.
   stops, the same containers between the app and the document. Good enough.
 - **IME (Japanese): the candidate list appears in the right place on google.com and
   does not appear at all on wikipedia.org's search box. Brave shows it on both.** Open.
-  Not yet known: whether the composition text itself shows in the box, and what differs
-  between the two fields. Step 6.
+  Narrowed the same day: on wikipedia.org the composition text shows in the box, Enter
+  commits it, and **Tab opens the list, in the right place** — so composition and the
+  caret position both work, and only the list opening by itself is missing. The two
+  fields differ in kind: Wikipedia's is `<input type="search">`, Google's a `<textarea>`.
+  Chromium tells the input method which kind a field is, and an input method may hold its
+  suggestions back in a search field, which has its own. That would make this the
+  engine's behaviour and not the hosting's — but it does not explain Brave, so it is a
+  guess until the same page is tried in Edge itself. Step 6.
 
 ## Linux engines
 
