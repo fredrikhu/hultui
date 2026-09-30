@@ -41,10 +41,11 @@ public sealed partial class ApertureApp
     private void EnsureHomeRows()
     {
         if (_library is not { } lib) return;
+        EnsureHomeWatchlist();
         _resume.Load(("resume", _dataGeneration),
-            () => Fetch(() => lib.GetResumeAsync(12), (IReadOnlyList<MediaItem>)[], "Continue watching"));
+            () => Fetch(() => lib.GetResumeAsync(ResumeRowSize), (IReadOnlyList<MediaItem>)[], "Continue watching"));
         _nextUp.Load(("nextup", _dataGeneration),
-            () => Fetch(() => lib.GetNextUpAsync(12), (IReadOnlyList<MediaItem>)[], "Next up"));
+            () => Fetch(() => lib.GetNextUpAsync(NextUpRowSize), (IReadOnlyList<MediaItem>)[], "Next up"));
 
         // One load for every library's latest row: two or three small calls, and a single
         // key means the home screen settles in one step rather than flickering in per row.
@@ -56,7 +57,7 @@ public sealed partial class ApertureApp
             foreach (var view in libraries)
             {
                 if (view.Kind is LibraryKind.Music or LibraryKind.Books) continue;
-                map[view.Id] = Fetch(() => lib.GetLatestAsync(view.Id, 12),
+                map[view.Id] = Fetch(() => lib.GetLatestAsync(view.Id, LatestRowSize),
                     (IReadOnlyList<MediaItem>)[], $"Latest in {view.Name}");
             }
             return (IReadOnlyDictionary<string, IReadOnlyList<MediaItem>>)map;
@@ -65,6 +66,16 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaItem> ResumeItems => _resume.Value;
     internal IReadOnlyList<MediaItem> NextUpItems => _nextUp.Value;
+    /// <summary>How many Home's Continue watching row asks for; a full row has "See all".</summary>
+    internal const int ResumeRowSize = 12;
+
+    /// <summary>How many Home's Next up row asks for; a full row has "See all".</summary>
+    internal const int NextUpRowSize = 12;
+
+    /// <summary>How many a "Latest in" row asks for. A row that comes back full may have
+    /// more behind it — which is when it offers "See all".</summary>
+    internal const int LatestRowSize = 12;
+
     internal IReadOnlyList<MediaItem> LatestIn(string libraryId) =>
         _latest.Value.TryGetValue(libraryId, out var items) ? items : [];
 
@@ -211,6 +222,19 @@ public sealed partial class ApertureApp
 
     internal bool GridHasFilters => GridGenre is not null || GridFavouritesOnly || GridPlayedFilter is not null;
 
+    /// <summary>
+    /// A "Latest in" row's "See all": the library itself, newest first and unfiltered — the
+    /// very query the row is the first twelve of, so the grid carries on where it stops. The
+    /// grid's sort and filters are shared by every library, so this is what the next library
+    /// opens with too; that is the grid remembering how it was last left, as it always does.
+    /// </summary>
+    internal void OpenLatest(string libraryId, string libraryName)
+    {
+        ClearGridFilters();
+        SetGridSort(ItemSort.DateAdded, descending: true);
+        Navigate(new Route(ApertureView.Library, libraryId, libraryName));
+    }
+
     // ── Detail and its children ──────────────────────────────────────────
 
     private void EnsureDetail(string itemId)
@@ -291,6 +315,35 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaItem> PersonItems => _personItems.Value.Items;
     internal bool PersonItemsLoading => _personItems.IsLoading;
+
+    private readonly AsyncLoader<IReadOnlyList<MediaItem>> _resumeAll = new([]);
+
+    /// <summary>Everything part-watched, for the Continue watching page. In one call, as the
+    /// favourites are: a list of things someone is halfway through is tens long, not
+    /// thousands, and the server has no cheaper way to count it.</summary>
+    private void EnsureResumeAll()
+    {
+        if (_library is not { } lib) return;
+        _resumeAll.Load(("resume-all", _dataGeneration), () => Fetch(
+            () => lib.GetResumeAsync(200), (IReadOnlyList<MediaItem>)[], "Continue watching"));
+    }
+
+    internal IReadOnlyList<MediaItem> ResumeAll => _resumeAll.Value;
+    internal bool ResumeAllLoading => _resumeAll.IsLoading;
+
+    private readonly AsyncLoader<IReadOnlyList<MediaItem>> _nextUpAll = new([]);
+
+    /// <summary>Every series' next episode, for the Next up page — one per series being
+    /// watched, so as short a list as Continue watching, and in one call for the same reason.</summary>
+    private void EnsureNextUpAll()
+    {
+        if (_library is not { } lib) return;
+        _nextUpAll.Load(("nextup-all", _dataGeneration), () => Fetch(
+            () => lib.GetNextUpAsync(200), (IReadOnlyList<MediaItem>)[], "Next up"));
+    }
+
+    internal IReadOnlyList<MediaItem> NextUpAll => _nextUpAll.Value;
+    internal bool NextUpAllLoading => _nextUpAll.IsLoading;
 
     private void EnsureFavourites()
     {

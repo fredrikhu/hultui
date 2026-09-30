@@ -753,6 +753,103 @@ public class ApertureAppHostTests
     }
 
     [Fact]
+    public void AFullContinueWatchingRowsSeeAllIsEverythingPartWatched()
+    {
+        var library = Library();   // two part-watched already: Solaris and an episode
+        for (int i = 4; i <= 14; i++)
+        {
+            library.AddMovie("m" + i, "Film " + i, "movies", 2000 + i, 90, resume: TimeSpan.FromMinutes(i));
+            library.ResumeIds.Add("m" + i);
+        }
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Continue watching");
+            session.Window.FindByAutomationId("row-resume-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.ContinueWatching, app.Current.View);
+            // All thirteen, not the row's twelve: the last one added is past the row's end.
+            PumpUntilShown(session, "Film 14");
+            Assert.Equal(13, app.ResumeAll.Count);
+            Assert.Contains("GetResume(limit=200)", library.Calls);
+        });
+    }
+
+    [Fact]
+    public void AFullNextUpRowsSeeAllIsEverySeriesNextEpisode()
+    {
+        var library = Library();
+        for (int n = 1; n <= 13; n++)
+        {
+            library.AddItem(new MediaItem
+            {
+                Id = "next" + n, Name = "Pilot " + n, Kind = MediaKind.Episode,
+                SeriesId = "show" + n, SeriesName = "Show " + n, ParentIndexNumber = 1, IndexNumber = 2,
+                RunTime = TimeSpan.FromMinutes(30),
+            }, "shows");
+            library.NextUpIds.Add("next" + n);
+        }
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Next up");
+            session.Window.FindByAutomationId("row-nextup-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.NextUp, app.Current.View);
+            Assert.Equal(13, app.NextUpAll.Count);
+            Assert.Contains("GetNextUp(limit=200)", library.Calls);
+            // The thirteenth, which the row's twelve left out.
+            PumpUntilShown(session, "Show 13");
+        });
+    }
+
+    [Fact]
+    public void ShortContinueWatchingAndNextUpRowsHaveNoSeeAll()
+    {
+        var library = Library();
+        library.NextUpIds.Add("e5");
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            PumpUntilShown(session, "Next up");
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Null(session.Window.FindByAutomationId("row-resume-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-resume-menu"));
+            Assert.Null(session.Window.FindByAutomationId("row-nextup-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-nextup-menu"));
+        });
+    }
+
+    [Fact]
+    public void AFullLatestRowsSeeAllIsTheLibraryNewestFirstUnfiltered()
+    {
+        var library = Library();
+        for (int i = 4; i <= 13; i++) library.AddMovie("m" + i, "Film " + i, "movies", 2000 + i, 90);
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Latest in Films");
+            // A row holding its whole library has nothing more to see.
+            Assert.True(Shows(session, "Latest in Series"));
+            Assert.Null(session.Window.FindByAutomationId("row-latest-shows-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-latest-movies-menu"));
+
+            // Left sorted and filtered some other way since the last visit.
+            app.SetGridSort(ItemSort.Name, descending: false);
+            app.SetGridPlayedFilter(false);
+            session.Window.FindByAutomationId("row-latest-movies-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Library, app.Current.View);
+            Assert.Equal("movies", app.Current.Id);
+            // The query the row is the first twelve of, so the grid carries on from it.
+            Assert.Equal(ItemSort.DateAdded, app.GridSort);
+            Assert.True(app.GridDescending);
+            Assert.False(app.GridHasFilters);
+            PumpUntilShown(session, "Newest (on)");
+        });
+    }
+
+    [Fact]
     public void AHomeRowCanBeMovedAndStaysWhereItWasPut()
     {
         Host(Library(), (session, app) =>

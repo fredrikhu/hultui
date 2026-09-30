@@ -19,10 +19,36 @@ namespace Aperture;
 public enum ApertureStage { Connect, Browsing }
 
 /// <summary>A place in the app. The stack of these is the back button.</summary>
-/// <param name="Id">The library or item the view is about; null for Home and Search.</param>
+/// <param name="Id">The library or item the view is about; null for Home and Search. For a
+/// discovery title it is the title's key, <c>movie:603</c> or <c>tv:1399</c>.</param>
 public sealed record Route(ApertureView View, string? Id = null, string? Title = null);
 
-public enum ApertureView { Home, Library, Detail, Person, Favourites, Search, Settings }
+public enum ApertureView
+{
+    Home, Library, Detail, Person, Favourites, Search, Settings,
+    /// <summary>The request server's shelves: what is trending, popular and coming.</summary>
+    Discover,
+    /// <summary>One title the request server knows, whether or not the library has it.</summary>
+    DiscoverTitle,
+    /// <summary>Requests made, and — for someone who may — the ones waiting for approval.</summary>
+    Requests,
+    /// <summary>One genre's titles on the request server; the Id is <c>movie:28</c>.</summary>
+    DiscoverGenre,
+    /// <summary>One person's films and series on the request server; the Id is their TMDB id.</summary>
+    DiscoverPerson,
+    /// <summary>A studio's films or a network's series; the Id is <c>movie:2</c> or <c>tv:213</c>.</summary>
+    DiscoverCompany,
+    /// <summary>A Discover row in full — "See all"; the Id is the row's id in the layout.</summary>
+    DiscoverAll,
+    /// <summary>Everything part-watched — Home's Continue watching row in full.</summary>
+    ContinueWatching,
+    /// <summary>Every series' next episode — Home's Next up row in full.</summary>
+    NextUp,
+    /// <summary>Problem reports, for someone who may read everyone's.</summary>
+    Issues,
+    /// <summary>One report and its conversation; the Id is the server's issue id.</summary>
+    Issue,
+}
 
 /// <summary>
 /// Root of Aperture, the Jellyfin client: a Halide-themed shell — title bar, 64dip rail,
@@ -59,7 +85,8 @@ public sealed partial class ApertureApp : Component, IDisposable
     private ApertureStage _stage = ApertureStage.Connect;
 
     public ApertureApp(Application app, Window window, ApertureSettings? settings = null,
-        IMediaLibrary? library = null, Func<IMediaBackend>? backends = null, HttpClient? posterHttp = null)
+        IMediaLibrary? library = null, Func<IMediaBackend>? backends = null, HttpClient? posterHttp = null,
+        Aperture.Core.Requests.IRequestServer? requests = null)
     {
         _app = app;
         _window = window;
@@ -82,8 +109,11 @@ public sealed partial class ApertureApp : Component, IDisposable
             // header — scrubber tiles are behind it — and this path does not go through
             // Adopt, which is where a normal sign-in sets it.
             _library = library;
-            _posters.Authorization = _settings.Device.AuthorizationHeader(library.User.AccessToken);
+            _posters.Authorize(library.Server.Address, _settings.Device.AuthorizationHeader(library.User.AccessToken));
             _stage = ApertureStage.Browsing;
+            // A request server handed in the same way (tests, the driver) is simply in use.
+            _requestServer = requests;
+            if (requests is not null) StartArrivalWatch();
         }
         else
         {
@@ -176,6 +206,13 @@ public sealed partial class ApertureApp : Component, IDisposable
 
     private Element BuildBrowsing()
     {
+        // The request server rides along with the library: reopened from its stored
+        // session once the library is up, and asked for its waiting count for the rail.
+        EnsureRequestServer();
+        EnsurePendingCount();
+        EnsureIssueCounts();
+        EnsureMyIssues();
+
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var rail = BuildRail(); rail.Key = "rail";
         row.AddChild(rail);
@@ -186,8 +223,19 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.Detail => BuildDetailView(Current),
             ApertureView.Person => BuildPersonView(Current),
             ApertureView.Favourites => BuildFavouritesView(),
+            ApertureView.ContinueWatching => BuildContinueWatchingView(),
+            ApertureView.NextUp => BuildNextUpView(),
             ApertureView.Search => BuildSearchView(),
             ApertureView.Settings => BuildSettingsView(),
+            ApertureView.Discover => BuildDiscoverView(),
+            ApertureView.DiscoverTitle => BuildDiscoverTitleView(Current),
+            ApertureView.DiscoverGenre => BuildDiscoverGenreView(Current),
+            ApertureView.DiscoverCompany => BuildDiscoverCompanyView(Current),
+            ApertureView.DiscoverAll => BuildDiscoverAllView(Current),
+            ApertureView.DiscoverPerson => BuildDiscoverPersonView(Current),
+            ApertureView.Requests => BuildRequestsView(),
+            ApertureView.Issues => BuildIssuesView(),
+            ApertureView.Issue => BuildIssueView(Current),
             _ => BuildHomeView(),
         };
         view.Key = "view-" + Current.View;
@@ -280,7 +328,8 @@ public sealed partial class ApertureApp : Component, IDisposable
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 1, 0, 0));
 
         rail.AddChild(RailButton(Icons.Home, "Home", "1",
-            active: Current.View == ApertureView.Home,
+            // Home's rows in full are Home's, as a Discover row in full is Discover's.
+            active: Current.View is ApertureView.Home or ApertureView.ContinueWatching or ApertureView.NextUp,
             onClick: () => GoHome()));
 
         int key = 2;
@@ -292,6 +341,36 @@ public sealed partial class ApertureApp : Component, IDisposable
                 active: Current.View == ApertureView.Library && Current.Id == id,
                 onClick: () => Navigate(new Route(ApertureView.Library, id, lib.Name))));
             key++;
+        }
+
+        // The request server's two doors, under the libraries they fill — and only when one
+        // is connected: a rail button that leads to "connect something first" is furniture.
+        if (_requestServer is { } requests)
+        {
+            rail.AddChild(Box.New().Height(Halide.S2));
+            rail.AddChild(RailButton(Icons.Discover, "Discover", "",
+                active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
+                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany
+                    or ApertureView.DiscoverAll,
+                onClick: () => Navigate(new Route(ApertureView.Discover))));
+            rail.AddChild(RailButton(Icons.Requests, "Requests", "",
+                active: Current.View == ApertureView.Requests,
+                onClick: () => Navigate(new Route(ApertureView.Requests)),
+                badge: requests.User.CanManageRequests && PendingRequestCount > 0 ? PendingRequestCount : 0));
+            // Everyone's reports are for whoever looks after the library; the badge only for
+            // someone who can do something about them.
+            if (requests.User.CanSeeIssues)
+                rail.AddChild(RailButton(Icons.Report, "Issues", "",
+                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
+                    onClick: () => Navigate(new Route(ApertureView.Issues)),
+                    badge: requests.User.CanManageIssues ? OpenIssueCount : 0, badgeWord: "open"));
+            // Someone who files reports but may not read everyone's: their own, and a
+            // badge for the ones answered or resolved since they last looked.
+            else if (CanReportProblems)
+                rail.AddChild(RailButton(Icons.Report, "Your reports", "",
+                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
+                    onClick: () => Navigate(new Route(ApertureView.Issues)),
+                    badge: MyIssueNewsCount, badgeWord: "new"));
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
@@ -308,9 +387,12 @@ public sealed partial class ApertureApp : Component, IDisposable
         return rail;
     }
 
-    private Element RailButton(string glyph, string label, string key, bool active, Action onClick)
+    private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0,
+        string badgeWord = "waiting")
     {
         var fg = active ? Halide.Accent : Halide.TextMuted;
+        var name = key.Length > 0 ? $"{label} ({key})" : label;
+        if (badge > 0) name += $", {badge} {badgeWord}";
         var b = Flex.Column(gap: 2)
             .Width(48).Height(48).FlexShrink(0)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
@@ -320,14 +402,27 @@ public sealed partial class ApertureApp : Component, IDisposable
             .BorderColor(active ? Halide.Accent : Color.Transparent)
             .BorderWidth(new Thickness(2, 0, 0, 0))
             .Cursor(CursorType.Pointer)
-            .Tooltip(key.Length > 0 ? $"{label} ({key})" : label)
+            .Tooltip(name)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName(key.Length > 0 ? $"{label} ({key})" : label)
+            .AccessibleName(name)
             .AutomationId("rail-" + label.ToLowerInvariant().Replace(' ', '-'));
         if (active) b.Background(Halide.Tint(Halide.Accent));
         b.AddChild(Ui.Icon(glyph, 18f, fg));
         if (key.Length > 0)
             b.AddChild(Ui.Mono(key, 9f, active ? Halide.Alpha(Halide.Accent, 0.85) : Halide.TextFaint));
+        if (badge > 0)
+        {
+            // A count, top-right: requests waiting on someone who can approve them.
+            var dot = Box.New().Height(15).Padding(new Thickness(0, 4, 0, 4))
+                .CornerRadius(7.5f).Background(Halide.Accent)
+                .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+                .Children(Ui.Mono(badge > 99 ? "99+" : badge.ToString(), 9f, new Color(35, 23, 4)));
+            dot.IsHitTestVisible = false;
+            dot.Position.Type = PositionType.Absolute;
+            dot.Position.Right = Dimension.Px(3);
+            dot.Position.Top = Dimension.Px(4);
+            b.AddChild(dot);
+        }
         b.OnClick(_ => onClick());
         if (!active) b.HoverBg(Halide.Raised);
         return b;
@@ -375,8 +470,23 @@ public sealed partial class ApertureApp : Component, IDisposable
         // during the opening wait too, which is when someone is most likely to press it.
         if (_playingItem is not null)
         {
+            // Typing a problem report over the film: the text field has the keys, and a
+            // space in "out of sync" must not pause it. Escape closes the report, not the film.
+            if (e.Target is TextInputElement or TextAreaElement)
+            {
+                if (e.Key == KeyCode.Escape && _reportOpen)
+                {
+                    CloseReport();
+                    e.Handled = true;
+                }
+                return;
+            }
             switch (e.Key)
             {
+                case KeyCode.Escape when _reportOpen:
+                    CloseReport();
+                    e.Handled = true;
+                    break;
                 case KeyCode.Escape:
                     StopPlayback(report: true);
                     e.Handled = true;
@@ -465,8 +575,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     }
 
     /// <summary>Says something, briefly, at the bottom of the window.</summary>
-    internal void Flash(string message, ToastSeverity severity = ToastSeverity.None) =>
-        _toasts.Flash(message, severity);
+    internal void Flash(string message, ToastSeverity severity = ToastSeverity.None,
+        (string Label, Action Run)? action = null) =>
+        _toasts.Flash(message, severity, action, action is null ? null : 6f);
 
     /// <summary>The failure copy for a call that did not work, as a toast.</summary>
     internal void FlashFailure(ApertureFailure failure, string what = "That")
@@ -485,10 +596,14 @@ public sealed partial class ApertureApp : Component, IDisposable
         // to survive it: give the report its moment before the connection goes.
         WaitForStopReport();
         StopQuickConnectTimer();
+        StopProgressTimer();
+        StopArrivalWatch();
         _quickConnectCts?.Cancel();
         _quickConnectCts?.Dispose();
         _quickConnectCts = null;
         _posters.Dispose();
+        _requestServer?.Dispose();
+        _requestServer = null;
         _library?.Dispose();
         _library = null;
     }

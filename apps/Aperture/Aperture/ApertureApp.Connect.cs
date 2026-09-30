@@ -126,10 +126,11 @@ public sealed partial class ApertureApp
     /// starts the loads the shell needs.</summary>
     private void Adopt(IMediaLibrary library, bool remember)
     {
+        CloseRequestServer();
         _library?.Dispose();
         _library = library;
         // Scrubber tiles are behind the session; artwork is not. One header covers both.
-        _posters.Authorization = _settings.Device.AuthorizationHeader(library.User.AccessToken);
+        _posters.Authorize(library.Server.Address, _settings.Device.AuthorizationHeader(library.User.AccessToken));
         _stage = ApertureStage.Browsing;
         _connectFailure = null;
         _dataGeneration++;
@@ -149,9 +150,12 @@ public sealed partial class ApertureApp
     {
         StopPlayback(report: true);
         var serverId = _library?.Server.Id;
+        // The request server is paired with the Jellyfin server being left; its session
+        // goes with it (and, when the account is forgotten, so does its row).
+        CloseRequestServer();
         _library?.Dispose();
         _library = null;
-        _posters.Authorization = null;
+        _posters.Authorize(null, null);
         _stage = ApertureStage.Connect;
         _autoConnectDone = true;      // do not immediately resume the token we just left
         _signInAttempt = 0;
@@ -242,8 +246,9 @@ public sealed partial class ApertureApp
     }
 
     private Element Field(string label, string placeholder, string value, Action<string> onChange,
-        string automationId, bool masked = false)
+        string automationId, bool masked = false, Action? onSubmit = null)
     {
+        onSubmit ??= StartSignIn;
         var column = Flex.Column(gap: 6).FlexShrink(0);
         column.AddChild(Text.New(label).FontSize(11.5f).TextColor(Halide.TextMuted));
 
@@ -258,7 +263,7 @@ public sealed partial class ApertureApp
         // Enter anywhere in the form submits it — the form is three fields and one verb.
         input.On<KeyDownEvent>(e =>
         {
-            if (e.Key == KeyCode.Enter) { StartSignIn(); e.Handled = true; }
+            if (e.Key == KeyCode.Enter) { onSubmit(); e.Handled = true; }
         });
         input.Key = "field-" + automationId;
         column.AddChild(input);

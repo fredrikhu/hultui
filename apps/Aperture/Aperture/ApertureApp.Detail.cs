@@ -39,6 +39,8 @@ public sealed partial class ApertureApp
             EnsureChildren(item.Id, item.Kind);
         // A series' verb is its next episode, and only the server knows which that is.
         if (item.Kind == MediaKind.Series) EnsureNextInSeries(item.Id);
+        // And what the request server knows about it: the seasons the library lacks.
+        EnsureLibraryRequestState(item);
 
         var scroll = ScrollView.Vertical().FlexGrow(1).AutomationId("detail");
         // No FlexGrow on a scroll view's content: the viewport gives it an unbounded
@@ -55,6 +57,7 @@ public sealed partial class ApertureApp
         switch (item.Kind)
         {
             case MediaKind.Series:
+                if (SeasonsUnderWay(item) is { } underWay) body.AddChild(underWay);
                 body.AddChild(SeasonsSection(item));
                 break;
             case MediaKind.Season or MediaKind.BoxSet or MediaKind.Folder:
@@ -226,6 +229,7 @@ public sealed partial class ApertureApp
         row.AddChild(ToggleButton(item.IsFavorite ? Icons.FavoriteOn : Icons.Favorite,
             item.IsFavorite ? "In favourites" : "Add to favourites",
             item.IsFavorite, () => ToggleFavorite(item), "detail-favorite"));
+        if (MissingSeasonsButton(item) is { } missing) row.AddChild(missing);
         return row;
     }
 

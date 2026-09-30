@@ -62,15 +62,12 @@ public sealed partial class LayoutEngine
         var margin = box.Margin;
         var outerSpacing = padding + border;
 
-        // Resolve definite width/height. Forced size (from flex resolution) takes priority.
-        var resolvedWidth = forcedWidth ?? box.Width.Resolve(constraint.AvailableWidth);
-        var resolvedHeight = forcedHeight ?? box.Height.Resolve(constraint.AvailableHeight);
-
-        // Content area available for children
-        var contentAvailW = (resolvedWidth ?? constraint.AvailableWidth) - outerSpacing.Horizontal;
-        var contentAvailH = (resolvedHeight ?? constraint.AvailableHeight) - outerSpacing.Vertical;
-        contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
-        contentAvailH = float.IsNegative(contentAvailH) ? 0 : contentAvailH;
+        // Resolve definite width/height (a forced size, from flex resolution, takes priority)
+        // and the content area available for children — with min and max already applied.
+        var (resolvedWidth, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
+            constraint.AvailableWidth, outerSpacing.Horizontal);
+        var (resolvedHeight, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
+            constraint.AvailableHeight, outerSpacing.Vertical);
 
         // Count flow vs absolute children without allocating partition lists
         var children = element.Children;
@@ -485,13 +482,11 @@ public sealed partial class LayoutEngine
         var outerSpacing = box.Padding + box.BorderWidth;
         var margin = box.Margin;
 
-        var resolvedW = forcedWidth ?? box.Width.Resolve(constraint.AvailableWidth);
-        var resolvedH = forcedHeight ?? box.Height.Resolve(constraint.AvailableHeight);
-
-        var contentAvailW = (resolvedW ?? constraint.AvailableWidth) - outerSpacing.Horizontal;
-        var contentAvailH = (resolvedH ?? constraint.AvailableHeight) - outerSpacing.Vertical;
-        contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
-        contentAvailH = float.IsNegative(contentAvailH) ? 0 : contentAvailH;
+        // The same resolution ComputeLayout makes, or the measured size is not the laid-out one.
+        var (resolvedW, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
+            constraint.AvailableWidth, outerSpacing.Horizontal);
+        var (resolvedH, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
+            constraint.AvailableHeight, outerSpacing.Vertical);
 
         var children = element.Children;
         bool hasFlow = false;
@@ -629,13 +624,12 @@ public sealed partial class LayoutEngine
         var outerSpacing = box.Padding + box.BorderWidth;
         var margin = box.Margin;
 
-        var resolvedW = forcedWidth ?? box.Width.Resolve(constraintW);
-        var resolvedH = forcedHeight ?? box.Height.Resolve(constraintH);
-
-        var contentAvailW = (resolvedW ?? constraintW) - outerSpacing.Horizontal;
-        var contentAvailH = (resolvedH ?? constraintH) - outerSpacing.Vertical;
-        contentAvailW = float.IsNegative(contentAvailW) ? 0 : contentAvailW;
-        contentAvailH = float.IsNegative(contentAvailH) ? 0 : contentAvailH;
+        // As in ComputeLayout: a max width is what text wraps at, so it has to be in the
+        // width the text is measured in — not applied to a box measured on one long line.
+        var (resolvedW, contentAvailW) = ResolveAxis(forcedWidth, box.Width, box.MinWidth, box.MaxWidth,
+            constraintW, outerSpacing.Horizontal);
+        var (resolvedH, contentAvailH) = ResolveAxis(forcedHeight, box.Height, box.MinHeight, box.MaxHeight,
+            constraintH, outerSpacing.Vertical);
 
         var contentSize = element.MeasureContent(contentAvailW, contentAvailH, _measureContext);
 
@@ -1029,6 +1023,32 @@ public sealed partial class LayoutEngine
     }
 
     // ── Static helpers ──
+
+    /// <summary>
+    /// One axis of a box, settled before its content is laid out: the border-box size when
+    /// it is definite (declared, or forced by the parent's flex resolution — null when the
+    /// box sizes to its content), and the extent its content gets.
+    ///
+    /// <para><b>Min and max bind here</b>, not only on the finished box. Applied afterwards
+    /// alone they clamped the box and left its content laid out in the unclamped size: a
+    /// column stretched across a wide parent with a max width came out narrow with children
+    /// as wide as the parent — drawn past its edge and, because hit testing stops at a
+    /// parent's bounds, unreachable by the pointer — and text with a max width was measured
+    /// on one long line and painted wrapped. The finished box is still clamped where it is
+    /// sized from content; for a definite size that clamp is now a no-op.</para>
+    /// </summary>
+    private static (float? Resolved, float ContentAvailable) ResolveAxis(float? forced, Dimension size,
+        Dimension min, Dimension max, float available, float spacing)
+    {
+        float? resolved = forced ?? size.Resolve(available);
+        if (resolved is { } definite)
+            resolved = ApplyMinMax(definite, min, max, available);
+
+        // Sizing to content: the content may use what is available, within the same bounds.
+        // (An unbounded extent with no max stays unbounded.)
+        float extent = (resolved ?? ApplyMinMax(available, min, max, available)) - spacing;
+        return (resolved, float.IsNegative(extent) ? 0 : extent);
+    }
 
     private static float ApplyMinMax(float value, Dimension min, Dimension max, float reference)
     {

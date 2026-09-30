@@ -109,6 +109,188 @@ answers for a position without the player knowing where stills come from.
 - **Downloads.** `/Items/{id}/Download` is one call; the work is the library of
   what has been downloaded and playing from it when the server is unreachable.
 
+## Slice 7 — requests, through Jellyseerr / Seerr (**slice 7a done**, 2026-09-30)
+
+Researched first: Jellyseerr and Overseerr merged into **Seerr** (seerr-team/seerr, 3.x,
+same `/api/v1` as Jellyseerr 2.x; Overseerr is archived and Plex-only). **No .NET client
+exists on NuGet**, and the OpenAPI spec is missing the fields that matter here, so
+`Aperture.Core/Requests` is hand-written: `SeerrHttp` (auth, errors), `SeerrServer`
+(`IRequestServer`, mapping), `SeerrConnection` (address walk on 5055, probe, three sign-ins,
+resume), `SeerrJson` (source-generated STJ), `FakeRequestServer`.
+
+| 7a — done | |
+|---|---|
+| Connect | Settings card: Quick Connect bridge (no typing, Seerr 3.4+), Jellyfin password, or API key acting as your user; secret in the credential store, paired with the Jellyfin server |
+| Discover | rail button; trending, popular and upcoming shelves with status badges; "Your requests" |
+| Title page | TMDB hero, cast, "More like this", state line; Request (film), season picker (series), 4K where allowed; Approve/Decline for managers; the title's requests with Withdraw |
+| Requests | rail button with a waiting count for managers; filters; everyone's / mine; approve, decline, withdraw on the row |
+| Search | the request server answers beside the library: "Not in your library" |
+| Jump | a title the library has opens the library's page (`jellyfinMediaId`) |
+
+Traps found on the way, each now in a comment or a test:
+
+1. **Status 6 is Blocklisted** (was "Blacklisted" before 3.0), 7 is Deleted. The spec says
+   6 is Deleted — that is Overseerr's numbering.
+2. **The request list has no "declined" filter**, and the validator answers any unknown query
+   parameter or value with a 400 — including parameters a newer server added. Version-gate
+   anything new (`RequestServerInfo.ParsedVersion`).
+3. **`POST /request` can answer 202 with `{message}`** instead of a request (nothing left to
+   ask for). Read as a failure with the server's sentence.
+4. **`/auth/jellyfin` with a `hostname` is a 500** on a configured server — send only
+   username and password.
+5. **The poster cache sent the Jellyfin token to every host.** Now scoped to the Jellyfin
+   origin (`PosterCache.Authorize`), with a test.
+6. **Framework: `MaxWidth` on a stretched box clamped the box but not its children's
+   layout** — a button at the far end of such a card was drawn outside it and could not be
+   hit. Worked around in the picker at first; then it turned out the Settings page had it
+   too, and **1.1.0 shipped with a Connect button that took no click**. Fixed in the layout
+   engine (`ResolveAxis`: min and max bind before the content is laid out), which also
+   fixed max-width text being measured unwrapped. Lesson: the headless tests clicked
+   everything but the one button on the far side of a capped page.
+
+**Verified against the lab server** (`http://jellyseer.home:5055` — one "r" — Seerr **3.3.0**
+titled "Jellyseerr", key in `~/.secrets/seerr.key`), read-only: the six live tests pass,
+the probe reads shelves, a series in full and the 27 requests with their titles, and the
+views render real artwork. **All 22 `jellyfinMediaId`s on its requests resolve on
+`jellyfin.home:8096`** (checked through the anonymous image endpoint), so the library jump
+joins. 3.3.0 is below the Quick Connect bridge, so the Settings card asks for the Jellyfin
+password there. **Not exercised live:** making, deciding and withdrawing a request — those
+start real downloads, so they are covered by the wire tests only until someone asks for
+something on purpose.
+
+### 7b — done (two small things left, at the end)
+
+**Done (2026-09-30):**
+
+| | |
+|---|---|
+| Request from the library | a series' own Jellyfin page offers "Request Seasons 4–5" beside Play, and names seasons already asked for ("Season 3 on its way · 42%"); the join is the TMDB id Jellyfin scraped (`ItemFields.ProviderIds` → `MediaItem.TmdbId`) |
+| Download progress | `mediaInfo.downloadStatus[]` — not in the spec, filled from Radarr/Sonarr's queue whenever the server loads a title, so request lists carry it too. A bar on the title page, re-read every 15 s while something downloads (and only then); "On its way · 68%" in the list |
+| Quota | under the Request button ("3 of 5 film requests left this week"), which is disabled when spent; the season picker ticks no more seasons than the allowance and won't send more |
+| Hide switches | `hideAvailable` and `hideBlocklisted` applied as the server's web client applies them (the latter only for blocklist managers); `hideRequested` is not applied by that client, so not here either |
+
+Two things worth knowing: the server's `limit: 0` means *unlimited*, and a download's
+`timeLeft` is the downloader's own .NET `TimeSpan` string (`1.02:03:04` past a day). The
+library-page button is covered headless only — there is no Jellyfin key on the dev box to
+drive it against the real pair.
+
+**Done, second half (2026-09-30):**
+
+| | |
+|---|---|
+| The administrator's layout | Discover follows `/settings/discover` (open to any signed-in user): its order, what is switched off, and custom rows by the name they were given (genre, keyword, search, studio, network) |
+| Genres | "Films by genre" / "Series by genre" rows of backdrop cards (`/discover/genreslider/*`), each opening a genre page that pages with "Show more" |
+| People | a name in a title's cast opens their page: picture, biography, and every film and series they are credited with, once each, newest first |
+| Watchlist | a bookmark on the title page and a "Your watchlist" row; the list carries only ids, so titles and artwork come from the detail cache |
+| Advanced requests | for `REQUEST_ADVANCED` (or managers): a "Request with options…" button beside Request, and the same chips in the season picker — server (when there is more than one), quality profile, root folder with the room left in it |
+| Report a problem | from the player's title strip: picture / sound / subtitles / something else, this episode or the whole series, a description; filed against the request server's own record of the title |
+| Arrival toast | "Dune: Part Two is in your library", with Open — polled every five minutes (the server has no push); the first look announces nothing, and what was announced is kept in the settings file |
+| CSRF protection | the `_csrf` secret and `XSRF-TOKEN` are kept from any response and sent back on writes; a first write refused for CSRF fetches them and is sent again once |
+
+Traps on the way:
+
+1. **A new call swallowed a 401.** The layout read fell back to the default layout on any
+   failure — including a session the server had ended, which the rest of the app treats
+   as "close the request server". Caught by the existing session-ended test.
+2. **Escape bubbles.** A handled Escape in the report panel still reached the player
+   sheet's own handler, which stops the film. The panel stops propagation, and the sheet
+   now ignores a handled Escape. Keys typed into the report go to the text box, not the
+   player's shortcuts (a space in "out of sync" used to be Space: pause).
+3. **Removing from the watchlist takes `mediaType` from 3.2** and a 3.1 server refuses the
+   parameter outright, so it is sent by version. Adding answers 409 for "already on it",
+   which is success.
+4. **Left out, deliberately:** recently added (the library's Home has it, from Jellyfin) and
+   `hideRequested` (the server's web client does not apply it either). Studios, networks
+   and streaming-service rows were on this list too, until they were added (below).
+
+Verified against the lab server, read-only: the layout (all twelve built-in rows), the
+genre rows and a genre page, a person, the watchlist, and Radarr's profiles and folders
+(`radarr.home`). Making a request, reporting a problem and the watchlist writes are covered
+by the wire and headless tests only.
+
+**Since:** the watchlist has a row on Home, after the "what now" rows — what the library
+already has first, since that is what can be played — and moves, hides and comes back
+like any other row. Home's rows can now hold discovery titles (`HomeRow.Titles`).
+
+**Since, issues:** an **Issues** rail button for someone with Manage issues or View issues
+(the badge — open reports — only for Manage issues). The list starts at the open ones
+(Open / Resolved / All), each row saying what kind of problem, which episode, who and when,
+and the first line of the report, with a Resolve tick for a manager. A report's page has the
+conversation oldest first, a reply box, and Resolve or Reopen — "Reply and resolve" when
+something is typed, the reply sent first so a refused resolve still leaves it said. A reader
+without Manage issues sees the conversation and no box; the server lets the reporter answer
+their own report too, so the box follows that rule rather than the permission alone.
+
+Wire details: the list (`GET /issue`) joins the reporter and comments but not the comments'
+authors — only `GET /issue/{id}` does — so a reply or a status change is followed by a
+re-read of the issue. `problemSeason: 0` means "not about one episode". And the server says
+"not yours to change" on `POST /issue/{id}/{status}` with a **401**, which everywhere else
+means the session is gone; the client turns it into a refusal so it never signs anyone out.
+Verified read-only against the lab server (list, filters, counts — it has no reports yet, so
+the mapping of a real one rests on the wire tests, written from the server's source).
+
+**Since, a reporter's side:** someone with Create issues but neither Manage nor View gets
+**Your reports** on the rail instead of Issues — the server already limits `/issue` to their
+own. The list shows everything by default (a resolve is news to a reporter, not something
+done with) and leaves their name off every row. News is a report with more messages than
+when its reporter last read it here, or resolved or reopened since: a dot on the row, the
+badge, and — on the arrival watch's five-minute look — a toast, "Your report on Stalker has
+an answer", said once per change. The server keeps no read state, so it is in the settings
+file (`SeenIssues`, per request server); a report never read here counts as read at one
+message and open, which is how it was filed, and the first look records everything without
+calling it new. `/issue/count` is everyone's whoever asks, so the badge comes from the
+user's own list, never from it.
+
+One gap: the list does not say who wrote each message, so a reply the reporter made on the
+website reads as news here until they open it. Replies made in Aperture never do — the
+re-read report is marked read before the lists look again.
+
+**Since, studios and networks:** the layout's Studios and Networks rows are drawn. The API
+does not serve either list — the server's web page compiles them in (Seerr's
+`StudioSlider` and `NetworkSlider`: 11 studios, 22 networks, TMDB ids and logo paths) — so
+Aperture compiles the same lists in (`DiscoverCompanies`), in the same order, and the rows
+cost no call. Logos are asked for with TMDB's own duotone filter
+(`w300_filter(duotone,ffffff,bababa)`), which turns them white as the web page does; the
+server's image cache passes the path through unchanged. A card opens the studio's films
+(`/discover/movies/studio/{id}`) or the network's series (`/discover/tv/network/{id}`), a
+page at a time, on the loader genre pages use. A live test fetches every compiled logo and
+the first studio's and network's titles, so a list gone stale shows up there.
+
+**Since, streaming services:** a streaming-service row is a custom row the administrator
+makes (types 20 and 21 — there is no built-in one), drawn by the name it was given. Its
+data is what the server's web page writes from its provider picker, `SE,8|337` — a region,
+then TMDB watch-provider ids, any of which will do — and its own page splits it at the comma
+into `watchRegion` and `watchProviders` on `/discover/movies` or `/discover/tv`. Data that
+does not read that way leaves the row empty rather than sending the query without the
+filter, which answers with every film there is under a heading that says "Netflix". The lab
+server has no such row, and making one would change its layout, so the live test makes the
+row up in memory: Netflix in the US reads fewer titles than no filter, and Netflix or
+Disney+ more than Netflix alone.
+
+**Since, "See all":** a row of titles whose first page is not all of it gets "See all" at
+the end of its heading, opening the row as a wall that pages with "Show more"
+(`ApertureView.DiscoverAll`, on the loader genre and studio pages use) — custom rows first,
+then the built-in ones too: trending, popular and upcoming through the slider routes, the
+watchlist through its own (and, as on its row, not thinned by the server's hide switches:
+it is a record, not a shelf). Recent requests' "See all" is the Requests list itself, reset
+to everything (and everyone's, for someone who decides them). Home's watchlist row has one
+too, before its menu; both watchlist rows open a fixed route (`DiscoverAll` with id
+`watchlist`) rather than a layout row's id, since the list is the user's and opens whether
+or not the administrator's layout has a row for it. The wall is in the server's order; only
+the row's first page puts what the library has first. Genre, studio and network
+rows are whole already. The route carries only the row's id; the row itself is found in the
+layout as last loaded, and one no longer there says so rather than guessing. It is a real
+button, not a link-styled box: only `ButtonElement` answers Enter and Space.
+
+Its label's colour turned up a framework bug: a button's text colour and size never reached
+its label on the first style pass — `StyleResolver` resolved an element's inherited style
+before asking the element's `ApplyTheme` for it — so a label drew in its parent's colour
+until something re-dirtied the button (the issue page's "Reply" drew light on gold while
+disabled, and went dark only once typing enabled it). Fixed in the resolver; see `docs/THEMES.md`.
+
+**Still open:** nothing on the Discover page; every row of the server's layout is drawn but
+"recently added", which Home has from Jellyfin.
+
 ## Things deliberately not done
 
 - **A device profile, by default.** Aperture tells the server it can direct-play and

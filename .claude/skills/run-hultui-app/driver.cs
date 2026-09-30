@@ -36,6 +36,9 @@ bool fluentDark = true;
 int fluentAccent = 0;
 string? mediaPath = null;
 string jellyfinServer = "", jellyfinKeyFile = "", jellyfinUser = "";
+string seerrServer = "", seerrKeyFile = "";
+bool seerrDemo = false;
+bool seerrReporter = false;
 bool gitlab = false;
 string theme = "";
 var steps = new List<string>();
@@ -57,6 +60,14 @@ for (int i = 0; i < args.Length; i++)
         case "--server": jellyfinServer = args[++i]; break;
         case "--api-key-file": jellyfinKeyFile = args[++i]; break;
         case "--jellyfin-user": jellyfinUser = args[++i]; break;
+        // Aperture's request server: a real Jellyseerr/Seerr by API key (acting as the
+        // Jellyfin user when it knows them), or --seerr-demo for a fixture one.
+        case "--seerr": seerrServer = args[++i]; break;
+        case "--seerr-api-key-file": seerrKeyFile = args[++i]; break;
+        case "--seerr-demo": seerrDemo = true; break;
+        // The same fixture, signed in as someone who files problem reports but may not
+        // read everyone's — "Your reports" instead of "Issues".
+        case "--seerr-reporter": seerrDemo = true; seerrReporter = true; break;
         case "--size":
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
@@ -209,9 +220,123 @@ Element MountAperture()
         Path.Combine(scratchConfig, "aperture.json"));
     Func<HultUI.Media.IMediaBackend>? backends =
         HultUI.Media.Mpv.MpvBackend.IsAvailable ? () => new HultUI.Media.Mpv.MpvBackend() : null;
-    var a = new Aperture.ApertureApp(session.Application, session.Window.Window, settings, library, backends);
+
+    Aperture.Core.Requests.IRequestServer? requests = null;
+    if (seerrServer.Length > 0)
+    {
+        var key = seerrKeyFile.Length > 0
+            ? File.ReadAllText(seerrKeyFile).Trim()
+            : Environment.GetEnvironmentVariable("APERTURE_SEERR_API_KEY")?.Trim() ?? "";
+        var found = Aperture.Core.Requests.SeerrConnection.DiscoverAsync(seerrServer).GetAwaiter().GetResult();
+        if (!found.Ok) throw new InvalidOperationException("--seerr: " + found.Failure!.Message);
+        var signedIn = Aperture.Core.Requests.SeerrConnection
+            .SignInWithApiKeyAsync(found.Value, library.Server.Id, key, library.User.Id)
+            .GetAwaiter().GetResult();
+        if (!signedIn.Ok) throw new InvalidOperationException("--seerr: " + signedIn.Failure!.Message);
+        requests = signedIn.Value;
+    }
+    else if (seerrDemo)
+    {
+        requests = DemoRequests(seerrReporter);
+        if (seerrReporter)
+        {
+            // Read before the answer came: the answered report shows as news.
+            var mine = requests.GetIssuesAsync(Aperture.Core.Requests.IssueFilter.All).GetAwaiter().GetResult().Value.Items;
+            settings.RememberRequestServer(new Aperture.Core.RequestServerAccountData
+            {
+                JellyfinServerId = library.Server.Id,
+                Address = requests.Server.Address,
+                UserId = requests.User.Id,
+                UserName = requests.User.DisplayName,
+                SeenIssues = mine.Select(i => new Aperture.Core.SeenIssue
+                {
+                    Id = i.Id,
+                    Comments = 1,
+                    Resolved = i.Status == Aperture.Core.Requests.IssueStatus.Resolved,
+                }).ToList(),
+            }, "demo");
+        }
+    }
+
+    var a = new Aperture.ApertureApp(session.Application, session.Window.Window, settings, library, backends,
+        requests: requests);
     instance = a;
     return a.Mount();
+}
+
+// A request server with something on every shelf: a title the demo library has, one asked
+// for, one on its way, a series part-way in, and someone else's request waiting.
+Aperture.Core.Testing.FakeRequestServer DemoRequests(bool reporter = false)
+{
+    var R = reporter
+        ? Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.CreateIssues
+        : Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.ManageRequests
+          | Aperture.Core.Requests.RequestPermission.ManageIssues;
+    var fake = new Aperture.Core.Testing.FakeRequestServer(user: new Aperture.Core.Requests.RequestUser(1, "fredrik", R));
+    var trending = Aperture.Core.Requests.DiscoverShelf.Trending;
+    var films = Aperture.Core.Requests.DiscoverShelf.PopularMovies;
+    var upcoming = Aperture.Core.Requests.DiscoverShelf.UpcomingMovies;
+    var series = Aperture.Core.Requests.DiscoverShelf.PopularSeries;
+    string[] names = ["Harbour Lights", "The Quiet Year", "Glass Orchard", "Northbound", "A Field in Winter",
+                      "The Cartographer", "Low Tide", "Paper Moons", "Signal Fires", "The Night Ferry"];
+    for (int i = 0; i < names.Length; i++)
+    {
+        var availability = i switch
+        {
+            1 => Aperture.Core.Requests.Availability.Pending,
+            3 => Aperture.Core.Requests.Availability.Processing,
+            _ => Aperture.Core.Requests.Availability.Unknown,
+        };
+        fake.AddMovie(1000 + i, names[i], 2019 + i % 6, availability, null, trending, i % 2 == 0 ? films : upcoming);
+    }
+    fake.AddMovie(990, "Stalker", 1979, Aperture.Core.Requests.Availability.Available, "m0", trending, films);
+    fake.AddSeries(2000, "The Long Way Home", 2019, Aperture.Core.Requests.Availability.PartiallyAvailable, "s1",
+    [
+        new Aperture.Core.Requests.DiscoverSeason(1, "Season 1", 8, 2019, Aperture.Core.Requests.Availability.Available, Aperture.Core.Requests.Availability.Unknown),
+        new Aperture.Core.Requests.DiscoverSeason(2, "Season 2", 8, 2021, Aperture.Core.Requests.Availability.Unknown, Aperture.Core.Requests.Availability.Unknown),
+        new Aperture.Core.Requests.DiscoverSeason(3, "Season 3", 10, 2023, Aperture.Core.Requests.Availability.Unknown, Aperture.Core.Requests.Availability.Unknown),
+    ], series, trending);
+    for (int i = 0; i < 6; i++) fake.AddSeries(2100 + i, "Series " + (char)('A' + i), 2015 + i, shelves: [series]);
+    fake.AddPendingRequest("movie:1004");
+    fake.AddPendingRequest("tv:2102", [1, 2]);
+    fake.AddRequest("movie:1003", Aperture.Core.Requests.RequestStatus.Approved);
+    // A watchlist, for Home's row — one of them already in the library, which comes first.
+    fake.AddToWatchlist("movie:1006");
+    fake.AddToWatchlist("movie:990");
+    fake.AddToWatchlist("tv:2101");
+    // And enough more to run past a page of eight, so Home's row offers "See all".
+    foreach (var id in new[] { 1000, 1002, 1005, 1007, 1008, 1009 }) fake.AddToWatchlist($"movie:{id}");
+    // Something downloading, for the progress bar and the list's percentage.
+    fake.SetDownloads("movie:1003", [new Aperture.Core.Requests.DownloadProgress("Northbound.2022.2160p.mkv",
+        8_000_000_000, 2_600_000_000, "downloading", TimeSpan.FromMinutes(23), null)]);
+    // Pages of eight, so a custom row can outgrow its first page and offer "See all".
+    fake.SliderPageSize = 8;
+    fake.AddCustomRow(new Aperture.Core.Requests.DiscoverSlider(21, Aperture.Core.Requests.SliderKind.MovieKeyword,
+        "Slow cinema", "4565", true, 2), [.. Enumerable.Range(1000, 10).Select(id => $"movie:{id}"), "movie:990"]);
+    // A streaming-service row, as an administrator adds one: a name, a region, services.
+    fake.AddCustomRow(new Aperture.Core.Requests.DiscoverSlider(20, Aperture.Core.Requests.SliderKind.TvStreaming,
+        "On Netflix", "SE,8", true, 12), "tv:2000", "tv:2102", "tv:2104");
+    // Something behind the first studio and network cards, for their pages.
+    fake.AddCompanyTitles(Aperture.Core.Requests.DiscoverKind.Movie, 2, "movie:1000", "movie:1002", "movie:1005", "movie:990");
+    fake.AddCompanyTitles(Aperture.Core.Requests.DiscoverKind.Tv, 213, "tv:2000", "tv:2100", "tv:2101", "tv:2103");
+    // Problem reports, for the Issues page: two open (one answered), one resolved.
+    var now = DateTimeOffset.UtcNow;
+    var subs = fake.AddIssue("tv:2000", Aperture.Core.Requests.IssueType.Subtitles,
+        "The subtitles on this one are for the previous episode — the lines run about a scene behind.",
+        1, 4, at: now.AddHours(-5));
+    fake.AddComment(subs.Id, "Found it: the file was named for E03. Swapping it tonight.", 1, "fredrik");
+    fake.AddComment(subs.Id, "Thanks! I'll check tomorrow.");
+    fake.AddIssue("movie:990", Aperture.Core.Requests.IssueType.Audio,
+        "No sound after the first reel.", at: now.AddDays(-2), by: "sam", byId: 3);
+    fake.AddIssue("movie:1003", Aperture.Core.Requests.IssueType.Video, "Blocky in the dark scenes.",
+        status: Aperture.Core.Requests.IssueStatus.Resolved, at: now.AddDays(-9));
+    // Two of fredrik's own, for the reporter's view: one answered, one resolved.
+    var mine = fake.AddIssue("movie:1000", Aperture.Core.Requests.IssueType.Audio,
+        "The sound drops out for a few seconds around the hour mark.", at: now.AddDays(-1), byId: 1, by: "fredrik");
+    fake.AddComment(mine.Id, "Re-downloading it — should be back in an hour.");
+    fake.AddIssue("movie:1002", Aperture.Core.Requests.IssueType.Subtitles, "No English subtitles.",
+        status: Aperture.Core.Requests.IssueStatus.Resolved, at: now.AddDays(-12), byId: 1, by: "fredrik");
+    return fake;
 }
 
 // Enough of a library to render every surface: a shelf, something half-watched, a series
@@ -222,13 +347,15 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
         .AddLibrary("movies", "Films", Aperture.Core.LibraryKind.Movies)
         .AddLibrary("shows", "Series", Aperture.Core.LibraryKind.TvShows);
     string[] titles = ["Stalker", "Solaris", "The Mirror", "Andrei Rublev", "Nostalghia", "The Sacrifice",
-                       "Ivan's Childhood", "Mirror of Days", "Northern Light", "The Long Take"];
+                       "Ivan's Childhood", "Mirror of Days", "Northern Light", "The Long Take",
+                       // Past a "Latest in" row's twelve, so Home offers "See all".
+                       "Winter Light", "The Silence", "Persona"];
     for (int i = 0; i < titles.Length; i++)
         fake.AddMovie("m" + i, titles[i], "movies", 1962 + i * 3, 96 + i * 7,
             resume: i == 1 ? TimeSpan.FromMinutes(58) : null, played: i == 2);
     fake.AddItem(new Aperture.Core.MediaItem
     {
-        Id = "s1", Name = "The Long Way Home", Kind = Aperture.Core.MediaKind.Series,
+        Id = "s1", Name = "The Long Way Home", Kind = Aperture.Core.MediaKind.Series, TmdbId = 2000,
         ProductionYear = 2019, ChildCount = 8, UnplayedItemCount = 5,
         Overview = "A fixture series, for looking at the shelf.",
     }, "shows");
@@ -243,6 +370,12 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
         }, "s1");
     fake.ResumeIds.Add("m1");
     fake.ResumeIds.Add("e4");
+    // Enough more half-watched to fill Continue watching past its twelve, so it offers "See all".
+    foreach (var i in new[] { 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })
+    {
+        fake.Update(fake.Item("m" + i)! with { ResumePosition = TimeSpan.FromMinutes(12 + i * 5) });
+        fake.ResumeIds.Add("m" + i);
+    }
     fake.NextUpIds.Add("e5");
     return fake;
 }

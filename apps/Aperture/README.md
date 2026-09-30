@@ -22,7 +22,11 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
 
 - **Home** is Continue watching, Next up, then what each library has added. Rows
   page sideways with two buttons rather than scrolling — a horizontal scroller
-  nested in the page's vertical one is the framework's wheel-capture trap.
+  nested in the page's vertical one is the framework's wheel-capture trap. A
+  library's "Latest in" row that comes back full has "See all": the library itself,
+  newest first and unfiltered, which is the very query the row is the first twelve of.
+  Full Continue watching and Next up rows have one too, opening everything part-watched
+  (as stills) or every series' next episode.
   That order is a default: the menu in each row's heading moves it, hides it, or
   folds the two “what now” rows into one “Up next”. The choices are keyed by row
   in the settings file, and a hidden row is listed at the foot of the page with a
@@ -95,6 +99,77 @@ progress every ten seconds and on every pause, stopped — which is what drives
 on every other device. Resume seeks client-side once the backend has loaded: the
 stream URL always starts at the first byte.
 
+## Requests (Jellyseerr / Seerr)
+
+Connect a request server under **Settings → Requests** and the rail grows two buttons.
+**Discover** is the server's shelves — trending, popular, coming soon — as the same posters
+as the library's, each marked with where it stands: in the library, asked for, on its way.
+**Requests** is who asked for what, with Approve and Decline for someone allowed to, and
+Withdraw for your own while nobody has acted on it. Search asks both servers at once, so a
+film the library does not have is one click from being asked for.
+
+A title the library has opens the *library's* page, with its Play button — the request
+server's `jellyfinMediaId` is the join. A series with some seasons in opens the discovery
+page instead, which offers both the library and the seasons still to ask for.
+
+A series in the library that is missing seasons says so on its own page, with a Request button
+beside Play; something being downloaded shows how far it has got; and an allowance that is
+nearly spent is said before the button is pressed.
+
+Discover follows the request server administrator's own layout — its order, its switched-off
+rows, its custom rows (streaming-service rows among them) — and every row of titles that runs
+past one page has a "See all" page — with genre rows that open genre
+pages, studio and network rows of
+logos that open everything a studio made or a network aired, and a name in a title's cast
+opens everything that person is in. A bookmark keeps a title on the watchlist, which has a row on Home too (with its own
+"See all" once it runs past a page). Someone the
+server lets choose can send a request to a particular Radarr or Sonarr, quality and folder.
+Something wrong with what is playing (no sound, the wrong subtitles) is reported from the
+player's title strip, and whoever looks after the library reads the reports under **Issues**
+— a rail button (with a count of open ones) for someone the server lets read everyone's: the
+conversation, a reply box, Resolve and Reopen. Whoever reported it has **Your reports** instead:
+their own, with a mark (and a toast) when one has been answered or resolved since they last
+read it. And when something you asked for arrives, the app says so — the server
+has no push channel, so it looks every few minutes, and says each arrival once.
+
+**It speaks the one API Jellyseerr 2.x and Seerr 3.x share** (Seerr is what Jellyseerr and
+Overseerr merged into in February 2026). There is no .NET client on NuGet, and the published
+OpenAPI spec leaves out exactly the fields Aperture reads (`jellyfinMediaId`, per-season
+status, request seasons) and gets status 6 wrong — so the client is hand-written over
+`HttpClient` with a source-generated `System.Text.Json` context, the same shape as Junction's
+GitLab client, and native-AOT safe for the same reason.
+
+Signing in, three ways, in the order offered:
+
+| | What is kept |
+|---|---|
+| **Your Jellyfin account, nothing typed** (Seerr 3.4+). The server opens a Jellyfin Quick Connect request; Aperture approves the code itself with the session it already holds. | the session cookie, in the OS credential store |
+| **Your Jellyfin password**, for Jellyseerr 2.x or a Jellyfin with Quick Connect off. Sent once. | the session cookie |
+| **The server's API key.** It is the administrator's, so Aperture finds your Jellyfin user among the server's users and acts as them (`X-API-User`); requests land in your name. | the key |
+
+The session cookie lasts 30 days; after that Settings asks again. The request server is
+paired with the Jellyfin server it fills — signing out of one closes the other, and
+forgetting the Jellyfin account forgets its request server too.
+
+Artwork comes from TMDB, or through the server's own image cache when its administrator
+turned that on. **The poster cache only ever sends the Jellyfin session header to the
+Jellyfin server** — it used to send it to any host, which was harmless while every poster
+came from Jellyfin and would have handed the token to TMDB the moment discovery posters did.
+
+To look at it without a server, `--seerr-demo` mounts a fixture request server beside the
+fixture library; `--seerr <address> --seerr-api-key-file <path>` uses a real one:
+
+```bash
+dotnet run .claude/skills/run-hultui-app/driver.cs -- --app aperture --seerr-demo --out shots 'click:@Discover' shot:discover
+```
+
+and `--probe` reads one from the command line, read-only, which is also the native build's
+smoke test for this client:
+
+```bash
+dotnet run --project apps/Aperture/Aperture -- --probe jellyfin.home --api-key-file ~/jf.key --seerr seerr.home --seerr-api-key-file ~/seerr.key
+```
+
 ## Installing it
 
 Tagging `aperture-v<x.y.z>` builds a Windows installer and publishes it as a release
@@ -159,7 +234,9 @@ dotnet test tests/Aperture.Tests
 ```
 
 The live tests skip themselves unless `APERTURE_LIVE_SERVER` and
-`APERTURE_API_KEY` (or `APERTURE_API_KEY_FILE`) are set — they exist because the
+`APERTURE_API_KEY` (or `APERTURE_API_KEY_FILE`) are set — and the request-server ones
+unless `APERTURE_SEERR_SERVER` and `APERTURE_SEERR_API_KEY` (or `_FILE`) are; those are
+read-only, and never request anything. They exist because the
 part of a client that breaks is never the part a fake can model. One of them
 caught the thing this whole app turned on: **Jellyfin writes ids without dashes**,
 which the SDK's JSON reader refuses. `Aperture.Core/JellyfinSerialization.cs` is

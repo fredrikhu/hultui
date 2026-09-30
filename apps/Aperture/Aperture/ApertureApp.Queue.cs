@@ -117,6 +117,7 @@ public sealed partial class ApertureApp
     {
         if (!QueueIsRunning) return;
         _queueOpen = !_queueOpen;
+        if (_queueOpen) _reportOpen = false;
         Rerender();
     }
 

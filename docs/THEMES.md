@@ -113,6 +113,16 @@ draws one exposes it:
 `ProgressBarTheme`, `SpinnerTheme` and `SplitterTheme` draw no border. `FocusVisualTheme`
 is the two-ring focus indicator, not a border, and is drawn outside the control.
 
+**Writing a control's text style from the theme.** A control whose text takes its colour,
+size or weight from the theme — `ButtonElement`, `ToastElement`, the text fields — writes it
+into its own `Inherited` style in `ApplyTheme`, and its children read it from there.
+`StyleResolver` calls `ApplyTheme` *before* it resolves the element's inherited style, so
+those writes count in the same pass. (Until 2026-09-30 it was the other way round: a
+button's label drew in its parent's colour and size until something else re-dirtied the
+button, and the button tests never saw it because they called `ApplyTheme` directly and
+read the button, not the label. Test what the child resolves.) `ApplyTheme` must not read
+`ResolvedInherited` — it is not this pass's yet.
+
 ## Adding a scheme
 
 Add a `NamedTheme` to `ThemeCatalog` and put it in `All`. Transcribe the scheme's published

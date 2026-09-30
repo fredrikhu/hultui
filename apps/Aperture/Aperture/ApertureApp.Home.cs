@@ -1,4 +1,5 @@
 ﻿using Aperture.Core;
+using Aperture.Core.Requests;
 using Aperture.Theme;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -22,13 +23,20 @@ public sealed partial class ApertureApp
 {
     /// <summary>One shelf on home, as the current data and the current preferences make
     /// it. Built fresh each frame — the settings store keys and an order, never items.</summary>
+    /// <param name="Titles">When set, a row of the request server's titles rather than
+    /// library items — the watchlist — drawn as discovery cards.</param>
+    /// <param name="SeeAll">Where "See all" goes, for a row with more behind it than it shows.</param>
     private sealed record HomeRow(
         string Key, string Title, IReadOnlyList<MediaItem> Items,
-        float CardWidth, bool Stills, string? Trailing = null);
+        float CardWidth, bool Stills, IReadOnlyList<DiscoverItem>? Titles = null, Action? SeeAll = null)
+    {
+        public int Count => Titles?.Count ?? Items.Count;
+    }
 
     internal const string ResumeRowKey = "resume";
     internal const string NextUpRowKey = "nextup";
     internal const string CombinedRowKey = "upnext";
+    internal const string WatchlistRowKey = "watchlist";
     internal static string LatestRowKey(string libraryId) => "latest-" + libraryId;
 
     private Element BuildHomeView()
@@ -56,8 +64,12 @@ public sealed partial class ApertureApp
         // next, which is how every shelf on a television behaves. The flat list is built
         // in the order the rows are drawn — so reordering the shelves reorders the walk —
         // and each card is handed its place in it.
-        var walk = new List<MediaItem>();
-        foreach (var row in shown) walk.AddRange(row.Items);
+        var walk = new List<object>();
+        foreach (var row in shown)
+        {
+            if (row.Titles is { } titles) walk.AddRange(titles);
+            else walk.AddRange(row.Items);
+        }
         SetCursorList($"home:{string.Join(',', shown.Select(r => r.Key))}:{walk.Count}",
             walk, VisibleCards(Halide.PosterWidth));
 
@@ -67,12 +79,14 @@ public sealed partial class ApertureApp
             var row = shown[index];
             int start = cursorBase;
             var items = row.Items;
-            page.AddChild(CardRow(row.Title, items.Count,
-                i => row.Stills ? StillCard(items[i], cursorIndex: start + i)
-                                : PosterCard(items[i], cursorIndex: start + i),
-                row.CardWidth, "row-" + row.Key, trailing: row.Trailing,
-                headingExtra: RowMenuButton(row, all)));
-            cursorBase += items.Count;
+            var titles = row.Titles;
+            page.AddChild(CardRow(row.Title, row.Count,
+                i => titles is not null ? DiscoverCard(titles[i], row.CardWidth, cursorIndex: start + i)
+                    : row.Stills ? StillCard(items[i], cursorIndex: start + i)
+                    : PosterCard(items[i], cursorIndex: start + i),
+                row.CardWidth, "row-" + row.Key,
+                headingExtra: HomeRowHeadingExtra(row, all)));
+            cursorBase += row.Count;
         }
 
         if (shown.Count < all.Count) page.AddChild(HiddenRowsFooter(all, hidden));
@@ -99,17 +113,34 @@ public sealed partial class ApertureApp
         else
         {
             if (ResumeItems.Count > 0)
-                rows.Add(new HomeRow(ResumeRowKey, "Continue watching", ResumeItems, Halide.StillWidth, Stills: true));
+                rows.Add(new HomeRow(ResumeRowKey, "Continue watching", ResumeItems, Halide.StillWidth, Stills: true,
+                    SeeAll: ResumeItems.Count >= ResumeRowSize
+                        ? () => Navigate(new Route(ApertureView.ContinueWatching))
+                        : null));
             if (NextUpItems.Count > 0)
-                rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false));
+                rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false,
+                    SeeAll: NextUpItems.Count >= NextUpRowSize
+                        ? () => Navigate(new Route(ApertureView.NextUp))
+                        : null));
         }
+
+        // What you meant to watch, from the request server — after what you are already
+        // watching, before what has merely arrived. Only with a request server connected
+        // and something on the list: like every row here, an empty one is not drawn.
+        if (_requestServer is not null && HomeWatchlist.Count > 0)
+            rows.Add(new HomeRow(WatchlistRowKey, "Your watchlist", [], Halide.PosterWidth, Stills: false,
+                Titles: HomeWatchlist,
+                SeeAll: HomeWatchlistHasMore
+                    ? () => Navigate(new Route(ApertureView.DiscoverAll, WatchlistRouteId, "Your watchlist"))
+                    : null));
 
         foreach (var library in Libraries)
         {
             var latest = LatestIn(library.Id);
             if (latest.Count == 0) continue;
-            rows.Add(new HomeRow(LatestRowKey(library.Id), $"Latest in {library.Name}",
-                latest, Halide.PosterWidth, Stills: false, Trailing: "open"));
+            var (id, name) = (library.Id, library.Name);
+            rows.Add(new HomeRow(LatestRowKey(id), $"Latest in {name}", latest, Halide.PosterWidth, Stills: false,
+                SeeAll: latest.Count >= LatestRowSize ? () => OpenLatest(id, name) : null));
         }
 
         var order = _settings.Data.HomeRowOrder;
@@ -140,6 +171,18 @@ public sealed partial class ApertureApp
 
     /// <summary>The row's own menu, in its heading. Kept to the things that are about
     /// <em>this</em> row, so it reads as "this shelf" rather than "home settings".</summary>
+    /// <summary>What sits at the end of a row's heading: its menu — and, for a row with
+    /// more behind it (the watchlist past one page, a library's latest), "See all" before it.</summary>
+    private Element HomeRowHeadingExtra(HomeRow row, List<HomeRow> all)
+    {
+        var menu = RowMenuButton(row, all);
+        if (row.SeeAll is not { } seeAll) return menu;
+        var both = Flex.Row(gap: Halide.S1).AlignItems(AlignItems.Center);
+        both.AddChild(SeeAllButton(row.Title, "row-" + row.Key + "-see-all", seeAll));
+        both.AddChild(menu);
+        return both;
+    }
+
     private Element RowMenuButton(HomeRow row, List<HomeRow> all)
     {
         var button = Ui.IconButton(Icons.More, $"Customise “{row.Title}”", () => { }, 14f,

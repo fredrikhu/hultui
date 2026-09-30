@@ -97,4 +97,12 @@ public interface IMediaLibrary : IDisposable
 
     /// <summary>Adds or removes the heart.</summary>
     Task<ApertureResult<bool>> SetFavoriteAsync(string itemId, bool favorite, CancellationToken ct = default);
+
+    /// <summary>
+    /// Approves a Quick Connect code as the signed-in user — what the "Quick Connect" page
+    /// of Jellyfin's own clients does. Aperture uses it to sign itself into a request
+    /// server that asks Jellyfin for a code, so no password has to be typed twice.
+    /// </summary>
+    Task<ApertureResult<bool>> AuthorizeQuickConnectAsync(string code, CancellationToken ct = default) =>
+        Task.FromResult(ApertureResult<bool>.Fail(ApertureFailureKind.Forbidden, "Quick Connect is not available"));
 }

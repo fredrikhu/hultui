@@ -25,6 +25,56 @@ public sealed class ServerAccountData
     public ServerInfo ToServerInfo() => new(Address, ServerName, Version, ServerId);
 }
 
+/// <summary>How a request server was signed into, which decides what the secret in the
+/// credential store is.</summary>
+public enum RequestServerAuth
+{
+    /// <summary>The user's own Jellyfin account: the secret is the session cookie the
+    /// request server handed back, and it acts as that user with that user's quota.</summary>
+    Session,
+    /// <summary>The server's API key from its settings page. It acts as the administrator
+    /// unless a user is named, which is why <see cref="RequestServerAccountData.UserId"/>
+    /// is kept beside it.</summary>
+    ApiKey,
+}
+
+/// <summary>
+/// The request server (Jellyseerr, or Seerr — its successor, same API) paired with a Jellyfin
+/// server. <b>No secret lives here</b>: the session cookie or API key is in the credential
+/// store under <see cref="ApertureSettings.RequestCredentialService"/>, keyed by the
+/// Jellyfin server id — a request server is only ever used alongside the library it fills.
+/// </summary>
+public sealed class RequestServerAccountData
+{
+    /// <summary>The Jellyfin server this pairs with.</summary>
+    public string JellyfinServerId { get; set; } = "";
+    /// <summary>The address that answered, normalized: <c>http://jellyseerr.home:5055</c>.</summary>
+    public string Address { get; set; } = "";
+    public RequestServerAuth Auth { get; set; }
+    /// <summary>The request server's own user id — who requests are made as.</summary>
+    public int UserId { get; set; }
+    public string UserName { get; set; } = "";
+    public DateTimeOffset SignedInAt { get; set; }
+
+    /// <summary>Requests of this user's already known to have arrived, by request id — so
+    /// "it's in your library" is said once per request, not once per launch. Null until the
+    /// first look, which records what is there without announcing any of it.</summary>
+    public List<int>? SeenAvailable { get; set; }
+
+    /// <summary>This user's own problem reports as they last read them here, by issue id —
+    /// so an answer or a resolve since then shows as news. Null until the first look, which
+    /// records what is there without calling any of it new.</summary>
+    public List<SeenIssue>? SeenIssues { get; set; }
+}
+
+/// <summary>A report as its reporter last read it: how many messages, and whether resolved.</summary>
+public sealed class SeenIssue
+{
+    public int Id { get; set; }
+    public int Comments { get; set; }
+    public bool Resolved { get; set; }
+}
+
 /// <summary>How a library draws what it holds.</summary>
 public enum LibraryLayout { Grid, List }
 
@@ -35,6 +85,9 @@ public sealed class ApertureSettingsData
     public string DeviceId { get; set; } = "";
 
     public List<ServerAccountData> Servers { get; set; } = [];
+
+    /// <summary>Request servers, one per Jellyfin server at most.</summary>
+    public List<RequestServerAccountData> RequestServers { get; set; } = [];
 
     /// <summary>The server id to open on launch. Null means the connect screen.</summary>
     public string? ActiveServerId { get; set; }
@@ -101,6 +154,11 @@ public sealed class ApertureSettingsData
     {
         Servers ??= [];
         Servers.RemoveAll(s => string.IsNullOrWhiteSpace(s.Address) || string.IsNullOrWhiteSpace(s.ServerId));
+        RequestServers ??= [];
+        RequestServers.RemoveAll(r => string.IsNullOrWhiteSpace(r.Address) || string.IsNullOrWhiteSpace(r.JellyfinServerId));
+        // One per Jellyfin server: the last one written wins, which is the one in use.
+        RequestServers = RequestServers.GroupBy(r => r.JellyfinServerId, StringComparer.Ordinal)
+            .Select(g => g.Last()).ToList();
         HomeRowOrder ??= [];
         HiddenHomeRows ??= [];
         // A key listed twice would make "move up" swap a row with itself.
@@ -174,13 +232,49 @@ public sealed class ApertureSettings
         return stored;
     }
 
-    /// <summary>Forgets a server: its token first (the part that matters), then its row.</summary>
+    /// <summary>Forgets a server: its token first (the part that matters), then its row —
+    /// and the request server paired with it, whose session belongs to the same person.</summary>
     public void Forget(string serverId)
     {
         _credentials.Delete(CredentialService, serverId);
         Data.Servers.RemoveAll(s => s.ServerId == serverId);
         if (Data.ActiveServerId == serverId) Data.ActiveServerId = null;
+        ForgetRequestServer(serverId, save: false);
         Save();
+    }
+
+    // ── The request server ───────────────────────────────────────────────
+
+    /// <summary>Credential-store service for request-server secrets; the account is the
+    /// Jellyfin server id the request server is paired with.</summary>
+    public const string RequestCredentialService = "aperture|seerr";
+
+    /// <summary>The request server paired with a Jellyfin server, or null.</summary>
+    public RequestServerAccountData? RequestServerFor(string jellyfinServerId) =>
+        Data.RequestServers.FirstOrDefault(r => r.JellyfinServerId == jellyfinServerId);
+
+    /// <summary>The session cookie or API key for the request server paired with a Jellyfin
+    /// server — which of the two is recorded in <see cref="RequestServerAccountData.Auth"/>.</summary>
+    public string? RequestSecretFor(string jellyfinServerId) =>
+        _credentials.Read(RequestCredentialService, jellyfinServerId);
+
+    /// <summary>Records a request-server sign-in: who and where to the file, the secret to
+    /// the store. False when the secret could not be stored — it works for this run only.</summary>
+    public bool RememberRequestServer(RequestServerAccountData account, string secret)
+    {
+        Data.RequestServers.RemoveAll(r => r.JellyfinServerId == account.JellyfinServerId);
+        Data.RequestServers.Add(account);
+        bool stored = _credentials.Write(RequestCredentialService, account.JellyfinServerId, secret);
+        Save();
+        return stored;
+    }
+
+    /// <summary>Disconnects the request server paired with a Jellyfin server.</summary>
+    public void ForgetRequestServer(string jellyfinServerId, bool save = true)
+    {
+        _credentials.Delete(RequestCredentialService, jellyfinServerId);
+        Data.RequestServers.RemoveAll(r => r.JellyfinServerId == jellyfinServerId);
+        if (save) Save();
     }
 
     public void Save()

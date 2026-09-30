@@ -213,6 +213,7 @@ public sealed partial class ApertureApp
         _videoPlayer = null;
         _playback = null;
         _playingItem = null;
+        _reportOpen = false;
         _resumeApplied = false;
 
         if (!keepSheet) ClearQueue();
@@ -353,7 +354,13 @@ public sealed partial class ApertureApp
 
         // One panel at a time: they occupy the same side, and stacking them would hide
         // the picture entirely.
-        if (_chaptersOpen && PlayingChapters.Count > 0)
+        if (_reportOpen && CanReportProblems)
+        {
+            var panel = BuildReportPanel();
+            panel.Key = "report";
+            column.AddChild(panel);
+        }
+        else if (_chaptersOpen && PlayingChapters.Count > 0)
         {
             var panel = BuildChapterPanel();
             panel.Key = "chapters";
@@ -369,7 +376,7 @@ public sealed partial class ApertureApp
         sheet.AddChild(column);
         sheet.On<KeyDownEvent>(e =>
         {
-            if (e.Key == KeyCode.Escape)
+            if (e.Key == KeyCode.Escape && !e.Handled)
             {
                 StopPlayback(report: true);
                 e.Handled = true;
@@ -424,6 +431,12 @@ public sealed partial class ApertureApp
         if (PlayingChapters.Count > 0)
             strip.AddChild(Ui.IconButton(Icons.Episodes, $"Chapters ({PlayingChapters.Count}) — C",
                 ToggleChapters, 15f, _chaptersOpen ? Halide.Accent : Halide.TextDim, "player-chapters"));
+
+        // Something wrong with what is playing goes to the request server, for whoever
+        // looks after the library.
+        if (CanReportProblems)
+            strip.AddChild(Ui.IconButton(Icons.Report, "Report a problem", ToggleReport, 15f,
+                _reportOpen ? Halide.Accent : Halide.TextDim, "player-report"));
 
         // What the server is actually doing with the stream: a direct play and a transcode
         // feel identical until something stutters, and then it is the first question.
