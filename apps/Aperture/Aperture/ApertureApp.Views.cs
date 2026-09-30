@@ -162,6 +162,17 @@ public sealed partial class ApertureApp
             stills: true);
     }
 
+    /// <summary>Home's Next up row in full: the next episode of every series being
+    /// watched, as posters, as on the row.</summary>
+    private Element BuildNextUpView()
+    {
+        EnsureNextUpAll();
+        return ShelfView("Next up", NextUpAll, NextUpAllLoading,
+            "next-up-view", Icons.Shows,
+            emptyHeadline: "Nothing up next",
+            emptyHint: "Finish an episode and the one after it lands here.");
+    }
+
     /// <summary>
     /// A titled wrap of posters over a list that is already loaded in full — a person's
     /// credits, the favourites, what is part-watched (as stills). Not the library grid:

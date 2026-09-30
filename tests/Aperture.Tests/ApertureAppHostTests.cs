@@ -776,14 +776,47 @@ public class ApertureAppHostTests
     }
 
     [Fact]
-    public void AShortContinueWatchingRowHasNoSeeAll()
+    public void AFullNextUpRowsSeeAllIsEverySeriesNextEpisode()
     {
-        Host(Library(), (session, app) =>
+        var library = Library();
+        for (int n = 1; n <= 13; n++)
+        {
+            library.AddItem(new MediaItem
+            {
+                Id = "next" + n, Name = "Pilot " + n, Kind = MediaKind.Episode,
+                SeriesId = "show" + n, SeriesName = "Show " + n, ParentIndexNumber = 1, IndexNumber = 2,
+                RunTime = TimeSpan.FromMinutes(30),
+            }, "shows");
+            library.NextUpIds.Add("next" + n);
+        }
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Next up");
+            session.Window.FindByAutomationId("row-nextup-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.NextUp, app.Current.View);
+            Assert.Equal(13, app.NextUpAll.Count);
+            Assert.Contains("GetNextUp(limit=200)", library.Calls);
+            // The thirteenth, which the row's twelve left out.
+            PumpUntilShown(session, "Show 13");
+        });
+    }
+
+    [Fact]
+    public void ShortContinueWatchingAndNextUpRowsHaveNoSeeAll()
+    {
+        var library = Library();
+        library.NextUpIds.Add("e5");
+        Host(library, (session, app) =>
         {
             PumpUntilShown(session, "Continue watching");
+            PumpUntilShown(session, "Next up");
             for (int i = 0; i < 4; i++) session.PumpFrame();
             Assert.Null(session.Window.FindByAutomationId("row-resume-see-all"));
             Assert.NotNull(session.Window.FindByAutomationId("row-resume-menu"));
+            Assert.Null(session.Window.FindByAutomationId("row-nextup-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-nextup-menu"));
         });
     }
 

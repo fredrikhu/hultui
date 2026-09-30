@@ -25,7 +25,8 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
   nested in the page's vertical one is the framework's wheel-capture trap. A
   library's "Latest in" row that comes back full has "See all": the library itself,
   newest first and unfiltered, which is the very query the row is the first twelve of.
-  A full Continue watching row has one too, opening everything part-watched as stills.
+  Full Continue watching and Next up rows have one too, opening everything part-watched
+  (as stills) or every series' next episode.
   That order is a default: the menu in each row's heading moves it, hides it, or
   folds the two “what now” rows into one “Up next”. The choices are keyed by row
   in the settings file, and a hidden row is listed at the foot of the page with a

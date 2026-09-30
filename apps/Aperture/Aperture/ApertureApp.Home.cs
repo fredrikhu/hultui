@@ -118,7 +118,10 @@ public sealed partial class ApertureApp
                         ? () => Navigate(new Route(ApertureView.ContinueWatching))
                         : null));
             if (NextUpItems.Count > 0)
-                rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false));
+                rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false,
+                    SeeAll: NextUpItems.Count >= NextUpRowSize
+                        ? () => Navigate(new Route(ApertureView.NextUp))
+                        : null));
         }
 
         // What you meant to watch, from the request server — after what you are already

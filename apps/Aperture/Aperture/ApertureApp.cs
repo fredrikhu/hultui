@@ -42,6 +42,8 @@ public enum ApertureView
     DiscoverAll,
     /// <summary>Everything part-watched — Home's Continue watching row in full.</summary>
     ContinueWatching,
+    /// <summary>Every series' next episode — Home's Next up row in full.</summary>
+    NextUp,
     /// <summary>Problem reports, for someone who may read everyone's.</summary>
     Issues,
     /// <summary>One report and its conversation; the Id is the server's issue id.</summary>
@@ -222,6 +224,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.Person => BuildPersonView(Current),
             ApertureView.Favourites => BuildFavouritesView(),
             ApertureView.ContinueWatching => BuildContinueWatchingView(),
+            ApertureView.NextUp => BuildNextUpView(),
             ApertureView.Search => BuildSearchView(),
             ApertureView.Settings => BuildSettingsView(),
             ApertureView.Discover => BuildDiscoverView(),
@@ -325,8 +328,8 @@ public sealed partial class ApertureApp : Component, IDisposable
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 1, 0, 0));
 
         rail.AddChild(RailButton(Icons.Home, "Home", "1",
-            // Continue watching in full is Home's, as a Discover row in full is Discover's.
-            active: Current.View is ApertureView.Home or ApertureView.ContinueWatching,
+            // Home's rows in full are Home's, as a Discover row in full is Discover's.
+            active: Current.View is ApertureView.Home or ApertureView.ContinueWatching or ApertureView.NextUp,
             onClick: () => GoHome()));
 
         int key = 2;

@@ -45,7 +45,7 @@ public sealed partial class ApertureApp
         _resume.Load(("resume", _dataGeneration),
             () => Fetch(() => lib.GetResumeAsync(ResumeRowSize), (IReadOnlyList<MediaItem>)[], "Continue watching"));
         _nextUp.Load(("nextup", _dataGeneration),
-            () => Fetch(() => lib.GetNextUpAsync(12), (IReadOnlyList<MediaItem>)[], "Next up"));
+            () => Fetch(() => lib.GetNextUpAsync(NextUpRowSize), (IReadOnlyList<MediaItem>)[], "Next up"));
 
         // One load for every library's latest row: two or three small calls, and a single
         // key means the home screen settles in one step rather than flickering in per row.
@@ -68,6 +68,9 @@ public sealed partial class ApertureApp
     internal IReadOnlyList<MediaItem> NextUpItems => _nextUp.Value;
     /// <summary>How many Home's Continue watching row asks for; a full row has "See all".</summary>
     internal const int ResumeRowSize = 12;
+
+    /// <summary>How many Home's Next up row asks for; a full row has "See all".</summary>
+    internal const int NextUpRowSize = 12;
 
     /// <summary>How many a "Latest in" row asks for. A row that comes back full may have
     /// more behind it — which is when it offers "See all".</summary>
@@ -327,6 +330,20 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaItem> ResumeAll => _resumeAll.Value;
     internal bool ResumeAllLoading => _resumeAll.IsLoading;
+
+    private readonly AsyncLoader<IReadOnlyList<MediaItem>> _nextUpAll = new([]);
+
+    /// <summary>Every series' next episode, for the Next up page — one per series being
+    /// watched, so as short a list as Continue watching, and in one call for the same reason.</summary>
+    private void EnsureNextUpAll()
+    {
+        if (_library is not { } lib) return;
+        _nextUpAll.Load(("nextup-all", _dataGeneration), () => Fetch(
+            () => lib.GetNextUpAsync(200), (IReadOnlyList<MediaItem>)[], "Next up"));
+    }
+
+    internal IReadOnlyList<MediaItem> NextUpAll => _nextUpAll.Value;
+    internal bool NextUpAllLoading => _nextUpAll.IsLoading;
 
     private void EnsureFavourites()
     {
