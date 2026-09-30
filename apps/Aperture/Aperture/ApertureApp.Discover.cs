@@ -50,7 +50,7 @@ public sealed partial class ApertureApp
             .ToList();
         var rows = DiscoverRows
             .Select(r => r.Kind == SliderKind.RecentRequests ? r with { Items = recent } : r)
-            .Where(r => r.Items.Count > 0 || r.Genres.Count > 0)
+            .Where(r => !r.IsEmpty)
             .ToList();
 
         if (rows.Count == 0)
@@ -72,6 +72,7 @@ public sealed partial class ApertureApp
         {
             walk.AddRange(row.Items);
             walk.AddRange(row.Genres);
+            walk.AddRange(row.Companies);
         }
         SetCursorList($"discover:{string.Join(',', rows.Select(r => r.Key))}:{walk.Count}", walk,
             VisibleCards(Halide.PosterWidth));
@@ -86,6 +87,14 @@ public sealed partial class ApertureApp
                 page.AddChild(CardRow(row.Title, genres.Count,
                     i => GenreCard(genres[i], cursorIndex: start + i), GenreCardWidth, "discover-row-" + row.Key));
                 cursorBase += genres.Count;
+                continue;
+            }
+            if (row.Companies.Count > 0)
+            {
+                var companies = row.Companies;
+                page.AddChild(CardRow(row.Title, companies.Count,
+                    i => CompanyCard(companies[i], cursorIndex: start + i), CompanyCardWidth, "discover-row-" + row.Key));
+                cursorBase += companies.Count;
                 continue;
             }
             var items = row.Items;
@@ -148,6 +157,64 @@ public sealed partial class ApertureApp
         return card.HoverBg(Halide.Raised);
     }
 
+    private const float CompanyCardWidth = 224f;
+
+    /// <summary>
+    /// A studio or network: its logo, white, on a plain card — as the server's own web page
+    /// draws them, and a row of logos reads as "places to go" as the genre backdrops do. The
+    /// name stands in for a logo that has not loaded, or will not.
+    /// </summary>
+    private Element CompanyCard(DiscoverCompany company, int cursorIndex = -1)
+    {
+        var kind = company.Kind == DiscoverKind.Movie ? "films" : "series";
+        var card = Box.New().Width(CompanyCardWidth).Height(128).FlexShrink(0)
+            .Padding(new Thickness(28, 32, 28, 32))
+            .CornerRadius(Halide.Radius2).Background(Halide.Surface)
+            .BorderColor(Halide.Border).BorderWidth(1f)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(AccessibilityRole.Button)
+            .AccessibleName($"{company.Name} {kind}")
+            .AutomationId($"company-{company.Key.Replace(':', '-')}");
+        card.IsFocusable = true;
+        if (cursorIndex >= 0)
+        {
+            TrackCursor(card, cursorIndex);
+            if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
+        }
+
+        var (image, status) = _posters.Get(RequestImages.Logo(company.LogoPath, (int)(CompanyCardWidth * 2), RequestImageBase));
+        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        {
+            var logo = Image.New(image);
+            logo.Fit = ImageFit.Contain;
+            card.AddChild(logo.Size(Dimension.Percent(100), Dimension.Percent(100)));
+        }
+        else
+        {
+            card.AddChild(Text.New(company.Name).FontSize(16f).FontWeight(FontWeight.SemiBold).TextColor(Halide.TextDim)
+                .MaxLines(2).TextOverflow(TextOverflow.Ellipsis));
+        }
+
+        card.OnClick(_ => OpenCompany(company));
+        return card.HoverBg(Halide.Raised);
+    }
+
+    internal void OpenCompany(DiscoverCompany company) =>
+        Navigate(new Route(ApertureView.DiscoverCompany, company.Key, company.Name));
+
+    /// <summary>A studio's films or a network's series, most popular first, a page at a time.</summary>
+    private Element BuildDiscoverCompanyView(Route route)
+    {
+        if (!DiscoverItem.TryParseKey(route.Id, out var kind, out var companyId))
+            return EmptyState(Icons.Warning, "That isn't a studio or a network", null, "company-bad");
+        EnsureCompanyPage(kind, companyId);
+        var name = route.Title ?? (kind == DiscoverKind.Movie ? "Studio" : "Network");
+        return TitleWall($"{name} {(kind == DiscoverKind.Movie ? "films" : "series")}", WallItems, WallLoading, WallHasMore,
+            () => { EnsureCompanyPage(kind, companyId, more: true); Rerender(); }, "company-view", Icons.Discover,
+            "Nothing here", $"{RequestServerTitle} has nothing to show for {name}.");
+    }
+
     internal void OpenGenre(DiscoverGenre genre) =>
         Navigate(new Route(ApertureView.DiscoverGenre,
             $"{(genre.Kind == DiscoverKind.Movie ? "movie" : "tv")}:{genre.Id}",
@@ -161,7 +228,7 @@ public sealed partial class ApertureApp
         if (!DiscoverItem.TryParseKey(route.Id, out var kind, out var genreId))
             return EmptyState(Icons.Warning, "That isn't a genre", null, "genre-bad");
         EnsureGenrePage(kind, genreId);
-        return TitleWall(route.Title ?? "Genre", GenreItems, GenreLoading, GenreHasMore,
+        return TitleWall(route.Title ?? "Genre", WallItems, WallLoading, WallHasMore,
             () => { EnsureGenrePage(kind, genreId, more: true); Rerender(); }, "genre-view", Icons.Discover,
             "Nothing in that genre", $"{RequestServerTitle} has nothing to show under it.");
     }

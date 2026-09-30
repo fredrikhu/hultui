@@ -273,6 +273,12 @@ public sealed class SeerrServer : IRequestServer
         PageAsync($"discover/{(kind == DiscoverKind.Movie ? "movies" : "tv")}?genre={genreId}&page={Math.Max(1, page)}",
             kind, ct);
 
+    public Task<ApertureResult<DiscoverPage>> DiscoverCompanyAsync(DiscoverKind kind, int companyId, int page = 1,
+        CancellationToken ct = default) =>
+        PageAsync(kind == DiscoverKind.Movie
+            ? $"discover/movies/studio/{companyId}?page={Math.Max(1, page)}"
+            : $"discover/tv/network/{companyId}?page={Math.Max(1, page)}", kind, ct);
+
     private async Task<ApertureResult<DiscoverPage>> PageAsync(string pathAndQuery, DiscoverKind? kind, CancellationToken ct)
     {
         var result = await _http.GetAsync(pathAndQuery, SeerrJson.Default.SeerrResultPageDto, ct).ConfigureAwait(false);

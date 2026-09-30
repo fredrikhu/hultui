@@ -189,6 +189,32 @@ public class LiveRequestServerTests
         Assert.NotEmpty(details.Value.Profiles);
         Assert.NotEmpty(details.Value.RootFolders);
     }
+    /// <summary>The studio and network lists are compiled in, so this is what notices one
+    /// going stale: every id still has titles behind it (the first of each list, which
+    /// is enough to prove the routes), and every logo still loads through the server's
+    /// image path.</summary>
+    [LiveRequestServerFact]
+    public async Task TheCompiledStudiosAndNetworksStillResolve()
+    {
+        using var server = await LiveRequestServer.ConnectAsync(null, Ct);
+        var disney = await server.DiscoverCompanyAsync(DiscoverKind.Movie, DiscoverCompanies.Studios[0].Id, ct: Ct);
+        Assert.True(disney.Ok, disney.Failure?.Message);
+        Assert.NotEmpty(disney.Value.Items);
+        var netflix = await server.DiscoverCompanyAsync(DiscoverKind.Tv, DiscoverCompanies.Networks[0].Id, ct: Ct);
+        Assert.True(netflix.Ok, netflix.Failure?.Message);
+        Assert.NotEmpty(netflix.Value.Items);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var missing = new List<string>();
+        foreach (var company in DiscoverCompanies.Studios.Concat(DiscoverCompanies.Networks))
+        {
+            using var response = await http.GetAsync(RequestImages.Logo(company.LogoPath, 224, server.Server.ImageBase), Ct);
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "image/png")
+                missing.Add($"{company.Name}: {(int)response.StatusCode}");
+        }
+        Assert.Empty(missing);
+    }
+
     /// <summary>Read only: listing and counting; answering or resolving would change the
     /// household's real reports.</summary>
     [LiveRequestServerFact]

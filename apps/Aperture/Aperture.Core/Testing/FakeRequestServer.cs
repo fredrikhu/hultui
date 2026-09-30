@@ -274,6 +274,7 @@ public sealed class FakeRequestServer : IRequestServer
     private readonly Dictionary<(DiscoverKind, int), List<string>> _genreTitles = [];
     private readonly List<DiscoverGenre> _genres = [];
     private readonly Dictionary<int, List<string>> _customRows = [];
+    private readonly Dictionary<(DiscoverKind, int), List<string>> _companyTitles = [];
 
     /// <summary>The administrator's discover layout. Null serves the server's own default —
     /// the twelve built-in rows, in the order a fresh install has them.</summary>
@@ -304,6 +305,13 @@ public sealed class FakeRequestServer : IRequestServer
     }
 
     public void AddToWatchlist(string key) => _watchlist.Add(key);
+
+    /// <summary>A studio's films (<see cref="DiscoverKind.Movie"/>) or a network's series.</summary>
+    public FakeRequestServer AddCompanyTitles(DiscoverKind kind, int companyId, params string[] keys)
+    {
+        _companyTitles[(kind, companyId)] = [.. keys];
+        return this;
+    }
 
     /// <summary>A requested title lands in the library — what the server's own scan records
     /// when Jellyfin picks the download up.</summary>
@@ -365,6 +373,15 @@ public sealed class FakeRequestServer : IRequestServer
         Calls.Add($"DiscoverGenre({kind},{genreId},{page})");
         if (Fail<DiscoverPage>() is { } failed) return failed;
         var items = _genreTitles.GetValueOrDefault((kind, genreId), []).Select(k => _titles[k].Item).ToList();
+        return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
+    }
+
+    public Task<ApertureResult<DiscoverPage>> DiscoverCompanyAsync(DiscoverKind kind, int companyId, int page = 1,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"DiscoverCompany({kind},{companyId},{page})");
+        if (Fail<DiscoverPage>() is { } failed) return failed;
+        var items = _companyTitles.GetValueOrDefault((kind, companyId), []).Select(k => _titles[k].Item).ToList();
         return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
     }
 

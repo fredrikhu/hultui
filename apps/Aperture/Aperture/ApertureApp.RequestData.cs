@@ -111,17 +111,21 @@ public sealed partial class ApertureApp
         // Off any view that needs it — their rail buttons have just gone, and a page with
         // no way back to it is a dead end.
         if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
-                or ApertureView.DiscoverPerson or ApertureView.Requests or ApertureView.Issues or ApertureView.Issue) > 0
+                or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.Requests
+                or ApertureView.Issues or ApertureView.Issue) > 0
             && _stack.Count == 0)
             _stack.Add(new Route(ApertureView.Home));
     }
 
     // ── Discover's rows: the administrator's layout ──────────────────────
 
-    /// <summary>One row of Discover, filled. Exactly one of the three lists is used, by
-    /// the row's kind: titles, genres to browse, or requests.</summary>
+    /// <summary>One row of Discover, filled. One of the lists is used, by the row's kind:
+    /// titles (requests become titles too), genres to browse, or studios and networks.</summary>
     internal sealed record DiscoverRow(string Key, string Title, SliderKind Kind,
-        IReadOnlyList<DiscoverItem> Items, IReadOnlyList<DiscoverGenre> Genres);
+        IReadOnlyList<DiscoverItem> Items, IReadOnlyList<DiscoverGenre> Genres, IReadOnlyList<DiscoverCompany> Companies)
+    {
+        public bool IsEmpty => Items.Count == 0 && Genres.Count == 0 && Companies.Count == 0;
+    }
 
     private readonly AsyncLoader<IReadOnlyList<DiscoverRow>> _discoverRows = new([]);
 
@@ -131,10 +135,11 @@ public sealed partial class ApertureApp
     /// gets the built-in default, which is what a fresh install has anyway.
     ///
     /// <para>Left out, on purpose: <b>recently added</b> (the library's own Home has it,
-    /// straight from Jellyfin, which is where it comes from), <b>studios</b> and
-    /// <b>networks</b> (the server's web page draws those from logo lists compiled into
-    /// it, which the API does not serve), and <b>streaming services</b> (its data is an
-    /// undocumented region-and-providers string). Recent requests are their own loader.</para>
+    /// straight from Jellyfin, which is where it comes from) and <b>streaming services</b>
+    /// (its data is an undocumented region-and-providers string). <b>Studios</b> and
+    /// <b>networks</b> are the lists the server's web page compiles in
+    /// (<see cref="DiscoverCompanies"/>) — the API does not serve them, so they cost no call.
+    /// Recent requests are their own loader.</para>
     /// </summary>
     private void EnsureDiscoverRows()
     {
@@ -159,20 +164,26 @@ public sealed partial class ApertureApp
                 switch (slider.Kind)
                 {
                     case SliderKind.RecentRequests:
-                        rows.Add(new DiscoverRow("requests", title, slider.Kind, [], []));
+                        rows.Add(new DiscoverRow("requests", title, slider.Kind, [], [], []));
                         break;
                     case SliderKind.Watchlist:
                         rows.Add(new DiscoverRow("watchlist", title, slider.Kind,
-                            FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist").Items, []));
+                            FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist").Items, [], []));
                         break;
                     case SliderKind.MovieGenres or SliderKind.TvGenres:
                         var kind = slider.Kind == SliderKind.MovieGenres ? DiscoverKind.Movie : DiscoverKind.Tv;
                         rows.Add(new DiscoverRow("genres-" + slider.Id, title, slider.Kind, [],
-                            FetchRequest(() => server.GetGenresAsync(kind), (IReadOnlyList<DiscoverGenre>)[], title)));
+                            FetchRequest(() => server.GetGenresAsync(kind), (IReadOnlyList<DiscoverGenre>)[], title), []));
+                        break;
+                    case SliderKind.Studios:
+                        rows.Add(new DiscoverRow("studios-" + slider.Id, title, slider.Kind, [], [], DiscoverCompanies.Studios));
+                        break;
+                    case SliderKind.Networks:
+                        rows.Add(new DiscoverRow("networks-" + slider.Id, title, slider.Kind, [], [], DiscoverCompanies.Networks));
                         break;
                     default:
                         rows.Add(new DiscoverRow("slider-" + slider.Id, title, slider.Kind,
-                            Shown(server, FetchRequest(() => server.GetSliderAsync(slider), DiscoverPage.Empty, title).Items), []));
+                            Shown(server, FetchRequest(() => server.GetSliderAsync(slider), DiscoverPage.Empty, title).Items), [], []));
                         break;
                 }
             }
@@ -190,8 +201,8 @@ public sealed partial class ApertureApp
         .. new[]
         {
             SliderKind.RecentRequests, SliderKind.Watchlist, SliderKind.Trending, SliderKind.PopularMovies,
-            SliderKind.MovieGenres, SliderKind.UpcomingMovies, SliderKind.PopularTv, SliderKind.TvGenres,
-            SliderKind.UpcomingTv,
+            SliderKind.MovieGenres, SliderKind.UpcomingMovies, SliderKind.Studios, SliderKind.PopularTv,
+            SliderKind.TvGenres, SliderKind.UpcomingTv, SliderKind.Networks,
         }.Select((kind, i) => new DiscoverSlider(-(i + 1), kind, null, null, true, i)),
     ];
 
@@ -200,8 +211,7 @@ public sealed partial class ApertureApp
     /// called it.</summary>
     internal string? SliderTitle(DiscoverSlider slider) => slider.Kind switch
     {
-        SliderKind.RecentlyAdded or SliderKind.Studios or SliderKind.Networks
-            or SliderKind.MovieStreaming or SliderKind.TvStreaming => null,
+        SliderKind.RecentlyAdded or SliderKind.MovieStreaming or SliderKind.TvStreaming => null,
         SliderKind.RecentRequests => _requestServer?.User.CanManageRequests == true ? "Recent requests" : "Your requests",
         SliderKind.Watchlist => "Your watchlist",
         SliderKind.Trending => "Trending",
@@ -211,6 +221,8 @@ public sealed partial class ApertureApp
         SliderKind.PopularTv => "Popular series",
         SliderKind.TvGenres => "Series by genre",
         SliderKind.UpcomingTv => "Coming to television",
+        SliderKind.Studios => "Studios",
+        SliderKind.Networks => "Networks",
         _ when slider.Data is null => null,   // a custom row with nothing to ask for
         _ => slider.Title ?? slider.Kind switch
         {
@@ -260,40 +272,50 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<DiscoverItem> HomeWatchlist => _requestServer is null ? [] : _homeWatchlist.Value;
 
-    // ── A genre, a person ────────────────────────────────────────────────
+    // ── A genre, a studio or network, a person ───────────────────────────
 
-    private readonly AsyncLoader<DiscoverPage> _genrePage = new(DiscoverPage.Empty);
-    private readonly List<DiscoverItem> _genreItems = [];
-    private string? _genreKey;
+    private readonly AsyncLoader<DiscoverPage> _wallPage = new(DiscoverPage.Empty);
+    private readonly List<DiscoverItem> _wallItems = [];
+    private string? _wallKey;
 
-    /// <summary>A genre's titles, a page at a time: asks for the next page when
-    /// <paramref name="more"/> (the "Show more" button) and none is loading.</summary>
-    private void EnsureGenrePage(DiscoverKind kind, int genreId, bool more = false)
+    private void EnsureGenrePage(DiscoverKind kind, int genreId, bool more = false) =>
+        EnsureWallPage($"genre|{kind}|{genreId}",
+            (server, page) => server.DiscoverGenreAsync(kind, genreId, page), "That genre", more);
+
+    private void EnsureCompanyPage(DiscoverKind kind, int companyId, bool more = false) =>
+        EnsureWallPage($"company|{kind}|{companyId}",
+            (server, page) => server.DiscoverCompanyAsync(kind, companyId, page),
+            kind == DiscoverKind.Movie ? "That studio" : "That network", more);
+
+    /// <summary>A genre's or a company's titles, a page at a time: asks for the next page
+    /// when <paramref name="more"/> (the "Show more" button) and none is loading. One page
+    /// on screen at a time, so one loader serves both.</summary>
+    private void EnsureWallPage(string source, Func<IRequestServer, int, Task<ApertureResult<DiscoverPage>>> fetch,
+        string what, bool more)
     {
         if (_requestServer is not { } server) return;
-        var key = $"{_requestGeneration}|{_dataGeneration}|{kind}|{genreId}";
-        if (_genreKey != key)
+        var key = $"{_requestGeneration}|{_dataGeneration}|{source}";
+        if (_wallKey != key)
         {
-            _genreKey = key;
-            _genreItems.Clear();
+            _wallKey = key;
+            _wallItems.Clear();
         }
-        else if (!more || _genrePage.IsLoading || !_genrePage.Value.HasMore)
+        else if (!more || _wallPage.IsLoading || !_wallPage.Value.HasMore)
         {
             return;
         }
-        int page = _genreItems.Count == 0 ? 1 : _genrePage.Value.Page + 1;
-        _genrePage.Load((key, page), () => FetchRequest(() => server.DiscoverGenreAsync(kind, genreId, page),
-            DiscoverPage.Empty, "That genre"), loaded =>
+        int page = _wallItems.Count == 0 ? 1 : _wallPage.Value.Page + 1;
+        _wallPage.Load((key, page), () => FetchRequest(() => fetch(server, page), DiscoverPage.Empty, what), loaded =>
         {
-            if (_genreKey != key) return;
-            var seen = _genreItems.Select(i => i.Key).ToHashSet(StringComparer.Ordinal);
-            _genreItems.AddRange(Shown(server, loaded.Items).Where(i => seen.Add(i.Key)));
+            if (_wallKey != key) return;
+            var seen = _wallItems.Select(i => i.Key).ToHashSet(StringComparer.Ordinal);
+            _wallItems.AddRange(Shown(server, loaded.Items).Where(i => seen.Add(i.Key)));
         });
     }
 
-    internal IReadOnlyList<DiscoverItem> GenreItems => _genreItems;
-    internal bool GenreLoading => _genrePage.IsLoading;
-    internal bool GenreHasMore => _genrePage.Value.HasMore;
+    internal IReadOnlyList<DiscoverItem> WallItems => _wallItems;
+    internal bool WallLoading => _wallPage.IsLoading;
+    internal bool WallHasMore => _wallPage.Value.HasMore;
 
     private readonly AsyncLoader<PersonDetail?> _person = new(null);
 

@@ -307,6 +307,9 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests(bool reporter = false)
     // Something downloading, for the progress bar and the list's percentage.
     fake.SetDownloads("movie:1003", [new Aperture.Core.Requests.DownloadProgress("Northbound.2022.2160p.mkv",
         8_000_000_000, 2_600_000_000, "downloading", TimeSpan.FromMinutes(23), null)]);
+    // Something behind the first studio and network cards, for their pages.
+    fake.AddCompanyTitles(Aperture.Core.Requests.DiscoverKind.Movie, 2, "movie:1000", "movie:1002", "movie:1005", "movie:990");
+    fake.AddCompanyTitles(Aperture.Core.Requests.DiscoverKind.Tv, 213, "tv:2000", "tv:2100", "tv:2101", "tv:2103");
     // Problem reports, for the Issues page: two open (one answered), one resolved.
     var now = DateTimeOffset.UtcNow;
     var subs = fake.AddIssue("tv:2000", Aperture.Core.Requests.IssueType.Subtitles,

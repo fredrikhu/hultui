@@ -36,6 +36,8 @@ public enum ApertureView
     DiscoverGenre,
     /// <summary>One person's films and series on the request server; the Id is their TMDB id.</summary>
     DiscoverPerson,
+    /// <summary>A studio's films or a network's series; the Id is <c>movie:2</c> or <c>tv:213</c>.</summary>
+    DiscoverCompany,
     /// <summary>Problem reports, for someone who may read everyone's.</summary>
     Issues,
     /// <summary>One report and its conversation; the Id is the server's issue id.</summary>
@@ -220,6 +222,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.Discover => BuildDiscoverView(),
             ApertureView.DiscoverTitle => BuildDiscoverTitleView(Current),
             ApertureView.DiscoverGenre => BuildDiscoverGenreView(Current),
+            ApertureView.DiscoverCompany => BuildDiscoverCompanyView(Current),
             ApertureView.DiscoverPerson => BuildDiscoverPersonView(Current),
             ApertureView.Requests => BuildRequestsView(),
             ApertureView.Issues => BuildIssuesView(),
@@ -337,7 +340,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             rail.AddChild(Box.New().Height(Halide.S2));
             rail.AddChild(RailButton(Icons.Discover, "Discover", "",
                 active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
-                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson,
+                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany,
                 onClick: () => Navigate(new Route(ApertureView.Discover))));
             rail.AddChild(RailButton(Icons.Requests, "Requests", "",
                 active: Current.View == ApertureView.Requests,

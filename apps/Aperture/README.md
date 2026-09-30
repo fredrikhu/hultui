@@ -113,7 +113,8 @@ beside Play; something being downloaded shows how far it has got; and an allowan
 nearly spent is said before the button is pressed.
 
 Discover follows the request server administrator's own layout — its order, its switched-off
-rows, its custom rows — with genre rows that open genre pages, and a name in a title's cast
+rows, its custom rows — with genre rows that open genre pages, studio and network rows of
+logos that open everything a studio made or a network aired, and a name in a title's cast
 opens everything that person is in. A bookmark keeps a title on the watchlist. Someone the
 server lets choose can send a request to a particular Radarr or Sonarr, quality and folder.
 Something wrong with what is playing (no sound, the wrong subtitles) is reported from the

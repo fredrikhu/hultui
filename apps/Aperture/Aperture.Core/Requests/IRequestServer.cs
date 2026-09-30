@@ -72,6 +72,11 @@ public interface IRequestServer : IDisposable
     Task<ApertureResult<DiscoverPage>> DiscoverGenreAsync(DiscoverKind kind, int genreId, int page = 1,
         CancellationToken ct = default);
 
+    /// <summary>One page of a studio's films (<see cref="DiscoverKind.Movie"/>) or a
+    /// network's series (<see cref="DiscoverKind.Tv"/>), most popular first.</summary>
+    Task<ApertureResult<DiscoverPage>> DiscoverCompanyAsync(DiscoverKind kind, int companyId, int page = 1,
+        CancellationToken ct = default);
+
     /// <summary>A person and their films and series.</summary>
     Task<ApertureResult<PersonDetail>> GetPersonAsync(int tmdbId, CancellationToken ct = default);
 

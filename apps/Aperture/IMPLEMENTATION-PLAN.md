@@ -200,9 +200,9 @@ Traps on the way:
    parameter outright, so it is sent by version. Adding answers 409 for "already on it",
    which is success.
 4. **Left out, deliberately:** recently added (the library's Home has it, from Jellyfin),
-   studios and networks (the server's web page draws them from logo lists compiled into
-   it), streaming-service rows (their data is an undocumented string), and `hideRequested`
-   (the server's web client does not apply it either).
+   streaming-service rows (their data is an undocumented string), and `hideRequested`
+   (the server's web client does not apply it either). Studios and networks were on this
+   list too, until they were added from the web client's own lists (below).
 
 Verified against the lab server, read-only: the layout (all twelve built-in rows), the
 genre rows and a genre page, a person, the watchlist, and Radarr's profiles and folders
@@ -246,10 +246,20 @@ One gap: the list does not say who wrote each message, so a reply the reporter m
 website reads as news here until they open it. Replies made in Aperture never do — the
 re-read report is marked read before the lists look again.
 
+**Since, studios and networks:** the layout's Studios and Networks rows are drawn. The API
+does not serve either list — the server's web page compiles them in (Seerr's
+`StudioSlider` and `NetworkSlider`: 11 studios, 22 networks, TMDB ids and logo paths) — so
+Aperture compiles the same lists in (`DiscoverCompanies`), in the same order, and the rows
+cost no call. Logos are asked for with TMDB's own duotone filter
+(`w300_filter(duotone,ffffff,bababa)`), which turns them white as the web page does; the
+server's image cache passes the path through unchanged. A card opens the studio's films
+(`/discover/movies/studio/{id}`) or the network's series (`/discover/tv/network/{id}`), a
+page at a time, on the loader genre pages use. A live test fetches every compiled logo and
+the first studio's and network's titles, so a list gone stale shows up there.
+
 **Still open:**
 
-- Studios and networks, if a logo source turns up; streaming-service rows once their data
-  format is pinned down.
+- Streaming-service rows, once their data format is pinned down.
 
 ## Things deliberately not done
 

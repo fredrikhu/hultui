@@ -423,6 +423,15 @@ public static class RequestImages
         _ => "h632",
     }, imageBase);
 
+    /// <summary>
+    /// A studio's or network's logo, turned white by TMDB's own duotone filter — logos are
+    /// drawn in their brand colours on transparency, and half of them vanish on a dark card
+    /// as they are. The server's web page asks for the same filter, and its image cache
+    /// passes the path through unchanged.
+    /// </summary>
+    public static Uri? Logo(string? path, int width, string? imageBase = null) =>
+        Image(path, (width <= 300 ? "w300" : "w500") + "_filter(duotone,ffffff,bababa)", imageBase);
+
     /// <summary>Only a TMDB-shaped path (<c>/abc.jpg</c>) becomes a URL — a path is joined
     /// onto a base, so anything with a scheme, a <c>..</c> or a query in it is refused.</summary>
     private static Uri? Image(string? path, string size, string? imageBase)

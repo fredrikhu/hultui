@@ -519,13 +519,43 @@ public class RequestServerHostTests
             Assert.True(Shows(session, "Films by genre"));
             Assert.True(Shows(session, "Mind-benders"));   // a custom row, by the name it was given
             Assert.False(Shows(session, "Trending"), "a disabled row was drawn");
-            // Studios need logos the API does not serve: the row is left out, not drawn empty.
-            Assert.DoesNotContain(requests.Calls, c => c.Contains("Studios", StringComparison.Ordinal));
+            // Studios come from the list compiled in, as the server's web page draws them —
+            // there is nothing to ask the server for until one is opened.
+            Assert.NotNull(session.Window.FindByAutomationId("company-movie-2"));
+            Assert.DoesNotContain(requests.Calls, c => c.StartsWith("DiscoverCompany", StringComparison.Ordinal));
 
             Click(session, "genre-movie-18");
             Assert.Equal(ApertureView.DiscoverGenre, app.Current.View);
             PumpUntilShown(session, "The Matrix, film, 1999");
             Assert.Contains("DiscoverGenre(Movie,18,1)", requests.Calls);
+        });
+    }
+
+    [Fact]
+    public void ANetworkCardOpensItsSeriesAPageAtATime()
+    {
+        var requests = Requests();
+        requests.AddCompanyTitles(DiscoverKind.Tv, 213, "tv:1399");
+        requests.Layout =
+        [
+            new DiscoverSlider(1, SliderKind.Networks, null, null, Enabled: true, Order: 0),
+            new DiscoverSlider(2, SliderKind.Studios, null, null, Enabled: false, Order: 1),
+        ];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "Networks");
+            // Named for what it opens; the logo is decoration.
+            PumpUntilShown(session, "Netflix series");
+            Assert.Null(session.Window.FindByAutomationId("company-movie-2"));   // Studios is switched off
+
+            Click(session, "company-tv-213");
+            Assert.Equal(ApertureView.DiscoverCompany, app.Current.View);
+            Assert.Equal("tv:213", app.Current.Id);
+            PumpUntilShown(session, "Game of Thrones");
+            Assert.Contains("DiscoverCompany(Tv,213,1)", requests.Calls);
+            Assert.True(Shows(session, "Netflix series"));   // the page's heading
         });
     }
 

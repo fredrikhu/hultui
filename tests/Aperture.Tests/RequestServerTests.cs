@@ -470,6 +470,50 @@ public class RequestServerTests
         Assert.Equal(40, detail.MediaId);
     }
 
+    [Fact]
+    public async Task AStudiosFilmsAndANetworksSeriesHaveRoutesOfTheirOwn()
+    {
+        var router = new Router()
+            .On("GET", "/api/v1/discover/movies/studio/2", _ => Json("""
+                { "page": 2, "totalPages": 30, "totalResults": 600,
+                  "studio": { "id": 2, "name": "Walt Disney Pictures", "logoPath": "/wdrCwmRnLFJhEoH8GSfymY85KHT.png" },
+                  "results": [ { "id": 12, "mediaType": "movie", "title": "Finding Nemo", "releaseDate": "2003-05-30" } ] }
+                """))
+            .On("GET", "/api/v1/discover/tv/network/213", _ => Json("""
+                { "page": 1, "totalPages": 1, "totalResults": 1,
+                  "network": { "id": 213, "name": "Netflix", "logoPath": "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png" },
+                  "results": [ { "id": 66732, "mediaType": "tv", "name": "Stranger Things", "firstAirDate": "2016-07-15" } ] }
+                """));
+        using var server = await SessionServer(router);
+
+        var disney = (await server.DiscoverCompanyAsync(DiscoverKind.Movie, 2, page: 2)).Value;
+        Assert.Contains("page=2", router.Last("/api/v1/discover/movies/studio/2").Query);
+        Assert.Equal("Finding Nemo", Assert.Single(disney.Items).Title);
+        Assert.True(disney.HasMore);
+
+        var netflix = (await server.DiscoverCompanyAsync(DiscoverKind.Tv, 213)).Value;
+        var series = Assert.Single(netflix.Items);
+        Assert.Equal(("Stranger Things", DiscoverKind.Tv), (series.Title, series.Kind));
+    }
+
+    [Fact]
+    public void ALogoIsAskedForWhiteAndThroughTheServersCacheWhenItKeepsOne()
+    {
+        Assert.Equal("https://image.tmdb.org/t/p/w500_filter(duotone,ffffff,bababa)/n.png",
+            RequestImages.Logo("/n.png", 448)!.OriginalString);
+        Assert.Equal("http://jellyseerr.test:5055/imageproxy/tmdb/t/p/w300_filter(duotone,ffffff,bababa)/n.png",
+            RequestImages.Logo("/n.png", 224, "http://jellyseerr.test:5055/imageproxy/tmdb/t/p/")!.OriginalString);
+        Assert.Null(RequestImages.Logo("https://elsewhere.test/n.png", 224));
+        // The compiled lists: every entry a TMDB-shaped logo, no id twice within a list.
+        foreach (var list in new[] { DiscoverCompanies.Studios, DiscoverCompanies.Networks })
+        {
+            Assert.All(list, c => Assert.NotNull(RequestImages.Logo(c.LogoPath, 224)));
+            Assert.Equal(list.Count, list.Select(c => c.Id).Distinct().Count());
+        }
+        Assert.All(DiscoverCompanies.Studios, c => Assert.Equal(DiscoverKind.Movie, c.Kind));
+        Assert.All(DiscoverCompanies.Networks, c => Assert.Equal(DiscoverKind.Tv, c.Kind));
+    }
+
     /// <summary>The list as the server sends it: media with ids only, the reporter, and
     /// comments whose authors are left out (only a single issue joins them).</summary>
     private const string IssuePageJson = """
