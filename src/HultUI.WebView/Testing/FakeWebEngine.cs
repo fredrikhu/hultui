@@ -343,6 +343,19 @@ public sealed class FakeWebEngineView : IWebEngineView
         new("inspectElement", "Inspect", WebContextMenuItemKind.Command, 8),
     ];
 
+    /// <summary>Every drag step sent to the page.</summary>
+    public List<WebDragInput> Drags { get; } = [];
+
+    /// <summary>Whether the page takes drags; a page without a drop zone does not.</summary>
+    public bool AcceptsDrops { get; set; } = true;
+
+    public bool SendDrag(in WebDragInput input)
+    {
+        Drags.Add(input);
+        Calls.Add($"Drag {input.Action}");
+        return input.Action != WebDragAction.Leave && AcceptsDrops;
+    }
+
     /// <summary>What the engine was told about each context menu: the entry chosen, or null for none.</summary>
     public List<WebContextMenuItem?> ContextMenuAnswers { get; } = [];
 

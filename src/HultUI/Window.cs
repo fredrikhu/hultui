@@ -1557,11 +1557,11 @@ public sealed class Window : IOverlayHost, IDisposable
             }
 
             // ──── OS-level drag & drop ────
-            case InputEvent.DropBeginInput:
+            case InputEvent.DropBeginInput begin:
             {
                 _isExternalDrag = true;
                 _isDragging = true;
-                _dragData = new DragData();
+                _dragData = new DragData { NativeData = begin.NativeData };
                 _dragHoveredElement = null;
                 _dragAccepted = false;
                 _dragModifiers = KeyModifiers.None;
@@ -1573,6 +1573,7 @@ public sealed class Window : IOverlayHost, IDisposable
                 if (!_isExternalDrag) break;
                 var pos = new Point(dropPos.X, dropPos.Y);
                 UpdateDragHover(pos, dropPos.Modifiers);
+                if (dropPos.Feedback is { } feedback) feedback.Accepted = _dragAccepted;
                 break;
             }
 
@@ -1592,7 +1593,14 @@ public sealed class Window : IOverlayHost, IDisposable
 
             case InputEvent.DropCompleteInput complete:
             {
-                EndExternalDrag(complete.Modifiers);
+                bool dropped = EndExternalDrag(complete.Modifiers);
+                if (complete.Feedback is { } feedback) feedback.Accepted = dropped;
+                break;
+            }
+
+            case InputEvent.DropCancelInput:
+            {
+                if (_isExternalDrag) CancelExternalDrag();
                 break;
             }
         }
@@ -2073,8 +2081,20 @@ public sealed class Window : IOverlayHost, IDisposable
     /// parentless chain and reached none of the live ancestors that had accepted it: the drag
     /// visibly highlighted its target and then dropped into nothing.</para>
     /// </summary>
-    private void EndExternalDrag(KeyModifiers modifiers)
+    /// <summary>The drag left the window, or was called off: the hovered element is told it
+    /// left, and nobody gets a drop.</summary>
+    private void CancelExternalDrag()
     {
+        if (_dragHoveredElement is not null && _dragData is not null)
+            EventDispatcher.Dispatch(new DragLeaveEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = _dragModifiers }, _dragHoveredElement);
+        PlatformWindow.SetCursor(CursorType.Default);
+        ResetDragState();
+    }
+
+    /// <summary>Delivers an OS drop; true when an element took it.</summary>
+    private bool EndExternalDrag(KeyModifiers modifiers)
+    {
+        bool dropped = false;
         // The last drop-position update is what carried a modifier sample; a platform
         // that reports none on the release itself keeps whatever the drag was holding.
         if (modifiers == KeyModifiers.None) modifiers = _dragModifiers;
@@ -2087,7 +2107,10 @@ public sealed class Window : IOverlayHost, IDisposable
                 var overEvt = new DragOverEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers };
                 EventDispatcher.Dispatch(overEvt, target);
                 if (overEvt.Accepted)
+                {
                     EventDispatcher.Dispatch(new DropEvent { Position = _lastDragPos, DragData = _dragData, Modifiers = modifiers }, target);
+                    dropped = true;
+                }
             }
 
             // Leave goes to whatever the hover last recorded — that is the element whose
@@ -2098,6 +2121,7 @@ public sealed class Window : IOverlayHost, IDisposable
 
         PlatformWindow.SetCursor(CursorType.Default);
         ResetDragState();
+        return dropped;
     }
 
     private void ResetDragState()

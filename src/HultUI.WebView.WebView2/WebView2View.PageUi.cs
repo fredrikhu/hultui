@@ -1,3 +1,4 @@
+using HultUI.Core.Events;
 using HultUI.WebView.WebView2.Interop;
 
 namespace HultUI.WebView.WebView2;
@@ -16,7 +17,8 @@ namespace HultUI.WebView.WebView2;
 internal sealed unsafe partial class WebView2View
 {
     private const int DownloadUserCancelled = 26; // COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED
-    private nint _webview4, _webview11;
+    private nint _webview4, _webview11, _composition3;
+    private nint _dragData; // a data object we made for a drag that came without one
     private readonly List<ActiveDownload> _downloads = [];
 
     private void SubscribePageUi()
@@ -32,6 +34,7 @@ internal sealed unsafe partial class WebView2View
         if (_webview11 != 0)
             On(_webview11, ICoreWebView2_11.add_ContextMenuRequested, ICoreWebView2_11.remove_ContextMenuRequested,
                 ICoreWebView2ContextMenuRequestedEventHandler.IID, OnContextMenuRequested, "add_ContextMenuRequested");
+        _composition3 = Com.TryQueryInterface(_composition, ICoreWebView2CompositionController3.IID);
         _webview4 = Com.TryQueryInterface(_webview, ICoreWebView2_4.IID);
         if (_webview4 != 0)
             On(_webview4, ICoreWebView2_4.add_DownloadStarting, ICoreWebView2_4.remove_DownloadStarting,
@@ -41,6 +44,8 @@ internal sealed unsafe partial class WebView2View
     private void ReleasePageUi()
     {
         foreach (var download in _downloads.ToArray()) download.Close();
+        Com.Release(ref _dragData);
+        Com.Release(ref _composition3);
         Com.Release(ref _webview11);
         Com.Release(ref _webview4);
     }
@@ -58,6 +63,62 @@ internal sealed unsafe partial class WebView2View
         if (held.Deferral != 0) Com.Call(held.Deferral, ICoreWebView2Deferral.Complete);
         Com.Release(ref held.Deferral);
         Com.Release(ref held.Args);
+    }
+
+    // ──── Drags over the page ────
+
+    private const uint MK_LBUTTON = 0x1, MK_SHIFT = 0x4, MK_CONTROL = 0x8, MK_ALT = 0x20;
+    private const uint DROPEFFECT_COPY = 1, DROPEFFECT_MOVE = 2, DROPEFFECT_LINK = 4;
+
+    /// <summary>
+    /// A drag over the page, through the drop-target half of the composition controller — the
+    /// host is the page's drop target in visual hosting, for files from outside and for drags
+    /// the page started itself alike. The point is bounds-relative device pixels, as for
+    /// <c>SendMouseInput</c>.
+    /// </summary>
+    public bool SendDrag(in WebDragInput input)
+    {
+        if (_phase != Phase.Ready || _composition3 == 0) return false;
+        var point = new Native.POINT { X = input.X, Y = input.Y };
+        // During an OLE drag the left button is down, and up by the drop; the modifiers pick
+        // the effect.
+        uint keys = (input.Action == WebDragAction.Drop ? 0 : MK_LBUTTON)
+            | ((input.Modifiers & KeyModifiers.Shift) != 0 ? MK_SHIFT : 0)
+            | ((input.Modifiers & KeyModifiers.Ctrl) != 0 ? MK_CONTROL : 0)
+            | ((input.Modifiers & KeyModifiers.Alt) != 0 ? MK_ALT : 0);
+        uint effect = DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
+        var vtable = *(nint**)_composition3;
+        int hr;
+        switch (input.Action)
+        {
+            case WebDragAction.Enter:
+                hr = ((delegate* unmanaged[Stdcall]<nint, nint, uint, Native.POINT, uint*, int>)vtable[ICoreWebView2CompositionController3.DragEnter])(
+                    _composition3, DataFor(input), keys, point, &effect);
+                break;
+            case WebDragAction.Over:
+                hr = ((delegate* unmanaged[Stdcall]<nint, uint, Native.POINT, uint*, int>)vtable[ICoreWebView2CompositionController3.DragOver])(
+                    _composition3, keys, point, &effect);
+                break;
+            case WebDragAction.Drop:
+                hr = ((delegate* unmanaged[Stdcall]<nint, nint, uint, Native.POINT, uint*, int>)vtable[ICoreWebView2CompositionController3.Drop])(
+                    _composition3, DataFor(input), keys, point, &effect);
+                Com.Release(ref _dragData);
+                break;
+            default:
+                ((delegate* unmanaged[Stdcall]<nint, int>)vtable[ICoreWebView2CompositionController3.DragLeave])(_composition3);
+                Com.Release(ref _dragData);
+                return false;
+        }
+        return hr >= 0 && effect != 0;
+    }
+
+    /// <summary>The drag's own data object, or one made from its files and text when the
+    /// platform gave none.</summary>
+    private nint DataFor(in WebDragInput input)
+    {
+        if (input.NativeData != 0) return input.NativeData;
+        if (_dragData == 0) _dragData = DropData.Create(input.Files, input.Text);
+        return _dragData;
     }
 
     // ──── Context menu ────

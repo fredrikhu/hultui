@@ -51,6 +51,10 @@ public partial class WebViewElement : Element
         OnOwn<KeyUpEvent>(OnKeyUp);
         OnOwn<TextInputEvent>(OnTextInput);
         OnOwn<TextEditingEvent>(OnTextEditing);
+        OnOwn<DragEnterEvent>(e => Drag(WebDragAction.Enter, e.Position, e.DragData, e.Modifiers));
+        OnOwn<DragOverEvent>(e => e.Accepted = Drag(WebDragAction.Over, e.Position, e.DragData, e.Modifiers));
+        OnOwn<DragLeaveEvent>(e => Drag(WebDragAction.Leave, e.Position, e.DragData, e.Modifiers));
+        OnOwn<DropEvent>(e => Drag(WebDragAction.Drop, e.Position, e.DragData, e.Modifiers));
     }
 
     public WebViewController? Controller

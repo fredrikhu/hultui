@@ -91,6 +91,14 @@ public interface IWebEngineView : IDisposable
     void SendText(in WebTextInput input);
 
     /// <summary>
+    /// A step of a drag over the page. For <see cref="WebDragAction.Enter"/>,
+    /// <see cref="WebDragAction.Over"/> and <see cref="WebDragAction.Drop"/>, true when the page
+    /// takes the drag at this point — what the window tells the operating system. An engine
+    /// that cannot take drags answers false and the drag passes over the page.
+    /// </summary>
+    bool SendDrag(in WebDragInput input) => false;
+
+    /// <summary>
     /// The element gained focus. <see cref="FocusReason.Next"/> starts at the page's first
     /// tab stop and <see cref="FocusReason.Previous"/> at its last; anything else restores
     /// the page's own focus.

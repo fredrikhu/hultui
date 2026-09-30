@@ -262,6 +262,7 @@ public sealed class WebViewController : IDisposable
     internal void SendPointer(in WebPointerInput input) { if (!_disposed) _view.SendPointer(input); }
     internal void SendKey(in WebKeyInput input) { if (!_disposed) _view.SendKey(input); }
     internal void SendText(in WebTextInput input) { if (!_disposed) _view.SendText(input); }
+    internal bool SendDrag(in WebDragInput input) => !_disposed && _view.SendDrag(input);
     internal void Focus(FocusReason reason) { if (!_disposed) _view.Focus(reason); }
     internal void Blur() { if (!_disposed) _view.Blur(); }
 

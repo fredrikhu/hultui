@@ -174,9 +174,10 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
 - On the Vulkan renderer, one GPU source per window: a web view and a playing video in the
   same Vulkan window share the renderer's one interop image, so the second draws nothing.
   Separate windows, or the GL renderer, are unaffected.
-- Files dropped on the page do not reach it, and dragging inside the page (HTML5 drag and
-  drop) is not forwarded either: the window's drop target is SDL's, which hands over files
-  and text only on the drop.
+- Drags: a page is offered files dragged from outside, sees their types and can accept them
+  (Windows, with `[STAThread]`). Whether the drop itself completes, and whether a drag that
+  starts inside the page does, is not yet proven — WebView2's visual hosting has open bugs
+  there. The sample's home page has a drop zone and a sortable list to try it.
 - Windows only until the CEF engine exists; `FakeWebEngine` runs anywhere.
 
 ## Testing

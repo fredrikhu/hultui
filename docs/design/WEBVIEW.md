@@ -508,7 +508,7 @@ the data only in `Drop`; `DragEnter` and `DragOver` send a position and nothing 
   cannot accept, and without an accepted `dragover` the browser does not deliver the drop;
 - an in-page drag reaches SDL as an outside drop and loses everything but files and text.
 
-Three ways on, not yet chosen:
+Three ways on. **Chosen (2026-09-30): the second.**
 
 1. **An engine-local wrapper.** The WebView2 engine replaces the window's drop target with
    its own, which forwards to the page's `CompositionController3` while the pointer is over
@@ -520,6 +520,33 @@ Three ways on, not yet chosen:
    hosted engine can ask for the raw data object. The right shape, and a change to every
    app's drops (Vesper Commander's among them).
 3. **Leave it** until an app needs it.
+
+**Built.** `WindowsDropTarget` (in `HultUI.Platform.SDL3`) replaces SDL's target per window:
+it revokes SDL's registration and registers its own, a hand-built COM object, on the window's
+thread; a thread that cannot host OLE keeps SDL's. It reads files and text on `DragEnter`,
+raises `DropBeginInput(nativeData)`, the files and text, and positions, and answers OLE on
+each step from `DropFeedback` — whether an element accepted — which the window fills in
+while it handles the input. A drag that leaves is `DropCancelInput`, a leave and no drop; the
+old path took SDL's leave for a drop, so a zone that accepted anything got a drop with nothing
+in it. `DragData.NativeData` carries the
+`IDataObject*`. The web view element forwards drags from outside (platform data, files or
+text — not a HultUI-internal drag) as `IWebEngineView.SendDrag`, and WebView2 forwards them to
+`CompositionController3`, with a data object made from the files and text when the platform
+gave none (`DropData`).
+
+**Proven, by playing the drag through the registered target as OLE would, without a mouse**
+(`OsDropTests`): an element knows the files during the hover and its answer reaches OLE (and
+with SDL's target it heard nothing at all until the next pump — seen); a page gets
+`dragenter` with the `Files` type and its acceptance reaches OLE. Found: WebView2 answers
+for a point only when the point moves, so a still drag reports the old answer.
+
+**Not proven: the drop into the page.** Played this way the browser never finishes the drag —
+`drop` and `dragleave` never reach the page, and its `dragover` events keep coming after
+`Drop` and `DragLeave` have been called and returned success. Two readings. The test plays a
+drag with no `DoDragDrop` behind it, which a real one always has; or WebView2's visual
+hosting cannot finish a drag, which its own tracker records for drags that start inside a
+page (WebView2Feedback #5237, #5486: open, "never worked" in composition hosting). The sample's
+home page now has a drop zone and a sortable list to settle it with a real mouse.
 
 
 **Known limits to document:** a web view inside a `ScrollView` loses the middle
@@ -597,7 +624,8 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
-6. **Polish** — menus, dialogs, downloads and permissions **done**; drag and drop open.
+6. **Polish** — menus, dialogs, downloads and permissions **done**; drag and drop built,
+   its last step unproven (below).
    Four requests, each answered exactly once because the engine or the page's stopped
    script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
    copying entries, none of a browser's; the app may change them or take the menu over),
@@ -611,4 +639,4 @@ engine if it changed, but nothing more.
    device pixels; a page that starts a second download without a click is stopped by the
    browser's guard against automatic downloads; `Element.Focus()` does nothing inside an
    overlay (overlay content has no focus manager), so the dialog focuses its field through
-   the window's. **Drag and drop** needs a platform decision, below.
+   the window's. **Drag and drop**: option 2 below, chosen by the owner.

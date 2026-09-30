@@ -66,6 +66,51 @@ public partial class WebViewElement
         return menu;
     }
 
+    // ──── Drags over the page ────
+
+    private bool _dragInPage;
+
+    /// <summary>
+    /// Hands a drag from outside HultUI on to the page: files from the desktop, or a drag the
+    /// page itself started, which the operating system brings back to the window. A drag
+    /// between HultUI elements carries no platform data and is not the page's. Returns whether
+    /// the page takes it here.
+    /// </summary>
+    private bool Drag(WebDragAction action, Point at, DragData data, KeyModifiers modifiers)
+    {
+        if (_controller is null || OverlayHost is not Window window) return false;
+        bool fromOutside = data.NativeData != 0 || data.HasFiles || data.HasText;
+        if (!fromOutside) return false;
+
+        switch (action)
+        {
+            case WebDragAction.Enter:
+                _dragInPage = true;
+                break;
+            case WebDragAction.Over when !_dragInPage:
+                // An Over without an Enter: the element was rebuilt under the drag. Enter first.
+                _dragInPage = true;
+                Send(WebDragAction.Enter);
+                break;
+            case WebDragAction.Leave or WebDragAction.Drop:
+                // After a drop the window still says the drag left; the page has had its end.
+                if (!_dragInPage) return false;
+                _dragInPage = false;
+                break;
+        }
+        return Send(action);
+
+        bool Send(WebDragAction step)
+        {
+            // The same space and rounding as a pointer event's (see At).
+            var box = ScreenContentBox;
+            float scale = window.DisplayScale;
+            return _controller!.SendDrag(new WebDragInput(step,
+                (int)MathF.Floor((at.X - box.X) * scale), (int)MathF.Floor((at.Y - box.Y) * scale),
+                data.NativeData, data.Files, data.Text, modifiers));
+        }
+    }
+
     // ──── The page's dialogs ────
 
     private void ShowScriptDialog(WebScriptDialogRequest request)

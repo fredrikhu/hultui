@@ -293,6 +293,15 @@ In this order; each ends with its tests green and the step written into
    says where) and `PermissionRequested` (the permission handler: denied unless the app
    allows). The handler names are from memory; take them from the `capi` headers. CEF's
    menu point is worth checking against the click, in which units, as WebView2's needed.
+   **Drags** reach the element as HultUI drag events and go to the engine through
+   `IWebEngineView.SendDrag` (CEF: the browser host's drag-target calls, with a drag data
+   object built from the files and text). On Windows the window's drop target is HultUI's own
+   and fills `DragData` while the drag hovers; on Linux it is still SDL's, which learns the
+   files only on the drop, so a page's drop zone cannot accept during the hover there. Fixing
+   that is the Linux twin of `WindowsDropTarget` (XDND and the Wayland data device under
+   SDL), a platform change of its own; note it, do not start it unasked. A drag that starts in
+   the page comes to the host through CEF's start-dragging callback, which the host must turn
+   into a real drag.
 5. **Zero-copy.** A `IGpuFrameRenderer` registered through `IWebViewHost.UseGpuRenderer`, as
    the Windows engine's `CaptureRenderer` and the mpv backend do. One GPU source per Vulkan
    window until seam W7.

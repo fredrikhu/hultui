@@ -30,11 +30,17 @@ public sealed class WebViewSampleApp : IDisposable
           body { font: 16px system-ui, sans-serif; margin: 2rem; color: #1e293b; }
           button { font: inherit; padding: .4rem 1rem; }
           #from-app { margin-top: 1rem; color: #64748b; }
+          #drop { margin-top: 1.5rem; padding: 1rem; border: 2px dashed #94a3b8; border-radius: 8px; color: #64748b; }
+          #drop.over { border-color: #2563eb; color: #2563eb; }
+          #order li { cursor: grab; padding: .2rem 0; }
         </style></head><body>
           <h1>HultUI web view</h1>
           <p>Type an address above, or talk to the app:</p>
           <button id="ping">Send a message to the app</button>
           <p id="from-app">Nothing from the app yet.</p>
+          <div id="drop">Drop files here, from outside the app.</div>
+          <p>Drag to reorder, inside the page:</p>
+          <ol id="order"><li draggable="true">First</li><li draggable="true">Second</li><li draggable="true">Third</li></ol>
           <script>
             const bridge = window.chrome && window.chrome.webview;
             let clicks = 0;
@@ -42,6 +48,24 @@ public sealed class WebViewSampleApp : IDisposable
               bridge && bridge.postMessage({ clicked: ++clicks });
             bridge && bridge.addEventListener('message', e =>
               document.getElementById('from-app').textContent = 'The app says: ' + JSON.stringify(e.data));
+
+            // Files from outside: the drop zone lists what it was given.
+            const drop = document.getElementById('drop');
+            drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+            drop.ondragleave = () => drop.classList.remove('over');
+            drop.ondrop = e => {
+              e.preventDefault();
+              drop.classList.remove('over');
+              drop.textContent = 'Dropped: ' + ([...e.dataTransfer.files].map(f => f.name).join(', ') || e.dataTransfer.getData('text'));
+            };
+
+            // A drag that starts in the page: HTML5 drag and drop, as a sortable list does it.
+            let dragged = null;
+            for (const li of document.querySelectorAll('#order li')) {
+              li.ondragstart = e => { dragged = li; e.dataTransfer.setData('text/plain', li.textContent); };
+              li.ondragover = e => e.preventDefault();
+              li.ondrop = e => { e.preventDefault(); if (dragged && dragged !== li) li.before(dragged); };
+            }
           </script>
         </body></html>
         """;

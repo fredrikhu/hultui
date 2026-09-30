@@ -371,6 +371,51 @@ public class WebViewPageUiTests
         Assert.Equal([(WebPermission.ClipboardRead, true), (WebPermission.Microphone, true)], page.View.PermissionAnswers);
     }
 
+    // ──── Drags from outside ────
+
+    [Fact]
+    public void FilesDraggedOverThePage_AreHandedToIt_StepByStep_WithTheirPlatformData()
+    {
+        using var page = Show(scale: 2f);
+
+        // (100, 90) in the window is (100, 50) in the page, which starts 40 units down.
+        Assert.True(page.Window.DragFilesOver(new Point(100, 90), [@"C:	mp.txt"], nativeData: 0x1234));
+        Assert.True(page.Window.DropHere());
+
+        Assert.Equal([WebDragAction.Enter, WebDragAction.Over, WebDragAction.Over, WebDragAction.Drop],
+            page.View.Drags.Select(d => d.Action));
+        var enter = page.View.Drags[0];
+        Assert.Equal((200, 100), (enter.X, enter.Y)); // device pixels at scale 2
+        Assert.Equal(0x1234, enter.NativeData);
+        Assert.Equal([@"C:	mp.txt"], enter.Files);
+    }
+
+    [Fact]
+    public void APageThatRefusesTheDrag_GetsItsLeave_AndNoDrop()
+    {
+        using var page = Show();
+        page.View.AcceptsDrops = false;
+
+        Assert.False(page.Window.DragFilesOver(new Point(100, 90), [@"C:	mp.txt"]));
+        page.Window.CancelDrag();
+
+        Assert.Equal([WebDragAction.Enter, WebDragAction.Over, WebDragAction.Leave], page.View.Drags.Select(d => d.Action));
+    }
+
+    [Fact]
+    public void ADragBetweenHultUIElements_IsNotThePages()
+    {
+        using var page = Show();
+        var box = Box.New().Width(40).Height(20).Draggable(true).OnDragStart(e => e.DragData.Set("row", 3));
+        page.Session.Application.SetRoot(Flex.Column().Children(box, page.Element));
+        page.Session.PumpFrames(2);
+
+        page.Window.Drag(new Point(10, 10), new Point(100, 120), steps: 6);
+        page.Session.PumpFrame();
+
+        Assert.Empty(page.View.Drags);
+    }
+
     // ──── Downloads ────
 
     [Fact]

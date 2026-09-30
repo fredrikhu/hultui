@@ -127,6 +127,39 @@ public sealed partial class HeadlessWindow
         _platform.RaiseInput(new InputEvent.DropCompleteInput(modifiers));
     }
 
+    /// <summary>
+    /// Simulates an OS drag of <paramref name="paths"/> entering the window and moving to
+    /// <paramref name="at"/>, without dropping: finish it with <see cref="DropHere"/> or
+    /// <see cref="CancelDrag"/>. Returns whether the element under the point accepts it — what
+    /// a platform would tell the operating system.
+    /// </summary>
+    public bool DragFilesOver(Point at, IEnumerable<string> paths, KeyModifiers modifiers = KeyModifiers.None, nint nativeData = 0)
+    {
+        _platform.RaiseInput(new InputEvent.DropBeginInput(nativeData));
+        foreach (var path in paths)
+            _platform.RaiseInput(new InputEvent.DropFileInput(path));
+        return DragTo(at, modifiers);
+    }
+
+    /// <summary>Moves an OS drag begun with <see cref="DragFilesOver"/>; returns whether it is accepted there.</summary>
+    public bool DragTo(Point at, KeyModifiers modifiers = KeyModifiers.None)
+    {
+        var feedback = new DropFeedback();
+        _platform.RaiseInput(new InputEvent.DropPositionInput(at.X, at.Y, modifiers, feedback));
+        return feedback.Accepted;
+    }
+
+    /// <summary>Drops an OS drag begun with <see cref="DragFilesOver"/>; returns whether an element took it.</summary>
+    public bool DropHere(KeyModifiers modifiers = KeyModifiers.None)
+    {
+        var feedback = new DropFeedback();
+        _platform.RaiseInput(new InputEvent.DropCompleteInput(modifiers, feedback));
+        return feedback.Accepted;
+    }
+
+    /// <summary>The OS drag leaves the window without a drop.</summary>
+    public void CancelDrag() => _platform.RaiseInput(new InputEvent.DropCancelInput());
+
     /// <summary>Simulates an OS-level text drop at <paramref name="at"/>.</summary>
     public void DropText(Point at, string text, KeyModifiers modifiers = KeyModifiers.None)
     {

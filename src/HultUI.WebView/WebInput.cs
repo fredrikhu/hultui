@@ -4,6 +4,29 @@ namespace HultUI.WebView;
 
 public enum WebPointerAction : byte { Move, Down, Up, Wheel, Leave }
 
+/// <summary>A step of a drag over the page.</summary>
+public enum WebDragAction : byte { Enter, Over, Leave, Drop }
+
+/// <summary>
+/// A drag over the page from outside HultUI — files from the desktop, or a drag the page
+/// itself started, which comes back to the window as the operating system's.
+/// </summary>
+/// <param name="Action">Which step.</param>
+/// <param name="X">Device pixels from the page's left edge.</param>
+/// <param name="Y">Device pixels from the page's top edge.</param>
+/// <param name="NativeData">The platform's data object for the drag (<see cref="DragData.NativeData"/>):
+/// on Windows an <c>IDataObject*</c>, valid for the call. Zero when the platform gave none.</param>
+/// <param name="Files">What the platform read from it: files.</param>
+/// <param name="Text">And text.</param>
+/// <param name="Modifiers">The keyboard modifiers held, which pick copy, move or link.</param>
+public readonly record struct WebDragInput(
+    WebDragAction Action,
+    int X, int Y,
+    nint NativeData,
+    IReadOnlyList<string> Files,
+    string? Text,
+    KeyModifiers Modifiers);
+
 /// <summary>Mouse buttons, as a set.</summary>
 [Flags]
 public enum WebPointerButtons : byte

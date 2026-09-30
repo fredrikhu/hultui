@@ -14,6 +14,7 @@ namespace HultUI.Platform.SDL3;
 public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeDragSource, IWin32WindowHandle
 {
     private static bool _sdlInitialized;
+    private WindowsDropTarget? _dropTarget;
     private static readonly Dictionary<SDL_WindowID, SDL3Window> _registry = new();
 
     // ──── Graphics preload (HULTUI_GL_PRELOAD=1) ────
@@ -491,6 +492,10 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
             _customFrame = WindowsCustomFrame.Install(this, GetWin32Hwnd());
         else if (OperatingSystem.IsWindows())
             _plainFullscreen = new WindowsPlainFullscreen(GetWin32Hwnd());
+        // HultUI's own drop target in place of SDL's, which knows what is dragged only on the
+        // drop (see WindowsDropTarget). Not on a thread that cannot host OLE: SDL's stays.
+        if (OperatingSystem.IsWindows())
+            _dropTarget = WindowsDropTarget.Install(GetWin32Hwnd(), e => InputReceived?.Invoke(e), () => DisplayScale);
 
         // The DIP-to-pixel correction already happened, before the renderer was built. This
         // re-sync stays because installing a custom frame changes the non-client area, and so
@@ -1546,6 +1551,7 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
             throw new InvalidOperationException($"SDL_Init failed: {GetError()}");
         StartupTrace.Mark("SDL_Init");
+
     }
 
     public static void ShutdownSDL()
@@ -1632,8 +1638,12 @@ public sealed unsafe class SDL3Window : IPlatformWindow, IWindowChrome, INativeD
 
         // Restore SDL's window procedure before the window is destroyed.
         if (OperatingSystem.IsWindows())
+        {
             _customFrame?.Dispose();
+            _dropTarget?.Dispose();
+        }
         _customFrame = null;
+        _dropTarget = null;
 
         SDL_RemoveEventWatch(&EventWatchCallback, GCHandle.ToIntPtr(_gcHandle));
 
