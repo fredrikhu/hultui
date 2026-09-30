@@ -239,9 +239,11 @@ Three things found on the way:
 opens its popups there, and only learns where the app's window is from
 `NotifyParentWindowPositionChanged`. HultUI has no moved event, so the engine subclasses
 the parent window (`ParentWindowWatch`, comctl32) and calls it on `WM_WINDOWPOSCHANGED`.
-Before this a moved window left the page's rectangles where the window had been
-(measured: the test fails with the call removed). Its popups are placed from the same
-position, so a `<select>`'s list should have been left behind too; that was not measured.
+Before this a moved window left the page's rectangles where the window had been, and a
+`<select>`'s list with them. Both measured, by removing the call: the accessibility test
+reports the button where it was, and `ASelectsList_OpensUnderItsField…` finds the list
+(−90, −64) px from its field after the window moved by (90, 70), where it had been (0, 6)
+before. With the call, the list is under its field both times.
 
 **NavigationStarting has no deferral** (the IDL offers none), so the answer must be
 given before the handler returns. It is: WebView2 raises it on the UI thread, where the

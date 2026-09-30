@@ -282,6 +282,103 @@ public sealed class WebView2Tests
             $"the app never saw F2; it saw [{string.Join(", ", pressed)}]");
     });
 
+    [WebView2UiFact]
+    public void ASelectsList_OpensUnderItsField_AndStillDoesAfterTheWindowMoves() => OnSta(() =>
+    {
+        // The list of a <select> is not part of the page's picture: the browser opens a window
+        // of its own for it, on screen, where it believes the field is. It knows the page's
+        // place in our window from the bounds we give it, and our window's place on screen
+        // only from being told when that changes.
+        using var page = Open("""
+            <html><body style='margin:0'>
+              <select id=s style='position:absolute;left:40px;top:60px;width:220px;height:32px;font-size:16px'>
+                <option>One</option><option>Two</option><option>Three</option><option>Four</option>
+              </select>
+              <script>chrome.webview.postMessage('ready');</script>
+            </body></html>
+            """);
+        var received = new List<string>();
+        page.Web.MessageReceived += m => received.Add(m.Json);
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"") && page.Web.Frames.IsLoaded), "the page never got ready");
+
+        var window = page.App.PrimaryWindow;
+        nint handle = window.NativeHandle;
+        float scale = window.DisplayScale;
+        GetWindowThreadProcessId(FocusWindowOf(handle), out uint browser);
+        Assert.NotEqual(0u, browser);
+
+        // The page fills the window, so a point in the page is the same point in the client area.
+        int fieldLeft = (int)(40 * scale), fieldBottom = (int)((60 + 32) * scale);
+        int clickX = (int)((40 + 110) * scale), clickY = (int)((60 + 16) * scale);
+        int awayX = (int)(400 * scale), awayY = (int)(250 * scale);
+
+        (int dx, int dy) OpenListAndMeasure(string when)
+        {
+            var before = BrowserWindows(browser);
+            Click(page.Web.View, clickX, clickY);
+            nint list = 0;
+            Assert.True(page.PumpUntil(() => (list = BrowserWindows(browser).FirstOrDefault(w => !before.Contains(w))) != 0, seconds: 5),
+                $"{when}: no list window opened");
+            // It is placed when it is shown; give it a moment to stop moving.
+            page.PumpUntil(() => false, seconds: 0.3);
+            GetWindowRect(list, out var r);
+            var origin = new POINT();
+            ClientToScreen(handle, ref origin);
+
+            Click(page.Web.View, awayX, awayY);
+            Assert.True(page.PumpUntil(() => !BrowserWindows(browser).Contains(list), seconds: 5), $"{when}: the list never closed");
+            return (r.Left - (origin.X + fieldLeft), r.Top - (origin.Y + fieldBottom));
+        }
+
+        // Under the field's bottom left corner, give or take the list's own border and shadow.
+        var first = OpenListAndMeasure("before the move");
+        int slack = (int)(16 * scale);
+        Assert.True(Math.Abs(first.dx) <= slack && Math.Abs(first.dy) <= slack,
+            $"the list opened ({first.dx},{first.dy}) px from the field's bottom left corner");
+
+        GetWindowRect(handle, out var frame);
+        SetWindowPos(handle, 0, frame.Left + 90, frame.Top + 70, 0, 0, 0x0001 | 0x0004 | 0x0010 /* NOSIZE | NOZORDER | NOACTIVATE */);
+        page.PumpUntil(() => false, seconds: 0.5);
+
+        // The same offset from the field as before: the list went with the window.
+        var second = OpenListAndMeasure("after the move");
+        Assert.True(Math.Abs(second.dx - first.dx) <= 2 && Math.Abs(second.dy - first.dy) <= 2,
+            $"before the move the list was ({first.dx},{first.dy}) px from the field; after moving the window by (90,70) it was ({second.dx},{second.dy})");
+    });
+
+    private static void Click(IWebEngineView view, int x, int y)
+    {
+        view.SendPointer(new WebPointerInput(WebPointerAction.Move, x, y));
+        view.SendPointer(new WebPointerInput(WebPointerAction.Down, x, y, WebPointerButtons.Left, WebPointerButtons.Left, 1));
+        view.SendPointer(new WebPointerInput(WebPointerAction.Up, x, y, WebPointerButtons.Left, WebPointerButtons.None, 1));
+    }
+
+    /// <summary>The browser process's visible top-level windows: its page windows, and whatever it has popped up.</summary>
+    private static HashSet<nint> BrowserWindows(uint process)
+    {
+        var found = new HashSet<nint>();
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out uint owner);
+            if (owner == process && IsWindowVisible(hwnd)) found.Add(hwnd);
+            return true;
+        }, 0);
+        return found;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc proc, nint lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint process);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ClientToScreen(nint hwnd, ref POINT point);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int cx, int cy, uint flags);
+
     private static nint FocusWindowOf(nint parent)
     {
         nint found = 0;
