@@ -263,7 +263,7 @@ public sealed partial class ApertureApp
 
     // ── The watchlist, for Home ──────────────────────────────────────────
 
-    private readonly AsyncLoader<IReadOnlyList<DiscoverItem>> _homeWatchlist = new([]);
+    private readonly AsyncLoader<DiscoverPage> _homeWatchlist = new(DiscoverPage.Empty);
 
     /// <summary>
     /// The watchlist as Home shows it: what can be played now first — a title on the list
@@ -276,13 +276,18 @@ public sealed partial class ApertureApp
         if (_requestServer is not { } server) return;
         _homeWatchlist.Load(("home-watchlist", _requestGeneration, _dataGeneration), () =>
         {
-            var items = FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist").Items;
-            return (IReadOnlyList<DiscoverItem>)items.Where(i => i.InLibrary)
-                .Concat(items.Where(i => !i.InLibrary)).ToList();
+            var page = FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist");
+            return page with
+            {
+                Items = [.. page.Items.Where(i => i.InLibrary), .. page.Items.Where(i => !i.InLibrary)],
+            };
         });
     }
 
-    internal IReadOnlyList<DiscoverItem> HomeWatchlist => _requestServer is null ? [] : _homeWatchlist.Value;
+    internal IReadOnlyList<DiscoverItem> HomeWatchlist => _requestServer is null ? [] : _homeWatchlist.Value.Items;
+
+    /// <summary>More on the watchlist than its first page — the Home row's "See all".</summary>
+    internal bool HomeWatchlistHasMore => _requestServer is not null && _homeWatchlist.Value.HasMore;
 
     // ── A genre, a studio or network, a person ───────────────────────────
 

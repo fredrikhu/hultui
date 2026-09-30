@@ -117,7 +117,8 @@ rows, its custom rows (streaming-service rows among them) — and every row of t
 past one page has a "See all" page — with genre rows that open genre
 pages, studio and network rows of
 logos that open everything a studio made or a network aired, and a name in a title's cast
-opens everything that person is in. A bookmark keeps a title on the watchlist. Someone the
+opens everything that person is in. A bookmark keeps a title on the watchlist, which has a row on Home too (with its own
+"See all" once it runs past a page). Someone the
 server lets choose can send a request to a particular Radarr or Sonarr, quality and folder.
 Something wrong with what is playing (no sound, the wrong subtitles) is reported from the
 player's title strip, and whoever looks after the library reads the reports under **Issues**

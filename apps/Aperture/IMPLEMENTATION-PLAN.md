@@ -273,7 +273,11 @@ the end of its heading, opening the row as a wall that pages with "Show more"
 then the built-in ones too: trending, popular and upcoming through the slider routes, the
 watchlist through its own (and, as on its row, not thinned by the server's hide switches:
 it is a record, not a shelf). Recent requests' "See all" is the Requests list itself, reset
-to everything (and everyone's, for someone who decides them). Genre, studio and network
+to everything (and everyone's, for someone who decides them). Home's watchlist row has one
+too, before its menu; both watchlist rows open a fixed route (`DiscoverAll` with id
+`watchlist`) rather than a layout row's id, since the list is the user's and opens whether
+or not the administrator's layout has a row for it. The wall is in the server's order; only
+the row's first page puts what the library has first. Genre, studio and network
 rows are whole already. The route carries only the row's id; the row itself is found in the
 layout as last loaded, and one no longer there says so rather than guessing. It is a real
 button, not a link-styled box: only `ButtonElement` answers Enter and Space.

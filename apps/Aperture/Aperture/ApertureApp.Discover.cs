@@ -162,15 +162,25 @@ public sealed partial class ApertureApp
     /// <summary>"See all", at the end of a row's heading: the row's first page is all a row
     /// shows, and the rest is a wall of its own. A real button, small, so Enter and Space
     /// open it as they do any other.</summary>
-    private Element SeeAllLink(DiscoverRow row)
+    private Element SeeAllLink(DiscoverRow row) => SeeAllButton(row.Title, $"discover-row-{row.Key}-see-all",
+        row.Kind == SliderKind.Watchlist
+            ? new Route(ApertureView.DiscoverAll, WatchlistRouteId, row.Title)
+            : new Route(ApertureView.DiscoverAll,
+                row.Slider!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), row.Title));
+
+    private ButtonElement SeeAllButton(string title, string automationId, Route to)
     {
-        var link = Ui.Button(ButtonVariant.Ghost, "See all",
-            () => Navigate(new Route(ApertureView.DiscoverAll,
-                row.Slider!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), row.Title)),
-            $"discover-row-{row.Key}-see-all", style: SeeAllStyle);
-        link.AccessibleName = $"See all of {row.Title}";
+        var link = Ui.Button(ButtonVariant.Ghost, "See all", () => Navigate(to), automationId, style: SeeAllStyle);
+        link.AccessibleName = $"See all of {title}";
         return link;
     }
+
+    /// <summary>The watchlist's "See all" route, from Discover's row or Home's. Not a layout
+    /// id: the watchlist is the user's, and opens whether or not the administrator's layout
+    /// has a row for it.</summary>
+    internal const string WatchlistRouteId = "watchlist";
+
+    private static readonly DiscoverSlider WatchlistSlider = new(0, SliderKind.Watchlist, null, null, true, 0);
 
     /// <summary>The recent-requests row's "See all" is the Requests list itself — its
     /// filters and verbs are what the rest of them want — showing everything, and everyone's
@@ -200,8 +210,10 @@ public sealed partial class ApertureApp
     {
         int id = int.TryParse(route.Id, System.Globalization.NumberStyles.Integer,
             System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : int.MinValue;
-        EnsureDiscoverRows();
-        if (DiscoverRows.FirstOrDefault(r => r.Slider?.Id == id)?.Slider is not { } slider)
+        if (route.Id != WatchlistRouteId) EnsureDiscoverRows();
+        var slider = route.Id == WatchlistRouteId ? WatchlistSlider
+            : DiscoverRows.FirstOrDefault(r => r.Slider?.Id == id)?.Slider;
+        if (slider is null)
         {
             SetCursorList("see-all:empty", [], 1);
             var column = Flex.Column(gap: 0).FlexGrow(1).AutomationId("see-all-view");

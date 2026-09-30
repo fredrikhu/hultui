@@ -843,6 +843,48 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void AWatchlistLongerThanAPageHasSeeAllOnHome()
+    {
+        var requests = Requests();
+        requests.SliderPageSize = 1;
+        requests.AddMovie(604, "The Matrix Reloaded", 2003, shelves: []);
+        requests.AddToWatchlist("movie:603");
+        requests.AddToWatchlist("movie:604");
+        // Discover's layout has no watchlist row: the list is the user's, and opens anyway.
+        requests.Layout = [new DiscoverSlider(1, SliderKind.PopularMovies, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Your watchlist");
+            Click(session, "row-watchlist-see-all");
+            Assert.Equal(ApertureView.DiscoverAll, app.Current.View);
+            Assert.Equal(ApertureApp.WatchlistRouteId, app.Current.Id);
+            PumpUntilShown(session, "The Matrix, film, 1999");
+            Click(session, "see-all-view-more");
+            PumpUntilShown(session, "The Matrix Reloaded, film, 2003");
+            Assert.Contains("GetWatchlist(p2)", requests.Calls);
+            Assert.False(Shows(session, "That row is gone"));
+            // The row's menu is still there beside it.
+            app.GoBack();
+            Pump(session);
+            Assert.NotNull(session.Window.FindByAutomationId("row-watchlist-menu"));
+        });
+    }
+
+    [Fact]
+    public void AWatchlistThatFitsItsFirstPageHasNoSeeAllOnHome()
+    {
+        var requests = Requests();
+        requests.AddToWatchlist("movie:603");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your watchlist");
+            Pump(session);
+            Assert.Null(session.Window.FindByAutomationId("row-watchlist-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-watchlist-menu"));
+        });
+    }
+
+    [Fact]
     public void AWatchlistTitleTheLibraryHasComesFirst()
     {
         var requests = Requests();

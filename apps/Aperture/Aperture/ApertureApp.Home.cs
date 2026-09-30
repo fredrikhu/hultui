@@ -84,7 +84,7 @@ public sealed partial class ApertureApp
                     : row.Stills ? StillCard(items[i], cursorIndex: start + i)
                     : PosterCard(items[i], cursorIndex: start + i),
                 row.CardWidth, "row-" + row.Key, trailing: row.Trailing,
-                headingExtra: RowMenuButton(row, all)));
+                headingExtra: HomeRowHeadingExtra(row, all)));
             cursorBase += row.Count;
         }
 
@@ -160,6 +160,19 @@ public sealed partial class ApertureApp
 
     /// <summary>The row's own menu, in its heading. Kept to the things that are about
     /// <em>this</em> row, so it reads as "this shelf" rather than "home settings".</summary>
+    /// <summary>What sits at the end of a row's heading: its menu — and, on the watchlist
+    /// when it runs past one page, "See all" before it, as on Discover's row.</summary>
+    private Element HomeRowHeadingExtra(HomeRow row, List<HomeRow> all)
+    {
+        var menu = RowMenuButton(row, all);
+        if (row.Key != WatchlistRowKey || !HomeWatchlistHasMore) return menu;
+        var both = Flex.Row(gap: Halide.S1).AlignItems(AlignItems.Center);
+        both.AddChild(SeeAllButton(row.Title, "row-" + row.Key + "-see-all",
+            new Route(ApertureView.DiscoverAll, WatchlistRouteId, row.Title)));
+        both.AddChild(menu);
+        return both;
+    }
+
     private Element RowMenuButton(HomeRow row, List<HomeRow> all)
     {
         var button = Ui.IconButton(Icons.More, $"Customise “{row.Title}”", () => { }, 14f,
