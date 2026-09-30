@@ -69,6 +69,45 @@ Messages are JSON both ways: `PostMessage(json)` reaches the page's
 `WebViewOptions.AppOrigin` (`https://app.local`) and string documents — so a page from
 the internet cannot talk to the app unless it is listed. `["*"]` accepts any origin.
 
+## The page's menus, dialogs, downloads and permissions
+
+The engine's own interface for these never shows. Each reaches the controller as a request
+that is answered exactly once — the page, or the engine, waits for the answer — and each has
+a default that needs nothing from the app:
+
+| Request | Default | The app can |
+|---|---|---|
+| `ContextMenuRequested` | A HultUI context menu where the page asked, with the page's editing and copying entries (cut, copy, paste, select all, copy link, spelling) and none of a browser's (back, reload, save as, print) | Change `request.Items` — remove, reorder, add its own `new WebContextMenuItem("Open in browser", action)`, pick from `request.EngineItems` — or set `Handled` and answer with `Select`/`Dismiss` itself |
+| `ScriptDialogRequested` | `alert`, `confirm`, `prompt` and the leave-page question as a HultUI dialog that says whose page is asking; Enter answers yes, Escape no | `Accept(text)` or `Cancel()` in the handler, or set `Handled` and answer later |
+| `DownloadRequested` | **Cancelled** | `SaveTo(path)`, or `Defer()` and call `SaveTo` after a save dialog; `request.Download` reports progress |
+| `PermissionRequested` | **Denied** — camera, microphone, location, notifications, clipboard reading, everything | `Allow()`, or `Defer()` and answer after asking the person |
+
+```csharp
+web.ContextMenuRequested += menu =>
+{
+    if (menu.Target.LinkUri is { } link)
+        menu.Items.Add(new WebContextMenuItem("Open in browser", () => OpenInSystemBrowser(link)));
+};
+web.DownloadRequested += download =>
+{
+    download.Defer();                                   // the answer comes after a dialog
+    window.FileDialogs.SaveFileAsync(download.SuggestedFileName).ContinueWith(t =>
+        Application.InvokeOnMainThread(() =>            // answers go back on the UI thread
+        {
+            if (t.Result is { } path) download.SaveTo(path).Changed += ShowProgress;
+            else download.Cancel();
+        }));
+};
+web.PermissionRequested += p =>
+{
+    if (p.Permission == WebPermission.ClipboardRead && p.Origin?.Host == "docs.example.org") p.Allow();
+};
+```
+
+While the page's menu or dialog is open the keyboard is HultUI's — arrows, Enter and Escape
+work the menu, typing goes into a prompt — and it goes back to the page when it closes. The
+sample saves downloads through a save dialog and shows their progress in its status line.
+
 ## Options
 
 ```csharp
@@ -135,7 +174,9 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
 - On the Vulkan renderer, one GPU source per window: a web view and a playing video in the
   same Vulkan window share the renderer's one interop image, so the second draws nothing.
   Separate windows, or the GL renderer, are unaffected.
-- Files dropped on the page do not reach it.
+- Files dropped on the page do not reach it, and dragging inside the page (HTML5 drag and
+  drop) is not forwarded either: the window's drop target is SDL's, which hands over files
+  and text only on the drop.
 - Windows only until the CEF engine exists; `FakeWebEngine` runs anywhere.
 
 ## Testing

@@ -285,7 +285,14 @@ In this order; each ends with its tests green and the step written into
    `<select>` popup is composited by the engine into the same sink. The IME's candidate
    position goes to `TextInputHost.SetInputArea`.
 4. **Navigation, script, messages, policy.** Everything in `WebEngineEvent`, by whichever
-   route question 6 chose.
+   route question 6 chose. That includes the four requests Windows added in step 6, each
+   answered exactly once and each with a default that asks nothing of the app:
+   `ContextMenuRequested` (CEF's context menu handler hands over its model and a callback;
+   the element draws the menu), `ScriptDialogRequested` (the JS dialog handler, and the
+   before-unload one), `DownloadRequested` (the download handler: cancelled unless the app
+   says where) and `PermissionRequested` (the permission handler: denied unless the app
+   allows). The handler names are from memory; take them from the `capi` headers. CEF's
+   menu point is worth checking against the click, in which units, as WebView2's needed.
 5. **Zero-copy.** A `IGpuFrameRenderer` registered through `IWebViewHost.UseGpuRenderer`, as
    the Windows engine's `CaptureRenderer` and the mpv backend do. One GPU source per Vulkan
    window until seam W7.

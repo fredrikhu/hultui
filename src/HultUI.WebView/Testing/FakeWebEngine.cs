@@ -368,6 +368,18 @@ public sealed class FakeWebEngineView : IWebEngineView
         return request;
     }
 
+    /// <summary>What the page was told about each permission it asked for.</summary>
+    public List<(WebPermission Permission, bool Allowed)> PermissionAnswers { get; } = [];
+
+    /// <summary>The page asks for a permission.</summary>
+    public WebPermissionRequest RaisePermission(WebPermission permission, bool isUserInitiated = true)
+    {
+        var request = new WebPermissionRequest(permission, CurrentUri, isUserInitiated,
+            allowed => PermissionAnswers.Add((permission, allowed)));
+        Raise(new WebEngineEvent.PermissionRequested(request));
+        return request;
+    }
+
     /// <summary>Where each download was told to go; null for cancelled.</summary>
     public List<string?> DownloadAnswers { get; } = [];
 

@@ -338,6 +338,39 @@ public class WebViewPageUiTests
         Assert.Equal((false, (string?)null), Assert.Single(page.View.ScriptDialogAnswers));
     }
 
+    // ──── Permissions ────
+
+    [Fact]
+    public void APermissionNobodyAllows_IsDenied()
+    {
+        using var page = Show();
+
+        page.View.RaisePermission(WebPermission.Camera);
+
+        Assert.Equal((WebPermission.Camera, false), Assert.Single(page.View.PermissionAnswers));
+    }
+
+    [Fact]
+    public void TheApp_CanAllowAPermission_AtOnceOrAfterAsking()
+    {
+        using var page = Show();
+        WebPermissionRequest? waiting = null;
+        page.Web.PermissionRequested += p =>
+        {
+            Assert.Equal(new Uri("https://a.test/page"), p.Origin);
+            if (p.Permission == WebPermission.ClipboardRead) p.Allow();
+            else { p.Defer(); waiting = p; }
+        };
+
+        page.View.RaisePermission(WebPermission.ClipboardRead);
+        page.View.RaisePermission(WebPermission.Microphone);
+        Assert.Equal([(WebPermission.ClipboardRead, true)], page.View.PermissionAnswers);
+
+        waiting!.Allow();
+        waiting.Deny(); // too late: does nothing
+        Assert.Equal([(WebPermission.ClipboardRead, true), (WebPermission.Microphone, true)], page.View.PermissionAnswers);
+    }
+
     // ──── Downloads ────
 
     [Fact]

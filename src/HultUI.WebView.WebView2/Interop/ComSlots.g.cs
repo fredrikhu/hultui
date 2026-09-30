@@ -833,6 +833,41 @@ namespace HultUI.WebView.WebView2.Interop;
         public const int Invoke = 3;
     }
 
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2PermissionRequestedEventArgs
+    {
+        public static readonly Guid IID = new("973ae2ef-ff18-4894-8fb2-3c758f046810");
+        public const int get_Uri = 3;
+        public const int get_PermissionKind = 4;
+        public const int get_IsUserInitiated = 5;
+        public const int get_State = 6;
+        public const int put_State = 7;
+        public const int GetDeferral = 8;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2PermissionRequestedEventArgs3
+    {
+        public static readonly Guid IID = new("e61670bc-3dce-4177-86d2-c629ae3cb6ac");
+        public const int get_Uri = 3;
+        public const int get_PermissionKind = 4;
+        public const int get_IsUserInitiated = 5;
+        public const int get_State = 6;
+        public const int put_State = 7;
+        public const int GetDeferral = 8;
+        public const int get_Handled = 9;
+        public const int put_Handled = 10;
+        public const int get_SavesInProfile = 11;
+        public const int put_SavesInProfile = 12;
+    }
+
+    /// <summary>From WebView2.h.</summary>
+    internal static class ICoreWebView2PermissionRequestedEventHandler
+    {
+        public static readonly Guid IID = new("15e1c6a3-c72a-4df3-91d7-d097fbec6bfd");
+        public const int Invoke = 3;
+    }
+
     /// <summary>From d3d11.h.</summary>
     internal static class ID3D11Device
     {

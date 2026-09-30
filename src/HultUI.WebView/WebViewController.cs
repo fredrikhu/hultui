@@ -161,6 +161,13 @@ public sealed class WebViewController : IDisposable
     /// </summary>
     public event Action<WebDownloadRequest>? DownloadRequested;
 
+    /// <summary>
+    /// The page asked for a permission. It is denied unless a handler calls
+    /// <see cref="WebPermissionRequest.Allow"/>, or <see cref="WebPermissionRequest.Defer"/> and
+    /// answers later. UI thread.
+    /// </summary>
+    public event Action<WebPermissionRequest>? PermissionRequested;
+
     /// <summary>A context menu nobody took over, for the element to open. UI thread.</summary>
     internal event Action<WebContextMenuRequest>? ContextMenuToShow;
 
@@ -376,6 +383,14 @@ public sealed class WebViewController : IDisposable
                         if (ScriptDialogToShow is { } show) show(r);
                         else r.Cancel();
                     }
+                }
+                break;
+
+            case WebEngineEvent.PermissionRequested p:
+                try { PermissionRequested?.Invoke(p.Request); }
+                finally
+                {
+                    if (!p.Request.IsCompleted && !p.Request.IsDeferred) p.Request.Deny();
                 }
                 break;
 

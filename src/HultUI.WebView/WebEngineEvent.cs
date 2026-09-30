@@ -79,6 +79,10 @@ public abstract record WebEngineEvent
     /// sees it answered — cancelled, unless the application says where.</summary>
     public sealed record DownloadRequested(WebDownloadRequest Request) : WebEngineEvent;
 
+    /// <summary>The page asked for a permission, which waits for an answer. The controller
+    /// sees it answered — denied, unless the application allows it.</summary>
+    public sealed record PermissionRequested(WebPermissionRequest Request) : WebEngineEvent;
+
     /// <summary>The page's process died. <see cref="WebViewController.Reload"/> recovers
     /// when <paramref name="CanReload"/>.</summary>
     public sealed record ProcessFailed(string Message, bool CanReload) : WebEngineEvent;

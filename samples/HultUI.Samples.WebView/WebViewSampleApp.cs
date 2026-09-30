@@ -53,7 +53,37 @@ public sealed class WebViewSampleApp : IDisposable
         Web = new WebViewController(engine);
         Web.MessageReceived += m => LastMessage.Value = m.Json;
         Web.NewWindowRequested += r => Web.Navigate(r.Uri);   // keep it in this window
+        Web.DownloadRequested += OnDownload;
         Web.NavigateToString(HomePage);
+    }
+
+    /// <summary>What the last download is doing, for the status line.</summary>
+    public HultUI.Core.Reactivity.Signal<string?> DownloadStatus { get; } = new(null);
+
+    /// <summary>
+    /// A download is cancelled unless the app says where it goes. This one asks: a save dialog,
+    /// then progress in the status line. The answer comes after the dialog, so the request is
+    /// deferred, and the dialog's continuation comes back to the UI thread to give it.
+    /// </summary>
+    private void OnDownload(WebDownloadRequest request)
+    {
+        if (Page?.OverlayHost is not Window window) return;
+        request.Defer();
+        var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        window.FileDialogs.SaveFileAsync(request.SuggestedFileName, downloads).ContinueWith(chosen =>
+            Application.InvokeOnMainThread(() =>
+            {
+                if (chosen.Result is not { } path) { request.Cancel(); return; }
+                request.SaveTo(path).Changed += d => DownloadStatus.Value = d.State switch
+                {
+                    WebDownloadState.InProgress => d.TotalBytes is > 0 and var total
+                        ? $"Downloading {Path.GetFileName(d.Path)}: {100 * d.BytesReceived / total} %"
+                        : $"Downloading {Path.GetFileName(d.Path)}: {d.BytesReceived / 1024} KB",
+                    WebDownloadState.Completed => $"Saved {d.Path}",
+                    WebDownloadState.Failed => $"The download of {Path.GetFileName(d.Path)} failed",
+                    _ => null,
+                };
+            }));
     }
 
     public WebViewController Web { get; }
@@ -134,7 +164,8 @@ public sealed class WebViewSampleApp : IDisposable
                 WebViewState.Crashed => "The page crashed — reload to recover",
                 _ => web.IsLoading ? "Loading…" : web.Title,
             };
-            string message = app.LastMessage.Value is { } json ? "Page said: " + json : "";
+            string message = app.DownloadStatus.Value
+                ?? (app.LastMessage.Value is { } json ? "Page said: " + json : "");
             return Flex.Row(gap: 16).Padding(new Thickness(8f, 4f)).Children(
                 Text.New(state).FontSize(12f).TextColor(app._muted).FlexGrow(1),
                 Text.New(message).FontSize(12f).TextColor(app._muted));

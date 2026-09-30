@@ -23,6 +23,8 @@ internal sealed unsafe partial class WebView2View
     {
         On(_webview, ICoreWebView2.add_ScriptDialogOpening, ICoreWebView2.remove_ScriptDialogOpening,
             ICoreWebView2ScriptDialogOpeningEventHandler.IID, OnScriptDialogOpening, "add_ScriptDialogOpening");
+        On(_webview, ICoreWebView2.add_PermissionRequested, ICoreWebView2.remove_PermissionRequested,
+            ICoreWebView2PermissionRequestedEventHandler.IID, OnPermissionRequested, "add_PermissionRequested");
 
         // Both interfaces are years old in the Evergreen runtime; without them the page keeps
         // WebView2's own menu and download flyout rather than failing.
@@ -183,6 +185,35 @@ internal sealed unsafe partial class WebView2View
                 if (text is not null) Com.CallString(held.Args, ICoreWebView2ScriptDialogOpeningEventArgs.put_ResultText, text);
                 Com.Call(held.Args, ICoreWebView2ScriptDialogOpeningEventArgs.Accept);
             }
+            Complete(ref held);
+        })));
+    }
+
+    // ──── Permissions ────
+
+    private void OnPermissionRequested(nint sender, nint args)
+    {
+        int kind = Com.Get<int>(args, ICoreWebView2PermissionRequestedEventArgs.get_PermissionKind, "get_PermissionKind");
+        var permission = kind is >= 0 and <= (int)WebPermission.PersistentStorage ? (WebPermission)kind : WebPermission.Unknown;
+        var origin = OriginOf(Com.GetString(args, ICoreWebView2PermissionRequestedEventArgs.get_Uri, "get_Uri"));
+        bool user = Com.GetBool(args, ICoreWebView2PermissionRequestedEventArgs.get_IsUserInitiated, "get_IsUserInitiated");
+
+        // Answered with an explicit allow or deny, never left at "default": that is what
+        // would bring up WebView2's own prompt.
+        // Not remembered in the profile: WebView2 would otherwise keep the first answer — the
+        // default denial, most likely — and never ask the application again.
+        var args3 = Com.TryQueryInterface(args, ICoreWebView2PermissionRequestedEventArgs3.IID);
+        if (args3 != 0)
+        {
+            Com.Call(args3, ICoreWebView2PermissionRequestedEventArgs3.put_SavesInProfile, 0);
+            Com.Release(ref args3);
+        }
+
+        var held = Hold(args, ICoreWebView2PermissionRequestedEventArgs.GetDeferral);
+        Raise(new WebEngineEvent.PermissionRequested(new WebPermissionRequest(permission, origin, user, allowed =>
+        {
+            if (_phase != Phase.Disposed)
+                Com.Call(held.Args, ICoreWebView2PermissionRequestedEventArgs.put_State, allowed ? 1 : 2); // ALLOW : DENY
             Complete(ref held);
         })));
     }

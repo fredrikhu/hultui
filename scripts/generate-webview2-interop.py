@@ -86,6 +86,9 @@ WANTED = {
         "ICoreWebView2DownloadOperation",
         "ICoreWebView2BytesReceivedChangedEventHandler",
         "ICoreWebView2StateChangedEventHandler",
+        "ICoreWebView2PermissionRequestedEventArgs",
+        "ICoreWebView2PermissionRequestedEventArgs3",
+        "ICoreWebView2PermissionRequestedEventHandler",
     ],
     os.path.join(SDK, "um", "d3d11.h"): [
         "ID3D11Device",

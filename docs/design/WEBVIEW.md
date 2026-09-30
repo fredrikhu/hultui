@@ -495,10 +495,32 @@ pointer capture (`CapturePointer`, released on up), wake from another thread
 (`RequestRepaint`'s thread-pool hop, reused as is), IME area
 (`TextInputHost.SetInputArea`, for the Linux engine).
 
-**Not in the first version:** files dropped onto a page. SDL owns the OLE drop
-target and `DragData` carries only files and text, while WebView2's
-`CompositionController3.Drop` wants the `IDataObject`. That is a platform seam of
-its own, for later.
+**Drag and drop: open, and a platform decision.** In visual hosting the host is the
+page's drop target: WebView2 wants `CompositionController3.DragEnter/DragOver/DragLeave/Drop`
+with the real `IDataObject`, for files dropped from outside *and* for drags that start inside
+the page (HTML5 drag and drop — a sortable list), whose OLE drag lands on our window like any
+other. Our window's drop target is SDL's, and SDL (read from its source, 2026-09-30) reads
+the data only in `Drop`; `DragEnter` and `DragOver` send a position and nothing else. So:
+
+- during a hover nobody in HultUI knows what is being dragged — `DragData` is empty until
+  the drop, for every element, not only the web view;
+- the page cannot be offered the data while the pointer moves, so its `dragover` handlers
+  cannot accept, and without an accepted `dragover` the browser does not deliver the drop;
+- an in-page drag reaches SDL as an outside drop and loses everything but files and text.
+
+Three ways on, not yet chosen:
+
+1. **An engine-local wrapper.** The WebView2 engine replaces the window's drop target with
+   its own, which forwards to the page's `CompositionController3` while the pointer is over
+   a page and to SDL's target everywhere else. SDL's target is found through the window
+   property OLE keeps it under (`OleDropTargetInterface`, undocumented but unchanged since
+   Windows 95). Nothing changes for apps without a web view.
+2. **HultUI's own drop target on Windows**, replacing SDL's in the platform layer: the data
+   is read on `DragEnter`, so every element's `DragData` is filled during the hover, and a
+   hosted engine can ask for the raw data object. The right shape, and a change to every
+   app's drops (Vesper Commander's among them).
+3. **Leave it** until an app needs it.
+
 
 **Known limits to document:** a web view inside a `ScrollView` loses the middle
 button to the ancestor's autoscroll, and scroll chaining out of the page does not
@@ -575,5 +597,18 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
-6. **Polish**: HultUI context menu and script dialogs over the engine's, downloads,
-   drag and drop into the page.
+6. **Polish** — menus, dialogs, downloads and permissions **done**; drag and drop open.
+   Four requests, each answered exactly once because the engine or the page's stopped
+   script waits: `ContextMenuRequested` (a HultUI context menu of the page's editing and
+   copying entries, none of a browser's; the app may change them or take the menu over),
+   `ScriptDialogRequested` (a HultUI dialog naming the page's host), `DownloadRequested`
+   (cancelled unless the app says where) and `PermissionRequested` (denied unless the app
+   allows). WebView2's own menu, dialogs, download flyout and permission prompt never show.
+   One framework seam, W9: `Window.OpenContextMenu(items, point, onClosed)`, a menu whose
+   entries arrive after the click, which tells its owner it closed only after the chosen
+   item's action has run. The keyboard is taken from the page while a menu or dialog is open
+   and given back after. Found: WebView2 reports the menu's location in CSS pixels, not
+   device pixels; a page that starts a second download without a click is stopped by the
+   browser's guard against automatic downloads; `Element.Focus()` does nothing inside an
+   overlay (overlay content has no focus manager), so the dialog focuses its field through
+   the window's. **Drag and drop** needs a platform decision, below.

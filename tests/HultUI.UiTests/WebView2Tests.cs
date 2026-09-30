@@ -434,6 +434,35 @@ public sealed class WebView2Tests
             $"the page said: {string.Join(", ", received)}");
     });
 
+    [WebView2UiFact]
+    public void APermission_IsTheAppsToGive_AndDeniedWhenItSaysNothing() => OnSta(() =>
+    {
+        // Notifications, because asking has no side effect: the answer is all there is.
+        const string Ask = "Notification.requestPermission().then(r => chrome.webview.postMessage('notifications:' + r))";
+        string Answer(Action<WebPermissionRequest>? handler, List<WebPermissionRequest> asked)
+        {
+            using var page = Open("<html><body><script>chrome.webview.postMessage('ready');</script></body></html>");
+            var received = new List<string>();
+            page.Web.MessageReceived += m => received.Add(m.Json);
+            Assert.True(page.PumpUntil(() => received.Contains("\"ready\"")), "the page never got ready");
+            page.Web.PermissionRequested += p => { asked.Add(p); handler?.Invoke(p); };
+            page.Web.ExecuteScriptAsync(Ask);
+            Assert.True(page.PumpUntil(() => received.Any(m => m.StartsWith("\"notifications:")), seconds: 10), "the page never heard");
+            return received.Last();
+        }
+
+        var asked = new List<WebPermissionRequest>();
+        Assert.Equal("\"notifications:denied\"", Answer(null, asked));
+        Assert.Equal(WebPermission.Notifications, Assert.Single(asked).Permission);
+
+        // The next page to ask asks the app again. (This does not prove the engine's
+        // SavesInProfile = false: a page loaded from a string has no origin a permission could be
+        // remembered against, and the test passes without the setting too. WebView2 documents
+        // that it remembers host answers by default; the setting is there on that word.)
+        Assert.Equal("\"notifications:granted\"", Answer(p => p.Allow(), asked));
+        Assert.Equal(2, asked.Count);
+    });
+
     private const string DownloadPage = """
         <html><body>
           <a id=d href='data:text/plain,hello%20download' download='hello.txt'>get</a>
