@@ -267,13 +267,22 @@ server has no such row, and making one would change its layout, so the live test
 row up in memory: Netflix in the US reads fewer titles than no filter, and Netflix or
 Disney+ more than Netflix alone.
 
-**Since, "See all":** a custom row — keywords, a genre, a search, a studio, a network,
-streaming services — whose first page is not all of it gets "See all" at the end of its
-heading, opening the row as a wall that pages with "Show more" (`ApertureView.DiscoverAll`,
-on the loader genre and studio pages use). Built-in rows keep paging in place, as the
-server's own page has them. The route carries only the row's id; the row itself is found in
-the layout as last loaded, and one no longer there says so rather than guessing. It is a
-real button, not a link-styled box: only `ButtonElement` answers Enter and Space.
+**Since, "See all":** a row of titles whose first page is not all of it gets "See all" at
+the end of its heading, opening the row as a wall that pages with "Show more"
+(`ApertureView.DiscoverAll`, on the loader genre and studio pages use) — custom rows first,
+then the built-in ones too: trending, popular and upcoming through the slider routes, the
+watchlist through its own (and, as on its row, not thinned by the server's hide switches:
+it is a record, not a shelf). Recent requests' "See all" is the Requests list itself, reset
+to everything (and everyone's, for someone who decides them). Genre, studio and network
+rows are whole already. The route carries only the row's id; the row itself is found in the
+layout as last loaded, and one no longer there says so rather than guessing. It is a real
+button, not a link-styled box: only `ButtonElement` answers Enter and Space.
+
+Its label's colour turned up a framework bug: a button's text colour and size never reached
+its label on the first style pass — `StyleResolver` resolved an element's inherited style
+before asking the element's `ApplyTheme` for it — so a label drew in its parent's colour
+until something re-dirtied the button (the issue page's "Reply" drew light on gold while
+disabled, and went dark only once typing enabled it). Fixed in the resolver; see `docs/THEMES.md`.
 
 **Still open:** nothing on the Discover page; every row of the server's layout is drawn but
 "recently added", which Home has from Jellyfin.

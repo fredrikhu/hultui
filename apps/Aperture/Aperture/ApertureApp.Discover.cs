@@ -101,7 +101,8 @@ public sealed partial class ApertureApp
             page.AddChild(CardRow(row.Title, items.Count,
                 i => DiscoverCard(items[i], Halide.PosterWidth, cursorIndex: start + i),
                 Halide.PosterWidth, "discover-row-" + row.Key,
-                headingExtra: row.CanSeeAll ? SeeAllLink(row) : null));
+                headingExtra: row.Kind == SliderKind.RecentRequests ? SeeAllRequestsLink(row)
+                    : row.CanSeeAll ? SeeAllLink(row) : null));
             cursorBase += items.Count;
         }
 
@@ -158,15 +159,30 @@ public sealed partial class ApertureApp
         return card.HoverBg(Halide.Raised);
     }
 
-    /// <summary>"See all", at the end of a custom row's heading: the row's first page is all
-    /// a row shows, and the rest is a wall of its own. A real button, small, so Enter and
-    /// Space open it as they do any other.</summary>
+    /// <summary>"See all", at the end of a row's heading: the row's first page is all a row
+    /// shows, and the rest is a wall of its own. A real button, small, so Enter and Space
+    /// open it as they do any other.</summary>
     private Element SeeAllLink(DiscoverRow row)
     {
         var link = Ui.Button(ButtonVariant.Ghost, "See all",
             () => Navigate(new Route(ApertureView.DiscoverAll,
                 row.Slider!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), row.Title)),
             $"discover-row-{row.Key}-see-all", style: SeeAllStyle);
+        link.AccessibleName = $"See all of {row.Title}";
+        return link;
+    }
+
+    /// <summary>The recent-requests row's "See all" is the Requests list itself — its
+    /// filters and verbs are what the rest of them want — showing everything, and everyone's
+    /// for someone who decides them, as the row does.</summary>
+    private Element SeeAllRequestsLink(DiscoverRow row)
+    {
+        var link = Ui.Button(ButtonVariant.Ghost, "See all", () =>
+        {
+            SetRequestListFilter(RequestFilter.All);
+            SetRequestListMine(false);
+            Navigate(new Route(ApertureView.Requests));
+        }, $"discover-row-{row.Key}-see-all", style: SeeAllStyle);
         link.AccessibleName = $"See all of {row.Title}";
         return link;
     }
@@ -178,8 +194,8 @@ public sealed partial class ApertureApp
         Text = Halide.Accent300,
     };
 
-    /// <summary>A custom row in full: its titles as a wall, a page at a time. The row is
-    /// found in the layout as last loaded — the route carries only its id.</summary>
+    /// <summary>A row in full: its titles as a wall, a page at a time. The row is found in
+    /// the layout as last loaded — the route carries only its id.</summary>
     private Element BuildDiscoverAllView(Route route)
     {
         int id = int.TryParse(route.Id, System.Globalization.NumberStyles.Integer,
@@ -197,7 +213,7 @@ public sealed partial class ApertureApp
             return column;
         }
         EnsureSliderPage(slider);
-        return TitleWall(route.Title ?? slider.Title ?? "Discover", WallItems, WallLoading, WallHasMore,
+        return TitleWall(route.Title ?? SliderTitle(slider) ?? "Discover", WallItems, WallLoading, WallHasMore,
             () => { EnsureSliderPage(slider, more: true); Rerender(); }, "see-all-view", Icons.Discover,
             "Nothing here now", $"{RequestServerTitle} has nothing to show for this row just now.");
     }

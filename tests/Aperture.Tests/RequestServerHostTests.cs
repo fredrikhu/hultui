@@ -532,7 +532,7 @@ public class RequestServerHostTests
     }
 
     [Fact]
-    public void ACustomRowWithMoreThanItsFirstPageOffersSeeAll()
+    public void ARowWithMoreThanItsFirstPageOffersSeeAll()
     {
         var requests = Requests();
         requests.SliderPageSize = 1;   // so two titles make two pages
@@ -546,9 +546,9 @@ public class RequestServerHostTests
             PumpUntilShown(session, "Films");
             Click(session, "rail-discover");
             PumpUntilShown(session, "See all of Mind-benders");
-            // A built-in row pages in place, as the server's own page does; a custom row
-            // with one page has nothing more to see.
-            Assert.Null(session.Window.FindByAutomationId("discover-row-slider-1-see-all"));
+            // Built-in or custom alike; only a row whose first page is all of it has
+            // nothing more to see.
+            PumpUntilShown(session, "See all of Popular films");
             Assert.Null(session.Window.FindByAutomationId("discover-row-slider-6-see-all"));
 
             Click(session, "discover-row-slider-5-see-all");
@@ -565,6 +565,73 @@ public class RequestServerHostTests
             app.GoBack();
             Pump(session);
             Assert.Equal(ApertureView.Discover, app.Current.View);
+        });
+    }
+
+    [Fact]
+    public void ABuiltInRowsSeeAllPagesThroughTheShelf()
+    {
+        var requests = Requests();
+        requests.SliderPageSize = 1;
+        requests.AddMovie(604, "The Matrix Reloaded", 2003, shelves: [DiscoverShelf.PopularMovies]);
+        requests.Layout = [new DiscoverSlider(1, SliderKind.PopularMovies, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Popular films");
+            Click(session, "discover-row-slider-1-see-all");
+            Assert.Equal(ApertureView.DiscoverAll, app.Current.View);
+            PumpUntilShown(session, "The Matrix, film, 1999");
+            Click(session, "see-all-view-more");
+            PumpUntilShown(session, "The Matrix Reloaded, film, 2003");
+            Assert.Contains("GetSlider(PopularMovies,1,p2)", requests.Calls);
+        });
+    }
+
+    [Fact]
+    public void TheWatchlistsSeeAllIsTheWholeWatchlistAvailableTitlesIncluded()
+    {
+        // The administrator hides what is available — which thins shelves, never a record.
+        var requests = Requests(info: new RequestServerInfo("http://jellyseerr.test:5055", "Jellyseerr", "2.7.3",
+            HideAvailable: true));
+        requests.SliderPageSize = 1;
+        requests.AddToWatchlist("movie:603");
+        requests.AddToWatchlist("movie:1398");   // Stalker: available
+        requests.Layout = [new DiscoverSlider(3, SliderKind.Watchlist, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Your watchlist");
+            Click(session, "discover-row-watchlist-see-all");
+            PumpUntilShown(session, "The Matrix, film, 1999");
+            Click(session, "see-all-view-more");
+            PumpUntilShown(session, "Stalker");
+            Assert.Contains("GetWatchlist(p2)", requests.Calls);
+            Assert.DoesNotContain(requests.Calls, c => c.StartsWith("GetSlider(Watchlist", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void RecentRequestsSeeAllIsTheRequestsListShowingEverything()
+    {
+        var requests = Requests(RequestPermission.ManageRequests | RequestPermission.Request);
+        requests.AddPendingRequest("movie:603");
+        requests.Layout = [new DiscoverSlider(2, SliderKind.RecentRequests, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            // Left on a narrower list since the last visit.
+            app.SetRequestListFilter(RequestFilter.Failed);
+            app.SetRequestListMine(true);
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Recent requests");
+            Click(session, "discover-row-requests-see-all");
+            Assert.Equal(ApertureView.Requests, app.Current.View);
+            Assert.Equal(RequestFilter.All, app.RequestListFilter);
+            Assert.False(app.RequestListMine);
+            PumpUntilShown(session, "The Matrix, requested by anna, waiting for approval");
         });
     }
 

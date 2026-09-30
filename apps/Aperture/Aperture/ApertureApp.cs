@@ -38,7 +38,7 @@ public enum ApertureView
     DiscoverPerson,
     /// <summary>A studio's films or a network's series; the Id is <c>movie:2</c> or <c>tv:213</c>.</summary>
     DiscoverCompany,
-    /// <summary>A custom Discover row in full — "See all"; the Id is the row's id in the layout.</summary>
+    /// <summary>A Discover row in full — "See all"; the Id is the row's id in the layout.</summary>
     DiscoverAll,
     /// <summary>Problem reports, for someone who may read everyone's.</summary>
     Issues,

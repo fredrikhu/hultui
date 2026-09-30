@@ -122,16 +122,17 @@ public sealed partial class ApertureApp
 
     /// <summary>One row of Discover, filled. One of the lists is used, by the row's kind:
     /// titles (requests become titles too), genres to browse, or studios and networks.
-    /// A row of titles from the layout keeps its <see cref="Slider"/>, and whether the
-    /// server has more of it than the first page — which is what "See all" opens.</summary>
+    /// A row of titles keeps its <see cref="Slider"/>, and whether the server has more of
+    /// it than the first page — which is what "See all" opens. Genre, studio and network
+    /// rows are whole already.</summary>
     internal sealed record DiscoverRow(string Key, string Title, SliderKind Kind,
         IReadOnlyList<DiscoverItem> Items, IReadOnlyList<DiscoverGenre> Genres, IReadOnlyList<DiscoverCompany> Companies,
         DiscoverSlider? Slider = null, bool HasMore = false)
     {
         public bool IsEmpty => Items.Count == 0 && Genres.Count == 0 && Companies.Count == 0;
 
-        /// <summary>A custom row with more than its first page: the heading offers the rest.</summary>
-        public bool CanSeeAll => Slider is { IsCustom: true } && HasMore;
+        /// <summary>A row with more than its first page: the heading offers the rest.</summary>
+        public bool CanSeeAll => Slider is not null && HasMore;
     }
 
     private readonly AsyncLoader<IReadOnlyList<DiscoverRow>> _discoverRows = new([]);
@@ -172,11 +173,13 @@ public sealed partial class ApertureApp
                 switch (slider.Kind)
                 {
                     case SliderKind.RecentRequests:
-                        rows.Add(new DiscoverRow("requests", title, slider.Kind, [], [], []));
+                        // Its "See all" is the Requests list, whatever this says of the first page.
+                        rows.Add(new DiscoverRow("requests", title, slider.Kind, [], [], [], slider));
                         break;
                     case SliderKind.Watchlist:
-                        rows.Add(new DiscoverRow("watchlist", title, slider.Kind,
-                            FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist").Items, [], []));
+                        var watchlist = FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist");
+                        rows.Add(new DiscoverRow("watchlist", title, slider.Kind, watchlist.Items, [], [],
+                            slider, watchlist.HasMore));
                         break;
                     case SliderKind.MovieGenres or SliderKind.TvGenres:
                         var kind = slider.Kind == SliderKind.MovieGenres ? DiscoverKind.Movie : DiscoverKind.Tv;
@@ -291,11 +294,17 @@ public sealed partial class ApertureApp
         EnsureWallPage($"genre|{kind}|{genreId}",
             (server, page) => server.DiscoverGenreAsync(kind, genreId, page), "That genre", more);
 
-    /// <summary>A custom row's titles in full. Keyed by what the row asks for, not only its
-    /// id, so an administrator changing the row mid-visit starts it again.</summary>
-    private void EnsureSliderPage(DiscoverSlider slider, bool more = false) =>
-        EnsureWallPage($"slider|{slider.Id}|{slider.Kind}|{slider.Data}",
-            (server, page) => server.GetSliderAsync(slider, page), "That row", more);
+    /// <summary>A row's titles in full. Keyed by what the row asks for, not only its id, so
+    /// an administrator changing the row mid-visit starts it again. The watchlist is a
+    /// record, as on its row, so the server's hide switches do not thin it.</summary>
+    private void EnsureSliderPage(DiscoverSlider slider, bool more = false)
+    {
+        var source = $"slider|{slider.Id}|{slider.Kind}|{slider.Data}";
+        if (slider.Kind == SliderKind.Watchlist)
+            EnsureWallPage(source, (server, page) => server.GetWatchlistAsync(page), "Your watchlist", more, hide: false);
+        else
+            EnsureWallPage(source, (server, page) => server.GetSliderAsync(slider, page), "That row", more);
+    }
 
     private void EnsureCompanyPage(DiscoverKind kind, int companyId, bool more = false) =>
         EnsureWallPage($"company|{kind}|{companyId}",
@@ -306,7 +315,7 @@ public sealed partial class ApertureApp
     /// when <paramref name="more"/> (the "Show more" button) and none is loading. One page
     /// on screen at a time, so one loader serves both.</summary>
     private void EnsureWallPage(string source, Func<IRequestServer, int, Task<ApertureResult<DiscoverPage>>> fetch,
-        string what, bool more)
+        string what, bool more, bool hide = true)
     {
         if (_requestServer is not { } server) return;
         var key = $"{_requestGeneration}|{_dataGeneration}|{source}";
@@ -324,7 +333,7 @@ public sealed partial class ApertureApp
         {
             if (_wallKey != key) return;
             var seen = _wallItems.Select(i => i.Key).ToHashSet(StringComparer.Ordinal);
-            _wallItems.AddRange(Shown(server, loaded.Items).Where(i => seen.Add(i.Key)));
+            _wallItems.AddRange((hide ? Shown(server, loaded.Items) : loaded.Items).Where(i => seen.Add(i.Key)));
         });
     }
 

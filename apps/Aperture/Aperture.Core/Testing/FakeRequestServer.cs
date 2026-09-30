@@ -410,10 +410,12 @@ public sealed class FakeRequestServer : IRequestServer
 
     public Task<ApertureResult<DiscoverPage>> GetWatchlistAsync(int page = 1, CancellationToken ct = default)
     {
-        Calls.Add("GetWatchlist");
+        Calls.Add(page > 1 ? $"GetWatchlist(p{page})" : "GetWatchlist");
         if (Fail<DiscoverPage>() is { } failed) return failed;
-        var items = _watchlist.Select(k => _titles[k].Item).ToList();
-        return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
+        var items = _watchlist.Skip((Math.Max(1, page) - 1) * SliderPageSize).Take(SliderPageSize)
+            .Select(k => _titles[k].Item).ToList();
+        return Done(new DiscoverPage(items, Math.Max(1, page), (_watchlist.Count + SliderPageSize - 1) / SliderPageSize,
+            _watchlist.Count));
     }
 
     public Task<ApertureResult<bool>> SetWatchlistAsync(DiscoverItem item, bool on, CancellationToken ct = default)

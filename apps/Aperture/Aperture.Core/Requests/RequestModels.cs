@@ -508,12 +508,7 @@ public enum SliderKind
 /// <summary>One row of the administrator's discover layout.</summary>
 /// <param name="Title">Set for a custom row; a built-in row is named by its kind.</param>
 /// <param name="Data">What a custom row is about — a genre id, keyword ids, a search.</param>
-public sealed record DiscoverSlider(int Id, SliderKind Kind, string? Title, string? Data, bool Enabled, int Order)
-{
-    /// <summary>A row the administrator made — keywords, a genre, a search, a studio, a
-    /// network, streaming services — rather than one the server comes with.</summary>
-    public bool IsCustom => Kind >= SliderKind.MovieKeyword;
-}
+public sealed record DiscoverSlider(int Id, SliderKind Kind, string? Title, string? Data, bool Enabled, int Order);
 
 /// <summary>A genre to browse by, with a backdrop to draw its card with.</summary>
 public sealed record DiscoverGenre(int Id, string Name, DiscoverKind Kind, string? BackdropPath);
