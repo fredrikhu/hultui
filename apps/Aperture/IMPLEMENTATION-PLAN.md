@@ -158,7 +158,7 @@ password there. **Not exercised live:** making, deciding and withdrawing a reque
 start real downloads, so they are covered by the wire tests only until someone asks for
 something on purpose.
 
-### 7b — done (three small things left, at the end)
+### 7b — done (two small things left, at the end)
 
 **Done (2026-09-30):**
 
@@ -209,13 +209,16 @@ genre rows and a genre page, a person, the watchlist, and Radarr's profiles and 
 (`radarr.home`). Making a request, reporting a problem and the watchlist writes are covered
 by the wire and headless tests only.
 
+**Since:** the watchlist has a row on Home, after the "what now" rows — what the library
+already has first, since that is what can be played — and moves, hides and comes back
+like any other row. Home's rows can now hold discovery titles (`HomeRow.Titles`).
+
 **Still open:**
 
-- A Home row for the watchlist (Home's rows are library items; this needs a row kind that
-  holds discovery titles).
 - Studios and networks, if a logo source turns up; streaming-service rows once their data
   format is pinned down.
 - Issues as a list — reading and commenting on reports, for someone who manages them.
+
 ## Things deliberately not done
 
 - **A device profile, by default.** Aperture tells the server it can direct-play and

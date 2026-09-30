@@ -41,6 +41,7 @@ public sealed partial class ApertureApp
     private void EnsureHomeRows()
     {
         if (_library is not { } lib) return;
+        EnsureHomeWatchlist();
         _resume.Load(("resume", _dataGeneration),
             () => Fetch(() => lib.GetResumeAsync(12), (IReadOnlyList<MediaItem>)[], "Continue watching"));
         _nextUp.Load(("nextup", _dataGeneration),

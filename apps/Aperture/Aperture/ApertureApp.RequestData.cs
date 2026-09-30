@@ -235,6 +235,29 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaRequest> MyRecentRequests => _myRecentRequests.Value;
 
+    // ── The watchlist, for Home ──────────────────────────────────────────
+
+    private readonly AsyncLoader<IReadOnlyList<DiscoverItem>> _homeWatchlist = new([]);
+
+    /// <summary>
+    /// The watchlist as Home shows it: what can be played now first — a title on the list
+    /// that has since arrived is the most useful thing the row can say — then the rest, each
+    /// group in the server's own order. Re-read whenever anything a request changes (adding
+    /// to the list bumps the same generation), and by F5.
+    /// </summary>
+    private void EnsureHomeWatchlist()
+    {
+        if (_requestServer is not { } server) return;
+        _homeWatchlist.Load(("home-watchlist", _requestGeneration, _dataGeneration), () =>
+        {
+            var items = FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist").Items;
+            return (IReadOnlyList<DiscoverItem>)items.Where(i => i.InLibrary)
+                .Concat(items.Where(i => !i.InLibrary)).ToList();
+        });
+    }
+
+    internal IReadOnlyList<DiscoverItem> HomeWatchlist => _requestServer is null ? [] : _homeWatchlist.Value;
+
     // ── A genre, a person ────────────────────────────────────────────────
 
     private readonly AsyncLoader<DiscoverPage> _genrePage = new(DiscoverPage.Empty);

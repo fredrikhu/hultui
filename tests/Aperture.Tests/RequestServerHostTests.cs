@@ -654,4 +654,82 @@ public class RequestServerHostTests
             Assert.False(Shows(session, "The Matrix is in your library"));
         });
     }
+
+    // ── The watchlist on Home ────────────────────────────────────────────
+
+    [Fact]
+    public void TheWatchlistHasARowOnHomeWhoseTitlesOpen()
+    {
+        var requests = Requests();
+        requests.AddToWatchlist("movie:603");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your watchlist");
+            Assert.Equal(ApertureView.Home, app.Current.View);
+
+            Click(session, "discover-card-movie:603");
+            Assert.Equal(ApertureView.DiscoverTitle, app.Current.View);
+            Assert.Equal("movie:603", app.Current.Id);
+        });
+    }
+
+    [Fact]
+    public void AWatchlistTitleTheLibraryHasComesFirst()
+    {
+        var requests = Requests();
+        requests.AddToWatchlist("movie:603");    // not in the library
+        requests.AddToWatchlist("movie:1398");   // Stalker: arrived, playable now
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your watchlist");
+            Assert.Equal(["movie:1398", "movie:603"], app.HomeWatchlist.Select(i => i.Key));
+        });
+    }
+
+    [Fact]
+    public void AnEmptyWatchlistDrawsNoRow()
+    {
+        var requests = Requests();
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Pump(session, 4);
+            Assert.Contains("GetWatchlist", requests.Calls);
+            Assert.False(Shows(session, "Your watchlist"));
+        });
+    }
+
+    [Fact]
+    public void TheWatchlistRowMovesAndHidesLikeAnyOther()
+    {
+        var requests = Requests();
+        requests.AddToWatchlist("movie:603");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your watchlist");
+            app.SetHomeRowHidden(ApertureApp.WatchlistRowKey, true);
+            Pump(session);
+            Assert.Null(session.Window.FindByAutomationId("discover-card-movie:603"));
+            // Hidden, not forgotten: the footer offers it back.
+            PumpUntilShown(session, "Show Your watchlist");
+            Assert.Contains(ApertureApp.WatchlistRowKey, app.Settings.Data.HiddenHomeRows);
+        });
+    }
+
+    [Fact]
+    public void AddingToTheWatchlistPutsItOnHome()
+    {
+        var requests = Requests();
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "Add to your watchlist");
+            Click(session, "discover-watchlist");
+            PumpUntilShown(session, "On your watchlist");
+
+            Click(session, "rail-home");
+            PumpUntilShown(session, "Your watchlist");
+        });
+    }
 }

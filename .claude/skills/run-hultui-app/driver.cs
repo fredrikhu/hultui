@@ -275,6 +275,10 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests()
     fake.AddPendingRequest("movie:1004");
     fake.AddPendingRequest("tv:2102", [1, 2]);
     fake.AddRequest("movie:1003", Aperture.Core.Requests.RequestStatus.Approved);
+    // A watchlist, for Home's row — one of them already in the library, which comes first.
+    fake.AddToWatchlist("movie:1006");
+    fake.AddToWatchlist("movie:990");
+    fake.AddToWatchlist("tv:2101");
     // Something downloading, for the progress bar and the list's percentage.
     fake.SetDownloads("movie:1003", [new Aperture.Core.Requests.DownloadProgress("Northbound.2022.2160p.mkv",
         8_000_000_000, 2_600_000_000, "downloading", TimeSpan.FromMinutes(23), null)]);

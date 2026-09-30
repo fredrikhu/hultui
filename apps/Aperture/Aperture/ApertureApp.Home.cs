@@ -1,4 +1,5 @@
 ﻿using Aperture.Core;
+using Aperture.Core.Requests;
 using Aperture.Theme;
 using HultUI.Core.Builders;
 using HultUI.Core.Elements;
@@ -22,13 +23,19 @@ public sealed partial class ApertureApp
 {
     /// <summary>One shelf on home, as the current data and the current preferences make
     /// it. Built fresh each frame — the settings store keys and an order, never items.</summary>
+    /// <param name="Titles">When set, a row of the request server's titles rather than
+    /// library items — the watchlist — drawn as discovery cards.</param>
     private sealed record HomeRow(
         string Key, string Title, IReadOnlyList<MediaItem> Items,
-        float CardWidth, bool Stills, string? Trailing = null);
+        float CardWidth, bool Stills, string? Trailing = null, IReadOnlyList<DiscoverItem>? Titles = null)
+    {
+        public int Count => Titles?.Count ?? Items.Count;
+    }
 
     internal const string ResumeRowKey = "resume";
     internal const string NextUpRowKey = "nextup";
     internal const string CombinedRowKey = "upnext";
+    internal const string WatchlistRowKey = "watchlist";
     internal static string LatestRowKey(string libraryId) => "latest-" + libraryId;
 
     private Element BuildHomeView()
@@ -56,8 +63,12 @@ public sealed partial class ApertureApp
         // next, which is how every shelf on a television behaves. The flat list is built
         // in the order the rows are drawn — so reordering the shelves reorders the walk —
         // and each card is handed its place in it.
-        var walk = new List<MediaItem>();
-        foreach (var row in shown) walk.AddRange(row.Items);
+        var walk = new List<object>();
+        foreach (var row in shown)
+        {
+            if (row.Titles is { } titles) walk.AddRange(titles);
+            else walk.AddRange(row.Items);
+        }
         SetCursorList($"home:{string.Join(',', shown.Select(r => r.Key))}:{walk.Count}",
             walk, VisibleCards(Halide.PosterWidth));
 
@@ -67,12 +78,14 @@ public sealed partial class ApertureApp
             var row = shown[index];
             int start = cursorBase;
             var items = row.Items;
-            page.AddChild(CardRow(row.Title, items.Count,
-                i => row.Stills ? StillCard(items[i], cursorIndex: start + i)
-                                : PosterCard(items[i], cursorIndex: start + i),
+            var titles = row.Titles;
+            page.AddChild(CardRow(row.Title, row.Count,
+                i => titles is not null ? DiscoverCard(titles[i], row.CardWidth, cursorIndex: start + i)
+                    : row.Stills ? StillCard(items[i], cursorIndex: start + i)
+                    : PosterCard(items[i], cursorIndex: start + i),
                 row.CardWidth, "row-" + row.Key, trailing: row.Trailing,
                 headingExtra: RowMenuButton(row, all)));
-            cursorBase += items.Count;
+            cursorBase += row.Count;
         }
 
         if (shown.Count < all.Count) page.AddChild(HiddenRowsFooter(all, hidden));
@@ -103,6 +116,13 @@ public sealed partial class ApertureApp
             if (NextUpItems.Count > 0)
                 rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false));
         }
+
+        // What you meant to watch, from the request server — after what you are already
+        // watching, before what has merely arrived. Only with a request server connected
+        // and something on the list: like every row here, an empty one is not drawn.
+        if (_requestServer is not null && HomeWatchlist.Count > 0)
+            rows.Add(new HomeRow(WatchlistRowKey, "Your watchlist", [], Halide.PosterWidth, Stills: false,
+                Titles: HomeWatchlist));
 
         foreach (var library in Libraries)
         {
