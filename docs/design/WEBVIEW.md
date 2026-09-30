@@ -269,6 +269,15 @@ latency and cost, `<select>` placement and focus, and the accessibility route â€
 each folded into the paragraphs above. Left for a person at the keyboard: IME
 candidate position, and how scrolling and drag-selection feel.
 
+**Checked by the owner, 2026-09-30, on the shipped engine (the WebView sample):**
+
+- **Narrator** reads the page as it reads the web view in Claude Desktop â€” the same
+  stops, the same containers between the app and the document. Good enough.
+- **IME (Japanese): the candidate list appears in the right place on google.com and
+  does not appear at all on wikipedia.org's search box. Brave shows it on both.** Open.
+  Not yet known: whether the composition text itself shows in the box, and what differs
+  between the two fields. Step 6.
+
 ## Linux engines
 
 **DECIDED (Linux engine), revised 2026-09-30: CEF, rendered off-screen.** WPE WebKit was
@@ -561,5 +570,6 @@ engine if it changed, but nothing more.
 5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
    libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
    accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
-6. **Polish**: HultUI context menu and script dialogs over the engine's, downloads,
-   drag and drop into the page.
+6. **Polish**: the IME candidate list that is missing on some pages (above), HultUI
+   context menu and script dialogs over the engine's, downloads, drag and drop into the
+   page.
