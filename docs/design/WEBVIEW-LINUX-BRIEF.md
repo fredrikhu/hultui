@@ -303,8 +303,11 @@ In this order; each ends with its tests green and the step written into
    the page comes to the host through CEF's start-dragging callback, which the host must turn
    into a real drag.
 5. **Zero-copy.** A `IGpuFrameRenderer` registered through `IWebViewHost.UseGpuRenderer`, as
-   the Windows engine's `CaptureRenderer` and the mpv backend do. One GPU source per Vulkan
-   window until seam W7.
+   the Windows engine's `CaptureRenderer` and the mpv backend do. Seam W7 is done: on
+   Vulkan each GPU source is lent a shared image of its own, with its own semaphores.
+   It ran on Windows only, so the fd export of those semaphores is unproven: once CEF
+   draws, show two pages, or a page and a video, in one Vulkan window and check a
+   `HULTUI_VULKAN_CAPTURE` of it, as `VulkanProbeTests` does with two WebView2 pages.
 6. **Accessibility.** The Linux half of seam W8 is not what `WEBVIEW.md` sketched for
    WebKit (a socket onto someone else's tree). CEF gives a tree of plain data, so the web
    view's node grows real children that our AT-SPI bridge serves like any others. Design it
@@ -315,4 +318,4 @@ In this order; each ends with its tests green and the step written into
 ## When you stop
 
 Commit on `claude/webview-component-repo-62ba8b` with the results in the documents, and push
-if the owner has said to. The Windows side still has, after this: step 6 (polish), seam W7, and merging `main`.
+if the owner has said to. The Windows side is done: step 6 (polish) and seam W7.

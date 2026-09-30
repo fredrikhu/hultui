@@ -348,6 +348,7 @@ wait on one. Defer destruction until the image's next acquire, or use present fe
   - **Limit, documented rather than fixed:** a source whose lend is refused, or fails, draws
     nothing. Its mode is decided once at its first draw, so it cannot fall back to pixels
     afterwards. Two GPU sources in one Vulkan window would need an image per source.
+    **Since done** as seam W7 (2026-09-30, `docs/design/WEBVIEW.md`): an image per source.
 - **6.4:** retired semaphores are kept per batch and destroyed after the replacing swapchain has
   presented a full round of images, plus one. A maximize/restore cycle showed each batch destroyed
   one round later, and the last one on dispose.

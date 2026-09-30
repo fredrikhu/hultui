@@ -165,15 +165,13 @@ every frame is carried on the GPU from the browser to the screen on both rendere
 capture's D3D11 texture is read by GL in place and blitted into the frame the renderer
 composites — and costs this process roughly 60–100 ms of CPU a second on the GL renderer
 and 20–90 on Vulkan, at 1650×1072 and 60 frames a second, most of it HultUI redrawing
-the window. Where the driver lacks the
+the window. Several pages, and videos beside them, can share a window on either renderer:
+on Vulkan each is lent a shared image of its own. Where the driver lacks the
 interop the frame is read back and uploaded instead, at about 220 ms/s;
 `HULTUI_WEBVIEW2_INTEROP=0` forces that, for a driver that mishandles the interop.
 
 ## Limits, for now
 
-- On the Vulkan renderer, one GPU source per window: a web view and a playing video in the
-  same Vulkan window share the renderer's one interop image, so the second draws nothing.
-  Separate windows, or the GL renderer, are unaffected.
 - Drag and drop needs `[STAThread]` on Windows: files and text dropped from outside reach the
   page, drags inside the page work, and a page's drag can be dropped on another application.
   A page learns of a drag about a quarter of a second after it enters (Edge is quicker: its

@@ -46,10 +46,14 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
 
     // ──── GPU path ────
 
+    private IExternalGLSurface? _surface;
+
     public bool TryRenderFrame(IExternalGLSurface surface, out GpuFrame frame)
     {
         frame = default;
         if (_disposed) return false;
+        // Remembered so the target the surface lent this sink can be given back when it goes.
+        _surface = surface;
         if (_mode == GpuSinkMode.Undecided)
         {
             Decide(GpuSinkMode.Gpu);
@@ -80,7 +84,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
             // A renderer that lends a target needs none of them — and on a Vulkan surface
             // there is no guarantee the nine functions a texture needs are even reachable
             // through its resolver.
-            if (surface.TryAcquireFrameTarget(width, height, out var lent))
+            if (surface.TryAcquireFrameTarget(this, width, height, out var lent))
             {
                 rendererOwned = true;
                 lentTarget = lent;
@@ -174,6 +178,10 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         if (_disposed) return;
         _disposed = true;
         if (_mode == GpuSinkMode.Gpu) _renderer.ReleaseGL();
+        // The surface's image for this sink: on Vulkan an allocation of its own, which would
+        // otherwise live as long as the window.
+        _surface?.ReleaseFrameTarget(this);
+        _surface = null;
         if (_gl is { } gl && _texture != 0)
         {
             gl.DeleteFramebuffers(1, ref _framebuffer);

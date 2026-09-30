@@ -195,15 +195,23 @@ public interface IVulkanInteropHost
     void RunOnGLContext(Action draw);
 
     /// <summary>
-    /// An image of this size for GL to render into, creating or resizing one as needed, or
-    /// null when interop is unavailable. The host owns it; it stays valid until the next
-    /// call with a different size or until the host is disposed.
+    /// <paramref name="owner"/>'s image, of this size, for GL to render into — creating or
+    /// resizing it as needed — or null when interop is unavailable. Each owner (a GPU source:
+    /// a video, a web page) has an image of its own, so several can draw in one frame. The host
+    /// owns it; it stays valid until the owner's next call with a different size, until
+    /// <see cref="ForgetInteropImage"/>, or until the host is disposed.
     /// </summary>
-    VulkanInteropImage? LendInteropImage(int widthPx, int heightPx);
+    VulkanInteropImage? LendInteropImage(object owner, int widthPx, int heightPx);
 
     /// <summary>
-    /// Orders what GL just wrote before what Vulkan is about to read, and hands the image
-    /// back to the Vulkan queue. No-op when nothing is lent.
+    /// <paramref name="owner"/> is done with its image. Any thread; the image is freed on the
+    /// render thread at the next frame, once the GPU has finished with it.
+    /// </summary>
+    void ForgetInteropImage(object owner);
+
+    /// <summary>
+    /// Orders what GL just wrote before what Vulkan is about to read, and hands the images GL
+    /// drew into back to the Vulkan queue. No-op when nothing was drawn.
     ///
     /// <para>With a shared semaphore, GL signals it and the Vulkan barrier waits on it on the
     /// GPU, so the CPU does not block. Without one it falls back to <c>glFinish</c> and a queue

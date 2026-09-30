@@ -1010,8 +1010,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         if (!_haveAcquired || _swapchain.IsNull)
         {
             // Nothing to present — the swapchain was rebuilt since the acquire — but a video
-            // drawn this frame still took the shared image, and GL must get it back.
+            // drawn this frame still took its shared image, and GL must get it back.
             FlushOwedRelease();
+            DestroyForgottenSlots();
             return;
         }
 
@@ -1047,7 +1048,12 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
 
         if (result is VkResult.ErrorOutOfDateKHR or VkResult.SuboptimalKHR)
             Rebuild(_widthPx, _heightPx, force: true);
+
+        // A source that went away gives its image back here, where no frame is recording.
+        DestroyForgottenSlots();
     }
+
+    private readonly List<VkSemaphore> _presentReleases = [];
 
     /// <summary>Records and submits the transition to PRESENT_SRC_KHR, returning the
     /// semaphore it signals when that work is done.</summary>
@@ -1072,19 +1078,21 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanSurfaceHost, IDispos
         _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.ColorAttachmentOutput,
             VkPipelineStageFlags.BottomOfPipe, VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
 
-        // The last submit of the frame, so the shared image goes back to GL here if it was drawn.
-        var release = ReleaseInteropImage(cmd);
+        // The last submit of the frame, so the shared images go back to GL here if drawn.
+        _presentReleases.Clear();
+        ReleaseInteropImages(cmd, _presentReleases);
 
         Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
 
-        var signals = stackalloc VkSemaphore[2];
+        int count = 1 + _presentReleases.Count;
+        var signals = stackalloc VkSemaphore[count];
         signals[0] = _renderFinished[imageIndex];
-        if (release is { } r) signals[1] = r;
+        for (int i = 1; i < count; i++) signals[i] = _presentReleases[i - 1];
         var submit = new VkSubmitInfo
         {
             commandBufferCount = 1,
             pCommandBuffers = &cmd,
-            signalSemaphoreCount = release is null ? 1u : 2u,
+            signalSemaphoreCount = (uint)count,
             pSignalSemaphores = signals,
         };
         Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");

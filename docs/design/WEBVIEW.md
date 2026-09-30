@@ -466,10 +466,20 @@ international keys to `Unknown`; CEF's key event wants the native key code besid
 the Windows one (what exactly is question 5 of the Linux spike). Add `KeyDownEvent.ScanCode`/`KeyUpEvent.ScanCode`.
 
 **W7 — Per-source interop images on Vulkan (`HultUI.Platform.SDL3`,
-`HultUI.Rendering.Skia`).** The Vulkan surface lends *one* interop image and
-reallocates it when the requested size changes, so two GPU sources in one window
-of different sizes — a web view and a video, or two videos today — fight over it.
-Lend per source. Needed for zero-copy on Vulkan (phase 3), not before.
+`HultUI.Rendering.Skia`). Done (2026-09-30).** The Vulkan surface lent *one* interop
+image and refused a second lend in a frame, so a second GPU source in a window drew
+nothing. Now `IExternalGLSurface.TryAcquireFrameTarget` and `ReleaseFrameTarget` take
+an owner (the `GpuFrameSink`), and `IVulkanSurfaceHost.LendInteropImage(owner, …)` keeps
+a slot per owner: its image, GL objects, and its own GL→Vulkan and Vulkan→GL semaphore
+pair. One barrier submit hands every slot drawn in the frame back to Vulkan, and the
+present signals every slot's release semaphore. `ForgetInteropImage(owner)` may be
+called from any thread; the slot is destroyed at the next frame, after a device wait.
+A sink holds its slot until it is disposed — with its controller or player, not when its
+element leaves the tree. Proven by
+`VulkanProbeTests.TwoGpuSources_InOneVulkanWindow_BothReachTheScreen`: two pages side by side, captured from the swapchain, and one
+disposed afterwards gives its image back. With the second lend refused again, the
+right page's half was empty (seen). A single video on Vulkan was checked by capture.
+**Open:** the Linux fd path, which has not run with more than one slot.
 
 **W8 — Foreign accessibility subtree (`HultUI.Core`, both bridges).** Neither
 bridge could host a subtree it did not build. **Windows half done (step 4):**
@@ -623,11 +633,9 @@ engine if it changed, but nothing more.
    needs no conversion: the frame reports `ReferenceWhiteNits = 0` and the renderer
    composites it as encoded, which a swapchain capture confirmed. The element now draws
    before the first frame, as the video element does — that visit decides the mode.
-   **W7 is not done** and turned out not to be needed for this: zero-copy on Vulkan works
-   with the one lent image as long as a window has one GPU source. A video and a page in
-   one Vulkan window still conflict (the second lend is refused and draws nothing); fixing
-   it means generalising the host's single image — its semaphores, release bookkeeping
-   and GL objects, hardened in plan 15 and verified on Linux — to one per source.
+   W7 turned out not to be needed for this: zero-copy on Vulkan worked with the one lent
+   image as long as a window had one GPU source. A video and a page in one Vulkan window
+   conflicted until W7 was done, after step 6 (see the seam).
 4. **Windows accessibility — done.** The page's UIA tree hangs under the web view element,
    a point over the page resolves to the page's element, focus in the page is reported as
    the page's element, and all of it follows the window when it moves. Seam W8's Windows

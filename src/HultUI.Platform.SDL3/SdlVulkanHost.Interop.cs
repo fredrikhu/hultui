@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using HultUI.Core.DevTools;
 using HultUI.Core.Rendering;
@@ -8,8 +9,8 @@ using static SDL.SDL3;
 namespace HultUI.Platform.SDL3;
 
 /// <summary>
-/// One image shared between this window's Vulkan device and a hidden OpenGL context —
-/// phase 4 of <c>docs/design/HDR.md</c>.
+/// Images shared between this window's Vulkan device and a hidden OpenGL context — phase 4 of
+/// <c>docs/design/HDR.md</c>, and seam W7 of <c>docs/design/WEBVIEW.md</c>.
 ///
 /// <para><b>Why there is a second context at all.</b> mpv renders with OpenGL and nothing
 /// else: its render API defines <c>opengl</c> and <c>sw</c>, and no build flag adds a third.
@@ -19,10 +20,17 @@ namespace HultUI.Platform.SDL3;
 ///
 /// <para>So a GL context is made beside the Vulkan device, and the two are given one
 /// allocation rather than a copy each: Vulkan creates an image whose memory is exportable,
-/// GL imports that memory as a texture, mpv renders into a framebuffer over it, and Skia
-/// draws the Vulkan image. Nothing crosses the bus twice. Phase 0 proved drivers allow it;
-/// <c>spikes/HdrInterop</c> is that proof and this is the same sequence in the real
+/// GL imports that memory as a texture, the producer renders into a framebuffer over it, and
+/// Skia draws the Vulkan image. Nothing crosses the bus twice. Phase 0 proved drivers allow
+/// it; <c>spikes/HdrInterop</c> is that proof and this is the same sequence in the real
 /// renderer.</para>
+///
+/// <para><b>One image per source.</b> Each GPU source — a video, a web page — is lent an image
+/// of its own (an <see cref="InteropSlot"/>), with its own pair of semaphores and its own
+/// hand-back bookkeeping. There used to be one per window, which Skia only reads at the
+/// frame's flush: a second source that frame would have drawn over the first one's picture,
+/// or re-created it at another size under a draw already recorded, so the second was refused
+/// and drew nothing. A source gives its image up with <see cref="ForgetInteropImage"/>.</para>
 ///
 /// <para><b>Everything here is lazy.</b> Loading a GL driver costs about 130 ms and most
 /// windows never show a video, so none of it happens until the first frame that asks. A
@@ -51,19 +59,67 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     /// gain external-memory support while the process runs.</summary>
     private bool? _interopReady;
 
-    private VkImage _interopImage;
-    private VkDeviceMemory _interopMemory;
-    private ulong _interopMemorySize;
-    private uint _glMemoryObject, _glTexture, _glFramebuffer;
-    private int _interopWidth, _interopHeight;
+    /// <summary>
+    /// One source's image: the Vulkan allocation, the GL objects over it, the two semaphores
+    /// that order it, and where it is in being handed back and forth.
+    /// </summary>
+    private sealed class InteropSlot(object owner)
+    {
+        public readonly object Owner = owner;
 
-    /// <summary>Whether GL has drawn into the image since the last barrier. Kept so that a
-    /// <see cref="RunOnGLContext"/> which only set something up does not pay for a submit.</summary>
-    private bool _interopDirty;
+        public VkImage Image;
+        public VkDeviceMemory Memory;
+        public ulong MemorySize;
+        public uint GlMemoryObject, GlTexture, GlFramebuffer;
+        public int Width, Height;
+
+        /// <summary>Whether GL has drawn into the image since the last barrier. Kept so that a
+        /// <see cref="RunOnGLContext"/> which only set something up does not pay for a submit.</summary>
+        public bool Dirty;
+
+        /// <summary>GL signals it when it has written; the barrier submit waits on it.</summary>
+        public VkSemaphore Shared;
+        public uint GlShared;
+
+        /// <summary>
+        /// The other direction: Vulkan signals it once the frame that sampled the image is
+        /// done, and GL waits on it before writing the next one.
+        ///
+        /// <para>Without it nothing ordered a GL write after the previous frame's Skia read of
+        /// the same image. The acquire fence only waits for the frame that last presented
+        /// <i>that swapchain image</i>, two or three frames back. At the video's frame rate the
+        /// read had always finished anyway; with the GPU made to take longer than a frame, 59 of
+        /// 960 GL writes began while it was still pending.</para>
+        /// </summary>
+        public VkSemaphore Release;
+        public uint GlRelease;
+
+        /// <summary>Set when a frame drew from the image, so its present must release it to GL.</summary>
+        public bool ReleaseOwed;
+
+        /// <summary>Set once Vulkan has signalled the release, until GL has waited on it. A binary
+        /// semaphore takes exactly one wait per signal, so this is what keeps the two in step.</summary>
+        public bool ReleasePending;
+
+        /// <summary>Ordered by semaphores; otherwise by <c>glFinish</c> and queue waits.</summary>
+        public bool Ordered => !Shared.IsNull;
+    }
+
+    private readonly List<InteropSlot> _slots = [];
+
+    /// <summary>Sources that gave their image up, from any thread; the images go on the render
+    /// thread, at the next lend or present.</summary>
+    private readonly ConcurrentQueue<object> _forgotten = new();
+
+    /// <summary>Whether a slot should try for a pair of shared semaphores.</summary>
+    private bool _semaphoresUsable;
 
     /// <summary>The same resolver the GL window uses, handed to whatever renders here — mpv
     /// loads its own GL through it.</summary>
     public Func<string, nint> GlGetProcAddress { get; } = ResolveGl;
+
+    /// <summary>How many sources hold an image. For tests.</summary>
+    internal int InteropImageCount => _slots.Count;
 
     private static nint ResolveGl(string name)
     {
@@ -115,9 +171,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
                 $"(GL {Describe(glUuids)} vs Vulkan {Convert.ToHexString(vkUuid)})");
 
         _interopReady = true;
-        CreateSharedSemaphore(gl);
+        _semaphoresUsable = SemaphoreAllowed && _semaphoreExtensionsEnabled && gl.HasSemaphore;
         StartupTrace.Mark($"vulkan interop ready on {gl.Renderer}" +
-            (_sharedSemaphore.IsNull ? " (glFinish ordering)" : " (semaphore ordering)"));
+            (_semaphoresUsable ? " (semaphore ordering)" : " (glFinish ordering)"));
         return true;
 
         bool Refuse(string why)
@@ -182,42 +238,47 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         draw();
     }
 
-    public VulkanInteropImage? LendInteropImage(int widthPx, int heightPx)
+    public VulkanInteropImage? LendInteropImage(object owner, int widthPx, int heightPx)
     {
+        ArgumentNullException.ThrowIfNull(owner);
         if (_interopReady != true || widthPx <= 0 || heightPx <= 0) return null;
+        DestroyForgottenSlots();
+
+        var slot = SlotOf(owner) ?? NewSlot(owner);
 
         // A frame that took the image and never presented still owes it back; settle that
         // first, so the wait below has a signal to wait for.
-        FlushOwedRelease();
+        FlushOwedRelease(slot);
 
         // GL is about to write the image, so the last frame that sampled it has to be done.
         // Called on the GL context, before the producer draws. With the semaphore the wait
         // is the GPU's; without one it is the old blunt kind, which in practice finds the
         // queue already idle.
-        if (_releasePending)
+        if (slot.ReleasePending)
         {
-            _gl!.WaitSemaphore(_glReleaseSemaphore, _glTexture);
-            _releasePending = false;
+            _gl!.WaitSemaphore(slot.GlRelease, slot.GlTexture);
+            slot.ReleasePending = false;
         }
-        else if (_sharedSemaphore.IsNull && !_interopImage.IsNull)
+        else if (!slot.Ordered && !slot.Image.IsNull)
         {
             _vk.QueueWaitIdle(_queue);
         }
 
-        if (_interopImage.IsNull || _interopWidth != widthPx || _interopHeight != heightPx)
+        if (slot.Image.IsNull || slot.Width != widthPx || slot.Height != heightPx)
         {
-            // A GPU-side wait orders GL, not the destruction, which is the CPU's. Rare: the
-            // image follows the video's size, not the window's.
-            if (!_interopImage.IsNull) _vk.DeviceWaitIdle(_device);
-            DestroyInteropImage();
-            if (!CreateSharedImage(widthPx, heightPx)) return null;
+            // A GPU-side wait orders GL, not the destruction, which is the CPU's. A video's
+            // image follows the video's size, which changes with the file; a page's follows the
+            // element, and so every step of a resize pays this.
+            if (!slot.Image.IsNull) _vk.DeviceWaitIdle(_device);
+            DestroySlotImage(slot);
+            if (!CreateSharedImage(slot, widthPx, heightPx)) return null;
         }
 
-        _interopDirty = true;
+        slot.Dirty = true;
         return new VulkanInteropImage(
-            Image: _interopImage.Handle,
-            Memory: _interopMemory.Handle,
-            MemorySize: _interopMemorySize,
+            Image: slot.Image.Handle,
+            Memory: slot.Memory.Handle,
+            MemorySize: slot.MemorySize,
             Format: (uint)InteropFormat,
             Usage: InteropUsage,
             // What FinishExternalFrame leaves it in, which is the only layout the renderer
@@ -225,9 +286,51 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             Layout: (uint)VkImageLayout.ShaderReadOnlyOptimal,
             WidthPx: widthPx,
             HeightPx: heightPx,
-            GlFramebuffer: _glFramebuffer,
-            GlTexture: _glTexture,
+            GlFramebuffer: slot.GlFramebuffer,
+            GlTexture: slot.GlTexture,
             GlInternalFormat: GlRgba16f);
+    }
+
+    public void ForgetInteropImage(object owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        _forgotten.Enqueue(owner);
+    }
+
+    private InteropSlot? SlotOf(object owner)
+    {
+        foreach (var slot in _slots)
+            if (ReferenceEquals(slot.Owner, owner)) return slot;
+        return null;
+    }
+
+    private InteropSlot NewSlot(object owner)
+    {
+        var slot = new InteropSlot(owner);
+        if (_semaphoresUsable) CreateSharedSemaphores(slot);
+        _slots.Add(slot);
+        StartupTrace.Mark($"vulkan interop: source {_slots.Count} of this window" +
+            (slot.Ordered ? "" : " (glFinish ordering)"));
+        return slot;
+    }
+
+    /// <summary>
+    /// The images of sources that gave them up. The GPU may still be reading one — the frame
+    /// before last drew it — so this waits for the device first, which is fine for something
+    /// that happens when a video or a page goes away.
+    /// </summary>
+    private void DestroyForgottenSlots()
+    {
+        if (_forgotten.IsEmpty) return;
+        bool waited = false;
+        while (_forgotten.TryDequeue(out var owner))
+        {
+            if (SlotOf(owner) is not { } slot) continue;
+            if (!waited) { _vk.DeviceWaitIdle(_device); waited = true; }
+            DestroySlot(slot);
+            _slots.Remove(slot);
+            StartupTrace.Mark($"vulkan interop: a source gave its image back ({_slots.Count} left)");
+        }
     }
 
     /// <summary>
@@ -238,7 +341,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     /// (<see cref="VkExternalMemoryImageCreateInfo"/>) and the allocation says the same
     /// (<see cref="VkExportMemoryAllocateInfo"/>).</para>
     /// </summary>
-    private bool CreateSharedImage(int width, int height)
+    private bool CreateSharedImage(InteropSlot slot, int width, int height)
     {
         var gl = _gl!;
         var handleType = OperatingSystem.IsWindows()
@@ -266,11 +369,11 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         };
         VkImage image;
         if (_vk.CreateImage(_device, &imageInfo, 0, &image) != VkResult.Success) return false;
-        _interopImage = image;
+        slot.Image = image;
 
         var requirements = new VkMemoryRequirements();
         _vk.GetImageMemoryRequirements(_device, image, &requirements);
-        _interopMemorySize = requirements.size;
+        slot.MemorySize = requirements.size;
 
         var dedicated = new VkMemoryDedicatedAllocateInfo
         {
@@ -293,22 +396,22 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         VkDeviceMemory memory;
         if (_vk.AllocateMemory(_device, &allocate, 0, &memory) != VkResult.Success)
             return FailImage("vkAllocateMemory");
-        _interopMemory = memory;
+        slot.Memory = memory;
 
         if (_vk.BindImageMemory(_device, image, memory, 0) != VkResult.Success)
             return FailImage("vkBindImageMemory");
 
-        if (!ImportIntoGL(gl, width, height)) return FailImage("the GL import");
+        if (!ImportIntoGL(gl, slot, width, height)) return FailImage("the GL import");
 
-        _interopWidth = width;
-        _interopHeight = height;
+        slot.Width = width;
+        slot.Height = height;
         StartupTrace.Mark($"vulkan interop image {width}x{height} RGBA16F ({requirements.size} bytes)");
         return true;
 
         bool FailImage(string what)
         {
             Console.Error.WriteLine($"[vulkan] the shared image failed at {what}");
-            DestroyInteropImage();
+            DestroySlotImage(slot);
             return false;
         }
     }
@@ -321,18 +424,18 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     /// linear tiling over an optimally-tiled allocation reads as noise rather than
     /// failing.</para>
     /// </summary>
-    private bool ImportIntoGL(InteropGl gl, int width, int height)
+    private bool ImportIntoGL(InteropGl gl, InteropSlot slot, int width, int height)
     {
         bool ok = false;
         RunOnGLContext(() =>
         {
-            _glMemoryObject = gl.CreateMemoryObject();
-            gl.MarkDedicated(_glMemoryObject);
+            slot.GlMemoryObject = gl.CreateMemoryObject();
+            gl.MarkDedicated(slot.GlMemoryObject);
             if (OperatingSystem.IsWindows())
             {
-                nint handle = ExportWin32Handle();
+                nint handle = ExportWin32Handle(slot.Memory);
                 if (handle == 0) return;
-                gl.ImportWin32(_glMemoryObject, _interopMemorySize, handle);
+                gl.ImportWin32(slot.GlMemoryObject, slot.MemorySize, handle);
                 // GL copies what it needs out of an OPAQUE_WIN32 handle rather than taking
                 // ownership of it, so this side still has to close it. A file descriptor is
                 // the other way round and glImportMemoryFdEXT consumes it.
@@ -340,63 +443,69 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             }
             else
             {
-                int fd = ExportFd();
+                int fd = ExportFd(slot.Memory);
                 if (fd < 0) return;
-                gl.ImportFd(_glMemoryObject, _interopMemorySize, fd);
+                gl.ImportFd(slot.GlMemoryObject, slot.MemorySize, fd);
             }
             if (gl.Error() != 0) return;
 
-            _glTexture = gl.CreateTexture();
-            gl.SetOptimalTiling(_glTexture);
-            gl.TextureStorageMem(_glTexture, GlRgba16f, width, height, _glMemoryObject);
+            slot.GlTexture = gl.CreateTexture();
+            gl.SetOptimalTiling(slot.GlTexture);
+            gl.TextureStorageMem(slot.GlTexture, GlRgba16f, width, height, slot.GlMemoryObject);
             if (gl.Error() != 0) return;
 
-            _glFramebuffer = gl.CreateFramebuffer();
-            gl.AttachColour(_glFramebuffer, _glTexture);
-            ok = gl.FramebufferComplete(_glFramebuffer);
+            slot.GlFramebuffer = gl.CreateFramebuffer();
+            gl.AttachColour(slot.GlFramebuffer, slot.GlTexture);
+            ok = gl.FramebufferComplete(slot.GlFramebuffer);
         });
         return ok;
     }
 
-    private nint ExportWin32Handle()
+    private nint ExportWin32Handle(VkDeviceMemory memory)
     {
         if (_vk.GetMemoryWin32Handle is null) return 0;
         var info = new VkMemoryGetWin32HandleInfoKHR
         {
             sType = VkStructureType.MemoryGetWin32HandleInfoKHR,
-            memory = _interopMemory,
+            memory = memory,
             handleType = VkExternalMemoryHandleTypeFlags.OpaqueWin32,
         };
         nint handle;
         return _vk.GetMemoryWin32Handle(_device, &info, &handle) == VkResult.Success ? handle : 0;
     }
 
-    private int ExportFd()
+    private int ExportFd(VkDeviceMemory memory)
     {
         if (_vk.GetMemoryFd is null) return -1;
         var info = new VkMemoryGetFdInfoKHR
         {
             sType = VkStructureType.MemoryGetFDInfoKHR,
-            memory = _interopMemory,
+            memory = memory,
             handleType = VkExternalMemoryHandleTypeFlags.OpaqueFD,
         };
         int fd;
         return _vk.GetMemoryFd(_device, &info, &fd) == VkResult.Success ? fd : -1;
     }
 
+    private readonly List<InteropSlot> _dirty = [];
+    private readonly List<VkSemaphore> _barrierWaits = [];
+
     /// <summary>
-    /// Orders what GL wrote before what Vulkan is about to read, and takes the image back
-    /// from the external queue.
+    /// Orders what GL wrote before what Vulkan is about to read, and takes each image GL drew
+    /// into back from the external queue.
     ///
-    /// <para>With a shared semaphore, GL signals it and the barrier submit waits on it on the
-    /// GPU, from a ring of command buffers with a fence each, so the CPU does not block. Without
-    /// one, <c>glFinish</c> and a waited one-shot submit order it instead: correct, and 0.74 to
-    /// 5.33 ms a frame under a 4K decode.</para>
+    /// <para>With shared semaphores, GL signals them and the barrier submit waits on them on
+    /// the GPU, from a ring of command buffers with a fence each, so the CPU does not block.
+    /// Without, <c>glFinish</c> and a waited one-shot submit order it instead: correct, and
+    /// 0.74 to 5.33 ms a frame under a 4K decode. Normally one image is dirty — each source runs
+    /// its own <see cref="RunOnGLContext"/> — but the barriers are recorded together if not.</para>
     /// </summary>
     public void FinishExternalFrame()
     {
-        if (!_interopDirty || _interopImage.IsNull) return;
-        _interopDirty = false;
+        _dirty.Clear();
+        foreach (var slot in _slots)
+            if (slot.Dirty && !slot.Image.IsNull) _dirty.Add(slot);
+        if (_dirty.Count == 0) return;
 
         long beforeFinish = FinishTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
 
@@ -404,24 +513,35 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         // where glFinish returned only once the GPU had finished — 0.74 to 5.33 ms of blocked
         // CPU a frame on a 4K decode. The barrier submit below waits on the semaphore
         // instead, so the ordering happens on the GPU, which is where it belongs.
-        if (!_sharedSemaphore.IsNull) _gl!.SignalSemaphore(_glSemaphore, _glTexture);
-        else _gl!.Finish();
+        bool finish = false;
+        _barrierWaits.Clear();
+        foreach (var slot in _dirty)
+        {
+            slot.Dirty = false;
+            if (slot.Ordered)
+            {
+                _gl!.SignalSemaphore(slot.GlShared, slot.GlTexture);
+                _barrierWaits.Add(slot.Shared);
+            }
+            else finish = true;
+        }
+        if (finish) _gl!.Finish();
 
         long afterFinish = FinishTrace ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        ProbeRangeOnce();
+        ProbeRangeOnce(_dirty[0]);
 
         // The ring only exists for the semaphore path; without one the old one-shot is
         // correct and its wait is what makes freeing the buffer safe.
-        bool ring = !_sharedSemaphore.IsNull && EnsureInteropCommandRing();
+        bool ring = !finish && EnsureInteropCommandRing();
 
         VkCommandBuffer cmd;
         VkFence slotFence = VkFence.Null;
         if (ring)
         {
-            int slot = _interopSlot;
+            int index = _interopSlot;
             _interopSlot = (_interopSlot + 1) % _interopCmd.Length;
-            cmd = _interopCmd[slot];
-            slotFence = _interopFence[slot];
+            cmd = _interopCmd[index];
+            slotFence = _interopFence[index];
 
             // Three frames of slack, so in practice this is already signalled.
             var f = slotFence;
@@ -436,33 +556,34 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             cmd = BeginOneShot();
         }
 
-        // Where the image comes from depends on how GL handed it over. A signalled semaphore
-        // carries the layout with it — SHADER_READ_ONLY, which is what SignalSemaphore asks
-        // for — so the barrier is left with only the queue ownership to take. Without one,
-        // GENERAL is what the other API is taken to have left it in.
-        var from = _sharedSemaphore.IsNull
-            ? VkImageLayout.General
-            : VkImageLayout.ShaderReadOnlyOptimal;
-        var barrier = new VkImageMemoryBarrier
+        foreach (var slot in _dirty)
         {
-            sType = VkStructureType.ImageMemoryBarrier,
-            srcAccessMask = VkAccessFlags.None,
-            dstAccessMask = VkAccessFlags.ShaderRead,
-            oldLayout = from,
-            newLayout = VkImageLayout.ShaderReadOnlyOptimal,
-            srcQueueFamilyIndex = Vortice.Vulkan.Vulkan.VK_QUEUE_FAMILY_EXTERNAL,
-            dstQueueFamilyIndex = _queueFamily,
-            image = _interopImage,
-            subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
-        };
-        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.TopOfPipe, VkPipelineStageFlags.FragmentShader,
-            VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
-        if (ring) SubmitBarrier(cmd, _sharedSemaphore, slotFence);
-        else EndOneShot(cmd);
-        // Taken from GL, so it has to be handed back: see ReleaseInteropImage. On both paths —
-        // the glFinish one used to take ownership every frame and never return it, so every
-        // acquire after the first was of an image the external side had never been given.
-        _releaseOwed = true;
+            // Where the image comes from depends on how GL handed it over. A signalled semaphore
+            // carries the layout with it — SHADER_READ_ONLY, which is what SignalSemaphore asks
+            // for — so the barrier is left with only the queue ownership to take. Without one,
+            // GENERAL is what the other API is taken to have left it in.
+            var from = slot.Ordered ? VkImageLayout.ShaderReadOnlyOptimal : VkImageLayout.General;
+            var barrier = new VkImageMemoryBarrier
+            {
+                sType = VkStructureType.ImageMemoryBarrier,
+                srcAccessMask = VkAccessFlags.None,
+                dstAccessMask = VkAccessFlags.ShaderRead,
+                oldLayout = from,
+                newLayout = VkImageLayout.ShaderReadOnlyOptimal,
+                srcQueueFamilyIndex = Vortice.Vulkan.Vulkan.VK_QUEUE_FAMILY_EXTERNAL,
+                dstQueueFamilyIndex = _queueFamily,
+                image = slot.Image,
+                subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
+            };
+            _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.TopOfPipe, VkPipelineStageFlags.FragmentShader,
+                VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
+            // Taken from GL, so it has to be handed back: see ReleaseInteropImages. On both
+            // paths — the glFinish one used to take ownership every frame and never return it,
+            // so every acquire after the first was of an image the external side had never
+            // been given.
+            slot.ReleaseOwed = true;
+        }
+        SubmitBarrier(cmd, _barrierWaits, slotFence, oneShot: !ring);
         if (FinishTrace) RecordFinish(beforeFinish, afterFinish);
     }
 
@@ -509,41 +630,18 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     private static readonly bool SemaphoreAllowed =
         Environment.GetEnvironmentVariable("HULTUI_VULKAN_SEMAPHORE") != "0";
 
-    private VkSemaphore _sharedSemaphore;
-    private uint _glSemaphore;
-
     /// <summary>
-    /// The other direction: Vulkan signals it once the frame that sampled the image is done,
-    /// and GL waits on it before writing the next one.
-    ///
-    /// <para>Without it nothing ordered a GL write after the previous frame's Skia read of
-    /// the same image. The acquire fence only waits for the frame that last presented
-    /// <i>that swapchain image</i>, two or three frames back. At the video's frame rate the
-    /// read had always finished anyway; with the GPU made to take longer than a frame, 59 of
-    /// 960 GL writes began while it was still pending.</para>
-    /// </summary>
-    private VkSemaphore _releaseSemaphore;
-    private uint _glReleaseSemaphore;
-
-    /// <summary>Set when a frame drew from the image, so its present must release it to GL.</summary>
-    private bool _releaseOwed;
-
-    /// <summary>Set once Vulkan has signalled the release, until GL has waited on it. A binary
-    /// semaphore takes exactly one wait per signal, so this is what keeps the two in step.</summary>
-    private bool _releasePending;
-
-    /// <summary>
-    /// Two semaphores, exported from Vulkan and imported into GL, reused every frame: one
-    /// for each direction the image changes hands.
+    /// Two semaphores for one slot, exported from Vulkan and imported into GL, reused every
+    /// frame: one for each direction the image changes hands.
     ///
     /// <para>Best effort throughout: a driver that will share an image but not a semaphore
-    /// keeps working and pays the old CPU block instead. Every step here may fail quietly,
-    /// and a null <see cref="_sharedSemaphore"/> is what selects that path. Both or neither,
-    /// so there is only one fallback to reason about.</para>
+    /// keeps working and pays the old CPU block instead. Every step here may fail quietly, and
+    /// a slot left without its <see cref="InteropSlot.Shared"/> semaphore is on that path.
+    /// Both or neither, so there is only one fallback to reason about.</para>
     /// </summary>
-    private void CreateSharedSemaphore(InteropGl gl)
+    private void CreateSharedSemaphores(InteropSlot slot)
     {
-        if (!SemaphoreAllowed || !_semaphoreExtensionsEnabled || !gl.HasSemaphore) return;
+        var gl = _gl!;
         if (!TryShareSemaphore(gl, out var toVulkan, out uint toVulkanGl)) return;
         if (!TryShareSemaphore(gl, out var toGl, out uint toGlGl))
         {
@@ -551,10 +649,10 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
             _vk.DestroySemaphore(_device, toVulkan, 0);
             return;
         }
-        _sharedSemaphore = toVulkan;
-        _glSemaphore = toVulkanGl;
-        _releaseSemaphore = toGl;
-        _glReleaseSemaphore = toGlGl;
+        slot.Shared = toVulkan;
+        slot.GlShared = toVulkanGl;
+        slot.Release = toGl;
+        slot.GlRelease = toGlGl;
     }
 
     private bool TryShareSemaphore(InteropGl gl, out VkSemaphore shared, out uint glSemaphore)
@@ -675,31 +773,42 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     }
 
     /// <summary>
-    /// Submits the hand-back barrier waiting on the semaphore, and does not wait for it.
+    /// Submits the hand-back barriers waiting on the semaphores GL signalled. From the ring it
+    /// does not wait for the submit; a one-shot buffer it waits for, and frees.
     ///
-    /// <para>Nothing blocks the CPU here. Skia reads the image later in the same frame and is
-    /// ordered after this by submission order on the one queue, which is what the present
-    /// transition already relies on.</para>
+    /// <para>Nothing blocks the CPU on the ring path. Skia reads the images later in the same
+    /// frame and is ordered after this by submission order on the one queue, which is what the
+    /// present transition already relies on.</para>
     /// </summary>
-    private void SubmitBarrier(VkCommandBuffer cmd, VkSemaphore wait, VkFence fence)
+    private void SubmitBarrier(VkCommandBuffer cmd, List<VkSemaphore> waits, VkFence fence, bool oneShot)
     {
         Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
-        var stage = VkPipelineStageFlags.FragmentShader;
+        int count = waits.Count;
+        var semaphores = stackalloc VkSemaphore[Math.Max(count, 1)];
+        var stages = stackalloc VkPipelineStageFlags[Math.Max(count, 1)];
+        for (int i = 0; i < count; i++)
+        {
+            semaphores[i] = waits[i];
+            stages[i] = VkPipelineStageFlags.FragmentShader;
+        }
         var submit = new VkSubmitInfo
         {
-            waitSemaphoreCount = wait.IsNull ? 0u : 1u,
-            pWaitSemaphores = wait.IsNull ? null : &wait,
-            pWaitDstStageMask = wait.IsNull ? null : &stage,
+            waitSemaphoreCount = (uint)count,
+            pWaitSemaphores = count == 0 ? null : semaphores,
+            pWaitDstStageMask = count == 0 ? null : stages,
             commandBufferCount = 1,
             pCommandBuffers = &cmd,
         };
         Check(_vk.QueueSubmit(_queue, 1, &submit, fence), "vkQueueSubmit");
+        if (!oneShot) return;
+        Check(_vk.QueueWaitIdle(_queue), "vkQueueWaitIdle");
+        _vk.FreeCommandBuffers(_device, _pool, 1, &cmd);
     }
 
     /// <summary>
-    /// Records the hand-back to GL into the frame's last command buffer and returns the
-    /// semaphore its submit has to signal — null when there is none to signal, which is both
-    /// "this frame did not draw the image" and the glFinish path.
+    /// Records the hand-back to GL of every image a frame drew — or of <paramref name="only"/>
+    /// — into <paramref name="cmd"/>, and adds the semaphores its submit has to signal to
+    /// <paramref name="signals"/>: none for an image on the glFinish path.
     ///
     /// <para>The mirror of the acquire in <see cref="FinishExternalFrame"/>: ownership back to
     /// the external queue. With a semaphore the layout stays SHADER_READ_ONLY, which is what
@@ -710,52 +819,64 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     /// available, so ordering it is all a later write needs. On the glFinish path the ordering
     /// is the queue wait in <see cref="LendInteropImage"/>, which also covers this.</para>
     /// </summary>
-    private VkSemaphore? ReleaseInteropImage(VkCommandBuffer cmd)
+    private void ReleaseInteropImages(VkCommandBuffer cmd, List<VkSemaphore> signals, InteropSlot? only = null)
     {
-        if (!_releaseOwed || _interopImage.IsNull) return null;
-        _releaseOwed = false;
-
-        bool semaphore = !_releaseSemaphore.IsNull;
-        var barrier = new VkImageMemoryBarrier
+        foreach (var slot in _slots)
         {
-            sType = VkStructureType.ImageMemoryBarrier,
-            srcAccessMask = VkAccessFlags.None,
-            dstAccessMask = VkAccessFlags.None,
-            oldLayout = VkImageLayout.ShaderReadOnlyOptimal,
-            newLayout = semaphore ? VkImageLayout.ShaderReadOnlyOptimal : VkImageLayout.General,
-            srcQueueFamilyIndex = _queueFamily,
-            dstQueueFamilyIndex = Vortice.Vulkan.Vulkan.VK_QUEUE_FAMILY_EXTERNAL,
-            image = _interopImage,
-            subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
-        };
-        _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.FragmentShader, VkPipelineStageFlags.BottomOfPipe,
-            VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
-        if (!semaphore) return null;
-        _releasePending = true;
-        return _releaseSemaphore;
+            if (only is not null && !ReferenceEquals(slot, only)) continue;
+            if (!slot.ReleaseOwed || slot.Image.IsNull) continue;
+            slot.ReleaseOwed = false;
+
+            var barrier = new VkImageMemoryBarrier
+            {
+                sType = VkStructureType.ImageMemoryBarrier,
+                srcAccessMask = VkAccessFlags.None,
+                dstAccessMask = VkAccessFlags.None,
+                oldLayout = VkImageLayout.ShaderReadOnlyOptimal,
+                newLayout = slot.Ordered ? VkImageLayout.ShaderReadOnlyOptimal : VkImageLayout.General,
+                srcQueueFamilyIndex = _queueFamily,
+                dstQueueFamilyIndex = Vortice.Vulkan.Vulkan.VK_QUEUE_FAMILY_EXTERNAL,
+                image = slot.Image,
+                subresourceRange = new VkImageSubresourceRange(VkImageAspectFlags.Color, 0, 1, 0, 1),
+            };
+            _vk.CmdPipelineBarrier(cmd, VkPipelineStageFlags.FragmentShader, VkPipelineStageFlags.BottomOfPipe,
+                VkDependencyFlags.None, 0, 0, 0, 0, 1, &barrier);
+            if (!slot.Ordered) continue;
+            slot.ReleasePending = true;
+            signals.Add(slot.Release);
+        }
     }
 
+    private readonly List<VkSemaphore> _releaseSignals = [];
+
     /// <summary>
-    /// Hands the image back to GL on its own, for a frame that took it and was never presented
+    /// Hands images back to GL on their own, for a frame that took them and was never presented
     /// — a draw that threw, or a swapchain rebuilt between the video and the present. The
     /// release normally rides the present's submit; without this, the next GL write skipped
     /// its wait (nothing had signalled) and the next acquire took an image that had never been
     /// given back. Rare, so a blocking one-shot submit is fine.
     /// </summary>
-    private void FlushOwedRelease()
+    /// <param name="only">One source's image, before it is lent again; null for every image owed.</param>
+    private void FlushOwedRelease(InteropSlot? only = null)
     {
-        if (!_releaseOwed || _interopImage.IsNull) return;
+        bool owed = false;
+        foreach (var slot in _slots)
+            if (slot.ReleaseOwed && !slot.Image.IsNull && (only is null || ReferenceEquals(slot, only))) owed = true;
+        if (!owed) return;
 
         var cmd = BeginOneShot();
-        var release = ReleaseInteropImage(cmd);
+        _releaseSignals.Clear();
+        ReleaseInteropImages(cmd, _releaseSignals, only);
         Check(_vk.EndCommandBuffer(cmd), "vkEndCommandBuffer");
-        var signal = release ?? default;
+        int count = _releaseSignals.Count;
+        var signals = stackalloc VkSemaphore[Math.Max(count, 1)];
+        for (int i = 0; i < count; i++) signals[i] = _releaseSignals[i];
         var submit = new VkSubmitInfo
         {
             commandBufferCount = 1,
             pCommandBuffers = &cmd,
-            signalSemaphoreCount = release is null ? 0u : 1u,
-            pSignalSemaphores = release is null ? null : &signal,
+            signalSemaphoreCount = (uint)count,
+            pSignalSemaphores = count == 0 ? null : signals,
         };
         Check(_vk.QueueSubmit(_queue, 1, &submit, VkFence.Null), "vkQueueSubmit");
         Check(_vk.QueueWaitIdle(_queue), "vkQueueWaitIdle");
@@ -788,24 +909,48 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         return uuid;
     }
 
-    private void DestroyInteropImage()
+    private void DestroySlotImage(InteropSlot slot)
     {
-        if (_gl is { } gl && _glTexture != 0)
+        if (_gl is { } gl && slot.GlTexture != 0)
+        {
+            uint framebuffer = slot.GlFramebuffer, texture = slot.GlTexture, memory = slot.GlMemoryObject;
             RunOnGLContext(() =>
             {
-                gl.DeleteFramebuffer(_glFramebuffer);
-                gl.DeleteTexture(_glTexture);
-                gl.DeleteMemoryObject(_glMemoryObject);
+                gl.DeleteFramebuffer(framebuffer);
+                gl.DeleteTexture(texture);
+                gl.DeleteMemoryObject(memory);
             });
-        _glFramebuffer = _glTexture = _glMemoryObject = 0;
+        }
+        slot.GlFramebuffer = slot.GlTexture = slot.GlMemoryObject = 0;
 
-        if (!_interopImage.IsNull) _vk.DestroyImage(_device, _interopImage, 0);
-        if (!_interopMemory.IsNull) _vk.FreeMemory(_device, _interopMemory, 0);
-        _interopImage = VkImage.Null;
-        _interopMemory = VkDeviceMemory.Null;
-        _interopMemorySize = 0;
-        _interopWidth = _interopHeight = 0;
-        _interopDirty = false;
+        if (!slot.Image.IsNull) _vk.DestroyImage(_device, slot.Image, 0);
+        if (!slot.Memory.IsNull) _vk.FreeMemory(_device, slot.Memory, 0);
+        slot.Image = VkImage.Null;
+        slot.Memory = VkDeviceMemory.Null;
+        slot.MemorySize = 0;
+        slot.Width = slot.Height = 0;
+        slot.Dirty = false;
+        slot.ReleaseOwed = false;
+    }
+
+    /// <summary>A slot's image and semaphores. The device must be idle.</summary>
+    private void DestroySlot(InteropSlot slot)
+    {
+        DestroySlotImage(slot);
+        if (_gl is { } g && (slot.GlShared != 0 || slot.GlRelease != 0))
+        {
+            uint shared = slot.GlShared, release = slot.GlRelease;
+            RunOnGLContext(() =>
+            {
+                g.DeleteSemaphore(shared);
+                g.DeleteSemaphore(release);
+            });
+        }
+        if (!slot.Shared.IsNull) _vk.DestroySemaphore(_device, slot.Shared, 0);
+        if (!slot.Release.IsNull) _vk.DestroySemaphore(_device, slot.Release, 0);
+        slot.Shared = slot.Release = VkSemaphore.Null;
+        slot.GlShared = slot.GlRelease = 0;
+        slot.ReleasePending = false;
     }
 
     private void DisposeInterop()
@@ -816,17 +961,9 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
         foreach (var fence in _interopFence) if (!fence.IsNull) _vk.DestroyFence(_device, fence, 0);
         _interopFence = [];
         _interopCmd = [];
-        if (_gl is { } g) RunOnGLContext(() =>
-        {
-            g.DeleteSemaphore(_glSemaphore);
-            g.DeleteSemaphore(_glReleaseSemaphore);
-        });
-        if (!_sharedSemaphore.IsNull) _vk.DestroySemaphore(_device, _sharedSemaphore, 0);
-        if (!_releaseSemaphore.IsNull) _vk.DestroySemaphore(_device, _releaseSemaphore, 0);
-        _sharedSemaphore = _releaseSemaphore = VkSemaphore.Null;
-        _glSemaphore = _glReleaseSemaphore = 0;
-        _releaseOwed = _releasePending = false;
-        DestroyInteropImage();
+        foreach (var slot in _slots) DestroySlot(slot);
+        _slots.Clear();
+        _forgotten.Clear();
         if (_glContext is not null) SDL_GL_DestroyContext(_glContext);
         if (_glWindow is not null) SDL_DestroyWindow(_glWindow);
         _glContext = null;
@@ -835,7 +972,7 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     }
 
     /// <summary>
-    /// <c>HULTUI_VIDEO_HDR_PROBE=&lt;n&gt;</c> reads the shared image back through GL every nth
+    /// <c>HULTUI_VIDEO_HDR_PROBE=&lt;n&gt;</c> reads a shared image back through GL every nth
     /// frame, six times, and says what the producer actually wrote into it.
     ///
     /// <para>Six samples because one can land on a black frame, which reads exactly like a
@@ -858,16 +995,16 @@ internal sealed unsafe partial class SdlVulkanHost : IVulkanInteropHost
     /// black frame and reported 0.000, which reads exactly like a producer writing nothing —
     /// and a film has plenty of black frames to land on.
     /// </summary>
-    private void ProbeRangeOnce()
+    private void ProbeRangeOnce(InteropSlot slot)
     {
-        if (ProbeFrame == 0 || _probesTaken >= Probes || _glFramebuffer == 0) return;
+        if (ProbeFrame == 0 || _probesTaken >= Probes || slot.GlFramebuffer == 0) return;
         if (++_probeFrames < ProbeFrame) return;
         _probeFrames = 0;
         _probesTaken++;
 
-        var (max, over1, levels, reversals) = _gl!.ReadRange(_glFramebuffer, _interopWidth, _interopHeight);
+        var (max, over1, levels, reversals) = _gl!.ReadRange(slot.GlFramebuffer, slot.Width, slot.Height);
         Console.Error.WriteLine($"[interop] sample {_probesTaken}/{Probes} of the shared image " +
-            $"({_interopWidth}x{_interopHeight}): max {max:0.000}, {over1} above 1.0; " +
+            $"({slot.Width}x{slot.Height}): max {max:0.000}, {over1} above 1.0; " +
             $"middle row {levels} levels, {reversals} reversals");
     }
 

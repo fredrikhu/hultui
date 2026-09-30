@@ -136,25 +136,23 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
 
     private IVulkanInteropHost? Interop => _host as IVulkanInteropHost;
 
-    /// <summary>The image lent out this frame, so that
+    /// <summary>The images lent out this frame, by the GL texture each is imported as, so that
     /// <see cref="ISkiaExternalSurface.WrapFrame"/> knows what it is wrapping — the
-    /// <see cref="GpuFrame"/> itself carries GL names, which name nothing
-    /// a Vulkan renderer can draw.</summary>
-    private VulkanInteropImage? _lent;
+    /// <see cref="GpuFrame"/> itself carries GL names, which name nothing a Vulkan renderer can
+    /// draw, but each source's image has a texture name of its own.</summary>
+    private readonly Dictionary<uint, VulkanInteropImage> _lent = [];
 
     /// <summary>
-    /// Whether the shared image has been lent in the frame now open.
+    /// Which sources have been lent their image in the frame now open, and at what size.
     ///
-    /// <para><b>Once per frame</b>, because there is one shared image per window and Skia reads
-    /// it only when the frame flushes. A second GPU video source in the same frame would have
-    /// rendered over the first one's picture before either was drawn. Worse, at another size it
-    /// would have made the host destroy and recreate the image under a draw already recorded
-    /// against it. A second lend is now refused, so that source draws nothing, and the first
-    /// stays correct. Nothing in the tree has two GPU video sources in one window today (Reel's
-    /// scrubber stills are files); a real second one needs an image per source.</para>
+    /// <para>Each source has an image of its own (seam W7), so a video and a web page both draw.
+    /// What stays refused is one source asking twice in a frame <b>at another size</b>: Skia
+    /// reads the image only when the frame flushes, and resizing it would destroy it under a
+    /// draw already recorded against it. The same source at the same size — one video shown by
+    /// two elements — renders into its image again, which is harmless.</para>
     /// </summary>
-    private bool _lentThisFrame;
-    private bool _tracedSecondLend;
+    private readonly Dictionary<object, (int Width, int Height)> _lentThisFrame = new(ReferenceEqualityComparer.Instance);
+    private bool _tracedResizeInFrame;
 
     /// <inheritdoc />
     /// <remarks>
@@ -192,20 +190,21 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     }
 
     /// <inheritdoc />
-    public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
+    public bool TryAcquireFrameTarget(object owner, int width, int height, out GpuFrameTarget target)
     {
+        ArgumentNullException.ThrowIfNull(owner);
         target = default;
-        if (_lentThisFrame)
+        if (_lentThisFrame.TryGetValue(owner, out var earlier) && earlier != (width, height))
         {
-            if (!_tracedSecondLend && StartupTrace.Enabled)
-                StartupTrace.Mark("video: a second GPU source in one frame is not supported on Vulkan; it draws nothing");
-            _tracedSecondLend = true;
+            if (!_tracedResizeInFrame && StartupTrace.Enabled)
+                StartupTrace.Mark("video: a GPU source asked for its target twice in one frame at two sizes; the second draws nothing");
+            _tracedResizeInFrame = true;
             return false;
         }
-        if (Interop?.LendInteropImage(width, height) is not { } image) return false;
+        if (Interop?.LendInteropImage(owner, width, height) is not { } image) return false;
 
-        _lent = image;
-        _lentThisFrame = true;
+        _lent[image.GlTexture] = image;
+        _lentThisFrame[owner] = (width, height);
         // Linear light only where it can survive. An 8-bit sRGB swapchain has no room above
         // white, and the offscreen that carries the extra range exists only for scRGB — ask a
         // producer for HDR into an SDR target and it comes out clipped rather than bright.
@@ -225,6 +224,9 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
             WideGamut: linear && WideGamutEnabled);
         return true;
     }
+
+    /// <inheritdoc />
+    public void ReleaseFrameTarget(object owner) => Interop?.ForgetInteropImage(owner);
 
     /// <summary>
     /// Whether the scRGB target is offered to the producer as wide-gamut:
@@ -258,7 +260,7 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
     SKImage? ISkiaExternalSurface.WrapFrame(in GpuFrame frame)
     {
         if (!frame.RendererOwned) return null;
-        if (_lent is not { } image) return null;
+        if (!_lent.TryGetValue(frame.TextureId, out var image)) return null;
 
         var info = new GRVkImageInfo
         {
@@ -340,7 +342,8 @@ public sealed class SkiaVulkanRenderSurface : IRenderSurface, ISkiaExternalSurfa
         _frameColorSpace = frame.ColorSpace;
         _renderContext.SetCanvas((OffscreenFor(frame) ?? surface).Canvas);
         _frameOpen = true;
-        _lentThisFrame = false;
+        _lentThisFrame.Clear();
+        _lent.Clear();
         return true;
     }
 

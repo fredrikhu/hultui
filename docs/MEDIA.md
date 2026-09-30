@@ -122,7 +122,7 @@ removing a panel unmounts the video inside it like any other descendant. Before 
 `HULTUI_RENDERER` overrides the choice either way. It composites Vulkan images, so it cannot
 draw a GL texture a source made for itself: it lends one instead, through
 `IExternalGLSurface.TryAcquireFrameTarget`, backed by an `RGBA16F` image shared with a
-hidden GL context. On an HDR display that target also asks for **linear light with its
+hidden GL context, one per source, so a video and a web page can play in one window. On an HDR display that target also asks for **linear light with its
 range intact**, and the frame comes back saying what its 1.0 means in nits
 (`GpuFrame.ReferenceWhiteNits`). It also asks for **wide gamut** (`GpuFrameTarget.WideGamut`):
 colours outside BT.709 kept as negative values, which the scRGB swapchain shows as the colours

@@ -96,6 +96,29 @@ public class GpuFrameSinkTests
     }
 
     /// <summary>
+    /// Each sink asks for its target as itself, so a surface can give every GPU source an image
+    /// of its own — on Vulkan a video and a page in one window each draw (seam W7) — and gives
+    /// it back when it goes, or a window would keep every image it ever lent.
+    /// </summary>
+    [Fact]
+    public void EachSink_AsksForItsOwnTarget_AndGivesItBackWhenDisposed()
+    {
+        var surface = new LendingSurface(framebuffer: 7, texture: 9, internalFormat: 0x881A);
+        var video = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+        var page = new GpuFrameSink(new PixelFrameSink(), new CountingRenderer());
+
+        Assert.True(video.TryRenderFrame(surface, out _));
+        Assert.True(page.TryRenderFrame(surface, out _));
+        Assert.Equal([video, page], surface.Owners);
+        Assert.Empty(surface.Released);
+
+        page.Dispose();
+        Assert.Equal([page], surface.Released);
+        page.Dispose();
+        Assert.Single(surface.Released);
+    }
+
+    /// <summary>
     /// The other half of the same seam: a surface that lends nothing leaves the sink to make
     /// its own RGBA8 texture, which is what every GL surface does and what this did before.
     /// </summary>
@@ -201,11 +224,20 @@ public class GpuFrameSinkTests
             draw();
         }
 
-        public bool TryAcquireFrameTarget(int width, int height, out GpuFrameTarget target)
+        /// <summary>Who asked for a target, in order.</summary>
+        public List<object> Owners { get; } = [];
+
+        /// <summary>Who gave theirs back.</summary>
+        public List<object> Released { get; } = [];
+
+        public bool TryAcquireFrameTarget(object owner, int width, int height, out GpuFrameTarget target)
         {
+            Owners.Add(owner);
             target = new GpuFrameTarget(_framebuffer, _texture, _internalFormat, _linear, _peakNits);
             return _lends;
         }
+
+        public void ReleaseFrameTarget(object owner) => Released.Add(owner);
 
         public IRenderContext RenderContext => throw new NotSupportedException();
         public IMeasureContext MeasureContext => throw new NotSupportedException();

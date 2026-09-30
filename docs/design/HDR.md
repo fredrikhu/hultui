@@ -111,7 +111,7 @@ wide gamut.
 1. **A hidden GL context** beside the Vulkan device, created on the first frame that draws a video.
    It must be on the same GPU: the device UUIDs are compared, through the indexed
    `glGetUnsignedBytei_vEXT` query.
-2. **A shared `RGBA16F` image**, allocated dedicated and exportable, exported as a Win32 handle or
+2. **A shared `RGBA16F` image per GPU source** (a video, a web page), allocated dedicated and exportable, exported as a Win32 handle or
    an fd, and imported into GL (`GL_EXT_memory_object`, with `GL_DEDICATED_MEMORY_OBJECT_EXT`) as a
    texture with a framebuffer over it.
 3. **mpv renders into that framebuffer** through its GL render API, told the format and
@@ -119,13 +119,17 @@ wide gamut.
 4. **Ordering, both ways.** GL signals a semaphore after mpv draws, which the Vulkan hand-back
    barrier waits on. A second semaphore runs back: the present releases the image to the external
    queue and signals it, and GL waits on it before the next write (184ae17). The barrier command
-   buffers are a ring of three with a fence each, so nothing blocks the CPU.
+   buffers are a ring of three with a fence each, so nothing blocks the CPU. Each image has its
+   own pair, and one barrier submit hands back every image drawn in the frame.
    `HULTUI_VULKAN_SEMAPHORE=0` goes back to `glFinish` and a queue wait.
 
 **A failure is harmless.** A missing extension, a context on another GPU or a refused import leaves
 `SupportsExternalGL` false, and the video takes its pixel path, which is slower and works.
-`HULTUI_VULKAN_INTEROP=0` refuses the interop outright. **One GPU video source per window** can
-use it; a second in the same frame draws nothing on Vulkan.
+`HULTUI_VULKAN_INTEROP=0` refuses the interop outright. **Each source is lent an image of its
+own**, keyed by the source (seam W7 in [WEBVIEW.md](WEBVIEW.md)), so a video and a web page, or
+two pages, draw in one window. A source that goes away gives its image back, and the host
+destroys it at the next frame after a device wait. A source that asks twice in one frame at two
+sizes gets nothing the second time.
 
 ### HDR video
 
@@ -235,7 +239,8 @@ quantity; where HDR-LOG.md has several, these are the most careful.
   absolute luminance and Skia's colour management is relative.
 - **Video luminance under the scaled colour space** matches the offscreen path to 0.4% on average,
   but no same-frame comparison was possible.
-- **A second GPU video source in one window** draws nothing on Vulkan.
+- **Per-source images on Linux.** Seam W7 ran on Windows only; the fd export of each source's
+  semaphores has not.
 - **One "render() not being called or stuck" line at Vulkan start-up** remains, logged only at
   `HULTUI_MPV_LOG=v`. The UI thread is busy with its first frame and the window reveal, so the
   picture comes up no later because of it.
