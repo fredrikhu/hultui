@@ -26,6 +26,8 @@ arrows-in
 arrows-in-line-vertical
 arrows-left-right
 arrows-out
+bookmark-simple
+bookmark-simple-fill
 broom
 browsers
 bug
@@ -57,6 +59,7 @@ file-code
 file-image
 file-magnifying-glass
 file-x
+flag
 flask
 folder-open
 folder-plus
