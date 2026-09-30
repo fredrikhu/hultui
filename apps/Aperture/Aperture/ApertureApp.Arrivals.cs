@@ -34,8 +34,12 @@ public sealed partial class ApertureApp
     private void StartArrivalWatch()
     {
         StopArrivalWatch();
-        _arrivalTimer = new System.Threading.Timer(_ => Application.InvokeOnMainThread(() => _ = CheckArrivalsAsync()),
-            null, FirstArrivalCheck, ArrivalInterval);
+        _arrivalTimer = new System.Threading.Timer(_ => Application.InvokeOnMainThread(() =>
+        {
+            _ = CheckArrivalsAsync();
+            // The same slow look for answers to a reporter's own problem reports.
+            CheckMyIssues();
+        }), null, FirstArrivalCheck, ArrivalInterval);
     }
 
     private void StopArrivalWatch()
@@ -43,6 +47,7 @@ public sealed partial class ApertureApp
         _arrivalTimer?.Dispose();
         _arrivalTimer = null;
         _seenAvailable = null;
+        ForgetMyIssues();
     }
 
     /// <summary>One look: this user's available requests, against what has been announced.

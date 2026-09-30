@@ -38,6 +38,7 @@ string? mediaPath = null;
 string jellyfinServer = "", jellyfinKeyFile = "", jellyfinUser = "";
 string seerrServer = "", seerrKeyFile = "";
 bool seerrDemo = false;
+bool seerrReporter = false;
 bool gitlab = false;
 string theme = "";
 var steps = new List<string>();
@@ -64,6 +65,9 @@ for (int i = 0; i < args.Length; i++)
         case "--seerr": seerrServer = args[++i]; break;
         case "--seerr-api-key-file": seerrKeyFile = args[++i]; break;
         case "--seerr-demo": seerrDemo = true; break;
+        // The same fixture, signed in as someone who files problem reports but may not
+        // read everyone's — "Your reports" instead of "Issues".
+        case "--seerr-reporter": seerrDemo = true; seerrReporter = true; break;
         case "--size":
             var wh = args[++i].Split('x');
             width = int.Parse(wh[0]); height = int.Parse(wh[1]);
@@ -233,7 +237,25 @@ Element MountAperture()
     }
     else if (seerrDemo)
     {
-        requests = DemoRequests();
+        requests = DemoRequests(seerrReporter);
+        if (seerrReporter)
+        {
+            // Read before the answer came: the answered report shows as news.
+            var mine = requests.GetIssuesAsync(Aperture.Core.Requests.IssueFilter.All).GetAwaiter().GetResult().Value.Items;
+            settings.RememberRequestServer(new Aperture.Core.RequestServerAccountData
+            {
+                JellyfinServerId = library.Server.Id,
+                Address = requests.Server.Address,
+                UserId = requests.User.Id,
+                UserName = requests.User.DisplayName,
+                SeenIssues = mine.Select(i => new Aperture.Core.SeenIssue
+                {
+                    Id = i.Id,
+                    Comments = 1,
+                    Resolved = i.Status == Aperture.Core.Requests.IssueStatus.Resolved,
+                }).ToList(),
+            }, "demo");
+        }
     }
 
     var a = new Aperture.ApertureApp(session.Application, session.Window.Window, settings, library, backends,
@@ -244,10 +266,12 @@ Element MountAperture()
 
 // A request server with something on every shelf: a title the demo library has, one asked
 // for, one on its way, a series part-way in, and someone else's request waiting.
-Aperture.Core.Testing.FakeRequestServer DemoRequests()
+Aperture.Core.Testing.FakeRequestServer DemoRequests(bool reporter = false)
 {
-    var R = Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.ManageRequests
-            | Aperture.Core.Requests.RequestPermission.ManageIssues;
+    var R = reporter
+        ? Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.CreateIssues
+        : Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.ManageRequests
+          | Aperture.Core.Requests.RequestPermission.ManageIssues;
     var fake = new Aperture.Core.Testing.FakeRequestServer(user: new Aperture.Core.Requests.RequestUser(1, "fredrik", R));
     var trending = Aperture.Core.Requests.DiscoverShelf.Trending;
     var films = Aperture.Core.Requests.DiscoverShelf.PopularMovies;
@@ -294,6 +318,12 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests()
         "No sound after the first reel.", at: now.AddDays(-2), by: "sam", byId: 3);
     fake.AddIssue("movie:1003", Aperture.Core.Requests.IssueType.Video, "Blocky in the dark scenes.",
         status: Aperture.Core.Requests.IssueStatus.Resolved, at: now.AddDays(-9));
+    // Two of fredrik's own, for the reporter's view: one answered, one resolved.
+    var mine = fake.AddIssue("movie:1000", Aperture.Core.Requests.IssueType.Audio,
+        "The sound drops out for a few seconds around the hour mark.", at: now.AddDays(-1), byId: 1, by: "fredrik");
+    fake.AddComment(mine.Id, "Re-downloading it — should be back in an hour.");
+    fake.AddIssue("movie:1002", Aperture.Core.Requests.IssueType.Subtitles, "No English subtitles.",
+        status: Aperture.Core.Requests.IssueStatus.Resolved, at: now.AddDays(-12), byId: 1, by: "fredrik");
     return fake;
 }
 

@@ -119,7 +119,9 @@ server lets choose can send a request to a particular Radarr or Sonarr, quality 
 Something wrong with what is playing (no sound, the wrong subtitles) is reported from the
 player's title strip, and whoever looks after the library reads the reports under **Issues**
 — a rail button (with a count of open ones) for someone the server lets read everyone's: the
-conversation, a reply box, Resolve and Reopen. And when something you asked for arrives, the app says so — the server
+conversation, a reply box, Resolve and Reopen. Whoever reported it has **Your reports** instead:
+their own, with a mark (and a toast) when one has been answered or resolved since they last
+read it. And when something you asked for arrives, the app says so — the server
 has no push channel, so it looks every few minutes, and says each arrival once.
 
 **It speaks the one API Jellyseerr 2.x and Seerr 3.x share** (Seerr is what Jellyseerr and

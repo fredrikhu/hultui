@@ -41,7 +41,11 @@ public sealed partial class ApertureApp
     private string? _issueListKey;
     private int _issueListTotal;
 
-    internal IssueFilter IssueListFilter { get; private set; } = IssueFilter.Open;
+    private IssueFilter? _issueListFilter;
+
+    /// <summary>Open reports for someone looking after the library; all of them for a
+    /// reporter, to whom a resolved report is news rather than something done with.</summary>
+    internal IssueFilter IssueListFilter => _issueListFilter ?? (IsReporterOnly ? IssueFilter.All : IssueFilter.Open);
     internal IReadOnlyList<MediaIssue> IssueList => _issueListItems;
     internal int IssueListTotal => _issueListTotal;
     internal bool IssueListLoading => _issuePage.IsLoading;
@@ -83,7 +87,7 @@ public sealed partial class ApertureApp
     internal void SetIssueListFilter(IssueFilter filter)
     {
         if (IssueListFilter == filter) return;
-        IssueListFilter = filter;
+        _issueListFilter = filter;
         Rerender();
     }
 
@@ -126,6 +130,9 @@ public sealed partial class ApertureApp
                 return issue.Ok ? ApertureResult<MediaIssue?>.Success(issue.Value) : issue.As<MediaIssue?>();
             }, null, "The report");
             return (IssueLoad?)new IssueLoad(id, loaded);
+        }, load =>
+        {
+            if (load?.Issue is { } issue) MarkIssuesRead([issue]);
         });
     }
 
@@ -176,6 +183,9 @@ public sealed partial class ApertureApp
                 return;
             }
             Flash(done, ToastSeverity.Success);
+            // What the reporter has now seen — marked before the lists read again, so their
+            // own reply is never their own news.
+            MarkIssuesRead([result.Value]);
             if (clearReply) _issueReply = "";
             _issueGeneration++;
             Rerender();
@@ -193,7 +203,9 @@ public sealed partial class ApertureApp
             .Height(56).AlignItems(AlignItems.Center)
             .Padding(new Thickness(0, Halide.S5, 0, Halide.S5))
             .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
-        bar.AddChild(Text.New("Issues").FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        bool own = IsReporterOnly;
+        bar.AddChild(Text.New(own ? "Your reports" : "Issues").FontSize(18f).FontWeight(FontWeight.SemiBold)
+            .TextColor(Halide.Text));
         if (IssueListTotal > 0) bar.AddChild(Ui.Mono(IssueListTotal.ToString(), 11.5f, Halide.TextFaint));
         bar.AddChild(Box.New().Width(Halide.S3));
         foreach (var (filter, label) in IssueFilters)
@@ -210,9 +222,12 @@ public sealed partial class ApertureApp
             SetCursorList("issues:empty", [], 1);
             column.AddChild(EmptyState(IssueListLoading ? Icons.Loading : Icons.Report,
                 IssueListLoading ? $"Asking {RequestServerTitle}…"
+                    : own && IssueListFilter == IssueFilter.All ? "You haven't reported anything"
                     : IssueListFilter == IssueFilter.Open ? "No open reports" : "No reports here",
-                IssueListLoading ? null : IssueListFilter == IssueFilter.Open
-                    ? "A problem reported from the player lands here."
+                IssueListLoading ? null
+                    : own && IssueListFilter == IssueFilter.All
+                        ? "Something wrong with what's playing? Report it from the player — the answer comes back here."
+                    : IssueListFilter == IssueFilter.Open ? "A problem reported from the player lands here."
                     : "Nothing matches that filter.",
                 "issues-empty"));
             return column;
@@ -246,7 +261,7 @@ public sealed partial class ApertureApp
             .CornerRadius(Halide.Radius2)
             .Cursor(CursorType.Pointer)
             .AccessibleRole(AccessibilityRole.Button)
-            .AccessibleName(IssueAccessibleName(issue))
+            .AccessibleName(IssueAccessibleName(issue) + (HasNews(issue) ? ", new" : ""))
             .AutomationId("issue-" + issue.Id);
         row.IsFocusable = true;
         TrackCursor(row, index);
@@ -255,11 +270,17 @@ public sealed partial class ApertureApp
 
         row.AddChild(IssuePoster(issue, 46, 69));
 
+        bool news = HasNews(issue);
         var text = Flex.Column(gap: 3).FlexGrow(1).FlexShrink(1);
-        text.AddChild(Ui.Line(IssueTitle(issue), 13f, Halide.Text));
+        var titleLine = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+        if (news)
+            titleLine.AddChild(Box.New().Width(7).Height(7).FlexShrink(0).CornerRadius(3.5f).Background(Halide.Accent));
+        titleLine.AddChild(Ui.Line(IssueTitle(issue), 13f, Halide.Text).FlexShrink(1));
+        text.AddChild(titleLine);
         var what = new List<string> { IssueTypeLabel(issue.Type) };
         if (issue.Where is { Length: > 0 } where) what.Add(where);
-        what.Add(issue.ReportedBy);
+        // A reporter's list is all their own: their name on every row says nothing.
+        if (!IsReporterOnly) what.Add(issue.ReportedBy);
         what.Add(Ui.Ago(issue.CreatedAt));
         text.AddChild(Ui.Line(string.Join(" · ", what), 11.5f, Halide.TextMuted));
         if (issue.Comments.FirstOrDefault() is { } first)
@@ -268,7 +289,8 @@ public sealed partial class ApertureApp
 
         int replies = Math.Max(0, issue.Comments.Count - 1);
         if (replies > 0)
-            row.AddChild(Ui.Line(replies == 1 ? "1 reply" : $"{replies} replies", 11f, Halide.TextFaint).FlexShrink(0));
+            row.AddChild(Ui.Line(replies == 1 ? "1 reply" : $"{replies} replies", 11f,
+                news ? Halide.Accent : Halide.TextFaint).FlexShrink(0));
         row.AddChild(IssueStatusChip(issue));
 
         var verbs = Flex.Row(gap: Halide.S1).AlignItems(AlignItems.Center).FlexShrink(0);
@@ -282,9 +304,10 @@ public sealed partial class ApertureApp
         return row;
     }
 
-    internal void OpenIssue(MediaIssue issue) =>
-        Navigate(new Route(ApertureView.Issue, issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            issue.Title));
+    internal void OpenIssue(MediaIssue issue) => Navigate(new Route(ApertureView.Issue, IssueRouteId(issue), issue.Title));
+
+    private static string IssueRouteId(MediaIssue issue) =>
+        issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     // ── One report's page ────────────────────────────────────────────────
 
@@ -327,7 +350,8 @@ public sealed partial class ApertureApp
         chips.AddChild(Ui.Chip(IssueTypeLabel(issue.Type)));
         if (issue.Where is { Length: > 0 } where) chips.AddChild(Ui.Chip(where));
         facts.AddChild(chips);
-        facts.AddChild(Text.New($"Reported by {issue.ReportedBy} · {Ui.Ago(issue.CreatedAt)}")
+        bool yours = issue.ReportedById == _requestServer?.User.Id;
+        facts.AddChild(Text.New($"{(yours ? "You reported this" : "Reported by " + issue.ReportedBy)} · {Ui.Ago(issue.CreatedAt)}")
             .FontSize(12.5f).TextColor(Halide.TextMuted));
 
         var open = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
@@ -384,9 +408,11 @@ public sealed partial class ApertureApp
         var reply = Flex.Column(gap: Halide.S2);
         // Bare: the theme's field style draws the border, as it does for every text field.
         var message = TextArea.New(_issueReply)
-            .PlaceholderText(issue.Status == IssueStatus.Open
-                ? "Answer — what you found, or what you changed"
-                : "Add to the conversation")
+            .PlaceholderText(issue.ReportedById == _requestServer?.User.Id
+                ? "Add to your report — more detail, or whether it's fixed now"
+                : issue.Status == IssueStatus.Open
+                    ? "Answer — what you found, or what you changed"
+                    : "Add to the conversation")
             .OnTextChanged(v => { _issueReply = v; MarkDirty(); })
             .Height(Dimension.Px(90)).TextColor(Halide.Text);
         message.AutomationId = "issue-reply";

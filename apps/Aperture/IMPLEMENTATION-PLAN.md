@@ -230,12 +230,26 @@ means the session is gone; the client turns it into a refusal so it never signs 
 Verified read-only against the lab server (list, filters, counts — it has no reports yet, so
 the mapping of a real one rests on the wire tests, written from the server's source).
 
+**Since, a reporter's side:** someone with Create issues but neither Manage nor View gets
+**Your reports** on the rail instead of Issues — the server already limits `/issue` to their
+own. The list shows everything by default (a resolve is news to a reporter, not something
+done with) and leaves their name off every row. News is a report with more messages than
+when its reporter last read it here, or resolved or reopened since: a dot on the row, the
+badge, and — on the arrival watch's five-minute look — a toast, "Your report on Stalker has
+an answer", said once per change. The server keeps no read state, so it is in the settings
+file (`SeenIssues`, per request server); a report never read here counts as read at one
+message and open, which is how it was filed, and the first look records everything without
+calling it new. `/issue/count` is everyone's whoever asks, so the badge comes from the
+user's own list, never from it.
+
+One gap: the list does not say who wrote each message, so a reply the reporter made on the
+website reads as news here until they open it. Replies made in Aperture never do — the
+re-read report is marked read before the lists look again.
+
 **Still open:**
 
 - Studios and networks, if a logo source turns up; streaming-service rows once their data
   format is pinned down.
-- A reporter's own reports — a user with only Create issues files from the player but has
-  no door to read the answers yet.
 
 ## Things deliberately not done
 

@@ -60,6 +60,19 @@ public sealed class RequestServerAccountData
     /// "it's in your library" is said once per request, not once per launch. Null until the
     /// first look, which records what is there without announcing any of it.</summary>
     public List<int>? SeenAvailable { get; set; }
+
+    /// <summary>This user's own problem reports as they last read them here, by issue id —
+    /// so an answer or a resolve since then shows as news. Null until the first look, which
+    /// records what is there without calling any of it new.</summary>
+    public List<SeenIssue>? SeenIssues { get; set; }
+}
+
+/// <summary>A report as its reporter last read it: how many messages, and whether resolved.</summary>
+public sealed class SeenIssue
+{
+    public int Id { get; set; }
+    public int Comments { get; set; }
+    public bool Resolved { get; set; }
 }
 
 /// <summary>How a library draws what it holds.</summary>

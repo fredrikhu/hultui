@@ -43,7 +43,7 @@ public class RequestServerHostTests
     }
 
     private static void Host(FakeMediaLibrary library, IRequestServer? requests, Action<HeadlessSession, ApertureApp> body,
-        Func<HultUI.Media.IMediaBackend>? backends = null)
+        Func<HultUI.Media.IMediaBackend>? backends = null, Action<ApertureSettings>? setup = null)
     {
         using var session = HeadlessSession.Create(1440, 900);
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
@@ -51,6 +51,7 @@ public class RequestServerHostTests
         try
         {
             var settings = new ApertureSettings(new InMemoryCredentialStore(), settingsPath);
+            setup?.Invoke(settings);
             app = new ApertureApp(session.Application, session.Window.Window, settings, library,
                 backends: backends, posterHttp: new HttpClient(new NoArtwork()), requests: requests);
             session.Application.SetRoot(app.Mount());
@@ -735,19 +736,168 @@ public class RequestServerHostTests
     // ── Issues ───────────────────────────────────────────────────────────
 
     [Fact]
-    public void OnlySomeoneWhoMayReadEveryonesReportsGetsTheIssuesDoor()
+    public void ReadersGetEveryonesIssuesAndReportersTheirOwn()
     {
-        // Filing a report is not reading them: the reporter's own door is the player.
+        // Filing a report is not reading everyone's: a reporter's door is their own reports.
         Host(Library(), Requests(RequestPermission.Request | RequestPermission.CreateIssues), (session, app) =>
         {
-            PumpUntilShown(session, "Requests");
+            PumpUntilShown(session, "Your reports");
             Assert.Null(session.Window.FindByAutomationId("rail-issues"));
+            Assert.NotNull(session.Window.FindByAutomationId("rail-your-reports"));
         });
-        Host(Library(), Requests(RequestPermission.ViewIssues), (session, app) =>
+        Host(Library(), Requests(RequestPermission.ViewIssues | RequestPermission.CreateIssues), (session, app) =>
         {
             PumpUntilShown(session, "Issues");
             Assert.NotNull(session.Window.FindByAutomationId("rail-issues"));
+            Assert.Null(session.Window.FindByAutomationId("rail-your-reports"));
         });
+        // Neither, for someone who may only ask for things.
+        Host(Library(), Requests(), (session, app) =>
+        {
+            PumpUntilShown(session, "Requests");
+            Assert.Null(session.Window.FindByAutomationId("rail-issues"));
+            Assert.Null(session.Window.FindByAutomationId("rail-your-reports"));
+        });
+    }
+
+    [Fact]
+    public void AReporterSeesOnlyTheirOwnReportsResolvedOnesIncluded()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.CreateIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 1, by: "tester");
+        requests.AddIssue("tv:1399", IssueType.Subtitles, "Wrong subtitles", 2, 3, IssueStatus.Resolved, byId: 1, by: "tester");
+        requests.AddIssue("movie:1398", IssueType.Audio, "No sound");   // anna's
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your reports");
+            Click(session, "rail-your-reports");
+            Assert.Equal(ApertureView.Issues, app.Current.View);
+            PumpUntilShown(session, "The Matrix, picture problem, reported by tester, open");
+            // All of them by default: a resolve is news to whoever reported it.
+            PumpUntilShown(session, "Game of Thrones, subtitles problem, S2 E3, reported by tester, resolved");
+            Assert.False(Shows(session, "Stalker"), "someone else's report was on a reporter's list");
+            // The first look calls nothing new.
+            Assert.False(Shows(session, ", new"), "the first look called a report new");
+            // Their own is theirs to add to.
+            Click(session, "issue-" + blocky.Id);
+            PumpUntilShown(session, "Blocky picture");
+            Assert.NotNull(session.Window.FindByAutomationId("issue-reply"));
+        });
+    }
+
+    [Fact]
+    public void AnAnswerToAReportIsNewsUntilItsReporterReadsIt()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.CreateIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 1, by: "tester");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your reports");
+            Pump(session);
+            Assert.False(Shows(session, "Your reports, 1 new"));
+
+            requests.AddComment(blocky.Id, "Swapped the file — try it now");
+            app.CheckMyIssues();
+            PumpUntilShown(session, "Your reports, 1 new");
+            PumpUntilShown(session, "Your report on The Matrix has an answer");
+
+            Click(session, "rail-your-reports");
+            PumpUntilShown(session, "The Matrix, picture problem, reported by tester, open, 1 reply, new");
+
+            Click(session, "issue-" + blocky.Id);
+            PumpUntilShown(session, "Swapped the file — try it now");
+            Pump(session);
+            Assert.False(Shows(session, "Your reports, 1 new"), "reading the answer left the badge up");
+
+            // Looking again says nothing more.
+            app.CheckMyIssues();
+            Pump(session);
+            Assert.False(Shows(session, "Your reports, 1 new"));
+        });
+    }
+
+    [Fact]
+    public void AReportersOwnReplyIsNotTheirNewsButAResolveIs()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.CreateIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 1, by: "tester");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your reports");
+            app.Navigate(new Route(ApertureView.Issue, blocky.Id.ToString(), "The Matrix"));
+            PumpUntilShown(session, "Blocky picture");
+            session.Window.FindByAutomationId("issue-reply")!.Element.Focus();
+            session.Window.TypeText("Only in the dark scenes");
+            Pump(session, 2);
+            Click(session, "issue-send");
+            Assert.Contains($"CommentOnIssue({blocky.Id},Only in the dark scenes)", requests.Calls);
+            PumpUntilShown(session, "Only in the dark scenes");
+
+            app.CheckMyIssues();
+            Pump(session);
+            Assert.False(Shows(session, "Your reports, 1 new"), "the reporter's own reply counted as news");
+
+            // Someone else resolving it is.
+            app.GoBack();
+            requests.User = new RequestUser(2, FakeRequestServer.OtherUser, RequestPermission.ManageIssues);
+            requests.SetIssueStatusAsync(blocky.Id, IssueStatus.Resolved).GetAwaiter().GetResult();
+            requests.User = new RequestUser(1, "tester", RequestPermission.Request | RequestPermission.CreateIssues);
+            app.CheckMyIssues();
+            PumpUntilShown(session, "Your report on The Matrix was resolved");
+            PumpUntilShown(session, "Your reports, 1 new");
+        });
+    }
+
+    [Fact]
+    public void WhatAReporterHasReadIsKeptWithTheirRequestServerAccount()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.CreateIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture", byId: 1, by: "tester");
+        requests.AddComment(blocky.Id, "Looking into it");   // answered before the first look
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Your reports");
+            Pump(session);
+            var account = app.Settings.RequestServerFor("test-server-id")!;
+            // The first look records what is there, answer included, without calling it new.
+            var seen = Assert.Single(account.SeenIssues!);
+            Assert.Equal((blocky.Id, 2, false), (seen.Id, seen.Comments, seen.Resolved));
+            Assert.False(Shows(session, "Your reports, 1 new"));
+
+            requests.AddComment(blocky.Id, "Fixed");
+            app.CheckMyIssues();
+            PumpUntilShown(session, "Your reports, 1 new");
+            app.Navigate(new Route(ApertureView.Issue, blocky.Id.ToString(), "The Matrix"));
+            PumpUntilShown(session, "Fixed");
+            Pump(session);
+            Assert.Equal(3, Assert.Single(account.SeenIssues!).Comments);
+        }, setup: settings => settings.RememberRequestServer(new RequestServerAccountData
+        {
+            JellyfinServerId = "test-server-id",
+            Address = "http://jellyseerr.test:5055",
+            Auth = RequestServerAuth.Session,
+            UserId = 1,
+            UserName = "tester",
+        }, "session-cookie"));
+    }
+
+    [Fact]
+    public void NewsSaysWhatChanged()
+    {
+        var issue = new MediaIssue
+        {
+            Id = 4, Type = IssueType.Audio, Status = IssueStatus.Resolved, Kind = DiscoverKind.Movie, TmdbId = 603,
+            Title = "The Matrix",
+            Comments = [new IssueComment(1, "a", 1, "tester", default), new IssueComment(2, "b", 2, "anna", default)],
+        };
+        var filed = new SeenIssue { Id = 4, Comments = 1, Resolved = false };
+        Assert.Equal("Your report on The Matrix was answered and resolved", ApertureApp.NewsPhrase(issue, filed));
+        Assert.Equal("Your report on The Matrix was resolved",
+            ApertureApp.NewsPhrase(issue, new SeenIssue { Id = 4, Comments = 2 }));
+        Assert.Equal("Your report on The Matrix was reopened",
+            ApertureApp.NewsPhrase(issue with { Status = IssueStatus.Open }, new SeenIssue { Id = 4, Comments = 2, Resolved = true }));
+        Assert.Equal("Your report on The Matrix has an answer",
+            ApertureApp.NewsPhrase(issue with { Status = IssueStatus.Open }, filed));
     }
 
     [Fact]

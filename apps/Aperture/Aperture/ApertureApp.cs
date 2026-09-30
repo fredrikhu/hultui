@@ -203,6 +203,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         EnsureRequestServer();
         EnsurePendingCount();
         EnsureIssueCounts();
+        EnsureMyIssues();
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var rail = BuildRail(); rail.Key = "rail";
@@ -342,13 +343,20 @@ public sealed partial class ApertureApp : Component, IDisposable
                 active: Current.View == ApertureView.Requests,
                 onClick: () => Navigate(new Route(ApertureView.Requests)),
                 badge: requests.User.CanManageRequests && PendingRequestCount > 0 ? PendingRequestCount : 0));
-            // Reports are for whoever looks after the library; the badge only for someone
-            // who can do something about them.
+            // Everyone's reports are for whoever looks after the library; the badge only for
+            // someone who can do something about them.
             if (requests.User.CanSeeIssues)
                 rail.AddChild(RailButton(Icons.Report, "Issues", "",
                     active: Current.View is ApertureView.Issues or ApertureView.Issue,
                     onClick: () => Navigate(new Route(ApertureView.Issues)),
                     badge: requests.User.CanManageIssues ? OpenIssueCount : 0, badgeWord: "open"));
+            // Someone who files reports but may not read everyone's: their own, and a
+            // badge for the ones answered or resolved since they last looked.
+            else if (CanReportProblems)
+                rail.AddChild(RailButton(Icons.Report, "Your reports", "",
+                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
+                    onClick: () => Navigate(new Route(ApertureView.Issues)),
+                    badge: MyIssueNewsCount, badgeWord: "new"));
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
