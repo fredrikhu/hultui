@@ -21,6 +21,39 @@ public class ButtonElementTests
         Assert.Equal(new Thickness(1f), b.Box.BorderWidth);
     }
 
+    /// <summary>
+    /// What the label draws, not what the button computed. A button writes its text colour
+    /// and size into its inherited style from <see cref="Element.ApplyTheme"/>, and the style
+    /// pass used to resolve the button's inherited style before asking it to — so on the
+    /// first pass the label drew in its parent's colour and size, and stayed that way until
+    /// something else happened to dirty the button (enabling it, say). Every test above
+    /// calls ApplyTheme directly and reads the button, which is why none of them saw it.
+    /// </summary>
+    [Fact]
+    public void TheLabel_DrawsInTheButtonsColourAndSize_FromTheFirstStylePass()
+    {
+        var theme = Theme.Dark;
+        Assert.NotEqual(theme.TextColor, theme.PrimaryText);   // or the first assertion proves nothing
+        var linkStyle = new ButtonStyle { Text = new Color(244, 200, 126, 255), FontSize = 12f };
+        var primary = Button.New("Play");
+        var link = Button.New("See all", ButtonVariant.Ghost);
+        link.Style = linkStyle;
+        var root = Box.New();
+        root.AddChild(primary);
+        root.AddChild(link);
+
+        StyleResolver.Resolve(root, theme);   // once — no second pass to paper over it
+
+        var playLabel = (TextElement)primary.Children[0];
+        Assert.Equal(theme.PrimaryText, playLabel.ResolvedInherited.TextColor);
+        Assert.Equal(theme.Button.FontWeight, playLabel.ResolvedInherited.FontWeight);
+        var linkLabel = (TextElement)link.Children[0];
+        Assert.Equal(linkStyle.Text, linkLabel.ResolvedInherited.TextColor);
+        Assert.Equal(12f, linkLabel.ResolvedInherited.FontSize);
+        // And the button's own resolved style, which its cursor and focus ring read.
+        Assert.Equal(theme.PrimaryText, primary.ResolvedInherited.TextColor);
+    }
+
     [Fact]
     public void Secondary_IsOutlinedOnNoFill()
     {

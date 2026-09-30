@@ -30,6 +30,17 @@ public static class StyleResolver
 
     private static void ResolveRecursive(Element element, ResolvedInheritedStyle parent, Theme? theme)
     {
+        // The theme first. An element that takes its text style from the theme — a
+        // button's label colour, size and weight, a toast's, a text field's — writes it
+        // into its own inherited style here, and that is what this pass has to resolve, for
+        // the element and for the children inheriting from it. The other way round, those
+        // writes landed a pass late: a button's label drew in its parent's colour and size
+        // until something else happened to dirty the button (being enabled, say), and one
+        // that nothing touched again kept them for good. No ApplyTheme reads the resolved
+        // style, so nothing depends on the old order.
+        if (theme is not null)
+            element.ApplyTheme(theme);
+
         var own = element.InheritedRead;
         var resolved = new ResolvedInheritedStyle(
             FontFamily: own.FontFamily ?? parent.FontFamily,
@@ -45,9 +56,6 @@ public static class StyleResolver
             LetterSpacing: own.LetterSpacing ?? parent.LetterSpacing);
 
         element.ResolvedInherited = resolved;
-
-        if (theme is not null)
-            element.ApplyTheme(theme);
 
         foreach (var child in element.Children)
         {
