@@ -42,6 +42,8 @@ public sealed partial class ApertureApp
     {
         if (_library is not { } lib) return;
         EnsureHomeWatchlist();
+        // The Favourites page's own list: one load serves the row and the page.
+        EnsureFavourites();
         _resume.Load(("resume", _dataGeneration),
             () => Fetch(() => lib.GetResumeAsync(ResumeRowSize), (IReadOnlyList<MediaItem>)[], "Continue watching"));
         _nextUp.Load(("nextup", _dataGeneration),
@@ -71,6 +73,10 @@ public sealed partial class ApertureApp
 
     /// <summary>How many Home's Next up row asks for; a full row has "See all".</summary>
     internal const int NextUpRowSize = 12;
+
+    /// <summary>How many favourites Home's row shows; more than that, and it has "See all"
+    /// (the Favourites page, which has them all).</summary>
+    internal const int FavouritesRowSize = 12;
 
     /// <summary>How many a "Latest in" row asks for. A row that comes back full may have
     /// more behind it — which is when it offers "See all".</summary>

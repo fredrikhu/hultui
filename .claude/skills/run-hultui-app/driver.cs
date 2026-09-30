@@ -370,6 +370,9 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
         }, "s1");
     fake.ResumeIds.Add("m1");
     fake.ResumeIds.Add("e4");
+    // A few hearted, for Home's favourites row.
+    foreach (var id in new[] { "m0", "m4", "m6" })
+        fake.Update(fake.Item(id)! with { IsFavorite = true });
     // Enough more half-watched to fill Continue watching past its twelve, so it offers "See all".
     foreach (var i in new[] { 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })
     {
