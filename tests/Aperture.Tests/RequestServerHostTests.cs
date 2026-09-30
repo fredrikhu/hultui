@@ -636,6 +636,28 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void YourRequestsSeeAllIsYourOwnRequests()
+    {
+        // Someone who cannot approve sees the same row as "Your requests" — and its "See all"
+        // is the Requests list, which for them is only ever their own.
+        var requests = Requests();
+        requests.RequestAsync(new NewRequest(DiscoverKind.Movie, 603, [])).GetAwaiter().GetResult();
+        requests.AddPendingRequest("tv:1399");   // anna's
+        requests.Layout = [new DiscoverSlider(2, SliderKind.RecentRequests, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Your requests");
+            Click(session, "discover-row-requests-see-all");
+            Assert.Equal(ApertureView.Requests, app.Current.View);
+            PumpUntilShown(session, "The Matrix, requested by tester");
+            Assert.False(Shows(session, "requested by anna"), "someone else's request on a user's own list");
+            Assert.Contains("GetRequests(All,mine,0)", requests.Calls);
+        });
+    }
+
+    [Fact]
     public void SeeAllForARowNoLongerInTheLayoutSaysSo()
     {
         var requests = Requests();
