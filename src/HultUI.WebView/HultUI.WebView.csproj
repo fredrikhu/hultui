@@ -6,7 +6,7 @@
     engine view and marshals its events to the UI thread, the WebViewElement that paints
     the page and forwards input to it, and a scripted FakeWebEngine so an application's
     headless tests need no browser. An engine is a separate package (HultUI.WebView.WebView2
-    on Windows, HultUI.WebView.Wpe on Linux) — see docs/design/WEBVIEW.md.
+    on Windows, HultUI.WebView.Cef on Linux) — see docs/design/WEBVIEW.md.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

@@ -5,14 +5,14 @@ using HultUI.Core.Rendering;
 namespace HultUI.WebView;
 
 /// <summary>
-/// A browser engine: WebView2 on Windows, WPE WebKit on Linux, or
+/// A browser engine: WebView2 on Windows, CEF on Linux, or
 /// <see cref="Testing.FakeWebEngine"/> in tests. It owns whatever its views share — on
 /// WebView2, one browser process per user data folder — so an application normally
 /// creates one and disposes it on exit, after the views.
 /// </summary>
 public interface IWebEngine : IDisposable
 {
-    /// <summary>A short name for logs and error messages: "WebView2", "WPE".</summary>
+    /// <summary>A short name for logs and error messages: "WebView2", "CEF".</summary>
     string Name { get; }
 
     /// <summary>

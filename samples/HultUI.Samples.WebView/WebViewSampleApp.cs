@@ -22,7 +22,7 @@ public sealed class WebViewSampleApp : IDisposable
     /// <summary>
     /// The start page. Its button posts a message to the app, and it shows what the app
     /// posts back — the two directions of the bridge. <c>chrome.webview</c> is WebView2's;
-    /// the WPE engine provides the same object.
+    /// the CEF engine provides the same object.
     /// </summary>
     public const string HomePage = """
         <!doctype html>

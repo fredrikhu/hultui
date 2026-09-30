@@ -15,7 +15,7 @@ using HultUI.WebView.Testing;   // FakeWebEngine (ships inside HultUI.WebView)
 |---|---|
 | `HultUI.WebView` | The engine contract, the reactive `WebViewController`, `WebViewElement`, and `FakeWebEngine` for tests. **No browser.** |
 | `HultUI.WebView.WebView2` | The Windows engine: Microsoft Edge WebView2. Brings `WebView2Loader.dll`; the WebView2 Runtime itself is the user's — Windows 11 ships it, and `Availability` says when it is missing. |
-| `HultUI.WebView.Wpe` | The Linux engine, WPE WebKit. **Not built yet.** |
+| `HultUI.WebView.Cef` | The Linux engine: CEF (Chromium), from the distribution's package on Fedora and bundled on Debian and Ubuntu. **Not built yet.** |
 
 An app that never shows a web page references none of these and pays nothing.
 
@@ -136,7 +136,7 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
   same Vulkan window share the renderer's one interop image, so the second draws nothing.
   Separate windows, or the GL renderer, are unaffected.
 - Files dropped on the page do not reach it.
-- Windows only until the WPE engine exists; `FakeWebEngine` runs anywhere.
+- Windows only until the CEF engine exists; `FakeWebEngine` runs anywhere.
 
 ## Testing
 

@@ -3,7 +3,7 @@
   <!--
     A browser window: back, forward, reload, an address bar, the page, and a status line,
     plus a home page that talks to the app through postMessage and a toolbar dropdown that
-    opens over the page. WebView2 on Windows; elsewhere, until the WPE engine exists, the
+    opens over the page. WebView2 on Windows; elsewhere, until the CEF engine exists, the
     fake engine's solid-colour pages (and anywhere with the fake argument). The check
     argument loads, scripts and messages the home page and exits, for proving a build
     works; see Program.cs and docs/design/WEBVIEW.md.

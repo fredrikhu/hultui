@@ -25,7 +25,7 @@ produces seventeen packages plus symbol packages (snupkg):
 | `HultUI.Media` | Video playback without a decoder: the backend contract, the reactive `MediaPlayer`, `VideoElement`, `VideoPlayer`, and a fake backend for tests. A decoder is a separate package. |
 | `HultUI.Media.Mpv` | The libmpv backend. Bindings and `MpvBackend` only; the native library is the consumer's, per its README. |
 | `HultUI.Media.Mpv.Natives` | The trimmed LGPL libmpv itself, under `runtimes/<rid>/native/`. **Not in the solution**: it packs only after `native/mpv/build-libmpv.sh` has produced the binaries, from the `mpv natives` workflow, and errors otherwise. |
-| `HultUI.WebView` | A web page as an element, without a browser: the engine contract, the reactive `WebViewController`, `WebViewElement`, and a fake engine for tests. An engine is a separate package (WebView2 on Windows, WPE WebKit on Linux — `docs/design/WEBVIEW.md`). |
+| `HultUI.WebView` | A web page as an element, without a browser: the engine contract, the reactive `WebViewController`, `WebViewElement`, and a fake engine for tests. An engine is a separate package (WebView2 on Windows, CEF on Linux — `docs/design/WEBVIEW.md`). |
 | `HultUI.WebView.WebView2` | The Windows engine: Edge WebView2 in visual hosting, captured into the page's frames. Hand-written COM, NativeAOT-clean. Brings `WebView2Loader.dll` (Microsoft's package, native assets only); the WebView2 Runtime is the user's (Windows 11 ships it). |
 | `HultUI.Icons`, `HultUI.Syntax`, `HultUI.Themes` | Satellite libraries. |
 | `HultUI.SourceGenerators` | The generator/analyzers standalone, for Core-only projects. Development dependency; no lib output, no symbols package. |

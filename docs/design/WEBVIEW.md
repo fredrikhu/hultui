@@ -6,7 +6,8 @@ the interop for one.
 
 Written 2026-09-30 from a read of the framework as it stands. The Windows path
 was spiked the same day (W0, `spikes/WebView2Capture`, results below); the Linux
-path has not been. Where a claim still needs confirming on real hardware it says
+path has not been, and its engine changed from WPE WebKit to CEF on the day Windows
+was finished — see *Linux engines*, and `WEBVIEW-LINUX-BRIEF.md` for the work itself. Where a claim still needs confirming on real hardware it says
 **verify**. Three decisions were put to the owner and are
 marked **DECIDED** (2026-09-30).
 
@@ -18,7 +19,7 @@ line changes when this lands.
 ## What an application gets
 
 ```csharp
-IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new WpeEngine();
+IWebEngine engine = OperatingSystem.IsWindows() ? new WebView2Engine() : new CefEngine();
 var web = new WebViewController(engine, new WebViewOptions
 {
     UserDataFolder = Path.Combine(appData, "WebView"),
@@ -29,7 +30,7 @@ Box.New().Children(
     Toolbar(web),                        // web.Title, web.CanGoBack, web.IsLoading are signals
     WebViewElement.New(web).FlexGrow(1));
 
-web.MessageReceived += m => ...;          // window.chrome.webview.postMessage / its WPE twin
+web.MessageReceived += m => ...;          // window.chrome.webview.postMessage / its CEF twin
 await web.ExecuteScriptAsync("document.title");
 ```
 
@@ -88,7 +89,7 @@ child HWND on Windows only, with the airspace documented and a snapshot swap
 src/
   HultUI.WebView/            contract, WebViewController, WebView element, fake engine — no natives
   HultUI.WebView.WebView2/   Windows engine: hand-rolled COM, WinRT capture, D3D11
-  HultUI.WebView.Wpe/        Linux engine: WPE WebKit through its WPEPlatform API, hand P/Invoke
+  HultUI.WebView.Cef/        Linux engine: CEF rendered off-screen, through its C API, hand P/Invoke
 tests/
   HultUI.WebView.Tests/          headless, fake engine
   HultUI.WebView.Engines.Tests/  real engines, skipped when the runtime is missing
@@ -244,8 +245,8 @@ position, so a `<select>`'s list should have been left behind too; that was not 
 
 **NavigationStarting has no deferral** (the IDL offers none), so the answer must be
 given before the handler returns. It is: WebView2 raises it on the UI thread, where the
-controller answers synchronously. An engine that raises elsewhere (WPE) keeps the
-request's continuation instead.
+controller answers synchronously. An engine that raises elsewhere (CEF, if it runs its
+own UI thread) keeps the request's continuation instead.
 
 **Threading.** WebView2 must be created on an STA thread with a message pump.
 Junction's and Vesper's `Main` are already `[STAThread]` (for OLE); any app that
@@ -270,7 +271,28 @@ candidate position, and how scrolling and drag-selection feel.
 
 ## Linux engines
 
-**DECIDED (Linux engine): WPE WebKit.** The comparison it was chosen from:
+**DECIDED (Linux engine), revised 2026-09-30: CEF, rendered off-screen.** WPE WebKit was
+chosen first, from the comparison below, and withdrawn the same day on a rule the owner
+added: an app must run on **Fedora with only Fedora's packages, RPM Fusion and official
+COPRs**, and on Debian and Ubuntu too.
+
+- **WPE WebKit is not packaged in Fedora** (43 to 45, Rawhide, EPEL); only personal COPRs
+  carry it. The comparison below had left that cell marked *verify*.
+- **CEF is**: `cef` and `cef-devel`, 146 on the stable releases and 151 in Rawhide, kept up
+  with Chromium's security releases. Arch packages it as well. So on Fedora the app ships
+  none of it — the argument that had been WPE's.
+- **Debian and Ubuntu do not**, so there the app bundles CEF (about 110 MB compressed) and
+  owns its security updates. CEF's versioned API (since M133: a client names the API version
+  it was written against and the library keeps that ABI) is what should let one engine
+  binary run against Fedora's CEF across major bumps and against a bundled one. **Verify**:
+  it is question 2 of the spike.
+- **What it costs**: accessibility is ours to build from CEF's raw tree updates, where WebKit
+  would have spoken AT-SPI itself; a helper process; and zero-copy on NVIDIA waits on
+  cef#4237, which is still open.
+- **What it gains**: the same engine as Windows, so a page renders alike on both.
+
+The spike, the machine and the build order are in `docs/design/WEBVIEW-LINUX-BRIEF.md`,
+written for a session on the Linux machine. The comparison, as first written:
 
 | | WPE WebKit (WPEPlatform) | CEF off-screen | WebKitGTK | None for now |
 |---|---|---|---|---|
@@ -281,12 +303,12 @@ candidate position, and how scrolling and drag-selection feel.
 | Input | Everything forwarded as `WPEEvent` — keyboard too; IME through a `WebKitInputMethodContext` we feed from SDL's text-editing events | Everything forwarded (`SendMouseEvent`, `SendKeyEvent`, IME composition calls) | — | — |
 | Popups, menus, dialogs, file chooser | Signals to the embedder: we draw `<select>` and context menus with HultUI's Dropdown/ContextMenu and use HultUI's file dialogs | Popup widget painted into a second buffer we composite; dialogs via handlers | — | — |
 | Accessibility | WebKit speaks AT-SPI over D-Bus itself; our bridge references its root as the element's child (**verify** the embed API) | `CefAccessibilityHandler` sends raw tree updates; we would build the whole AT-SPI tree ourselves | — | — |
-| What the app ships | Nothing: a distro package (`libwpewebkit-2.0`) | libcef + resources + a helper executable: ~110 MB compressed, ~350 MB installed (Arch's package), plus sandbox setup | — | Nothing |
+| What the app ships | Nothing where a distro packages it (`libwpewebkit-2.0`) — **Fedora does not** | libcef + resources + a helper executable: ~110 MB compressed, ~350 MB installed (Arch's package), plus sandbox setup | — | Nothing |
 | Security updates | The distribution's | Ours, every Chromium release | — | — |
-| Maturity risk | WPEPlatform became stable and default only in 2.54 (Sept 2026); the libwpe API is now deprecated. Debian testing has 2.54, Debian stable 2.48; Ubuntu 24.04 (our CI runner) is older; Fedora **verify** | Mature; the heavy parts are packaging and the Linux GPU path | — | None |
+| Maturity risk | WPEPlatform became stable and default only in 2.54 (Sept 2026); the libwpe API is now deprecated. Debian testing has 2.54, Debian stable 2.48; Ubuntu 24.04 (our CI runner) is older; **Fedora: not packaged** | Mature; the heavy parts are packaging and the Linux GPU path | — | None |
 | Rendering parity with Windows | Different engine: pages may differ from WebView2 | Same engine as WebView2 | — | — |
 
-**Why WPE WebKit.** It is the only engine built for exactly this
+**Why WPE WebKit was chosen first.** It is the only engine built for exactly this
 model — the embedder owns the renderer, buffers are handed over, input is
 injected — and the application ships zero bytes of it. Its risk is recency: it
 needs a 2.54-era distribution, and until the CI runner has one, the engine tests
@@ -299,10 +321,12 @@ Rejected: WebKitGTK (no way into an SDL window on Wayland), the deprecated
 libwpe/`wpebackend-fdo` API (building on something being removed), Servo (no
 stable C embedding API yet, compatibility gaps), Ultralight (proprietary licence).
 
-**Threading on Linux (WPE).** WPE runs on a GLib main context. It gets a
-dedicated thread with its own `GMainLoop`; controller calls marshal onto it and
-events marshal back with `InvokeOnMainThread`. Frames arrive on that thread and go
-into the sink like `FrameArrived` on Windows.
+**Threading on Linux (CEF).** Two models, and the spike picks: CEF's own UI thread
+(`multi_threaded_message_loop`), with controller calls posted to it and events marshalled
+back, or CEF pumped from HultUI's thread (`external_message_pump`). The contract allows
+either — `IWebEngineView.Event` may be raised from any thread — under one rule: the UI
+thread never blocks on CEF's. Frames go into the sink from whichever thread paints, like
+`FrameArrived` on Windows.
 
 ## The contract
 
@@ -348,7 +372,7 @@ the sink, not the event, exactly as in Media.
 the controller shows it to the app's handlers (which may `Cancel()` it) and then
 completes it exactly once — in a `finally`, so a throwing handler cannot leave an
 engine waiting. WebView2 raises on the UI thread and gets its answer before the
-handler returns; WPE, on its own thread, waits for the continuation.
+handler returns; CEF, on its own thread, waits for the continuation.
 
 `WebViewController` owns one view and the sink, holds signals (`State`, `Error`,
 `Source`, `Title`, `IsLoading`, `CanGoBack`, `CanGoForward`), and marshals events
@@ -367,7 +391,7 @@ and input is recorded; `Raise*` injects what a page does.
 **Defaults that are policy, not plumbing:** new windows are denied and raised as
 an event (the app opens the system browser or navigates in place); `file://` is
 off; local content is served through a virtual host
-(`SetVirtualHostNameToFolderMapping` / a WPE URI scheme handler) under a fixed
+(`SetVirtualHostNameToFolderMapping` / a CEF scheme handler factory) under a fixed
 `https://app.local/`; `MessageReceived` only from origins the options allow;
 DevTools off unless `WebViewOptions.DevTools`.
 
@@ -385,7 +409,7 @@ finds its `Window` through `OverlayHost is Window` (the `VideoPlayer` pattern),
 which is not set yet in `OnMounted` — resolve at render time. What is missing is
 the handle: `Window.PlatformWindow` is internal and `IWin32WindowHandle` has one
 consumer, the UIA bridge. Add a public `Window.NativeHandle` (HWND on Windows,
-zero elsewhere; WPE needs none, since we implement its display ourselves). Core
+zero elsewhere; CEF needs none, since it renders off-screen). Core
 grants `InternalsVisibleTo HultUI.WebView` for `MeasureContent`, `PatchFrom` and
 `WantsTextInput`, as it does for Media.
 
@@ -424,8 +448,8 @@ package can call.
 
 **W6 — Raw scan code on key events (`HultUI.Core`).** For Linux engines that take
 forwarded keys. `KeyCode` is physical but maps the keypad, F13+, media and
-international keys to `Unknown`; WPE wants the hardware keycode (evdev) and
-derives the keysym itself. Add `KeyDownEvent.ScanCode`/`KeyUpEvent.ScanCode`.
+international keys to `Unknown`; CEF's key event wants the native key code beside
+the Windows one (what exactly is question 5 of the Linux spike). Add `KeyDownEvent.ScanCode`/`KeyUpEvent.ScanCode`.
 
 **W7 — Per-source interop images on Vulkan (`HultUI.Platform.SDL3`,
 `HultUI.Rendering.Skia`).** The Vulkan surface lends *one* interop image and
@@ -445,9 +469,11 @@ the root, the node as override provider, a stand-in provider for hit tests, and 
 `ChildrenInvalidated` on the node and the root when content arrives or leaves. The
 engine's side is `IWebEngineView.AccessibleContent` plus
 `WebEngineEvent.AccessibleContentChanged`.
-**Linux half open:** AT-SPI children are local paths on our bus only, and no node offers
-a `Socket`. A child has to be a `(bus, path)` pair and the host node implement
-`Socket.Embedded`; `NativeAccessibleContent` grows whatever names WebKit's plug. Step 5.
+**Linux half open, and different now.** With WebKit it would have been a socket onto a
+tree on someone else's bus. CEF off-screen gives the embedder a tree of plain data
+(`cef_accessibility_handler_t`), so the web view's node grows real children that our
+AT-SPI bridge serves like any others; `NativeContent` is the Windows shape and need not be
+reused. Designed in step 5, from what the spike's question 9 shows.
 
 Not needed, checked: pixel-density math (`ScreenContentBox × Window.DisplayScale`
 is device pixels; use it rather than `LocalPosition`, which ignores scrolling),
@@ -469,8 +495,8 @@ engine if it changed, but nothing more.
 ## Implementation order
 
 0. **Spikes.** W0 (WebView2 capture) — **done 2026-09-30, the design holds.** L0
-   (WPE rendering one page into our window on Wayland) needs a Linux machine with
-   WPE 2.54 and runs before step 5. Nothing is built on an assumption either spike
+   (CEF rendering one page off-screen on Fedora: ten questions, in
+   `WEBVIEW-LINUX-BRIEF.md`) runs on the Linux machine before step 5. Nothing is built on an assumption either spike
    can break.
 1. **`HultUI.WebView`** — **done 2026-09-30**: contract, controller, element,
    `FakeWebEngine`, seams W1 and W2, 33 headless tests (`tests/HultUI.WebView.Tests`),
@@ -532,6 +558,8 @@ engine if it changed, but nothing more.
    browser's own views between the element and the document, as in any WebView2 app.
    One new contract member beside the two above: `IWebViewHost.Post`, because an engine
    that has to look again later is on a timer thread and its objects are not.
-5. **Linux engine**, same order: pixels, input, zero-copy, accessibility.
+5. **Linux engine: CEF**, in the order `WEBVIEW-LINUX-BRIEF.md` gives: find and start
+   libcef, pixels, input and IME (seam W6), navigation and messages, zero-copy,
+   accessibility (seam W8's Linux half), then the bundle for Debian and Ubuntu.
 6. **Polish**: HultUI context menu and script dialogs over the engine's, downloads,
    drag and drop into the page.
