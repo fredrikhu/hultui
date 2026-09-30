@@ -240,13 +240,22 @@ pct set 210 --features nesting=1,keyctl=1
 Inside the container, as root:
 
 ```bash
-apt update && apt install -y curl git ca-certificates libicu74 libssl3 zlib1g libfontconfig1
+apt update && apt install -y curl git ca-certificates libicu74 libssl3 zlib1g libfontconfig1 fonts-noto-cjk
 ```
 
 `libfontconfig1` is the non-obvious one. The renderer references
 `SkiaSharp.NativeAssets.Linux`, whose native `libSkiaSharp.so` links against fontconfig — the
 Skia render tests fail to load it otherwise. The hosted `ubuntu-latest` image has it already,
 which is why this only shows up on a lean container.
+
+`fonts-noto-cjk` is the other one a desktop has and a container does not. `libfontconfig1`
+brings DejaVu with it, which covers Latin, Hebrew and Arabic — enough for the bidi tests —
+and not one ideograph. The tests for language-aware Han fallback (`[HanFontsFact]` in
+`HultUI.Rendering.Skia.Tests`: a Japanese reader gets the Japanese face, a Taiwanese one the
+Traditional) have nothing to choose between without it. They skip rather than fail there,
+with this package named in the reason — so a run that reports three skipped Skia tests is a
+runner missing this package, and the feature is going untested on Linux until it is
+installed. It is about 90 MB.
 
 Install the SDK from the Ubuntu archive:
 

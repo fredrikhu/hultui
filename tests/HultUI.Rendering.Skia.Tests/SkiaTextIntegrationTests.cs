@@ -227,7 +227,7 @@ public class SkiaTextIntegrationTests
         Assert.False(typeface.IsFixedPitch, $"Hebrew fell back to monospaced '{typeface.FamilyName}'");
     }
 
-    [Fact]
+    [HanFontsFact]
     public void FontCollection_MatchCharacter_HanFollowsTheUiCulture()
     {
         // 說 is drawn differently in each of these, and only the reader's culture says which
@@ -255,7 +255,7 @@ public class SkiaTextIntegrationTests
         Assert.Equal(faces["zh-CN"], FaceFor("en-US"));
     }
 
-    [Fact]
+    [HanFontsFact]
     public void FontCollection_MatchCharacter_ACultureChangeIsNotServedFromTheCache()
     {
         var fonts = new SkiaFontCollection();
@@ -298,7 +298,7 @@ public class SkiaTextIntegrationTests
         }
     }
 
-    [Fact]
+    [HanFontsFact]
     public void AUiCultureChange_IsNotServedAnOldLayoutFromThePipelinesCaches()
     {
         // The font collection keys fallback by language, but the pipeline caches whole
