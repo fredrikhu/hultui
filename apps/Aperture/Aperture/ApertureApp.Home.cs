@@ -37,6 +37,7 @@ public sealed partial class ApertureApp
     internal const string NextUpRowKey = "nextup";
     internal const string CombinedRowKey = "upnext";
     internal const string WatchlistRowKey = "watchlist";
+    internal const string FavouritesRowKey = "favourites";
     internal static string LatestRowKey(string libraryId) => "latest-" + libraryId;
 
     private Element BuildHomeView()
@@ -133,6 +134,13 @@ public sealed partial class ApertureApp
                 SeeAll: HomeWatchlistHasMore
                     ? () => Navigate(new Route(ApertureView.DiscoverAll, WatchlistRouteId, "Your watchlist"))
                     : null));
+
+        // What you have hearted, from every library, after what you are watching and mean
+        // to — the same list as the Favourites page, whose first twelve this is.
+        if (Favourites.Count > 0)
+            rows.Add(new HomeRow(FavouritesRowKey, "Your favourites", [.. Favourites.Take(FavouritesRowSize)],
+                Halide.PosterWidth, Stills: false,
+                SeeAll: Favourites.Count > FavouritesRowSize ? () => Navigate(new Route(ApertureView.Favourites)) : null));
 
         foreach (var library in Libraries)
         {

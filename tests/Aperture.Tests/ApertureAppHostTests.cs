@@ -821,6 +821,42 @@ public class ApertureAppHostTests
     }
 
     [Fact]
+    public void FavouritesHaveARowOnHomeAfterWhatIsBeingWatched()
+    {
+        Host(Library(), (session, app) =>   // The Mirror is hearted
+        {
+            PumpUntilShown(session, "Your favourites");
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            int favourites = RowPosition(session, "row-favourites");
+            Assert.True(RowPosition(session, "row-resume") < favourites, session.Window.DumpAccessibilityTree());
+            Assert.True(favourites < RowPosition(session, "row-latest-movies"));
+            // One favourite is all of them: nothing more to see.
+            Assert.Null(session.Window.FindByAutomationId("row-favourites-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-favourites-menu"));
+        });
+    }
+
+    [Fact]
+    public void MoreFavouritesThanTheRowHoldsHaveSeeAllOpeningTheFavouritesPage()
+    {
+        var library = Library();
+        for (int i = 4; i <= 16; i++)
+        {
+            library.AddMovie("m" + i, "Film " + i, "movies", 2000 + i, 90);
+            library.Update(library.Item("m" + i)! with { IsFavorite = true });
+        }
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Your favourites");
+            session.Window.FindByAutomationId("row-favourites-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Favourites, app.Current.View);
+            Assert.Equal(14, app.Favourites.Count);   // The Mirror and thirteen more
+        });
+    }
+
+    [Fact]
     public void AFullLatestRowsSeeAllIsTheLibraryNewestFirstUnfiltered()
     {
         var library = Library();
@@ -859,7 +895,7 @@ public class ApertureAppHostTests
             Assert.True(RowPosition(session, "row-resume") < RowPosition(session, "row-latest-movies"),
                 session.Window.DumpAccessibilityTree());
 
-            // Up twice: past "Next up", then past "Continue watching".
+            // Up twice: past "Your favourites", then past "Continue watching".
             app.MoveHomeRow("latest-movies", -1);
             app.MoveHomeRow("latest-movies", -1);
             for (int i = 0; i < 6; i++) session.PumpFrame();
@@ -889,6 +925,14 @@ public class ApertureAppHostTests
             var back = session.Window.FindByAutomationId("home-show-resume");
             Assert.NotNull(back);
 
+            // The footer is below the fold once Home has a few rows; a click is at a point,
+            // so bring it up first, as a person would.
+            for (int i = 0; i < 20 && back!.Element.Layout.AbsoluteBorderBox.Bottom > 880; i++)
+            {
+                session.Window.Wheel(700, 400, 0, -3);
+                session.PumpFrame();
+                back = session.Window.FindByAutomationId("home-show-resume");
+            }
             back!.Click();
             for (int i = 0; i < 6; i++) session.PumpFrame();
             Assert.True(RowPosition(session, "row-resume") >= 0, session.Window.DumpAccessibilityTree());
