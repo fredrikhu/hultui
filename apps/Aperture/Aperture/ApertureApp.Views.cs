@@ -150,14 +150,26 @@ public sealed partial class ApertureApp
             emptyHint: "The heart on a film or series puts it here.");
     }
 
+    /// <summary>Home's Continue watching row in full: the same stills, with their progress
+    /// bars, as a wrap.</summary>
+    private Element BuildContinueWatchingView()
+    {
+        EnsureResumeAll();
+        return ShelfView("Continue watching", ResumeAll, ResumeAllLoading,
+            "continue-watching-view", Icons.Play,
+            emptyHeadline: "Nothing half-watched",
+            emptyHint: "Something stopped partway through lands here.",
+            stills: true);
+    }
+
     /// <summary>
     /// A titled wrap of posters over a list that is already loaded in full — a person's
-    /// credits, the favourites. Not the library grid: these lists are tens of items, not
-    /// thousands, so they need no virtualization and no paging, and a wrap reads better
-    /// than a strict grid when the count is odd.
+    /// credits, the favourites, what is part-watched (as stills). Not the library grid:
+    /// these lists are tens of items, not thousands, so they need no virtualization and no
+    /// paging, and a wrap reads better than a strict grid when the count is odd.
     /// </summary>
     private Element ShelfView(string title, IReadOnlyList<MediaItem> items, bool loading,
-        string automationId, string glyph, string emptyHeadline, string emptyHint)
+        string automationId, string glyph, string emptyHeadline, string emptyHint, bool stills = false)
     {
         var column = Flex.Column(gap: Halide.S4).FlexGrow(1).AutomationId(automationId);
 
@@ -189,9 +201,9 @@ public sealed partial class ApertureApp
             .Padding(new Thickness(0, Halide.S5, Halide.S5, Halide.S5));
         wrap.Flex.Wrap = FlexWrap.Wrap;
         wrap.Gap(Halide.PosterGap);
-        SetCursorList(automationId, items, VisibleCards(150f));
+        SetCursorList(automationId, items, VisibleCards(stills ? Halide.StillWidth : 150f));
         for (int i = 0; i < items.Count; i++)
-            wrap.AddChild(PosterCard(items[i], 150f, cursorIndex: i));
+            wrap.AddChild(stills ? StillCard(items[i], cursorIndex: i) : PosterCard(items[i], 150f, cursorIndex: i));
         scroll.AddChild(wrap);
         column.AddChild(scroll);
         return column;

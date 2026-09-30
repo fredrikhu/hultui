@@ -43,7 +43,7 @@ public sealed partial class ApertureApp
         if (_library is not { } lib) return;
         EnsureHomeWatchlist();
         _resume.Load(("resume", _dataGeneration),
-            () => Fetch(() => lib.GetResumeAsync(12), (IReadOnlyList<MediaItem>)[], "Continue watching"));
+            () => Fetch(() => lib.GetResumeAsync(ResumeRowSize), (IReadOnlyList<MediaItem>)[], "Continue watching"));
         _nextUp.Load(("nextup", _dataGeneration),
             () => Fetch(() => lib.GetNextUpAsync(12), (IReadOnlyList<MediaItem>)[], "Next up"));
 
@@ -66,6 +66,9 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaItem> ResumeItems => _resume.Value;
     internal IReadOnlyList<MediaItem> NextUpItems => _nextUp.Value;
+    /// <summary>How many Home's Continue watching row asks for; a full row has "See all".</summary>
+    internal const int ResumeRowSize = 12;
+
     /// <summary>How many a "Latest in" row asks for. A row that comes back full may have
     /// more behind it — which is when it offers "See all".</summary>
     internal const int LatestRowSize = 12;
@@ -309,6 +312,21 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaItem> PersonItems => _personItems.Value.Items;
     internal bool PersonItemsLoading => _personItems.IsLoading;
+
+    private readonly AsyncLoader<IReadOnlyList<MediaItem>> _resumeAll = new([]);
+
+    /// <summary>Everything part-watched, for the Continue watching page. In one call, as the
+    /// favourites are: a list of things someone is halfway through is tens long, not
+    /// thousands, and the server has no cheaper way to count it.</summary>
+    private void EnsureResumeAll()
+    {
+        if (_library is not { } lib) return;
+        _resumeAll.Load(("resume-all", _dataGeneration), () => Fetch(
+            () => lib.GetResumeAsync(200), (IReadOnlyList<MediaItem>)[], "Continue watching"));
+    }
+
+    internal IReadOnlyList<MediaItem> ResumeAll => _resumeAll.Value;
+    internal bool ResumeAllLoading => _resumeAll.IsLoading;
 
     private void EnsureFavourites()
     {

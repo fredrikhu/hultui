@@ -370,6 +370,12 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
         }, "s1");
     fake.ResumeIds.Add("m1");
     fake.ResumeIds.Add("e4");
+    // Enough more half-watched to fill Continue watching past its twelve, so it offers "See all".
+    foreach (var i in new[] { 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })
+    {
+        fake.Update(fake.Item("m" + i)! with { ResumePosition = TimeSpan.FromMinutes(12 + i * 5) });
+        fake.ResumeIds.Add("m" + i);
+    }
     fake.NextUpIds.Add("e5");
     return fake;
 }

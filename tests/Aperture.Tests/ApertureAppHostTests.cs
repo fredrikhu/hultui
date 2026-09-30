@@ -753,6 +753,41 @@ public class ApertureAppHostTests
     }
 
     [Fact]
+    public void AFullContinueWatchingRowsSeeAllIsEverythingPartWatched()
+    {
+        var library = Library();   // two part-watched already: Solaris and an episode
+        for (int i = 4; i <= 14; i++)
+        {
+            library.AddMovie("m" + i, "Film " + i, "movies", 2000 + i, 90, resume: TimeSpan.FromMinutes(i));
+            library.ResumeIds.Add("m" + i);
+        }
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Continue watching");
+            session.Window.FindByAutomationId("row-resume-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.ContinueWatching, app.Current.View);
+            // All thirteen, not the row's twelve: the last one added is past the row's end.
+            PumpUntilShown(session, "Film 14");
+            Assert.Equal(13, app.ResumeAll.Count);
+            Assert.Contains("GetResume(limit=200)", library.Calls);
+        });
+    }
+
+    [Fact]
+    public void AShortContinueWatchingRowHasNoSeeAll()
+    {
+        Host(Library(), (session, app) =>
+        {
+            PumpUntilShown(session, "Continue watching");
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+            Assert.Null(session.Window.FindByAutomationId("row-resume-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-resume-menu"));
+        });
+    }
+
+    [Fact]
     public void AFullLatestRowsSeeAllIsTheLibraryNewestFirstUnfiltered()
     {
         var library = Library();

@@ -113,7 +113,10 @@ public sealed partial class ApertureApp
         else
         {
             if (ResumeItems.Count > 0)
-                rows.Add(new HomeRow(ResumeRowKey, "Continue watching", ResumeItems, Halide.StillWidth, Stills: true));
+                rows.Add(new HomeRow(ResumeRowKey, "Continue watching", ResumeItems, Halide.StillWidth, Stills: true,
+                    SeeAll: ResumeItems.Count >= ResumeRowSize
+                        ? () => Navigate(new Route(ApertureView.ContinueWatching))
+                        : null));
             if (NextUpItems.Count > 0)
                 rows.Add(new HomeRow(NextUpRowKey, "Next up", NextUpItems, Halide.PosterWidth, Stills: false));
         }
