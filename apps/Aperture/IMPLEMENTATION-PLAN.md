@@ -213,11 +213,29 @@ by the wire and headless tests only.
 already has first, since that is what can be played — and moves, hides and comes back
 like any other row. Home's rows can now hold discovery titles (`HomeRow.Titles`).
 
+**Since, issues:** an **Issues** rail button for someone with Manage issues or View issues
+(the badge — open reports — only for Manage issues). The list starts at the open ones
+(Open / Resolved / All), each row saying what kind of problem, which episode, who and when,
+and the first line of the report, with a Resolve tick for a manager. A report's page has the
+conversation oldest first, a reply box, and Resolve or Reopen — "Reply and resolve" when
+something is typed, the reply sent first so a refused resolve still leaves it said. A reader
+without Manage issues sees the conversation and no box; the server lets the reporter answer
+their own report too, so the box follows that rule rather than the permission alone.
+
+Wire details: the list (`GET /issue`) joins the reporter and comments but not the comments'
+authors — only `GET /issue/{id}` does — so a reply or a status change is followed by a
+re-read of the issue. `problemSeason: 0` means "not about one episode". And the server says
+"not yours to change" on `POST /issue/{id}/{status}` with a **401**, which everywhere else
+means the session is gone; the client turns it into a refusal so it never signs anyone out.
+Verified read-only against the lab server (list, filters, counts — it has no reports yet, so
+the mapping of a real one rests on the wire tests, written from the server's source).
+
 **Still open:**
 
 - Studios and networks, if a logo source turns up; streaming-service rows once their data
   format is pinned down.
-- Issues as a list — reading and commenting on reports, for someone who manages them.
+- A reporter's own reports — a user with only Create issues files from the player but has
+  no door to read the answers yet.
 
 ## Things deliberately not done
 

@@ -405,6 +405,46 @@ internal sealed class SeerrCreditDto
     public SeerrMediaInfoDto? MediaInfo { get; set; }
 }
 
+internal sealed class SeerrIssueCommentDto
+{
+    public int Id { get; set; }
+    public string? Message { get; set; }
+    public string? CreatedAt { get; set; }
+    /// <summary>Present on a single issue; the list leaves comments' authors out.</summary>
+    public SeerrUserDto? User { get; set; }
+}
+
+internal sealed class SeerrIssueDto
+{
+    public int Id { get; set; }
+    public int IssueType { get; set; }
+    public int Status { get; set; }
+    public int? ProblemSeason { get; set; }
+    public int? ProblemEpisode { get; set; }
+    public string? CreatedAt { get; set; }
+    public string? UpdatedAt { get; set; }
+    public SeerrUserDto? CreatedBy { get; set; }
+    public SeerrMediaInfoDto? Media { get; set; }
+    public List<SeerrIssueCommentDto>? Comments { get; set; }
+}
+
+internal sealed class SeerrIssuePageDto
+{
+    public SeerrPageInfoDto? PageInfo { get; set; }
+    public List<SeerrIssueDto>? Results { get; set; }
+}
+
+internal sealed class SeerrIssueCountDto
+{
+    public int Open { get; set; }
+    public int Closed { get; set; }
+}
+
+internal sealed class SeerrCommentBodyDto
+{
+    public string Message { get; set; } = "";
+}
+
 internal sealed class SeerrErrorDto
 {
     public string? Message { get; set; }
@@ -441,4 +481,8 @@ internal sealed class SeerrErrorDto
 [JsonSerializable(typeof(List<SeerrGenreSliderDto>))]
 [JsonSerializable(typeof(SeerrPersonDto))]
 [JsonSerializable(typeof(SeerrCombinedCreditsDto))]
+[JsonSerializable(typeof(SeerrIssueDto))]
+[JsonSerializable(typeof(SeerrIssuePageDto))]
+[JsonSerializable(typeof(SeerrIssueCountDto))]
+[JsonSerializable(typeof(SeerrCommentBodyDto))]
 internal partial class SeerrJson : JsonSerializerContext;

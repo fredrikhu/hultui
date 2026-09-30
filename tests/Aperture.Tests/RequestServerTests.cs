@@ -470,6 +470,115 @@ public class RequestServerTests
         Assert.Equal(40, detail.MediaId);
     }
 
+    /// <summary>The list as the server sends it: media with ids only, the reporter, and
+    /// comments whose authors are left out (only a single issue joins them).</summary>
+    private const string IssuePageJson = """
+        { "pageInfo": { "pages": 1, "pageSize": 20, "results": 2, "page": 1 },
+          "results": [
+            { "id": 9, "issueType": 3, "status": 1, "problemSeason": 2, "problemEpisode": 4,
+              "createdAt": "2026-09-29T10:00:00.000Z", "updatedAt": "2026-09-29T11:00:00.000Z",
+              "createdBy": { "id": 5, "displayName": "anna", "permissions": 4194304 },
+              "media": { "id": 40, "tmdbId": 1399, "mediaType": "tv", "status": 5, "jellyfinMediaId": "ABCDEF01-2345-6789-ABCD-EF0123456789" },
+              "comments": [
+                { "id": 2, "message": "Thanks, looking", "createdAt": "2026-09-29T11:00:00.000Z" },
+                { "id": 1, "message": "Subtitles are for the wrong episode", "createdAt": "2026-09-29T10:00:00.000Z" } ] },
+            { "id": 8, "issueType": 1, "status": 2, "problemSeason": 0, "problemEpisode": 0,
+              "createdAt": "2026-09-20T10:00:00.000Z",
+              "createdBy": { "id": 3, "displayName": "fredrik", "permissions": 32 },
+              "media": { "id": 41, "tmdbId": 603, "mediaType": "movie", "status": 5 },
+              "comments": [ { "id": 3, "message": "Blocky picture", "createdAt": "2026-09-20T10:00:00.000Z" } ] } ] }
+        """;
+
+    [Fact]
+    public async Task TheIssueListMapsTheServersRecordsAndFillsInTitles()
+    {
+        var router = new Router()
+            .On("GET", "/api/v1/issue", _ => Json(IssuePageJson))
+            .On("GET", "/api/v1/tv/1399", _ => Json(TvDetail))
+            .On("GET", "/api/v1/movie/603", _ => Json("""{ "id": 603, "title": "The Matrix", "posterPath": "/m.jpg", "releaseDate": "1999-03-30" }"""));
+        using var server = await SessionServer(router);
+
+        var page = (await server.GetIssuesAsync(IssueFilter.Open, skip: 20, take: 20)).Value;
+        var query = router.Last("/api/v1/issue").Query;
+        Assert.Contains("filter=open", query);
+        Assert.Contains("skip=20", query);
+        Assert.Contains("sort=added", query);
+
+        Assert.Equal(2, page.Total);
+        var subtitles = page.Items[0];
+        Assert.Equal(9, subtitles.Id);
+        Assert.Equal(IssueType.Subtitles, subtitles.Type);
+        Assert.Equal(IssueStatus.Open, subtitles.Status);
+        Assert.Equal(DiscoverKind.Tv, subtitles.Kind);
+        Assert.Equal("Game of Thrones", subtitles.Title);
+        Assert.Equal("S2 · E4", subtitles.Where);
+        Assert.Equal("anna", subtitles.ReportedBy);
+        Assert.Equal("abcdef0123456789abcdef0123456789", subtitles.JellyfinItemId);
+        // Oldest first, and the unnamed first message is the reporter's own.
+        Assert.Equal(["Subtitles are for the wrong episode", "Thanks, looking"], subtitles.Comments.Select(c => c.Message));
+        Assert.Equal("anna", subtitles.Comments[0].Author);
+
+        var film = page.Items[1];
+        Assert.Equal(IssueStatus.Resolved, film.Status);
+        Assert.Equal("The Matrix", film.Title);
+        Assert.Equal("", film.Where);   // season 0 means "not about one episode"
+        Assert.Null(film.Season);
+    }
+
+    [Fact]
+    public async Task AnsweringAnIssuePostsTheMessageAndRereadsItWithAuthors()
+    {
+        var router = new Router()
+            .On("POST", "/api/v1/issue/9/comment", _ => Json("""{ "id": 9, "issueType": 3, "status": 1 }"""))
+            .On("GET", "/api/v1/issue/9", _ => Json("""
+                { "id": 9, "issueType": 3, "status": 1,
+                  "createdBy": { "id": 5, "displayName": "anna", "permissions": 0 },
+                  "media": { "id": 40, "tmdbId": 1399, "mediaType": "tv" },
+                  "comments": [
+                    { "id": 1, "message": "Wrong subtitles", "createdAt": "2026-09-29T10:00:00.000Z", "user": { "id": 5, "displayName": "anna", "permissions": 0 } },
+                    { "id": 4, "message": "Replaced them", "createdAt": "2026-09-30T10:00:00.000Z", "user": { "id": 3, "displayName": "fredrik", "permissions": 0 } } ] }
+                """))
+            .On("GET", "/api/v1/tv/1399", _ => Json(TvDetail));
+        using var server = await SessionServer(router);
+
+        var answered = await server.CommentOnIssueAsync(9, "Replaced them");
+        Assert.True(answered.Ok, answered.Failure?.Message);
+        var body = JsonDocument.Parse(router.Last("/api/v1/issue/9/comment").Body!).RootElement;
+        Assert.Equal("Replaced them", body.GetProperty("message").GetString());
+        Assert.Equal(["anna", "fredrik"], answered.Value.Comments.Select(c => c.Author));
+        Assert.Equal(3, answered.Value.Comments[1].AuthorId);
+    }
+
+    [Fact]
+    public async Task ResolvingPostsTheStatusAndARefusalIsNotASignOut()
+    {
+        var router = new Router()
+            .On("POST", "/api/v1/issue/9/resolved", _ => Json("""{ "id": 9, "issueType": 1, "status": 2 }"""))
+            .On("GET", "/api/v1/issue/9", _ => Json("""{ "id": 9, "issueType": 1, "status": 2, "media": { "id": 41, "tmdbId": 603, "mediaType": "movie" } }"""))
+            .On("GET", "/api/v1/movie/603", _ => Json("""{ "id": 603, "title": "The Matrix" }"""))
+            // "Not yours to change" — which the server says with a 401.
+            .On("POST", "/api/v1/issue/10/open",
+                _ => Json("""{ "message": "You do not have permission to modify this issue." }""", HttpStatusCode.Unauthorized));
+        using var server = await SessionServer(router);
+
+        var resolved = await server.SetIssueStatusAsync(9, IssueStatus.Resolved);
+        Assert.Equal(IssueStatus.Resolved, resolved.Value.Status);
+
+        var refused = await server.SetIssueStatusAsync(10, IssueStatus.Open);
+        Assert.Equal(ApertureFailureKind.Forbidden, refused.Failure!.Kind);
+        Assert.Contains("permission", refused.Failure.Message);
+    }
+
+    [Fact]
+    public async Task IssueCountsReadOpenAndClosed()
+    {
+        var router = new Router().On("GET", "/api/v1/issue/count", _ => Json("""
+            { "total": 5, "video": 1, "audio": 1, "subtitles": 2, "others": 1, "open": 3, "closed": 2 }
+            """));
+        using var server = await SessionServer(router);
+        Assert.Equal(new IssueCounts(3, 2), (await server.GetIssueCountsAsync()).Value);
+    }
+
     [Fact]
     public async Task AServersChoicesAreReadFromTheServiceRoutesNeverTheSettings()
     {

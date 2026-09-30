@@ -36,6 +36,10 @@ public enum ApertureView
     DiscoverGenre,
     /// <summary>One person's films and series on the request server; the Id is their TMDB id.</summary>
     DiscoverPerson,
+    /// <summary>Problem reports, for someone who may read everyone's.</summary>
+    Issues,
+    /// <summary>One report and its conversation; the Id is the server's issue id.</summary>
+    Issue,
 }
 
 /// <summary>
@@ -198,6 +202,7 @@ public sealed partial class ApertureApp : Component, IDisposable
         // session once the library is up, and asked for its waiting count for the rail.
         EnsureRequestServer();
         EnsurePendingCount();
+        EnsureIssueCounts();
 
         var row = Flex.Row(gap: 0).FlexGrow(1).AlignItems(AlignItems.Stretch);
         var rail = BuildRail(); rail.Key = "rail";
@@ -216,6 +221,8 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.DiscoverGenre => BuildDiscoverGenreView(Current),
             ApertureView.DiscoverPerson => BuildDiscoverPersonView(Current),
             ApertureView.Requests => BuildRequestsView(),
+            ApertureView.Issues => BuildIssuesView(),
+            ApertureView.Issue => BuildIssueView(Current),
             _ => BuildHomeView(),
         };
         view.Key = "view-" + Current.View;
@@ -335,6 +342,13 @@ public sealed partial class ApertureApp : Component, IDisposable
                 active: Current.View == ApertureView.Requests,
                 onClick: () => Navigate(new Route(ApertureView.Requests)),
                 badge: requests.User.CanManageRequests && PendingRequestCount > 0 ? PendingRequestCount : 0));
+            // Reports are for whoever looks after the library; the badge only for someone
+            // who can do something about them.
+            if (requests.User.CanSeeIssues)
+                rail.AddChild(RailButton(Icons.Report, "Issues", "",
+                    active: Current.View is ApertureView.Issues or ApertureView.Issue,
+                    onClick: () => Navigate(new Route(ApertureView.Issues)),
+                    badge: requests.User.CanManageIssues ? OpenIssueCount : 0, badgeWord: "open"));
         }
 
         rail.AddChild(Box.New().FlexGrow(1));
@@ -351,11 +365,12 @@ public sealed partial class ApertureApp : Component, IDisposable
         return rail;
     }
 
-    private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0)
+    private Element RailButton(string glyph, string label, string key, bool active, Action onClick, int badge = 0,
+        string badgeWord = "waiting")
     {
         var fg = active ? Halide.Accent : Halide.TextMuted;
         var name = key.Length > 0 ? $"{label} ({key})" : label;
-        if (badge > 0) name += $", {badge} waiting";
+        if (badge > 0) name += $", {badge} {badgeWord}";
         var b = Flex.Column(gap: 2)
             .Width(48).Height(48).FlexShrink(0)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)

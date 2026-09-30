@@ -619,7 +619,7 @@ public class RequestServerHostTests
             Assert.NotNull(app.PlayingItem);
 
             Click(session, "report-send");
-            var issue = Assert.Single(requests.Issues);
+            var issue = Assert.Single(requests.Reports);
             Assert.Equal(IssueType.Audio, issue.Type);
             Assert.Equal(100_000 + 1398, issue.MediaId);   // the server's record, not TMDB's number
             Assert.Equal("No sound after the first reel", issue.Message);
@@ -730,6 +730,132 @@ public class RequestServerHostTests
 
             Click(session, "rail-home");
             PumpUntilShown(session, "Your watchlist");
+        });
+    }
+    // ── Issues ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void OnlySomeoneWhoMayReadEveryonesReportsGetsTheIssuesDoor()
+    {
+        // Filing a report is not reading them: the reporter's own door is the player.
+        Host(Library(), Requests(RequestPermission.Request | RequestPermission.CreateIssues), (session, app) =>
+        {
+            PumpUntilShown(session, "Requests");
+            Assert.Null(session.Window.FindByAutomationId("rail-issues"));
+        });
+        Host(Library(), Requests(RequestPermission.ViewIssues), (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            Assert.NotNull(session.Window.FindByAutomationId("rail-issues"));
+        });
+    }
+
+    [Fact]
+    public void AnIssueManagerSeesOpenReportsOnTheRailAndResolvesOneFromTheList()
+    {
+        var requests = Requests(RequestPermission.ManageIssues | RequestPermission.Request);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture");
+        requests.AddIssue("tv:1399", IssueType.Subtitles, "Wrong subtitles", 2, 3, IssueStatus.Resolved);
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues, 1 open");
+
+            Click(session, "rail-issues");
+            Assert.Equal(ApertureView.Issues, app.Current.View);
+            PumpUntilShown(session, "The Matrix, picture problem, reported by anna, open");
+            // The list starts at the open ones.
+            Assert.False(Shows(session, "Game of Thrones"), "a resolved report was on the open list");
+
+            Click(session, $"issue-{blocky.Id}-resolve");
+            Assert.Contains($"SetIssueStatus({blocky.Id},Resolved)", requests.Calls);
+            // Resolving does not also open the report under the button.
+            Assert.Equal(ApertureView.Issues, app.Current.View);
+            PumpUntilShown(session, "No open reports");
+            Assert.False(Shows(session, "1 open"), "the badge still counted the resolved report");
+
+            Click(session, "issues-filter-resolved");
+            PumpUntilShown(session, "Game of Thrones, subtitles problem, S2 E3, reported by anna, resolved");
+            PumpUntilShown(session, "The Matrix, picture problem, reported by anna, resolved");
+        });
+    }
+
+    [Fact]
+    public void AReportOpensWithItsConversationAndAnAnswerIsSentAndResolved()
+    {
+        var requests = Requests(RequestPermission.ManageIssues);
+        var subs = requests.AddIssue("tv:1399", IssueType.Subtitles, "Subtitles are for the wrong episode", 2, 3);
+        requests.AddComment(subs.Id, "It's episode 4's", byId: 2);
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            Click(session, "rail-issues");
+            PumpUntilShown(session, "1 reply");
+            Click(session, "issue-" + subs.Id);
+            Assert.Equal(ApertureView.Issue, app.Current.View);
+            PumpUntilShown(session, "Subtitles are for the wrong episode");
+            PumpUntilShown(session, "It's episode 4's");
+
+            session.Window.FindByAutomationId("issue-reply")!.Element.Focus();
+            session.Window.TypeText("Replaced them");
+            Pump(session, 2);
+            Assert.Equal("Replaced them", session.Window.FindByAutomationId("issue-reply")!.Value);
+            Click(session, "issue-resolve");
+            // The answer first, then the status — and the button said both.
+            var answer = requests.Calls.IndexOf($"CommentOnIssue({subs.Id},Replaced them)");
+            var resolve = requests.Calls.IndexOf($"SetIssueStatus({subs.Id},Resolved)");
+            Assert.True(answer >= 0 && resolve > answer, string.Join("\n", requests.Calls));
+            PumpUntilShown(session, "tester, just now: Replaced them");
+            Assert.Equal(IssueStatus.Resolved, requests.Issue(subs.Id)!.Status);
+            // The box is empty again, and the page offers the way back.
+            Assert.Equal("", session.Window.FindByAutomationId("issue-reply")!.Value ?? "");
+            Assert.NotNull(session.Window.FindByAutomationId("issue-reopen"));
+        });
+    }
+
+    [Fact]
+    public void AReaderWhoCannotManageSeesTheConversationButCannotAnswer()
+    {
+        var requests = Requests(RequestPermission.ViewIssues);
+        var blocky = requests.AddIssue("movie:603", IssueType.Video, "Blocky picture");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            Assert.False(Shows(session, "1 open"), "the rail counted reports this user cannot act on");
+            app.Navigate(new Route(ApertureView.Issue, blocky.Id.ToString(), "The Matrix"));
+            PumpUntilShown(session, "Blocky picture");
+            Assert.NotNull(session.Window.FindByAutomationId("issue-read-only"));
+            Assert.Null(session.Window.FindByAutomationId("issue-reply"));
+            Assert.Null(session.Window.FindByAutomationId("issue-resolve"));
+        });
+    }
+
+    [Fact]
+    public void AReportThatWillNotLoadSaysSoRatherThanSpinning()
+    {
+        var requests = Requests(RequestPermission.ManageIssues);
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            app.Navigate(new Route(ApertureView.Issue, "999", null));
+            PumpUntilShown(session, "This report didn't load");
+            // A missing report is not a lost session.
+            Assert.NotNull(app.RequestServer);
+        });
+    }
+
+    [Fact]
+    public void AReportAboutATitleInTheLibraryOpensTheLibrarysPage()
+    {
+        var requests = Requests(RequestPermission.ManageIssues);
+        var stalker = requests.AddIssue("movie:1398", IssueType.Audio, "No sound");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Issues");
+            app.Navigate(new Route(ApertureView.Issue, stalker.Id.ToString(), "Stalker"));
+            PumpUntilShown(session, "No sound");
+            Click(session, "issue-open-library");
+            Assert.Equal(ApertureView.Detail, app.Current.View);
+            Assert.Equal("0123456789abcdef0123456789abcdef", app.Current.Id);
         });
     }
 }

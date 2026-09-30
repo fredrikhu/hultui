@@ -106,10 +106,12 @@ public sealed partial class ApertureApp
         _requestGeneration++;
         _requestListItems.Clear();
         _requestListKey = null;
+        _issueListItems.Clear();
+        _issueListKey = null;
         // Off any view that needs it — their rail buttons have just gone, and a page with
         // no way back to it is a dead end.
         if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
-                or ApertureView.DiscoverPerson or ApertureView.Requests) > 0
+                or ApertureView.DiscoverPerson or ApertureView.Requests or ApertureView.Issues or ApertureView.Issue) > 0
             && _stack.Count == 0)
             _stack.Add(new Route(ApertureView.Home));
     }

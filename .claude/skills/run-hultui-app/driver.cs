@@ -246,7 +246,8 @@ Element MountAperture()
 // for, one on its way, a series part-way in, and someone else's request waiting.
 Aperture.Core.Testing.FakeRequestServer DemoRequests()
 {
-    var R = Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.ManageRequests;
+    var R = Aperture.Core.Requests.RequestPermission.Request | Aperture.Core.Requests.RequestPermission.ManageRequests
+            | Aperture.Core.Requests.RequestPermission.ManageIssues;
     var fake = new Aperture.Core.Testing.FakeRequestServer(user: new Aperture.Core.Requests.RequestUser(1, "fredrik", R));
     var trending = Aperture.Core.Requests.DiscoverShelf.Trending;
     var films = Aperture.Core.Requests.DiscoverShelf.PopularMovies;
@@ -282,6 +283,17 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests()
     // Something downloading, for the progress bar and the list's percentage.
     fake.SetDownloads("movie:1003", [new Aperture.Core.Requests.DownloadProgress("Northbound.2022.2160p.mkv",
         8_000_000_000, 2_600_000_000, "downloading", TimeSpan.FromMinutes(23), null)]);
+    // Problem reports, for the Issues page: two open (one answered), one resolved.
+    var now = DateTimeOffset.UtcNow;
+    var subs = fake.AddIssue("tv:2000", Aperture.Core.Requests.IssueType.Subtitles,
+        "The subtitles on this one are for the previous episode — the lines run about a scene behind.",
+        1, 4, at: now.AddHours(-5));
+    fake.AddComment(subs.Id, "Found it: the file was named for E03. Swapping it tonight.", 1, "fredrik");
+    fake.AddComment(subs.Id, "Thanks! I'll check tomorrow.");
+    fake.AddIssue("movie:990", Aperture.Core.Requests.IssueType.Audio,
+        "No sound after the first reel.", at: now.AddDays(-2), by: "sam", byId: 3);
+    fake.AddIssue("movie:1003", Aperture.Core.Requests.IssueType.Video, "Blocky in the dark scenes.",
+        status: Aperture.Core.Requests.IssueStatus.Resolved, at: now.AddDays(-9));
     return fake;
 }
 

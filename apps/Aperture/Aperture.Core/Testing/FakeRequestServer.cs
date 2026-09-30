@@ -279,8 +279,8 @@ public sealed class FakeRequestServer : IRequestServer
     /// the twelve built-in rows, in the order a fresh install has them.</summary>
     public List<DiscoverSlider>? Layout { get; set; }
 
-    /// <summary>Problem reports made, in order.</summary>
-    public List<NewIssue> Issues { get; } = [];
+    /// <summary>Problem reports made through <see cref="ReportIssueAsync"/>, in order.</summary>
+    public List<NewIssue> Reports { get; } = [];
 
     /// <summary>Requests' advanced choices, as sent — so a test can see what went.</summary>
     public List<RequestOptions?> SentOptions { get; } = [];
@@ -408,8 +408,137 @@ public sealed class FakeRequestServer : IRequestServer
         if (Fail<int>() is { } failed) return failed;
         if (!User.Has(RequestPermission.CreateIssues) && !User.Has(RequestPermission.ManageIssues))
             return Task.FromResult(ApertureResult<int>.Fail(ApertureFailureKind.Forbidden, "not allowed", 403));
-        Issues.Add(issue);
-        return Done(Issues.Count);
+        Reports.Add(issue);
+        var title = _titles.Values.FirstOrDefault(t => t.MediaId == issue.MediaId);
+        if (title is null)
+            return Task.FromResult(ApertureResult<int>.Fail(ApertureFailureKind.NotFound, "Media does not exist.", 404));
+        var record = NewIssueRecord(title, issue.Type, issue.Message, issue.Season, issue.Episode, User.Id, User.DisplayName);
+        _issues.Add(record);
+        return Done(record.Id);
+    }
+
+    // ── Issues ───────────────────────────────────────────────────────────
+
+    private readonly List<MediaIssue> _issues = [];
+    private int _nextIssueId = 1;
+    private int _nextCommentId = 1;
+
+    /// <summary>Someone's report — <see cref="OtherUser"/>'s unless another name is given.</summary>
+    public MediaIssue AddIssue(string key, IssueType type, string message, int? season = null, int? episode = null,
+        IssueStatus status = IssueStatus.Open, int byId = 2, string by = OtherUser, DateTimeOffset? at = null)
+    {
+        var record = NewIssueRecord(_titles[key], type, message, season, episode, byId, by, at) with { Status = status };
+        _issues.Add(record);
+        return record;
+    }
+
+    /// <summary>Someone else answers in a report's conversation.</summary>
+    public void AddComment(int issueId, string message, int byId = 2, string by = OtherUser)
+    {
+        int at = _issues.FindIndex(i => i.Id == issueId);
+        var issue = _issues[at];
+        _issues[at] = issue with
+        {
+            Comments = [.. issue.Comments, new IssueComment(_nextCommentId++, message, byId, by, DateTimeOffset.UtcNow)],
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    public MediaIssue? Issue(int id) => _issues.FirstOrDefault(i => i.Id == id);
+
+    public Task<ApertureResult<IssuePage>> GetIssuesAsync(IssueFilter filter, int skip = 0, int take = 20,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"GetIssues({filter},{skip})");
+        if (Fail<IssuePage>() is { } failed) return failed;
+        IEnumerable<MediaIssue> list = _issues.OrderByDescending(i => i.CreatedAt).ThenByDescending(i => i.Id);
+        if (!CanSeeAllIssues) list = list.Where(i => i.ReportedById == User.Id);
+        list = filter switch
+        {
+            IssueFilter.Open => list.Where(i => i.Status == IssueStatus.Open),
+            IssueFilter.Resolved => list.Where(i => i.Status == IssueStatus.Resolved),
+            _ => list,
+        };
+        var all = list.ToList();
+        return Done(new IssuePage(all.Skip(skip).Take(take).Select(Fresh).ToList(), all.Count, skip));
+    }
+
+    public Task<ApertureResult<MediaIssue>> GetIssueAsync(int issueId, CancellationToken ct = default)
+    {
+        Calls.Add($"GetIssue({issueId})");
+        if (Fail<MediaIssue>() is { } failed) return failed;
+        if (Issue(issueId) is not { } issue)
+            return Task.FromResult(ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Server, "Issue not found.", 500));
+        if (issue.ReportedById != User.Id && !CanSeeAllIssues)
+            return Task.FromResult(ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Forbidden, "not allowed", 403));
+        return Done(Fresh(issue));
+    }
+
+    public Task<ApertureResult<MediaIssue>> CommentOnIssueAsync(int issueId, string message, CancellationToken ct = default)
+    {
+        Calls.Add($"CommentOnIssue({issueId},{message})");
+        if (Fail<MediaIssue>() is { } failed) return failed;
+        if (Issue(issueId) is not { } issue)
+            return Task.FromResult(ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Server, "Issue not found.", 500));
+        if (issue.ReportedById != User.Id && !User.Has(RequestPermission.ManageIssues))
+            return Task.FromResult(ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Forbidden, "not allowed", 403));
+        AddComment(issueId, message, User.Id, User.DisplayName);
+        return Done(Fresh(Issue(issueId)!));
+    }
+
+    public Task<ApertureResult<MediaIssue>> SetIssueStatusAsync(int issueId, IssueStatus status, CancellationToken ct = default)
+    {
+        Calls.Add($"SetIssueStatus({issueId},{status})");
+        if (Fail<MediaIssue>() is { } failed) return failed;
+        int at = _issues.FindIndex(i => i.Id == issueId);
+        if (at < 0) return Task.FromResult(ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Server, "Issue not found.", 500));
+        if (_issues[at].ReportedById != User.Id && !User.Has(RequestPermission.ManageIssues))
+            return Task.FromResult(ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Forbidden, "not allowed", 403));
+        _issues[at] = _issues[at] with { Status = status, UpdatedAt = DateTimeOffset.UtcNow };
+        return Done(Fresh(_issues[at]));
+    }
+
+    public Task<ApertureResult<IssueCounts>> GetIssueCountsAsync(CancellationToken ct = default)
+    {
+        Calls.Add("GetIssueCounts");
+        if (Fail<IssueCounts>() is { } failed) return failed;
+        // Like the server's: everyone's, whoever asks.
+        return Done(new IssueCounts(_issues.Count(i => i.Status == IssueStatus.Open),
+            _issues.Count(i => i.Status == IssueStatus.Resolved)));
+    }
+
+    private bool CanSeeAllIssues => User.CanSeeIssues;
+
+    /// <summary>The title as it stands now — a report about a film that has since arrived
+    /// opens the library's page.</summary>
+    private MediaIssue Fresh(MediaIssue issue) =>
+        _titles.TryGetValue(issue.MediaKey, out var t)
+            ? issue with { JellyfinItemId = t.Item.JellyfinItemId, Title = t.Item.Title, PosterPath = t.Item.PosterPath }
+            : issue;
+
+    private MediaIssue NewIssueRecord(DiscoverDetail title, IssueType type, string message, int? season, int? episode,
+        int byId, string by, DateTimeOffset? at = null)
+    {
+        var when = at ?? DateTimeOffset.UtcNow;
+        return new MediaIssue
+        {
+            Id = _nextIssueId++,
+            Type = type,
+            Status = IssueStatus.Open,
+            Kind = title.Item.Kind,
+            TmdbId = title.Item.TmdbId,
+            Title = title.Item.Title,
+            Year = title.Item.Year,
+            PosterPath = title.Item.PosterPath,
+            JellyfinItemId = title.Item.JellyfinItemId,
+            Season = season is > 0 ? season : null,
+            Episode = season is > 0 && episode is > 0 ? episode : null,
+            ReportedById = byId,
+            ReportedBy = by,
+            CreatedAt = when,
+            UpdatedAt = when,
+            Comments = [new IssueComment(_nextCommentId++, message, byId, by, when)],
+        };
     }
 
     public Task<ApertureResult<IReadOnlyList<RequestService>>> GetServicesAsync(DiscoverKind kind, CancellationToken ct = default)

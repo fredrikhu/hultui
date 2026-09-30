@@ -358,6 +358,79 @@ public sealed class SeerrServer : IRequestServer
         return result.Ok ? ApertureResult<int>.Success(result.Value.Id) : result.As<int>();
     }
 
+    public async Task<ApertureResult<IssuePage>> GetIssuesAsync(IssueFilter filter, int skip = 0, int take = 20,
+        CancellationToken ct = default)
+    {
+        var name = filter switch { IssueFilter.Open => "open", IssueFilter.Resolved => "resolved", _ => "all" };
+        var query = $"issue?take={Math.Clamp(take, 1, 100)}&skip={Math.Max(0, skip)}&sort=added&filter={name}";
+        var result = await _http.GetAsync(query, SeerrJson.Default.SeerrIssuePageDto, ct).ConfigureAwait(false);
+        if (!result.Ok) return result.As<IssuePage>();
+
+        // Like the request list: ids only, titles filled in from the cache or a detail call.
+        using var gate = new SemaphoreSlim(TitleFetchParallelism);
+        var named = await Task.WhenAll((result.Value.Results ?? []).Select(MapIssue).Select(async issue =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return await NamedAsync(issue, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+
+        int total = result.Value.PageInfo?.Results ?? named.Length;
+        return ApertureResult<IssuePage>.Success(new IssuePage(named, total, skip));
+    }
+
+    public async Task<ApertureResult<MediaIssue>> GetIssueAsync(int issueId, CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync($"issue/{issueId}", SeerrJson.Default.SeerrIssueDto, ct).ConfigureAwait(false);
+        return result.Ok ? ApertureResult<MediaIssue>.Success(await NamedAsync(MapIssue(result.Value), ct).ConfigureAwait(false))
+            : result.As<MediaIssue>();
+    }
+
+    public async Task<ApertureResult<MediaIssue>> CommentOnIssueAsync(int issueId, string message, CancellationToken ct = default)
+    {
+        var posted = await _http.PostAsync($"issue/{issueId}/comment", new SeerrCommentBodyDto { Message = message },
+            SeerrJson.Default.SeerrCommentBodyDto, SeerrJson.Default.SeerrIssueDto, ct).ConfigureAwait(false);
+        // The answer's comments carry no authors; the single issue does.
+        return posted.Ok ? await GetIssueAsync(issueId, ct).ConfigureAwait(false) : posted.As<MediaIssue>();
+    }
+
+    public async Task<ApertureResult<MediaIssue>> SetIssueStatusAsync(int issueId, IssueStatus status, CancellationToken ct = default)
+    {
+        var posted = await _http.PostAsync($"issue/{issueId}/{(status == IssueStatus.Resolved ? "resolved" : "open")}",
+            SeerrJson.Default.SeerrIssueDto, ct).ConfigureAwait(false);
+        if (posted.Ok) return await GetIssueAsync(issueId, ct).ConfigureAwait(false);
+        // The server answers "not yours to change" with a 401, which everywhere else means
+        // the session is gone — and would sign the person out of the request server.
+        return posted.Failure!.Kind == ApertureFailureKind.Unauthorized
+            ? ApertureResult<MediaIssue>.Fail(ApertureFailureKind.Forbidden, posted.Failure.Message, 403)
+            : posted.As<MediaIssue>();
+    }
+
+    public async Task<ApertureResult<IssueCounts>> GetIssueCountsAsync(CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync("issue/count", SeerrJson.Default.SeerrIssueCountDto, ct).ConfigureAwait(false);
+        return result.Ok ? ApertureResult<IssueCounts>.Success(new IssueCounts(result.Value.Open, result.Value.Closed))
+            : result.As<IssueCounts>();
+    }
+
+    private async Task<MediaIssue> NamedAsync(MediaIssue issue, CancellationToken ct)
+    {
+        var title = await TitleAsync(issue.Kind, issue.TmdbId, ct).ConfigureAwait(false);
+        return title is null ? issue : issue with
+        {
+            Title = title.Item.Title,
+            Year = title.Item.Year,
+            PosterPath = title.Item.PosterPath,
+            JellyfinItemId = issue.JellyfinItemId ?? title.Item.JellyfinItemId,
+        };
+    }
+
     public async Task<ApertureResult<IReadOnlyList<RequestService>>> GetServicesAsync(DiscoverKind kind, CancellationToken ct = default)
     {
         var result = await _http.GetAsync(ServicePath(kind), SeerrJson.Default.ListSeerrServiceDto, ct).ConfigureAwait(false);
@@ -602,6 +675,40 @@ public sealed class SeerrServer : IRequestServer
             Downloads = MapDownloads(r.Is4k ? media?.DownloadStatus4k : media?.DownloadStatus),
         };
     }
+
+    internal static MediaIssue MapIssue(SeerrIssueDto i)
+    {
+        var media = i.Media;
+        return new MediaIssue
+        {
+            Id = i.Id,
+            Type = Enum.IsDefined((IssueType)i.IssueType) ? (IssueType)i.IssueType : IssueType.Other,
+            Status = i.Status == (int)IssueStatus.Resolved ? IssueStatus.Resolved : IssueStatus.Open,
+            Kind = media?.MediaType == "tv" ? DiscoverKind.Tv : DiscoverKind.Movie,
+            TmdbId = media?.TmdbId ?? 0,
+            JellyfinItemId = JellyfinId(media?.JellyfinMediaId),
+            // The server stores 0 for "not about one season/episode".
+            Season = i.ProblemSeason is > 0 ? i.ProblemSeason : null,
+            Episode = i.ProblemSeason is > 0 && i.ProblemEpisode is > 0 ? i.ProblemEpisode : null,
+            ReportedById = i.CreatedBy?.Id ?? 0,
+            ReportedBy = i.CreatedBy?.Name ?? "someone",
+            CreatedAt = TimeOf(i.CreatedAt),
+            UpdatedAt = TimeOf(i.UpdatedAt ?? i.CreatedAt),
+            // Oldest first, as a conversation reads. The list call leaves the authors out;
+            // the first message is always the reporter's own.
+            Comments = (i.Comments ?? []).OrderBy(c => TimeOf(c.CreatedAt)).ThenBy(c => c.Id)
+                .Where(c => !string.IsNullOrWhiteSpace(c.Message))
+                .Select((c, n) => new IssueComment(c.Id, c.Message!.Trim(),
+                    c.User?.Id ?? (n == 0 ? i.CreatedBy?.Id ?? 0 : 0),
+                    c.User?.Name ?? (n == 0 ? i.CreatedBy?.Name ?? "someone" : "someone"),
+                    TimeOf(c.CreatedAt)))
+                .ToList(),
+        };
+    }
+
+    private static DateTimeOffset TimeOf(string? at) =>
+        DateTimeOffset.TryParse(at, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t)
+            ? t : DateTimeOffset.MinValue;
 
     internal static RequestUser MapUser(SeerrUserDto u) =>
         new(u.Id, u.Name, (RequestPermission)(int)Math.Clamp(u.Permissions, 0, int.MaxValue));

@@ -54,6 +54,12 @@ public sealed record RequestUser(int Id, string DisplayName, RequestPermission P
     /// <summary>May approve, decline and delete anyone's request.</summary>
     public bool CanManageRequests => Has(RequestPermission.ManageRequests);
 
+    /// <summary>May read everyone's problem reports, not only their own.</summary>
+    public bool CanSeeIssues => Has(RequestPermission.ManageIssues) || Has(RequestPermission.ViewIssues);
+
+    /// <summary>May answer and resolve anyone's report.</summary>
+    public bool CanManageIssues => Has(RequestPermission.ManageIssues);
+
     public bool CanRequest(DiscoverKind kind) => kind == DiscoverKind.Movie
         ? Has(RequestPermission.Request) || Has(RequestPermission.RequestMovie)
         : Has(RequestPermission.Request) || Has(RequestPermission.RequestTv);
@@ -512,3 +518,60 @@ public sealed record PersonDetail
     /// <summary>Films and series, newest first, each once however many roles it held.</summary>
     public IReadOnlyList<DiscoverItem> Credits { get; init; } = [];
 }
+
+// ── Issues, for whoever looks after the library ─────────────────────────────
+
+/// <summary>Where a report stands — the server's own numbers.</summary>
+public enum IssueStatus { Open = 1, Resolved = 2 }
+
+/// <summary>Which reports to list — the server's filters.</summary>
+public enum IssueFilter { Open, Resolved, All }
+
+/// <summary>One message in a report's conversation. The first is the report itself.</summary>
+public sealed record IssueComment(int Id, string Message, int AuthorId, string Author, DateTimeOffset CreatedAt);
+
+/// <summary>
+/// A reported problem with a title: what kind, where in a series, who reported it, and
+/// the conversation since. Keyed by the server's issue id; the title is filled in from the
+/// title's own record, as a request's is.
+/// </summary>
+public sealed record MediaIssue
+{
+    public required int Id { get; init; }
+    public required IssueType Type { get; init; }
+    public required IssueStatus Status { get; init; }
+    public required DiscoverKind Kind { get; init; }
+    public required int TmdbId { get; init; }
+    public string? Title { get; init; }
+    public int? Year { get; init; }
+    public string? PosterPath { get; init; }
+    public string? JellyfinItemId { get; init; }
+    /// <summary>Null for a film, or for a report about a whole series.</summary>
+    public int? Season { get; init; }
+    public int? Episode { get; init; }
+    public int ReportedById { get; init; }
+    public string ReportedBy { get; init; } = "";
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+    public IReadOnlyList<IssueComment> Comments { get; init; } = [];
+
+    public string MediaKey => $"{(Kind == DiscoverKind.Movie ? "movie" : "tv")}:{TmdbId}";
+
+    /// <summary>"S2 · E3", "Season 2", or empty — where in a series the problem is.</summary>
+    public string Where => (Season, Episode) switch
+    {
+        ({ } s, { } e) when s > 0 && e > 0 => $"S{s} · E{e}",
+        ({ } s, _) when s > 0 => $"Season {s}",
+        _ => "",
+    };
+}
+
+/// <summary>A page of reports, newest first.</summary>
+public sealed record IssuePage(IReadOnlyList<MediaIssue> Items, int Total, int Skip)
+{
+    public static readonly IssuePage Empty = new([], 0, 0);
+    public bool HasMore => Skip + Items.Count < Total;
+}
+
+/// <summary>How many reports there are, open and resolved.</summary>
+public sealed record IssueCounts(int Open, int Resolved);

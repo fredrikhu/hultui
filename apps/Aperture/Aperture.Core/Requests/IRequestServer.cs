@@ -84,6 +84,24 @@ public interface IRequestServer : IDisposable
     /// <summary>Reports a problem with a title. Returns the new issue's id.</summary>
     Task<ApertureResult<int>> ReportIssueAsync(NewIssue issue, CancellationToken ct = default);
 
+    /// <summary>A page of reports, newest first, titles filled in — everyone's for someone
+    /// who may see them (<see cref="RequestPermission.ManageIssues"/> or
+    /// <see cref="RequestPermission.ViewIssues"/>), one's own otherwise.</summary>
+    Task<ApertureResult<IssuePage>> GetIssuesAsync(IssueFilter filter, int skip = 0, int take = 20,
+        CancellationToken ct = default);
+
+    /// <summary>One report with its whole conversation.</summary>
+    Task<ApertureResult<MediaIssue>> GetIssueAsync(int issueId, CancellationToken ct = default);
+
+    /// <summary>Adds to a report's conversation.</summary>
+    Task<ApertureResult<MediaIssue>> CommentOnIssueAsync(int issueId, string message, CancellationToken ct = default);
+
+    /// <summary>Marks a report resolved, or opens it again.</summary>
+    Task<ApertureResult<MediaIssue>> SetIssueStatusAsync(int issueId, IssueStatus status, CancellationToken ct = default);
+
+    /// <summary>How many reports are open and resolved — the rail's badge.</summary>
+    Task<ApertureResult<IssueCounts>> GetIssueCountsAsync(CancellationToken ct = default);
+
     /// <summary>The Radarr (films) or Sonarr (series) servers requests can go to.</summary>
     Task<ApertureResult<IReadOnlyList<RequestService>>> GetServicesAsync(DiscoverKind kind, CancellationToken ct = default);
 

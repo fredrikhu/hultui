@@ -182,16 +182,13 @@ public sealed partial class ApertureApp
                 body.AddChild(only);
             }
 
-            var box = Flex.Column(gap: 0).Padding(new Thickness(6, 10, 6, 10))
-                .Background(Halide.Bg).BorderColor(Halide.Border).BorderWidth(1f).CornerRadius(Halide.Radius1);
             var message = TextArea.New(_reportMessage)
                 .PlaceholderText("What happens, and roughly where — \"out of sync from 40 minutes in\"")
                 .OnTextChanged(v => { _reportMessage = v; MarkDirty(); })
                 .Height(Dimension.Px(110)).TextColor(Halide.Text);
             message.AutomationId = "report-message";
             message.AccessibleName = "What's wrong";
-            box.AddChild(message);
-            body.AddChild(box);
+            body.AddChild(message);
 
             bool ready = _reportType is not null && _reportMessage.Trim().Length > 0;
             var actions = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);

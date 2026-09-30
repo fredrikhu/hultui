@@ -117,7 +117,9 @@ rows, its custom rows — with genre rows that open genre pages, and a name in a
 opens everything that person is in. A bookmark keeps a title on the watchlist. Someone the
 server lets choose can send a request to a particular Radarr or Sonarr, quality and folder.
 Something wrong with what is playing (no sound, the wrong subtitles) is reported from the
-player's title strip. And when something you asked for arrives, the app says so — the server
+player's title strip, and whoever looks after the library reads the reports under **Issues**
+— a rail button (with a count of open ones) for someone the server lets read everyone's: the
+conversation, a reply box, Resolve and Reopen. And when something you asked for arrives, the app says so — the server
 has no push channel, so it looks every few minutes, and says each arrival once.
 
 **It speaks the one API Jellyseerr 2.x and Seerr 3.x share** (Seerr is what Jellyseerr and

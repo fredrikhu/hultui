@@ -189,4 +189,25 @@ public class LiveRequestServerTests
         Assert.NotEmpty(details.Value.Profiles);
         Assert.NotEmpty(details.Value.RootFolders);
     }
+    /// <summary>Read only: listing and counting; answering or resolving would change the
+    /// household's real reports.</summary>
+    [LiveRequestServerFact]
+    public async Task TheIssueListAndItsCountsRead()
+    {
+        using var server = await LiveRequestServer.ConnectAsync(null, Ct);
+        var counts = await server.GetIssueCountsAsync(Ct);
+        Assert.True(counts.Ok, counts.Failure?.Message);
+        foreach (var filter in new[] { IssueFilter.Open, IssueFilter.Resolved, IssueFilter.All })
+        {
+            var page = await server.GetIssuesAsync(filter, 0, 5, Ct);
+            Assert.True(page.Ok, $"{filter}: {page.Failure?.Message}");
+            if (filter == IssueFilter.All) Assert.Equal(counts.Value.Open + counts.Value.Resolved, page.Value.Total);
+            if (page.Value.Items.FirstOrDefault() is { } first)
+            {
+                var one = await server.GetIssueAsync(first.Id, Ct);
+                Assert.True(one.Ok, one.Failure?.Message);
+                Assert.NotEmpty(one.Value.Comments);
+            }
+        }
+    }
 }
