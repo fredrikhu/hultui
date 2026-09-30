@@ -146,6 +146,33 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void TheConnectButtonOnSettingsTakesAClick()
+    {
+        // It sits at the right-hand end of its card, and the settings page has a max
+        // width: the layout engine used to clamp the page and lay the card out at the
+        // window's width, which put the button outside the page's bounds — drawn, lit,
+        // and out of the pointer's reach. Shipped that way in 1.1.0.
+        Host(Library(), null, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Settings));
+            Pump(session);
+
+            Click(session, "settings-requests-connect");
+
+            // No address typed, so the click's whole effect is the form saying so.
+            Assert.Equal(ApertureFailureKind.Invalid, app.RequestConnectFailure?.Kind);
+            PumpUntilShown(session, "Enter Jellyseerr's address");
+
+            var button = session.Window.FindByAutomationId("settings-requests-connect")!.Element;
+            var card = session.Window.FindByAutomationId("settings-requests-connect")!.Element.Parent!.Parent!;
+            Assert.True(button.Layout.AbsoluteBorderBox.Right <= card.Layout.AbsoluteBorderBox.Right,
+                "the button is drawn outside its card");
+            Assert.True(card.Layout.Width <= 720, $"the card is {card.Layout.Width} wide on a 720 page");
+        });
+    }
+
+    [Fact]
     public void ASessionTheServerEndedLeavesDiscoverRatherThanStrandingItThere()
     {
         var requests = Requests();

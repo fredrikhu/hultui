@@ -140,9 +140,13 @@ Traps found on the way, each now in a comment or a test:
    username and password.
 5. **The poster cache sent the Jellyfin token to every host.** Now scoped to the Jellyfin
    origin (`PosterCache.Authorize`), with a test.
-6. **Framework: `MaxWidth` on a stretched column child clamps the box but not its
-   children's layout** — a button in such a card is drawn outside it and cannot be hit. The
-   picker and the lists use a set `Width` + `AlignSelf(FlexStart)` until that is fixed.
+6. **Framework: `MaxWidth` on a stretched box clamped the box but not its children's
+   layout** — a button at the far end of such a card was drawn outside it and could not be
+   hit. Worked around in the picker at first; then it turned out the Settings page had it
+   too, and **1.1.0 shipped with a Connect button that took no click**. Fixed in the layout
+   engine (`ResolveAxis`: min and max bind before the content is laid out), which also
+   fixed max-width text being measured unwrapped. Lesson: the headless tests clicked
+   everything but the one button on the far side of a capped page.
 
 **Verified against the lab server** (`http://jellyseer.home:5055` — one "r" — Seerr **3.3.0**
 titled "Jellyseerr", key in `~/.secrets/seerr.key`), read-only: the six live tests pass,

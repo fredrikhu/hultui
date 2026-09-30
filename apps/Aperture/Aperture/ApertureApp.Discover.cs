@@ -510,10 +510,7 @@ public sealed partial class ApertureApp
             .CornerRadius(Halide.Radius2)
             .Background(Halide.Surface)
             .BorderColor(Halide.Border).BorderWidth(1f)
-            // A set width, not MaxWidth: a stretched column child clamped by MaxWidth still
-            // lays its children out at the unclamped width, which puts the confirm button
-            // outside the card where no click can reach it.
-            .Width(Dimension.Px(560)).AlignSelf(AlignSelf.FlexStart)
+            .MaxWidth(Dimension.Px(560))
             .AutomationId("season-picker");
 
         var heading = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
@@ -603,8 +600,7 @@ public sealed partial class ApertureApp
     /// when the picker is closed.</summary>
     private static Element SeasonList(DiscoverDetail detail)
     {
-        // Set width, not MaxWidth on the rows — see the note in SeasonPicker.
-        var column = Flex.Column(gap: Halide.S2).Width(Dimension.Px(560)).AlignSelf(AlignSelf.FlexStart)
+        var column = Flex.Column(gap: Halide.S2).MaxWidth(Dimension.Px(560))
             .AutomationId("discover-seasons");
         column.AddChild(Ui.SectionHeading("Seasons"));
         foreach (var season in detail.Seasons)
@@ -623,7 +619,7 @@ public sealed partial class ApertureApp
     /// them — the answer to "has someone already asked for this?"</summary>
     private Element TitleRequests(DiscoverDetail detail)
     {
-        var column = Flex.Column(gap: Halide.S2).Width(Dimension.Px(720)).AlignSelf(AlignSelf.FlexStart)
+        var column = Flex.Column(gap: Halide.S2).MaxWidth(Dimension.Px(720))
             .AutomationId("discover-requests");
         column.AddChild(Ui.SectionHeading("Requests"));
         foreach (var request in detail.Requests)

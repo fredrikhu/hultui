@@ -302,6 +302,11 @@ var responsive = Box.New()
 
 The constraint defaults are `Dimension.None` (unconstrained).
 
+A min or max binds the box **and what is laid out inside it**: a column with `MaxWidth(720)`
+in a 1400-wide parent is 720 wide, and its children are laid out across 720; text with a
+`MaxWidth` wraps at it and is as tall as its wrapped lines. The same holds for a size the
+parent forces — a stretched flex item, a scroll view's content — and on both axes.
+
 ---
 
 ## 9. Gap
