@@ -24,7 +24,7 @@ public sealed partial class ApertureApp
 {
     private Element BuildDiscoverView()
     {
-        EnsureShelves();
+        EnsureDiscoverRows();
         EnsureMyRecentRequests();
 
         var scroll = ScrollView.Vertical().FlexGrow(1).AutomationId("discover");
@@ -40,34 +40,39 @@ public sealed partial class ApertureApp
             "discover-requests", Icons.Requests));
         page.AddChild(header);
 
-        // The walk runs through every shelf in the order drawn, like home's.
-        var rows = new List<(string Key, string Title, IReadOnlyList<DiscoverItem> Items)>();
-        var mine = MyRecentRequests
+        // The administrator's rows, in their order, minus any with nothing in them — an
+        // empty heading is worse than a missing one. Requests are a row of their own
+        // loader, and become titles here.
+        var recent = MyRecentRequests
             .Where(r => r.Title is not null)
             .Select(RequestAsItem)
             .DistinctBy(i => i.Key)
             .ToList();
-        if (mine.Count > 0) rows.Add(("mine", "Your requests", mine));
-        foreach (var shelf in ShelfOrder)
-        {
-            var items = Shelf(shelf);
-            if (items.Count > 0) rows.Add((shelf.ToString(), ShelfTitle(shelf), items));
-        }
+        var rows = DiscoverRows
+            .Select(r => r.Kind == SliderKind.RecentRequests ? r with { Items = recent } : r)
+            .Where(r => r.Items.Count > 0 || r.Genres.Count > 0)
+            .ToList();
 
         if (rows.Count == 0)
         {
             // Nothing to walk — and not the last view's cards either.
             SetCursorList("discover:empty", [], 1);
-            page.AddChild(EmptyState(ShelvesLoading ? Icons.Loading : Icons.Discover,
-                ShelvesLoading ? $"Asking {RequestServerTitle}…" : "Nothing to discover",
-                ShelvesLoading ? null : $"{RequestServerTitle} sent back empty shelves. Is it connected to TMDB?",
+            page.AddChild(EmptyState(DiscoverRowsLoading ? Icons.Loading : Icons.Discover,
+                DiscoverRowsLoading ? $"Asking {RequestServerTitle}…" : "Nothing to discover",
+                DiscoverRowsLoading ? null : $"{RequestServerTitle} sent back empty shelves. Is it connected to TMDB?",
                 "discover-empty"));
             scroll.AddChild(page);
             return scroll;
         }
 
+        // The walk runs through every row in the order drawn, like home's — genre cards
+        // included, which open their genre.
         var walk = new List<object>();
-        foreach (var row in rows) walk.AddRange(row.Items);
+        foreach (var row in rows)
+        {
+            walk.AddRange(row.Items);
+            walk.AddRange(row.Genres);
+        }
         SetCursorList($"discover:{string.Join(',', rows.Select(r => r.Key))}:{walk.Count}", walk,
             VisibleCards(Halide.PosterWidth));
 
@@ -75,6 +80,14 @@ public sealed partial class ApertureApp
         foreach (var row in rows)
         {
             int start = cursorBase;
+            if (row.Genres.Count > 0)
+            {
+                var genres = row.Genres;
+                page.AddChild(CardRow(row.Title, genres.Count,
+                    i => GenreCard(genres[i], cursorIndex: start + i), GenreCardWidth, "discover-row-" + row.Key));
+                cursorBase += genres.Count;
+                continue;
+            }
             var items = row.Items;
             page.AddChild(CardRow(row.Title, items.Count,
                 i => DiscoverCard(items[i], Halide.PosterWidth, cursorIndex: start + i),
@@ -84,6 +97,186 @@ public sealed partial class ApertureApp
 
         scroll.AddChild(page);
         return scroll;
+    }
+
+    private const float GenreCardWidth = 240f;
+
+    /// <summary>
+    /// A genre to browse: one of its backdrops, darkened, with the name over it — the
+    /// server's own web page draws them the same way, and a row of backdrops reads as
+    /// "places to go" rather than as more titles.
+    /// </summary>
+    private Element GenreCard(DiscoverGenre genre, int cursorIndex = -1)
+    {
+        float height = MathF.Round(GenreCardWidth * 9 / 16);
+        var card = Box.New().Width(GenreCardWidth).Height(height).FlexShrink(0)
+            .CornerRadius(Halide.Radius2).Background(Halide.Raised)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center)
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(AccessibilityRole.Button)
+            .AccessibleName($"{genre.Name} {(genre.Kind == DiscoverKind.Movie ? "films" : "series")}")
+            .AutomationId($"genre-{(genre.Kind == DiscoverKind.Movie ? "movie" : "tv")}-{genre.Id}");
+        card.Box.OverflowX = Overflow.Hidden;
+        card.Box.OverflowY = Overflow.Hidden;
+        card.IsFocusable = true;
+        if (cursorIndex >= 0)
+        {
+            TrackCursor(card, cursorIndex);
+            if (IsCursor(cursorIndex)) card.Outline(2f, Halide.Accent, offset: 3f);
+        }
+
+        var (image, status) = _posters.Get(RequestImages.Backdrop(genre.BackdropPath, (int)(GenreCardWidth * 2), RequestImageBase));
+        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        {
+            var picture = Image.New(image);
+            picture.Fit = ImageFit.Cover;
+            picture.Position.Type = PositionType.Absolute;
+            picture.Position.Left = Dimension.Px(0);
+            picture.Position.Top = Dimension.Px(0);
+            card.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
+        }
+        var scrim = Box.New().Size(Dimension.Percent(100), Dimension.Percent(100)).Background(Halide.Alpha(Halide.Bg, 0.55));
+        scrim.IsHitTestVisible = false;
+        scrim.Position.Type = PositionType.Absolute;
+        scrim.Position.Left = Dimension.Px(0);
+        scrim.Position.Top = Dimension.Px(0);
+        card.AddChild(scrim);
+        card.AddChild(Text.New(genre.Name).FontSize(17f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text)
+            .MaxLines(2).TextOverflow(TextOverflow.Ellipsis));
+
+        card.OnClick(_ => OpenGenre(genre));
+        return card.HoverBg(Halide.Raised);
+    }
+
+    internal void OpenGenre(DiscoverGenre genre) =>
+        Navigate(new Route(ApertureView.DiscoverGenre,
+            $"{(genre.Kind == DiscoverKind.Movie ? "movie" : "tv")}:{genre.Id}",
+            $"{genre.Name} {(genre.Kind == DiscoverKind.Movie ? "films" : "series")}"));
+
+    /// <summary>A genre: its titles as a wrap of posters, most popular first, a page at a
+    /// time with "Show more" — TMDB has thousands of dramas, and nobody scrolls past a few
+    /// hundred.</summary>
+    private Element BuildDiscoverGenreView(Route route)
+    {
+        if (!DiscoverItem.TryParseKey(route.Id, out var kind, out var genreId))
+            return EmptyState(Icons.Warning, "That isn't a genre", null, "genre-bad");
+        EnsureGenrePage(kind, genreId);
+        return TitleWall(route.Title ?? "Genre", GenreItems, GenreLoading, GenreHasMore,
+            () => { EnsureGenrePage(kind, genreId, more: true); Rerender(); }, "genre-view", Icons.Discover,
+            "Nothing in that genre", $"{RequestServerTitle} has nothing to show under it.");
+    }
+
+    /// <summary>
+    /// A person: their picture, what they are known for, the biography TMDB keeps, and
+    /// everything they are credited with — the discovery twin of the library's person
+    /// page, reaching past what the library holds.
+    /// </summary>
+    private Element BuildDiscoverPersonView(Route route)
+    {
+        if (!int.TryParse(route.Id, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var tmdbId))
+            return EmptyState(Icons.Warning, "That isn't a person", null, "person-bad");
+        EnsurePerson(tmdbId);
+        var person = Person;
+        if (person is null || person.TmdbId != tmdbId)
+            return EmptyState(PersonLoading ? Icons.Loading : Icons.Warning,
+                PersonLoading ? "Loading…" : $"{RequestServerTitle} doesn't know that person", null, "person-loading");
+
+        var column = Flex.Column(gap: 0).FlexGrow(1).AutomationId("discover-person");
+        column.AddChild(ViewBar(person.Name, person.Credits.Count, "discover-person"));
+
+        var scroll = ScrollView.Vertical().FlexGrow(1);
+        var page = Flex.Column(gap: Halide.S5).Padding(new Thickness(Halide.S5));
+
+        var head = Flex.Row(gap: Halide.S5).AlignItems(AlignItems.FlexStart);
+        var photo = Box.New().Width(150).Height(210).FlexShrink(0).CornerRadius(Halide.Radius3).Background(Halide.Raised)
+            .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
+        photo.Box.OverflowX = Overflow.Hidden;
+        photo.Box.OverflowY = Overflow.Hidden;
+        var (image, status) = _posters.Get(RequestImages.Profile(person.ProfilePath, 300, RequestImageBase));
+        if (status == PosterCache.Status.Ready && image is { IsLoaded: true })
+        {
+            var picture = Image.New(image);
+            picture.Fit = ImageFit.Cover;
+            photo.AddChild(picture.Size(Dimension.Percent(100), Dimension.Percent(100)));
+        }
+        else photo.AddChild(Ui.Icon(Icons.User, 36f, Halide.TextFaint));
+        head.AddChild(photo);
+
+        var facts = Flex.Column(gap: Halide.S2).FlexGrow(1).FlexShrink(1);
+        var line = new List<string>();
+        if (person.KnownFor is { } known) line.Add(known);
+        if (person.Birthday is { } born)
+            line.Add(person.Deathday is { } died ? $"{born.Year}–{died.Year}" : $"born {born:d MMMM yyyy}");
+        if (person.PlaceOfBirth is { } place) line.Add(place);
+        if (line.Count > 0) facts.AddChild(Ui.Line(string.Join(" · ", line), 12.5f, Halide.TextMuted));
+        if (person.Biography is { } bio)
+            facts.AddChild(Text.New(bio).FontSize(13f).TextColor(Halide.TextDim).MaxWidth(Dimension.Px(820))
+                .MaxLines(9).TextOverflow(TextOverflow.Ellipsis));
+        head.AddChild(facts);
+        page.AddChild(head);
+
+        var credits = person.Credits;
+        if (credits.Count > 0)
+        {
+            SetCursorList("person:" + tmdbId, credits, VisibleCards(150f));
+            page.AddChild(Ui.SectionHeading("Films and series"));
+            var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart);
+            wrap.Flex.Wrap = FlexWrap.Wrap;
+            wrap.Gap(Halide.PosterGap);
+            for (int i = 0; i < credits.Count; i++) wrap.AddChild(DiscoverCard(credits[i], 150f, cursorIndex: i));
+            page.AddChild(wrap);
+        }
+        else SetCursorList("person:" + tmdbId + ":none", [], 1);
+
+        scroll.AddChild(page);
+        column.AddChild(scroll);
+        return column;
+    }
+
+    /// <summary>A page's top bar — back, the title, a count — as the library's shelves have.</summary>
+    private Element ViewBar(string title, int count, string automationId)
+    {
+        var bar = Flex.Row(gap: Halide.S3).FlexShrink(0)
+            .Height(56).AlignItems(AlignItems.Center)
+            .Padding(new Thickness(0, Halide.S5, 0, Halide.S5))
+            .BorderColor(Halide.Border).BorderWidth(new Thickness(0, 0, 1, 0));
+        bar.AddChild(Ui.IconButton(Icons.Back, "Back (Esc)", () => GoBack(), 15f, Halide.TextMuted, automationId + "-back"));
+        bar.AddChild(Text.New(title).FontSize(18f).FontWeight(FontWeight.SemiBold).TextColor(Halide.Text));
+        if (count > 0) bar.AddChild(Ui.Mono(count.ToString(), 11.5f, Halide.TextFaint));
+        return bar;
+    }
+
+    /// <summary>A titled wall of discovery posters with a "Show more" at its foot — a genre.</summary>
+    private Element TitleWall(string title, IReadOnlyList<DiscoverItem> items, bool loading, bool hasMore,
+        Action showMore, string automationId, string glyph, string emptyHeadline, string emptyHint)
+    {
+        var column = Flex.Column(gap: 0).FlexGrow(1).AutomationId(automationId);
+        column.AddChild(ViewBar(title, items.Count, automationId));
+
+        if (items.Count == 0)
+        {
+            SetCursorList(automationId + ":empty", [], 1);
+            column.AddChild(EmptyState(loading ? Icons.Loading : glyph,
+                loading ? $"Asking {RequestServerTitle}…" : emptyHeadline, loading ? null : emptyHint,
+                automationId + "-empty"));
+            return column;
+        }
+
+        var scroll = ScrollView.Vertical().FlexGrow(1);
+        var page = Flex.Column(gap: Halide.S4).Padding(new Thickness(Halide.S5));
+        var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart);
+        wrap.Flex.Wrap = FlexWrap.Wrap;
+        wrap.Gap(Halide.PosterGap);
+        SetCursorList($"{automationId}:{title}", items, VisibleCards(150f));
+        for (int i = 0; i < items.Count; i++) wrap.AddChild(DiscoverCard(items[i], 150f, cursorIndex: i));
+        page.AddChild(wrap);
+        if (hasMore)
+            page.AddChild(Ui.Button(ButtonVariant.Secondary, loading ? "Loading…" : "Show more",
+                loading ? null : showMore, automationId + "-more"));
+        scroll.AddChild(page);
+        column.AddChild(scroll);
+        return column;
     }
 
     /// <summary>A request as a card on the "Your requests" shelf: the title's own state,
@@ -278,12 +471,18 @@ public sealed partial class ApertureApp
                 null, "discover-title-loading");
 
         var item = detail.Item;
+        // Something on its way re-reads itself while the page is up, so the bar moves.
+        KeepProgressFresh(detail.Downloads.Count + detail.Downloads4k.Count > 0);
+        if (_requestServer?.User.CanRequest(item.Kind) == true) EnsureQuota();
+
         var scroll = ScrollView.Vertical().FlexGrow(1).AutomationId("discover-title");
         var page = Flex.Column(gap: 0);
         page.AddChild(DiscoverHero(detail));
 
         var body = Flex.Column(gap: Halide.S5).Padding(new Thickness(Halide.S5));
 
+        if (_optionsFor == item.Key && item.Kind == DiscoverKind.Movie)
+            body.AddChild(RequestOptionsCard(detail));
         if (_seasonPickerFor == item.Key && item.Kind == DiscoverKind.Tv)
             body.AddChild(SeasonPicker(detail));
 
@@ -408,6 +607,11 @@ public sealed partial class ApertureApp
             block.AddChild(line);
         }
 
+        // How far along it is, when Radarr or Sonarr is fetching it now.
+        foreach (var (downloads, label) in new[] { (detail.Downloads, ""), (detail.Downloads4k, "4K · ") })
+            if (DownloadSummary.Of(downloads) is { } summary)
+                block.AddChild(DownloadBar(summary, label, 320f, "discover-download" + (label.Length > 0 ? "-4k" : "")));
+
         block.AddChild(DiscoverActions(detail));
         content.AddChild(block);
         hero.AddChild(content);
@@ -431,6 +635,18 @@ public sealed partial class ApertureApp
         var item = detail.Item;
         var row = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
         var user = _requestServer?.User;
+        // A spent allowance is said before the button is pressed, not by the server after.
+        var quota = QuotaFor(item.Kind);
+        bool spent = quota?.Restricted == true;
+        bool offered = false;
+
+        ButtonElement RequestButton(ButtonVariant variant, string label, Action onClick, string automationId)
+        {
+            offered = true;
+            var b = Ui.Button(variant, label, spent ? null : onClick, automationId, Icons.Request);
+            b.IsEnabled = !spent;
+            return b;
+        }
 
         if (item.InLibrary && _library is not null)
             row.AddChild(Ui.Button(ButtonVariant.Primary, "Open in your library",
@@ -442,26 +658,81 @@ public sealed partial class ApertureApp
             if (item.Kind == DiscoverKind.Movie)
             {
                 if (item.Availability is Availability.Unknown or Availability.Deleted)
-                    row.AddChild(Ui.Button(ButtonVariant.Primary, "Request",
+                    row.AddChild(RequestButton(ButtonVariant.Primary, "Request",
                         () => MakeRequest(new NewRequest(DiscoverKind.Movie, item.TmdbId, []), item.Title),
-                        "discover-request", Icons.Request));
+                        "discover-request"));
+                if (CanRequestAdvanced && !spent && item.Availability is Availability.Unknown or Availability.Deleted)
+                    row.AddChild(Ui.IconButton(Icons.Options, "Request with options…", () => OpenRequestOptions(item, false),
+                        15f, Halide.TextDim, "discover-request-options"));
             }
             else if (RequestableSeasons(detail).Count > 0)
             {
                 bool some = detail.Seasons.Any(s => s.Availability is not (Availability.Unknown or Availability.Deleted));
                 var label = some ? "Request more seasons" : "Request";
-                row.AddChild(Ui.Button(item.InLibrary ? ButtonVariant.Secondary : ButtonVariant.Primary, label,
-                    () => OpenSeasonPicker(detail), "discover-request", Icons.Request));
+                row.AddChild(RequestButton(item.InLibrary ? ButtonVariant.Secondary : ButtonVariant.Primary, label,
+                    () => OpenSeasonPicker(detail), "discover-request"));
             }
 
             if (Can4k(item) && item.Availability4k is Availability.Unknown or Availability.Deleted
                 && item.Kind == DiscoverKind.Movie)
-                row.AddChild(Ui.Button(ButtonVariant.Secondary, "Request in 4K",
+                row.AddChild(RequestButton(ButtonVariant.Secondary, "Request in 4K",
                     () => MakeRequest(new NewRequest(DiscoverKind.Movie, item.TmdbId, [], Is4k: true), item.Title + " (4K)"),
-                    "discover-request-4k", Icons.Request));
+                    "discover-request-4k"));
         }
 
-        // A waiting request is decided right here, by someone who may.
+        // The watchlist: for something to watch later that nobody has fetched yet — once
+        // it is in the library there is nothing left to be reminded of.
+        if (_requestServer is not null && !(item.InLibrary && item.Availability == Availability.Available))
+            row.AddChild(ToggleButton(detail.OnWatchlist ? Icons.WatchlistOn : Icons.Watchlist,
+                detail.OnWatchlist ? "On your watchlist" : "Add to your watchlist", detail.OnWatchlist,
+                () => SetWatchlist(item, !detail.OnWatchlist), "discover-watchlist"));
+
+        // The allowance, under the verbs — only where there is something to request with it.
+        if (offered && quota is not null)
+        {
+            var column = Flex.Column(gap: Halide.S2);
+            column.AddChild(row);
+            column.AddChild(Text.New(QuotaPhrase(quota, item.Kind))
+                .FontSize(11.5f).TextColor(spent ? Halide.StatusWarn : Halide.TextMuted)
+                .AutomationId("discover-quota"));
+            AddDecisions(row, detail, user);
+            return column;
+        }
+
+        AddDecisions(row, detail, user);
+        return row;
+    }
+
+    /// <summary>"3 of 5 film requests left this week", or — spent — "No film requests left
+    /// this week (the limit is 5)". Series are counted in seasons, as the server counts them.</summary>
+    internal static string QuotaPhrase(RequestQuota quota, DiscoverKind kind)
+    {
+        var what = kind == DiscoverKind.Movie ? "film" : "season";
+        if (quota.Restricted || quota.Remaining is 0)
+            return $"No {what} requests left {quota.Period} (the limit is {quota.Limit})";
+        var left = quota.Remaining ?? Math.Max(0, (quota.Limit ?? 0) - quota.Used);
+        return $"{left} of {quota.Limit} {what} request{(quota.Limit == 1 ? "" : "s")} left {quota.Period}";
+    }
+
+    /// <summary>
+    /// A download's progress: the bar, then "42% · about 12 min left". Deliberately a thin
+    /// accent track rather than a filled block — it is the same mark as a half-watched film's
+    /// sliver, and means the same thing: part of the way there.
+    /// </summary>
+    private static Element DownloadBar(DownloadSummary summary, string label, float width, string automationId)
+    {
+        var line = Flex.Column(gap: 5).FlexShrink(0).AutomationId(automationId)
+            .AccessibleRole(HultUI.Core.Accessibility.AccessibilityRole.ProgressBar)
+            .AccessibleName($"Downloading, {label}{summary.Phrase}");
+        line.AddChild(Ui.ProgressSliver(summary.Fraction * 100, width));
+        line.AddChild(Ui.Line($"Downloading · {label}{summary.Phrase}", 11.5f, Halide.TextMuted));
+        return line;
+    }
+
+    /// <summary>A waiting request is decided right here, by someone who may.</summary>
+    private void AddDecisions(BoxElement row, DiscoverDetail detail, RequestUser? user)
+    {
+        var item = detail.Item;
         if (user?.CanManageRequests == true
             && detail.Requests.FirstOrDefault(r => r.Status == RequestStatus.Pending) is { } waiting)
         {
@@ -471,7 +742,6 @@ public sealed partial class ApertureApp
             row.AddChild(Ui.Button(ButtonVariant.Secondary, "Decline", () => DecideRequest(named, false),
                 "discover-decline", Icons.Decline));
         }
-        return row;
     }
 
     private bool Can4k(DiscoverItem item) =>
@@ -486,10 +756,13 @@ public sealed partial class ApertureApp
     private void OpenSeasonPicker(DiscoverDetail detail)
     {
         _seasonPickerFor = detail.Item.Key;
+        ResetOptionChoices();
         _seasonPick.Clear();
         // Everything that can be asked for, ticked: "the rest of the series" is what
-        // nearly everyone wants, and unticking one is easier than ticking eight.
-        foreach (var season in RequestableSeasons(detail)) _seasonPick.Add(season.Number);
+        // nearly everyone wants, and unticking one is easier than ticking eight. A rationed
+        // user gets as many as the allowance covers, earliest first.
+        var allowance = QuotaFor(DiscoverKind.Tv) is { } quota ? (quota.Restricted ? 0 : quota.Remaining) : null;
+        foreach (var season in RequestableSeasons(detail).Take(allowance ?? int.MaxValue)) _seasonPick.Add(season.Number);
         Rerender();
     }
 
@@ -578,19 +851,33 @@ public sealed partial class ApertureApp
             ? requestable.Where(s => _seasonPick.Contains(s.Number)).Select(s => s.Number).ToList()
             : requestable.Select(s => s.Number).ToList();
 
+        // Seasons are what a series quota counts, so a rationed user is told how many they
+        // have before ticking more than that — the server would refuse the whole request.
+        // Where it goes, for someone who may say.
+        if (CanRequestAdvanced) card.AddChild(OptionChips(DiscoverKind.Tv, false));
+
+        var quota = QuotaFor(DiscoverKind.Tv);
+        int? allowed = quota is null ? null : quota.Restricted ? 0 : quota.Remaining;
+        bool over = allowed is { } cap && chosen.Count > cap;
+
         var actions = Flex.Row(gap: Halide.S2).AlignItems(AlignItems.Center);
+        if (quota is not null)
+            actions.AddChild(Ui.Line(over ? $"Only {allowed} left {quota.Period} — untick some" : QuotaPhrase(quota, DiscoverKind.Tv),
+                11.5f, over || quota.Restricted ? Halide.StatusWarn : Halide.TextMuted).AutomationId("season-picker-quota"));
         actions.AddChild(Box.New().FlexGrow(1));
         actions.AddChild(Ui.Button(ButtonVariant.Secondary, "Cancel", () =>
         {
             _seasonPickerFor = null;
             Rerender();
         }, "season-picker-cancel"));
+        bool ready = chosen.Count > 0 && !over;
         var confirm = Ui.Button(ButtonVariant.Primary,
             chosen.Count == 0 ? "Pick a season" : $"Request {chosen.Count} season{(chosen.Count == 1 ? "" : "s")}",
-            chosen.Count == 0 ? null : () => MakeRequest(
-                new NewRequest(DiscoverKind.Tv, item.TmdbId, chosen, TvdbId: detail.TvdbId), item.Title),
+            !ready ? null : () => MakeRequest(
+                new NewRequest(DiscoverKind.Tv, item.TmdbId, chosen, TvdbId: detail.TvdbId,
+                    Options: CanRequestAdvanced ? CurrentOptions(DiscoverKind.Tv, false) : null), item.Title),
             "season-picker-confirm", Icons.Request);
-        confirm.IsEnabled = chosen.Count > 0;
+        confirm.IsEnabled = ready;
         actions.AddChild(confirm);
         card.AddChild(actions);
         return card;
@@ -643,7 +930,13 @@ public sealed partial class ApertureApp
     {
         const float width = 110f;
         var card = Flex.Column(gap: Halide.S2).Width(width).FlexShrink(0)
-            .AccessibleName(person.Role is { Length: > 0 } r ? $"{person.Name} as {r}" : person.Name);
+            .Cursor(CursorType.Pointer)
+            .AccessibleRole(AccessibilityRole.Button)
+            .AccessibleName(person.Role is { Length: > 0 } r ? $"{person.Name} as {r}" : person.Name)
+            .AutomationId($"cast-{person.TmdbId}");
+        // A name opens everything they are in — the library's cast row does the same.
+        card.OnClick(_ => Navigate(new Route(ApertureView.DiscoverPerson,
+            person.TmdbId.ToString(System.Globalization.CultureInfo.InvariantCulture), person.Name)));
         var art = Box.New().Width(width).Height(width * 1.4f).FlexShrink(0)
             .CornerRadius(Halide.Radius2).Background(Halide.Raised)
             .AlignItems(AlignItems.Center).JustifyContent(JustifyContent.Center);
@@ -688,6 +981,9 @@ public sealed partial class ApertureApp
             _ when request.Availability == Availability.Available => ("Available", Halide.StatusOk),
             _ when request.Availability == Availability.PartiallyAvailable => ("Partly available", Halide.StatusWarn),
             RequestStatus.Completed => ("Completed", Halide.StatusOk),
+            // Downloading now: say how far, which is the question "on its way" leaves open.
+            _ when DownloadSummary.Of(request.Downloads) is { } downloading =>
+                ($"On its way · {Math.Round(downloading.Fraction * 100):0}%", Halide.Accent300),
             _ => ("On its way", Halide.Accent300),
         };
         return Ui.Chip(text, colour);

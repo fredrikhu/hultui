@@ -34,6 +34,7 @@ public sealed partial class ApertureApp
     {
         if (PlayingChapters.Count == 0) return;
         _chaptersOpen = !_chaptersOpen;
+        if (_chaptersOpen) _reportOpen = false;
         Rerender();
     }
 

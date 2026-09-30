@@ -206,6 +206,296 @@ public class RequestServerTests
             Assert.Contains(SeerrServer.FilterName(filter), accepted);
     }
 
+    // ── Slice 7b: downloads, the allowance, the hide switches, the join ──
+
+    [Fact]
+    public void DownloadsAreReadOffATitleAndOffTheRequestsThatCarryIt()
+    {
+        // The shape of the server's DownloadingItem (server/lib/downloadtracker.ts): sizes in
+        // bytes, and the downloader's time left as a .NET TimeSpan string.
+        const string json = """
+        {
+          "id": 1399, "name": "Game of Thrones",
+          "mediaInfo": { "id": 40, "tmdbId": 1399, "status": 3,
+            "downloadStatus": [
+              { "title": "GoT.S02E03.mkv", "size": 1000, "sizeLeft": 250, "status": "downloading",
+                "timeLeft": "00:12:30", "estimatedCompletionTime": "2026-09-30T18:00:00.000Z",
+                "episode": { "seasonNumber": 2, "episodeNumber": 3 } },
+              { "title": "GoT.S02E04.mkv", "size": 1000, "sizeLeft": 750, "status": "downloading",
+                "timeLeft": "1.02:03:04" }
+            ],
+            "downloadStatus4k": [] }
+        }
+        """;
+        var detail = SeerrServer.MapTv(Parse(json, SeerrJson.Default.SeerrTvDetailsDto));
+
+        Assert.Equal(2, detail.Downloads.Count);
+        var first = detail.Downloads[0];
+        Assert.Equal(0.75, first.Fraction, 3);
+        Assert.Equal(new TimeSpan(0, 12, 30), first.TimeLeft);
+        Assert.Equal((2, 3), (first.Season, first.Episode));
+        Assert.Equal(new TimeSpan(1, 2, 3, 4), detail.Downloads[1].TimeLeft);
+        Assert.Empty(detail.Downloads4k);
+
+        // Two files, half of it here, and the longest wait is the one that counts.
+        var summary = DownloadSummary.Of(detail.Downloads)!.Value;
+        Assert.Equal(0.5, summary.Fraction, 3);
+        Assert.Equal("50% of 2 files · about 26 h 3 min left", summary.Phrase);
+
+        // A request reads the downloads of what it asked for — the 4K ones for a 4K request.
+        var request = SeerrServer.MapRequest(Parse("""
+            { "id": 9, "status": 2, "type": "movie", "is4k": true,
+              "media": { "tmdbId": 603, "status": 3, "status4k": 3,
+                "downloadStatus": [ { "title": "hd", "size": 10, "sizeLeft": 5 } ],
+                "downloadStatus4k": [ { "title": "uhd", "size": 100, "sizeLeft": 10 } ] } }
+            """, SeerrJson.Default.SeerrRequestDto));
+        Assert.Equal("uhd", Assert.Single(request.Downloads).Title);
+    }
+
+    [Fact]
+    public void NothingDownloadingIsNoSummaryAtAll()
+    {
+        Assert.Null(DownloadSummary.Of([]));
+        Assert.Equal("0%", DownloadSummary.Of([new DownloadProgress("x", 0, 0, "queued", null, null)])!.Value.Phrase);
+    }
+
+    [Fact]
+    public void TheHideSwitchesApplyAsTheServersOwnWebClientAppliesThem()
+    {
+        DiscoverItem Title(Availability a) => new() { TmdbId = 1, Kind = DiscoverKind.Movie, Title = "t", Availability = a };
+
+        var plain = new Aperture.Core.Testing.FakeRequestServer();
+        Assert.True(ApertureApp.Visible(plain, Title(Availability.Available)));
+
+        var hiding = new Aperture.Core.Testing.FakeRequestServer(
+            new RequestServerInfo("http://s", "Seerr", "3.5.0", HideAvailable: true, HideBlocklisted: true),
+            new RequestUser(1, "u", RequestPermission.Request));
+        Assert.False(ApertureApp.Visible(hiding, Title(Availability.Available)));
+        Assert.False(ApertureApp.Visible(hiding, Title(Availability.PartiallyAvailable)));
+        Assert.True(ApertureApp.Visible(hiding, Title(Availability.Processing)));
+        // Blocklisted is hidden only from someone who manages the blocklist — the web client
+        // applies the switch for them alone.
+        Assert.True(ApertureApp.Visible(hiding, Title(Availability.Blocklisted)));
+        hiding.User = new RequestUser(1, "u", RequestPermission.ManageBlocklist);
+        Assert.False(ApertureApp.Visible(hiding, Title(Availability.Blocklisted)));
+    }
+
+    [Fact]
+    public void TheAllowanceReadsInPlainWords()
+    {
+        Assert.Equal("3 of 5 film requests left this week",
+            ApertureApp.QuotaPhrase(new RequestQuota(5, 7, 2, 3, false), DiscoverKind.Movie));
+        Assert.Equal("1 of 1 season request left today",
+            ApertureApp.QuotaPhrase(new RequestQuota(1, 1, 0, 1, false), DiscoverKind.Tv));
+        Assert.Equal("No season requests left in any 14 days (the limit is 10)",
+            ApertureApp.QuotaPhrase(new RequestQuota(10, 14, 10, 0, true), DiscoverKind.Tv));
+        // limit 0 is the server's "unlimited".
+        Assert.False(new RequestQuota(null, 0, 3, null, false).IsLimited);
+    }
+
+    [Fact]
+    public void TheTmdbIdIsReadOffJellyfinsProviderIdsInEitherShape()
+    {
+        // The provider ids are a free-form bag, like the image tags: a plain string today,
+        // and a Kiota untyped node if the serializer ever starts handing them over as such —
+        // which would otherwise read as "this series has no TMDB id" and hide the feature.
+        foreach (object value in new object[] { "1399", new Microsoft.Kiota.Abstractions.Serialization.UntypedString("1399") })
+        {
+            var dto = new Jellyfin.Sdk.Generated.Models.BaseItemDto
+            {
+                Id = Guid.NewGuid(),
+                Name = "Game of Thrones",
+                Type = Jellyfin.Sdk.Generated.Models.BaseItemDto_Type.Series,
+                ProviderIds = new Jellyfin.Sdk.Generated.Models.BaseItemDto_ProviderIds
+                {
+                    AdditionalData = new Dictionary<string, object> { ["Tmdb"] = value, ["Tvdb"] = "121361" },
+                },
+            };
+            Assert.Equal(1399, JellyfinLibrary.Map(dto).TmdbId);
+        }
+
+        var none = new Jellyfin.Sdk.Generated.Models.BaseItemDto { Id = Guid.NewGuid(), Name = "Home video" };
+        Assert.Null(JellyfinLibrary.Map(none).TmdbId);
+    }
+
+    // ── Slice 7b, second half: CSRF, watchlist, issues, layout, people ────
+
+    [Fact]
+    public async Task AWriteRefusedForCsrfFetchesTheTokenAndIsSentAgainWithIt()
+    {
+        // With "CSRF protection" on, every response sets the secret and the token; a write
+        // must send the secret back as a cookie and the token as a header.
+        int posts = 0;
+        var router = new Router()
+            .On("GET", "/api/v1/status", _ =>
+                Json("""{ "version": "3.5.0" }""", cookies: ["_csrf=s3cret; Path=/; HttpOnly", "XSRF-TOKEN=t%2Bken; Path=/"]))
+            .On("POST", "/api/v1/request", req =>
+            {
+                posts++;
+                bool ok = req.Headers.TryGetValue("X-XSRF-TOKEN", out var token) && token == "t+ken"
+                          && req.Headers.TryGetValue("Cookie", out var cookie) && cookie.Contains("_csrf=s3cret");
+                return ok
+                    ? Json("""{ "id": 12, "status": 1, "type": "movie", "media": { "tmdbId": 603, "status": 2 } }""", HttpStatusCode.Created)
+                    : Json("""{ "message": "invalid csrf token" }""", HttpStatusCode.Forbidden);
+            });
+        using var server = await SessionServer(router);
+
+        var made = await server.RequestAsync(new NewRequest(DiscoverKind.Movie, 603, []));
+        Assert.True(made.Ok, made.Failure?.Message);
+        Assert.Equal(2, posts);
+        // The session cookie still rides along beside the CSRF secret.
+        Assert.Contains("connect.sid=s%3Ax", router.Last("/api/v1/request").Headers["Cookie"]);
+    }
+
+    [Fact]
+    public async Task APermissionRefusalIsNotRetriedAsIfItWereCsrf()
+    {
+        int posts = 0;
+        var router = new Router().On("POST", "/api/v1/request", _ =>
+        {
+            posts++;
+            return Json("""{ "message": "You do not have permission to make requests." }""", HttpStatusCode.Forbidden);
+        });
+        using var server = await SessionServer(router);
+        var made = await server.RequestAsync(new NewRequest(DiscoverKind.Movie, 603, []));
+        Assert.Equal(ApertureFailureKind.Forbidden, made.Failure!.Kind);
+        Assert.Equal(1, posts);
+    }
+
+    [Theory]
+    [InlineData("3.5.0", "?mediaType=tv")]
+    [InlineData("3.1.0", "")]           // before 3.2 the parameter is unknown, and so refused
+    public async Task TakingATitleOffTheWatchlistSendsItsKindOnlyWhereTheServerExpectsIt(string version, string query)
+    {
+        var router = new Router().On("DELETE", "/api/v1/watchlist/", _ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        using var server = await SessionServer(router, Server with { Version = version });
+        var item = new DiscoverItem { TmdbId = 1399, Kind = DiscoverKind.Tv, Title = "Game of Thrones" };
+
+        Assert.True((await server.SetWatchlistAsync(item, on: false)).Ok);
+        Assert.Equal(query, router.Last("/api/v1/watchlist/1399").Query);
+    }
+
+    [Fact]
+    public async Task TheWatchlistFillsInWhatItsListLeavesOut()
+    {
+        var router = new Router()
+            .On("GET", "/api/v1/discover/watchlist", _ => Json("""
+                { "page": 1, "totalPages": 1, "totalResults": 1,
+                  "results": [ { "id": 5, "tmdbId": 603, "mediaType": "movie", "title": "The Matrix", "ratingKey": null } ] }
+                """))
+            .On("GET", "/api/v1/movie/603", _ => Json("""{ "id": 603, "title": "The Matrix", "posterPath": "/m.jpg", "releaseDate": "1999-03-30" }"""))
+            .On("POST", "/api/v1/watchlist", req =>
+            {
+                var body = JsonDocument.Parse(req.Body!).RootElement;
+                Assert.Equal(603, body.GetProperty("tmdbId").GetInt32());
+                Assert.Equal("movie", body.GetProperty("mediaType").GetString());
+                // Already on it: a 409, which is where the user wanted it anyway.
+                return Json("""{ "message": "Already exists" }""", HttpStatusCode.Conflict);
+            });
+        using var server = await SessionServer(router);
+
+        var page = await server.GetWatchlistAsync();
+        var item = Assert.Single(page.Value.Items);
+        Assert.Equal("/m.jpg", item.PosterPath);
+        Assert.Equal(1999, item.Year);
+        Assert.True((await server.SetWatchlistAsync(item, on: true)).Ok);
+    }
+
+    [Fact]
+    public async Task TheLayoutIsReadInOrderAndUnknownRowsAreLeftOut()
+    {
+        var router = new Router().On("GET", "/api/v1/settings/discover", _ => Json("""
+            [ { "id": 3, "type": 4, "order": 2, "isBuiltIn": true, "enabled": true, "title": null, "data": null },
+              { "id": 9, "type": 14, "order": 1, "isBuiltIn": false, "enabled": true, "title": "Dramas", "data": "18" },
+              { "id": 1, "type": 99, "order": 0, "isBuiltIn": false, "enabled": true, "title": "From the future", "data": "x" },
+              { "id": 4, "type": 5, "order": 3, "isBuiltIn": true, "enabled": false, "title": null, "data": null } ]
+            """));
+        using var server = await SessionServer(router);
+
+        var layout = (await server.GetDiscoverLayoutAsync()).Value;
+        Assert.Equal([SliderKind.MovieGenre, SliderKind.Trending, SliderKind.PopularMovies], layout.Select(s => s.Kind));
+        Assert.Equal("Dramas", layout[0].Title);
+        Assert.False(layout[2].Enabled);
+    }
+
+    [Theory]
+    [InlineData(SliderKind.MovieGenre, "18", "/api/v1/discover/movies", "genre=18")]
+    [InlineData(SliderKind.TvKeyword, "210024,9951", "/api/v1/discover/tv", "keywords=210024%2C9951")]
+    [InlineData(SliderKind.Search, "studio ghibli", "/api/v1/search", "query=studio%20ghibli")]
+    [InlineData(SliderKind.Network, "213", "/api/v1/discover/tv", "network=213")]
+    public async Task ACustomRowAsksForWhatItsDataSays(SliderKind kind, string data, string path, string query)
+    {
+        var router = new Router().On("GET", path, _ => Json("""{ "page": 1, "totalPages": 1, "totalResults": 0, "results": [] }"""));
+        using var server = await SessionServer(router);
+        var result = await server.GetSliderAsync(new DiscoverSlider(9, kind, "Row", data, true, 0));
+        Assert.True(result.Ok, result.Failure?.Message);
+        Assert.Contains(query, router.Last(path).Query);
+    }
+
+    [Fact]
+    public void APersonsCreditsAreEachTitleOnceNewestFirst()
+    {
+        var credits = Parse("""
+            { "cast": [
+                { "id": 1, "mediaType": "movie", "title": "Old Film", "releaseDate": "1990-01-01", "character": "A" },
+                { "id": 2, "mediaType": "tv", "name": "New Series", "firstAirDate": "2024-05-01", "character": "B" },
+                { "id": 3, "mediaType": "movie", "title": "Undated" } ],
+              "crew": [
+                { "id": 1, "mediaType": "movie", "title": "Old Film", "releaseDate": "1990-01-01", "job": "Director" },
+                { "id": 4, "mediaType": "movie", "title": "Middle Film", "releaseDate": "2005-06-01", "job": "Writer" } ] }
+            """, SeerrJson.Default.SeerrCombinedCreditsDto);
+
+        var items = SeerrServer.MapCredits(credits);
+        Assert.Equal(["New Series", "Middle Film", "Old Film", "Undated"], items.Select(i => i.Title));
+    }
+
+    [Fact]
+    public async Task AReportIsFiledAgainstTheServersRecordNotTmdbs()
+    {
+        var router = new Router().On("POST", "/api/v1/issue", req =>
+        {
+            var body = JsonDocument.Parse(req.Body!).RootElement;
+            Assert.Equal(40, body.GetProperty("mediaId").GetInt32());
+            Assert.Equal(2, body.GetProperty("issueType").GetInt32());
+            Assert.Equal(2, body.GetProperty("problemSeason").GetInt32());
+            Assert.Equal(3, body.GetProperty("problemEpisode").GetInt32());
+            return Json("""{ "id": 77, "issueType": 2, "status": 1 }""", HttpStatusCode.Created);
+        });
+        using var server = await SessionServer(router);
+        var filed = await server.ReportIssueAsync(new NewIssue(40, IssueType.Audio, "No sound", Season: 2, Episode: 3));
+        Assert.Equal(77, filed.Value);
+
+        // A detail's own record id is what goes in mediaId.
+        var detail = SeerrServer.MapTv(Parse(TvDetail, SeerrJson.Default.SeerrTvDetailsDto));
+        Assert.Equal(40, detail.MediaId);
+    }
+
+    [Fact]
+    public async Task AServersChoicesAreReadFromTheServiceRoutesNeverTheSettings()
+    {
+        var router = new Router()
+            .On("GET", "/api/v1/service/radarr", _ => Json("""
+                [ { "id": 0, "name": "Radarr", "is4k": false, "isDefault": true, "activeDirectory": "/movies", "activeProfileId": 4 },
+                  { "id": 1, "name": "Radarr 4K", "is4k": true, "isDefault": true, "activeDirectory": "/uhd", "activeProfileId": 5 } ]
+                """))
+            .On("GET", "/api/v1/service/radarr/0", _ => Json("""
+                { "server": { "id": 0, "name": "Radarr", "is4k": false, "isDefault": true, "activeDirectory": "/movies", "activeProfileId": 4 },
+                  "profiles": [ { "id": 4, "name": "HD-1080p" }, { "id": 6, "name": "Any" } ],
+                  "rootFolders": [ { "id": 1, "path": "/movies", "freeSpace": 1800000000000, "totalSpace": 4000000000000 } ],
+                  "tags": [] }
+                """));
+        using var server = await SessionServer(router);
+
+        var services = (await server.GetServicesAsync(DiscoverKind.Movie)).Value;
+        Assert.Equal(["Radarr", "Radarr 4K"], services.Select(s => s.Name));
+        var details = (await server.GetServiceDetailsAsync(DiscoverKind.Movie, 0)).Value;
+        Assert.Equal(["HD-1080p", "Any"], details.Profiles.Select(p => p.Name));
+        Assert.Equal(1_800_000_000_000, Assert.Single(details.RootFolders).FreeSpace);
+        Assert.DoesNotContain(router.Requests, r => r.Path.Contains("/settings/", StringComparison.Ordinal));
+        // In the reader's own number format, like every other figure in the app.
+        Assert.Equal(1.8.ToString("0.#") + " TB", ApertureApp.Bytes(1_800_000_000_000));
+    }
+
     // ── Addresses and artwork ────────────────────────────────────────────
 
     [Fact]
@@ -547,19 +837,21 @@ public class RequestServerTests
     private static T Parse<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type) =>
         JsonSerializer.Deserialize(json, type)!;
 
-    private static async Task<SeerrServer> SessionServer(Router router)
+    private static async Task<SeerrServer> SessionServer(Router router, RequestServerInfo? server = null)
     {
         router.On("POST", "/api/v1/auth/jellyfin",
             _ => Json("""{ "id": 3, "displayName": "fredrik", "permissions": 32 }""", cookie: "connect.sid=s%3Ax; Path=/"));
-        var signIn = await SeerrConnection.SignInAsync(Server, "jf-1", "fredrik", "pw", handler: router);
+        var signIn = await SeerrConnection.SignInAsync(server ?? Server, "jf-1", "fredrik", "pw", handler: router);
         Assert.True(signIn.Ok, signIn.Failure?.Message);
         return signIn.Value;
     }
 
-    private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK, string? cookie = null)
+    private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK, string? cookie = null,
+        string[]? cookies = null)
     {
         var response = new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         if (cookie is not null) response.Headers.TryAddWithoutValidation("Set-Cookie", cookie);
+        foreach (var c in cookies ?? []) response.Headers.TryAddWithoutValidation("Set-Cookie", c);
         return response;
     }
 

@@ -165,6 +165,7 @@ public sealed partial class ApertureApp
             RequestStatus.Declined => "declined",
             RequestStatus.Failed => "failed",
             _ when request.Availability == Availability.Available => "available",
+            _ when DownloadSummary.Of(request.Downloads) is { } downloading => "on its way, downloading " + downloading.Phrase,
             _ => "on its way",
         });
         return string.Join(", ", parts);

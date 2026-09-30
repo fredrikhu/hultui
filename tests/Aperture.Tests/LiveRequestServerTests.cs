@@ -145,4 +145,48 @@ public class LiveRequestServerTests
         var item = await library.GetItemAsync(withId.JellyfinItemId!, Ct);
         Assert.True(item.Ok, $"{withId.Title}: Jellyfin has no item {withId.JellyfinItemId} ({item.Failure?.Message})");
     }
+
+    [LiveRequestServerFact]
+    public async Task TheLayoutGenresAPersonAndTheWatchlistRead()
+    {
+        using var server = await LiveRequestServer.ConnectAsync(null, Ct);
+
+        var layout = await server.GetDiscoverLayoutAsync(Ct);
+        Assert.True(layout.Ok, layout.Failure?.Message);
+        Assert.NotEmpty(layout.Value);
+        // Every row Aperture draws fills without an error.
+        foreach (var slider in layout.Value.Where(s => s.Enabled && s.Kind is not (SliderKind.RecentlyAdded
+                     or SliderKind.RecentRequests or SliderKind.Watchlist or SliderKind.MovieGenres or SliderKind.TvGenres
+                     or SliderKind.Studios or SliderKind.Networks or SliderKind.MovieStreaming or SliderKind.TvStreaming)))
+        {
+            var row = await server.GetSliderAsync(slider, ct: Ct);
+            Assert.True(row.Ok, $"{slider.Kind}: {row.Failure?.Message}");
+        }
+
+        var genres = await server.GetGenresAsync(DiscoverKind.Movie, Ct);
+        Assert.True(genres.Ok, genres.Failure?.Message);
+        Assert.Contains(genres.Value, g => g.Name == "Drama");
+        var drama = await server.DiscoverGenreAsync(DiscoverKind.Movie, genres.Value.First(g => g.Name == "Drama").Id, ct: Ct);
+        Assert.NotEmpty(drama.Value.Items);
+
+        var keanu = await server.GetPersonAsync(6384, Ct);
+        Assert.True(keanu.Ok, keanu.Failure?.Message);
+        Assert.Contains(keanu.Value.Credits, c => c.TmdbId == 603);
+
+        var watchlist = await server.GetWatchlistAsync(ct: Ct);
+        Assert.True(watchlist.Ok, watchlist.Failure?.Message);
+    }
+
+    [LiveRequestServerFact]
+    public async Task TheDownloadServersAndTheirChoicesRead()
+    {
+        using var server = await LiveRequestServer.ConnectAsync(null, Ct);
+        var radarr = await server.GetServicesAsync(DiscoverKind.Movie, Ct);
+        Assert.True(radarr.Ok, radarr.Failure?.Message);
+        if (radarr.Value.Count == 0) return;   // no Radarr set up — nothing to read
+        var details = await server.GetServiceDetailsAsync(DiscoverKind.Movie, radarr.Value[0].Id, Ct);
+        Assert.True(details.Ok, details.Failure?.Message);
+        Assert.NotEmpty(details.Value.Profiles);
+        Assert.NotEmpty(details.Value.RootFolders);
+    }
 }

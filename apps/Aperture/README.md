@@ -108,6 +108,18 @@ A title the library has opens the *library's* page, with its Play button — the
 server's `jellyfinMediaId` is the join. A series with some seasons in opens the discovery
 page instead, which offers both the library and the seasons still to ask for.
 
+A series in the library that is missing seasons says so on its own page, with a Request button
+beside Play; something being downloaded shows how far it has got; and an allowance that is
+nearly spent is said before the button is pressed.
+
+Discover follows the request server administrator's own layout — its order, its switched-off
+rows, its custom rows — with genre rows that open genre pages, and a name in a title's cast
+opens everything that person is in. A bookmark keeps a title on the watchlist. Someone the
+server lets choose can send a request to a particular Radarr or Sonarr, quality and folder.
+Something wrong with what is playing (no sound, the wrong subtitles) is reported from the
+player's title strip. And when something you asked for arrives, the app says so — the server
+has no push channel, so it looks every few minutes, and says each arrival once.
+
 **It speaks the one API Jellyseerr 2.x and Seerr 3.x share** (Seerr is what Jellyseerr and
 Overseerr merged into in February 2026). There is no .NET client on NuGet, and the published
 OpenAPI spec leaves out exactly the fields Aperture reads (`jellyfinMediaId`, per-season

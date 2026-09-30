@@ -88,16 +88,34 @@ public sealed class FakeRequestServer : IRequestServer
         }, seasons, shelves);
 
     /// <summary>A request someone else made, waiting for approval.</summary>
-    public MediaRequest AddPendingRequest(string key, IReadOnlyList<int>? seasons = null)
+    public MediaRequest AddPendingRequest(string key, IReadOnlyList<int>? seasons = null) =>
+        AddRequest(key, RequestStatus.Pending, seasons);
+
+    /// <summary>A request someone else made, in whatever state — approved moves its title
+    /// on its way, as the server's bookkeeping does.</summary>
+    public MediaRequest AddRequest(string key, RequestStatus status, IReadOnlyList<int>? seasons = null)
     {
         var title = _titles[key];
-        var request = NewRecord(title, RequestStatus.Pending, seasons ?? [], is4k: false, byId: 2, by: OtherUser);
+        var request = NewRecord(title, status, seasons ?? [], is4k: false, byId: 2, by: OtherUser);
         _requests.Insert(0, request);
-        SetAvailability(key, Availability.Pending, seasons);
-        return request;
+        SetAvailability(key, status switch
+        {
+            RequestStatus.Pending => Availability.Pending,
+            RequestStatus.Approved => Availability.Processing,
+            RequestStatus.Completed => Availability.Available,
+            _ => title.Item.Availability,
+        }, seasons);
+        return request with { Availability = _titles[key].Item.Availability };
     }
 
     public DiscoverDetail? Title(string key) => _titles.GetValueOrDefault(key);
+
+    /// <summary>What Radarr/Sonarr are downloading for a title, as the server would relay it.</summary>
+    public void SetDownloads(string key, IReadOnlyList<DownloadProgress> downloads) =>
+        _titles[key] = _titles[key] with { Downloads = downloads };
+
+    /// <summary>The allowance <see cref="GetQuotaAsync"/> reports; null reports an unlimited one.</summary>
+    public RequestQuotas? Quotas { get; set; }
     public IReadOnlyList<MediaRequest> Requests => _requests;
 
     // ── IRequestServer ───────────────────────────────────────────────────
@@ -127,7 +145,13 @@ public sealed class FakeRequestServer : IRequestServer
         if (Fail<DiscoverDetail>() is { } failed) return failed;
         if (!_titles.TryGetValue(key, out var detail))
             return Task.FromResult(ApertureResult<DiscoverDetail>.Fail(ApertureFailureKind.NotFound, "no such title", 404));
-        return Done(detail with { Requests = _requests.Where(r => r.MediaKey == key).ToList() });
+        return Done(detail with
+        {
+            Requests = _requests.Where(r => r.MediaKey == key).Select(r => r with { Downloads = detail.Downloads }).ToList(),
+            // A made-up id for the server's own record, so an issue has something to be filed on.
+            MediaId = 100_000 + tmdbId + (kind == DiscoverKind.Tv ? 50_000 : 0),
+            OnWatchlist = _watchlist.Contains(key),
+        });
     }
 
     public Task<ApertureResult<DiscoverPage>> GetRecommendationsAsync(DiscoverKind kind, int tmdbId, int page = 1,
@@ -145,7 +169,12 @@ public sealed class FakeRequestServer : IRequestServer
     {
         Calls.Add($"GetRequests({filter},{(mine ? "mine" : "all")},{skip})");
         if (Fail<RequestPage>() is { } failed) return failed;
-        IEnumerable<MediaRequest> list = _requests;
+        // Where each title stands now — a request made last week reads its title's state today.
+        IEnumerable<MediaRequest> list = _requests.Select(r => r with
+        {
+            Availability = _titles[r.MediaKey].Item.Availability,
+            JellyfinItemId = _titles[r.MediaKey].Item.JellyfinItemId,
+        });
         if (mine || !User.CanManageRequests) list = list.Where(r => r.RequestedById == User.Id);
         list = filter switch
         {
@@ -160,7 +189,10 @@ public sealed class FakeRequestServer : IRequestServer
             _ => list,
         };
         var all = list.ToList();
-        return Done(new RequestPage(all.Skip(skip).Take(take).ToList(), all.Count, skip));
+        // Each request carries what is downloading for its title, as the server's does.
+        var page = all.Skip(skip).Take(take)
+            .Select(r => r with { Downloads = _titles.TryGetValue(r.MediaKey, out var t) ? t.Downloads : [] }).ToList();
+        return Done(new RequestPage(page, all.Count, skip));
     }
 
     public Task<ApertureResult<int>> GetPendingCountAsync(CancellationToken ct = default)
@@ -174,6 +206,7 @@ public sealed class FakeRequestServer : IRequestServer
     {
         Calls.Add("GetQuota");
         if (Fail<RequestQuotas>() is { } failed) return failed;
+        if (Quotas is { } set) return Done(set);
         int movies = _requests.Count(r => r.RequestedById == User.Id && r.Kind == DiscoverKind.Movie);
         int tv = _requests.Count(r => r.RequestedById == User.Id && r.Kind == DiscoverKind.Tv);
         return Done(new RequestQuotas(
@@ -184,6 +217,7 @@ public sealed class FakeRequestServer : IRequestServer
     public Task<ApertureResult<MediaRequest>> RequestAsync(NewRequest request, CancellationToken ct = default)
     {
         var key = new DiscoverItem { TmdbId = request.TmdbId, Kind = request.Kind, Title = "" }.Key;
+        SentOptions.Add(request.Options);
         Calls.Add($"Request({key}{(request.Seasons.Count > 0 ? " s" + string.Join(",", request.Seasons) : "")}"
                   + $"{(request.Is4k ? " 4k" : "")})");
         if (Fail<MediaRequest>() is { } failed) return failed;
@@ -192,6 +226,10 @@ public sealed class FakeRequestServer : IRequestServer
         if (!User.CanRequest(request.Kind))
             return Task.FromResult(ApertureResult<MediaRequest>.Fail(ApertureFailureKind.Forbidden,
                 "You do not have permission to request this", 403));
+
+        if (Quotas is { } quotas && (request.Kind == DiscoverKind.Movie ? quotas.Movie : quotas.Tv).Restricted)
+            return Task.FromResult(ApertureResult<MediaRequest>.Fail(ApertureFailureKind.Forbidden,
+                "Quota exceeded", 403));
 
         bool auto = User.AutoApproves(request.Kind);
         var record = NewRecord(title, auto ? RequestStatus.Approved : RequestStatus.Pending, request.Seasons,
@@ -228,6 +266,171 @@ public sealed class FakeRequestServer : IRequestServer
         if (!_requests.Any(r => r.MediaKey == gone.MediaKey))
             SetAvailability(gone.MediaKey, Availability.Unknown, gone.Seasons);
         return Done(true);
+    }
+
+    // ── Slice 7b ─────────────────────────────────────────────────────────
+
+    private readonly HashSet<string> _watchlist = new(StringComparer.Ordinal);
+    private readonly Dictionary<(DiscoverKind, int), List<string>> _genreTitles = [];
+    private readonly List<DiscoverGenre> _genres = [];
+    private readonly Dictionary<int, List<string>> _customRows = [];
+
+    /// <summary>The administrator's discover layout. Null serves the server's own default —
+    /// the twelve built-in rows, in the order a fresh install has them.</summary>
+    public List<DiscoverSlider>? Layout { get; set; }
+
+    /// <summary>Problem reports made, in order.</summary>
+    public List<NewIssue> Issues { get; } = [];
+
+    /// <summary>Requests' advanced choices, as sent — so a test can see what went.</summary>
+    public List<RequestOptions?> SentOptions { get; } = [];
+
+    public static readonly RequestService Radarr = new(0, "Radarr", false, true, 4, "/media/movies");
+    public static readonly RequestService Sonarr = new(0, "Sonarr", false, true, 6, "/media/shows");
+
+    public FakeRequestServer AddGenre(DiscoverKind kind, int id, string name, params string[] keys)
+    {
+        _genres.Add(new DiscoverGenre(id, name, kind, $"/genre-{id}.jpg"));
+        _genreTitles[(kind, id)] = [.. keys];
+        return this;
+    }
+
+    /// <summary>A custom row of the layout, filled with these titles.</summary>
+    public FakeRequestServer AddCustomRow(DiscoverSlider slider, params string[] keys)
+    {
+        (Layout ??= [.. DefaultLayout]).Add(slider);
+        _customRows[slider.Id] = [.. keys];
+        return this;
+    }
+
+    public void AddToWatchlist(string key) => _watchlist.Add(key);
+
+    /// <summary>A requested title lands in the library — what the server's own scan records
+    /// when Jellyfin picks the download up.</summary>
+    public void Arrive(string key, string jellyfinItemId)
+    {
+        var title = _titles[key];
+        _titles[key] = title with
+        {
+            Item = title.Item with { Availability = Availability.Available, JellyfinItemId = jellyfinItemId },
+            Downloads = [],
+        };
+    }
+
+    private static readonly DiscoverSlider[] DefaultLayout =
+    [
+        .. new[]
+        {
+            SliderKind.RecentlyAdded, SliderKind.RecentRequests, SliderKind.Watchlist, SliderKind.Trending,
+            SliderKind.PopularMovies, SliderKind.MovieGenres, SliderKind.UpcomingMovies, SliderKind.Studios,
+            SliderKind.PopularTv, SliderKind.TvGenres, SliderKind.UpcomingTv, SliderKind.Networks,
+        }.Select((kind, i) => new DiscoverSlider(i + 1, kind, null, null, true, i)),
+    ];
+
+    public Task<ApertureResult<IReadOnlyList<DiscoverSlider>>> GetDiscoverLayoutAsync(CancellationToken ct = default)
+    {
+        Calls.Add("GetDiscoverLayout");
+        if (Fail<IReadOnlyList<DiscoverSlider>>() is { } failed) return failed;
+        return Done((IReadOnlyList<DiscoverSlider>)(Layout ?? [.. DefaultLayout]).OrderBy(s => s.Order).ToList());
+    }
+
+    public Task<ApertureResult<DiscoverPage>> GetSliderAsync(DiscoverSlider slider, int page = 1, CancellationToken ct = default)
+    {
+        Calls.Add($"GetSlider({slider.Kind},{slider.Id})");
+        if (Fail<DiscoverPage>() is { } failed) return failed;
+        DiscoverShelf? shelf = slider.Kind switch
+        {
+            SliderKind.Trending => DiscoverShelf.Trending,
+            SliderKind.PopularMovies => DiscoverShelf.PopularMovies,
+            SliderKind.UpcomingMovies => DiscoverShelf.UpcomingMovies,
+            SliderKind.PopularTv => DiscoverShelf.PopularSeries,
+            SliderKind.UpcomingTv => DiscoverShelf.UpcomingSeries,
+            _ => null,
+        };
+        var keys = shelf is { } s ? _shelves.GetValueOrDefault(s, []) : _customRows.GetValueOrDefault(slider.Id, []);
+        var items = keys.Select(k => _titles[k].Item).ToList();
+        return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
+    }
+
+    public Task<ApertureResult<IReadOnlyList<DiscoverGenre>>> GetGenresAsync(DiscoverKind kind, CancellationToken ct = default)
+    {
+        Calls.Add($"GetGenres({kind})");
+        if (Fail<IReadOnlyList<DiscoverGenre>>() is { } failed) return failed;
+        return Done((IReadOnlyList<DiscoverGenre>)_genres.Where(g => g.Kind == kind).ToList());
+    }
+
+    public Task<ApertureResult<DiscoverPage>> DiscoverGenreAsync(DiscoverKind kind, int genreId, int page = 1,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"DiscoverGenre({kind},{genreId},{page})");
+        if (Fail<DiscoverPage>() is { } failed) return failed;
+        var items = _genreTitles.GetValueOrDefault((kind, genreId), []).Select(k => _titles[k].Item).ToList();
+        return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
+    }
+
+    public Task<ApertureResult<PersonDetail>> GetPersonAsync(int tmdbId, CancellationToken ct = default)
+    {
+        Calls.Add($"GetPerson({tmdbId})");
+        if (Fail<PersonDetail>() is { } failed) return failed;
+        var credited = _titles.Values.Where(t => t.Cast.Any(c => c.TmdbId == tmdbId)).ToList();
+        if (credited.Count == 0)
+            return Task.FromResult(ApertureResult<PersonDetail>.Fail(ApertureFailureKind.NotFound, "no such person", 404));
+        var person = credited[0].Cast.First(c => c.TmdbId == tmdbId);
+        return Done(new PersonDetail
+        {
+            TmdbId = tmdbId,
+            Name = person.Name,
+            Biography = $"{person.Name} is a fixture actor.",
+            KnownFor = "Acting",
+            Credits = credited.Select(t => t.Item).OrderByDescending(i => i.Year).ToList(),
+        });
+    }
+
+    public Task<ApertureResult<DiscoverPage>> GetWatchlistAsync(int page = 1, CancellationToken ct = default)
+    {
+        Calls.Add("GetWatchlist");
+        if (Fail<DiscoverPage>() is { } failed) return failed;
+        var items = _watchlist.Select(k => _titles[k].Item).ToList();
+        return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
+    }
+
+    public Task<ApertureResult<bool>> SetWatchlistAsync(DiscoverItem item, bool on, CancellationToken ct = default)
+    {
+        Calls.Add($"{(on ? "Watchlist" : "Unwatchlist")}({item.Key})");
+        if (Fail<bool>() is { } failed) return failed;
+        if (on) _watchlist.Add(item.Key); else _watchlist.Remove(item.Key);
+        return Done(true);
+    }
+
+    public Task<ApertureResult<int>> ReportIssueAsync(NewIssue issue, CancellationToken ct = default)
+    {
+        Calls.Add($"ReportIssue({issue.MediaId},{issue.Type},s{issue.Season}e{issue.Episode})");
+        if (Fail<int>() is { } failed) return failed;
+        if (!User.Has(RequestPermission.CreateIssues) && !User.Has(RequestPermission.ManageIssues))
+            return Task.FromResult(ApertureResult<int>.Fail(ApertureFailureKind.Forbidden, "not allowed", 403));
+        Issues.Add(issue);
+        return Done(Issues.Count);
+    }
+
+    public Task<ApertureResult<IReadOnlyList<RequestService>>> GetServicesAsync(DiscoverKind kind, CancellationToken ct = default)
+    {
+        Calls.Add($"GetServices({kind})");
+        if (Fail<IReadOnlyList<RequestService>>() is { } failed) return failed;
+        return Done((IReadOnlyList<RequestService>)[kind == DiscoverKind.Movie ? Radarr : Sonarr]);
+    }
+
+    public Task<ApertureResult<RequestServiceDetails>> GetServiceDetailsAsync(DiscoverKind kind, int serviceId,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"GetServiceDetails({kind},{serviceId})");
+        if (Fail<RequestServiceDetails>() is { } failed) return failed;
+        return kind == DiscoverKind.Movie
+            ? Done(new RequestServiceDetails(Radarr,
+                [new QualityProfile(4, "HD-1080p"), new QualityProfile(5, "Ultra-HD")],
+                [new RootFolder(1, "/media/movies", 2_000_000_000_000), new RootFolder(2, "/media/kids", 500_000_000_000)]))
+            : Done(new RequestServiceDetails(Sonarr,
+                [new QualityProfile(6, "HD-720p/1080p"), new QualityProfile(7, "Any")],
+                [new RootFolder(1, "/media/shows", 2_000_000_000_000)]));
     }
 
     public void Dispose() => Disposed = true;

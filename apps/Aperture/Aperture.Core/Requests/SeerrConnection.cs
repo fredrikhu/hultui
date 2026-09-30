@@ -82,7 +82,9 @@ public static class SeerrConnection
             s.Series4kEnabled ?? false,
             s.PartialRequestsEnabled ?? true,
             JellyfinBacked: s.MediaServerType is null or JellyfinServerType,
-            CacheImages: s.CacheImages ?? false));
+            CacheImages: s.CacheImages ?? false,
+            HideAvailable: s.HideAvailable ?? false,
+            HideBlocklisted: s.HideBlocklisted ?? false));
     }
 
     /// <summary><c>mediaServerType</c> for Jellyfin (1 is Plex, 3 Emby, 4 not configured).</summary>

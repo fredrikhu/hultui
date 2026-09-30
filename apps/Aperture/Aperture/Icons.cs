@@ -54,6 +54,11 @@ public static class Icons
     public const string Decline = "x";
     public const string Withdraw = "trash";
     public const string External = "arrow-square-out";
+    public const string Watchlist = "bookmark-simple";
+    public const string WatchlistOn = "bookmark-simple-fill";
+    public const string Report = "flag";
+    public const string Options = "sliders-horizontal";
+    public const string Genre = "tag";
 
     // Window controls (Windows/Linux style; bold so the marks survive caption size).
     public const string WinMinimize = "minus-bold";

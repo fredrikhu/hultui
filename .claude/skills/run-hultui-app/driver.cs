@@ -274,6 +274,10 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests()
     for (int i = 0; i < 6; i++) fake.AddSeries(2100 + i, "Series " + (char)('A' + i), 2015 + i, shelves: [series]);
     fake.AddPendingRequest("movie:1004");
     fake.AddPendingRequest("tv:2102", [1, 2]);
+    fake.AddRequest("movie:1003", Aperture.Core.Requests.RequestStatus.Approved);
+    // Something downloading, for the progress bar and the list's percentage.
+    fake.SetDownloads("movie:1003", [new Aperture.Core.Requests.DownloadProgress("Northbound.2022.2160p.mkv",
+        8_000_000_000, 2_600_000_000, "downloading", TimeSpan.FromMinutes(23), null)]);
     return fake;
 }
 
@@ -291,7 +295,7 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
             resume: i == 1 ? TimeSpan.FromMinutes(58) : null, played: i == 2);
     fake.AddItem(new Aperture.Core.MediaItem
     {
-        Id = "s1", Name = "The Long Way Home", Kind = Aperture.Core.MediaKind.Series,
+        Id = "s1", Name = "The Long Way Home", Kind = Aperture.Core.MediaKind.Series, TmdbId = 2000,
         ProductionYear = 2019, ChildCount = 8, UnplayedItemCount = 5,
         Overview = "A fixture series, for looking at the shelf.",
     }, "shows");

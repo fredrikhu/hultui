@@ -32,6 +32,10 @@ public enum ApertureView
     DiscoverTitle,
     /// <summary>Requests made, and — for someone who may — the ones waiting for approval.</summary>
     Requests,
+    /// <summary>One genre's titles on the request server; the Id is <c>movie:28</c>.</summary>
+    DiscoverGenre,
+    /// <summary>One person's films and series on the request server; the Id is their TMDB id.</summary>
+    DiscoverPerson,
 }
 
 /// <summary>
@@ -97,6 +101,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             _stage = ApertureStage.Browsing;
             // A request server handed in the same way (tests, the driver) is simply in use.
             _requestServer = requests;
+            if (requests is not null) StartArrivalWatch();
         }
         else
         {
@@ -208,6 +213,8 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.Settings => BuildSettingsView(),
             ApertureView.Discover => BuildDiscoverView(),
             ApertureView.DiscoverTitle => BuildDiscoverTitleView(Current),
+            ApertureView.DiscoverGenre => BuildDiscoverGenreView(Current),
+            ApertureView.DiscoverPerson => BuildDiscoverPersonView(Current),
             ApertureView.Requests => BuildRequestsView(),
             _ => BuildHomeView(),
         };
@@ -321,7 +328,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         {
             rail.AddChild(Box.New().Height(Halide.S2));
             rail.AddChild(RailButton(Icons.Discover, "Discover", "",
-                active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle,
+                active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
+                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson,
                 onClick: () => Navigate(new Route(ApertureView.Discover))));
             rail.AddChild(RailButton(Icons.Requests, "Requests", "",
                 active: Current.View == ApertureView.Requests,
@@ -425,8 +433,23 @@ public sealed partial class ApertureApp : Component, IDisposable
         // during the opening wait too, which is when someone is most likely to press it.
         if (_playingItem is not null)
         {
+            // Typing a problem report over the film: the text field has the keys, and a
+            // space in "out of sync" must not pause it. Escape closes the report, not the film.
+            if (e.Target is TextInputElement or TextAreaElement)
+            {
+                if (e.Key == KeyCode.Escape && _reportOpen)
+                {
+                    CloseReport();
+                    e.Handled = true;
+                }
+                return;
+            }
             switch (e.Key)
             {
+                case KeyCode.Escape when _reportOpen:
+                    CloseReport();
+                    e.Handled = true;
+                    break;
                 case KeyCode.Escape:
                     StopPlayback(report: true);
                     e.Handled = true;
@@ -515,8 +538,9 @@ public sealed partial class ApertureApp : Component, IDisposable
     }
 
     /// <summary>Says something, briefly, at the bottom of the window.</summary>
-    internal void Flash(string message, ToastSeverity severity = ToastSeverity.None) =>
-        _toasts.Flash(message, severity);
+    internal void Flash(string message, ToastSeverity severity = ToastSeverity.None,
+        (string Label, Action Run)? action = null) =>
+        _toasts.Flash(message, severity, action, action is null ? null : 6f);
 
     /// <summary>The failure copy for a call that did not work, as a toast.</summary>
     internal void FlashFailure(ApertureFailure failure, string what = "That")
@@ -535,6 +559,8 @@ public sealed partial class ApertureApp : Component, IDisposable
         // to survive it: give the report its moment before the connection goes.
         WaitForStopReport();
         StopQuickConnectTimer();
+        StopProgressTimer();
+        StopArrivalWatch();
         _quickConnectCts?.Cancel();
         _quickConnectCts?.Dispose();
         _quickConnectCts = null;

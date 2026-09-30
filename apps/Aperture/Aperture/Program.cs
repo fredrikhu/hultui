@@ -198,6 +198,23 @@ internal static class ApertureProgram
         if (requests.Ok)
             Console.WriteLine($"{requests.Value.Total} requests; newest: "
                               + string.Join(", ", requests.Value.Items.Select(r => $"{r.Title} ({r.Status})")));
+
+        // The discover layout, the genre rows and the downloaders' choices — each a JSON shape
+        // of its own, so each has to be read once natively to count as proven.
+        var layout = await server.GetDiscoverLayoutAsync().ConfigureAwait(false);
+        if (layout.Ok)
+            Console.WriteLine($"discover layout: {layout.Value.Count(s => s.Enabled)} of {layout.Value.Count} rows on");
+        var genres = await server.GetGenresAsync(Aperture.Core.Requests.DiscoverKind.Movie).ConfigureAwait(false);
+        if (genres.Ok) Console.WriteLine($"film genres: {genres.Value.Count}");
+        var radarr = await server.GetServicesAsync(Aperture.Core.Requests.DiscoverKind.Movie).ConfigureAwait(false);
+        if (radarr.Ok && radarr.Value.Count > 0)
+        {
+            var details = await server.GetServiceDetailsAsync(Aperture.Core.Requests.DiscoverKind.Movie, radarr.Value[0].Id)
+                .ConfigureAwait(false);
+            if (details.Ok)
+                Console.WriteLine($"{radarr.Value[0].Name}: {details.Value.Profiles.Count} quality profiles, "
+                                  + $"{details.Value.RootFolders.Count} root folders");
+        }
         return true;
     }
 

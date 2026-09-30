@@ -165,6 +165,7 @@ public sealed partial class ApertureApp
         {
             case MediaItem item: Open(item); break;
             case DiscoverItem title: OpenDiscover(title); break;
+            case DiscoverGenre genre: OpenGenre(genre); break;
         }
     }
 

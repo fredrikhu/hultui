@@ -11,6 +11,11 @@ namespace Aperture.Core.Requests;
 /// <param name="CacheImages">The server proxies and caches TMDB artwork itself. Its own web
 /// page then loads posters through it, and so does Aperture — the administrator switched it
 /// on so that browsers on this network do not talk to TMDB.</param>
+/// <param name="HideAvailable">The administrator asked for titles the library has to be left
+/// off the discovery shelves. The server does not filter them itself — its own web client
+/// does — so a native client has to as well.</param>
+/// <param name="HideBlocklisted">The same for blocklisted titles; the web client applies it
+/// only for someone who manages the blocklist (anyone else is never shown them).</param>
 public sealed record RequestServerInfo(
     string Address,
     string Title,
@@ -19,7 +24,9 @@ public sealed record RequestServerInfo(
     bool Series4kEnabled = false,
     bool PartialRequestsEnabled = true,
     bool JellyfinBacked = true,
-    bool CacheImages = false)
+    bool CacheImages = false,
+    bool HideAvailable = false,
+    bool HideBlocklisted = false)
 {
     public string Host => Uri.TryCreate(Address, UriKind.Absolute, out var u) ? u.Authority : Address;
 
@@ -193,6 +200,60 @@ public sealed record DiscoverItem
     }
 }
 
+/// <summary>
+/// One download Radarr or Sonarr has queued for a title — a film, or an episode of a series
+/// (<see cref="Season"/>/<see cref="Episode"/> set). What the server relays from the
+/// downloader's queue, as of when the title was read.
+/// </summary>
+public sealed record DownloadProgress(
+    string Title,
+    long Size,
+    long SizeLeft,
+    string Status,
+    TimeSpan? TimeLeft,
+    DateTimeOffset? EstimatedCompletion,
+    int? Season = null,
+    int? Episode = null)
+{
+    /// <summary>0–1, how much has arrived. Zero for a download whose size is not known yet.</summary>
+    public double Fraction => Size > 0 ? Math.Clamp(1 - (double)SizeLeft / Size, 0, 1) : 0;
+}
+
+/// <summary>Several downloads read as one: how much of all of it has arrived, and how long
+/// until the last of it does.</summary>
+public readonly record struct DownloadSummary(int Count, double Fraction, TimeSpan? TimeLeft)
+{
+    public static DownloadSummary? Of(IReadOnlyList<DownloadProgress> downloads)
+    {
+        if (downloads.Count == 0) return null;
+        long size = 0, left = 0;
+        TimeSpan? longest = null;
+        foreach (var d in downloads)
+        {
+            size += Math.Max(0, d.Size);
+            left += Math.Clamp(d.SizeLeft, 0, Math.Max(0, d.Size));
+            if (d.TimeLeft is { } t && (longest is null || t > longest)) longest = t;
+        }
+        double fraction = size > 0 ? Math.Clamp(1 - (double)left / size, 0, 1) : 0;
+        return new DownloadSummary(downloads.Count, fraction, longest);
+    }
+
+    /// <summary>"42%", with "· about 12 min left" when the downloader knows.</summary>
+    public string Phrase
+    {
+        get
+        {
+            var text = $"{Math.Round(Fraction * 100):0}%";
+            if (Count > 1) text += $" of {Count} files";
+            if (TimeLeft is { } t && t > TimeSpan.Zero)
+                text += t.TotalHours >= 1
+                    ? $" · about {(int)t.TotalHours} h {t.Minutes} min left"
+                    : $" · about {Math.Max(1, (int)Math.Ceiling(t.TotalMinutes))} min left";
+            return text;
+        }
+    }
+}
+
 /// <summary>A page of discovery results, numbered the way TMDB numbers them (from 1).</summary>
 public sealed record DiscoverPage(IReadOnlyList<DiscoverItem> Items, int Page, int TotalPages, int TotalResults)
 {
@@ -238,6 +299,17 @@ public sealed record DiscoverDetail
     public IReadOnlyList<DiscoverSeason> Seasons { get; init; } = [];
     public IReadOnlyList<DiscoverPerson> Cast { get; init; } = [];
     public IReadOnlyList<MediaRequest> Requests { get; init; } = [];
+
+    /// <summary>What Radarr/Sonarr are downloading for it right now; empty when nothing is.</summary>
+    public IReadOnlyList<DownloadProgress> Downloads { get; init; } = [];
+    public IReadOnlyList<DownloadProgress> Downloads4k { get; init; } = [];
+
+    /// <summary>The request server's own id for its record of the title — what an issue is
+    /// filed against (not the TMDB id). Null for a title it has no record of yet.</summary>
+    public int? MediaId { get; init; }
+
+    /// <summary>On this user's watchlist.</summary>
+    public bool OnWatchlist { get; init; }
 }
 
 /// <summary>One request, as the requests list and a detail page show it.</summary>
@@ -264,6 +336,9 @@ public sealed record MediaRequest
     public DateTimeOffset CreatedAt { get; init; }
     public string? JellyfinItemId { get; init; }
 
+    /// <summary>What is downloading for it — the 4K downloads for a 4K request.</summary>
+    public IReadOnlyList<DownloadProgress> Downloads { get; init; } = [];
+
     public string MediaKey => $"{(Kind == DiscoverKind.Movie ? "movie" : "tv")}:{TmdbId}";
 }
 
@@ -281,11 +356,27 @@ public enum RequestFilter { All, Pending, Approved, Processing, Available, Unava
 /// <summary>What a request asks for.</summary>
 /// <param name="Seasons">The seasons, for a series; empty for a film.</param>
 public sealed record NewRequest(DiscoverKind Kind, int TmdbId, IReadOnlyList<int> Seasons, bool Is4k = false,
-    int? TvdbId = null);
+    int? TvdbId = null, RequestOptions? Options = null);
 
-/// <summary>How many of one kind this user may still request, when the server limits it.</summary>
+/// <summary>How many of one kind this user may still request, when the server limits it.
+/// For series the server counts <i>seasons</i>, not series.</summary>
 /// <param name="Limit">Requests allowed per <paramref name="Days"/>; null when unlimited.</param>
-public sealed record RequestQuota(int? Limit, int Days, int Used, int? Remaining, bool Restricted);
+/// <param name="Restricted">Nothing left: the server will refuse the next request.</param>
+public sealed record RequestQuota(int? Limit, int Days, int Used, int? Remaining, bool Restricted)
+{
+    public bool IsLimited => Limit is > 0;
+
+    /// <summary>"today", "this week", "in any 14 days" — the window the limit runs over. The
+    /// server's window rolls rather than resetting on a calendar day, which "this week"
+    /// glosses over; it is the phrase people use for a seven-day allowance anyway.</summary>
+    public string Period => Days switch
+    {
+        1 => "today",
+        7 => "this week",
+        30 => "this month",
+        _ => $"in any {Days} days",
+    };
+}
 
 /// <summary>A user's allowance for both kinds.</summary>
 public sealed record RequestQuotas(RequestQuota Movie, RequestQuota Tv);
@@ -335,4 +426,89 @@ public static class RequestImages
             return null;
         return Uri.TryCreate((imageBase ?? TmdbImageBase) + size + path, UriKind.Absolute, out var uri) ? uri : null;
     }
+}
+
+// ── Slice 7b: advanced requests, issues, the layout, genres, people ─────────
+
+/// <summary>
+/// Where an advanced request goes: which Radarr/Sonarr, at which quality, into which
+/// folder. Only users with <see cref="RequestPermission.RequestAdvanced"/> (or who manage
+/// requests) may send these; anyone else's request takes the server's defaults.
+/// </summary>
+public sealed record RequestOptions(int? ServerId, int? ProfileId, string? RootFolder);
+
+/// <summary>One Radarr or Sonarr the request server sends requests to.</summary>
+/// <param name="ActiveProfileId">The quality profile it uses when nobody picks one.</param>
+/// <param name="ActiveDirectory">The root folder it uses when nobody picks one.</param>
+public sealed record RequestService(int Id, string Name, bool Is4k, bool IsDefault, int? ActiveProfileId,
+    string? ActiveDirectory);
+
+/// <summary>A service's choices: its quality profiles and root folders.</summary>
+public sealed record RequestServiceDetails(RequestService Server, IReadOnlyList<QualityProfile> Profiles,
+    IReadOnlyList<RootFolder> RootFolders);
+
+public sealed record QualityProfile(int Id, string Name);
+
+/// <summary>A folder the downloader files things into, and how much room is left in it.</summary>
+public sealed record RootFolder(int Id, string Path, long? FreeSpace);
+
+/// <summary>What kind of problem a report is about — the server's own numbers.</summary>
+public enum IssueType { Video = 1, Audio = 2, Subtitles = 3, Other = 4 }
+
+/// <summary>A problem report. <paramref name="MediaId"/> is the request server's id for the
+/// title (<see cref="DiscoverDetail.MediaId"/>), not TMDB's. Season and episode narrow it
+/// down within a series; null (sent as 0) means the whole thing.</summary>
+public sealed record NewIssue(int MediaId, IssueType Type, string Message, int? Season = null, int? Episode = null);
+
+/// <summary>
+/// The kinds of row an administrator can put on the request server's discover page —
+/// its own <c>DiscoverSliderType</c> numbers. Aperture draws the ones the API can fill;
+/// see the app's Discover view for which, and why the others are left out.
+/// </summary>
+public enum SliderKind
+{
+    RecentlyAdded = 1,
+    RecentRequests = 2,
+    Watchlist = 3,
+    Trending = 4,
+    PopularMovies = 5,
+    MovieGenres = 6,
+    UpcomingMovies = 7,
+    Studios = 8,
+    PopularTv = 9,
+    TvGenres = 10,
+    UpcomingTv = 11,
+    Networks = 12,
+    MovieKeyword = 13,
+    MovieGenre = 14,
+    TvKeyword = 15,
+    TvGenre = 16,
+    Search = 17,
+    Studio = 18,
+    Network = 19,
+    MovieStreaming = 20,
+    TvStreaming = 21,
+}
+
+/// <summary>One row of the administrator's discover layout.</summary>
+/// <param name="Title">Set for a custom row; a built-in row is named by its kind.</param>
+/// <param name="Data">What a custom row is about — a genre id, keyword ids, a search.</param>
+public sealed record DiscoverSlider(int Id, SliderKind Kind, string? Title, string? Data, bool Enabled, int Order);
+
+/// <summary>A genre to browse by, with a backdrop to draw its card with.</summary>
+public sealed record DiscoverGenre(int Id, string Name, DiscoverKind Kind, string? BackdropPath);
+
+/// <summary>Someone in TMDB's credits, and everything they are credited with.</summary>
+public sealed record PersonDetail
+{
+    public required int TmdbId { get; init; }
+    public required string Name { get; init; }
+    public string? Biography { get; init; }
+    public string? ProfilePath { get; init; }
+    public string? KnownFor { get; init; }
+    public DateOnly? Birthday { get; init; }
+    public DateOnly? Deathday { get; init; }
+    public string? PlaceOfBirth { get; init; }
+    /// <summary>Films and series, newest first, each once however many roles it held.</summary>
+    public IReadOnlyList<DiscoverItem> Credits { get; init; } = [];
 }

@@ -54,4 +54,41 @@ public interface IRequestServer : IDisposable
 
     /// <summary>Withdraws a request — your own while it is pending, anyone's for a manager.</summary>
     Task<ApertureResult<bool>> DeleteRequestAsync(int requestId, CancellationToken ct = default);
+
+    // ── Slice 7b ─────────────────────────────────────────────────────────
+
+    /// <summary>The administrator's discover layout, in its own order, disabled rows
+    /// included (the caller decides what to draw).</summary>
+    Task<ApertureResult<IReadOnlyList<DiscoverSlider>>> GetDiscoverLayoutAsync(CancellationToken ct = default);
+
+    /// <summary>One page of a custom row of the layout — a genre, keywords, a search, a
+    /// studio or a network. Built-in rows go through <see cref="DiscoverAsync"/>.</summary>
+    Task<ApertureResult<DiscoverPage>> GetSliderAsync(DiscoverSlider slider, int page = 1, CancellationToken ct = default);
+
+    /// <summary>The genres to browse films or series by, each with a backdrop.</summary>
+    Task<ApertureResult<IReadOnlyList<DiscoverGenre>>> GetGenresAsync(DiscoverKind kind, CancellationToken ct = default);
+
+    /// <summary>One page of a genre, most popular first.</summary>
+    Task<ApertureResult<DiscoverPage>> DiscoverGenreAsync(DiscoverKind kind, int genreId, int page = 1,
+        CancellationToken ct = default);
+
+    /// <summary>A person and their films and series.</summary>
+    Task<ApertureResult<PersonDetail>> GetPersonAsync(int tmdbId, CancellationToken ct = default);
+
+    /// <summary>This user's watchlist, one page, with titles and artwork filled in.</summary>
+    Task<ApertureResult<DiscoverPage>> GetWatchlistAsync(int page = 1, CancellationToken ct = default);
+
+    /// <summary>Puts a title on this user's watchlist, or takes it off.</summary>
+    Task<ApertureResult<bool>> SetWatchlistAsync(DiscoverItem item, bool on, CancellationToken ct = default);
+
+    /// <summary>Reports a problem with a title. Returns the new issue's id.</summary>
+    Task<ApertureResult<int>> ReportIssueAsync(NewIssue issue, CancellationToken ct = default);
+
+    /// <summary>The Radarr (films) or Sonarr (series) servers requests can go to.</summary>
+    Task<ApertureResult<IReadOnlyList<RequestService>>> GetServicesAsync(DiscoverKind kind, CancellationToken ct = default);
+
+    /// <summary>One server's quality profiles and root folders — asked of the downloader
+    /// live, so it can be slow when that downloader is.</summary>
+    Task<ApertureResult<RequestServiceDetails>> GetServiceDetailsAsync(DiscoverKind kind, int serviceId,
+        CancellationToken ct = default);
 }

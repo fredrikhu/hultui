@@ -78,6 +78,7 @@ public sealed partial class ApertureApp
     {
         _requestServer?.Dispose();
         _requestServer = server;
+        StartArrivalWatch();
         _requestConnectFailure = null;
         _requestGeneration++;
         Rerender();
@@ -98,6 +99,8 @@ public sealed partial class ApertureApp
     /// the server has ended does.</summary>
     private void CloseRequestServer()
     {
+        StopProgressTimer();
+        StopArrivalWatch();
         _requestServer?.Dispose();
         _requestServer = null;
         _requestGeneration++;
@@ -105,86 +108,202 @@ public sealed partial class ApertureApp
         _requestListKey = null;
         // Off any view that needs it — their rail buttons have just gone, and a page with
         // no way back to it is a dead end.
-        if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.Requests) > 0
+        if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
+                or ApertureView.DiscoverPerson or ApertureView.Requests) > 0
             && _stack.Count == 0)
             _stack.Add(new Route(ApertureView.Home));
     }
 
-    // ── Discovery shelves ────────────────────────────────────────────────
+    // ── Discover's rows: the administrator's layout ──────────────────────
 
-    private readonly AsyncLoader<IReadOnlyDictionary<DiscoverShelf, IReadOnlyList<DiscoverItem>>> _shelves =
-        new(new Dictionary<DiscoverShelf, IReadOnlyList<DiscoverItem>>());
+    /// <summary>One row of Discover, filled. Exactly one of the three lists is used, by
+    /// the row's kind: titles, genres to browse, or requests.</summary>
+    internal sealed record DiscoverRow(string Key, string Title, SliderKind Kind,
+        IReadOnlyList<DiscoverItem> Items, IReadOnlyList<DiscoverGenre> Genres);
 
-    /// <summary>The shelves in the order Discover draws them.</summary>
-    internal static readonly DiscoverShelf[] ShelfOrder =
-    [
-        DiscoverShelf.Trending,
-        DiscoverShelf.PopularMovies,
-        DiscoverShelf.UpcomingMovies,
-        DiscoverShelf.PopularSeries,
-        DiscoverShelf.UpcomingSeries,
-    ];
+    private readonly AsyncLoader<IReadOnlyList<DiscoverRow>> _discoverRows = new([]);
 
-    internal static string ShelfTitle(DiscoverShelf shelf) => shelf switch
-    {
-        DiscoverShelf.Trending => "Trending",
-        DiscoverShelf.PopularMovies => "Popular films",
-        DiscoverShelf.UpcomingMovies => "Coming to cinemas",
-        DiscoverShelf.PopularSeries => "Popular series",
-        DiscoverShelf.UpcomingSeries => "Coming to television",
-        _ => shelf.ToString(),
-    };
-
-    /// <summary>One load for every shelf, so Discover settles in one step rather than
-    /// flickering in row by row — the same arrangement as home's latest rows.</summary>
-    private void EnsureShelves()
+    /// <summary>
+    /// The server's own discover layout, in its order, filled in one load so the page
+    /// settles in one step rather than row by row. A server whose layout cannot be read
+    /// gets the built-in default, which is what a fresh install has anyway.
+    ///
+    /// <para>Left out, on purpose: <b>recently added</b> (the library's own Home has it,
+    /// straight from Jellyfin, which is where it comes from), <b>studios</b> and
+    /// <b>networks</b> (the server's web page draws those from logo lists compiled into
+    /// it, which the API does not serve), and <b>streaming services</b> (its data is an
+    /// undocumented region-and-providers string). Recent requests are their own loader.</para>
+    /// </summary>
+    private void EnsureDiscoverRows()
     {
         if (_requestServer is not { } server) return;
-        _shelves.Load(("shelves", _requestGeneration, _dataGeneration), () =>
+        _discoverRows.Load(("rows", _requestGeneration, _dataGeneration), () =>
         {
-            var map = new Dictionary<DiscoverShelf, IReadOnlyList<DiscoverItem>>();
-            foreach (var shelf in ShelfOrder)
-                map[shelf] = FetchRequest(() => server.DiscoverAsync(shelf), DiscoverPage.Empty, ShelfTitle(shelf)).Items;
-            return (IReadOnlyDictionary<DiscoverShelf, IReadOnlyList<DiscoverItem>>)map;
+            var layout = server.GetDiscoverLayoutAsync().GetAwaiter().GetResult();
+            if (layout.Failure is { Kind: ApertureFailureKind.Unauthorized } refused)
+            {
+                // Not a layout problem: the session is gone, and that has to be said (and
+                // the doors to Discover closed) rather than papered over with defaults.
+                Application.InvokeOnMainThread(() => FlashRequestFailure(refused));
+                return (IReadOnlyList<DiscoverRow>)[];
+            }
+            var sliders = layout.Ok && layout.Value.Count > 0 ? layout.Value : DefaultSliders;
+
+            var rows = new List<DiscoverRow>();
+            foreach (var slider in sliders.Where(s => s.Enabled))
+            {
+                var title = SliderTitle(slider);
+                if (title is null) continue;
+                switch (slider.Kind)
+                {
+                    case SliderKind.RecentRequests:
+                        rows.Add(new DiscoverRow("requests", title, slider.Kind, [], []));
+                        break;
+                    case SliderKind.Watchlist:
+                        rows.Add(new DiscoverRow("watchlist", title, slider.Kind,
+                            FetchRequest(() => server.GetWatchlistAsync(), DiscoverPage.Empty, "Your watchlist").Items, []));
+                        break;
+                    case SliderKind.MovieGenres or SliderKind.TvGenres:
+                        var kind = slider.Kind == SliderKind.MovieGenres ? DiscoverKind.Movie : DiscoverKind.Tv;
+                        rows.Add(new DiscoverRow("genres-" + slider.Id, title, slider.Kind, [],
+                            FetchRequest(() => server.GetGenresAsync(kind), (IReadOnlyList<DiscoverGenre>)[], title)));
+                        break;
+                    default:
+                        rows.Add(new DiscoverRow("slider-" + slider.Id, title, slider.Kind,
+                            Shown(server, FetchRequest(() => server.GetSliderAsync(slider), DiscoverPage.Empty, title).Items), []));
+                        break;
+                }
+            }
+            return (IReadOnlyList<DiscoverRow>)rows;
         });
     }
 
-    internal IReadOnlyList<DiscoverItem> Shelf(DiscoverShelf shelf) =>
-        _shelves.Value.TryGetValue(shelf, out var items) ? items : [];
+    internal IReadOnlyList<DiscoverRow> DiscoverRows => _discoverRows.Value;
+    internal bool DiscoverRowsLoading => _discoverRows.IsLoading;
 
-    internal bool ShelvesLoading => _shelves.IsLoading;
+    /// <summary>The layout a fresh install has — what Discover shows when the server's
+    /// own cannot be read.</summary>
+    private static readonly IReadOnlyList<DiscoverSlider> DefaultSliders =
+    [
+        .. new[]
+        {
+            SliderKind.RecentRequests, SliderKind.Watchlist, SliderKind.Trending, SliderKind.PopularMovies,
+            SliderKind.MovieGenres, SliderKind.UpcomingMovies, SliderKind.PopularTv, SliderKind.TvGenres,
+            SliderKind.UpcomingTv,
+        }.Select((kind, i) => new DiscoverSlider(-(i + 1), kind, null, null, true, i)),
+    ];
 
-    // ── Your own requests, as a shelf ────────────────────────────────────
+    /// <summary>A row's heading, or null for a row Aperture does not draw (see
+    /// <see cref="EnsureDiscoverRows"/>). A custom row is called what its administrator
+    /// called it.</summary>
+    internal string? SliderTitle(DiscoverSlider slider) => slider.Kind switch
+    {
+        SliderKind.RecentlyAdded or SliderKind.Studios or SliderKind.Networks
+            or SliderKind.MovieStreaming or SliderKind.TvStreaming => null,
+        SliderKind.RecentRequests => _requestServer?.User.CanManageRequests == true ? "Recent requests" : "Your requests",
+        SliderKind.Watchlist => "Your watchlist",
+        SliderKind.Trending => "Trending",
+        SliderKind.PopularMovies => "Popular films",
+        SliderKind.MovieGenres => "Films by genre",
+        SliderKind.UpcomingMovies => "Coming to cinemas",
+        SliderKind.PopularTv => "Popular series",
+        SliderKind.TvGenres => "Series by genre",
+        SliderKind.UpcomingTv => "Coming to television",
+        _ when slider.Data is null => null,   // a custom row with nothing to ask for
+        _ => slider.Title ?? slider.Kind switch
+        {
+            SliderKind.Search => $"“{slider.Data}”",
+            SliderKind.MovieGenre or SliderKind.MovieKeyword or SliderKind.Studio => "Films",
+            _ => "Series",
+        },
+    };
+
+    // ── Recent requests, as a shelf ──────────────────────────────────────
 
     private readonly AsyncLoader<IReadOnlyList<MediaRequest>> _myRecentRequests = new([]);
 
+    /// <summary>The newest requests: everyone's for someone who decides them — that row is
+    /// their inbox — and one's own otherwise.</summary>
     private void EnsureMyRecentRequests()
     {
         if (_requestServer is not { } server) return;
+        bool everyone = server.User.CanManageRequests;
         _myRecentRequests.Load(("mine", _requestGeneration, _dataGeneration), () =>
-            FetchRequest(() => server.GetRequestsAsync(RequestFilter.All, mine: true, 0, 12),
-                RequestPage.Empty, "Your requests").Items);
+            FetchRequest(() => server.GetRequestsAsync(RequestFilter.All, mine: !everyone, 0, 12),
+                RequestPage.Empty, "Recent requests").Items);
     }
 
     internal IReadOnlyList<MediaRequest> MyRecentRequests => _myRecentRequests.Value;
+
+    // ── A genre, a person ────────────────────────────────────────────────
+
+    private readonly AsyncLoader<DiscoverPage> _genrePage = new(DiscoverPage.Empty);
+    private readonly List<DiscoverItem> _genreItems = [];
+    private string? _genreKey;
+
+    /// <summary>A genre's titles, a page at a time: asks for the next page when
+    /// <paramref name="more"/> (the "Show more" button) and none is loading.</summary>
+    private void EnsureGenrePage(DiscoverKind kind, int genreId, bool more = false)
+    {
+        if (_requestServer is not { } server) return;
+        var key = $"{_requestGeneration}|{_dataGeneration}|{kind}|{genreId}";
+        if (_genreKey != key)
+        {
+            _genreKey = key;
+            _genreItems.Clear();
+        }
+        else if (!more || _genrePage.IsLoading || !_genrePage.Value.HasMore)
+        {
+            return;
+        }
+        int page = _genreItems.Count == 0 ? 1 : _genrePage.Value.Page + 1;
+        _genrePage.Load((key, page), () => FetchRequest(() => server.DiscoverGenreAsync(kind, genreId, page),
+            DiscoverPage.Empty, "That genre"), loaded =>
+        {
+            if (_genreKey != key) return;
+            var seen = _genreItems.Select(i => i.Key).ToHashSet(StringComparer.Ordinal);
+            _genreItems.AddRange(Shown(server, loaded.Items).Where(i => seen.Add(i.Key)));
+        });
+    }
+
+    internal IReadOnlyList<DiscoverItem> GenreItems => _genreItems;
+    internal bool GenreLoading => _genrePage.IsLoading;
+    internal bool GenreHasMore => _genrePage.Value.HasMore;
+
+    private readonly AsyncLoader<PersonDetail?> _person = new(null);
+
+    private void EnsurePerson(int tmdbId)
+    {
+        if (_requestServer is not { } server) return;
+        _person.Load(("person", _requestGeneration, _dataGeneration, tmdbId), () =>
+            FetchRequest<PersonDetail?>(async () =>
+            {
+                var result = await server.GetPersonAsync(tmdbId).ConfigureAwait(false);
+                return result.Ok ? ApertureResult<PersonDetail?>.Success(result.Value) : result.As<PersonDetail?>();
+            }, null, "That person"));
+    }
+
+    internal PersonDetail? Person => _person.Value;
+    internal bool PersonLoading => _person.IsLoading;
 
     // ── One title ────────────────────────────────────────────────────────
 
     private readonly AsyncLoader<DiscoverDetail?> _discoverDetail = new(null);
     private readonly AsyncLoader<IReadOnlyList<DiscoverItem>> _recommendations = new([]);
 
-    private void EnsureDiscoverDetail(DiscoverKind kind, int tmdbId)
+    private void EnsureDiscoverDetail(DiscoverKind kind, int tmdbId, bool withRecommendations = true)
     {
         if (_requestServer is not { } server) return;
-        _discoverDetail.Load(("title", _requestGeneration, _dataGeneration, kind, tmdbId), () =>
+        _discoverDetail.Load(("title", _requestGeneration, _dataGeneration, _progressTick, kind, tmdbId), () =>
             FetchRequest<DiscoverDetail?>(async () =>
             {
                 var result = await server.GetDetailAsync(kind, tmdbId).ConfigureAwait(false);
                 return result.Ok ? ApertureResult<DiscoverDetail?>.Success(result.Value) : result.As<DiscoverDetail?>();
             }, null, "That title"));
+        if (!withRecommendations) return;
         _recommendations.Load(("recs", _dataGeneration, kind, tmdbId), () =>
-            FetchRequest(() => server.GetRecommendationsAsync(kind, tmdbId), DiscoverPage.Empty,
-                "Recommendations").Items);
+            Shown(server, FetchRequest(() => server.GetRecommendationsAsync(kind, tmdbId), DiscoverPage.Empty,
+                "Recommendations").Items));
     }
 
     internal DiscoverDetail? DiscoverDetail => _discoverDetail.Value;
@@ -202,7 +321,7 @@ public sealed partial class ApertureApp
         if (_requestServer is not { } server || term.Length < 2) return;
         _requestSearch.Load(("request-search", _requestGeneration, term), () =>
             FetchRequest(() => server.SearchAsync(term), DiscoverPage.Empty, "The search").Items
-                .Where(i => !i.InLibrary).ToList());
+                .Where(i => !i.InLibrary && Visible(server, i)).ToList());
     }
 
     internal IReadOnlyList<DiscoverItem> RequestSearchResults => _requestSearch.Value;
@@ -278,6 +397,97 @@ public sealed partial class ApertureApp
         Rerender();
     }
 
+    // ── What the administrator asked to hide ─────────────────────────────
+
+    /// <summary>
+    /// The server's own hide switches, applied the way its web client applies them — the
+    /// server itself sends everything. Available (and partly available) titles go when
+    /// <see cref="RequestServerInfo.HideAvailable"/> is on; blocklisted ones only for
+    /// someone who manages the blocklist, because nobody else is shown them at all.
+    /// "Your requests" is never filtered: it is a record, not a shelf.
+    /// </summary>
+    internal static bool Visible(IRequestServer server, DiscoverItem item)
+    {
+        if (server.Server.HideAvailable
+            && item.Availability is Availability.Available or Availability.PartiallyAvailable)
+            return false;
+        if (server.Server.HideBlocklisted && item.Availability == Availability.Blocklisted
+            && server.User.Has(RequestPermission.ManageBlocklist))
+            return false;
+        return true;
+    }
+
+    private static IReadOnlyList<DiscoverItem> Shown(IRequestServer server, IReadOnlyList<DiscoverItem> items) =>
+        items.Where(i => Visible(server, i)).ToList();
+
+    // ── The allowance ────────────────────────────────────────────────────
+
+    private readonly AsyncLoader<RequestQuotas?> _quota = new(null);
+
+    /// <summary>What this user may still request — read for the title page, where the
+    /// Request button is, and re-read after every request, which spends it.</summary>
+    private void EnsureQuota()
+    {
+        if (_requestServer is not { } server) return;
+        _quota.Load(("quota", _requestGeneration, _dataGeneration), () =>
+            FetchRequest<RequestQuotas?>(async () =>
+            {
+                var result = await server.GetQuotaAsync().ConfigureAwait(false);
+                return result.Ok ? ApertureResult<RequestQuotas?>.Success(result.Value) : result.As<RequestQuotas?>();
+            }, null, "Your request allowance"));
+    }
+
+    /// <summary>The allowance for one kind, or null while unknown or when unlimited.</summary>
+    internal RequestQuota? QuotaFor(DiscoverKind kind) =>
+        _quota.Value is { } q && (kind == DiscoverKind.Movie ? q.Movie : q.Tv) is { IsLimited: true } limited
+            ? limited
+            : null;
+
+    // ── Downloads, while they run ────────────────────────────────────────
+
+    /// <summary>Bumped by the progress timer; part of the title page's key, so a tick re-reads
+    /// the title and with it how far its downloads have got.</summary>
+    private int _progressTick;
+    private System.Threading.Timer? _progressTimer;
+
+    /// <summary>Whether the page on screen is being kept up to date with its downloads.</summary>
+    internal bool RefreshingProgress => _progressTimer is not null;
+
+    /// <summary>How often a title page with something downloading re-reads it. The server
+    /// relays the downloader's queue, which Radarr and Sonarr refresh about this often.</summary>
+    internal static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(15);
+
+    /// <summary>Keeps the progress timer running while the page on screen has downloads, and
+    /// only then. Called from the title page's build; the tick checks again, so leaving the
+    /// page stops it within one interval.</summary>
+    private void KeepProgressFresh(bool downloading)
+    {
+        if (downloading && _progressTimer is null)
+            _progressTimer = new System.Threading.Timer(_ => Application.InvokeOnMainThread(ProgressTick), null,
+                ProgressInterval, ProgressInterval);
+        else if (!downloading)
+            StopProgressTimer();
+    }
+
+    private void ProgressTick()
+    {
+        if (_requestServer is null || Current.View != ApertureView.DiscoverTitle || _playingItem is not null)
+        {
+            // Nothing to watch — or a film playing, which is not the moment for the title
+            // page underneath to be re-reading itself.
+            if (_requestServer is null || Current.View != ApertureView.DiscoverTitle) StopProgressTimer();
+            return;
+        }
+        _progressTick++;
+        Rerender();
+    }
+
+    private void StopProgressTimer()
+    {
+        _progressTimer?.Dispose();
+        _progressTimer = null;
+    }
+
     // ── The badge ────────────────────────────────────────────────────────
 
     private readonly AsyncLoader<int> _pendingCount = new(0);
@@ -320,6 +530,13 @@ public sealed partial class ApertureApp
         _ = ApplyRequestAsync(() => server.DeleteRequestAsync(request.Id), _ => $"Withdrew {name}");
     }
 
+    internal void SetWatchlist(DiscoverItem item, bool on)
+    {
+        if (_requestServer is not { } server) return;
+        _ = ApplyRequestAsync(() => server.SetWatchlistAsync(item, on),
+            _ => on ? $"Added {item.Title} to your watchlist" : $"Took {item.Title} off your watchlist");
+    }
+
     private async Task ApplyRequestAsync<T>(Func<Task<ApertureResult<T>>> call, Func<T, string> done)
     {
         var result = await call().ConfigureAwait(false);
@@ -333,6 +550,7 @@ public sealed partial class ApertureApp
             Flash(done(result.Value), ToastSeverity.Success);
             _requestGeneration++;
             _seasonPickerFor = null;
+            _optionsFor = null;
             Rerender();
         });
     }

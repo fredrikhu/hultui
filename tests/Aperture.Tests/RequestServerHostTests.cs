@@ -26,9 +26,10 @@ public class RequestServerHostTests
         return library;
     }
 
-    private static FakeRequestServer Requests(RequestPermission permissions = RequestPermission.Request)
+    private static FakeRequestServer Requests(RequestPermission permissions = RequestPermission.Request,
+        RequestServerInfo? info = null)
     {
-        var server = new FakeRequestServer(user: new RequestUser(1, "tester", permissions));
+        var server = new FakeRequestServer(info, new RequestUser(1, "tester", permissions));
         server.AddMovie(603, "The Matrix", 1999, shelves: [DiscoverShelf.Trending, DiscoverShelf.PopularMovies]);
         server.AddMovie(1398, "Stalker", 1979, Availability.Available, "0123456789abcdef0123456789abcdef",
             DiscoverShelf.Trending);
@@ -41,7 +42,8 @@ public class RequestServerHostTests
         return server;
     }
 
-    private static void Host(FakeMediaLibrary library, IRequestServer? requests, Action<HeadlessSession, ApertureApp> body)
+    private static void Host(FakeMediaLibrary library, IRequestServer? requests, Action<HeadlessSession, ApertureApp> body,
+        Func<HultUI.Media.IMediaBackend>? backends = null)
     {
         using var session = HeadlessSession.Create(1440, 900);
         var settingsPath = Path.Combine(Path.GetTempPath(), "aperture-tests", Guid.NewGuid().ToString("N"), "settings.json");
@@ -50,7 +52,7 @@ public class RequestServerHostTests
         {
             var settings = new ApertureSettings(new InMemoryCredentialStore(), settingsPath);
             app = new ApertureApp(session.Application, session.Window.Window, settings, library,
-                posterHttp: new HttpClient(new NoArtwork()), requests: requests);
+                backends: backends, posterHttp: new HttpClient(new NoArtwork()), requests: requests);
             session.Application.SetRoot(app.Mount());
             session.PumpFrame();
             body(session, app);
@@ -328,6 +330,328 @@ public class RequestServerHostTests
             Pump(session);
             // The request server knows Stalker too, as available — it is not offered twice.
             Assert.Null(session.Window.FindByAutomationId("discover-card-movie:1398"));
+        });
+    }
+
+    // ── Slice 7b ─────────────────────────────────────────────────────────
+
+    /// <summary>The library, with Game of Thrones in it — season 1 only, and the TMDB id
+    /// Jellyfin scraped for it, which is what joins it to the request server's record.</summary>
+    private static FakeMediaLibrary LibraryWithSeries()
+    {
+        var library = Library();
+        library.AddItem(new MediaItem
+        {
+            Id = "got", Name = "Game of Thrones", Kind = MediaKind.Series, TmdbId = 1399, ChildCount = 1,
+            Overview = "Seven noble families fight.",
+        }, "shows");
+        library.AddItem(new MediaItem
+        {
+            Id = "got-s1", Name = "Season 1", Kind = MediaKind.Season, SeriesId = "got",
+            SeriesName = "Game of Thrones", IndexNumber = 1, ChildCount = 10,
+        }, "got");
+        return library;
+    }
+
+    [Fact]
+    public void ASeriesInTheLibraryOffersTheSeasonsItIsMissing()
+    {
+        var requests = Requests();
+        Host(LibraryWithSeries(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "got", "Game of Thrones"));
+            // Seasons 2 and 3 are the request server's and not the library's.
+            PumpUntilShown(session, "Request Seasons 2–3");
+            Assert.Contains("GetDetail(tv:1399)", requests.Calls);
+            Assert.DoesNotContain(requests.Calls, c => c.StartsWith("GetRecommendations", StringComparison.Ordinal));
+
+            Click(session, "detail-request-seasons");
+            Assert.Equal(ApertureView.DiscoverTitle, app.Current.View);
+            Assert.Equal("tv:1399", app.Current.Id);
+            // The picker is open on arrival, with exactly the missing seasons ticked.
+            PumpUntilShown(session, "Request 2 seasons");
+        });
+    }
+
+    [Fact]
+    public void ALibrarySeriesSaysWhichSeasonsAreAlreadyAskedFor()
+    {
+        var requests = Requests();
+        requests.AddPendingRequest("tv:1399", [2]);
+        Host(LibraryWithSeries(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "got", "Game of Thrones"));
+            PumpUntilShown(session, "Season 2 requested, waiting for approval");
+            // Only the season nobody has asked for is offered.
+            PumpUntilShown(session, "Request Season 3");
+        });
+    }
+
+    [Fact]
+    public void ALibraryItemWithoutATmdbIdAsksTheRequestServerNothing()
+    {
+        var requests = Requests();
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.Detail, "0123456789abcdef0123456789abcdef", "Stalker"));
+            PumpUntilShown(session, "Stalker is a fixture.");
+            Assert.DoesNotContain(requests.Calls, c => c.StartsWith("GetDetail", StringComparison.Ordinal));
+            Assert.Null(session.Window.FindByAutomationId("detail-request-seasons"));
+        });
+    }
+
+    [Fact]
+    public void ADownloadShowsHowFarItHasGotOnTheTitleAndInTheList()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.AutoApprove | RequestPermission.ManageRequests);
+        requests.RequestAsync(new NewRequest(DiscoverKind.Movie, 603, [])).GetAwaiter().GetResult();
+        requests.SetDownloads("movie:603",
+            [new DownloadProgress("The.Matrix.1999.mkv", 1000, 250, "downloading", TimeSpan.FromMinutes(12), null)]);
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "Downloading · 75% · about 12 min left");
+
+            // The title page keeps re-reading itself while something downloads…
+            Assert.True(app.RefreshingProgress);
+
+            Click(session, "rail-requests");
+            PumpUntilShown(session, "The Matrix, requested by tester, on its way, downloading 75% · about 12 min left");
+        });
+    }
+
+    [Fact]
+    public void ATitleWithNothingDownloadingIsNotPolled()
+    {
+        Host(Library(), Requests(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "The Matrix is a fixture film.");
+            // …and one with nothing on its way costs the server nothing after it has loaded.
+            Assert.False(app.RefreshingProgress);
+        });
+    }
+
+    [Fact]
+    public void ASpentAllowanceDisablesRequestAndSaysWhy()
+    {
+        var requests = Requests();
+        requests.Quotas = new RequestQuotas(
+            new RequestQuota(5, 7, 5, 0, Restricted: true),
+            new RequestQuota(null, 7, 0, null, false));
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "No film requests left this week (the limit is 5)");
+
+            var button = (HultUI.Core.Elements.ButtonElement)session.Window.FindByAutomationId("discover-request")!.Element;
+            Assert.False(button.IsEnabled);
+            Click(session, "discover-request");
+            Pump(session);
+            Assert.DoesNotContain(requests.Calls, c => c.StartsWith("Request(", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void ARationedSeriesPickerTicksNoMoreThanTheAllowance()
+    {
+        var requests = Requests();
+        requests.Quotas = new RequestQuotas(
+            new RequestQuota(null, 7, 0, null, false),
+            new RequestQuota(3, 7, 2, 1, false));
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "tv:1399", "Game of Thrones"));
+            PumpUntilShown(session, "1 of 3 season requests left this week");   // under the button, before opening it
+            Click(session, "discover-request");
+            PumpUntilShown(session, "Request 1 season");
+
+            // Ticking the other one is more than the allowance: said, and not sent.
+            Click(session, "season-pick-3");
+            PumpUntilShown(session, "Only 1 left this week — untick some");
+            var confirm = (HultUI.Core.Elements.ButtonElement)session.Window.FindByAutomationId("season-picker-confirm")!.Element;
+            Assert.False(confirm.IsEnabled);
+        });
+    }
+
+    [Fact]
+    public void TheServersHideAvailableSwitchLeavesTheLibrarysTitlesOffTheShelves()
+    {
+        var requests = Requests(info: new RequestServerInfo("http://jellyseerr.test:5055", "Jellyseerr", "2.7.3",
+            HideAvailable: true));
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "The Matrix, film, 1999");
+            Assert.Null(session.Window.FindByAutomationId("discover-card-movie:1398"));   // Stalker: in the library
+        });
+    }
+
+    // ── Slice 7b, second half ────────────────────────────────────────────
+
+    [Fact]
+    public void DiscoverFollowsTheAdministratorsLayout()
+    {
+        var requests = Requests();
+        requests.AddGenre(DiscoverKind.Movie, 18, "Drama", "movie:603", "movie:1398");
+        requests.Layout =
+        [
+            new DiscoverSlider(1, SliderKind.PopularTv, null, null, Enabled: true, Order: 0),
+            new DiscoverSlider(2, SliderKind.Trending, null, null, Enabled: false, Order: 1),
+            new DiscoverSlider(3, SliderKind.MovieGenres, null, null, Enabled: true, Order: 2),
+            new DiscoverSlider(4, SliderKind.Studios, null, null, Enabled: true, Order: 3),
+        ];
+        requests.AddCustomRow(new DiscoverSlider(5, SliderKind.MovieKeyword, "Mind-benders", "4565", true, 4), "movie:603");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "Popular series");
+            Assert.True(Shows(session, "Films by genre"));
+            Assert.True(Shows(session, "Mind-benders"));   // a custom row, by the name it was given
+            Assert.False(Shows(session, "Trending"), "a disabled row was drawn");
+            // Studios need logos the API does not serve: the row is left out, not drawn empty.
+            Assert.DoesNotContain(requests.Calls, c => c.Contains("Studios", StringComparison.Ordinal));
+
+            Click(session, "genre-movie-18");
+            Assert.Equal(ApertureView.DiscoverGenre, app.Current.View);
+            PumpUntilShown(session, "The Matrix, film, 1999");
+            Assert.Contains("DiscoverGenre(Movie,18,1)", requests.Calls);
+        });
+    }
+
+    [Fact]
+    public void ANameInTheCastOpensEverythingTheyAreIn()
+    {
+        var requests = Requests();
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "Fixture Actor as The Lead");
+            Click(session, "cast-9603");
+            Assert.Equal(ApertureView.DiscoverPerson, app.Current.View);
+            PumpUntilShown(session, "Fixture Actor is a fixture actor.");
+            PumpUntilShown(session, "The Matrix, film, 1999");
+        });
+    }
+
+    [Fact]
+    public void AWatchlistedTitleIsMarkedAndHasARowOfItsOwn()
+    {
+        var requests = Requests();
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "Add to your watchlist");
+            Click(session, "discover-watchlist");
+            Assert.Contains("Watchlist(movie:603)", requests.Calls);
+            PumpUntilShown(session, "On your watchlist");
+
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "Your watchlist");
+        });
+    }
+
+    [Fact]
+    public void SomeoneWhoMayChooseSendsTheServerQualityAndFolderTheyPicked()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.RequestAdvanced);
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "The Matrix is a fixture film.");
+            Click(session, "discover-request-options");
+            // The chips say what the server would use: its default profile and folder.
+            PumpUntilShown(session, "Quality: HD-1080p");
+            PumpUntilShown(session, "Folder: /media/movies");
+
+            Click(session, "request-options-confirm");
+            var sent = Assert.Single(requests.SentOptions);
+            Assert.Equal(new RequestOptions(0, 4, "/media/movies"), sent);
+        });
+    }
+
+    [Fact]
+    public void SomeoneWhoMayNotChooseIsNotOfferedTheChoices()
+    {
+        Host(Library(), Requests(), (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverTitle, "movie:603", "The Matrix"));
+            PumpUntilShown(session, "The Matrix is a fixture film.");
+            Assert.Null(session.Window.FindByAutomationId("discover-request-options"));
+        });
+    }
+
+    [Fact]
+    public void AProblemIsReportedFromThePlayerAgainstTheRequestServersRecord()
+    {
+        var library = Library();
+        // Stalker, as Jellyfin scraped it: the TMDB id is what finds it on the request server.
+        library.Update(library.Item("0123456789abcdef0123456789abcdef")! with { TmdbId = 1398 });
+        var requests = Requests(RequestPermission.Request | RequestPermission.CreateIssues);
+        var backend = new HultUI.Media.Testing.FakeMediaBackend { Duration = TimeSpan.FromMinutes(162) };
+        Host(library, requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Play(library.Item("0123456789abcdef0123456789abcdef")!, TimeSpan.Zero);
+            Pump(session, 10);
+            Assert.NotNull(app.PlayingItem);
+
+            app.ToggleReport();
+            PumpUntilShown(session, "What's wrong with Stalker?");
+            Click(session, "report-type-audio");
+            session.Window.FindByAutomationId("report-message")!.Element.Focus();
+            session.Window.TypeText("No sound after the first reel");
+            Pump(session, 2);
+            // Typing a space in the report is not the player's pause key.
+            Assert.NotNull(app.PlayingItem);
+
+            Click(session, "report-send");
+            var issue = Assert.Single(requests.Issues);
+            Assert.Equal(IssueType.Audio, issue.Type);
+            Assert.Equal(100_000 + 1398, issue.MediaId);   // the server's record, not TMDB's number
+            Assert.Equal("No sound after the first reel", issue.Message);
+            Assert.False(app.ReportOpen);
+        }, () => backend);
+    }
+
+    [Fact]
+    public void ARequestThatArrivesIsAnnouncedOnceAndNotOnTheFirstLook()
+    {
+        var requests = Requests(RequestPermission.Request | RequestPermission.AutoApprove);
+        requests.RequestAsync(new NewRequest(DiscoverKind.Movie, 603, [])).GetAwaiter().GetResult();
+        requests.AddMovie(604, "The Matrix Reloaded", 2003, shelves: []);
+        requests.RequestAsync(new NewRequest(DiscoverKind.Movie, 604, [])).GetAwaiter().GetResult();
+        requests.Arrive("movie:604", "reloaded");   // already here before the first look
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+
+            app.CheckArrivalsAsync().GetAwaiter().GetResult();
+            Pump(session, 3);
+            Assert.False(Shows(session, "is in your library"), "the first look announced what was already there");
+
+            requests.Arrive("movie:603", "matrix");
+            app.CheckArrivalsAsync().GetAwaiter().GetResult();
+            PumpUntilShown(session, "The Matrix is in your library");
+
+            // And only once.
+            Pump(session, 400);   // past the toast
+            app.CheckArrivalsAsync().GetAwaiter().GetResult();
+            Pump(session, 3);
+            Assert.False(Shows(session, "The Matrix is in your library"));
         });
     }
 }

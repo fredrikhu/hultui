@@ -188,6 +188,11 @@ public sealed class SeerrServer : IRequestServer
             // person saw and ticked.
             Seasons = request.Kind == DiscoverKind.Tv ? request.Seasons.ToList() : null,
             Is4k = request.Is4k,
+            // Advanced choices go only where they were made; the server fills in its own
+            // defaults for anything left out.
+            ServerId = request.Options?.ServerId,
+            ProfileId = request.Options?.ProfileId,
+            RootFolder = request.Options?.RootFolder,
         };
         var result = await _http.PostAsync("request", body, SeerrJson.Default.SeerrNewRequestDto,
             SeerrJson.Default.SeerrRequestDto, ct).ConfigureAwait(false);
@@ -212,6 +217,172 @@ public sealed class SeerrServer : IRequestServer
 
     public Task<ApertureResult<bool>> DeleteRequestAsync(int requestId, CancellationToken ct = default) =>
         _http.SendStatusAsync(HttpMethod.Delete, $"request/{requestId}", ct);
+
+    // ── Slice 7b ─────────────────────────────────────────────────────────
+
+    public async Task<ApertureResult<IReadOnlyList<DiscoverSlider>>> GetDiscoverLayoutAsync(CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync("settings/discover", SeerrJson.Default.ListSeerrSliderDto, ct).ConfigureAwait(false);
+        if (!result.Ok) return result.As<IReadOnlyList<DiscoverSlider>>();
+        return ApertureResult<IReadOnlyList<DiscoverSlider>>.Success(result.Value
+            .Where(s => Enum.IsDefined((SliderKind)s.Type))
+            .OrderBy(s => s.Order)
+            .Select(s => new DiscoverSlider(s.Id, (SliderKind)s.Type,
+                NullIfEmpty(s.Title), NullIfEmpty(s.Data), s.Enabled, s.Order))
+            .ToList());
+    }
+
+    public Task<ApertureResult<DiscoverPage>> GetSliderAsync(DiscoverSlider slider, int page = 1, CancellationToken ct = default)
+    {
+        int p = Math.Max(1, page);
+        string Data() => Uri.EscapeDataString(slider.Data ?? "");
+        (string Path, DiscoverKind? Kind)? route = slider.Kind switch
+        {
+            SliderKind.Trending => ($"discover/trending?page={p}", null),
+            SliderKind.PopularMovies => ($"discover/movies?page={p}", DiscoverKind.Movie),
+            SliderKind.UpcomingMovies => ($"discover/movies/upcoming?page={p}", DiscoverKind.Movie),
+            SliderKind.PopularTv => ($"discover/tv?page={p}", DiscoverKind.Tv),
+            SliderKind.UpcomingTv => ($"discover/tv/upcoming?page={p}", DiscoverKind.Tv),
+            SliderKind.MovieKeyword when slider.Data is not null => ($"discover/movies?keywords={Data()}&page={p}", DiscoverKind.Movie),
+            SliderKind.MovieGenre when slider.Data is not null => ($"discover/movies?genre={Data()}&page={p}", DiscoverKind.Movie),
+            SliderKind.TvKeyword when slider.Data is not null => ($"discover/tv?keywords={Data()}&page={p}", DiscoverKind.Tv),
+            SliderKind.TvGenre when slider.Data is not null => ($"discover/tv?genre={Data()}&page={p}", DiscoverKind.Tv),
+            SliderKind.Search when slider.Data is not null => ($"search?query={Data()}&page={p}", null),
+            SliderKind.Studio when slider.Data is not null => ($"discover/movies?studio={Data()}&page={p}", DiscoverKind.Movie),
+            SliderKind.Network when slider.Data is not null => ($"discover/tv?network={Data()}&page={p}", DiscoverKind.Tv),
+            _ => null,
+        };
+        return route is { } r
+            ? PageAsync(r.Path, r.Kind, ct)
+            : Task.FromResult(ApertureResult<DiscoverPage>.Success(DiscoverPage.Empty));
+    }
+
+    public async Task<ApertureResult<IReadOnlyList<DiscoverGenre>>> GetGenresAsync(DiscoverKind kind, CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync($"discover/genreslider/{(kind == DiscoverKind.Movie ? "movie" : "tv")}",
+            SeerrJson.Default.ListSeerrGenreSliderDto, ct).ConfigureAwait(false);
+        if (!result.Ok) return result.As<IReadOnlyList<DiscoverGenre>>();
+        return ApertureResult<IReadOnlyList<DiscoverGenre>>.Success(result.Value
+            .Where(g => g.Id > 0 && !string.IsNullOrWhiteSpace(g.Name))
+            .Select(g => new DiscoverGenre(g.Id, g.Name!, kind, g.Backdrops?.FirstOrDefault(b => !string.IsNullOrEmpty(b))))
+            .ToList());
+    }
+
+    public Task<ApertureResult<DiscoverPage>> DiscoverGenreAsync(DiscoverKind kind, int genreId, int page = 1,
+        CancellationToken ct = default) =>
+        PageAsync($"discover/{(kind == DiscoverKind.Movie ? "movies" : "tv")}?genre={genreId}&page={Math.Max(1, page)}",
+            kind, ct);
+
+    private async Task<ApertureResult<DiscoverPage>> PageAsync(string pathAndQuery, DiscoverKind? kind, CancellationToken ct)
+    {
+        var result = await _http.GetAsync(pathAndQuery, SeerrJson.Default.SeerrResultPageDto, ct).ConfigureAwait(false);
+        return result.Ok ? ApertureResult<DiscoverPage>.Success(MapPage(result.Value, kind)) : result.As<DiscoverPage>();
+    }
+
+    public async Task<ApertureResult<PersonDetail>> GetPersonAsync(int tmdbId, CancellationToken ct = default)
+    {
+        var person = _http.GetAsync($"person/{tmdbId}", SeerrJson.Default.SeerrPersonDto, ct);
+        var credits = _http.GetAsync($"person/{tmdbId}/combined_credits", SeerrJson.Default.SeerrCombinedCreditsDto, ct);
+        await Task.WhenAll(person, credits).ConfigureAwait(false);
+        if (!person.Result.Ok) return person.Result.As<PersonDetail>();
+        // Credits that fail to load leave a page with the person and nothing under them,
+        // which is still a page — not a failure of the whole thing.
+        var list = credits.Result.Ok ? MapCredits(credits.Result.Value) : [];
+        return ApertureResult<PersonDetail>.Success(MapPerson(person.Result.Value, list));
+    }
+
+    public async Task<ApertureResult<DiscoverPage>> GetWatchlistAsync(int page = 1, CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync($"discover/watchlist?page={Math.Max(1, page)}",
+            SeerrJson.Default.SeerrWatchlistPageDto, ct).ConfigureAwait(false);
+        if (!result.Ok) return result.As<DiscoverPage>();
+
+        // The list carries a TMDB id and a title and nothing to draw: artwork and state
+        // come from the title's own record, a few at a time and from the cache first.
+        using var gate = new SemaphoreSlim(TitleFetchParallelism);
+        var entries = (result.Value.Results ?? [])
+            .Where(e => e.TmdbId > 0 && e.MediaType is "movie" or "tv")
+            .ToList();
+        var items = await Task.WhenAll(entries.Select(async e =>
+        {
+            var kind = e.MediaType == "tv" ? DiscoverKind.Tv : DiscoverKind.Movie;
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var title = await TitleAsync(kind, e.TmdbId, ct).ConfigureAwait(false);
+                return title?.Item ?? new DiscoverItem { TmdbId = e.TmdbId, Kind = kind, Title = e.Title ?? $"TMDB {e.TmdbId}" };
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+
+        return ApertureResult<DiscoverPage>.Success(new DiscoverPage(items, result.Value.Page ?? 1,
+            result.Value.TotalPages ?? 1, result.Value.TotalResults ?? items.Length));
+    }
+
+    public async Task<ApertureResult<bool>> SetWatchlistAsync(DiscoverItem item, bool on, CancellationToken ct = default)
+    {
+        var mediaType = item.Kind == DiscoverKind.Movie ? "movie" : "tv";
+        Forget(item.Kind, item.TmdbId);
+        if (on)
+        {
+            var body = new SeerrWatchlistAddDto { TmdbId = item.TmdbId, MediaType = mediaType, Title = item.Title };
+            var added = await _http.SendStatusAsync(HttpMethod.Post, "watchlist", ct,
+                SeerrHttp.JsonContent(body, SeerrJson.Default.SeerrWatchlistAddDto)).ConfigureAwait(false);
+            // Already on it is where the user wanted it: a 409 is the outcome, not a failure.
+            return added.Ok || added.Failure!.Status == 409 ? ApertureResult<bool>.Success(true) : added;
+        }
+
+        // The media type became a required parameter in 3.2 — and the older validator
+        // refuses a parameter it does not know, so it is sent only where it is expected.
+        var path = $"watchlist/{item.TmdbId}";
+        if (Server.ParsedVersion >= new Version(3, 2)) path += $"?mediaType={mediaType}";
+        var removed = await _http.SendStatusAsync(HttpMethod.Delete, path, ct).ConfigureAwait(false);
+        return removed.Ok || removed.Failure!.Kind == ApertureFailureKind.NotFound ? ApertureResult<bool>.Success(true) : removed;
+    }
+
+    public async Task<ApertureResult<int>> ReportIssueAsync(NewIssue issue, CancellationToken ct = default)
+    {
+        var body = new SeerrNewIssueDto
+        {
+            IssueType = (int)issue.Type,
+            Message = issue.Message,
+            MediaId = issue.MediaId,
+            ProblemSeason = issue.Season ?? 0,
+            ProblemEpisode = issue.Season is null ? 0 : issue.Episode ?? 0,
+        };
+        var result = await _http.PostAsync("issue", body, SeerrJson.Default.SeerrNewIssueDto,
+            SeerrJson.Default.SeerrIdDto, ct).ConfigureAwait(false);
+        return result.Ok ? ApertureResult<int>.Success(result.Value.Id) : result.As<int>();
+    }
+
+    public async Task<ApertureResult<IReadOnlyList<RequestService>>> GetServicesAsync(DiscoverKind kind, CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync(ServicePath(kind), SeerrJson.Default.ListSeerrServiceDto, ct).ConfigureAwait(false);
+        if (!result.Ok) return result.As<IReadOnlyList<RequestService>>();
+        return ApertureResult<IReadOnlyList<RequestService>>.Success(result.Value.Select(MapService).ToList());
+    }
+
+    public async Task<ApertureResult<RequestServiceDetails>> GetServiceDetailsAsync(DiscoverKind kind, int serviceId,
+        CancellationToken ct = default)
+    {
+        var result = await _http.GetAsync($"{ServicePath(kind)}/{serviceId}", SeerrJson.Default.SeerrServiceDetailsDto, ct)
+            .ConfigureAwait(false);
+        if (!result.Ok) return result.As<RequestServiceDetails>();
+        var d = result.Value;
+        return ApertureResult<RequestServiceDetails>.Success(new RequestServiceDetails(
+            MapService(d.Server ?? new SeerrServiceDto { Id = serviceId }),
+            (d.Profiles ?? []).Where(p => !string.IsNullOrWhiteSpace(p.Name)).Select(p => new QualityProfile(p.Id, p.Name!)).ToList(),
+            (d.RootFolders ?? []).Where(f => !string.IsNullOrWhiteSpace(f.Path))
+                .Select(f => new RootFolder(f.Id, f.Path!, f.FreeSpace is { } free ? (long)free : null)).ToList()));
+    }
+
+    private static string ServicePath(DiscoverKind kind) => kind == DiscoverKind.Movie ? "service/radarr" : "service/sonarr";
+
+    private static RequestService MapService(SeerrServiceDto s) =>
+        new(s.Id, NullIfEmpty(s.Name) ?? $"Server {s.Id}", s.Is4k, s.IsDefault, s.ActiveProfileId, NullIfEmpty(s.ActiveDirectory));
 
     public void Dispose() => _http.Dispose();
 
@@ -275,6 +446,43 @@ public sealed class SeerrServer : IRequestServer
         };
     }
 
+    /// <summary>A person's films and series: cast and crew together, each title once (a
+    /// director who also acted is not listed twice), newest first — undated ones last.</summary>
+    internal static IReadOnlyList<DiscoverItem> MapCredits(SeerrCombinedCreditsDto credits)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var items = new List<(DiscoverItem Item, double Popularity)>();
+        foreach (var c in (credits.Cast ?? []).Concat(credits.Crew ?? []))
+        {
+            var hit = MapResult(new SeerrResultDto
+            {
+                Id = c.Id, MediaType = c.MediaType, Title = c.Title, Name = c.Name,
+                ReleaseDate = c.ReleaseDate, FirstAirDate = c.FirstAirDate,
+                PosterPath = c.PosterPath, BackdropPath = c.BackdropPath,
+                VoteAverage = c.VoteAverage, VoteCount = c.VoteCount, MediaInfo = c.MediaInfo,
+            }, null);
+            if (hit is not null && seen.Add(hit.Key)) items.Add((hit, c.Popularity ?? 0));
+        }
+        return items
+            .OrderByDescending(i => i.Item.Year ?? int.MinValue)
+            .ThenByDescending(i => i.Popularity)
+            .Select(i => i.Item)
+            .ToList();
+    }
+
+    internal static PersonDetail MapPerson(SeerrPersonDto p, IReadOnlyList<DiscoverItem> credits) => new()
+    {
+        TmdbId = p.Id,
+        Name = NullIfEmpty(p.Name) ?? $"TMDB {p.Id}",
+        Biography = NullIfEmpty(p.Biography),
+        ProfilePath = NullIfEmpty(p.ProfilePath),
+        KnownFor = NullIfEmpty(p.KnownForDepartment),
+        Birthday = DateOf(p.Birthday),
+        Deathday = DateOf(p.Deathday),
+        PlaceOfBirth = NullIfEmpty(p.PlaceOfBirth),
+        Credits = credits,
+    };
+
     internal static DiscoverDetail MapMovie(SeerrMovieDetailsDto m)
     {
         var item = new DiscoverItem
@@ -301,6 +509,10 @@ public sealed class SeerrServer : IRequestServer
             ReleaseDate = DateOf(m.ReleaseDate),
             Cast = MapCast(m.Credits),
             Requests = (m.MediaInfo?.Requests ?? []).Select(r => MapRequest(r, DiscoverKind.Movie, m.Id, m.MediaInfo)).ToList(),
+            Downloads = MapDownloads(m.MediaInfo?.DownloadStatus),
+            Downloads4k = MapDownloads(m.MediaInfo?.DownloadStatus4k),
+            MediaId = m.MediaInfo?.Id is > 0 ? m.MediaInfo.Id : null,
+            OnWatchlist = m.OnUserWatchlist ?? false,
         };
     }
 
@@ -346,6 +558,10 @@ public sealed class SeerrServer : IRequestServer
             Seasons = seasons,
             Cast = MapCast(t.Credits),
             Requests = (t.MediaInfo?.Requests ?? []).Select(r => MapRequest(r, DiscoverKind.Tv, t.Id, t.MediaInfo)).ToList(),
+            Downloads = MapDownloads(t.MediaInfo?.DownloadStatus),
+            Downloads4k = MapDownloads(t.MediaInfo?.DownloadStatus4k),
+            MediaId = t.MediaInfo?.Id is > 0 ? t.MediaInfo.Id : null,
+            OnWatchlist = t.OnUserWatchlist ?? false,
         };
     }
 
@@ -383,11 +599,28 @@ public sealed class SeerrServer : IRequestServer
             CreatedAt = DateTimeOffset.TryParse(r.CreatedAt, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal, out var at) ? at : DateTimeOffset.MinValue,
             JellyfinItemId = JellyfinId(r.Is4k ? media?.JellyfinMediaId4k : media?.JellyfinMediaId),
+            Downloads = MapDownloads(r.Is4k ? media?.DownloadStatus4k : media?.DownloadStatus),
         };
     }
 
     internal static RequestUser MapUser(SeerrUserDto u) =>
         new(u.Id, u.Name, (RequestPermission)(int)Math.Clamp(u.Permissions, 0, int.MaxValue));
+
+    internal static IReadOnlyList<DownloadProgress> MapDownloads(List<SeerrDownloadDto>? downloads) =>
+        (downloads ?? [])
+            .Select(d => new DownloadProgress(
+                d.Title ?? "",
+                (long)Math.Max(0, d.Size ?? 0),
+                (long)Math.Max(0, d.SizeLeft ?? 0),
+                d.Status ?? "",
+                // Radarr and Sonarr write their queue's time left as a .NET TimeSpan.
+                TimeSpan.TryParse(d.TimeLeft, CultureInfo.InvariantCulture, out var left) && left >= TimeSpan.Zero
+                    ? left : null,
+                DateTimeOffset.TryParse(d.EstimatedCompletionTime, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal, out var eta) ? eta : null,
+                d.Episode?.SeasonNumber,
+                d.Episode?.EpisodeNumber))
+            .ToList();
 
     private static IReadOnlyList<DiscoverPerson> MapCast(SeerrCreditsDto? credits) =>
         (credits?.Cast ?? [])

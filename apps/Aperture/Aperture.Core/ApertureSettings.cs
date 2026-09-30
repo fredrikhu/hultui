@@ -55,6 +55,11 @@ public sealed class RequestServerAccountData
     public int UserId { get; set; }
     public string UserName { get; set; } = "";
     public DateTimeOffset SignedInAt { get; set; }
+
+    /// <summary>Requests of this user's already known to have arrived, by request id — so
+    /// "it's in your library" is said once per request, not once per launch. Null until the
+    /// first look, which records what is there without announcing any of it.</summary>
+    public List<int>? SeenAvailable { get; set; }
 }
 
 /// <summary>How a library draws what it holds.</summary>

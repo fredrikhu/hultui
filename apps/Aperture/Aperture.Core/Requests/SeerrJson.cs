@@ -25,6 +25,8 @@ internal sealed class SeerrPublicSettingsDto
     public int? MediaServerType { get; set; }
     public bool? MediaServerLogin { get; set; }
     public bool? CacheImages { get; set; }
+    public bool? HideAvailable { get; set; }
+    public bool? HideBlocklisted { get; set; }
 }
 
 internal sealed class SeerrUserDto
@@ -100,6 +102,29 @@ internal sealed class SeerrMediaInfoDto
     public string? JellyfinMediaId4k { get; set; }
     public List<SeerrSeasonStatusDto>? Seasons { get; set; }
     public List<SeerrRequestDto>? Requests { get; set; }
+    /// <summary>Filled by the server from Radarr/Sonarr's queue whenever it loads the title,
+    /// so request lists carry it as well as detail pages. Not in the published spec.</summary>
+    public List<SeerrDownloadDto>? DownloadStatus { get; set; }
+    public List<SeerrDownloadDto>? DownloadStatus4k { get; set; }
+}
+
+/// <summary>The server's <c>DownloadingItem</c> (<c>server/lib/downloadtracker.ts</c>).</summary>
+internal sealed class SeerrDownloadDto
+{
+    public string? Title { get; set; }
+    public double? Size { get; set; }
+    public double? SizeLeft { get; set; }
+    public string? Status { get; set; }
+    /// <summary>The downloader's own clock format: <c>00:12:34</c>, or <c>1.02:03:04</c> past a day.</summary>
+    public string? TimeLeft { get; set; }
+    public string? EstimatedCompletionTime { get; set; }
+    public SeerrEpisodeNumberDto? Episode { get; set; }
+}
+
+internal sealed class SeerrEpisodeNumberDto
+{
+    public int? SeasonNumber { get; set; }
+    public int? EpisodeNumber { get; set; }
 }
 
 internal sealed class SeerrSeasonStatusDto
@@ -150,6 +175,7 @@ internal sealed class SeerrMovieDetailsDto
     public SeerrCreditsDto? Credits { get; set; }
     public SeerrExternalIdsDto? ExternalIds { get; set; }
     public SeerrMediaInfoDto? MediaInfo { get; set; }
+    public bool? OnUserWatchlist { get; set; }
 }
 
 internal sealed class SeerrSeasonDto
@@ -177,6 +203,7 @@ internal sealed class SeerrTvDetailsDto
     public SeerrExternalIdsDto? ExternalIds { get; set; }
     public List<SeerrSeasonDto>? Seasons { get; set; }
     public SeerrMediaInfoDto? MediaInfo { get; set; }
+    public bool? OnUserWatchlist { get; set; }
 }
 
 internal sealed class SeerrRequestSeasonDto
@@ -237,6 +264,9 @@ internal sealed class SeerrNewRequestDto
     public int? TvdbId { get; set; }
     public List<int>? Seasons { get; set; }
     public bool Is4k { get; set; }
+    public int? ServerId { get; set; }
+    public int? ProfileId { get; set; }
+    public string? RootFolder { get; set; }
 }
 
 internal sealed class SeerrJellyfinAuthDto
@@ -254,6 +284,125 @@ internal sealed class SeerrQuickConnectCodeDto
 internal sealed class SeerrQuickConnectSecretDto
 {
     public string Secret { get; set; } = "";
+}
+
+internal sealed class SeerrWatchlistItemDto
+{
+    public int TmdbId { get; set; }
+    public string? MediaType { get; set; }
+    public string? Title { get; set; }
+}
+
+internal sealed class SeerrWatchlistPageDto
+{
+    public int? Page { get; set; }
+    public int? TotalPages { get; set; }
+    public int? TotalResults { get; set; }
+    public List<SeerrWatchlistItemDto>? Results { get; set; }
+}
+
+internal sealed class SeerrWatchlistAddDto
+{
+    public int TmdbId { get; set; }
+    public string MediaType { get; set; } = "movie";
+    public string? Title { get; set; }
+}
+
+internal sealed class SeerrNewIssueDto
+{
+    public int IssueType { get; set; }
+    public string Message { get; set; } = "";
+    public int MediaId { get; set; }
+    /// <summary>0 for the whole series (or a film), as the server's own form sends it.</summary>
+    public int ProblemSeason { get; set; }
+    public int ProblemEpisode { get; set; }
+}
+
+internal sealed class SeerrIdDto
+{
+    public int Id { get; set; }
+}
+
+internal sealed class SeerrServiceDto
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public bool Is4k { get; set; }
+    public bool IsDefault { get; set; }
+    public string? ActiveDirectory { get; set; }
+    public int? ActiveProfileId { get; set; }
+}
+
+internal sealed class SeerrProfileDto
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+}
+
+internal sealed class SeerrRootFolderDto
+{
+    public int Id { get; set; }
+    public string? Path { get; set; }
+    public double? FreeSpace { get; set; }
+}
+
+internal sealed class SeerrServiceDetailsDto
+{
+    public SeerrServiceDto? Server { get; set; }
+    public List<SeerrProfileDto>? Profiles { get; set; }
+    public List<SeerrRootFolderDto>? RootFolders { get; set; }
+}
+
+internal sealed class SeerrSliderDto
+{
+    public int Id { get; set; }
+    public int Type { get; set; }
+    public int Order { get; set; }
+    public bool Enabled { get; set; }
+    public string? Title { get; set; }
+    public string? Data { get; set; }
+}
+
+internal sealed class SeerrGenreSliderDto
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public List<string>? Backdrops { get; set; }
+}
+
+internal sealed class SeerrPersonDto
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public string? Biography { get; set; }
+    public string? ProfilePath { get; set; }
+    public string? KnownForDepartment { get; set; }
+    public string? Birthday { get; set; }
+    public string? Deathday { get; set; }
+    public string? PlaceOfBirth { get; set; }
+}
+
+/// <summary>A person's credits: the same hits as a search, each with its role.</summary>
+internal sealed class SeerrCombinedCreditsDto
+{
+    public List<SeerrCreditDto>? Cast { get; set; }
+    public List<SeerrCreditDto>? Crew { get; set; }
+}
+
+internal sealed class SeerrCreditDto
+{
+    public int Id { get; set; }
+    public string? MediaType { get; set; }
+    public string? Title { get; set; }
+    public string? Name { get; set; }
+    public string? ReleaseDate { get; set; }
+    public string? FirstAirDate { get; set; }
+    public string? PosterPath { get; set; }
+    public string? BackdropPath { get; set; }
+    public double? VoteAverage { get; set; }
+    public int? VoteCount { get; set; }
+    public double? Popularity { get; set; }
+    public SeerrMediaInfoDto? MediaInfo { get; set; }
 }
 
 internal sealed class SeerrErrorDto
@@ -282,4 +431,14 @@ internal sealed class SeerrErrorDto
 [JsonSerializable(typeof(SeerrQuickConnectCodeDto))]
 [JsonSerializable(typeof(SeerrQuickConnectSecretDto))]
 [JsonSerializable(typeof(SeerrErrorDto))]
+[JsonSerializable(typeof(SeerrWatchlistPageDto))]
+[JsonSerializable(typeof(SeerrWatchlistAddDto))]
+[JsonSerializable(typeof(SeerrNewIssueDto))]
+[JsonSerializable(typeof(SeerrIdDto))]
+[JsonSerializable(typeof(List<SeerrServiceDto>))]
+[JsonSerializable(typeof(SeerrServiceDetailsDto))]
+[JsonSerializable(typeof(List<SeerrSliderDto>))]
+[JsonSerializable(typeof(List<SeerrGenreSliderDto>))]
+[JsonSerializable(typeof(SeerrPersonDto))]
+[JsonSerializable(typeof(SeerrCombinedCreditsDto))]
 internal partial class SeerrJson : JsonSerializerContext;

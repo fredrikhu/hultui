@@ -158,28 +158,64 @@ password there. **Not exercised live:** making, deciding and withdrawing a reque
 start real downloads, so they are covered by the wire tests only until someone asks for
 something on purpose.
 
-### 7b — next
+### 7b — done (three small things left, at the end)
 
-- **Request from the library's own page.** A series with seasons missing says so on its
-  Jellyfin page, with the picker there. Needs the TMDB id from Jellyfin's `ProviderIds`.
-- **Download progress** — `mediaInfo.downloadStatus[]` (title, size left, ETA) on the title
-  page and in the requests list; the row that says "on its way" should say how far.
-- **Report a problem** — `POST /issue` (video / audio / subtitles, season and episode) from
-  the player's menu; `mediaId` is the request server's own media id, not TMDB's.
-- **Watchlist** (`/discover/watchlist`, `POST`/`DELETE /watchlist`, `mediaType` required
-  from 3.2) and a Home row for it.
-- **Advanced requests** for users with `REQUEST_ADVANCED`: server, quality profile, root
-  folder (`/service/radarr|sonarr[/{id}]` — never `/settings/*`, which carries the *arr keys).
-- **Quota** on the title page ("2 of 5 films left this week") and a clear refusal when over.
-- **The server's own hide flags** (`hideAvailable`, `hideRequested`, `hideBlocklisted` in
-  `/settings/public`) — they are applied by its web client, so a native one has to as well.
-- **CSRF protection** (off by default): with it on, writes need the `XSRF-TOKEN` cookie
-  echoed as a header. Detect the 403 and say so first; implement if a lab server has it on.
-- **A toast when a request arrives** — the server has no push channel, so poll the user's
-  requests on a slow timer and say when one turns available.
-- Genre, network and studio shelves (`/discover/genreslider/*`), person pages, the
-  administrator's own discover layout (`/settings/discover`).
+**Done (2026-09-30):**
 
+| | |
+|---|---|
+| Request from the library | a series' own Jellyfin page offers "Request Seasons 4–5" beside Play, and names seasons already asked for ("Season 3 on its way · 42%"); the join is the TMDB id Jellyfin scraped (`ItemFields.ProviderIds` → `MediaItem.TmdbId`) |
+| Download progress | `mediaInfo.downloadStatus[]` — not in the spec, filled from Radarr/Sonarr's queue whenever the server loads a title, so request lists carry it too. A bar on the title page, re-read every 15 s while something downloads (and only then); "On its way · 68%" in the list |
+| Quota | under the Request button ("3 of 5 film requests left this week"), which is disabled when spent; the season picker ticks no more seasons than the allowance and won't send more |
+| Hide switches | `hideAvailable` and `hideBlocklisted` applied as the server's web client applies them (the latter only for blocklist managers); `hideRequested` is not applied by that client, so not here either |
+
+Two things worth knowing: the server's `limit: 0` means *unlimited*, and a download's
+`timeLeft` is the downloader's own .NET `TimeSpan` string (`1.02:03:04` past a day). The
+library-page button is covered headless only — there is no Jellyfin key on the dev box to
+drive it against the real pair.
+
+**Done, second half (2026-09-30):**
+
+| | |
+|---|---|
+| The administrator's layout | Discover follows `/settings/discover` (open to any signed-in user): its order, what is switched off, and custom rows by the name they were given (genre, keyword, search, studio, network) |
+| Genres | "Films by genre" / "Series by genre" rows of backdrop cards (`/discover/genreslider/*`), each opening a genre page that pages with "Show more" |
+| People | a name in a title's cast opens their page: picture, biography, and every film and series they are credited with, once each, newest first |
+| Watchlist | a bookmark on the title page and a "Your watchlist" row; the list carries only ids, so titles and artwork come from the detail cache |
+| Advanced requests | for `REQUEST_ADVANCED` (or managers): a "Request with options…" button beside Request, and the same chips in the season picker — server (when there is more than one), quality profile, root folder with the room left in it |
+| Report a problem | from the player's title strip: picture / sound / subtitles / something else, this episode or the whole series, a description; filed against the request server's own record of the title |
+| Arrival toast | "Dune: Part Two is in your library", with Open — polled every five minutes (the server has no push); the first look announces nothing, and what was announced is kept in the settings file |
+| CSRF protection | the `_csrf` secret and `XSRF-TOKEN` are kept from any response and sent back on writes; a first write refused for CSRF fetches them and is sent again once |
+
+Traps on the way:
+
+1. **A new call swallowed a 401.** The layout read fell back to the default layout on any
+   failure — including a session the server had ended, which the rest of the app treats
+   as "close the request server". Caught by the existing session-ended test.
+2. **Escape bubbles.** A handled Escape in the report panel still reached the player
+   sheet's own handler, which stops the film. The panel stops propagation, and the sheet
+   now ignores a handled Escape. Keys typed into the report go to the text box, not the
+   player's shortcuts (a space in "out of sync" used to be Space: pause).
+3. **Removing from the watchlist takes `mediaType` from 3.2** and a 3.1 server refuses the
+   parameter outright, so it is sent by version. Adding answers 409 for "already on it",
+   which is success.
+4. **Left out, deliberately:** recently added (the library's Home has it, from Jellyfin),
+   studios and networks (the server's web page draws them from logo lists compiled into
+   it), streaming-service rows (their data is an undocumented string), and `hideRequested`
+   (the server's web client does not apply it either).
+
+Verified against the lab server, read-only: the layout (all twelve built-in rows), the
+genre rows and a genre page, a person, the watchlist, and Radarr's profiles and folders
+(`radarr.home`). Making a request, reporting a problem and the watchlist writes are covered
+by the wire and headless tests only.
+
+**Still open:**
+
+- A Home row for the watchlist (Home's rows are library items; this needs a row kind that
+  holds discovery titles).
+- Studios and networks, if a logo source turns up; streaming-service rows once their data
+  format is pinned down.
+- Issues as a list — reading and commenting on reports, for someone who manages them.
 ## Things deliberately not done
 
 - **A device profile, by default.** Aperture tells the server it can direct-play and

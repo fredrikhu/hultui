@@ -72,6 +72,11 @@ public sealed record MediaItem
     /// <summary>Episodes in a season, seasons in a series, items in a folder.</summary>
     public int? ChildCount { get; init; }
 
+    /// <summary>The item's TMDB id, from the metadata the server scraped — what joins a
+    /// film or series in the library to the request server's record of it. Only read for a
+    /// single item fetched for its detail page, like <see cref="People"/>.</summary>
+    public int? TmdbId { get; init; }
+
     /// <summary>Cast and crew, in the order the server lists them — which is billing order
     /// for actors, so the first few are the ones a poster would name. Only ever filled in
     /// for a single item fetched for its detail page; a list query does not ask for it.</summary>

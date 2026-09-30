@@ -19,13 +19,12 @@ internal abstract record SeerrAuth
 
     public sealed record None : SeerrAuth;
 
+    /// <summary>The headers this way of signing in adds. A session's cookie is not one of
+    /// them: <see cref="SeerrHttp"/> sends every cookie in one header of its own.</summary>
     public void Apply(HttpRequestMessage request)
     {
         switch (this)
         {
-            case Session s:
-                request.Headers.TryAddWithoutValidation("Cookie", s.Cookie);
-                break;
             case ApiKey k:
                 request.Headers.TryAddWithoutValidation("X-Api-Key", k.Key);
                 if (k.AsUser is { } user)
@@ -81,24 +80,15 @@ internal sealed class SeerrHttp : IDisposable
     public Task<ApertureResult<T>> PostAsync<T>(string path, JsonTypeInfo<T> type, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, path, null, type, ct);
 
-    /// <summary>A call whose answer is only its status — a delete.</summary>
-    public async Task<ApertureResult<bool>> SendStatusAsync(HttpMethod method, string path, CancellationToken ct = default)
+    /// <summary>A call whose answer is only its status — a delete, a watchlist add.</summary>
+    public async Task<ApertureResult<bool>> SendStatusAsync(HttpMethod method, string path, CancellationToken ct = default,
+        HttpContent? content = null)
     {
-        using var request = NewRequest(method, path, null);
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return ApertureResult<bool>.Fail(Classify(ex));
-        }
-        using (response)
-        {
-            if (response.IsSuccessStatusCode) return ApertureResult<bool>.Success(true);
-            return ApertureResult<bool>.Fail(await FailureFromAsync(response, ct).ConfigureAwait(false));
-        }
+        var sent = await SendRawAsync(method, path, content, ct).ConfigureAwait(false);
+        if (!sent.Ok) return sent.As<bool>();
+        using var response = sent.Value;
+        if (response.IsSuccessStatusCode) return ApertureResult<bool>.Success(true);
+        return ApertureResult<bool>.Fail(await FailureFromAsync(response, ct).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -109,18 +99,10 @@ internal sealed class SeerrHttp : IDisposable
     public async Task<ApertureResult<T>> SendAsync<T>(HttpMethod method, string pathAndQuery, HttpContent? content,
         JsonTypeInfo<T> type, CancellationToken ct = default, Action<string>? cookie = null)
     {
-        using var request = NewRequest(method, pathAndQuery, content);
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return ApertureResult<T>.Fail(Classify(ex));
-        }
+        var sent = await SendRawAsync(method, pathAndQuery, content, ct).ConfigureAwait(false);
+        if (!sent.Ok) return sent.As<T>();
 
-        using (response)
+        using (var response = sent.Value)
         {
             if (!response.IsSuccessStatusCode)
                 return ApertureResult<T>.Fail(await FailureFromAsync(response, ct).ConfigureAwait(false));
@@ -146,9 +128,118 @@ internal sealed class SeerrHttp : IDisposable
     public static StringContent JsonContent<T>(T body, JsonTypeInfo<T> type) =>
         new(JsonSerializer.Serialize(body, type), Encoding.UTF8, "application/json");
 
-    private HttpRequestMessage NewRequest(HttpMethod method, string pathAndQuery, HttpContent? content)
+    // ── CSRF ─────────────────────────────────────────────────────────────
+    //
+    // With "CSRF protection" switched on in its network settings, the server sets two
+    // cookies on every response — `_csrf`, a secret, and `XSRF-TOKEN`, a token derived from
+    // it — and refuses any write that does not send the secret back as a cookie and the
+    // token as a header. It applies to API-key calls too. A browser does that dance by
+    // itself; this client keeps the two values and does it by hand.
+
+    private string? _csrfCookie;
+    private string? _xsrfToken;
+
+    private const string CsrfCookieName = "_csrf";
+    private const string XsrfCookieName = "XSRF-TOKEN";
+
+    /// <summary>
+    /// The one send everything goes through: builds the request (auth, cookies, the CSRF
+    /// token on writes), sends it, and keeps whatever CSRF cookies the answer set. A write
+    /// refused for a bad CSRF token when none has been seen yet is retried once, after a
+    /// read that fetches one — which is how the first write of a session goes on a server
+    /// with the protection on.
+    /// </summary>
+    private async Task<ApertureResult<HttpResponseMessage>> SendRawAsync(HttpMethod method, string pathAndQuery,
+        HttpContent? content, CancellationToken ct)
     {
-        var request = new HttpRequestMessage(method, Address + "/api/v1/" + pathAndQuery.TrimStart('/')) { Content = content };
+        // The body is buffered so a retry can send it again.
+        byte[]? body = content is null ? null : await content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        var contentType = content?.Headers.ContentType;
+        content?.Dispose();
+
+        bool hadToken = _xsrfToken is not null;
+        var first = await SendOnceAsync(method, pathAndQuery, body, contentType, ct).ConfigureAwait(false);
+        // Only a write, only the first time, and only a refusal that says it is about CSRF.
+        if (!first.Ok || method == HttpMethod.Get || hadToken || first.Value.StatusCode != HttpStatusCode.Forbidden)
+            return first;
+        if (!await IsCsrfRefusalAsync(first.Value, ct).ConfigureAwait(false))
+            return first;
+
+        first.Value.Dispose();
+        if (_xsrfToken is null)
+        {
+            // Any read will do: the server sets the cookies on every response.
+            var primed = await SendOnceAsync(HttpMethod.Get, "status", null, null, ct).ConfigureAwait(false);
+            if (primed.Ok) primed.Value.Dispose();
+        }
+        return await SendOnceAsync(method, pathAndQuery, body, contentType, ct).ConfigureAwait(false);
+    }
+
+    private async Task<ApertureResult<HttpResponseMessage>> SendOnceAsync(HttpMethod method, string pathAndQuery,
+        byte[]? body, MediaTypeHeaderValue? contentType, CancellationToken ct)
+    {
+        using var request = NewRequest(method, pathAndQuery, body, contentType);
+        try
+        {
+            var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            KeepCsrfCookies(response);
+            return ApertureResult<HttpResponseMessage>.Success(response);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ApertureResult<HttpResponseMessage>.Fail(Classify(ex));
+        }
+    }
+
+    /// <summary>The csurf middleware's refusal reads "invalid csrf token"; a permission
+    /// refusal is a 403 too, and must not be retried as if it were one.</summary>
+    private static async Task<bool> IsCsrfRefusalAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            await response.Content.LoadIntoBufferAsync(ct).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return text.Contains("csrf", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            return false;
+        }
+    }
+
+    private void KeepCsrfCookies(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+        foreach (var header in values)
+        {
+            int semi = header.IndexOf(';');
+            var pair = (semi >= 0 ? header[..semi] : header).Trim();
+            if (pair.StartsWith(CsrfCookieName + "=", StringComparison.Ordinal))
+                _csrfCookie = pair;
+            else if (pair.StartsWith(XsrfCookieName + "=", StringComparison.Ordinal))
+                _xsrfToken = Uri.UnescapeDataString(pair[(XsrfCookieName.Length + 1)..]);
+        }
+    }
+
+    private HttpRequestMessage NewRequest(HttpMethod method, string pathAndQuery, byte[]? body,
+        MediaTypeHeaderValue? contentType)
+    {
+        var request = new HttpRequestMessage(method, Address + "/api/v1/" + pathAndQuery.TrimStart('/'));
+        if (body is not null)
+        {
+            request.Content = new ByteArrayContent(body);
+            request.Content.Headers.ContentType = contentType;
+        }
+
+        // One Cookie header: the session (when signed in with one) and the CSRF secret
+        // (when the server has handed one out).
+        var cookies = new List<string>(2);
+        if (Auth is SeerrAuth.Session session) cookies.Add(session.Cookie);
+        if (_csrfCookie is { } csrf) cookies.Add(csrf);
+        if (cookies.Count > 0) request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies));
+        if (method != HttpMethod.Get && _xsrfToken is { } token)
+            request.Headers.TryAddWithoutValidation("X-XSRF-TOKEN", token);
+
         Auth.Apply(request);
         return request;
     }
