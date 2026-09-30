@@ -176,7 +176,8 @@ interop the frame is read back and uploaded instead, at about 220 ms/s;
   Separate windows, or the GL renderer, are unaffected.
 - Drag and drop needs `[STAThread]` on Windows: files and text dropped from outside reach the
   page, drags inside the page work, and a page's drag can be dropped on another application.
-  A file drag takes about half a second to light up a page's drop zone. On Linux, drops wait
+  A page learns of a drag about a quarter of a second after it enters (Edge is quicker: its
+  drop target is in the browser's own process). On Linux, drops wait
   for the CEF engine.
 - Windows only until the CEF engine exists; `FakeWebEngine` runs anywhere.
 

@@ -150,16 +150,16 @@ public sealed unsafe class OsDropTests
         {
             var target = DropTargetOf(app.PrimaryWindow.NativeHandle);
             var at = OnScreen(app, 200, 150);
+            // A drag flicked into the middle of a drop zone: OLE calls DragOver on every mouse
+            // event from the moment the drag enters, before the page has even seen it. The
+            // page's acceptance (it cancels its dragover) must still reach OLE, and soon: with
+            // every call passed on to WebView2 it took 4 s here, and half a second by hand.
+            var clock = Stopwatch.StartNew();
             DragEnter(target, data, at);
-            Assert.True(PumpUntil(app, () => received.Contains("\"enter:Files\""), seconds: 5),
-                $"the page said: {string.Join(", ", received)}");
-
-            // The page accepts by cancelling its dragover. The browser answers for a point once
-            // the page has, and only asks again when the point moves — as it always does under
-            // a real mouse — so the drag moves a pixel at a time until the answer comes back.
-            int step = 0;
-            Assert.True(PumpUntil(app, () => DragOver(target, new POINTL { X = at.X + (step++ % 5), Y = at.Y }) != 0, seconds: 5),
-                "the page's acceptance never reached the operating system");
+            Assert.True(PumpUntil(app, () => DragOver(target, at) != 0, seconds: 1),
+                $"the page's acceptance had not reached the operating system after {clock.ElapsedMilliseconds} ms");
+            Console.Error.WriteLine($"[timing] accepted after {clock.ElapsedMilliseconds} ms");
+            Assert.Contains("\"enter:Files\"", received);
             DragLeave(target);
         }
         finally { Marshal.Release(data); }

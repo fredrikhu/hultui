@@ -537,19 +537,24 @@ gave none (`DropData`).
 **Proven, by playing the drag through the registered target as OLE would, without a mouse**
 (`OsDropTests`): an element knows the files during the hover and its answer reaches OLE (and
 with SDL's target it heard nothing at all until the next pump — seen); a page gets
-`dragenter` with the `Files` type and its acceptance reaches OLE. Found: WebView2 answers
-for a point only when the point moves, so a still drag reports the old answer.
+`dragenter` with the `Files` type and its acceptance reaches OLE.
 
 **The drop into the page: proven by hand** (the owner, 2026-09-30, the sample with a real
 mouse): files dragged from File Explorer onto the page's drop zone arrive by name; a
 sortable list inside the page reorders by dragging (HTML5 drag and drop, the case WebView2's
 tracker calls broken in composition hosting); a page item dragged onto another application
 (the Run dialog) arrives as its text; and Vesper Commander's own drops work as before, now
-with the copy, move and no-entry cursors during the hover. Two observations: the drop zone
-lights up about half a second after a file drag enters (text is quick), and our side of that
-is 7 ms — measured, the page's `dragenter` comes about 120 ms after `DragEnter` returns, for
-files and text alike, in a synthetic drag. Whether the rest is WebView2's or Explorer's is
-open; Brave on the same page is the comparison.
+with the copy, move and no-entry cursors during the hover.
+
+**The late drop zone** (found by hand: a file flicked into the middle of a zone lit it half a
+second late; moved slowly to its edge, at once; Edge at once either way). Our side is 7 ms.
+WebView2 takes about 120 ms to tell the page a drag entered, and every `DragOver` it is given
+meanwhile holds that up: from `DragEnter` to the page's acceptance, 4 s with every call passed
+on (a fast mouse makes hundreds a second), 0.5 s at one per 50 ms, 0.25 s with a quiet 150 ms
+and then one per 25 ms. The engine now passes hovers on at that pace and answers in between
+with the last answer. Edge pays none of this: its drop target is in the browser's own process.
+A first guess — that WebView2 re-asks the page only when the point moves — was wrong; it
+came from a test flooding it with calls.
 
 What the synthetic test could not do, for the record: played without a real `DoDragDrop`, the
 browser never finishes the drag —

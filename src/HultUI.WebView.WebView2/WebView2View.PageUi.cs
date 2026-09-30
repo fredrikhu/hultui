@@ -19,6 +19,18 @@ internal sealed unsafe partial class WebView2View
     private const int DownloadUserCancelled = 26; // COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED
     private nint _webview4, _webview11, _composition3;
     private nint _dragData; // a data object we made for a drag that came without one
+    private long _dragEntered, _dragForwarded;
+    private bool _dragAccepted;
+
+    /// <summary>
+    /// How often a hover is passed on. OLE calls DragOver on every mouse event — hundreds a
+    /// second from a fast mouse — and each call WebView2 takes while it is still telling the
+    /// page the drag has entered holds that up: measured from DragEnter to the page's
+    /// acceptance, 4 s with every call passed on, 0.5 s one per 50 ms (what a quick flick into
+    /// a drop zone felt like), 0.25 s with a quiet 150 ms and then one per 25 ms. Edge, whose
+    /// drop target is in-process, has no such cost. Between calls the last answer stands.
+    /// </summary>
+    private const int DragQuietMs = 150, DragEveryMs = 25;
     private readonly List<ActiveDownload> _downloads = [];
 
     private void SubscribePageUi()
@@ -80,6 +92,16 @@ internal sealed unsafe partial class WebView2View
     {
         if (_phase != Phase.Ready || _composition3 == 0) return false;
         var point = new Native.POINT { X = input.X, Y = input.Y };
+        long now = Environment.TickCount64;
+        if (input.Action == WebDragAction.Enter)
+        {
+            _dragEntered = now;
+            _dragAccepted = false;
+        }
+        else if (input.Action == WebDragAction.Over
+                 && (now - _dragEntered < DragQuietMs || now - _dragForwarded < DragEveryMs))
+            return _dragAccepted;
+        if (input.Action == WebDragAction.Over) _dragForwarded = now;
         // During an OLE drag the left button is down, and up by the drop; the modifiers pick
         // the effect.
         uint keys = (input.Action == WebDragAction.Drop ? 0 : MK_LBUTTON)
@@ -98,6 +120,7 @@ internal sealed unsafe partial class WebView2View
             case WebDragAction.Over:
                 hr = ((delegate* unmanaged[Stdcall]<nint, uint, Native.POINT, uint*, int>)vtable[ICoreWebView2CompositionController3.DragOver])(
                     _composition3, keys, point, &effect);
+                _dragAccepted = hr >= 0 && effect != 0;
                 break;
             case WebDragAction.Drop:
                 hr = ((delegate* unmanaged[Stdcall]<nint, nint, uint, Native.POINT, uint*, int>)vtable[ICoreWebView2CompositionController3.Drop])(
