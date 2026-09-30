@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using HultUI.Core.Accessibility;
 using HultUI.Core.Elements;
 using HultUI.Core.Primitives;
@@ -13,6 +14,7 @@ namespace HultUI.Headless.Tests;
 /// is proved against a real browser in <c>HultUI.UiTests</c>; these pin the answers, because
 /// each one was a way to get it wrong that a client only showed as a hang or an empty element.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public class NativeContentUiaTests
 {
     private const int ServerSide = 0x2, Override = 0x8;
