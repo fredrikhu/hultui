@@ -111,7 +111,8 @@ public sealed partial class ApertureApp
         // Off any view that needs it — their rail buttons have just gone, and a page with
         // no way back to it is a dead end.
         if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
-                or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.Requests
+                or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.DiscoverAll
+                or ApertureView.Requests
                 or ApertureView.Issues or ApertureView.Issue) > 0
             && _stack.Count == 0)
             _stack.Add(new Route(ApertureView.Home));
@@ -120,11 +121,17 @@ public sealed partial class ApertureApp
     // ── Discover's rows: the administrator's layout ──────────────────────
 
     /// <summary>One row of Discover, filled. One of the lists is used, by the row's kind:
-    /// titles (requests become titles too), genres to browse, or studios and networks.</summary>
+    /// titles (requests become titles too), genres to browse, or studios and networks.
+    /// A row of titles from the layout keeps its <see cref="Slider"/>, and whether the
+    /// server has more of it than the first page — which is what "See all" opens.</summary>
     internal sealed record DiscoverRow(string Key, string Title, SliderKind Kind,
-        IReadOnlyList<DiscoverItem> Items, IReadOnlyList<DiscoverGenre> Genres, IReadOnlyList<DiscoverCompany> Companies)
+        IReadOnlyList<DiscoverItem> Items, IReadOnlyList<DiscoverGenre> Genres, IReadOnlyList<DiscoverCompany> Companies,
+        DiscoverSlider? Slider = null, bool HasMore = false)
     {
         public bool IsEmpty => Items.Count == 0 && Genres.Count == 0 && Companies.Count == 0;
+
+        /// <summary>A custom row with more than its first page: the heading offers the rest.</summary>
+        public bool CanSeeAll => Slider is { IsCustom: true } && HasMore;
     }
 
     private readonly AsyncLoader<IReadOnlyList<DiscoverRow>> _discoverRows = new([]);
@@ -183,8 +190,9 @@ public sealed partial class ApertureApp
                         rows.Add(new DiscoverRow("networks-" + slider.Id, title, slider.Kind, [], [], DiscoverCompanies.Networks));
                         break;
                     default:
+                        var first = FetchRequest(() => server.GetSliderAsync(slider), DiscoverPage.Empty, title);
                         rows.Add(new DiscoverRow("slider-" + slider.Id, title, slider.Kind,
-                            Shown(server, FetchRequest(() => server.GetSliderAsync(slider), DiscoverPage.Empty, title).Items), [], []));
+                            Shown(server, first.Items), [], [], slider, first.HasMore));
                         break;
                 }
             }
@@ -282,6 +290,12 @@ public sealed partial class ApertureApp
     private void EnsureGenrePage(DiscoverKind kind, int genreId, bool more = false) =>
         EnsureWallPage($"genre|{kind}|{genreId}",
             (server, page) => server.DiscoverGenreAsync(kind, genreId, page), "That genre", more);
+
+    /// <summary>A custom row's titles in full. Keyed by what the row asks for, not only its
+    /// id, so an administrator changing the row mid-visit starts it again.</summary>
+    private void EnsureSliderPage(DiscoverSlider slider, bool more = false) =>
+        EnsureWallPage($"slider|{slider.Id}|{slider.Kind}|{slider.Data}",
+            (server, page) => server.GetSliderAsync(slider, page), "That row", more);
 
     private void EnsureCompanyPage(DiscoverKind kind, int companyId, bool more = false) =>
         EnsureWallPage($"company|{kind}|{companyId}",

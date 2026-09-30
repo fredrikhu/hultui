@@ -100,7 +100,8 @@ public sealed partial class ApertureApp
             var items = row.Items;
             page.AddChild(CardRow(row.Title, items.Count,
                 i => DiscoverCard(items[i], Halide.PosterWidth, cursorIndex: start + i),
-                Halide.PosterWidth, "discover-row-" + row.Key));
+                Halide.PosterWidth, "discover-row-" + row.Key,
+                headingExtra: row.CanSeeAll ? SeeAllLink(row) : null));
             cursorBase += items.Count;
         }
 
@@ -155,6 +156,50 @@ public sealed partial class ApertureApp
 
         card.OnClick(_ => OpenGenre(genre));
         return card.HoverBg(Halide.Raised);
+    }
+
+    /// <summary>"See all", at the end of a custom row's heading: the row's first page is all
+    /// a row shows, and the rest is a wall of its own. A real button, small, so Enter and
+    /// Space open it as they do any other.</summary>
+    private Element SeeAllLink(DiscoverRow row)
+    {
+        var link = Ui.Button(ButtonVariant.Ghost, "See all",
+            () => Navigate(new Route(ApertureView.DiscoverAll,
+                row.Slider!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), row.Title)),
+            $"discover-row-{row.Key}-see-all", style: SeeAllStyle);
+        link.AccessibleName = $"See all of {row.Title}";
+        return link;
+    }
+
+    private static readonly ButtonStyle SeeAllStyle = new()
+    {
+        Padding = new Thickness(4, 8, 4, 8),
+        FontSize = 12f,
+        Text = Halide.Accent300,
+    };
+
+    /// <summary>A custom row in full: its titles as a wall, a page at a time. The row is
+    /// found in the layout as last loaded — the route carries only its id.</summary>
+    private Element BuildDiscoverAllView(Route route)
+    {
+        int id = int.TryParse(route.Id, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : int.MinValue;
+        EnsureDiscoverRows();
+        if (DiscoverRows.FirstOrDefault(r => r.Slider?.Id == id)?.Slider is not { } slider)
+        {
+            SetCursorList("see-all:empty", [], 1);
+            var column = Flex.Column(gap: 0).FlexGrow(1).AutomationId("see-all-view");
+            column.AddChild(ViewBar(route.Title ?? "Discover", 0, "see-all-view"));
+            column.AddChild(DiscoverRowsLoading
+                ? EmptyState(Icons.Loading, $"Asking {RequestServerTitle}…", null, "see-all-view-empty")
+                : EmptyState(Icons.Discover, "That row is gone",
+                    $"It is no longer in {RequestServerTitle}'s Discover layout.", "see-all-view-empty"));
+            return column;
+        }
+        EnsureSliderPage(slider);
+        return TitleWall(route.Title ?? slider.Title ?? "Discover", WallItems, WallLoading, WallHasMore,
+            () => { EnsureSliderPage(slider, more: true); Rerender(); }, "see-all-view", Icons.Discover,
+            "Nothing here now", $"{RequestServerTitle} has nothing to show for this row just now.");
     }
 
     private const float CompanyCardWidth = 224f;

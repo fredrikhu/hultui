@@ -113,7 +113,8 @@ beside Play; something being downloaded shows how far it has got; and an allowan
 nearly spent is said before the button is pressed.
 
 Discover follows the request server administrator's own layout — its order, its switched-off
-rows, its custom rows (streaming-service rows among them) — with genre rows that open genre
+rows, its custom rows (streaming-service rows among them, each with a "See all" page once it
+runs past one page) — with genre rows that open genre
 pages, studio and network rows of
 logos that open everything a studio made or a network aired, and a name in a title's cast
 opens everything that person is in. A bookmark keeps a title on the watchlist. Someone the

@@ -267,6 +267,14 @@ server has no such row, and making one would change its layout, so the live test
 row up in memory: Netflix in the US reads fewer titles than no filter, and Netflix or
 Disney+ more than Netflix alone.
 
+**Since, "See all":** a custom row — keywords, a genre, a search, a studio, a network,
+streaming services — whose first page is not all of it gets "See all" at the end of its
+heading, opening the row as a wall that pages with "Show more" (`ApertureView.DiscoverAll`,
+on the loader genre and studio pages use). Built-in rows keep paging in place, as the
+server's own page has them. The route carries only the row's id; the row itself is found in
+the layout as last loaded, and one no longer there says so rather than guessing. It is a
+real button, not a link-styled box: only `ButtonElement` answers Enter and Space.
+
 **Still open:** nothing on the Discover page; every row of the server's layout is drawn but
 "recently added", which Home has from Jellyfin.
 

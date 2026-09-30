@@ -38,6 +38,8 @@ public enum ApertureView
     DiscoverPerson,
     /// <summary>A studio's films or a network's series; the Id is <c>movie:2</c> or <c>tv:213</c>.</summary>
     DiscoverCompany,
+    /// <summary>A custom Discover row in full — "See all"; the Id is the row's id in the layout.</summary>
+    DiscoverAll,
     /// <summary>Problem reports, for someone who may read everyone's.</summary>
     Issues,
     /// <summary>One report and its conversation; the Id is the server's issue id.</summary>
@@ -223,6 +225,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.DiscoverTitle => BuildDiscoverTitleView(Current),
             ApertureView.DiscoverGenre => BuildDiscoverGenreView(Current),
             ApertureView.DiscoverCompany => BuildDiscoverCompanyView(Current),
+            ApertureView.DiscoverAll => BuildDiscoverAllView(Current),
             ApertureView.DiscoverPerson => BuildDiscoverPersonView(Current),
             ApertureView.Requests => BuildRequestsView(),
             ApertureView.Issues => BuildIssuesView(),
@@ -340,7 +343,8 @@ public sealed partial class ApertureApp : Component, IDisposable
             rail.AddChild(Box.New().Height(Halide.S2));
             rail.AddChild(RailButton(Icons.Discover, "Discover", "",
                 active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
-                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany,
+                    or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany
+                    or ApertureView.DiscoverAll,
                 onClick: () => Navigate(new Route(ApertureView.Discover))));
             rail.AddChild(RailButton(Icons.Requests, "Requests", "",
                 active: Current.View == ApertureView.Requests,

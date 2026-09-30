@@ -280,6 +280,10 @@ public sealed class FakeRequestServer : IRequestServer
     /// the twelve built-in rows, in the order a fresh install has them.</summary>
     public List<DiscoverSlider>? Layout { get; set; }
 
+    /// <summary>How many titles a page of a row holds — twenty, as the server's; smaller so a
+    /// test can have a second page without twenty titles.</summary>
+    public int SliderPageSize { get; set; } = 20;
+
     /// <summary>Problem reports made through <see cref="ReportIssueAsync"/>, in order.</summary>
     public List<NewIssue> Reports { get; } = [];
 
@@ -344,7 +348,7 @@ public sealed class FakeRequestServer : IRequestServer
 
     public Task<ApertureResult<DiscoverPage>> GetSliderAsync(DiscoverSlider slider, int page = 1, CancellationToken ct = default)
     {
-        Calls.Add($"GetSlider({slider.Kind},{slider.Id})");
+        Calls.Add(page > 1 ? $"GetSlider({slider.Kind},{slider.Id},p{page})" : $"GetSlider({slider.Kind},{slider.Id})");
         if (Fail<DiscoverPage>() is { } failed) return failed;
         DiscoverShelf? shelf = slider.Kind switch
         {
@@ -356,8 +360,9 @@ public sealed class FakeRequestServer : IRequestServer
             _ => null,
         };
         var keys = shelf is { } s ? _shelves.GetValueOrDefault(s, []) : _customRows.GetValueOrDefault(slider.Id, []);
-        var items = keys.Select(k => _titles[k].Item).ToList();
-        return Done(new DiscoverPage(items, 1, items.Count > 0 ? 1 : 0, items.Count));
+        // Pages of SliderPageSize, as the server's are of twenty.
+        var items = keys.Skip((Math.Max(1, page) - 1) * SliderPageSize).Take(SliderPageSize).Select(k => _titles[k].Item).ToList();
+        return Done(new DiscoverPage(items, Math.Max(1, page), (keys.Count + SliderPageSize - 1) / SliderPageSize, keys.Count));
     }
 
     public Task<ApertureResult<IReadOnlyList<DiscoverGenre>>> GetGenresAsync(DiscoverKind kind, CancellationToken ct = default)

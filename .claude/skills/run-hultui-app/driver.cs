@@ -307,6 +307,10 @@ Aperture.Core.Testing.FakeRequestServer DemoRequests(bool reporter = false)
     // Something downloading, for the progress bar and the list's percentage.
     fake.SetDownloads("movie:1003", [new Aperture.Core.Requests.DownloadProgress("Northbound.2022.2160p.mkv",
         8_000_000_000, 2_600_000_000, "downloading", TimeSpan.FromMinutes(23), null)]);
+    // Pages of eight, so a custom row can outgrow its first page and offer "See all".
+    fake.SliderPageSize = 8;
+    fake.AddCustomRow(new Aperture.Core.Requests.DiscoverSlider(21, Aperture.Core.Requests.SliderKind.MovieKeyword,
+        "Slow cinema", "4565", true, 2), [.. Enumerable.Range(1000, 10).Select(id => $"movie:{id}"), "movie:990"]);
     // A streaming-service row, as an administrator adds one: a name, a region, services.
     fake.AddCustomRow(new Aperture.Core.Requests.DiscoverSlider(20, Aperture.Core.Requests.SliderKind.TvStreaming,
         "On Netflix", "SE,8", true, 12), "tv:2000", "tv:2102", "tv:2104");

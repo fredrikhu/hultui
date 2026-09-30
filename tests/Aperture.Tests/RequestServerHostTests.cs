@@ -532,6 +532,57 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void ACustomRowWithMoreThanItsFirstPageOffersSeeAll()
+    {
+        var requests = Requests();
+        requests.SliderPageSize = 1;   // so two titles make two pages
+        requests.AddMovie(604, "The Matrix Reloaded", 2003, shelves: [DiscoverShelf.PopularMovies]);
+        requests.Layout = [new DiscoverSlider(1, SliderKind.PopularMovies, null, null, Enabled: true, Order: 0)];
+        requests.AddCustomRow(new DiscoverSlider(5, SliderKind.MovieKeyword, "Mind-benders", "4565", true, 1),
+            "movie:603", "movie:604");
+        requests.AddCustomRow(new DiscoverSlider(6, SliderKind.TvGenre, "Dramas", "18", true, 2), "tv:1399");
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Mind-benders");
+            // A built-in row pages in place, as the server's own page does; a custom row
+            // with one page has nothing more to see.
+            Assert.Null(session.Window.FindByAutomationId("discover-row-slider-1-see-all"));
+            Assert.Null(session.Window.FindByAutomationId("discover-row-slider-6-see-all"));
+
+            Click(session, "discover-row-slider-5-see-all");
+            Assert.Equal(ApertureView.DiscoverAll, app.Current.View);
+            Assert.Equal("5", app.Current.Id);
+            PumpUntilShown(session, "The Matrix, film, 1999");
+            Assert.False(Shows(session, "The Matrix Reloaded"));
+
+            Click(session, "see-all-view-more");
+            PumpUntilShown(session, "The Matrix Reloaded, film, 2003");
+            Assert.Contains("GetSlider(MovieKeyword,5,p2)", requests.Calls);
+
+            // Back is Discover, with the rail still saying so.
+            app.GoBack();
+            Pump(session);
+            Assert.Equal(ApertureView.Discover, app.Current.View);
+        });
+    }
+
+    [Fact]
+    public void SeeAllForARowNoLongerInTheLayoutSaysSo()
+    {
+        var requests = Requests();
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            app.Navigate(new Route(ApertureView.DiscoverAll, "99", "Mind-benders"));
+            PumpUntilShown(session, "That row is gone");
+            Assert.DoesNotContain(requests.Calls, c => c.StartsWith("GetSlider(", StringComparison.Ordinal)
+                                                      && c.Contains(",99", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
     public void AStreamingServiceRowIsDrawnByTheNameItWasGiven()
     {
         var requests = Requests();
