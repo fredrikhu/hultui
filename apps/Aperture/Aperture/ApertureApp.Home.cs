@@ -25,9 +25,10 @@ public sealed partial class ApertureApp
     /// it. Built fresh each frame — the settings store keys and an order, never items.</summary>
     /// <param name="Titles">When set, a row of the request server's titles rather than
     /// library items — the watchlist — drawn as discovery cards.</param>
+    /// <param name="SeeAll">Where "See all" goes, for a row with more behind it than it shows.</param>
     private sealed record HomeRow(
         string Key, string Title, IReadOnlyList<MediaItem> Items,
-        float CardWidth, bool Stills, string? Trailing = null, IReadOnlyList<DiscoverItem>? Titles = null)
+        float CardWidth, bool Stills, IReadOnlyList<DiscoverItem>? Titles = null, Action? SeeAll = null)
     {
         public int Count => Titles?.Count ?? Items.Count;
     }
@@ -83,7 +84,7 @@ public sealed partial class ApertureApp
                 i => titles is not null ? DiscoverCard(titles[i], row.CardWidth, cursorIndex: start + i)
                     : row.Stills ? StillCard(items[i], cursorIndex: start + i)
                     : PosterCard(items[i], cursorIndex: start + i),
-                row.CardWidth, "row-" + row.Key, trailing: row.Trailing,
+                row.CardWidth, "row-" + row.Key,
                 headingExtra: HomeRowHeadingExtra(row, all)));
             cursorBase += row.Count;
         }
@@ -122,14 +123,18 @@ public sealed partial class ApertureApp
         // and something on the list: like every row here, an empty one is not drawn.
         if (_requestServer is not null && HomeWatchlist.Count > 0)
             rows.Add(new HomeRow(WatchlistRowKey, "Your watchlist", [], Halide.PosterWidth, Stills: false,
-                Titles: HomeWatchlist));
+                Titles: HomeWatchlist,
+                SeeAll: HomeWatchlistHasMore
+                    ? () => Navigate(new Route(ApertureView.DiscoverAll, WatchlistRouteId, "Your watchlist"))
+                    : null));
 
         foreach (var library in Libraries)
         {
             var latest = LatestIn(library.Id);
             if (latest.Count == 0) continue;
-            rows.Add(new HomeRow(LatestRowKey(library.Id), $"Latest in {library.Name}",
-                latest, Halide.PosterWidth, Stills: false, Trailing: "open"));
+            var (id, name) = (library.Id, library.Name);
+            rows.Add(new HomeRow(LatestRowKey(id), $"Latest in {name}", latest, Halide.PosterWidth, Stills: false,
+                SeeAll: latest.Count >= LatestRowSize ? () => OpenLatest(id, name) : null));
         }
 
         var order = _settings.Data.HomeRowOrder;
@@ -160,15 +165,14 @@ public sealed partial class ApertureApp
 
     /// <summary>The row's own menu, in its heading. Kept to the things that are about
     /// <em>this</em> row, so it reads as "this shelf" rather than "home settings".</summary>
-    /// <summary>What sits at the end of a row's heading: its menu — and, on the watchlist
-    /// when it runs past one page, "See all" before it, as on Discover's row.</summary>
+    /// <summary>What sits at the end of a row's heading: its menu — and, for a row with
+    /// more behind it (the watchlist past one page, a library's latest), "See all" before it.</summary>
     private Element HomeRowHeadingExtra(HomeRow row, List<HomeRow> all)
     {
         var menu = RowMenuButton(row, all);
-        if (row.Key != WatchlistRowKey || !HomeWatchlistHasMore) return menu;
+        if (row.SeeAll is not { } seeAll) return menu;
         var both = Flex.Row(gap: Halide.S1).AlignItems(AlignItems.Center);
-        both.AddChild(SeeAllButton(row.Title, "row-" + row.Key + "-see-all",
-            new Route(ApertureView.DiscoverAll, WatchlistRouteId, row.Title)));
+        both.AddChild(SeeAllButton(row.Title, "row-" + row.Key + "-see-all", seeAll));
         both.AddChild(menu);
         return both;
     }

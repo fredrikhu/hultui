@@ -162,15 +162,18 @@ public sealed partial class ApertureApp
     /// <summary>"See all", at the end of a row's heading: the row's first page is all a row
     /// shows, and the rest is a wall of its own. A real button, small, so Enter and Space
     /// open it as they do any other.</summary>
-    private Element SeeAllLink(DiscoverRow row) => SeeAllButton(row.Title, $"discover-row-{row.Key}-see-all",
-        row.Kind == SliderKind.Watchlist
+    private Element SeeAllLink(DiscoverRow row)
+    {
+        var to = row.Kind == SliderKind.Watchlist
             ? new Route(ApertureView.DiscoverAll, WatchlistRouteId, row.Title)
             : new Route(ApertureView.DiscoverAll,
-                row.Slider!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), row.Title));
+                row.Slider!.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), row.Title);
+        return SeeAllButton(row.Title, $"discover-row-{row.Key}-see-all", () => Navigate(to));
+    }
 
-    private ButtonElement SeeAllButton(string title, string automationId, Route to)
+    private ButtonElement SeeAllButton(string title, string automationId, Action open)
     {
-        var link = Ui.Button(ButtonVariant.Ghost, "See all", () => Navigate(to), automationId, style: SeeAllStyle);
+        var link = Ui.Button(ButtonVariant.Ghost, "See all", open, automationId, style: SeeAllStyle);
         link.AccessibleName = $"See all of {title}";
         return link;
     }

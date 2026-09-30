@@ -753,6 +753,35 @@ public class ApertureAppHostTests
     }
 
     [Fact]
+    public void AFullLatestRowsSeeAllIsTheLibraryNewestFirstUnfiltered()
+    {
+        var library = Library();
+        for (int i = 4; i <= 13; i++) library.AddMovie("m" + i, "Film " + i, "movies", 2000 + i, 90);
+        Host(library, (session, app) =>
+        {
+            PumpUntilShown(session, "See all of Latest in Films");
+            // A row holding its whole library has nothing more to see.
+            Assert.True(Shows(session, "Latest in Series"));
+            Assert.Null(session.Window.FindByAutomationId("row-latest-shows-see-all"));
+            Assert.NotNull(session.Window.FindByAutomationId("row-latest-movies-menu"));
+
+            // Left sorted and filtered some other way since the last visit.
+            app.SetGridSort(ItemSort.Name, descending: false);
+            app.SetGridPlayedFilter(false);
+            session.Window.FindByAutomationId("row-latest-movies-see-all")!.Click();
+            for (int i = 0; i < 4; i++) session.PumpFrame();
+
+            Assert.Equal(ApertureView.Library, app.Current.View);
+            Assert.Equal("movies", app.Current.Id);
+            // The query the row is the first twelve of, so the grid carries on from it.
+            Assert.Equal(ItemSort.DateAdded, app.GridSort);
+            Assert.True(app.GridDescending);
+            Assert.False(app.GridHasFilters);
+            PumpUntilShown(session, "Newest (on)");
+        });
+    }
+
+    [Fact]
     public void AHomeRowCanBeMovedAndStaysWhereItWasPut()
     {
         Host(Library(), (session, app) =>

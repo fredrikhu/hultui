@@ -57,7 +57,7 @@ public sealed partial class ApertureApp
             foreach (var view in libraries)
             {
                 if (view.Kind is LibraryKind.Music or LibraryKind.Books) continue;
-                map[view.Id] = Fetch(() => lib.GetLatestAsync(view.Id, 12),
+                map[view.Id] = Fetch(() => lib.GetLatestAsync(view.Id, LatestRowSize),
                     (IReadOnlyList<MediaItem>)[], $"Latest in {view.Name}");
             }
             return (IReadOnlyDictionary<string, IReadOnlyList<MediaItem>>)map;
@@ -66,6 +66,10 @@ public sealed partial class ApertureApp
 
     internal IReadOnlyList<MediaItem> ResumeItems => _resume.Value;
     internal IReadOnlyList<MediaItem> NextUpItems => _nextUp.Value;
+    /// <summary>How many a "Latest in" row asks for. A row that comes back full may have
+    /// more behind it — which is when it offers "See all".</summary>
+    internal const int LatestRowSize = 12;
+
     internal IReadOnlyList<MediaItem> LatestIn(string libraryId) =>
         _latest.Value.TryGetValue(libraryId, out var items) ? items : [];
 
@@ -211,6 +215,19 @@ public sealed partial class ApertureApp
     }
 
     internal bool GridHasFilters => GridGenre is not null || GridFavouritesOnly || GridPlayedFilter is not null;
+
+    /// <summary>
+    /// A "Latest in" row's "See all": the library itself, newest first and unfiltered — the
+    /// very query the row is the first twelve of, so the grid carries on where it stops. The
+    /// grid's sort and filters are shared by every library, so this is what the next library
+    /// opens with too; that is the grid remembering how it was last left, as it always does.
+    /// </summary>
+    internal void OpenLatest(string libraryId, string libraryName)
+    {
+        ClearGridFilters();
+        SetGridSort(ItemSort.DateAdded, descending: true);
+        Navigate(new Route(ApertureView.Library, libraryId, libraryName));
+    }
 
     // ── Detail and its children ──────────────────────────────────────────
 

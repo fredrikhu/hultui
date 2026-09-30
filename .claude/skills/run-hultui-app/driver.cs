@@ -347,7 +347,9 @@ Aperture.Core.Testing.FakeMediaLibrary DemoLibrary()
         .AddLibrary("movies", "Films", Aperture.Core.LibraryKind.Movies)
         .AddLibrary("shows", "Series", Aperture.Core.LibraryKind.TvShows);
     string[] titles = ["Stalker", "Solaris", "The Mirror", "Andrei Rublev", "Nostalghia", "The Sacrifice",
-                       "Ivan's Childhood", "Mirror of Days", "Northern Light", "The Long Take"];
+                       "Ivan's Childhood", "Mirror of Days", "Northern Light", "The Long Take",
+                       // Past a "Latest in" row's twelve, so Home offers "See all".
+                       "Winter Light", "The Silence", "Persona"];
     for (int i = 0; i < titles.Length; i++)
         fake.AddMovie("m" + i, titles[i], "movies", 1962 + i * 3, 96 + i * 7,
             resume: i == 1 ? TimeSpan.FromMinutes(58) : null, played: i == 2);

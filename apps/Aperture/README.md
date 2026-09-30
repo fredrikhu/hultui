@@ -22,7 +22,9 @@ Connect  ──►  Home ──► Library grid ──► Item page ──► Pl
 
 - **Home** is Continue watching, Next up, then what each library has added. Rows
   page sideways with two buttons rather than scrolling — a horizontal scroller
-  nested in the page's vertical one is the framework's wheel-capture trap.
+  nested in the page's vertical one is the framework's wheel-capture trap. A
+  library's "Latest in" row that comes back full has "See all": the library itself,
+  newest first and unfiltered, which is the very query the row is the first twelve of.
   That order is a default: the menu in each row's heading moves it, hides it, or
   folds the two “what now” rows into one “Up next”. The choices are keyed by row
   in the settings file, and a hidden row is listed at the foot of the page with a

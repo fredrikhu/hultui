@@ -99,6 +99,14 @@ public sealed class FakeMediaLibrary : IMediaLibrary
                   $"{(query.PersonId is { Length: > 0 } p ? $", person={p}" : "")}" +
                   $"{(query.Favorite is { } f2 ? $", favourite={f2}" : "")})");
 
+        var all = Query(query);
+        var page = all.Skip(query.StartIndex).Take(query.Limit).ToList();
+        return Result(new ItemPage(page, all.Count, query.StartIndex));
+    }
+
+    /// <summary>Everything a query matches, filtered and sorted, before paging.</summary>
+    private List<MediaItem> Query(ItemQuery query)
+    {
         IEnumerable<MediaItem> source = query.ParentId is { } parent
             ? (_children.GetValueOrDefault(parent) ?? []).Select(id => _items[id])
             : _items.Values;
@@ -122,10 +130,7 @@ public sealed class FakeMediaLibrary : IMediaLibrary
             _ => source.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase),
         };
         if (query.Descending) source = source.Reverse();
-
-        var all = source.ToList();
-        var page = all.Skip(query.StartIndex).Take(query.Limit).ToList();
-        return Result(new ItemPage(page, all.Count, query.StartIndex));
+        return source.ToList();
     }
 
     public Task<ApertureResult<IReadOnlyList<MediaItem>>> GetResumeAsync(int limit = 12, CancellationToken ct = default)
@@ -163,8 +168,17 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         CancellationToken ct = default)
     {
         Calls.Add($"GetLatest({libraryId}, limit={limit})");
-        var kids = (_children.GetValueOrDefault(libraryId) ?? []).Select(id => _items[id]).Take(limit).ToList();
-        return Result<IReadOnlyList<MediaItem>>(kids);
+        // What the real one asks: the library itself, newest first — so a row's "See all"
+        // (the grid sorted Newest) carries on in the same order here as against a server.
+        var sorted = Query(new ItemQuery
+        {
+            ParentId = libraryId,
+            Limit = limit,
+            Sort = ItemSort.DateAdded,
+            Descending = true,
+            Recursive = false,
+        }).Take(limit).ToList();
+        return Result<IReadOnlyList<MediaItem>>(sorted);
     }
 
     /// <summary>The genres of everything under a library, which is how a real server
