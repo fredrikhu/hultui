@@ -213,7 +213,7 @@ public class ComposerTests
             Set(app, "_amendCommit", true);
             Compose(app, "rewritten subject", "rewritten body");
             Invoke(app, "DoCommit");
-            session.PumpFrames(3);
+            Committed(session, app);
 
             Assert.Equal(before, CommitCount(repo));
             Assert.Equal("rewritten subject", HeadSubject(repo));
@@ -232,7 +232,9 @@ public class ComposerTests
             Set(app, "_amendCommit", true);
             Compose(app, "just a better subject");
             Invoke(app, "DoCommit");
-            session.PumpFrames(3);
+            // The commit is a git process: wait for it, as the others here do. Three frames
+            // was enough on a quiet machine and not on a loaded CI runner.
+            Committed(session, app);
 
             Assert.Equal(before, CommitCount(repo));
             Assert.Equal("just a better subject", HeadSubject(repo));
