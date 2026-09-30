@@ -136,13 +136,17 @@ public class WebViewElement : Element
         if (_controller is null || OverlayHost is not Window window) return;
         UpdatePlacement(window);
 
+        // Drawn even before the first frame, as a video is: that first visit is what tells a
+        // GPU frame sink which kind of surface it is on, and so how the engine should deliver.
         var frames = _controller.Frames;
-        if (!frames.IsLoaded) return;
         var box = Layout.AbsoluteContentBox;
         var size = frames.IntrinsicSize;
         float scale = window.DisplayScale;
+        var rect = size.Width > 0 && size.Height > 0
+            ? new Rect(box.X, box.Y, size.Width / scale, size.Height / scale)
+            : box;
         ctx.PushClip(box);
-        ctx.DrawImage(frames, new Rect(box.X, box.Y, size.Width / scale, size.Height / scale), ImageFit.Fill);
+        ctx.DrawImage(frames, rect, ImageFit.Fill);
         ctx.Pop();
     }
 

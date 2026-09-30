@@ -102,11 +102,28 @@ public interface IWebEngineView : IDisposable
     event Action<WebEngineEvent>? Event;
 }
 
-/// <summary>What the controller gives a view to deliver its output through.</summary>
+/// <summary>
+/// What the controller gives a view to deliver its output through. Two ways, as for video:
+/// pixels into <see cref="Pixels"/> from any thread, which every engine can do; and, for an
+/// engine that registers an <see cref="IGpuFrameRenderer"/>, rendering into a GPU framebuffer
+/// inside the frame on a surface that runs external GL. Which applies is known only once the
+/// element is first drawn — the renderer hears through <see cref="IGpuFrameRenderer.OnModeDecided"/>.
+/// </summary>
 public interface IWebViewHost
 {
     /// <summary>The page's pixels. Write whole frames, from any thread.</summary>
     PixelFrameSink Pixels { get; }
+
+    /// <summary>Registers a GPU renderer; call from <see cref="IWebEngineView.Attach"/>. The
+    /// page is then drawn through a <see cref="GpuFrameSink"/>.</summary>
+    void UseGpuRenderer(IGpuFrameRenderer renderer);
+
+    /// <summary>
+    /// Any thread: the GPU renderer has a new frame and wants to be asked for it. Never blocks
+    /// and never touches the platform on the caller's thread. (A pixel producer needs nothing
+    /// here: publishing to <see cref="Pixels"/> asks.)
+    /// </summary>
+    void RequestRepaint();
 }
 
 /// <summary>What a view does itself rather than through the element.</summary>

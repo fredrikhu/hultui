@@ -153,15 +153,11 @@ A page change reaches a captured frame in 6.7 ms median (p90 11, max 17).
   our process ~300 ms/s of CPU against ~5 ms/s for the same page windowed (the
   browser's own processes cost the same either way). Most of it is the copy plus
   Skia re-uploading 7 MB per drawn frame.
-- **Phase 2, zero-copy** — worth doing for animated content, per the number
-  above; irrelevant for still pages. `WGL_NV_DX_interop2` registers a D3D11 texture we own
-  (filled by one `CopyResource` per frame) as a GL texture. On the GL surface that
-  is an `IGpuImageSource` like mpv's; on the Vulkan surface the same GL code runs
-  in the hidden interop context and draws into the lent image, so one import path
-  serves both renderers. Nothing in the framework imports foreign GPU memory
-  today — all interop is Vulkan exporting to GL — so this is new code, and the
-  Vulkan surface's single lent image has to become one per source first (see
-  *Framework seams*).
+- **Phase 2, zero-copy — done (step 3).** `WGL_NV_DX_interop2` lets GL read a D3D11
+  texture we own, filled by one `CopySubresourceRegion` per frame, and a GL blit puts it in
+  the frame sink's framebuffer — the window's GL context on the GL surface, the hidden
+  interop context on the Vulkan one, so one path serves both renderers. It cut an animating
+  page from ~300 ms/s to roughly 20–100 (numbers under *Implementation order*).
 
 **Size and scale.** `Bounds` is set in the parent window's client pixels to where
 the element actually is, so the browser places its own popups (`<select>`, date
@@ -469,7 +465,26 @@ engine if it changed, but nothing more.
    (and fails with the subscription removed). W5 needed no `Window` seam after all: the
    element dispatches the key itself. The hover fix found the same bug as `IsFocused`
    in `IsHovered` and `IsPressed`, fixed the same way.
-3. **Windows zero-copy**: GL, then Vulkan.
+3. **Windows zero-copy** — **done 2026-09-30, GL and Vulkan.** `GpuFrameSink` and
+   `IGpuFrameRenderer` moved from Media to `HultUI.Core.Rendering` (the mode enum renamed
+   `GpuSinkMode`), and the engine registers a renderer as mpv does. In GPU mode the
+   capture thread only asks for a repaint; inside the frame the UI thread takes the
+   newest frame, copies it on the GPU into a D3D11 texture registered with GL through
+   `WGL_NV_DX_interop2`, locks it and blits it into the sink's framebuffer — or, on
+   Vulkan, into the lent interop image through the hidden GL context. Measured with the
+   sample's `--bench` (the spike's animated page, 1650×1072, 60 frames a second, five-second
+   windows, noisy): **62–106 ms/s on GL and 19–94 on Vulkan** across JIT and NativeAOT
+   runs, against 291–334 for the step-1 pixel path and 219 for the upload fallback the
+   renderer keeps for drivers without the interop (`HULTUI_WEBVIEW2_INTEROP=0`). The AOT
+   build publishes with no trim or AOT warnings and passes `--check` in ~360 ms. An encoded picture into Vulkan's linear-light target
+   needs no conversion: the frame reports `ReferenceWhiteNits = 0` and the renderer
+   composites it as encoded, which a swapchain capture confirmed. The element now draws
+   before the first frame, as the video element does — that visit decides the mode.
+   **W7 is not done** and turned out not to be needed for this: zero-copy on Vulkan works
+   with the one lent image as long as a window has one GPU source. A video and a page in
+   one Vulkan window still conflict (the second lend is refused and draws nothing); fixing
+   it means generalising the host's single image — its semaphores, release bookkeeping
+   and GL objects, hardened in plan 15 and verified on Linux — to one per source.
 4. **Windows accessibility**: `IRawElementProviderHwndOverride` on the UIA
    bridge's window provider for WebView2's focus window; proven in the real-window
    suite.

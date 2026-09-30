@@ -125,7 +125,7 @@ public class MediaPlayerTests
 
     private sealed class NullRenderer : IGpuFrameRenderer
     {
-        public void OnModeDecided(VideoSinkMode mode) { }
+        public void OnModeDecided(GpuSinkMode mode) { }
         public void PrepareGL(Func<string, nint> getProcAddress) { }
         public bool TryGetFrameSize(out int width, out int height) { width = height = 0; return false; }
         public bool RendersBottomUp => false;

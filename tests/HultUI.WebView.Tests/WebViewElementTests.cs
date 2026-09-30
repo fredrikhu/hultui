@@ -6,6 +6,7 @@ using HultUI.Core.Elements;
 using HultUI.Core.Events;
 using HultUI.Core.Primitives;
 using HultUI.Core.Reactivity;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.Headless;
 using HultUI.WebView.Testing;
@@ -321,6 +322,57 @@ public class WebViewElementTests
         Assert.Equal([(KeyCode.L, KeyModifiers.Ctrl), (KeyCode.F, KeyModifiers.Ctrl)], pressed);
         Assert.True(taken.Handled);
         Assert.False(passed.Handled);
+    }
+
+    // ──── A GPU renderer ────
+
+    private sealed class RecordingRenderer : IGpuFrameRenderer
+    {
+        public GpuSinkMode Decided { get; private set; }
+        public void OnModeDecided(GpuSinkMode mode) => Decided = mode;
+        public void PrepareGL(Func<string, nint> getProcAddress) { }
+        public bool TryGetFrameSize(out int width, out int height) { width = height = 0; return false; }
+        public bool RendersBottomUp => false;
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height) => false;
+        public void ReleaseGL() { }
+    }
+
+    [Fact]
+    public void AnEngineWithAGpuRenderer_IsToldByTheFirstDraw_AndPixelsCarryOnHeadless()
+    {
+        // The element draws before any frame exists, because that visit is what decides how a
+        // GPU sink delivers. Headless is a raster surface, so the answer is pixels.
+        var renderer = new RecordingRenderer();
+        using var session = HeadlessSession.Create(400, 300, options: new HeadlessOptions { RecordDrawCalls = true });
+        var engine = new FakeWebEngine { GpuRenderer = renderer };
+        using var web = new WebViewController(engine);
+        session.Application.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
+        session.PumpFrames(3);
+
+        Assert.Equal(GpuSinkMode.Pixels, renderer.Decided);
+        Assert.Equal(GpuSinkMode.Pixels, web.SinkMode);
+        session.Window.RenderLog.Clear();
+        engine.Views[0].Paint();
+        Assert.True(session.PumpFrame());
+        Assert.Contains("DrawImage", session.Window.RenderLog.ToString());
+    }
+
+    [Fact]
+    public void ARepaintAskedForFromAnotherThread_ReachesTheElementOnTheUIThread()
+    {
+        using var session = HeadlessSession.Create(400, 300);
+        var engine = new FakeWebEngine { GpuRenderer = new RecordingRenderer() };
+        using var web = new WebViewController(engine);
+        session.Application.SetRoot(Flex.Column().Children(WebViewElement.New(web).FlexGrow(1)));
+        session.PumpFrames(3);
+        int arrived = 0;
+        int uiThread = Environment.CurrentManagedThreadId, seenOn = 0;
+        web.FrameArrived += () => { arrived++; seenOn = Environment.CurrentManagedThreadId; };
+
+        Task.Run(() => engine.Views[0].RequestRepaint()).Wait();
+        session.PumpUntil(() => arrived > 0, TimeSpan.FromSeconds(5));
+
+        Assert.Equal(uiThread, seenOn);
     }
 
     // ──── Title, cursor, accessibility ────

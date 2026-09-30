@@ -31,6 +31,8 @@ public sealed class WebViewController : IDisposable
 {
     private readonly IWebEngineView _view;
     private readonly PixelFrameSink _sink = new();
+    private GpuFrameSink? _gpuSink;
+    private int _repaintPending;
     private readonly List<(Action Run, Action<Exception>? Fail)> _pending = [];
     private bool _disposed;
     private WebViewPlacement? _placement;
@@ -65,7 +67,7 @@ public sealed class WebViewController : IDisposable
 
         _view.Event += OnEngineEvent;
         _sink.FramePublished += OnFramePublished;
-        _view.Attach(new Host(_sink));
+        _view.Attach(new Host(this));
     }
 
     /// <summary>The engine's view, for what only that engine offers. Cast it to the engine
@@ -76,9 +78,14 @@ public sealed class WebViewController : IDisposable
 
     public WebEngineCapabilities Capabilities => _view.Capabilities;
 
-    /// <summary>The page's pixels, for <see cref="WebViewElement"/> to draw. Never null;
-    /// empty until the engine's first frame.</summary>
-    public IPixelImageSource Frames => _sink;
+    /// <summary>The page's frames, for <see cref="WebViewElement"/> to draw. Never null;
+    /// empty until the engine's first frame. An engine with a GPU renderer is drawn through a
+    /// <see cref="GpuFrameSink"/>, which is also the pixel ring on a surface without GL.</summary>
+    public IPixelImageSource Frames => _gpuSink ?? (IPixelImageSource)_sink;
+
+    /// <summary>How frames reach the screen; <see cref="GpuSinkMode.Pixels"/> for an engine
+    /// with no GPU renderer.</summary>
+    public GpuSinkMode SinkMode => _gpuSink?.Mode ?? GpuSinkMode.Pixels;
 
     /// <summary>A frame was published. UI thread. <see cref="WebViewElement"/> subscribes.</summary>
     public event Action? FrameArrived;
@@ -225,6 +232,23 @@ public sealed class WebViewController : IDisposable
 
     private void OnFramePublished(PixelFrameSink _) => Dispatch(() => FrameArrived?.Invoke());
 
+    // A GPU renderer asks from a thread of the engine's. Posting from there could deadlock
+    // with a live-resize frame (docs/THREADING.md: a thread the frame waits for must never
+    // post), so the request flips a flag and a thread-pool item posts — as MediaPlayer does.
+    private void OnRepaintRequested()
+    {
+        if (_disposed) return;
+        if (UIThread.IsCurrent) { FrameArrived?.Invoke(); return; }
+        if (Interlocked.Exchange(ref _repaintPending, 1) == 0)
+            ThreadPool.UnsafeQueueUserWorkItem(static c => c.PostRepaint(), this, preferLocal: false);
+    }
+
+    private void PostRepaint() => Application.InvokeOnMainThread(() =>
+    {
+        Volatile.Write(ref _repaintPending, 0);
+        if (!_disposed) FrameArrived?.Invoke();
+    });
+
     /// <summary>
     /// Runs on the UI thread: now when this is it (WebView2 raises everything there),
     /// otherwise on the next frame, which the post wakes.
@@ -356,13 +380,24 @@ public sealed class WebViewController : IDisposable
         _view.Event -= OnEngineEvent;
         _sink.FramePublished -= OnFramePublished;
         FailPending(new ObjectDisposedException(nameof(WebViewController)));
+        // The GPU sink first: it has the engine free its GL objects while what they were made
+        // from still exists. UI thread, where the window's GL context lives between frames.
+        _gpuSink?.Dispose();
         _view.Dispose();
         _sink.Dispose();
     }
 
-    private sealed class Host(PixelFrameSink pixels) : IWebViewHost
+    private sealed class Host(WebViewController owner) : IWebViewHost
     {
-        public PixelFrameSink Pixels { get; } = pixels;
+        public PixelFrameSink Pixels => owner._sink;
+
+        public void UseGpuRenderer(IGpuFrameRenderer renderer)
+        {
+            if (owner._gpuSink is not null) throw new InvalidOperationException("A GPU renderer is already registered.");
+            owner._gpuSink = new GpuFrameSink(owner._sink, renderer);
+        }
+
+        public void RequestRepaint() => owner.OnRepaintRequested();
     }
 
     /// <summary>Stands in for a view the engine could not create, so no member needs a

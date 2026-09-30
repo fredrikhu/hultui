@@ -74,19 +74,32 @@ public sealed class WebView2Tests
             return task.GetAwaiter().GetResult();
         }
 
-        /// <summary>The page's pixel at the given device-pixel position, as (R, G, B).</summary>
-        public (int R, int G, int B)? Pixel(int x, int y)
+        /// <summary>
+        /// The window's pixel at a device-pixel position from its top-left, read back from the
+        /// front buffer through GL. On a real window the page goes through the GPU, so the pixel
+        /// ring holds nothing; the screen is the only honest place to look.
+        /// </summary>
+        public (int R, int G, int B) Screen(int x, int y)
         {
-            var frames = Web.Frames;
-            if (!frames.TryAcquire(out var frame)) return null;
-            try
-            {
-                if (x >= frame.Width || y >= frame.Height) return null;
-                int bgra = System.Runtime.InteropServices.Marshal.ReadInt32(frame.Pixels, y * frame.Stride + x * 4);
-                return ((bgra >> 16) & 0xFF, (bgra >> 8) & 0xFF, bgra & 0xFF);
-            }
-            finally { frames.Release(frame); }
+            var gl = new GL();
+            var viewport = new int[4];
+            gl.GetIntegerv(0x0BA2 /* GL_VIEWPORT */, viewport);
+            gl.ReadBuffer(0x0404 /* GL_FRONT */);
+            var px = new byte[4];
+            gl.ReadPixels(x, viewport[3] - 1 - y, 1, 1, 0x1908 /* RGBA */, 0x1401 /* UNSIGNED_BYTE */, px);
+            return (px[0], px[1], px[2]);
         }
+
+        public (int R, int G, int B) ScreenMiddle()
+        {
+            var gl = new GL();
+            var viewport = new int[4];
+            gl.GetIntegerv(0x0BA2, viewport);
+            return Screen(viewport[2] / 2, viewport[3] / 2);
+        }
+
+        public static bool Near((int R, int G, int B) a, (int R, int G, int B) b) =>
+            Math.Abs(a.R - b.R) <= 8 && Math.Abs(a.G - b.G) <= 8 && Math.Abs(a.B - b.B) <= 8;
 
         public void Dispose()
         {
@@ -110,34 +123,32 @@ public sealed class WebView2Tests
     }
 
     [WebView2UiFact]
-    public void APage_RendersOffscreen_AndItsPixelsReachTheSink() => OnSta(() =>
+    public void APage_ReachesTheWindow_WithoutPassingThroughTheCpu() => OnSta(() =>
     {
-        using var page = Open("<html><head><title>Magenta</title></head><body style='margin:0;background:#ff00ff'></body></html>");
+        // Captured into D3D11, read by GL in place through WGL_NV_DX_interop2, blitted into the
+        // frame sink's framebuffer, composited by Skia: the colour on screen proves the chain,
+        // and ZeroCopy that no fallback was taken on the way.
+        using var page = Open("<html><head><title>Green</title></head><body style='margin:0;background:#00c060'></body></html>");
 
-        Assert.True(page.PumpUntil(() => page.Pixel(10, 10) == (255, 0, 255)),
-            $"the page's pixels never arrived; the sink holds {page.Pixel(10, 10)}");
-        Assert.True(page.PumpUntil(() => page.Web.Title == "Magenta"));
-        // A string document has no address of its own: WebView2 reports none, or about:blank.
-        Assert.True(page.Web.Source is null or { Scheme: "about" or "data" }, $"source was {page.Web.Source}");
+        Assert.True(page.PumpUntil(() => Page.Near(page.ScreenMiddle(), (0, 192, 96))),
+            $"the window's middle was {page.ScreenMiddle()}, expected the page's (0,192,96)");
+        Assert.Equal(GpuSinkMode.Gpu, page.Web.SinkMode);
+        Assert.True(((WebView2View)page.Web.View).ZeroCopy, "the frame was read back and uploaded, not shared");
+        Assert.True(page.PumpUntil(() => page.Web.Title == "Green"));
     });
 
     [WebView2UiFact]
-    public void ThePage_IsCompositedIntoTheWindow() => OnSta(() =>
+    public void APageThatChanges_ShowsEachChange() => OnSta(() =>
     {
-        // The sink holding the page proves the capture; this proves the element draws it:
-        // the window's front buffer, read back through GL, shows the page's colour.
-        using var page = Open("<html><body style='margin:0;background:#00c060'></body></html>");
-        Assert.True(page.PumpUntil(() => page.Pixel(10, 10) == (0, 192, 96)), "the page's pixels never arrived");
-        for (int i = 0; i < 5; i++) page.App.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
+        // Frames arrive only on change; each must be taken and drawn, not just the first.
+        using var page = Open("<html><body style='margin:0;background:#ff00ff'></body></html>");
+        Assert.True(page.PumpUntil(() => Page.Near(page.ScreenMiddle(), (255, 0, 255))), $"first colour: {page.ScreenMiddle()}");
 
-        var gl = new GL();
-        var viewport = new int[4];
-        gl.GetIntegerv(0x0BA2 /* GL_VIEWPORT */, viewport);
-        gl.ReadBuffer(0x0404 /* GL_FRONT */);
-        var px = new byte[4];
-        gl.ReadPixels(viewport[2] / 2, viewport[3] / 2, 1, 1, 0x1908 /* RGBA */, 0x1401 /* UNSIGNED_BYTE */, px);
-        Assert.True(px[0] < 8 && Math.Abs(px[1] - 192) <= 8 && Math.Abs(px[2] - 96) <= 8,
-            $"the window's middle was ({px[0]},{px[1]},{px[2]}), expected the page's (0,192,96)");
+        foreach (var (css, rgb) in new[] { ("#2040e0", (32, 64, 224)), ("#e0c020", (224, 192, 32)) })
+        {
+            page.Web.ExecuteScriptAsync($"document.body.style.background = '{css}'");
+            Assert.True(page.PumpUntil(() => Page.Near(page.ScreenMiddle(), rgb)), $"after {css}: {page.ScreenMiddle()}");
+        }
     });
 
     /// <summary>GL 1.1 entry points, which opengl32.dll exports directly; they act on the current context.</summary>
@@ -212,12 +223,16 @@ public sealed class WebView2Tests
               <script>
                 for (const id of ['left', 'right'])
                   document.getElementById(id).onclick = () => chrome.webview.postMessage(id);
+                chrome.webview.postMessage('ready');
               </script>
             </body></html>
             """);
         var received = new List<string>();
         page.Web.MessageReceived += m => received.Add(m.Json);
-        Assert.True(page.PumpUntil(() => page.Pixel(1, 1) is not null), "no frame");
+        // Ready when the page says so: its handlers exist only once its script has run, which a
+        // frame on screen does not prove.
+        Assert.True(page.PumpUntil(() => received.Contains("\"ready\"") && page.Web.Frames.IsLoaded), "the page never got ready");
+        received.Clear();
         int width = page.Web.Frames.IntrinsicSize.Width is var w and > 0 ? (int)w : 480;
 
         var view = page.Web.View;

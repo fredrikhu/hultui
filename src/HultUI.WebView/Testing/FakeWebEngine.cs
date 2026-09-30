@@ -38,6 +38,10 @@ public sealed class FakeWebEngine : IWebEngine
     /// <see cref="FakeWebEngineView.CompleteNavigation"/>.</summary>
     public bool AutoComplete { get; set; } = true;
 
+    /// <summary>A GPU renderer each view registers when attached, as a real engine's does —
+    /// for testing the frame sink's wiring. Null (the default) delivers pixels only.</summary>
+    public IGpuFrameRenderer? GpuRenderer { get; set; }
+
     /// <summary>Titles and colours by address. An address not listed loads with its host as
     /// the title and a colour derived from it.</summary>
     public Dictionary<Uri, FakePage> Pages { get; } = [];
@@ -117,7 +121,11 @@ public sealed class FakeWebEngineView : IWebEngineView
     {
         _host = host;
         Calls.Add("Attach");
+        if (_engine.GpuRenderer is { } renderer) host.UseGpuRenderer(renderer);
     }
+
+    /// <summary>What a GPU renderer's frame thread does when it has a frame: ask, from any thread.</summary>
+    public void RequestRepaint() => _host?.RequestRepaint();
 
     public void SetPlacement(in WebViewPlacement placement)
     {

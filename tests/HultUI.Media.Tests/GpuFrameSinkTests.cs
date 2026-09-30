@@ -18,7 +18,7 @@ public class GpuFrameSinkTests
     {
         using var player = new MediaPlayer(new FakeMediaBackend());
         Assert.IsType<PixelFrameSink>(player.Frames);
-        Assert.Equal(VideoSinkMode.Pixels, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Pixels, player.SinkMode);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class GpuFrameSinkTests
         using var player = new MediaPlayer(new FakeMediaBackend { GpuRenderer = renderer });
 
         Assert.IsType<GpuFrameSink>(player.Frames);
-        Assert.Equal(VideoSinkMode.Undecided, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Undecided, player.SinkMode);
         Assert.Null(renderer.DecidedMode);
     }
 
@@ -43,8 +43,8 @@ public class GpuFrameSinkTests
         player.Open(MediaSource.FromFile("clip.mp4"));
         session.PumpFrame();
 
-        Assert.Equal(VideoSinkMode.Pixels, player.SinkMode);
-        Assert.Equal(VideoSinkMode.Pixels, renderer.DecidedMode);
+        Assert.Equal(GpuSinkMode.Pixels, player.SinkMode);
+        Assert.Equal(GpuSinkMode.Pixels, renderer.DecidedMode);
         Assert.Equal(0, renderer.GLRenders);
         Assert.Contains("gpu", session.Window.RenderLog.ToString());   // the log names the source kind
         Assert.Contains("version=1", session.Window.RenderLog.ToString());
@@ -217,14 +217,14 @@ public class GpuFrameSinkTests
     /// <summary>A GPU renderer that only counts.</summary>
     private sealed class CountingRenderer : IGpuFrameRenderer
     {
-        public VideoSinkMode? DecidedMode { get; private set; }
+        public GpuSinkMode? DecidedMode { get; private set; }
         public int GLRenders { get; private set; }
 
         public bool HasSize { get; init; } = true;
         public bool Waiting { get; set; }
         public int Skips { get; private set; }
 
-        public void OnModeDecided(VideoSinkMode mode) => DecidedMode = mode;
+        public void OnModeDecided(GpuSinkMode mode) => DecidedMode = mode;
         public void PrepareGL(Func<string, nint> getProcAddress) { }
         public bool TryGetFrameSize(out int width, out int height)
         {

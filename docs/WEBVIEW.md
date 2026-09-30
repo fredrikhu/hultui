@@ -102,9 +102,22 @@ ancestors, so an app's `OnKeyDown` on the root sees Ctrl+L or F11 as usual. A ha
 sets `StopPropagation` takes the key, and the page never sees it; otherwise the page gets it
 too. Typing, arrows, Tab and Escape are the page's alone.
 
+## What it costs
+
+A still page costs nothing: frames come only when the page changes. A page that animates
+every frame is carried on the GPU from the browser to the screen on both renderers — the
+capture's D3D11 texture is read by GL in place and blitted into the frame the renderer
+composites — and costs this process roughly 60–100 ms of CPU a second on the GL renderer
+and 20–90 on Vulkan, at 1650×1072 and 60 frames a second, most of it HultUI redrawing
+the window. Where the driver lacks the
+interop the frame is read back and uploaded instead, at about 220 ms/s;
+`HULTUI_WEBVIEW2_INTEROP=0` forces that, for a driver that mishandles the interop.
+
 ## Limits, for now
-- A continuously animating page costs about a third of a core at 1650×1072 on the pixel
-  path it uses today; a still page costs nothing. Zero-copy GPU frames are the next step.
+
+- On the Vulkan renderer, one GPU source per window: a web view and a playing video in the
+  same Vulkan window share the renderer's one interop image, so the second draws nothing.
+  Separate windows, or the GL renderer, are unaffected.
 - The page is announced to screen readers as a named group with nothing inside yet.
 - Files dropped on the page do not reach it.
 - Windows only until the WPE engine exists; `FakeWebEngine` runs anywhere.

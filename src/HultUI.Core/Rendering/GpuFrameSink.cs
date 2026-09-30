@@ -1,8 +1,7 @@
 using System.Runtime.InteropServices;
 using HultUI.Core.Primitives;
-using HultUI.Core.Rendering;
 
-namespace HultUI.Media;
+namespace HultUI.Core.Rendering;
 
 /// <summary>
 /// The frame source for a backend with an <see cref="IGpuFrameRenderer"/>. On a surface
@@ -19,7 +18,7 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     private GLFunctions? _gl;
     private uint _texture, _framebuffer;
     private int _width, _height;
-    private VideoSinkMode _mode;
+    private GpuSinkMode _mode;
     private bool _disposed;
 
     public GpuFrameSink(PixelFrameSink pixels, IGpuFrameRenderer renderer)
@@ -28,14 +27,14 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
         _renderer = renderer;
     }
 
-    public VideoSinkMode Mode => _mode;
+    public GpuSinkMode Mode => _mode;
 
     // IImageSource: in GPU mode the size is the renderer's; otherwise the ring's.
-    public Size IntrinsicSize => _mode == VideoSinkMode.Gpu && _renderer.TryGetFrameSize(out int w, out int h)
+    public Size IntrinsicSize => _mode == GpuSinkMode.Gpu && _renderer.TryGetFrameSize(out int w, out int h)
         ? new Size(w, h)
         : _pixels.IntrinsicSize;
 
-    public bool IsLoaded => _mode == VideoSinkMode.Gpu
+    public bool IsLoaded => _mode == GpuSinkMode.Gpu
         ? _renderer.TryGetFrameSize(out _, out _)
         : _pixels.IsLoaded;
 
@@ -51,9 +50,9 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
     {
         frame = default;
         if (_disposed) return false;
-        if (_mode == VideoSinkMode.Undecided)
+        if (_mode == GpuSinkMode.Undecided)
         {
-            Decide(VideoSinkMode.Gpu);
+            Decide(GpuSinkMode.Gpu);
             // The renderer sets up inside the frame, before there is anything to draw:
             // that is what lets a decoder create its GL context ahead of loading.
             surface.RunExternalGL(() => _renderer.PrepareGL(surface.GetProcAddress));
@@ -152,29 +151,29 @@ public sealed class GpuFrameSink : IGpuImageSource, IPixelImageSource, IDisposab
 
     public bool TryAcquire(out PixelFrame frame)
     {
-        Decide(VideoSinkMode.Pixels);
+        Decide(GpuSinkMode.Pixels);
         return _pixels.TryAcquire(out frame);
     }
 
     public void Release(in PixelFrame frame) => _pixels.Release(frame);
 
-    private void Decide(VideoSinkMode mode)
+    private void Decide(GpuSinkMode mode)
     {
-        if (_mode != VideoSinkMode.Undecided) return;
+        if (_mode != GpuSinkMode.Undecided) return;
         _mode = mode;
         _renderer.OnModeDecided(mode);
     }
 
     /// <summary>
     /// Frees the renderer's GL objects and then the sink's. Must run with the GL
-    /// context current when the mode is <see cref="VideoSinkMode.Gpu"/> — on the UI
+    /// context current when the mode is <see cref="GpuSinkMode.Gpu"/> — on the UI
     /// thread, where the window's context lives between frames.
     /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        if (_mode == VideoSinkMode.Gpu) _renderer.ReleaseGL();
+        if (_mode == GpuSinkMode.Gpu) _renderer.ReleaseGL();
         if (_gl is { } gl && _texture != 0)
         {
             gl.DeleteFramebuffers(1, ref _framebuffer);

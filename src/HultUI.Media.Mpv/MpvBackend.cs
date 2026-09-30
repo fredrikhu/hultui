@@ -42,7 +42,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     private long _lastPositionTicks;
 
     // Rendering.
-    private VideoSinkMode _mode;
+    private GpuSinkMode _mode;
     private nint _render;                 // mpv_render_context, GL or sw
     private GCHandle _procAddressHandle;   // pins the resolver for mpv's callback
     private Func<string, nint>? _getProcAddress;
@@ -132,7 +132,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
     public event Action<BackendEvent>? Event;
 
     /// <summary>How frames are being delivered; undecided until the first draw.</summary>
-    public VideoSinkMode Mode => _mode;
+    public GpuSinkMode Mode => _mode;
 
     // ──── Commands (UI thread) ────
 
@@ -296,7 +296,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
                 {
                     ReadGeometry();
                     RaiseGeometry();
-                    if (_mode == VideoSinkMode.Pixels) _swWake.Set();
+                    if (_mode == GpuSinkMode.Pixels) _swWake.Set();
                 }
                 break;
 
@@ -446,10 +446,10 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         return _loaded && width > 0 && height > 0;
     }
 
-    public void OnModeDecided(VideoSinkMode mode)
+    public void OnModeDecided(GpuSinkMode mode)
     {
         _mode = mode;
-        if (mode != VideoSinkMode.Pixels) return;   // GL waits for PrepareGL, inside the frame
+        if (mode != GpuSinkMode.Pixels) return;   // GL waits for PrepareGL, inside the frame
         // Software rendering: mpv's sw renderer writes into the ring from a thread of
         // its own, woken by mpv's update callback, so the UI thread never waits on it.
         CreateSoftwareContext();
@@ -792,7 +792,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
         {
             if (GCHandle.FromIntPtr((nint)userdata).Target is MpvBackend self)
             {
-                if (self._mode == VideoSinkMode.Pixels) self._swWake.Set();
+                if (self._mode == GpuSinkMode.Pixels) self._swWake.Set();
                 else
                 {
                     self._updateWaiting = true;
@@ -805,7 +805,7 @@ public sealed unsafe class MpvBackend : IMediaBackend, IGpuFrameRenderer
 
     public void ReleaseGL()
     {
-        if (_mode != VideoSinkMode.Gpu || _render == 0) return;
+        if (_mode != GpuSinkMode.Gpu || _render == 0) return;
         mpv_render_context_free(_render);
         _render = 0;
         if (_procAddressHandle.IsAllocated) _procAddressHandle.Free();

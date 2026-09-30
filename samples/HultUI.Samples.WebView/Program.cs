@@ -16,8 +16,53 @@ internal static class Program
         using var sample = new WebViewSampleApp(engine);
         app.SetRoot(sample.Mount());
         if (args.Contains("--check")) return Check(app, sample);
+        if (args.Contains("--bench")) Application.InvokeOnMainThread(() => _ = Bench(app, sample));
         app.Run();
         return 0;
+    }
+
+    private const string AnimatedPage = """
+        <html><head><title>Bench</title><style>
+        body { margin:0; height:100vh; overflow:hidden;
+               background: linear-gradient(90deg, #203040, #406080, #203040); background-size: 400% 100%;
+               animation: pan 3s linear infinite; }
+        .spin { position:absolute; left:40%; top:30%; width:200px; height:200px; background:#e0a020;
+                animation: spin 1s linear infinite; }
+        @keyframes pan { from { background-position: 0% 0 } to { background-position: 400% 0 } }
+        @keyframes spin { to { transform: rotate(360deg) } }
+        </style></head><body><div class="spin"></div></body></html>
+        """;
+
+    /// <summary>
+    /// <c>--bench</c>: a page that animates every frame, in the app's own loop, for five
+    /// seconds: this process's CPU per second and the page frames drawn per second. The page
+    /// is the one spike W0 measured the pixel path with (about 300 ms/s at 1650×1072), so the
+    /// two numbers compare. <c>HULTUI_WEBVIEW2_INTEROP=0</c> measures the upload fallback.
+    /// </summary>
+    private static async Task Bench(Application app, WebViewSampleApp sample)
+    {
+        var web = sample.Web;
+        while (web.State == WebViewState.Initializing) await Task.Delay(50);
+        web.NavigateToString(AnimatedPage);
+        while (web.Title != "Bench") await Task.Delay(50);
+        await Task.Delay(1500);
+
+        int frames = 0;
+        void Count() => frames++;
+        web.FrameArrived += Count;
+        var process = Process.GetCurrentProcess();
+        var cpu0 = process.TotalProcessorTime;
+        var clock = Stopwatch.StartNew();
+        await Task.Delay(5000);
+        process.Refresh();
+        double seconds = clock.Elapsed.TotalSeconds;
+        double cpu = (process.TotalProcessorTime - cpu0).TotalMilliseconds / seconds;
+        web.FrameArrived -= Count;
+
+        var size = web.Frames.IntrinsicSize;
+        Console.WriteLine($"bench: {size.Width}x{size.Height}, {web.SinkMode} mode, " +
+            $"{frames / seconds:F1} page frames/s, CPU {cpu:F0} ms/s in this process");
+        app.PrimaryWindow.Close();
     }
 
     /// <summary>

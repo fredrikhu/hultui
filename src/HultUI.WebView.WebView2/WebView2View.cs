@@ -1,4 +1,5 @@
 using HultUI.Core.Events;
+using HultUI.Core.Rendering;
 using HultUI.Core.Styling;
 using HultUI.WebView.WebView2.Interop;
 
@@ -36,6 +37,13 @@ internal sealed unsafe class WebView2View : IWebEngineView
     private nint _composition, _controller, _controller3, _webview;
     private ComHandler? _creating;
     private VisualCapture? _capture;
+    private CaptureRenderer? _renderer;
+
+    /// <summary>How the page's frames are delivered; decided by the element's first draw.</summary>
+    internal GpuSinkMode FrameMode => _renderer?.Mode ?? GpuSinkMode.Undecided;
+
+    /// <summary>Whether GL reads the captured frames in place, with no copy through the CPU.</summary>
+    internal bool ZeroCopy => _capture?.ZeroCopy ?? false;
 
     public WebView2View(WebView2Engine engine, WebViewOptions options)
     {
@@ -49,7 +57,12 @@ internal sealed unsafe class WebView2View : IWebEngineView
 
     private void Raise(WebEngineEvent e) => Event?.Invoke(e);
 
-    public void Attach(IWebViewHost host) => _host = host;
+    public void Attach(IWebViewHost host)
+    {
+        _host = host;
+        _renderer = new CaptureRenderer(this);
+        host.UseGpuRenderer(_renderer);
+    }
 
     // ──── Creation ────
 
@@ -126,7 +139,7 @@ internal sealed unsafe class WebView2View : IWebEngineView
 
             ApplySettings();
 
-            _capture = new VisualCapture(_host!.Pixels);
+            _capture = new VisualCapture(_host!.Pixels, _host.RequestRepaint) { Mode = _renderer!.Mode };
             Com.Check(Com.Call(_composition, ICoreWebView2CompositionController.put_RootVisualTarget, _capture.RootVisual), "put_RootVisualTarget");
 
             Subscribe();
@@ -530,6 +543,38 @@ internal sealed unsafe class WebView2View : IWebEngineView
     /// <summary>COREWEBVIEW2_WEB_ERROR_STATUS as text; OPERATION_CANCELED reads "Cancelled", as the fake says.</summary>
     internal static string WebErrorText(int status) =>
         (uint)status < (uint)WebErrors.Length ? WebErrors[status] : $"Error {status}";
+
+    /// <summary>
+    /// The page as a GPU frame producer: the frame sink's renderer, forwarding to the capture
+    /// once it exists. The sink asks from the element's first draw, which can come before the
+    /// engine has created anything — then there is simply nothing to draw yet.
+    /// </summary>
+    private sealed class CaptureRenderer(WebView2View view) : IGpuFrameRenderer
+    {
+        public GpuSinkMode Mode { get; private set; }
+
+        public void OnModeDecided(GpuSinkMode mode)
+        {
+            Mode = mode;
+            if (view._capture is { } capture) capture.Mode = mode;
+        }
+
+        public void PrepareGL(Func<string, nint> getProcAddress) => view._capture?.PrepareGL(getProcAddress);
+
+        public bool TryGetFrameSize(out int width, out int height)
+        {
+            width = height = 0;
+            return view._capture?.TryGetSize(out width, out height) ?? false;
+        }
+
+        /// <summary>The page's top row lands in the target's row 0, as mpv's does.</summary>
+        public bool RendersBottomUp => false;
+
+        public bool Render(Func<string, nint> getProcAddress, in GpuFrameTarget target, int width, int height) =>
+            view._capture?.Render(getProcAddress, target, width, height) ?? false;
+
+        public void ReleaseGL() => view._capture?.ReleaseGL();
+    }
 
     public void Dispose()
     {

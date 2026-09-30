@@ -1,3 +1,4 @@
+using HultUI.Core.Rendering;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using HultUI.Core.Builders;
@@ -46,7 +47,7 @@ public sealed class MpvGLTests
             while (player.State != PlaybackState.Paused && deadline.Elapsed < TimeSpan.FromSeconds(20))
                 app.RunFrame(TimeSpan.FromMilliseconds(16), forceRender: true);
             Assert.Equal(PlaybackState.Paused, player.State);
-            Assert.Equal(VideoSinkMode.Gpu, player.SinkMode);
+            Assert.Equal(GpuSinkMode.Gpu, player.SinkMode);
             Assert.Equal(new Size(64, 36), player.VideoSize);
 
             // A few more frames so mpv's first render has happened and been presented.
