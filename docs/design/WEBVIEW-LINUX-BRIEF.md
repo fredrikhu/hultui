@@ -8,7 +8,10 @@ drags. Step 5 is the Linux engine. This file is what a session on the Linux mach
 any other context: the decision, the machine, a spike with ten questions in order, and then the
 build.
 
-Nothing here has run on Linux. Where a line says **verify**, it is a belief, not a finding.
+**Spike L0 ran on 2026-10-01** on the machine below. Every question has its result under it
+(and `spikes/CefOsr/README.md` has the detail and raw output). The decisions it informs are
+recommended in *Spike L0: recommendations*, for the owner to settle before step 5 starts.
+Where a line still says **verify**, it is a belief, not a finding.
 **Write what you find into this file** (results under each question) and into
 `docs/design/WEBVIEW.md` where it changes the design. The Windows session's memory is not on
 your machine; the documents are the only thing both sides share.
@@ -433,6 +436,66 @@ anything on the AT-SPI bus by itself when windowless. **Expect not.**
 
 **10. Two pages and the way out.** Two browsers on one `cef_initialize`; close one; close
 both; `cef_shutdown`. What must be released, in what order, for the process to exit by itself?
+
+> **Result (2026-10-01): clean, and forgiving.**
+> - Two browsers paint at 60 each.
+> - `close_browser` → `on_before_close` (5–10 ms) → release ends one browser and its renderer;
+>   the other keeps painting.
+> - **The documented order** (each browser closed, `on_before_close` seen, our reference
+>   released; then `cef_shutdown` on the initialising thread): `cef_shutdown` takes 15 ms,
+>   every reference of ours comes back, the process exits ~35 ms after `Main` returns, and no
+>   CEF process is left 0.3 s later.
+> - **Three zygotes and two zombie renderers outlive `cef_shutdown`** for as long as the
+>   process lives. Chromium never tears its zygotes down; they go when our end of their socket
+>   closes. So `cef_shutdown` belongs at application exit only.
+> - **Release builds forgive mistakes.** A held browser reference, a browser left open (which
+>   `cef_shutdown` then closes itself), no `cef_shutdown` at all, or SIGKILL with both open:
+>   the process exits and nothing is orphaned. A debug `libcef` would assert on the first two;
+>   the engine keeps the documented order.
+
+## Spike L0: recommendations (not yet decided)
+
+Each is the spike's answer to one of "yours to decide"; none is built yet.
+
+1. **The helper process: a separate C executable**, about 20 lines (`spikes/CefOsr/Helper/helper.c`):
+   `dlopen` libcef, `cef_api_hash` with the engine's API version, `cef_execute_process`. No
+   .NET executable can be the zygote with the sandbox on (question 1). It asks nothing of the
+   app's `Main`, does not depend on the CEF release (only on the API version), and finds
+   libcef through `HULTUI_CEF_DIR`, which the engine `setenv`s before `cef_initialize`. Ship it
+   per RID in `HultUI.WebView.Cef`'s `runtimes/<rid>/native`, built by a workflow as the mpv
+   natives are. It is the one exception to "no native code of ours", and the owner's call.
+2. **The message loop: `multi_threaded_message_loop`** (question 4). Callbacks arrive on
+   `CrBrowserMain`, HultUI's thread does no CEF work, and the costs equal the external pump's,
+   which would need a 33 ms timer and run CEF's work on the thread that draws.
+   `on_before_browse` waits on CEF's thread for the controller's answer. Calls that must run
+   on CEF's UI thread go through `cef_post_task`.
+3. **Script and messages: the DevTools protocol, nothing in the renderer** (question 6).
+   `Runtime.evaluate` for `ExecuteScriptAsync`. `Runtime.addBinding` plus a shim registered
+   with `Page.addScriptToEvaluateOnNewDocument` (after `Page.enable`) for
+   `window.chrome.webview`. `Runtime.enable`'s execution contexts give the origin. Messages
+   are parsed raw (`on_dev_tools_message`), so child sessions (`Target.setAutoAttach`,
+   cross-origin iframes) work if iframe messages are wanted. **`NavigateToString` is served
+   by the `app.local` scheme handler**, not a `data:` URL (question 7).
+4. **Ozone: the window's own platform, asked for outright** (questions 1, 3, 8):
+   `--ozone-platform=wayland --disable-features=WaylandFractionalScaleV1` under Wayland, and
+   `--ozone-platform=x11` under X11. Both give the GPU, the exact scale (changeable live) and
+   shared textures. `headless` (+ `--use-angle=gl-egl`) is only a fallback with no display:
+   it has the scale but no zero-copy.
+5. **Zero-copy: an EGL import on CEF's thread, inside `on_accelerated_paint`**, into a
+   texture the engine owns, fenced before returning (question 8). HultUI's frame then draws
+   the newest, as Windows draws its D3D11 copy. GL serves both renderers through the
+   existing interop. How the engine's context shares with HultUI's (one share group, or the
+   copy target exported to it) is step 5.5's first question. Expect ~33 ms/s against ~110–150
+   for pixels at 1650×1072, 60 frames a second.
+6. **Accessibility on Linux: a mirrored tree, served by our bridge, acted on through DevTools**
+   (question 9). The web view's node keeps a mirror of CEF's `AXTreeUpdate`s and exposes
+   their nodes as its children to the AT-SPI bridge. Actions go to DevTools by
+   `backendDOMNodeId`, which is CEF's node id. Accessibility is enabled only while a screen
+   reader is on (`org.a11y.Status`), because a big page costs hundreds of ms to read.
+   `AccessibilityNode.NativeContent` is not reused; the bridge needs a way to host data
+   children, which is the seam to design.
+7. **Shutdown: `cef_shutdown` at application exit only**, after every browser is closed and
+   released (question 10). The zygotes stay until then.
 
 ## Where libcef comes from
 

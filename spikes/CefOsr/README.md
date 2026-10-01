@@ -1,5 +1,10 @@
 # CEF off-screen spike — L0
 
+**Result: Fedora's CEF renders off-screen for a .NET program, through the C API alone,
+with a 20-line C helper.** One binary runs on Fedora's CEF 146 and the official 154; pixels,
+input, IME, script, messages, policy, zero-copy (Wayland and X11), accessibility data and
+shutdown all work. 2026-10-01, on the machine below.
+
 Spike L0 of [`docs/design/WEBVIEW-LINUX-BRIEF.md`](../../docs/design/WEBVIEW-LINUX-BRIEF.md):
 before any engine code, can Fedora's CEF render a page off-screen for a .NET program,
 through CEF's C API alone, and what does each part of the engine have to look like? Ten
@@ -65,6 +70,7 @@ runs this program again),
 | 7 | Policy hooks | **All four work.** `on_before_browse` returning 1 cancels (`ERR_ABORTED`, the page stays), asked on `CrBrowserMain`, which waited 33 ms for our thread's answer. `on_before_popup` returning 1 refuses and names the URL, for a link with `target=_blank` and for `window.open`, on a user gesture; without one Chromium's popup blocker drops it before asking. `on_render_process_terminated` (`TS_PROCESS_WAS_KILLED`, 9) on SIGKILL, and `reload` brings the page back. A scheme handler factory for `https` + `app.local` serves a folder as a secure origin (`https://app.local`, `isSecureContext`), with 404s, on `Chrome_IOThread`; and `NavigateToString` served through it gets a real origin and no `data:` crash. |
 | 8 | Zero-copy | **Yes, on `wayland` and `x11`, not on `headless`.** `on_accelerated_paint` hands over one dmabuf plane, BGRA (`DRM_FORMAT_ARGB8888`), modifier 0 (linear), stride 4864 at 1200×900, from a pool of three buffers. Imported on CEF's thread inside the callback, as CEF requires, into GL (`EGL_EXT_image_dma_buf_import`, blit, fence: 0.81 ms) or Vulkan (`VK_EXT_external_memory_dma_buf` + DRM format modifier, copy, fence: 0.73 ms); pixels checked in both. At 1650×1072, 60 frames a second, our process: **33 ms/s** either way, against 108 for copying `on_paint`'s pixels and 150 with the upload; CEF's processes 130 against 190. **On Wayland the scale needs `--disable-features=WaylandFractionalScaleV1`**; then it is exact and live, like X11's. CEF owns the fds. |
 | 9 | Accessibility | **A full, incremental tree as plain data, nothing on AT-SPI, and no way to act through CEF; DevTools can act, by the same ids.** `on_accessibility_tree_change` carries Chromium's `AXTreeUpdate` as a value tree: `{ax_tree_id, events, updates: [{nodes, root_id, tree_data, node_id_to_clear}]}`, each node with `id`, `role`, `state`, `attributes` (name, value, checked state, …), `child_ids`, `actions` and a `location` in device pixels. First update of a small form: 32 nodes, 14 KB; Wikipedia's article: ~5 100 nodes, 5 MB, 226 ms to read through `cef_value_t`. Changes are incremental (4 nodes for a changed heading and checkbox). `on_accessibility_location_change` is a list of `{id, new_location: {bounds, offset_container_id}}`. CEF's node ids are DevTools' AX `nodeId` and `backendDOMNodeId`, so `DOM.focus` and `Runtime.callFunctionOn` act on a node by id. |
+| 10 | Two pages and the way out | **Clean, and forgiving.** Two browsers on one `cef_initialize` paint at 60 each; closing one (`close_browser`, `on_before_close` 5–10 ms later) ends its renderer and leaves the other painting; with both closed and released, `cef_shutdown` returns in 15 ms with every reference back, and the process exits ~35 ms after `Main` returns with no CEF process left 0.3 s later. Three zygotes and two zombie renderers outlive `cef_shutdown` for as long as the process lives (10 s watched): Chromium never tears the zygotes down, they go when our end of their socket closes. A held reference, a browser left open, no `cef_shutdown` at all, or SIGKILL with both open: the process still exits and leaves nothing behind. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -607,3 +613,42 @@ name, states, value, bounds converted from the offset container chain plus the e
 position), raises the bridge's events from the update's `events`, and turns AT-SPI actions
 into DevTools calls by `backendDOMNodeId`. Out-of-process iframes have trees of their own
 (`ax_tree_id`, child tree ids), as they have their own DevTools sessions.
+
+### 10. Two pages and the way out
+
+`--loop=mt`, two browsers on the bench page at 400×300 (`results/q10*.txt`).
+
+**Two pages.** Both paint at 60 a second; the processes are one GPU process, four renderers
+(one each, plus spares), two utilities (network, storage) and three zygotes. Closing the first
+with `close_browser(0)` gives `on_before_close` after 6 ms, its renderer goes, and the second
+keeps painting at 60. Closing the second likewise.
+
+**The order that works, and is what CEF documents:** for each browser, `close_browser`, wait
+for `on_before_close`, release our reference; then `cef_shutdown` on the thread that called
+`cef_initialize`. Done that way: `cef_shutdown` 15 ms, every reference CEF took of ours
+returned (`client=0` and the rest), `Main` returns, **the process is gone ~35 ms later and no
+CEF process is left 0.3 s after**. 29 of CEF's threads are still in our process after
+`cef_shutdown`; they do not hold it up.
+
+**What lingers until then.** After `cef_shutdown`: three zygotes (`S`) and two zombie renderers
+(`Z`, unreaped children of a zygote), unchanged after 1, 3 and 10 s. Chromium keeps the zygote
+host as a process-lifetime singleton: the zygotes leave when our end of their socket closes,
+the zombies with them. Since CEF cannot be initialised twice in a process, the engine's
+`cef_shutdown` belongs at application exit (`IWebEngine.Dispose` on the way out), where this
+costs nothing; an app that disposed the engine and ran on would carry three idle processes.
+
+**What CEF tolerates** (Fedora's is a release build; a debug `libcef` asserts on some of
+these):
+
+| Variant | `cef_shutdown` | References left | Process exits | CEF processes after exit |
+|---|---|---|---|---|
+| normal order | 15 ms | none | yes, ~35 ms | none |
+| a browser reference kept (`--hold-ref`) | 15 ms | `client=1` (the browser still holds our client) | yes | none |
+| a browser left open (`--no-close`) | 14 ms; it closes the browser itself (`on_before_close` inside the call) | `client=1` | yes | none |
+| no `cef_shutdown` at all (`--no-shutdown`) | — | — | yes, ~35 ms | none |
+| SIGKILL to our process, both open (`--kill-self`) | — | — | killed | **none, 0.3 s later**: zygotes, renderers and the GPU process all notice |
+
+So nothing has to be released for the process to exit by itself, and a crash orphans
+nothing. Doing it in the documented order is still what the engine should do: it is what
+makes `client=0`, it is what a debug `libcef` checks, and it is what keeps `on_before_close`
+on the browser's own path rather than inside `cef_shutdown`.

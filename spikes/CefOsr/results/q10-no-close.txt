@@ -1,0 +1,21 @@
+[    80.4 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    88.6 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   244.2 ms main          ] cef_initialize = 1
+[   263.2 ms CrBrowserMain (33930)] on_context_initialized
+[   269.2 ms main          ] create_browser = 1
+[   269.3 ms main          ] create_browser = 1
+[   271.3 ms CrBrowserMain (33930)] on_after_created: browser 1
+[   274.2 ms CrBrowserMain (33930)] get_screen_info #1: struct size 56, answering scale 1
+[   278.9 ms CrBrowserMain (33930)] on_after_created: browser 2
+[   279.3 ms CrBrowserMain (33930)] get_screen_info #2: struct size 56, answering scale 1
+[   298.4 ms CrBrowserMain (33930)] get_screen_info #3: struct size 56, answering scale 1
+[  2808.1 ms main          ] two browsers (1, 2): browser 1: 60/s, browser 2: 60/s; processes: 1 gpu-process, 4 renderer, 2 utility, 3 zygote
+[  2810.2 ms CrBrowserMain (33930)] on_before_close: browser 1
+[  2815.0 ms main          ] close_browser(force 0) on browser 1: on_before_close after 6 ms
+[  4825.3 ms main          ] one left: browser 2: 60/s; processes: 1 gpu-process, 3 renderer, 2 utility, 3 zygote
+[  4825.4 ms main          ] not closing the second browser before cef_shutdown (--no-close)
+[  4826.1 ms CrBrowserMain (33930)] on_before_close: browser 2
+[  4843.1 ms main          ] cef_shutdown returned after 14 ms; refs: app=0, browser_process_handler=0, client=1, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[  4845.1 ms main          ] threads in our process: 29; processes: 3 (no type), 3 zygote
+[  4845.1 ms main          ] returning from Main
+exit status 0; wall 4885 ms; helper processes 0.3 s after exit: 0, 3 s after: 0
