@@ -86,7 +86,7 @@ internal static unsafe class Q3
             Host.Pump(() => paints > before && lastW != 800, 3000);
             Log($"after notify_screen_info_changed + was_resized: {lastW}x{lastH}");
         }
-        Host.Pump(() => false, 300);   // let the text finish painting
+        Host.Wait(300);   // let the text finish painting
         // The frame as it stands now: the first frame may precede the text.
         int W = lastW, H = lastH;
         byte[]? settled = null;
@@ -107,7 +107,7 @@ internal static unsafe class Q3
 
         // A still page: does it stop?
         paints = 0; dirtyArea = 0;
-        Host.Pump(() => false, 2000);
+        Host.Wait(2000);
         Log($"still page: {paints} paints in 2 s after settling");
 
         // An animating page at several frame rates.
@@ -117,14 +117,14 @@ internal static unsafe class Q3
         main->load_url(main, &u);
         Release(main);
         Host.Pump(() => loaded, 10000);
-        Host.Pump(() => false, 500);
+        Host.Wait(500);
         foreach (var rate in new[] { 60, 30, 120, 1 })
         {
             Host.WithHost(browser, h => ((cef_browser_host_t*)h)->set_windowless_frame_rate((cef_browser_host_t*)h, rate));
-            Host.Pump(() => false, 500);
+            Host.Wait(500);
             paints = 0; dirtyArea = 0;
             long a = Clock.ElapsedMilliseconds;
-            Host.Pump(() => false, 3000);
+            Host.Wait(3000);
             double secs = (Clock.ElapsedMilliseconds - a) / 1000.0;
             int got = 0;
             Host.WithHost(browser, h => got = ((cef_browser_host_t*)h)->get_windowless_frame_rate((cef_browser_host_t*)h));

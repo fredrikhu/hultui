@@ -59,6 +59,7 @@ runs this program again),
 | 1 | Does Fedora's libcef load and start, windowless, from a .NET program? | **Yes, with a native helper.** `cef_api_hash(14600)` first, then `cef_initialize`: context ready ~200 ms after process start, a `data:` page loaded and painted 85–100 ms after `create_browser_sync`. Resources are found beside `libcef.so` with no `resources_dir_path` and from any working directory. **The subprocess executable cannot be .NET**: Chromium's zygote must be single-threaded to sandbox itself, and cannot fork a .NET process even unsandboxed. A 20-line C helper in `browser_subprocess_path` works with the sandbox on. Sandbox: **the namespace sandbox works in this container**, and the setuid `chrome-sandbox` beside `libcef.so` works too; `no_sandbox` is not needed. Ozone: **Wayland**, with the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa); X11 (the default) and `ozone-platform-hint=auto` without a session type fail here for want of an X server; `headless` runs with no WebGL (until question 3 gives it `--use-angle=gl-egl`). |
 | 2 | Does the versioned API hold? | **Yes.** The same binary, written against Fedora's 146 at API 14600, runs unchanged on the official CEF **154.0.32** (Chromium 154.0.8037.58, the stable release on 2026-10-01): same hash, `cef_initialize` = 1, page painted 59 ms after `create_browser`, WebGL on the GPU, sandbox on, references balanced. 154 accepts API 13300–15400; generated from 154's headers at 14600, every struct, offset and export is identical to 146's. A bundled CEF must be laid out **flat** (`Resources/` beside `libcef.so`: `resources_dir_path` does not cover `icudtl.dat`) and **stripped** (the official `libcef.so` is 1.45 GB with debug sections, 272 MB without; ~115 MB compressed in all). |
 | 3 | Pixels | **BGRA, top-down, opaque, at the frame rate asked for; but the scale only takes on `headless`.** An 800×600 view at scale 1.5 paints **1200×900** on `--ozone-platform=headless` (a 100-CSS-pixel box is 150 device pixels), and **800×600 at scale 1** on `wayland`, whatever `get_screen_info`, `--force-device-scale-factor` or the compositor's output scale say. `headless` with `--use-angle=gl-egl` has the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa) and needs no display connection. First frame 85–93 ms after `create_browser`. A still page stops painting (0 paints in 2 s); an animating one paints at exactly `windowless_frame_rate`: 60, 30, 120 and 1 measured, each the whole view. |
+| 4 | The message loop | **Both work; `multi_threaded_message_loop` is the simpler fit.** With it every callback (`on_paint`, `on_title_change`, `on_before_browse`, life span, load) arrives on CEF's own UI thread, `CrBrowserMain`, in our process, and our thread does nothing. `external_message_pump` delivers them on our thread, but **only with a fallback timer**: CEF asks for work once and then stalls unless the host also calls `cef_do_message_loop_work` at least every 33 ms (cefclient's rule); with it CEF asks ~1/s idle and 186/s animating, always "now". Costs are the same either way: ~18 ms/s idle and ~50 ms/s animating at 60 in our process, ~155 ms/s in CEF's. All three shut down with every reference returned and no process left once ours exits; until then zygotes and two zombie renderers outlive `cef_shutdown` (question 10). |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -217,3 +218,51 @@ textures arrive on headless too.
   main thread (question 4 compares the loop models).
 - **`data:` URLs need a charset.** Base64 without `;charset=utf-8` is read as Latin-1 ("Â·").
   `NavigateToString` must say UTF-8.
+
+### 4. The message loop
+
+Three runs, identical but for the loop, on `headless` + `gl-egl`: create a browser
+(asynchronously: `create_browser_sync` only works on CEF's UI thread, and returns null, with
+no error, from any other), navigate twice, 5 s still, 3 s animating at 60, close, shut down
+(`results/q4-*.txt`).
+
+| | `multi_threaded_message_loop` | `external_message_pump` + 33 ms timer | polled `cef_do_message_loop_work` (reference) |
+|---|---|---|---|
+| Callbacks arrive on | **`CrBrowserMain`, CEF's thread in our process** | our main thread | our main thread |
+| `on_schedule_message_pump_work` | not called | from `Chrome_IOThread`, `ThreadPoolForeground`, `CacheThread`; always delay 0 | not called |
+| Pump runs | none of ours | 31/s idle (the timer), 186/s animating | 480/s, always |
+| Our process, idle | 17 ms/s | 18 ms/s | 21 ms/s |
+| Our process, animating at 60 | 48 ms/s | 56 ms/s | 56 ms/s |
+| CEF's processes, animating | 157 ms/s | 153 ms/s | 163 ms/s |
+| `cef_shutdown` | 16 ms, on main | 25 ms | 18 ms |
+
+**The external pump stalls without a timer** (`results/q4-external-no-timer.txt`): CEF asks
+once, during `cef_initialize`, and never again; the first page took 15 s to fail with
+`ERR_ABORTED`, and nothing animated. Its pump (`libcef/browser/browser_message_loop.cc`)
+asks only when the UI thread goes from idle to busy and never reports delayed work it
+already knew of, so the host must come back by itself. cefclient
+(`main_message_loop_external_pump.cc`) calls `cef_do_message_loop_work` at least every
+1000/30 ms for this reason. Iterating glib's default context instead does not help. With the
+timer: HultUI's loop would have to wake 30 times a second forever, and each wake runs up to
+10 ms of CEF's work (its time slice) on the thread that draws.
+
+**Multi-threaded** keeps CEF's work off HultUI's thread entirely: CEF runs its UI thread
+itself, and our thread only calls in. What that asks of the engine:
+
+- every event is raised on `CrBrowserMain`, which `IWebEngineView.Event` allows; the
+  controller marshals;
+- `on_before_browse` is answered on CEF's thread, which waits while HultUI's thread decides:
+  the allowed direction ("the reverse is allowed"), and the continuation
+  `WebNavigationRequest` already has;
+- calls that must be on CEF's UI thread (`create_browser_sync`, and whichever others the
+  headers say) are posted with `cef_post_task(TID_UI, …)`; the browser itself comes back in
+  `on_after_created`. `cef_initialize` and `cef_shutdown` are made on our main thread, the
+  same one, as CEF requires.
+
+**Shutdown.** In all three: close the browser, `on_before_close` 2–5 ms later, release our
+reference, `cef_shutdown` returns in 16–25 ms, and every reference CEF took of ours has been
+returned. But **three zygotes and two zombie renderers are still there 3 s after
+`cef_shutdown`**, the zombies being the zygote's unreaped children. They go when our process
+exits: `pgrep` finds no helper and `ps` no zombie, at once and 2.5 s later, in every mode.
+For an app, which shuts CEF down only on its way out, that is clean; question 10 looks at why
+they outlive `cef_shutdown`.

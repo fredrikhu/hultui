@@ -268,6 +268,21 @@ HultUI's thread when `on_schedule_message_pump_work` asks). Which threads do `on
 no zombie processes (`pgrep -f type=`)? The contract allows either: `IWebEngineView.Event`
 may be raised from any thread.
 
+> **Result (2026-10-01): both work; multi-threaded is the fit.** With
+> `multi_threaded_message_loop` every callback (`on_paint`, `on_title_change`,
+> `on_before_browse`, life span, load) arrives on **`CrBrowserMain`**, CEF's thread in our
+> process, and HultUI's thread does no CEF work. `create_browser_sync` returns null off that
+> thread: create asynchronously and take the browser from `on_after_created`, and post
+> whatever must run there with `cef_post_task`. With `external_message_pump` the callbacks
+> arrive on our thread, but **only with a fallback timer**. CEF asks for work once
+> (`cef_initialize`) and then stalls unless `cef_do_message_loop_work` also runs at least
+> every 33 ms, as cefclient does. With the timer, CEF asks from its IO and pool threads,
+> always with delay 0 (~1/s idle, 186/s animating). The cost is the same in all three: our
+> process ~18 ms/s idle, ~50 ms/s animating at 60; CEF's ~155 ms/s. Shutdown is clean in all
+> three: every reference returned, `cef_shutdown` in 16–25 ms, and nothing left once our
+> process exits. But three zygotes and two zombie renderers outlive `cef_shutdown` for as long
+> as the process lives (question 10). Details: `spikes/CefOsr/README.md`, question 4.
+
 **5. Input and focus.** `send_mouse_move_event`, `send_mouse_click_event`,
 `send_mouse_wheel_event`; `send_key_event` for a letter, Enter, Tab and an arrow; `set_focus`.
 What does `cef_key_event_t` need to make a page's `keydown` and a text field both right:

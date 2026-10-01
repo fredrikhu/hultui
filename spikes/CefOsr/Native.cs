@@ -141,9 +141,25 @@ internal static unsafe class Native
     public static string Thread()
     {
         int t = GetTid();
-        return t == MainTid ? "main" : $"tid {t}";
+        if (t == MainTid) return "main";
+        string comm;
+        try { comm = File.ReadAllText($"/proc/self/task/{t}/comm").Trim(); }
+        catch (IOException) { comm = "?"; }
+        return $"{comm} ({t})";
+    }
+
+    /// <summary>CPU time (user + system) of a process, from /proc.</summary>
+    public static double CpuMs(int pid)
+    {
+        try
+        {
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+            var f = stat[(stat.LastIndexOf(')') + 2)..].Split(' ');
+            return (long.Parse(f[11]) + long.Parse(f[12])) * 1000.0 / 100;   // USER_HZ = 100
+        }
+        catch (Exception) { return 0; }
     }
 
     public static void Log(string text)
-        => Console.WriteLine($"[{Clock.Elapsed.TotalMilliseconds,8:F1} ms {Thread(),-10}] {text}");
+        => Console.WriteLine($"[{Clock.Elapsed.TotalMilliseconds,8:F1} ms {Thread(),-14}] {text}");
 }

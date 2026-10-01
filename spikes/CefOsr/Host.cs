@@ -17,6 +17,8 @@ internal sealed class Options
     public string LogSeverity = "warning"; // verbose|info|warning|error|disable
     public string Cwd = "";                // --cwd=<dir> before cef_initialize
     public List<string> Switches = new();  // --switch=name[=value], to the browser's command line
+    public int PumpTimerMs;                // --pump-timer=33: external pump's fallback timer
+    public bool PumpGlib;                  // --pump-glib: also iterate glib's default context
     public List<string> Rest = new();
 
     public static Options Parse(IEnumerable<string> args)
@@ -34,6 +36,8 @@ internal sealed class Options
             else if (a.StartsWith("--log=")) o.LogSeverity = Val();
             else if (a.StartsWith("--cwd=")) o.Cwd = Val();
             else if (a.StartsWith("--switch=")) o.Switches.Add(Val());
+            else if (a.StartsWith("--pump-timer=")) o.PumpTimerMs = int.Parse(Val());
+            else if (a == "--pump-glib") o.PumpGlib = true;
             else o.Rest.Add(a);
         }
         // The C helper (question 1), when built beside the program as the README says.
@@ -165,10 +169,18 @@ internal static unsafe class Host
         {
             if (Opt.Loop == "mt") { System.Threading.Thread.Sleep(5); continue; }
             if (Opt.Loop == "external") { PumpExternal(5); continue; }
+            PumpCalls++;
             Cef.cef_do_message_loop_work();
             System.Threading.Thread.Sleep(2);
         }
         if (!done()) Log($"Pump: timed out after {timeoutMs} ms");
+    }
+
+    /// <summary>Runs the loop for a while, for the time itself.</summary>
+    public static void Wait(int ms)
+    {
+        var end = Clock.ElapsedMilliseconds + ms;
+        Pump(() => Clock.ElapsedMilliseconds >= end, ms + 1000);
     }
 
     // external_message_pump: do the work when CEF asks, at the time it asks for.
@@ -178,6 +190,7 @@ internal static unsafe class Host
 
     private static void PumpExternal(int maxWaitMs)
     {
+        if (Opt.PumpGlib) g_main_context_iteration(0, 0);
         long now = Clock.ElapsedMilliseconds, due = Interlocked.Read(ref _pumpDue);
         if (due > now) PumpWake.WaitOne((int)Math.Min(maxWaitMs, Math.Max(0, due - now)));
         if (Interlocked.Read(ref _pumpDue) <= Clock.ElapsedMilliseconds)
@@ -185,8 +198,14 @@ internal static unsafe class Host
             Interlocked.Exchange(ref _pumpDue, long.MaxValue);
             PumpCalls++;
             Cef.cef_do_message_loop_work();
+            // cefclient's rule (main_message_loop_external_pump.cc): never let more than
+            // 1000/30 ms pass between calls, whether CEF asked or not.
+            if (Opt.PumpTimerMs > 0 && Interlocked.Read(ref _pumpDue) == long.MaxValue)
+                Interlocked.CompareExchange(ref _pumpDue, Clock.ElapsedMilliseconds + Opt.PumpTimerMs, long.MaxValue);
         }
     }
+
+    [DllImport("libglib-2.0.so.0")] private static extern int g_main_context_iteration(nint context, int mayBlock);
 
     public static cef_browser_t* CreateBrowser(string url, int frameRate = 60, bool sharedTexture = false, bool sync = true)
     {
@@ -319,7 +338,7 @@ internal static unsafe class Host
     [UnmanagedCallersOnly]
     private static void OnSchedulePumpWork(cef_browser_process_handler_t* self, long delayMs)
     {
-        Interlocked.Increment(ref PumpRequests);
+        if (Interlocked.Increment(ref PumpRequests) <= 5) Log($"on_schedule_message_pump_work({delayMs})");
         long due = Clock.ElapsedMilliseconds + Math.Max(0, delayMs);
         long cur;
         do { cur = Interlocked.Read(ref _pumpDue); }
