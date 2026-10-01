@@ -1,0 +1,51 @@
+# spike L0 question 1: which subprocess executable, with which sandbox (Fedora 44, CEF 146, --ozone-platform=wayland)
+=== subprocess this .NET program run again sandbox on
+      1 [FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:221] Check failed: . : No such file or directory (2)
+=== subprocess this .NET program run again --sandbox=off
+      1 [   204.3 ms main      ] cef_initialize = 1
+      6 [ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+      1 [FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.
+=== subprocess this .NET program run again --sandbox=off --switch=no-zygote
+      1 [   120.3 ms main      ] cef_initialize = 1
+      1 [   284.5 ms main      ] page loaded and painted 164 ms after create_browser; title 'Q1'
+=== subprocess NativeAOT .NET helper sandbox on
+      1 [FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:221] Check failed: . : No such file or directory (2)
+      1 helper 11347: threads at Main: cefosr-helper, .NET Finalizer
+      1 helper 1: threads at Main: cefosr-helper, .NET Finalizer
+=== subprocess NativeAOT .NET helper --sandbox=off
+      1 [   185.7 ms main      ] cef_initialize = 1
+      6 [ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+      1 [FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.
+      1 helper 11371: threads at Main: cefosr-helper, .NET Finalizer
+      1 helper 11372: threads at Main: cefosr-helper, .NET Finalizer
+=== subprocess NativeAOT .NET helper --sandbox=off --switch=no-zygote
+      1 [   128.7 ms main      ] cef_initialize = 1
+      1 [   273.4 ms main      ] page loaded and painted 144 ms after create_browser; title 'Q1'
+      1 helper 11451: threads at Main: cefosr-helper, .NET Finalizer
+      1 helper 11453: threads at Main: cefosr-helper, .NET Finalizer
+      1 helper 11458: threads at Main: cefosr-helper, .NET Finalizer
+=== subprocess JIT .NET helper sandbox on
+      1 [FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:221] Check failed: . : No such file or directory (2)
+      1 helper 11584: threads at Main: cefosr-helper, .NET SynchManag, .NET EventPipe, .NET DebugPipe, .NET Debugger, .NET Finalizer, .NET Tiered Com
+      1 helper 1: threads at Main: cefosr-helper, .NET SynchManag, .NET DebugPipe, .NET Debugger, cefosr-helper, cefosr-helper
+=== subprocess JIT .NET helper --sandbox=off
+      1 [   203.3 ms main      ] cef_initialize = 1
+      6 [ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+      1 [FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.
+      1 helper 11619: threads at Main: cefosr-helper, .NET SynchManag, .NET EventPipe, .NET DebugPipe, .NET Debugger, .NET Finalizer, .NET Tiered Com
+      1 helper 11620: threads at Main: cefosr-helper, .NET SynchManag, .NET EventPipe, .NET DebugPipe, .NET Debugger, .NET Finalizer, .NET Tiered Com
+=== subprocess JIT .NET helper --sandbox=off --switch=no-zygote
+      1 [   123.5 ms main      ] cef_initialize = 1
+      1 [   297.4 ms main      ] page loaded and painted 174 ms after create_browser; title 'Q1'
+      1 helper 11716: threads at Main: cefosr-helper, .NET SynchManag, .NET EventPipe, .NET DebugPipe, .NET Debugger, .NET Finalizer, .NET Tiered Com
+      1 helper 11717: threads at Main: cefosr-helper, .NET SynchManag, .NET EventPipe, .NET DebugPipe, .NET Debugger, .NET Finalizer, .NET Tiered Com
+      1 helper 11730: threads at Main: cefosr-helper, .NET SynchManag, .NET EventPipe, .NET DebugPipe, .NET Debugger, .NET Finalizer, .NET Tiered Com
+=== subprocess C helper (Helper/helper.c) sandbox on
+      1 [   182.0 ms main      ] cef_initialize = 1
+      1 [   278.1 ms main      ] page loaded and painted 96 ms after create_browser; title 'Q1'
+=== subprocess C helper (Helper/helper.c) --sandbox=off
+      1 [   199.0 ms main      ] cef_initialize = 1
+      1 [   289.0 ms main      ] page loaded and painted 90 ms after create_browser; title 'Q1'
+=== subprocess C helper (Helper/helper.c) --sandbox=off --switch=no-zygote
+      1 [   130.1 ms main      ] cef_initialize = 1
+      1 [   290.5 ms main      ] page loaded and painted 160 ms after create_browser; title 'Q1'

@@ -302,7 +302,10 @@ COPRs**, and on Debian and Ubuntu too.
   it is question 2 of the spike.
 - **What it costs**: accessibility is ours to build from CEF's raw tree updates, where WebKit
   would have spoken AT-SPI itself; a helper process; and zero-copy on NVIDIA waits on
-  cef#4237, which is still open.
+  cef#4237, which is still open. **Spike L0 found (question 1) that the helper must be
+  native**: Chromium's zygote has to be single-threaded to sandbox itself and cannot fork a
+  .NET process, so neither the app run again nor a .NET helper (NativeAOT included) works
+  with the sandbox on. A 20-line C executable does, and is the engine's one native piece.
 - **What it gains**: the same engine as Windows, so a page renders alike on both.
 
 The spike, the machine and the build order are in `docs/design/WEBVIEW-LINUX-BRIEF.md`,

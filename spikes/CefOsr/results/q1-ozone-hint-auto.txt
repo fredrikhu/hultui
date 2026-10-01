@@ -1,0 +1,6 @@
+[    55.6 ms main      ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    64.6 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<build>/helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform-hint=auto
+[10282:10282:1001/212610.372633:ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:258] Missing X server or $DISPLAY
+[10282:10282:1001/212610.372700:ERROR:ui/aura/env.cc:246] The platform failed to initialize.  Exiting.
+[10282:10282:1001/212610.372721:ERROR:cef/libcef/browser/main_runner.cc:77] ContentMainRun failed with exit code 1
+[   158.0 ms main      ] cef_initialize = 0

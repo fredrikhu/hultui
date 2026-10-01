@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Spike L0 of docs/design/WEBVIEW-LINUX-BRIEF.md, and deliberately not in HultUI.slnx:
+       a throwaway that answers whether Fedora's CEF can render a page off-screen for a .NET
+       program on Linux, through CEF's C API and nothing else. Capi.g.cs is generated from
+       the headers by gen-capi.py. Helper/ is the separate subprocess executable question 1
+       weighs against re-running this one. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>CefOsr</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Helper/**" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,63 @@
+[    57.6 ms main      ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    66.3 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<build>/helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=headless
+[   172.9 ms main      ] on_context_initialized
+[   172.9 ms main      ] cef_initialize = 1
+[   173.4 ms main      ] context ready 173 ms after start
+[   177.8 ms main      ] on_after_created: browser 1
+[10136:10136:1001/212555.670163:ERROR:ui/gl/angle_platform_impl.cc:47] Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+ERR: Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+[10136:10136:1001/212555.682852:ERROR:ui/gl/egl_util.cc:92] EGL Driver message (Critical) eglInitialize: Could not open the default X display.
+[10136:10136:1001/212555.682881:ERROR:ui/gl/gl_display.cc:638] eglInitialize OpenGL failed with error EGL_NOT_INITIALIZED, trying next display type
+[10136:10136:1001/212555.682933:ERROR:ui/gl/angle_platform_impl.cc:47] Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+ERR: Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+[10136:10136:1001/212555.682956:ERROR:ui/gl/egl_util.cc:92] EGL Driver message (Critical) eglInitialize: Could not open the default X display.
+[10136:10136:1001/212555.682971:ERROR:ui/gl/gl_display.cc:638] eglInitialize OpenGLES failed with error EGL_NOT_INITIALIZED
+[10136:10136:1001/212555.683003:ERROR:ui/gl/gl_display.cc:673] Initialization of all EGL display types failed.
+[10136:10136:1001/212555.683022:ERROR:ui/ozone/common/gl_ozone_egl.cc:26] GLDisplayEGL::Initialize failed.
+[   204.8 ms main      ] create_browser_sync = 5782ba6673c0
+[10139:10139:1001/212555.702044:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7
+[10136:10136:1001/212555.705863:ERROR:ui/gl/angle_platform_impl.cc:47] Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+ERR: Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+[10136:10136:1001/212555.705925:ERROR:ui/gl/egl_util.cc:92] EGL Driver message (Critical) eglInitialize: Could not open the default X display.
+[10136:10136:1001/212555.705950:ERROR:ui/gl/gl_display.cc:638] eglInitialize OpenGL failed with error EGL_NOT_INITIALIZED, trying next display type
+[10136:10136:1001/212555.705976:ERROR:ui/gl/angle_platform_impl.cc:47] Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+ERR: Display.cpp:1097 (initialize): ANGLE Display::initialize error 12289: Could not open the default X display.
+[10136:10136:1001/212555.705991:ERROR:ui/gl/egl_util.cc:92] EGL Driver message (Critical) eglInitialize: Could not open the default X display.
+[10136:10136:1001/212555.706005:ERROR:ui/gl/gl_display.cc:638] eglInitialize OpenGLES failed with error EGL_NOT_INITIALIZED
+[10136:10136:1001/212555.706018:ERROR:ui/gl/gl_display.cc:673] Initialization of all EGL display types failed.
+[10136:10136:1001/212555.706031:ERROR:ui/ozone/common/gl_ozone_egl.cc:26] GLDisplayEGL::Initialize failed.
+[10136:10136:1001/212555.706462:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization
+[10201:10201:1001/212555.713982:ERROR:media/gpu/vaapi/vaapi_wrapper.cc:1640] vaInitialize failed: unknown libva error
+[   236.3 ms main      ] on_load_end: HTTP 200
+[   256.0 ms main      ] first on_paint: PET_VIEW 1200x900
+[   258.1 ms main      ] page loaded and painted 85 ms after create_browser; title 'Q1'
+[   278.2 ms main      ] on_load_end: HTTP 200
+[   280.7 ms main      ] WebGL probe: GL: no WebGL
+[   280.7 ms main      ] children launched:
+    <build>/helper-c --type=zygote --no-zygote-sandbox --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=zygote --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=gpu-process --ozone-platform=headless --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=storage.mojom.StorageService --lang=en-US --service-sandbox-type=utility --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=gpu-process --ozone-platform=headless --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+[   281.4 ms main      ] children now:
+    pid 10110 (parent 10100) zygote: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10111 (parent 10100) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 10114 (parent 10111) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 10139 (parent 10100) utility: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10143 (parent 10114) utility: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 10153 (parent 10114) (no type): exe ?, seccomp 2, no_new_privs 1, own userns + own pidns + own netns
+    pid 10167 (parent 10114) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=headless, maps libX11.so libxcb.so
+    pid 10201 (parent 10110) gpu-process: exe chelper, seccomp 2, no_new_privs 1, our namespaces, --ozone-platform=headless, maps libvulkan_intel libwayland-client libX11.so libxcb.so
+    pid 10204 (parent 10201) broker: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10212 (parent 10114) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=headless, maps libX11.so libxcb.so
+    pid 10218 (parent 10114) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=headless, maps libX11.so libxcb.so
+[   305.6 ms main      ] on_before_close: browser 1
+[   327.3 ms main      ] cef_shutdown returned after 14 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[   829.5 ms main      ] children left: 10110 zygote; 10111 zygote; 10114 zygote; 10167 (no type); 10218 (no type)

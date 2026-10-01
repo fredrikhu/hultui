@@ -1,0 +1,40 @@
+[    57.1 ms main      ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    65.4 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<build>/helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-namespace-sandbox
+[   192.0 ms main      ] on_context_initialized
+[   192.0 ms main      ] cef_initialize = 1
+[   192.5 ms main      ] context ready 192 ms after start
+[   197.2 ms main      ] on_after_created: browser 1
+[10692:10692:1001/212620.157654:ERROR:media/gpu/vaapi/vaapi_wrapper.cc:1640] vaInitialize failed: unknown libva error
+[   219.9 ms main      ] create_browser_sync = 57b4de1d4a20
+[10697:10697:1001/212620.179862:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7
+[   249.2 ms main      ] on_load_end: HTTP 200
+[   272.0 ms main      ] first on_paint: PET_VIEW 800x600
+[   274.2 ms main      ] page loaded and painted 82 ms after create_browser; title 'Q1'
+[   299.3 ms main      ] on_load_end: HTTP 200
+[   301.6 ms main      ] WebGL probe: GL: Google Inc. (Intel) | ANGLE (Intel, Mesa Intel(R) UHD Graphics 770 (ADL-S GT1), OpenGL ES 3.2)
+[   301.7 ms main      ] children launched:
+    <build>/helper-c --type=zygote --no-zygote-sandbox --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=zygote --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=storage.mojom.StorageService --lang=en-US --service-sandbox-type=utility --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+[   302.5 ms main      ] children now:
+    pid 10662 (parent 10653) zygote: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10663 (parent 10653) zygote: exe ?, seccomp 2, no_new_privs 0, ns unreadable
+    pid 10664 (parent 10663) zygote: exe chelper, seccomp 2, no_new_privs 0, own pidns + own netns, maps libX11.so libxcb.so
+    pid 10667 (parent 10664) zygote: exe ?, seccomp 2, no_new_privs 0, ns unreadable
+    pid 10692 (parent 10662) gpu-process: exe chelper, seccomp 2, no_new_privs 1, our namespaces, --ozone-platform=wayland, maps libgallium libEGL_mesa libwayland-client libX11.so libxcb.so libGLESv2.so
+    pid 10697 (parent 10653) utility: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 10699 (parent 10667) utility: exe ?, seccomp 2, no_new_privs 1, ns unreadable
+    pid 10754 (parent 10667) renderer: exe ?, seccomp 2, no_new_privs 1, ns unreadable, --ozone-platform=wayland
+    pid 10781 (parent 10667) renderer: exe ?, seccomp 2, no_new_privs 1, ns unreadable, --ozone-platform=wayland
+    pid 10792 (parent 10667) renderer: exe ?, seccomp 2, no_new_privs 1, ns unreadable, --ozone-platform=wayland
+[   324.2 ms main      ] on_before_close: browser 1
+[   346.8 ms main      ] cef_shutdown returned after 15 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[   849.6 ms main      ] children left: 10662 zygote; 10663 zygote; 10664 zygote; 10667 zygote; 10754 (no type); 10792 (no type)

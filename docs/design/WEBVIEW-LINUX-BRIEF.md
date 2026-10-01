@@ -99,6 +99,11 @@ Three things about a container that a desktop does not have. All three are **ver
   so nothing here may assume a `/dev/dri/card*`. Inside, check before anything else:
   `ls -l /dev/dri`, `eglinfo -B`, `vainfo`. If the render node is missing, stop and say so:
   that is the owner's to fix on the host.
+  **Found (2026-10-01):** `renderD128` (group `render`) and a `card1` (group `video`) are
+  both there. `eglinfo -B`: Mesa 26.2.3 on the UHD 770 through GBM, surfaceless and device
+  platforms; `vulkaninfo`: the UHD 770 through Mesa's Intel driver, and llvmpipe. `vainfo`
+  finds no driver (`intel-media-driver` is RPM Fusion's), so video decode is software.
+  Sway headless on `renderD128` with GLES2 works as written above.
 - **Chromium's sandbox wants user namespaces.** An unprivileged container may refuse them
   unless it has `nesting=1`. Fedora ships `/usr/lib64/cef/chrome-sandbox` as the other route.
   Question 1 below finds out. `no_sandbox` is acceptable **for the spike only**, and the
@@ -121,6 +126,13 @@ dotnet run --project samples/HultUI.Samples.WebView -- --fake   # a HultUI windo
 If the last line does not put a window on the compositor, fix that first; nothing below
 means anything until HultUI itself draws there. `dotnet-sdk-10.0` from Fedora is **verify**
 (`dnf search dotnet-sdk`).
+
+**Found (2026-10-01):** all of it holds on Fedora 44. `dotnet-sdk-10.0` is Fedora's
+(10.0.112), sway 1.11 and wayvnc 0.9.1 likewise. The build has no errors; the fake-engine suite
+passes 64 of 64; `--fake` opens the window in sway through SDL's Wayland driver with GL on the
+UHD 770 (`gfx: video=wayland renderer="Mesa Intel(R) UHD Graphics 770"`), drawn. Sway's
+headless output starts at 1280×720; `swaymsg output HEADLESS-1 resolution 1920x1080` makes
+room for question 8's 1650×1072 page.
 
 What Fedora's package holds (Fedora 44, read from the package index):
 
@@ -180,6 +192,32 @@ A console program under `spikes/CefOsr/`, results in its `README.md` as a table,
   or only with `no_sandbox`;
 - which Ozone platform it starts on with no flags, and with `--ozone-platform=wayland`,
   `x11` and `headless`.
+
+> **Result (2026-10-01): yes, but the helper must be native.** Details and raw output:
+> `spikes/CefOsr/README.md`, question 1.
+> - `cef_api_hash(14600, 0)` first returns the Linux hash `cef_api_versions.h` lists;
+>   `cef_initialize` = 1, context ready ~200 ms after process start; a `data:` page painted
+>   85–100 ms after `create_browser_sync`. Fedora's 146 accepts API versions 13300–14600, and
+>   its RPM provides `cef(api) = 13300 … 14600`: an app package can require the API version.
+> - **Resources** are found beside `libcef.so`, no `resources_dir_path`, any working directory.
+> - **Helper: neither shape works with .NET.** Chromium's zygote has to be single-threaded to
+>   enter the sandbox, and cannot fork a .NET process even unsandboxed. The app run again,
+>   a NativeAOT helper (2 threads at `Main`: its finalizer) and a JIT helper (7) all fail:
+>   sandbox on, the zygote never reports (`FATAL zygote_host_impl_linux.cc:221`); sandbox off,
+>   the GPU process never launches. Only `--no-sandbox --no-zygote` gets a .NET helper running.
+>   **A 20-line C helper** (`dlopen`, `cef_api_hash`, `cef_execute_process`) in
+>   `browser_subprocess_path` works with the sandbox on and asks nothing of `Main`. It finds
+>   libcef through `HULTUI_CEF_DIR`, set with libc `setenv` before `cef_initialize`. It is the
+>   engine's one piece of native code.
+> - **Sandbox: works, namespace sandbox** (renderers in their own user, PID and network
+>   namespaces, seccomp-bpf). The setuid `chrome-sandbox` beside `libcef.so` also works, found
+>   without `CHROME_DEVEL_SANDBOX`. `no_sandbox` was not needed and no later run uses it.
+>   Whether the host set `nesting=1` cannot be seen from inside; `unshare -U` works.
+> - **Ozone: ask for it outright.** No flag means X11, which fails here (no X server);
+>   `--ozone-platform-hint=auto` follows `XDG_SESSION_TYPE`, unset in this shell. `wayland`
+>   works with the GPU: WebGL is ANGLE on GL ES 3.2 on Mesa, UHD 770. `headless` paints but
+>   has no WebGL. `x11` fails for want of a server. CEF passes
+>   `--render-node-override=/dev/dri/renderD128` to its children itself.
 
 **2. Does the versioned API hold?** Since M133 a client names the API version it was written
 against (`CEF_API_VERSION=XXXZZ`; the list is `cef_api_versions.h`) in the first call to
