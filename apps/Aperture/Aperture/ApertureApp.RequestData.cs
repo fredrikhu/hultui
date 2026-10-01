@@ -112,7 +112,7 @@ public sealed partial class ApertureApp
         // no way back to it is a dead end.
         if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
                 or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.DiscoverAll
-                or ApertureView.DiscoverGenres or ApertureView.Requests
+                or ApertureView.DiscoverGenres or ApertureView.DiscoverCompanies or ApertureView.Requests
                 or ApertureView.Issues or ApertureView.Issue) > 0
             && _stack.Count == 0)
             _stack.Add(new Route(ApertureView.Home));

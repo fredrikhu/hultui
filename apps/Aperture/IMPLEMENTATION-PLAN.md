@@ -280,7 +280,9 @@ or not the administrator's layout has a row for it. The wall is in the server's 
 the row's first page puts what the library has first. A genre row holds every
 genre already, a page at a time; its "See all" (once they do not fit on one page) is all of
 them at once as a wrap of the same cards (`ApertureView.DiscoverGenres`, id `movie` or `tv`,
-its own load so it stands without the rows). Studio and network rows have none. The route carries only the row's id; the row itself is found in the
+its own load so it stands without the rows). Studio and network rows got the same after:
+every studio or network at once (`ApertureView.DiscoverCompanies`, id `movie` or `tv`) —
+the lists are compiled in, so the page has nothing to load. The route carries only the row's id; the row itself is found in the
 layout as last loaded, and one no longer there says so rather than guessing. It is a real
 button, not a link-styled box: only `ButtonElement` answers Enter and Space.
 

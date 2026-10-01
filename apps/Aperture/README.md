@@ -122,7 +122,7 @@ added included — its order, its switched-off
 rows, its custom rows (streaming-service rows among them) — and every row of titles that runs
 past one page has a "See all" page — with genre rows (all of whose genres a "See all" shows at once) that open genre
 pages, studio and network rows of
-logos that open everything a studio made or a network aired, and a name in a title's cast
+logos (each with a "See all" showing every one at once) that open everything a studio made or a network aired, and a name in a title's cast
 opens everything that person is in. A bookmark keeps a title on the watchlist, which has a row on Home too (with its own
 "See all" once it runs past a page). Someone the
 server lets choose can send a request to a particular Radarr or Sonarr, quality and folder.

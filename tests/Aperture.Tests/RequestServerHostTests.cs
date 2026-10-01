@@ -748,6 +748,43 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void StudiosAndNetworksSeeAllShowsEveryOneAtOnce()
+    {
+        var requests = Requests();
+        requests.Layout =
+        [
+            new DiscoverSlider(1, SliderKind.Studios, null, null, Enabled: true, Order: 0),
+            new DiscoverSlider(2, SliderKind.Networks, null, null, Enabled: true, Order: 1),
+        ];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Studios");
+            PumpUntilShown(session, "See all of Networks");
+            // The rows show a page of logos; A24, the last studio, is a page turn away.
+            Assert.Null(session.Window.FindByAutomationId("company-movie-41077"));
+
+            Click(session, "discover-row-studios-1-see-all");
+            Assert.Equal(ApertureView.DiscoverCompanies, app.Current.View);
+            foreach (var studio in DiscoverCompanies.Studios)
+                Assert.NotNull(session.Window.FindByAutomationId($"company-movie-{studio.Id}"));
+            Assert.Null(session.Window.FindByAutomationId("company-tv-213"));   // no networks here
+            Click(session, "company-movie-41077");
+            Assert.Equal(ApertureView.DiscoverCompany, app.Current.View);
+            Assert.Equal("movie:41077", app.Current.Id);
+
+            app.GoBack();
+            app.GoBack();
+            Pump(session);
+            Click(session, "discover-row-networks-2-see-all");
+            Assert.Equal("tv", app.Current.Id);
+            foreach (var network in DiscoverCompanies.Networks)
+                Assert.NotNull(session.Window.FindByAutomationId($"company-tv-{network.Id}"));
+        });
+    }
+
+    [Fact]
     public void SeeAllForARowNoLongerInTheLayoutSaysSo()
     {
         var requests = Requests();

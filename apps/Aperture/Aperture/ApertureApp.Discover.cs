@@ -100,8 +100,15 @@ public sealed partial class ApertureApp
             if (row.Companies.Count > 0)
             {
                 var companies = row.Companies;
+                var studios = row.Kind == SliderKind.Studios;
+                var heading = row.Title;
+                // As with genres: the row has them all, a few at a time; "See all" is all at once.
                 page.AddChild(CardRow(row.Title, companies.Count,
-                    i => CompanyCard(companies[i], cursorIndex: start + i), CompanyCardWidth, "discover-row-" + row.Key));
+                    i => CompanyCard(companies[i], cursorIndex: start + i), CompanyCardWidth, "discover-row-" + row.Key,
+                    headingExtra: companies.Count > VisibleCards(CompanyCardWidth)
+                        ? SeeAllButton(heading, $"discover-row-{row.Key}-see-all", () => Navigate(new Route(
+                            ApertureView.DiscoverCompanies, studios ? "movie" : "tv", heading)))
+                        : null));
                 cursorBase += companies.Count;
                 continue;
             }
@@ -282,6 +289,26 @@ public sealed partial class ApertureApp
 
         card.OnClick(_ => OpenCompany(company));
         return card.HoverBg(Halide.Raised);
+    }
+
+    /// <summary>Every studio or network at once, as the row's logo cards. The lists are
+    /// compiled in (<see cref="DiscoverCompanies"/>), so there is nothing to wait for.</summary>
+    private Element BuildDiscoverCompaniesView(Route route)
+    {
+        bool studios = route.Id != "tv";
+        var companies = studios ? DiscoverCompanies.Studios : DiscoverCompanies.Networks;
+        var column = Flex.Column(gap: 0).FlexGrow(1).AutomationId("companies-view");
+        column.AddChild(ViewBar(route.Title ?? (studios ? "Studios" : "Networks"), companies.Count, "companies-view"));
+
+        var scroll = ScrollView.Vertical().FlexGrow(1);
+        var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart).Padding(new Thickness(Halide.S5));
+        wrap.Flex.Wrap = FlexWrap.Wrap;
+        wrap.Gap(Halide.PosterGap);
+        SetCursorList("companies:" + route.Id, companies, VisibleCards(CompanyCardWidth));
+        for (int i = 0; i < companies.Count; i++) wrap.AddChild(CompanyCard(companies[i], cursorIndex: i));
+        scroll.AddChild(wrap);
+        column.AddChild(scroll);
+        return column;
     }
 
     internal void OpenCompany(DiscoverCompany company) =>

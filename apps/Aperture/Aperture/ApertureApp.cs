@@ -42,6 +42,8 @@ public enum ApertureView
     DiscoverAll,
     /// <summary>Every genre to browse by, at once; the Id is <c>movie</c> or <c>tv</c>.</summary>
     DiscoverGenres,
+    /// <summary>Every studio (<c>movie</c>) or network (<c>tv</c>), at once.</summary>
+    DiscoverCompanies,
     /// <summary>Everything part-watched — Home's Continue watching row in full.</summary>
     ContinueWatching,
     /// <summary>Every series' next episode — Home's Next up row in full.</summary>
@@ -235,6 +237,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             ApertureView.DiscoverCompany => BuildDiscoverCompanyView(Current),
             ApertureView.DiscoverAll => BuildDiscoverAllView(Current),
             ApertureView.DiscoverGenres => BuildDiscoverGenresView(Current),
+            ApertureView.DiscoverCompanies => BuildDiscoverCompaniesView(Current),
             ApertureView.DiscoverPerson => BuildDiscoverPersonView(Current),
             ApertureView.Requests => BuildRequestsView(),
             ApertureView.Issues => BuildIssuesView(),
@@ -354,7 +357,7 @@ public sealed partial class ApertureApp : Component, IDisposable
             rail.AddChild(RailButton(Icons.Discover, "Discover", "",
                 active: Current.View is ApertureView.Discover or ApertureView.DiscoverTitle
                     or ApertureView.DiscoverGenre or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany
-                    or ApertureView.DiscoverAll or ApertureView.DiscoverGenres,
+                    or ApertureView.DiscoverAll or ApertureView.DiscoverGenres or ApertureView.DiscoverCompanies,
                 onClick: () => Navigate(new Route(ApertureView.Discover))));
             rail.AddChild(RailButton(Icons.Requests, "Requests", "",
                 active: Current.View == ApertureView.Requests,
