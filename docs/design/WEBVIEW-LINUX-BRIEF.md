@@ -108,7 +108,9 @@ Set up:
 
 ```bash
 sudo dnf install cef cef-devel dotnet-sdk-10.0 clang zlib-devel mesa-dri-drivers \
-                 mesa-libEGL-devel egl-utils libva-utils git
+                 mesa-libEGL-devel egl-utils libva-utils git \
+                 mesa-vulkan-drivers vulkan-loader vulkan-tools
+vulkaninfo --summary     # the Intel GPU through Mesa's driver, for the Vulkan renderer and question 8
 git clone git@github.com:fredrikhu/hului-revamped.git && cd hului-revamped
 git checkout claude/webview-component-repo-62ba8b
 dotnet build HultUI.CrossPlatform.slnf
