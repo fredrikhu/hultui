@@ -658,6 +658,60 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void RecentlyAddedIsDrawnForWhomTheServerDrawsIt()
+    {
+        DiscoverSlider[] layout =
+        [
+            new(1, SliderKind.RecentlyAdded, null, null, Enabled: true, Order: 0),
+            new(2, SliderKind.PopularMovies, null, null, Enabled: true, Order: 1),
+        ];
+        foreach (var (permissions, drawn) in new[]
+        {
+            (RequestPermission.Request, false),
+            (RequestPermission.Request | RequestPermission.RecentView, true),
+            (RequestPermission.ManageRequests, true),
+        })
+        {
+            var requests = Requests(permissions);
+            requests.AddRecentlyAdded("movie:1398");
+            requests.Layout = [.. layout];
+            Host(Library(), requests, (session, app) =>
+            {
+                PumpUntilShown(session, "Films");
+                Click(session, "rail-discover");
+                PumpUntilShown(session, "Popular films");
+                Assert.True(drawn == Shows(session, "Recently added"), $"{permissions}: drawn should be {drawn}");
+            });
+        }
+    }
+
+    [Fact]
+    public void RecentlyAddedIsNeverThinnedByTheHideAvailableSwitch()
+    {
+        // Every title in it is available: the switch would leave nothing.
+        var requests = Requests(RequestPermission.ManageRequests,
+            new RequestServerInfo("http://jellyseerr.test:5055", "Jellyseerr", "2.7.3", HideAvailable: true));
+        requests.SliderPageSize = 1;
+        requests.AddMovie(1399_000, "Andrei Rublev", 1966, Availability.Available, "rublev", []);
+        requests.AddRecentlyAdded("movie:1398", "movie:1399000");
+        requests.Layout = [new DiscoverSlider(1, SliderKind.RecentlyAdded, null, null, Enabled: true, Order: 0)];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "Recently added");
+            Assert.NotNull(session.Window.FindByAutomationId("discover-card-movie:1398"));
+
+            // And its "See all" pages through the rest, still unthinned.
+            Click(session, "discover-row-slider-1-see-all");
+            PumpUntilShown(session, "Stalker");
+            Click(session, "see-all-view-more");
+            PumpUntilShown(session, "Andrei Rublev");
+            Assert.Contains("GetSlider(RecentlyAdded,1,p2)", requests.Calls);
+        });
+    }
+
+    [Fact]
     public void SeeAllForARowNoLongerInTheLayoutSaysSo()
     {
         var requests = Requests();

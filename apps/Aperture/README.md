@@ -117,7 +117,8 @@ A series in the library that is missing seasons says so on its own page, with a 
 beside Play; something being downloaded shows how far it has got; and an allowance that is
 nearly spent is said before the button is pressed.
 
-Discover follows the request server administrator's own layout — its order, its switched-off
+Discover follows the request server administrator's own layout — every row of it, recently
+added included — its order, its switched-off
 rows, its custom rows (streaming-service rows among them) — and every row of titles that runs
 past one page has a "See all" page — with genre rows that open genre
 pages, studio and network rows of

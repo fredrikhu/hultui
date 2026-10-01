@@ -142,8 +142,10 @@ public sealed partial class ApertureApp
     /// settles in one step rather than row by row. A server whose layout cannot be read
     /// gets the built-in default, which is what a fresh install has anyway.
     ///
-    /// <para>Left out, on purpose: <b>recently added</b> — the library's own Home has it,
-    /// straight from Jellyfin, which is where it comes from. <b>Studios</b> and
+    /// <para><b>Recently added</b> is what the server has seen arrive in Jellyfin, across
+    /// libraries — drawn for whom the server's own page draws it (managers, and "view recently
+    /// added"), and never thinned by the hide-available switch, which would empty it: every
+    /// title in it is available. <b>Studios</b> and
     /// <b>networks</b> are the lists the server's web page compiles in
     /// (<see cref="DiscoverCompanies"/>) — the API does not serve them, so they cost no call.
     /// A <b>streaming-service</b> row is a custom row like any other, its region and services
@@ -195,7 +197,8 @@ public sealed partial class ApertureApp
                     default:
                         var first = FetchRequest(() => server.GetSliderAsync(slider), DiscoverPage.Empty, title);
                         rows.Add(new DiscoverRow("slider-" + slider.Id, title, slider.Kind,
-                            Shown(server, first.Items), [], [], slider, first.HasMore));
+                            slider.Kind == SliderKind.RecentlyAdded ? first.Items : Shown(server, first.Items),
+                            [], [], slider, first.HasMore));
                         break;
                 }
             }
@@ -212,7 +215,8 @@ public sealed partial class ApertureApp
     [
         .. new[]
         {
-            SliderKind.RecentRequests, SliderKind.Watchlist, SliderKind.Trending, SliderKind.PopularMovies,
+            SliderKind.RecentlyAdded, SliderKind.RecentRequests, SliderKind.Watchlist, SliderKind.Trending,
+            SliderKind.PopularMovies,
             SliderKind.MovieGenres, SliderKind.UpcomingMovies, SliderKind.Studios, SliderKind.PopularTv,
             SliderKind.TvGenres, SliderKind.UpcomingTv, SliderKind.Networks,
         }.Select((kind, i) => new DiscoverSlider(-(i + 1), kind, null, null, true, i)),
@@ -223,7 +227,9 @@ public sealed partial class ApertureApp
     /// called it.</summary>
     internal string? SliderTitle(DiscoverSlider slider) => slider.Kind switch
     {
-        SliderKind.RecentlyAdded => null,
+        SliderKind.RecentlyAdded => _requestServer?.User is { } user
+                                    && (user.CanManageRequests || user.Has(RequestPermission.RecentView))
+            ? "Recently added" : null,
         SliderKind.RecentRequests => _requestServer?.User.CanManageRequests == true ? "Recent requests" : "Your requests",
         SliderKind.Watchlist => "Your watchlist",
         SliderKind.Trending => "Trending",
@@ -308,7 +314,9 @@ public sealed partial class ApertureApp
         if (slider.Kind == SliderKind.Watchlist)
             EnsureWallPage(source, (server, page) => server.GetWatchlistAsync(page), "Your watchlist", more, hide: false);
         else
-            EnsureWallPage(source, (server, page) => server.GetSliderAsync(slider, page), "That row", more);
+            EnsureWallPage(source, (server, page) => server.GetSliderAsync(slider, page), "That row", more,
+                // Everything recently added is available: the hide switch would empty it.
+                hide: slider.Kind != SliderKind.RecentlyAdded);
     }
 
     private void EnsureCompanyPage(DiscoverKind kind, int companyId, bool more = false) =>

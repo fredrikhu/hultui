@@ -434,6 +434,13 @@ internal sealed class SeerrIssuePageDto
     public List<SeerrIssueDto>? Results { get; set; }
 }
 
+/// <summary><c>GET /media</c>: the server's own records, not TMDB's — ids and state only.</summary>
+internal sealed class SeerrMediaPageDto
+{
+    public SeerrPageInfoDto? PageInfo { get; set; }
+    public List<SeerrMediaInfoDto>? Results { get; set; }
+}
+
 internal sealed class SeerrIssueCountDto
 {
     public int Open { get; set; }
@@ -484,5 +491,6 @@ internal sealed class SeerrErrorDto
 [JsonSerializable(typeof(SeerrIssueDto))]
 [JsonSerializable(typeof(SeerrIssuePageDto))]
 [JsonSerializable(typeof(SeerrIssueCountDto))]
+[JsonSerializable(typeof(SeerrMediaPageDto))]
 [JsonSerializable(typeof(SeerrCommentBodyDto))]
 internal partial class SeerrJson : JsonSerializerContext;

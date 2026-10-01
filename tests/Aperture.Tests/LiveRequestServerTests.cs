@@ -189,6 +189,23 @@ public class LiveRequestServerTests
         Assert.NotEmpty(details.Value.Profiles);
         Assert.NotEmpty(details.Value.RootFolders);
     }
+    /// <summary>The server's record of what arrived, newest first, each with a title and a
+    /// Jellyfin item to open. Read only.</summary>
+    [LiveRequestServerFact]
+    public async Task RecentlyAddedReadsWithTitlesAndLibraryItems()
+    {
+        using var server = await LiveRequestServer.ConnectAsync(null, Ct);
+        var page = await server.GetSliderAsync(new DiscoverSlider(0, SliderKind.RecentlyAdded, null, null, true, 0), ct: Ct);
+        Assert.True(page.Ok, page.Failure?.Message);
+        Assert.NotEmpty(page.Value.Items);
+        Assert.All(page.Value.Items, i =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(i.Title));
+            Assert.Contains(i.Availability, new[] { Availability.Available, Availability.PartiallyAvailable });
+        });
+        Assert.Contains(page.Value.Items, i => i.InLibrary);
+    }
+
     /// <summary>A streaming-service row the way the server stores one (Netflix, in the US):
     /// titles come back, and fewer than without the filter — which proves it was applied.
     /// Read only: the row is made up here, never saved to the server's layout.</summary>
