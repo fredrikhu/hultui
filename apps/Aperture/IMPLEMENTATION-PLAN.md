@@ -277,8 +277,10 @@ to everything (and everyone's, for someone who decides them). Home's watchlist r
 too, before its menu; both watchlist rows open a fixed route (`DiscoverAll` with id
 `watchlist`) rather than a layout row's id, since the list is the user's and opens whether
 or not the administrator's layout has a row for it. The wall is in the server's order; only
-the row's first page puts what the library has first. Genre, studio and network
-rows are whole already. The route carries only the row's id; the row itself is found in the
+the row's first page puts what the library has first. A genre row holds every
+genre already, a page at a time; its "See all" (once they do not fit on one page) is all of
+them at once as a wrap of the same cards (`ApertureView.DiscoverGenres`, id `movie` or `tv`,
+its own load so it stands without the rows). Studio and network rows have none. The route carries only the row's id; the row itself is found in the
 layout as last loaded, and one no longer there says so rather than guessing. It is a real
 button, not a link-styled box: only `ButtonElement` answers Enter and Space.
 

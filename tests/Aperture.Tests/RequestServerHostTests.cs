@@ -712,6 +712,42 @@ public class RequestServerHostTests
     }
 
     [Fact]
+    public void AGenreRowTooLongForOnePageOffersEveryGenreAtOnce()
+    {
+        var requests = Requests();
+        string[] names = ["Action", "Comedy", "Drama", "Horror", "Romance", "Thriller", "Western", "War"];
+        for (int i = 0; i < names.Length; i++) requests.AddGenre(DiscoverKind.Movie, 100 + i, names[i], "movie:603");
+        requests.AddGenre(DiscoverKind.Tv, 200, "Animation", "tv:1399");   // one: fits, nothing more to see
+        requests.Layout =
+        [
+            new DiscoverSlider(1, SliderKind.MovieGenres, null, null, Enabled: true, Order: 0),
+            new DiscoverSlider(2, SliderKind.TvGenres, null, null, Enabled: true, Order: 1),
+        ];
+        Host(Library(), requests, (session, app) =>
+        {
+            PumpUntilShown(session, "Films");
+            Click(session, "rail-discover");
+            PumpUntilShown(session, "See all of Films by genre");
+            Assert.True(Shows(session, "Series by genre"));
+            Assert.Null(session.Window.FindByAutomationId("discover-row-genres-2-see-all"));
+            // The row shows one page of them; the others are a page turn away.
+            Assert.Null(session.Window.FindByAutomationId("genre-movie-107"));
+
+            Click(session, "discover-row-genres-1-see-all");
+            Assert.Equal(ApertureView.DiscoverGenres, app.Current.View);
+            Assert.Equal("movie", app.Current.Id);
+            PumpUntilShown(session, "War films");
+            // All eight at once, each opening its genre as on the row.
+            for (int i = 0; i < names.Length; i++)
+                Assert.NotNull(session.Window.FindByAutomationId($"genre-movie-{100 + i}"));
+            Assert.False(Shows(session, "Animation series"), "a series genre on the films page");
+            Click(session, "genre-movie-107");
+            Assert.Equal(ApertureView.DiscoverGenre, app.Current.View);
+            Assert.Equal("movie:107", app.Current.Id);
+        });
+    }
+
+    [Fact]
     public void SeeAllForARowNoLongerInTheLayoutSaysSo()
     {
         var requests = Requests();

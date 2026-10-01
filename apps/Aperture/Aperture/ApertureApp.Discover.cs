@@ -84,8 +84,16 @@ public sealed partial class ApertureApp
             if (row.Genres.Count > 0)
             {
                 var genres = row.Genres;
+                var kind = row.Kind == SliderKind.MovieGenres ? DiscoverKind.Movie : DiscoverKind.Tv;
+                var title = row.Title;
+                // The row holds every genre already, a few at a time; "See all" is all of
+                // them at once — only worth offering when they do not fit on one page.
                 page.AddChild(CardRow(row.Title, genres.Count,
-                    i => GenreCard(genres[i], cursorIndex: start + i), GenreCardWidth, "discover-row-" + row.Key));
+                    i => GenreCard(genres[i], cursorIndex: start + i), GenreCardWidth, "discover-row-" + row.Key,
+                    headingExtra: genres.Count > VisibleCards(GenreCardWidth)
+                        ? SeeAllButton(title, $"discover-row-{row.Key}-see-all", () => Navigate(new Route(
+                            ApertureView.DiscoverGenres, kind == DiscoverKind.Movie ? "movie" : "tv", title)))
+                        : null));
                 cursorBase += genres.Count;
                 continue;
             }
@@ -289,6 +297,38 @@ public sealed partial class ApertureApp
         return TitleWall($"{name} {(kind == DiscoverKind.Movie ? "films" : "series")}", WallItems, WallLoading, WallHasMore,
             () => { EnsureCompanyPage(kind, companyId, more: true); Rerender(); }, "company-view", Icons.Discover,
             "Nothing here", $"{RequestServerTitle} has nothing to show for {name}.");
+    }
+
+    /// <summary>Every genre of one kind as a wrap of the same cards the row has.</summary>
+    private Element BuildDiscoverGenresView(Route route)
+    {
+        var kind = route.Id == "tv" ? DiscoverKind.Tv : DiscoverKind.Movie;
+        EnsureGenreList(kind);
+        // The loader keeps the last kind's list while the next loads: only this kind's count.
+        var genres = GenreList.Where(g => g.Kind == kind).ToList();
+        var title = route.Title ?? (kind == DiscoverKind.Movie ? "Films by genre" : "Series by genre");
+
+        var column = Flex.Column(gap: 0).FlexGrow(1).AutomationId("genres-view");
+        column.AddChild(ViewBar(title, genres.Count, "genres-view"));
+        if (genres.Count == 0)
+        {
+            SetCursorList("genres:empty", [], 1);
+            column.AddChild(EmptyState(GenreListLoading ? Icons.Loading : Icons.Genre,
+                GenreListLoading ? $"Asking {RequestServerTitle}…" : "No genres",
+                GenreListLoading ? null : $"{RequestServerTitle} sent back none. Is it connected to TMDB?",
+                "genres-view-empty"));
+            return column;
+        }
+
+        var scroll = ScrollView.Vertical().FlexGrow(1);
+        var wrap = Flex.Row(gap: Halide.PosterGap).AlignItems(AlignItems.FlexStart).Padding(new Thickness(Halide.S5));
+        wrap.Flex.Wrap = FlexWrap.Wrap;
+        wrap.Gap(Halide.PosterGap);
+        SetCursorList("genres:" + route.Id, genres, VisibleCards(GenreCardWidth));
+        for (int i = 0; i < genres.Count; i++) wrap.AddChild(GenreCard(genres[i], cursorIndex: i));
+        scroll.AddChild(wrap);
+        column.AddChild(scroll);
+        return column;
     }
 
     internal void OpenGenre(DiscoverGenre genre) =>

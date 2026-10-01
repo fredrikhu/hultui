@@ -112,7 +112,7 @@ public sealed partial class ApertureApp
         // no way back to it is a dead end.
         if (_stack.RemoveAll(r => r.View is ApertureView.Discover or ApertureView.DiscoverTitle or ApertureView.DiscoverGenre
                 or ApertureView.DiscoverPerson or ApertureView.DiscoverCompany or ApertureView.DiscoverAll
-                or ApertureView.Requests
+                or ApertureView.DiscoverGenres or ApertureView.Requests
                 or ApertureView.Issues or ApertureView.Issue) > 0
             && _stack.Count == 0)
             _stack.Add(new Route(ApertureView.Home));
@@ -207,6 +207,20 @@ public sealed partial class ApertureApp
     }
 
     internal IReadOnlyList<DiscoverRow> DiscoverRows => _discoverRows.Value;
+
+    private readonly AsyncLoader<IReadOnlyList<DiscoverGenre>> _genreList = new([]);
+
+    /// <summary>Every genre of one kind, for the genres page — its own load, so the page
+    /// stands on its own when the Discover rows have not been read (or have been re-keyed).</summary>
+    private void EnsureGenreList(DiscoverKind kind)
+    {
+        if (_requestServer is not { } server) return;
+        _genreList.Load(("genre-list", _requestGeneration, _dataGeneration, kind), () =>
+            FetchRequest(() => server.GetGenresAsync(kind), (IReadOnlyList<DiscoverGenre>)[], "The genres"));
+    }
+
+    internal IReadOnlyList<DiscoverGenre> GenreList => _genreList.Value;
+    internal bool GenreListLoading => _genreList.IsLoading;
     internal bool DiscoverRowsLoading => _discoverRows.IsLoading;
 
     /// <summary>The layout a fresh install has — what Discover shows when the server's
