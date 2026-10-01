@@ -292,6 +292,32 @@ buffer (`PET_POPUP`, with `on_popup_show` and `on_popup_size`); confirm, and tha
 composited over the page at the rectangle given. Then `ime_set_composition` and
 `ime_commit_text`, and `on_ime_composition_range_changed` for where the candidates go.
 
+> **Result (2026-10-01): all of it works, from any thread.**
+> - **Mouse:** coordinates are **view coordinates (DIP)**: device pixels ÷ scale. Left,
+>   right (`contextmenu`) and `click_count` 2 (`dblclick`) work. Wheel `delta_y` −120 is one
+>   notch down (120 CSS px, smooth). Right-click logs that no default menu exists off-screen,
+>   so the context-menu handler of 5.4 is required.
+> - **Keys:** `windows_key_code` gives `key` and `keyCode`, `native_key_code` (**the XKB
+>   keycode, evdev + 8**) gives `code` (empty without it), and `character` gives the text.
+>   A key that types: `RAWKEYDOWN`, then `CHAR` **carrying the key's own codes** and the
+>   character, then `KEYUP`, with modifier flags. That is exactly a browser's
+>   keydown/keypress/input/keyup. A `CHAR` with the character as its code gives `keypress`
+>   the wrong key ('c' → "3", VK_NUMPAD3). Text with no key goes through `ime_commit_text`
+>   (an `insertText` input, no keypress). Keys the page leaves unhandled come back in
+>   `on_key_event`.
+> - **W6:** the XKB keycode. A `KeyCode` → XKB table covers the keys HultUI names. For the
+>   rest, `KeyDownEvent.ScanCode` = SDL's scancode (the USB HID usage), mapped through
+>   Chromium's `dom_code_data.inc` table (USB, evdev, XKB per key).
+> - **Focus:** `set_focus(0/1)` blurs and focuses. Tab past the last element raises
+>   `on_take_focus(next)`.
+> - **`<select>`:** confirmed. `on_popup_show`, then `on_popup_size` in DIP (200×106 under the
+>   field), then `PET_POPUP` paints at device scale (300×159). Clicks inside the rectangle
+>   choose an option.
+> - **IME:** composition events and commit as in a browser.
+>   `on_ime_composition_range_changed` gives one rectangle per character in DIP.
+>
+> `spikes/CefOsr/README.md`, question 5; the popup's PNG in `results/`.
+
 **6. Script results and page messages without code in the renderer.** CEF's
 `execute_java_script` returns nothing, and its message router is C++ only. Try the DevTools
 protocol from the browser process: `execute_dev_tools_method` with `Runtime.evaluate`

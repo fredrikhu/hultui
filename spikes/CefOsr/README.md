@@ -60,6 +60,7 @@ runs this program again),
 | 2 | Does the versioned API hold? | **Yes.** The same binary, written against Fedora's 146 at API 14600, runs unchanged on the official CEF **154.0.32** (Chromium 154.0.8037.58, the stable release on 2026-10-01): same hash, `cef_initialize` = 1, page painted 59 ms after `create_browser`, WebGL on the GPU, sandbox on, references balanced. 154 accepts API 13300–15400; generated from 154's headers at 14600, every struct, offset and export is identical to 146's. A bundled CEF must be laid out **flat** (`Resources/` beside `libcef.so`: `resources_dir_path` does not cover `icudtl.dat`) and **stripped** (the official `libcef.so` is 1.45 GB with debug sections, 272 MB without; ~115 MB compressed in all). |
 | 3 | Pixels | **BGRA, top-down, opaque, at the frame rate asked for; but the scale only takes on `headless`.** An 800×600 view at scale 1.5 paints **1200×900** on `--ozone-platform=headless` (a 100-CSS-pixel box is 150 device pixels), and **800×600 at scale 1** on `wayland`, whatever `get_screen_info`, `--force-device-scale-factor` or the compositor's output scale say. `headless` with `--use-angle=gl-egl` has the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa) and needs no display connection. First frame 85–93 ms after `create_browser`. A still page stops painting (0 paints in 2 s); an animating one paints at exactly `windowless_frame_rate`: 60, 30, 120 and 1 measured, each the whole view. |
 | 4 | The message loop | **Both work; `multi_threaded_message_loop` is the simpler fit.** With it every callback (`on_paint`, `on_title_change`, `on_before_browse`, life span, load) arrives on CEF's own UI thread, `CrBrowserMain`, in our process, and our thread does nothing. `external_message_pump` delivers them on our thread, but **only with a fallback timer**: CEF asks for work once and then stalls unless the host also calls `cef_do_message_loop_work` at least every 33 ms (cefclient's rule); with it CEF asks ~1/s idle and 186/s animating, always "now". Costs are the same either way: ~18 ms/s idle and ~50 ms/s animating at 60 in our process, ~155 ms/s in CEF's. All three shut down with every reference returned and no process left once ours exits; until then zygotes and two zombie renderers outlive `cef_shutdown` (question 10). |
+| 5 | Input and focus | **All of it works off-screen.** Mouse coordinates are **view coordinates (DIP)**; clicks, right-clicks, `click_count` 2 for a double click, the wheel (−120 = one notch down, 120 CSS px, smooth). Keys: **`RAWKEYDOWN`, `CHAR`, `KEYUP`, each carrying the key's Windows code and its XKB `native_key_code`**, give a page exactly what a browser does; `native_key_code` is what fills `KeyboardEvent.code` (seam W6). Text with no key goes through `ime_commit_text`. Tab past the last element raises `on_take_focus`. `<select>` paints a `PET_POPUP` buffer at the device scale with its rectangle in DIP, and clicks inside it choose. IME composition and commit work, with character bounds in DIP. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -266,3 +267,73 @@ returned. But **three zygotes and two zombie renderers are still there 3 s after
 exits: `pgrep` finds no helper and `ps` no zombie, at once and 2.5 s later, in every mode.
 For an app, which shuts CEF down only on its way out, that is clean; question 10 looks at why
 they outlive `cef_shutdown`.
+
+### 5. Input and focus
+
+A page with a text field, a button and a `<select>` at known CSS positions logs every event it
+receives through `console.log`; the spike prints them after each step (`results/q5.txt`). Run
+with `--loop=mt`, so every call here comes from our thread, not CEF's: CEF accepts input from
+any thread.
+
+**Mouse.** `send_mouse_move_event` / `send_mouse_click_event` / `send_mouse_wheel_event` take
+**view coordinates**, the DIP of `get_view_rect`: (60, 85) arrives as `clientX 60, clientY 85`
+with `devicePixelRatio` 1.5. So the engine divides the element's device pixels by the scale.
+Left, right (`contextmenu`, `auxclick`) and `click_count` 2 (`dblclick`, `detail 2`) all
+arrive. The button flags in `modifiers` (`EVENTFLAG_LEFT_MOUSE_BUTTON`) make `buttons`
+right. **Wheel:** `delta_y` −120 is one notch *down* (`deltaY` +120, `deltaMode` 0), the
+page scrolls 120 CSS px, animated over ~10 frames. The sign is Windows' `WHEEL_DELTA`
+convention. Right-click with no context-menu handler logs `Default context menu
+implementation is not available`: step 5.4's handler is needed, as on Windows. The cursor
+comes back through `on_cursor_change` (`CT_POINTER`, `CT_IBEAM`).
+
+**Keys: what `cef_key_event_t` needs.**
+
+| Sent | `keydown` | `keypress` | Text |
+|---|---|---|---|
+| `RAWKEYDOWN`, `CHAR`, `KEYUP`, all with wkc `0x41`, native 38, character `a` (cefclient's way) | `"a"`, `KeyA`, 65 | `"a"`, `KeyA`, 97 | `a` |
+| the same with `native_key_code` 0 | `"b"`, **`code` ""**, 66 | `"b"`, `""` | `b` |
+| `RAWKEYDOWN` (wkc `0x43`, native 54, no character), then `CHAR` with wkc = the character `c` | `"c"`, `KeyC` | **`"3"`**: wkc `0x63` read as VK_NUMPAD3 | `c` |
+| `RAWKEYDOWN`/`CHAR`/`KEYUP`, the `CHAR` carrying the key's wkc `0x44` and native 40 | `"d"`, `KeyD`, 68 | `"d"`, `KeyD`, 100 | `d` |
+| the same for E with `EVENTFLAG_SHIFT_DOWN` | `"E"`, `KeyE` | `"E"` | `E` |
+| `CHAR` only, wkc 0 or the character, no native | — | **`"\u0000"`** | `é`, `日` |
+| `ime_commit_text("ü")` with no composition | — | — | `ü`, `insertText` |
+| ArrowLeft (`0x25`/113), Enter (`0x0D`/36, `\r`), Tab (`0x09`/23) | `ArrowLeft`, `Enter`, `Tab` with their codes | Enter only | caret moves; Tab moves focus |
+
+So: **`windows_key_code` gives `key` and `keyCode`; `native_key_code`, the XKB keycode
+(evdev + 8), gives `code`; `character` gives the text.** A key that types sends
+`RAWKEYDOWN`, then `CHAR` with *the key's* codes and the character, then `KEYUP`, with the
+modifier flags; HultUI's `KeyDownEvent` and the `TextInputEvent` SDL sends right after it make
+that pair. Text that came from no key (an IME commit outside composition, a dead key, an
+on-screen keyboard) goes through `ime_commit_text`, which inserts without a `keypress`, as a
+browser does; a bare `CHAR` would give the page a `keypress` with key `"\u0000"`.
+
+**Seam W6, answered:** the engine needs the XKB keycode. For every key HultUI's `KeyCode`
+names, a table from `KeyCode` to XKB is enough; for the keys it maps to `Unknown` (keypad,
+F13+, media, international) the raw scan code is needed. SDL's scancode is the USB HID usage,
+and Chromium's `ui/events/keycodes/dom/dom_code_data.inc` lists USB usage, evdev and XKB for
+every key, so `KeyDownEvent.ScanCode` carrying SDL's scancode and one generated table cover
+it. **Keys come back.** Every key the page did not consume arrives in the keyboard handler's
+`on_key_event` (`RAWKEYDOWN` and `KEYUP`), on CEF's thread: a second chance for app
+shortcuts, beside the element seeing every key first.
+
+**Focus.** A windowless browser reports `document.hasFocus()` true from the start;
+`set_focus(0)` blurs the page (`blur` on the field and the window), `set_focus(1)` restores it.
+Tab moves through the page's own order; **Tab past the last element blurs the window and
+raises `on_take_focus(next = 1)`** on `CrBrowserMain`, which is `FocusLeaving(forward)`.
+Shift+Tab sent after that comes back in at the last element.
+
+**`<select>`.** A click on it raises `on_popup_show(1)` and `on_popup_size` with the list's
+rectangle in **view coordinates** (20, 150, 200×106: just below the field), then `on_paint`
+with `PET_POPUP` and a **300×159** buffer, the rectangle times 1.5
+(`results/q5-select-popup.png`: the native list, first row highlighted). The engine
+composites it over the page at the rectangle × scale. Mouse events sent at view coordinates
+inside the rectangle go to the list: a click at row 3 chose "three" (`change`), closed it
+(`on_popup_show(0)`), and the page saw nothing else.
+
+**IME.** In the focused field, `ime_set_composition("にほん", underline 0–3, caret 3)` gives
+`compositionstart`, `compositionupdate "にほん"` and an `input` with `insertCompositionText`;
+**`on_ime_composition_range_changed` reports the composed range (6–9) and one rectangle per
+character in view coordinates** (where `TextInputHost.SetInputArea` puts the candidate window,
+after × scale and the element's offset). `ime_commit_text("日本")` ends it with
+`compositionend "日本"`. This container has no CJK font, so those characters drew as 7 px
+boxes; the geometry, not the glyphs, is what was checked.

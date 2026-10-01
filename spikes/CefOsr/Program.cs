@@ -25,6 +25,7 @@ return probe switch
     "q1" => Q1.Run(opt),
     "q3" => Q3.Run(opt),
     "q4" => Q4.Run(opt),
+    "q5" => Q5.Run(opt),
     _ => Fail($"unknown probe {probe}"),
 };
 

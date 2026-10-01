@@ -467,6 +467,10 @@ package can call.
 forwarded keys. `KeyCode` is physical but maps the keypad, F13+, media and
 international keys to `Unknown`; CEF's key event wants the native key code beside
 the Windows one (what exactly is question 5 of the Linux spike). Add `KeyDownEvent.ScanCode`/`KeyUpEvent.ScanCode`.
+**Spike L0 answered it:** CEF's `native_key_code` is the XKB keycode (evdev + 8), and it is
+what fills `KeyboardEvent.code` (empty without it); `key` and `keyCode` come from the
+Windows code. So `ScanCode` carries SDL's scancode (the USB HID usage), and the engine maps it
+through one table generated from Chromium's `dom_code_data.inc` (USB, evdev and XKB per key).
 
 **W7 — Per-source interop images on Vulkan (`HultUI.Platform.SDL3`,
 `HultUI.Rendering.Skia`). Done (2026-09-30).** The Vulkan surface lent *one* interop
