@@ -61,6 +61,7 @@ runs this program again),
 | 3 | Pixels | **BGRA, top-down, opaque, at the frame rate asked for; but the scale only takes on `headless`.** An 800×600 view at scale 1.5 paints **1200×900** on `--ozone-platform=headless` (a 100-CSS-pixel box is 150 device pixels), and **800×600 at scale 1** on `wayland`, whatever `get_screen_info`, `--force-device-scale-factor` or the compositor's output scale say. `headless` with `--use-angle=gl-egl` has the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa) and needs no display connection. First frame 85–93 ms after `create_browser`. A still page stops painting (0 paints in 2 s); an animating one paints at exactly `windowless_frame_rate`: 60, 30, 120 and 1 measured, each the whole view. |
 | 4 | The message loop | **Both work; `multi_threaded_message_loop` is the simpler fit.** With it every callback (`on_paint`, `on_title_change`, `on_before_browse`, life span, load) arrives on CEF's own UI thread, `CrBrowserMain`, in our process, and our thread does nothing. `external_message_pump` delivers them on our thread, but **only with a fallback timer**: CEF asks for work once and then stalls unless the host also calls `cef_do_message_loop_work` at least every 33 ms (cefclient's rule); with it CEF asks ~1/s idle and 186/s animating, always "now". Costs are the same either way: ~18 ms/s idle and ~50 ms/s animating at 60 in our process, ~155 ms/s in CEF's. All three shut down with every reference returned and no process left once ours exits; until then zygotes and two zombie renderers outlive `cef_shutdown` (question 10). |
 | 5 | Input and focus | **All of it works off-screen.** Mouse coordinates are **view coordinates (DIP)**; clicks, right-clicks, `click_count` 2 for a double click, the wheel (−120 = one notch down, 120 CSS px, smooth). Keys: **`RAWKEYDOWN`, `CHAR`, `KEYUP`, each carrying the key's Windows code and its XKB `native_key_code`**, give a page exactly what a browser does; `native_key_code` is what fills `KeyboardEvent.code` (seam W6). Text with no key goes through `ime_commit_text`. Tab past the last element raises `on_take_focus`. `<select>` paints a `PET_POPUP` buffer at the device scale with its rectangle in DIP, and clicks inside it choose. IME composition and commit work, with character bounds in DIP. |
+| 6 | Script results and page messages without code in the renderer | **Yes, through the DevTools protocol; the helper stays 20 lines of C.** `Runtime.evaluate` (`returnByValue`, `awaitPromise`) answers `ExecuteScriptAsync` with JSON: values, objects, promises, exceptions; 0.29 ms median round trip. `Runtime.addBinding` + `Runtime.bindingCalled` carries the page's posts; a shim from `Page.addScriptToEvaluateOnNewDocument` (needs `Page.enable`) builds `window.chrome.webview` on it, on every new document. The origin: `Runtime.enable`'s `executionContextCreated` names each context's origin, and every post names its context. Cross-origin iframes are other targets: `Target.setAutoAttach(flatten)` and the same setup per session. Send on CEF's UI thread. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -337,3 +338,71 @@ character in view coordinates** (where `TextInputHost.SetInputArea` puts the can
 after × scale and the element's offset). `ime_commit_text("日本")` ends it with
 `compositionend "日本"`. This container has no CJK font, so those characters drew as 7 px
 boxes; the geometry, not the glyphs, is what was checked.
+
+### 6. Script results and page messages, with no code in the renderer
+
+All through `send_dev_tools_message` (raw UTF-8 JSON `{id, method, params}`) and one
+`cef_dev_tools_message_observer_t` registered with `add_dev_tools_message_observer` (keep the
+returned registration; releasing it unregisters). No DevTools window, no remote-debugging
+port. `results/q6.txt`.
+
+**Threading.** `send_dev_tools_message` reports whether it took the message only on CEF's UI
+thread; from any other thread it still sends it and returns 0. With
+`multi_threaded_message_loop` the engine posts the call to `CrBrowserMain`
+(`cef_post_task(TID_UI)`), where every result and event also arrives.
+
+**`ExecuteScriptAsync` → `Runtime.evaluate`** with `returnByValue: true, awaitPromise: true`:
+
+| Expression | Result |
+|---|---|
+| `1 + 2` | `{"result":{"type":"number","value":3,…}}` |
+| `({ a: [1, 'two', null], b: { c: true } })` | `{"result":{"type":"object","value":{"a":[1,"two",null],"b":{"c":true}}}}` |
+| `undefined` | `{"result":{"type":"undefined"}}` |
+| a promise resolving in 50 ms to `'later'` | `"later"`, after 50 ms |
+| `throw new Error('boom')` | the error object plus `exceptionDetails` |
+| `window` | method error `-32000 Object reference chain is too long` |
+
+So the engine returns `JSON.stringify` of `result.value` (`"null"` for `undefined`, as
+WebView2 does), faults the task on `exceptionDetails` or a method error. **Round trip: 0.29
+ms median, 0.46 max** over 50 calls, from the send on CEF's thread to the result callback.
+
+**`postMessage` → `Runtime.addBinding({name})`.** It works **without** `Runtime.enable`: a
+page calling the binding raises `Runtime.bindingCalled {name, payload, executionContextId}` on
+`CrBrowserMain`. The binding survives navigations (it is added to every new context). The
+payload is a string, so the page side stringifies.
+
+**`window.chrome.webview`** comes from a shim registered once with
+`Page.addScriptToEvaluateOnNewDocument` (`runImmediately` for the current document): it
+wraps the binding in `postMessage(m)` (→ `JSON.stringify`) and `addEventListener('message')`.
+**The script runs only while the Page domain is enabled**: without `Page.enable` it never
+ran (no log, no `chrome.webview`); with it, it runs before the page's own scripts on every
+navigation. Host → page is `Runtime.evaluate("chrome.webview.__deliver(<json string>)")`,
+which dispatches a `MessageEvent`; the page's listener got `{"hello":"from host"}`.
+
+**The posting frame's origin.** With `Runtime.enable`, `Runtime.executionContextCreated`
+names each context's id, origin and frame (`id 1, origin https://example.com, frame …,
+default true`), and `executionContextsCleared` says when to forget them; every
+`bindingCalled` names its `executionContextId`. So: keep id → origin, check it against
+`WebViewOptions`' allowed origins, raise `MessageReceived(json, origin)`. A `data:` page's
+origin is opaque (`://`). (`Runtime.enable` is the domain pages can notice a debugger by;
+only the mapping needs it.)
+
+**Cross-origin iframes are out of process** (site isolation is on): an `https://example.org`
+iframe in `https://example.com` produced no context in our session, so neither binding nor
+shim reached it. **`Target.setAutoAttach {autoAttach, flatten: true}`** attaches it as its own
+`iframe` target with a `sessionId`; messages sent with that `sessionId` run in it (`typeof
+chrome.webview` → `"undefined"` until set up), and the same `addBinding` + shim there made its
+post arrive as `bindingCalled` tagged with the session. **Replies and events of a child
+session come only through `on_dev_tools_message`** (raw), never `on_dev_tools_method_result`
+or `on_dev_tools_event`, so the engine should parse raw messages itself and return 1. Whether
+iframes post at all is a policy choice (WebView2 gives them their own frame object); the
+mechanism is there.
+
+**Found on the way: a `srcdoc` iframe inside a `data:` page crashes the renderer**
+(`TS_PROCESS_CRASHED`), DevTools or not, on 146 and on 154; in an https page it works
+(`results/q6-srcdoc-in-data-url.txt`). So `NavigateToString` should not be a `data:` URL:
+serve the string from the scheme handler of question 7 instead, which also gives it a real
+origin.
+
+**So the helper needs no code of ours**, and stays the 20 lines of C from question 1. The
+render-process-handler fallback is not needed.

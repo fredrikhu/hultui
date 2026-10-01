@@ -227,6 +227,28 @@ internal static unsafe class Host
         return b;
     }
 
+    // cef_post_task(TID_UI): run something on CEF's UI thread (with
+    // multi_threaded_message_loop, CrBrowserMain; otherwise our own thread).
+    private static readonly ConcurrentQueue<Action> UiWork = new();
+    private static cef_task_t* _uiTask;
+
+    public static void PostUi(Action work)
+    {
+        if (_uiTask == null)
+        {
+            _uiTask = New<cef_task_t>("ui_task");
+            _uiTask->execute = &RunUiWork;
+        }
+        UiWork.Enqueue(work);
+        Cef.cef_post_task(cef_thread_id_t.TID_UI, Give(_uiTask));
+    }
+
+    [UnmanagedCallersOnly]
+    private static void RunUiWork(cef_task_t* self)
+    {
+        if (UiWork.TryDequeue(out var work)) work();
+    }
+
     public static cef_browser_host_t* HostOf(cef_browser_t* b) => b->get_host(b);
     public static int Id(cef_browser_t* b) => b->get_identifier(b);
 

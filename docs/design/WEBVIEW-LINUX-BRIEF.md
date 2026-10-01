@@ -328,6 +328,26 @@ ours at all. Also needed: the posting frame's origin, for `WebViewOptions`' allo
 If it does not work, the fallback is a render process handler in the helper that adds the
 binding in `on_context_created` and sends a process message.
 
+> **Result (2026-10-01): it works; the helper needs no code of ours.**
+> - **`Runtime.evaluate`** (`returnByValue`, `awaitPromise`) returns values, objects, awaited
+>   promises and `exceptionDetails` as JSON, in **0.29 ms** median. Unserialisable results
+>   (`window`) come back as a method error.
+> - **`Runtime.addBinding`** works without `Runtime.enable`. `Runtime.bindingCalled` carries
+>   `{name, payload, executionContextId}` and the binding survives navigation. A shim from
+>   `Page.addScriptToEvaluateOnNewDocument` builds `window.chrome.webview` (`postMessage`,
+>   `addEventListener('message')`) on it, **but only after `Page.enable`**. Host → page is
+>   `Runtime.evaluate` of a delivery function.
+> - **Origin:** `Runtime.enable`'s `executionContextCreated` gives each context's id, origin
+>   and frame, so a post's `executionContextId` gives its origin. `data:` is opaque (`://`).
+> - **Cross-origin iframes** are other targets. `Target.setAutoAttach(flatten)` gives a
+>   session each, and the same setup per session makes their posts arrive. Session replies
+>   come only through the raw `on_dev_tools_message`.
+> - Send on CEF's UI thread: from any other thread `send_dev_tools_message` still sends, but
+>   returns 0.
+> - **Found:** a `srcdoc` iframe in a `data:` page crashes the renderer (146 and 154, with or
+>   without DevTools). `NavigateToString` should be served by the scheme handler, not as
+>   `data:`.
+
 **7. Policy hooks.** `on_before_browse` returning 1 cancels a navigation, synchronously;
 `on_before_popup` returning 1 refuses a new window and tells us the URL;
 `on_render_process_terminated` fires when the renderer is killed; a scheme handler factory
