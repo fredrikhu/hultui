@@ -94,9 +94,11 @@ Three things about a container that a desktop does not have. All three are **ver
 
 - **The GPU is a device file.** The host has to pass the render node into the container
   (Proxmox 8.2 or later: `pct set <id> -dev0 /dev/dri/renderD128,gid=<gid of "render" in the
-  container>`, and the same for `/dev/dri/card0` with the `video` group). Inside, check
-  before anything else: `ls -l /dev/dri`, `eglinfo -B`, `vainfo`. If the render node is
-  missing, stop and say so: that is the owner's to fix on the host.
+  container>`). **Only the render node is passed in**: the headless compositor and Chromium
+  both draw through it, and the host has no `card0` (its display node is numbered otherwise),
+  so nothing here may assume a `/dev/dri/card*`. Inside, check before anything else:
+  `ls -l /dev/dri`, `eglinfo -B`, `vainfo`. If the render node is missing, stop and say so:
+  that is the owner's to fix on the host.
 - **Chromium's sandbox wants user namespaces.** An unprivileged container may refuse them
   unless it has `nesting=1`. Fedora ships `/usr/lib64/cef/chrome-sandbox` as the other route.
   Question 1 below finds out. `no_sandbox` is acceptable **for the spike only**, and the
