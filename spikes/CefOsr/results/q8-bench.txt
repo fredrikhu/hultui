@@ -1,0 +1,8 @@
+[  7257.0 ms main          ] paint         1650x1072: 60.0 frames/s; our process 108 ms/s CPU, CEF's processes 190 ms/s
+[ 14782.8 ms main          ] paint+upload  1650x1072: 60.2 frames/s; our process 152 ms/s CPU, CEF's processes 188 ms/s
+[ 22302.8 ms main          ] shared        1650x1072: 60.0 frames/s; our process 33 ms/s CPU, CEF's processes 132 ms/s
+[ 29831.2 ms main          ] shared-vk     1650x1072: 60.0 frames/s; our process 33 ms/s CPU, CEF's processes 126 ms/s
+[  7256.1 ms main          ] paint         1650x1072: 60.0 frames/s; our process 113 ms/s CPU, CEF's processes 188 ms/s
+[ 14783.1 ms main          ] paint+upload  1650x1072: 60.0 frames/s; our process 147 ms/s CPU, CEF's processes 188 ms/s
+[ 22308.7 ms main          ] shared        1650x1072: 60.0 frames/s; our process 34 ms/s CPU, CEF's processes 130 ms/s
+[ 29834.1 ms main          ] shared-vk     1650x1072: 60.2 frames/s; our process 34 ms/s CPU, CEF's processes 136 ms/s

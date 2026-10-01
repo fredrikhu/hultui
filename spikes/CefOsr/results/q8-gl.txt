@@ -1,0 +1,15 @@
+[    54.2 ms main          ] libcef /usr/lib64/cef: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    62.2 ms main          ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<repo>/spikes/CefOsr/bin/cefosr-helper-c --lang=en-US --log-severity=warning --disable-features=EnableHangWatcher,GlicActorUi,AutofillActorMode,LensOverlay --ozone-platform=wayland --disable-features=WaylandFractionalScaleV1
+[   190.9 ms main          ] cef_initialize = 1
+[   195.6 ms CrBrowserMain (30600)] on_context_initialized
+[   216.2 ms main          ] create_browser = 1
+[   218.0 ms CrBrowserMain (30600)] on_after_created: browser 1
+[   220.2 ms CrBrowserMain (30600)] get_screen_info #1: struct size 56, answering scale 1.5
+[   243.0 ms CrBrowserMain (30600)] get_screen_info #2: struct size 56, answering scale 1.5
+[   253.5 ms CrBrowserMain (30600)] get_screen_info #3: struct size 56, answering scale 1.5
+[   303.1 ms CrBrowserMain (30600)] first frame: EGL 1.5 surfaceless, dma_buf_import True, modifiers True; import + blit + fence 21.93 ms (first, includes context creation)
+[  2233.4 ms main          ] read back from our texture 1200x900: (10,10) BGRA 00 00 FF FF; (149,149) BGRA 00 00 FF FF; (150,150) BGRA FF FF FF FF; (1190,890) BGRA FF 00 00 FF; (1049,749) BGRA FF FF FF FF
+[  2235.0 ms main          ] 118 frames copied, 0 imports failed; import + blit + fence avg 0.81 ms, max 1.15 ms; fds seen 5 (194,198,202,201,183); the previous callback's fd at the next callback: closed 4, still open 113
+[  2536.0 ms CrBrowserMain (30600)] on_before_close: browser 1
+[  2561.6 ms main          ] cef_shutdown returned after 18 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0, ui_task=0
+[  3073.0 ms main          ] children left: 30594 zygote; 30595 zygote; 30598 zygote; 30649 (no type); 30663 (no type); 30667 (no type)

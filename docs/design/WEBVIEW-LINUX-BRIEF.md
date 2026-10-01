@@ -213,7 +213,8 @@ A console program under `spikes/CefOsr/`, results in its `README.md` as a table,
 >   namespaces, seccomp-bpf). The setuid `chrome-sandbox` beside `libcef.so` also works, found
 >   without `CHROME_DEVEL_SANDBOX`. `no_sandbox` was not needed and no later run uses it.
 >   Whether the host set `nesting=1` cannot be seen from inside; `unshare -U` works.
-> - **Ozone: ask for it outright** (which one: see question 3). No flag means X11, which fails here (no X server);
+> - **Ozone: ask for it outright** (which one: questions 3 and 8 settle it: the window's own,
+>   `wayland` with `--disable-features=WaylandFractionalScaleV1`, or `x11`). No flag means X11, which fails here (no X server);
 >   `--ozone-platform-hint=auto` follows `XDG_SESSION_TYPE`, unset in this shell. `wayland`
 >   works with the GPU: WebGL is ANGLE on GL ES 3.2 on Mesa, UHD 770. `headless` paints but
 >   has no WebGL. `x11` fails for want of a server. CEF passes
@@ -255,7 +256,9 @@ the first frame. Does a still page stop painting, and an animating one paint at
 > `notify_screen_info_changed`, `--force-device-scale-factor`, or sway's output scale. Plain
 > `headless` falls back to SwiftShader, which CEF 146 refuses (no WebGL); `--use-angle=vulkan`
 > works too. Headless never connects to the display, so it is the same under Wayland and X11.
-> **The engine asks for `headless` + `gl-egl`.** First frame 85–93 ms after
+> ~~The engine asks for `headless` + `gl-egl`.~~ **Revised by question 8:** headless gives no
+> shared textures, and Wayland's scale needs only `--disable-features=WaylandFractionalScaleV1`
+> (X11's needs nothing), so the engine asks for the window's platform. First frame 85–93 ms after
 > `create_browser`. A still page stops painting (0 in 2 s; `invalidate` asks for one). An
 > animating page paints at exactly `windowless_frame_rate`, changeable live: 60, 30, 120 and
 > 1 measured, each the whole view for the bench page. Base64 `data:` URLs need
@@ -376,6 +379,29 @@ arrive at all, and on which Ozone platform? Import it in a GL context with
 `samples/HultUI.Samples.WebView/Program.cs`, `AnimatedPage`) at 1650×1072 and 60 frames a
 second, against `on_paint`. Windows for comparison: about 300 ms/s copying pixels, 62–106 on
 GL and 19–94 on Vulkan zero-copy. Who owns the fds, and for how long is a frame valid?
+
+> **Result (2026-10-01): it works, on `wayland` and `x11`; not on `headless`.**
+> - **Where:** `on_accelerated_paint` arrives under Wayland and under X11 (Xwayland). On
+>   `headless` nothing paints at all ("Unable to allocate frame"). **Wayland's scale works
+>   with `--disable-features=WaylandFractionalScaleV1`**: exact and live (1.5 → 2.0 → 1.5
+>   repaints in ~50 ms). X11's needs no flag. So the engine asks for the window's platform.
+> - **What:** one plane, BGRA (`DRM_FORMAT_ARGB8888`), **modifier 0 (linear)**, stride 4864
+>   at 1200×900, from a pool of three buffers.
+> - **GL:** EGLImage (`EGL_EXT_image_dma_buf_import`, surfaceless EGL), blit into our own
+>   texture, fence: **0.81 ms**.
+> - **Vulkan:** `VK_EXT_external_memory_dma_buf` + `VK_EXT_image_drm_format_modifier`
+>   (explicit plane layout, import a `dup`'d fd, acquire from `VK_QUEUE_FAMILY_EXTERNAL`),
+>   copy, fence: **0.73 ms**. Both read back pixel-exact.
+> - **CPU** at 1650×1072, 60 frames a second, our process: **33–34 ms/s** with GL or Vulkan,
+>   against 108–113 for copying `on_paint` and 147–152 with the upload. CEF's processes drop
+>   from ~190 to ~130.
+> - **The fds are CEF's.** CEF documents them as valid only inside the callback, and the
+>   buffer goes back to the pool on return. Seen: the fd usually stays open past the
+>   callback, sometimes not. So copy on CEF's thread before returning; never close the fd,
+>   never keep it; `dup` only for an import that takes ownership.
+> - **Not checked:** `PET_POPUP` as a shared texture, and NVIDIA (cef#4237).
+>
+> `spikes/CefOsr/README.md`, question 8.
 
 **9. Accessibility.** `set_accessibility_state(STATE_ENABLED)` and a render handler that
 returns an accessibility handler. What does `on_accessibility_tree_change` carry (node ids,

@@ -1,0 +1,5 @@
+[   291.9 ms CrBrowserMain (29425)] on_accelerated_paint PET_VIEW: 1 plane(s), format CEF_COLOR_TYPE_BGRA_8888, modifier 0x0, coded 1200x900, visible (0,0 1200x900), content 1200x900, source 1200x900, timestamp 0
+[   292.0 ms CrBrowserMain (29425)]     plane 0: fd 127, stride 4864, offset 0, size 4377600
+[   293.1 ms CrBrowserMain (29425)] on_accelerated_paint PET_VIEW: 1 plane(s), format CEF_COLOR_TYPE_BGRA_8888, modifier 0x0, coded 1200x900, visible (0,0 1200x900), content 1200x900, source 1200x900, timestamp 16666
+[   293.1 ms CrBrowserMain (29425)]     plane 0: fd 195, stride 4864, offset 0, size 4377600
+[  3212.1 ms main          ] 3 s animating: 177 on_accelerated_paint, 0 on_paint; 3 distinct buffers (dmabuf inodes) in the pool

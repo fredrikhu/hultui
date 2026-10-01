@@ -58,11 +58,12 @@ runs this program again),
 |---|---|---|
 | 1 | Does Fedora's libcef load and start, windowless, from a .NET program? | **Yes, with a native helper.** `cef_api_hash(14600)` first, then `cef_initialize`: context ready ~200 ms after process start, a `data:` page loaded and painted 85–100 ms after `create_browser_sync`. Resources are found beside `libcef.so` with no `resources_dir_path` and from any working directory. **The subprocess executable cannot be .NET**: Chromium's zygote must be single-threaded to sandbox itself, and cannot fork a .NET process even unsandboxed. A 20-line C helper in `browser_subprocess_path` works with the sandbox on. Sandbox: **the namespace sandbox works in this container**, and the setuid `chrome-sandbox` beside `libcef.so` works too; `no_sandbox` is not needed. Ozone: **Wayland**, with the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa); X11 (the default) and `ozone-platform-hint=auto` without a session type fail here for want of an X server; `headless` runs with no WebGL (until question 3 gives it `--use-angle=gl-egl`). |
 | 2 | Does the versioned API hold? | **Yes.** The same binary, written against Fedora's 146 at API 14600, runs unchanged on the official CEF **154.0.32** (Chromium 154.0.8037.58, the stable release on 2026-10-01): same hash, `cef_initialize` = 1, page painted 59 ms after `create_browser`, WebGL on the GPU, sandbox on, references balanced. 154 accepts API 13300–15400; generated from 154's headers at 14600, every struct, offset and export is identical to 146's. A bundled CEF must be laid out **flat** (`Resources/` beside `libcef.so`: `resources_dir_path` does not cover `icudtl.dat`) and **stripped** (the official `libcef.so` is 1.45 GB with debug sections, 272 MB without; ~115 MB compressed in all). |
-| 3 | Pixels | **BGRA, top-down, opaque, at the frame rate asked for; but the scale only takes on `headless`.** An 800×600 view at scale 1.5 paints **1200×900** on `--ozone-platform=headless` (a 100-CSS-pixel box is 150 device pixels), and **800×600 at scale 1** on `wayland`, whatever `get_screen_info`, `--force-device-scale-factor` or the compositor's output scale say. `headless` with `--use-angle=gl-egl` has the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa) and needs no display connection. First frame 85–93 ms after `create_browser`. A still page stops painting (0 paints in 2 s); an animating one paints at exactly `windowless_frame_rate`: 60, 30, 120 and 1 measured, each the whole view. |
+| 3 | Pixels | **BGRA, top-down, opaque, at the frame rate asked for.** The scale: see question 8, which revises the platform: `wayland` with `--disable-features=WaylandFractionalScaleV1`, or `x11`, both exact. First found: An 800×600 view at scale 1.5 paints **1200×900** on `--ozone-platform=headless` (a 100-CSS-pixel box is 150 device pixels), and **800×600 at scale 1** on `wayland`, whatever `get_screen_info`, `--force-device-scale-factor` or the compositor's output scale say. `headless` with `--use-angle=gl-egl` has the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa) and needs no display connection. First frame 85–93 ms after `create_browser`. A still page stops painting (0 paints in 2 s); an animating one paints at exactly `windowless_frame_rate`: 60, 30, 120 and 1 measured, each the whole view. |
 | 4 | The message loop | **Both work; `multi_threaded_message_loop` is the simpler fit.** With it every callback (`on_paint`, `on_title_change`, `on_before_browse`, life span, load) arrives on CEF's own UI thread, `CrBrowserMain`, in our process, and our thread does nothing. `external_message_pump` delivers them on our thread, but **only with a fallback timer**: CEF asks for work once and then stalls unless the host also calls `cef_do_message_loop_work` at least every 33 ms (cefclient's rule); with it CEF asks ~1/s idle and 186/s animating, always "now". Costs are the same either way: ~18 ms/s idle and ~50 ms/s animating at 60 in our process, ~155 ms/s in CEF's. All three shut down with every reference returned and no process left once ours exits; until then zygotes and two zombie renderers outlive `cef_shutdown` (question 10). |
 | 5 | Input and focus | **All of it works off-screen.** Mouse coordinates are **view coordinates (DIP)**; clicks, right-clicks, `click_count` 2 for a double click, the wheel (−120 = one notch down, 120 CSS px, smooth). Keys: **`RAWKEYDOWN`, `CHAR`, `KEYUP`, each carrying the key's Windows code and its XKB `native_key_code`**, give a page exactly what a browser does; `native_key_code` is what fills `KeyboardEvent.code` (seam W6). Text with no key goes through `ime_commit_text`. Tab past the last element raises `on_take_focus`. `<select>` paints a `PET_POPUP` buffer at the device scale with its rectangle in DIP, and clicks inside it choose. IME composition and commit work, with character bounds in DIP. |
 | 6 | Script results and page messages without code in the renderer | **Yes, through the DevTools protocol; the helper stays 20 lines of C.** `Runtime.evaluate` (`returnByValue`, `awaitPromise`) answers `ExecuteScriptAsync` with JSON: values, objects, promises, exceptions; 0.29 ms median round trip. `Runtime.addBinding` + `Runtime.bindingCalled` carries the page's posts; a shim from `Page.addScriptToEvaluateOnNewDocument` (needs `Page.enable`) builds `window.chrome.webview` on it, on every new document. The origin: `Runtime.enable`'s `executionContextCreated` names each context's origin, and every post names its context. Cross-origin iframes are other targets: `Target.setAutoAttach(flatten)` and the same setup per session. Send on CEF's UI thread. |
 | 7 | Policy hooks | **All four work.** `on_before_browse` returning 1 cancels (`ERR_ABORTED`, the page stays), asked on `CrBrowserMain`, which waited 33 ms for our thread's answer. `on_before_popup` returning 1 refuses and names the URL, for a link with `target=_blank` and for `window.open`, on a user gesture; without one Chromium's popup blocker drops it before asking. `on_render_process_terminated` (`TS_PROCESS_WAS_KILLED`, 9) on SIGKILL, and `reload` brings the page back. A scheme handler factory for `https` + `app.local` serves a folder as a secure origin (`https://app.local`, `isSecureContext`), with 404s, on `Chrome_IOThread`; and `NavigateToString` served through it gets a real origin and no `data:` crash. |
+| 8 | Zero-copy | **Yes, on `wayland` and `x11`, not on `headless`.** `on_accelerated_paint` hands over one dmabuf plane, BGRA (`DRM_FORMAT_ARGB8888`), modifier 0 (linear), stride 4864 at 1200×900, from a pool of three buffers. Imported on CEF's thread inside the callback, as CEF requires, into GL (`EGL_EXT_image_dma_buf_import`, blit, fence: 0.81 ms) or Vulkan (`VK_EXT_external_memory_dma_buf` + DRM format modifier, copy, fence: 0.73 ms); pixels checked in both. At 1650×1072, 60 frames a second, our process: **33 ms/s** either way, against 108 for copying `on_paint`'s pixels and 150 with the upload; CEF's processes 130 against 190. **On Wayland the scale needs `--disable-features=WaylandFractionalScaleV1`**; then it is exact and live, like X11's. CEF owns the fds. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -205,6 +206,13 @@ display, and so does not care whether HultUI's window is on Wayland or X11. **So
 asks for `--ozone-platform=headless --use-angle=gl-egl`**, not for the window's platform;
 question 1's advice to follow the window is withdrawn. Question 8 says whether shared
 textures arrive on headless too.
+
+**Revised by question 8:** they do not, and the Wayland scale was one feature flag away.
+With `--disable-features=WaylandFractionalScaleV1` the Wayland platform takes the scale from
+`get_screen_info` exactly (1200×900, the 150-pixel box) and changes it live; X11 does so with
+no flag. Both have the GPU and shared textures, so **the engine follows HultUI's window:
+`wayland` plus that flag, or `x11`.** `headless` remains the fallback for a host with no
+display.
 
 - **Format.** BGRA, top-down, rows of `width × 4` bytes, alpha `FF` on an opaque page:
   `(10,10)` is `00 00 FF FF` (red), the bottom-right corner `FF 00 00 FF` (blue). What
@@ -448,3 +456,80 @@ a 404. All 12 handlers were released by CEF (reference counts back to 0).
 served from memory: title right, `héllo · 日本` intact (UTF-8 from the response's charset),
 origin `https://app.local`, and **the `srcdoc` iframe that crashes a `data:` page works**.
 That is the engine's `NavigateToString`.
+
+### 8. Zero-copy
+
+`shared_texture_enabled = 1` in the window info; the animated bench page
+(`results/q8-*.txt`).
+
+**Where it arrives** (3 s animating, 800×600 at the scale asked):
+
+| Ozone | `on_accelerated_paint` | Frame |
+|---|---|---|
+| `wayland` | 177 in 3 s | 800×600: the scale ignored, as in question 3 |
+| `wayland` + `--disable-features=WaylandFractionalScaleV1` | 177 in 3 s | **1200×900**, exact |
+| `x11` (sway's Xwayland, `DISPLAY=:0`) | 179 in 3 s | **1200×900**, exact, no flag |
+| `headless` (+ `gl-egl` or `vulkan`) | **none, and no `on_paint` either**: `Unable to allocate frame for first frame capture: OOM?` | — |
+
+The flag is what fixes question 3's Wayland scale: with `WaylandFractionalScaleV1` off,
+Chromium's Wayland screen stops overriding the embedder's `device_scale_factor`, and
+`get_screen_info` decides. Changing it live works on both: scale 1.5 → 2.0 with
+`notify_screen_info_changed` + `was_resized` repainted at 1600×1200 within ~50 ms, and back.
+WebGL is on the GPU on both (ANGLE → GL ES 3.2 on Wayland, GL 4.6 on X11). So **the engine
+asks for the window's platform**: `--ozone-platform=wayland
+--disable-features=WaylandFractionalScaleV1` under a Wayland HultUI window, `x11` under X11.
+
+**What arrives.** One plane; `CEF_COLOR_TYPE_BGRA_8888`, i.e. `DRM_FORMAT_ARGB8888`;
+**modifier 0, linear**; stride 4864 for 1200 pixels (rows padded to 1216), offset 0, size
+4 377 600; `coded_size` = `visible_rect` = `content_rect` = the frame; `timestamp` in µs
+(16 666 apart at 60). The pool is **three buffers** (distinct dmabuf inodes; two at
+800×600). On the Intel GPU through Mesa, the modifier is linear, so any importer that takes a
+pitch can take it; NVIDIA, where cef#4237 is, was not available here.
+
+**Who owns the fds, and for how long.** CEF does. Its documentation says the handle "cannot be
+cached and cannot be accessed outside of this callback … the contents should be copied to a
+texture owned by the client application", and the buffer goes back to the pool on return.
+Seen: five distinct fd numbers in 118 frames; the previous callback's fd was still open at the
+next callback 113 times and closed 4 times. So: never close it, never keep it; `dup` it only
+for an import that takes ownership (Vulkan's), and finish the copy before returning.
+
+**Import and copy, on `CrBrowserMain`, inside the callback** (`Q8Gl.cs`, `Q8Vk.cs`):
+
+- **GL**: an EGL context on the surfaceless platform (`EGL_EXT_image_dma_buf_import` and
+  `_modifiers` both present), `eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT)` with fourcc
+  `AR24`, offset, pitch and modifier; `glEGLImageTargetTexture2DOES`; blit into a texture of
+  ours; `glFenceSync` + `glClientWaitSync`; destroy the image. **0.81 ms average, 1.15 max**
+  per 1200×900 frame. Read back: the frame exactly, the right way up
+  (`results/q8-gl-imported.png`).
+- **Vulkan**: `VK_KHR_external_memory_fd`, `VK_EXT_external_memory_dma_buf`,
+  `VK_EXT_image_drm_format_modifier`; an image with `DRM_FORMAT_MODIFIER_EXT` tiling and an
+  explicit plane layout (offset, row pitch); `vkGetMemoryFdPropertiesKHR`; a dedicated
+  allocation importing a `dup` of the fd; a barrier acquiring it from
+  `VK_QUEUE_FAMILY_EXTERNAL` (layout `GENERAL`, so its contents are kept) and releasing it
+  after; `vkCmdCopyImage` into an image of ours; a fence. **0.73 ms average, 1.11 max**, no
+  failures in 148 frames. Read back: the same frame (`results/q8-vk-imported.png`).
+
+No synchronisation from CEF was needed: the content was complete when the callback came.
+
+**Cost** at 1650×1072 (scale 1), the bench page animating at 60, two runs of 5 s each
+(`results/q8-bench.txt`):
+
+| Path | Frames/s | Our process | CEF's processes |
+|---|---|---|---|
+| `on_paint`, copied into a buffer (what `PixelFrameSink` takes) | 60.0 | 108–113 ms/s | 188–190 ms/s |
+| `on_paint`, copied and uploaded to a GL texture (Skia's re-upload) | 60.0–60.2 | 147–152 ms/s | 188 ms/s |
+| **shared texture, GL import + blit + fence** | 60.0 | **33–34 ms/s** | 130–132 ms/s |
+| **shared texture, Vulkan import + copy + fence** | 60.0–60.2 | **33–34 ms/s** | 126–136 ms/s |
+
+Windows, for comparison (whole HultUI sample, so with its own drawing): ~300 ms/s for
+pixels, 62–106 on GL and 19–94 on Vulkan zero-copy. Here zero-copy costs a quarter of the
+pixel path in our process, and CEF's processes save ~60 ms/s as well (no readback).
+
+**What it means for step 5.5.** The copy has to happen on CEF's thread, during the callback,
+into an image the engine owns; HultUI's frame then draws the newest of those, as Windows does
+with its D3D11 texture. GL is the natural importer: the GPU sources here already draw
+through GL, into the window's context on the GL surface and into the lent interop image on
+the Vulkan one, so one EGL import serves both renderers. That needs the engine's EGL context
+to share with HultUI's (or the copy target to be exported to it), which the next step
+settles. A direct Vulkan import works as well and costs the same, if a Vulkan-only route is
+ever wanted. Not checked here: `<select>`'s `PET_POPUP` as a shared texture, and NVIDIA.

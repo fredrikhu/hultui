@@ -19,4 +19,9 @@
     <Compile Remove="Helper/**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Question 8's Vulkan import: the structs and enums only, as spikes/HdrInterop uses it. -->
+    <PackageReference Include="Vortice.Vulkan" Version="3.2.3" />
+  </ItemGroup>
+
 </Project>

@@ -76,6 +76,8 @@ internal static unsafe class Q3
         {
             // Tell CEF the screen changed, as a host does when the window moves to another
             // monitor, and see whether the scale takes then.
+            int w0 = lastW;
+            Host.Scale = 2.0f;
             Host.WithHost(browser, h =>
             {
                 var hh = (cef_browser_host_t*)h;
@@ -83,8 +85,18 @@ internal static unsafe class Q3
                 hh->was_resized(hh);
             });
             int before = paints;
-            Host.Pump(() => paints > before && lastW != 800, 3000);
-            Log($"after notify_screen_info_changed + was_resized: {lastW}x{lastH}");
+            Host.Pump(() => paints > before && lastW != w0, 3000);
+            Log($"scale 1.5 → 2.0, then notify_screen_info_changed + was_resized: {w0} → {lastW}x{lastH}");
+            Host.Scale = 1.5f;
+            Host.WithHost(browser, h =>
+            {
+                var hh = (cef_browser_host_t*)h;
+                hh->notify_screen_info_changed(hh);
+                hh->was_resized(hh);
+            });
+            before = paints;
+            Host.Pump(() => paints > before && lastW == w0, 3000);
+            Log($"and back to 1.5: {lastW}x{lastH}");
         }
         Host.Wait(300);   // let the text finish painting
         // The frame as it stands now: the first frame may precede the text.
