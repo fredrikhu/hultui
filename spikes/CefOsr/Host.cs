@@ -11,7 +11,7 @@ internal sealed class Options
     public string CefDir = "/usr/lib64/cef";
     public string? Ozone;                  // --ozone=wayland|x11|headless; none: no flag
     public bool Sandbox = true;            // --sandbox=off: settings.no_sandbox
-    public string? Subprocess;             // --subprocess=<path>: browser_subprocess_path
+    public string? Subprocess;             // --subprocess=<path>|self: browser_subprocess_path
     public string Loop = "work";           // work: poll cef_do_message_loop_work; external; mt
     public bool ResourceDirs;              // --resource-dirs: set resources_ and locales_dir_path
     public string LogSeverity = "warning"; // verbose|info|warning|error|disable
@@ -36,6 +36,10 @@ internal sealed class Options
             else if (a.StartsWith("--switch=")) o.Switches.Add(Val());
             else o.Rest.Add(a);
         }
+        // The C helper (question 1), when built beside the program as the README says.
+        var helper = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "cefosr-helper-c"));
+        if (o.Subprocess == null && File.Exists(helper)) o.Subprocess = helper;
+        if (o.Subprocess == "self") o.Subprocess = null;
         return o;
     }
 }
@@ -77,6 +81,7 @@ internal static unsafe class Host
     // ---- the view, as get_view_rect and get_screen_info answer it ----
     public static int ViewWidth = 800, ViewHeight = 600;
     public static float Scale = 1.5f;
+    public static int ScreenInfoCalls;
 
     public static cef_app_t* App;
     public static cef_browser_process_handler_t* ProcessHandler;
@@ -246,7 +251,7 @@ internal static unsafe class Host
     private static void OnVisit(cef_string_visitor_t* self, cef_string_utf16_t* s) => _text = Get(s);
 
     public static string DataUrl(string html)
-        => "data:text/html;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(html));
+        => "data:text/html;charset=utf-8;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(html));
 
     // ---- children: how many renderer, GPU, utility and zygote processes are alive ----
     public static string[] Children()
@@ -389,6 +394,8 @@ internal static unsafe class Host
     [UnmanagedCallersOnly]
     private static int GetScreenInfo(cef_render_handler_t* s, cef_browser_t* b, cef_screen_info_t* info)
     {
+        if (Interlocked.Increment(ref ScreenInfoCalls) <= 3)
+            Log($"get_screen_info #{ScreenInfoCalls}: struct size {info->size}, answering scale {Scale}");
         info->device_scale_factor = Scale;
         info->depth = 24;
         info->depth_per_component = 8;

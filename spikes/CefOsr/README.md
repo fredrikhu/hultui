@@ -41,13 +41,14 @@ A console program, no HultUI until question 7.
 
 ```bash
 export XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-1   # the headless sway
-clang -O2 -o /tmp/cefosr-helper-c spikes/CefOsr/Helper/helper.c
 dotnet build spikes/CefOsr
-spikes/CefOsr/bin/Debug/net10.0/CefOsr q1 --ozone=wayland --subprocess=/tmp/cefosr-helper-c
+clang -O2 -o spikes/CefOsr/bin/cefosr-helper-c spikes/CefOsr/Helper/helper.c   # used when present
+spikes/CefOsr/bin/Debug/net10.0/CefOsr q1 --ozone=wayland
 ```
 
 Options: `--cef-dir=` (default `/usr/lib64/cef`), `--ozone=`, `--sandbox=off`,
-`--subprocess=` (`browser_subprocess_path`; without it the program runs itself again),
+`--subprocess=` (`browser_subprocess_path`; default `bin/cefosr-helper-c` when built, `self`
+runs this program again),
 `--loop=work|external|mt`, `--resource-dirs`, `--cwd=`, `--switch=name[=value]`,
 `--log=verbose|info|warning|error`.
 
@@ -55,8 +56,9 @@ Options: `--cef-dir=` (default `/usr/lib64/cef`), `--ozone=`, `--sandbox=off`,
 
 | # | Question | Answer |
 |---|---|---|
-| 1 | Does Fedora's libcef load and start, windowless, from a .NET program? | **Yes, with a native helper.** `cef_api_hash(14600)` first, then `cef_initialize`: context ready ~200 ms after process start, a `data:` page loaded and painted 85–100 ms after `create_browser_sync`. Resources are found beside `libcef.so` with no `resources_dir_path` and from any working directory. **The subprocess executable cannot be .NET**: Chromium's zygote must be single-threaded to sandbox itself, and cannot fork a .NET process even unsandboxed. A 20-line C helper in `browser_subprocess_path` works with the sandbox on. Sandbox: **the namespace sandbox works in this container**, and the setuid `chrome-sandbox` beside `libcef.so` works too; `no_sandbox` is not needed. Ozone: **Wayland**, with the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa); X11 (the default) and `ozone-platform-hint=auto` without a session type fail here for want of an X server; `headless` runs with no WebGL. |
+| 1 | Does Fedora's libcef load and start, windowless, from a .NET program? | **Yes, with a native helper.** `cef_api_hash(14600)` first, then `cef_initialize`: context ready ~200 ms after process start, a `data:` page loaded and painted 85–100 ms after `create_browser_sync`. Resources are found beside `libcef.so` with no `resources_dir_path` and from any working directory. **The subprocess executable cannot be .NET**: Chromium's zygote must be single-threaded to sandbox itself, and cannot fork a .NET process even unsandboxed. A 20-line C helper in `browser_subprocess_path` works with the sandbox on. Sandbox: **the namespace sandbox works in this container**, and the setuid `chrome-sandbox` beside `libcef.so` works too; `no_sandbox` is not needed. Ozone: **Wayland**, with the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa); X11 (the default) and `ozone-platform-hint=auto` without a session type fail here for want of an X server; `headless` runs with no WebGL (until question 3 gives it `--use-angle=gl-egl`). |
 | 2 | Does the versioned API hold? | **Yes.** The same binary, written against Fedora's 146 at API 14600, runs unchanged on the official CEF **154.0.32** (Chromium 154.0.8037.58, the stable release on 2026-10-01): same hash, `cef_initialize` = 1, page painted 59 ms after `create_browser`, WebGL on the GPU, sandbox on, references balanced. 154 accepts API 13300–15400; generated from 154's headers at 14600, every struct, offset and export is identical to 146's. A bundled CEF must be laid out **flat** (`Resources/` beside `libcef.so`: `resources_dir_path` does not cover `icudtl.dat`) and **stripped** (the official `libcef.so` is 1.45 GB with debug sections, 272 MB without; ~115 MB compressed in all). |
+| 3 | Pixels | **BGRA, top-down, opaque, at the frame rate asked for; but the scale only takes on `headless`.** An 800×600 view at scale 1.5 paints **1200×900** on `--ozone-platform=headless` (a 100-CSS-pixel box is 150 device pixels), and **800×600 at scale 1** on `wayland`, whatever `get_screen_info`, `--force-device-scale-factor` or the compositor's output scale say. `headless` with `--use-angle=gl-egl` has the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa) and needs no display connection. First frame 85–93 ms after `create_browser`. A still page stops painting (0 paints in 2 s); an animating one paints at exactly `windowless_frame_rate`: 60, 30, 120 and 1 measured, each the whole view. |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -126,8 +128,9 @@ namespaces through AppArmor, so a bundled CEF there needs an AppArmor profile or
 
 CEF passes `--render-node-override=/dev/dri/renderD128` to its children by itself and never
 looks for a `card*`. A windowless browser still connects to the display server. So the engine
-should ask for the platform outright (`--ozone-platform=wayland` when HultUI's window is on
-Wayland, `x11` when on X11), not leave it to a hint that depends on the session's variables.
+should ask for the platform outright, not leave it to a hint that depends on the session's
+variables. **Question 3 revises which:** on Wayland the scale is ignored, so the engine asks
+for `headless` with `--use-angle=gl-egl`, which has the GPU and the scale.
 
 Also seen: `chrome://gpu` never loads in a windowless browser (`Timeout of new browser info
 response` for its frame), so the GL was read through WebGL instead; and renderers and zygotes
@@ -173,3 +176,44 @@ What a bundle needs, learned on the way:
 - 154 links ANGLE into `libcef.so` (no `libEGL.so`/`libGLESv2.so` beside it, as 146 has), and
   its `chrome-sandbox` is not setuid out of the tarball: on Debian and Ubuntu the namespace
   sandbox is the route, and Ubuntu's AppArmor restriction on it is step 5.7's question.
+
+### 3. Pixels
+
+`get_view_rect` answers 800×600, `get_screen_info` scale 1.5 (CEF asks three times while
+creating the browser, struct size 56, as generated). The page: a red 100×100 CSS-pixel box at
+the top-left, a blue one at the bottom-right, a line of text (`results/q3-*.txt`, the PNGs
+beside them).
+
+| Ozone | `on_paint` | Red box | WebGL |
+|---|---|---|---|
+| `wayland` | **800×600** | 100 px | ANGLE → GL ES 3.2 → Mesa |
+| `headless` | 1200×900 | 150 px | none |
+| **`headless` + `--use-angle=gl-egl`** | **1200×900** | **150 px** | **ANGLE → GL ES 3.2 → Mesa** |
+| `headless` + `--use-angle=vulkan` | (not run) | | ANGLE → Vulkan → Mesa's Intel driver |
+
+**On Wayland the scale we give is ignored.** Neither `notify_screen_info_changed` plus
+`was_resized`, nor `--force-device-scale-factor=1.5`, nor sway's output scale at 1.5 or 2
+changed it: the frame stayed 800×600 with the page laid out at 1:1. **On `headless` the scale
+is exact.** Headless also has the GPU once ANGLE is told to use GL (`gl-egl`) or Vulkan (its
+default on headless is SwiftShader, which CEF 146 refuses without
+`--enable-unsafe-swiftshader`, hence "no WebGL" in question 1), never connects to the
+display, and so does not care whether HultUI's window is on Wayland or X11. **So the engine
+asks for `--ozone-platform=headless --use-angle=gl-egl`**, not for the window's platform;
+question 1's advice to follow the window is withdrawn. Question 8 says whether shared
+textures arrive on headless too.
+
+- **Format.** BGRA, top-down, rows of `width × 4` bytes, alpha `FF` on an opaque page:
+  `(10,10)` is `00 00 FF FF` (red), the bottom-right corner `FF 00 00 FF` (blue). What
+  `PixelFrameSink` takes.
+- **Time to the first frame:** 85–93 ms from `create_browser_sync` returning, with load end
+  already seen; the browser exists ~20 ms after the call starts.
+- **A still page stops.** No paints in 2 s once settled. `invalidate(PET_VIEW)` brings one
+  full-view paint back on demand.
+- **An animating page paints at `windowless_frame_rate`**, and `set_windowless_frame_rate`
+  changes it live: 60.0, 30.0, 120.0 and 0.7–1.0 paints a second measured over 3 s. Each paint
+  of the sample's bench page has one dirty rectangle, the whole view (its background moves).
+  A HultUI window's refresh rate is the rate to ask for; nothing caps it at 60.
+- **Thread:** with `cef_do_message_loop_work` on the main thread, `on_paint` arrives on the
+  main thread (question 4 compares the loop models).
+- **`data:` URLs need a charset.** Base64 without `;charset=utf-8` is read as Latin-1 ("Â·").
+  `NavigateToString` must say UTF-8.

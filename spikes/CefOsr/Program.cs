@@ -23,6 +23,7 @@ setenv("HULTUI_CEF_DIR", opt.CefDir, 1);
 return probe switch
 {
     "q1" => Q1.Run(opt),
+    "q3" => Q3.Run(opt),
     _ => Fail($"unknown probe {probe}"),
 };
 

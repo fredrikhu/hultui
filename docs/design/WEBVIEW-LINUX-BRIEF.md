@@ -213,7 +213,7 @@ A console program under `spikes/CefOsr/`, results in its `README.md` as a table,
 >   namespaces, seccomp-bpf). The setuid `chrome-sandbox` beside `libcef.so` also works, found
 >   without `CHROME_DEVEL_SANDBOX`. `no_sandbox` was not needed and no later run uses it.
 >   Whether the host set `nesting=1` cannot be seen from inside; `unshare -U` works.
-> - **Ozone: ask for it outright.** No flag means X11, which fails here (no X server);
+> - **Ozone: ask for it outright** (which one: see question 3). No flag means X11, which fails here (no X server);
 >   `--ozone-platform-hint=auto` follows `XDG_SESSION_TYPE`, unset in this shell. `wayland`
 >   works with the GPU: WebGL is ANGLE on GL ES 3.2 on Mesa, UHD 770. `headless` paints but
 >   has no WebGL. `x11` fails for want of a server. CEF passes
@@ -246,6 +246,20 @@ CEF version and the plan below changes.
 `on_paint` deliver BGRA at 1200×900? Save a PNG and look at it. Time from `create_browser` to
 the first frame. Does a still page stop painting, and an animating one paint at
 `windowless_frame_rate`?
+
+> **Result (2026-10-01): yes on `headless`, not on `wayland`.** With
+> `--ozone-platform=headless --use-angle=gl-egl` an 800×600 view at 1.5 paints **1200×900**
+> BGRA (top-down, `width×4` rows, opaque alpha). A 100-CSS-pixel box is 150 pixels, and the
+> GPU does the work: WebGL is ANGLE on GL ES 3.2 on Mesa. On `--ozone-platform=wayland` the
+> same answers paint **800×600 at scale 1**. Nothing changed that:
+> `notify_screen_info_changed`, `--force-device-scale-factor`, or sway's output scale. Plain
+> `headless` falls back to SwiftShader, which CEF 146 refuses (no WebGL); `--use-angle=vulkan`
+> works too. Headless never connects to the display, so it is the same under Wayland and X11.
+> **The engine asks for `headless` + `gl-egl`.** First frame 85–93 ms after
+> `create_browser`. A still page stops painting (0 in 2 s; `invalidate` asks for one). An
+> animating page paints at exactly `windowless_frame_rate`, changeable live: 60, 30, 120 and
+> 1 measured, each the whole view for the bench page. Base64 `data:` URLs need
+> `;charset=utf-8`. PNGs: `spikes/CefOsr/results/q3-*.png`.
 
 **4. The message loop.** Two candidates: `multi_threaded_message_loop` (CEF gets its own UI
 thread; callbacks arrive there) and `external_message_pump` (`cef_do_message_loop_work` on
