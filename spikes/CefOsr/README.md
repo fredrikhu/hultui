@@ -56,6 +56,7 @@ Options: `--cef-dir=` (default `/usr/lib64/cef`), `--ozone=`, `--sandbox=off`,
 | # | Question | Answer |
 |---|---|---|
 | 1 | Does Fedora's libcef load and start, windowless, from a .NET program? | **Yes, with a native helper.** `cef_api_hash(14600)` first, then `cef_initialize`: context ready ~200 ms after process start, a `data:` page loaded and painted 85–100 ms after `create_browser_sync`. Resources are found beside `libcef.so` with no `resources_dir_path` and from any working directory. **The subprocess executable cannot be .NET**: Chromium's zygote must be single-threaded to sandbox itself, and cannot fork a .NET process even unsandboxed. A 20-line C helper in `browser_subprocess_path` works with the sandbox on. Sandbox: **the namespace sandbox works in this container**, and the setuid `chrome-sandbox` beside `libcef.so` works too; `no_sandbox` is not needed. Ozone: **Wayland**, with the GPU (WebGL on ANGLE → GL ES 3.2 → Mesa); X11 (the default) and `ozone-platform-hint=auto` without a session type fail here for want of an X server; `headless` runs with no WebGL. |
+| 2 | Does the versioned API hold? | **Yes.** The same binary, written against Fedora's 146 at API 14600, runs unchanged on the official CEF **154.0.32** (Chromium 154.0.8037.58, the stable release on 2026-10-01): same hash, `cef_initialize` = 1, page painted 59 ms after `create_browser`, WebGL on the GPU, sandbox on, references balanced. 154 accepts API 13300–15400; generated from 154's headers at 14600, every struct, offset and export is identical to 146's. A bundled CEF must be laid out **flat** (`Resources/` beside `libcef.so`: `resources_dir_path` does not cover `icudtl.dat`) and **stripped** (the official `libcef.so` is 1.45 GB with debug sections, 272 MB without; ~115 MB compressed in all). |
 
 ### 1. Load, start, helper, sandbox, Ozone
 
@@ -132,3 +133,43 @@ Also seen: `chrome://gpu` never loads in a windowless browser (`Timeout of new b
 response` for its frame), so the GL was read through WebGL instead; and renderers and zygotes
 outlive `cef_shutdown` for a while (question 10). Reference counts were all back to 0 after
 shutdown.
+
+### 2. The versioned API, against a newer CEF
+
+The official minimal distribution of the current stable release for `linux64`,
+`cef_binary_154.0.32+g682c378+chromium-154.0.8037.58_linux64_minimal.tar.bz2` (326 MB, SHA-1
+checked against the CDN's), unpacked under `~/cef-new`. 154 supports API versions **13300 to
+15400**; its hash for 14600 is the one 146 returns. The spike binary, built once against
+Fedora's headers at 14600, and the same C helper, pointed at it with `--cef-dir`
+(`results/q2-cef154.txt`):
+
+- `cef_api_hash(14600)` = `7cec7429…`, `cef_api_version()` = 14600: the library serves the
+  version we named, not its own.
+- `cef_initialize` = 1 in 164 ms; the page loaded and painted 59 ms after
+  `create_browser_sync`; the WebGL probe reports the same ANGLE on Mesa; renderers in their own
+  namespaces; `cef_shutdown` with every reference given back.
+- **Statically too:** `gen-capi.py --include <154> --api 14600` produces the same 169 structs
+  with the same offsets and sizes and the same exports as from 146's headers; the only
+  difference is six new `cef_errorcode_t` values (`results/q2-capi-146-vs-154-at-14600.diff`).
+  At 15400 the headers add members, which is what the version number is for.
+
+So **one engine binary serves Fedora's CEF across its major bumps and a bundled CEF on Debian
+and Ubuntu**, as long as the library still lists the engine's version. Both 146 and 154 keep
+13300 as the minimum, so the window has not yet moved in eight releases. The engine should
+pin the newest version Fedora's stable releases all provide (14600 today) and check
+`cef_api_hash` before anything else; an app's RPM requires `cef(api) = 14600`.
+
+What a bundle needs, learned on the way:
+
+- **Flat.** The distribution splits `Release/` (library, snapshot, sandbox) from `Resources/`
+  (`icudtl.dat`, `.pak`, `locales/`). Pointed at `Release/`, CEF dies on ICU (`Invalid file
+  descriptor to ICU data received`), and still does with `resources_dir_path` and
+  `locales_dir_path` set to `Resources/`: those cover the `.pak` files, not `icudtl.dat`.
+  Everything in one directory works, which is the layout CEF's own CMake produces. Fedora's
+  package is already flat.
+- **Stripped.** The minimal distribution's `libcef.so` is 1.45 GB, with debug sections;
+  `strip --strip-unneeded` makes it 272 MB (Fedora's: 269 MB). Stripped library plus the rest,
+  `xz -6`: **115 MB**, the brief's estimate.
+- 154 links ANGLE into `libcef.so` (no `libEGL.so`/`libGLESv2.so` beside it, as 146 has), and
+  its `chrome-sandbox` is not setuid out of the tarball: on Debian and Ubuntu the namespace
+  sandbox is the route, and Ubuntu's AppArmor restriction on it is step 5.7's question.

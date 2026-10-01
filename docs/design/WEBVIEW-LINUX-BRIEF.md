@@ -229,6 +229,18 @@ under `~/cef-new`, and point the spike at it. This one test stands for both Fedo
 major version and an app bundling CEF on Debian. If it fails, the engine has to be built per
 CEF version and the plan below changes.
 
+> **Result (2026-10-01): it holds.** Fedora's 146 offers API versions 13300–14600. The spike,
+> generated from 146's headers at **14600**, ran unchanged (same binary, same C helper) on the
+> official **CEF 154.0.32** (Chromium 154.0.8037.58, current stable), which offers
+> 13300–15400. The hash matched, `cef_initialize` = 1, the page painted 59 ms after
+> `create_browser`, WebGL ran on the GPU, the sandbox was on, and every reference came back.
+> Generating from 154's headers at 14600 gives the identical structs, offsets and exports
+> (six new error-code values aside). So one engine binary serves Fedora across major bumps and
+> a bundled CEF; the plan below stands. Two things a bundle needs: **a flat directory**
+> (`Resources/` beside `libcef.so`; `resources_dir_path` does not cover `icudtl.dat`, and CEF
+> dies on ICU without it), and **`strip`** (the official `libcef.so` is 1.45 GB with debug
+> sections, 272 MB stripped; everything stripped compresses to 115 MB with xz).
+
 **3. Pixels.** One browser with `windowless_rendering_enabled`, a render handler whose
 `get_view_rect` and `get_screen_info` answer 800×600 at scale 1.5, a `data:` page. Does
 `on_paint` deliver BGRA at 1200×900? Save a PNG and look at it. Time from `create_browser` to
@@ -303,7 +315,9 @@ Ubuntu** the app ships it, from the official builds (`cef-builds.spotifycdn.com`
 distribution, `linux64` and `linuxarm64`), about 110 MB compressed. Whether that is a NuGet
 package per RID (`HultUI.WebView.Cef.Natives.linux-x64`), built by a workflow as the mpv
 natives are, or a download the app's packaging does, is decided after question 2: it only
-works at all if one engine binary runs against more than one CEF.
+works at all if one engine binary runs against more than one CEF. **Question 2 says it does**
+(146 and 154, one binary). Whichever it is, the directory it produces is flat (the
+distribution's `Release/` and `Resources/` merged) and its `libcef.so` stripped.
 
 Two things to write down for whoever ships an app, not to solve: the official builds have no
 H.264 or AAC, while Fedora's use the system's ffmpeg (RPM Fusion's gives the full set); and a

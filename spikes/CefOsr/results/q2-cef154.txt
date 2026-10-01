@@ -1,0 +1,35 @@
+[    20.0 ms main      ] libcef ~/cef-new/flat154: cef_api_hash(14600) = 7cec742972d6735aa8a955fc2e098a1f6669c3d5, cef_api_version() = 14600
+[    56.3 ms main      ] browser command line: <repo>/spikes/CefOsr/bin/Debug/net10.0/CefOsr --browser-subprocess-path=<build>/helper-c --lang=en-US --log-severity=warning --disable-features=GlicActorUi,AutofillActorMode,LensOverlay,KillOnInvalidNavigationHeaders --ozone-platform=wayland
+[   163.5 ms main      ] on_context_initialized
+[13189:13189:1001/213050.395842:ERROR:media/gpu/vaapi/vaapi_wrapper.cc:1801] vaInitialize failed: unknown libva error
+[   163.6 ms main      ] cef_initialize = 1
+[   164.3 ms main      ] context ready 164 ms after start
+[   169.5 ms main      ] on_after_created: browser 1
+[   175.5 ms main      ] create_browser_sync = 585287085ba0
+[   197.7 ms main      ] on_load_end: HTTP 200
+[   221.1 ms main      ] first on_paint: PET_VIEW 800x600
+[   223.3 ms main      ] page loaded and painted 59 ms after create_browser; title 'Q1'
+[   246.5 ms main      ] on_load_end: HTTP 200
+[   248.7 ms main      ] WebGL probe: GL: Google Inc. (Intel) | ANGLE (Intel, Mesa Intel(R) UHD Graphics 770 (ADL-S GT1), OpenGL ES 3.2)
+[   248.7 ms main      ] children launched:
+    <build>/helper-c --type=zygote --no-zygote-sandbox --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=zygote --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=utility --utility-sub-type=storage.mojom.StorageService --lang=en-US --service-sandbox-type=utility --render-node-override=/dev/dri/renderD128 --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+    <build>/helper-c --type=renderer --change-stack-guard-on-fork=enable
+[   249.4 ms main      ] children now:
+    pid 13156 (parent 13144) zygote: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 13157 (parent 13144) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 13162 (parent 13157) zygote: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 13189 (parent 13156) gpu-process: exe chelper, seccomp 2, no_new_privs 1, our namespaces, --ozone-platform=wayland, maps libgallium libEGL_mesa libwayland-client libX11.so libxcb.so
+    pid 13192 (parent 13144) utility: exe chelper, seccomp 2, no_new_privs 1, our namespaces, maps libX11.so libxcb.so
+    pid 13195 (parent 13162) utility: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, maps libX11.so libxcb.so
+    pid 13255 (parent 13162) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+    pid 13261 (parent 13162) renderer: exe chelper, seccomp 2, no_new_privs 1, own userns + own pidns + own netns, --ozone-platform=wayland, maps libX11.so libxcb.so
+[   268.4 ms main      ] on_before_close: browser 1
+[   289.6 ms main      ] cef_shutdown returned after 14 ms; our refs: app=0, browser_process_handler=0, client=0, display_handler=0, focus_handler=0, keyboard_handler=0, life_span_handler=0, load_handler=0, render_handler=0, request_handler=0
+[   791.7 ms main      ] children left: 13156 zygote; 13157 zygote; 13162 zygote; 13261 (no type)
